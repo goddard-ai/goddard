@@ -1,13 +1,47 @@
-import { createClient } from "@goddard-ai/sdk";
+import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/sdk";
 
-export function createWebhookHandler() {
-  const sdk = createClient({ serviceName: "github-app" });
+type FetchLike = typeof fetch;
 
-  return function handleWebhook(event?: { name?: string }) {
+export type GitHubAppOptions = {
+  backendBaseUrl: string;
+  fetchImpl?: FetchLike;
+};
+
+export type GitHubWebhookResult = {
+  handled: true;
+  event: RepoEvent;
+};
+
+export class GoddardGitHubApp {
+  readonly #baseUrl: URL;
+  readonly #fetchImpl: FetchLike;
+
+  constructor(options: GitHubAppOptions) {
+    this.#baseUrl = new URL(options.backendBaseUrl);
+    this.#fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  async handleWebhook(input: GitHubWebhookInput): Promise<GitHubWebhookResult> {
+    const response = await this.#fetchImpl(new URL("/webhooks/github", this.#baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Webhook handling failed (${response.status})`);
+    }
+
+    const event = (await response.json()) as RepoEvent;
     return {
       handled: true,
-      eventName: event?.name ?? "unknown",
-      sdk: sdk.ping()
+      event
     };
-  };
+  }
+}
+
+export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
+  return new GoddardGitHubApp(options);
 }

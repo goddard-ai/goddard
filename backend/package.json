@@ -4,12 +4,17 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@goddard-ai/sdk": "workspace:*"
+    "@goddard-ai/sdk": "workspace:*",
+    "ws": "^8.18.0"
   },
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "goddard-backend": "./bin/server.ts"
+  },
   "scripts": {
+    "start": "tsx bin/server.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test"
   }

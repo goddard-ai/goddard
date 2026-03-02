@@ -5,6 +5,7 @@
     "sdk/test/**/*.ts",
     "backend/src/**/*.ts",
     "backend/test/**/*.ts",
+    "backend/bin/**/*.ts",
     "github-app/src/**/*.ts",
     "github-app/test/**/*.ts",
     "cmd/src/**/*.ts",

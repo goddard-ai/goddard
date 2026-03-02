@@ -1,6 +1,11 @@
 # goddard
 
-TypeScript-only monorepo scaffold for `backend`, `cmd`, `github-app`, and `sdk` using `pnpm` workspaces with `git-subrepo` synchronization.
+TypeScript-only monorepo for:
+
+- `@goddard-ai/sdk`
+- `@goddard-ai/backend`
+- `@goddard-ai/github-app`
+- `@goddard-ai/cmd`
 
 ## Workspace
 
@@ -9,33 +14,54 @@ TypeScript-only monorepo scaffold for `backend`, `cmd`, `github-app`, and `sdk` 
 - `github-app`
 - `sdk`
 
-## CI Sync
-
-A GitHub Action is configured at `.github/workflows/sync-subrepos.yml`.
-
-It runs on pushes to `main` when one of the subrepo paths changes and executes:
-
-- `git subrepo push backend`
-- `git subrepo push cmd`
-- `git subrepo push github-app`
-- `git subrepo push sdk`
-
-## Required secret
-
-Configure repository secret:
-
-- `SYNC_PAT`: token with write access to this repository and each external subrepo.
-
-## Local validation
+## Quick start (local)
 
 ```bash
+pnpm install
 pnpm run check
 ```
 
-This runs:
-- root TypeScript typecheck
-- package tests
+### 1) Start the backend
+
+```bash
+pnpm --filter @goddard-ai/backend start
+```
+
+Backend runs at `http://127.0.0.1:8787`.
+
+### 2) Use the CLI
+
+```bash
+pnpm --filter @goddard-ai/cmd exec goddard login --username <github-user>
+pnpm --filter @goddard-ai/cmd exec goddard whoami
+pnpm --filter @goddard-ai/cmd exec goddard pr create --repo owner/repo --title "Test PR" --head feature/demo --base main
+pnpm --filter @goddard-ai/cmd exec goddard actions trigger --repo owner/repo --workflow ci --ref main
+pnpm --filter @goddard-ai/cmd exec goddard stream --repo owner/repo
+```
+
+### 3) Simulate a GitHub webhook
+
+Use `@goddard-ai/github-app` to forward webhook events to backend:
+
+```ts
+import { createGitHubApp } from "@goddard-ai/github-app";
+
+const app = createGitHubApp({ backendBaseUrl: "http://127.0.0.1:8787" });
+await app.handleWebhook({
+  type: "issue_comment",
+  owner: "owner",
+  repo: "repo",
+  prNumber: 1,
+  author: "teammate",
+  body: "Looks good"
+});
+```
 
 ## CI
 
-A CI workflow is configured at `.github/workflows/ci.yml` and runs `pnpm run check` on pull requests and pushes to `main`.
+- `.github/workflows/ci.yml` runs typecheck + tests on PRs and on `main` pushes.
+- `.github/workflows/sync-subrepos.yml` pushes each subrepo via `git-subrepo` on `main`.
+
+## Required secret for subrepo sync
+
+- `SYNC_PAT`: token with write access to this repository and each external subrepo.
