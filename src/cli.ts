@@ -65,6 +65,10 @@ export default createLoopConfig({
     maxDelayMs: 30000,
     backoffFactor: 2,
     jitterRatio: 0.2,
+    retryableErrors: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return !/maxTokensPerCycle/i.test(message);
+    },
   },
   metrics: {
     prometheusPort: 9090,

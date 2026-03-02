@@ -30,6 +30,7 @@ interface LoopConfig {
     maxDelayMs?: number;
     backoffFactor?: number;
     jitterRatio?: number;
+    retryableErrors?: (error: unknown, context: { cycle: number; attempt: number; maxAttempts: number }) => boolean;
   };
   metrics?: {
     prometheusPort?: number;
@@ -55,6 +56,7 @@ interface LoopConfig {
 - If `agent.maxTokensPerCycle` is set, it must equal `rateLimits.maxTokensPerCycle`.
 - Retry values (when set) must be positive, with `maxDelayMs >= initialDelayMs`.
 - `retries.jitterRatio` must be between `0` and `1`.
+- `retries.retryableErrors`, when provided, must be a function.
 
 ## Strategy contract
 

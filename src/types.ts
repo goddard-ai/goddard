@@ -31,6 +31,7 @@ export interface LoopConfig {
     maxDelayMs?: number;
     backoffFactor?: number;
     jitterRatio?: number;
+    retryableErrors?: (error: unknown, context: { cycle: number; attempt: number; maxAttempts: number }) => boolean;
   };
   metrics?: {
     prometheusPort?: number;
@@ -76,7 +77,11 @@ export const configSchema = z.object({
     initialDelayMs: z.number().int().nonnegative().optional(),
     maxDelayMs: z.number().int().positive().optional(),
     backoffFactor: z.number().positive().optional(),
-    jitterRatio: z.number().min(0).max(1).optional()
+    jitterRatio: z.number().min(0).max(1).optional(),
+    retryableErrors: z.custom<(error: unknown, context: { cycle: number; attempt: number; maxAttempts: number }) => boolean>(
+      (val) => val === undefined || typeof val === 'function',
+      'retries.retryableErrors must be a function'
+    ).optional()
   }).optional(),
   metrics: z.object({
     prometheusPort: z.number().int().positive().optional(),

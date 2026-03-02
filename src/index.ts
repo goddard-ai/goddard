@@ -81,6 +81,7 @@ export function createLoop<Config extends LoopConfig>(
     maxDelayMs: validated.retries?.maxDelayMs ?? 30000,
     backoffFactor: validated.retries?.backoffFactor ?? 2,
     jitterRatio: validated.retries?.jitterRatio ?? 0.2,
+    retryableErrors: validated.retries?.retryableErrors,
   };
 
   const status = {
@@ -138,7 +139,16 @@ export function createLoop<Config extends LoopConfig>(
           break;
         } catch (error) {
           attempt++;
-          if (attempt >= retryConfig.maxAttempts) {
+
+          const isRetryable = retryConfig.retryableErrors
+            ? retryConfig.retryableErrors(error, {
+                cycle: status.cycle,
+                attempt,
+                maxAttempts: retryConfig.maxAttempts,
+              })
+            : true;
+
+          if (!isRetryable || attempt >= retryConfig.maxAttempts) {
             throw error;
           }
 

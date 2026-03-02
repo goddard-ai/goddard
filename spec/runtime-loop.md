@@ -26,7 +26,7 @@ For each cycle:
 5. Build prompt via `strategy.nextPrompt({ cycleNumber, lastSummary })`.
 6. Optionally log prompt/cycle if `metrics.enableLogging` is true.
 7. Capture pre-prompt total token count.
-8. Send prompt to agent session (with optional retry/backoff if configured).
+8. Send prompt to agent session (with optional retry/backoff+jitter; `retryableErrors` can short-circuit retries).
 9. Read session stats, compute per-cycle token delta, and enforce `maxTokensPerCycle`.
 10. Update cumulative `tokensUsed`.
 11. Save last assistant text as `lastSummary` (or fallback text).
@@ -52,4 +52,5 @@ The session instance is intentionally reused across cycles so context accumulate
 - Exceeding `maxTokensPerCycle` throws and terminates the loop (expected to be handled by external supervisor if desired).
 - `DONE` causes deterministic successful loop termination.
 - Agent prompt execution can retry with exponential backoff and optional jitter when `retries` is configured.
+- `retries.retryableErrors` can classify errors as non-retryable to fail fast.
 - Errors still escape after max attempts, so external supervisors remain recommended.
