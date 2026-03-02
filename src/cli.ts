@@ -135,7 +135,12 @@ export default createLoopConfig({
 program
   .command('run')
   .description('Start the pi-loop daemon')
-  .action(async () => {
+  .option('-m, --model <model>', 'Override the agent model')
+  .option('-d, --project-dir <dir>', 'Override the project directory')
+  .option('--cycle-delay <delay>', 'Override the cycle delay (e.g. 30m, 1h)')
+  .option('--max-tokens <tokens>', 'Override max tokens per cycle', parseInt)
+  .option('--max-ops <ops>', 'Override max ops per minute', parseInt)
+  .action(async (options) => {
     const localConfigPath = path.join(process.cwd(), 'pi-loop.config.ts');
     const globalConfigPath = path.join(os.homedir(), '.pi-loop', 'config.ts');
 
@@ -160,6 +165,24 @@ program
 
       if (!config) {
         throw new Error('Config file must export a default configuration object.');
+      }
+
+      // Apply overrides
+      if (options.model) {
+        config.agent.model = options.model;
+      }
+      if (options.projectDir) {
+        config.agent.projectDir = options.projectDir;
+      }
+      if (options.cycleDelay) {
+        config.rateLimits.cycleDelay = options.cycleDelay;
+      }
+      if (options.maxTokens !== undefined && !isNaN(options.maxTokens)) {
+        config.agent.maxTokensPerCycle = options.maxTokens;
+        config.rateLimits.maxTokensPerCycle = options.maxTokens;
+      }
+      if (options.maxOps !== undefined && !isNaN(options.maxOps)) {
+        config.rateLimits.maxOpsPerMinute = options.maxOps;
       }
 
       console.log('Starting pi-loop daemon...');
