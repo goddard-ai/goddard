@@ -75,4 +75,15 @@ export const configSchema = z.object({
     workingDir: z.string().optional(),
     environment: z.record(z.string().optional()).optional()
   }).optional()
+}).superRefine((config, ctx) => {
+  const agentLimit = config.agent.maxTokensPerCycle;
+  const rateLimit = config.rateLimits.maxTokensPerCycle;
+
+  if (agentLimit !== undefined && agentLimit !== rateLimit) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['agent', 'maxTokensPerCycle'],
+      message: `agent.maxTokensPerCycle (${agentLimit}) must match rateLimits.maxTokensPerCycle (${rateLimit}) when both are set.`
+    });
+  }
 });

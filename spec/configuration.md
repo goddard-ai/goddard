@@ -45,6 +45,7 @@ interface LoopConfig {
 - `agent` is passthrough (supports extra provider-specific fields).
 - `strategy` must expose `nextPrompt`.
 - `rateLimits` fields are required except `maxCyclesBeforePause`.
+- If `agent.maxTokensPerCycle` is set, it must equal `rateLimits.maxTokensPerCycle`.
 
 ## Strategy contract
 
