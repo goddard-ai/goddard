@@ -1,18 +1,13 @@
-import pLimit from 'p-limit';
 import cronParser from 'cron-parser';
 
 export class RateLimiter {
-  private tokenLimiter: any;
   private wallclockDelay: string;
   private opsLimit: number;
   private opsWindow: number[] = [];
-  private maxTokensPerCycle: number;
 
   constructor(config: { cycleDelay: string; maxTokensPerCycle: number; maxOpsPerMinute: number }) {
-    this.tokenLimiter = pLimit(1); // Not really used in this simplified version since loop is sequential
     this.wallclockDelay = config.cycleDelay;
     this.opsLimit = config.maxOpsPerMinute;
-    this.maxTokensPerCycle = config.maxTokensPerCycle;
   }
 
   async throttle() {
@@ -36,7 +31,7 @@ export class RateLimiter {
         const interval = cronParser.parseExpression(this.wallclockDelay);
         const next = interval.next().toDate();
         delayMs = next.getTime() - Date.now();
-      } catch (e) {
+      } catch {
         // Fallback to 1 minute
         delayMs = 60 * 1000;
       }

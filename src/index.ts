@@ -1,8 +1,42 @@
 import { LoopConfig, TypedLoop, configSchema } from './types';
 import { RateLimiter } from './rate-limiter';
-import { createAgentSession } from '@mariozechner/pi-coding-agent';
+import { AuthStorage, ModelRegistry, createAgentSession } from '@mariozechner/pi-coding-agent';
 
 export * from './types';
+
+function resolveConfiguredModel(modelRef: string) {
+  const authStorage = AuthStorage.create();
+  const modelRegistry = new ModelRegistry(authStorage);
+
+  if (modelRef.includes('/')) {
+    const [provider, ...idParts] = modelRef.split('/');
+    const modelId = idParts.join('/');
+
+    if (!provider || !modelId) {
+      throw new Error(`Invalid model format "${modelRef}". Use "provider/modelId" or "modelId".`);
+    }
+
+    const model = modelRegistry.find(provider, modelId);
+    if (!model) {
+      throw new Error(`Unknown model "${modelRef}". Verify provider/modelId in pi-coding-agent models.`);
+    }
+
+    return model;
+  }
+
+  const matches = modelRegistry.getAll().filter((model) => model.id === modelRef);
+
+  if (matches.length === 0) {
+    throw new Error(`Unknown model id "${modelRef}". Use "provider/modelId" for explicit selection.`);
+  }
+
+  if (matches.length > 1) {
+    const options = matches.map((model) => `${model.provider}/${model.id}`).join(', ');
+    throw new Error(`Ambiguous model id "${modelRef}". Use one of: ${options}`);
+  }
+
+  return matches[0];
+}
 
 export function createLoop<Config extends LoopConfig>(
   config: Config
@@ -18,13 +52,15 @@ export function createLoop<Config extends LoopConfig>(
     startTime: Date.now()
   };
 
-  const endlessLoop = async ({ limiter, strategy }: any): Promise<never> => {
+  const endlessLoop = async ({ limiter, strategy }: { limiter: RateLimiter; strategy: Config['strategy'] }): Promise<never> => {
     let lastSummary: string | undefined = undefined;
+
+    const configuredModel = resolveConfiguredModel(validated.agent.model);
 
     // Create session outside the loop so it persists context
     const { session } = await createAgentSession({
       cwd: validated.agent.projectDir,
-      // model mapping would go here if needed
+      model: configuredModel,
     });
 
     while (true) {
@@ -40,7 +76,6 @@ export function createLoop<Config extends LoopConfig>(
         status.cycle % validated.rateLimits.maxCyclesBeforePause === 0
       ) {
         // Simple pause logic (e.g. sleep 24h)
-        // This is a placeholder for real pause logic
         await new Promise(r => setTimeout(r, 1000 * 60 * 60 * 24));
       }
 
@@ -56,9 +91,18 @@ export function createLoop<Config extends LoopConfig>(
         console.log(`[pi-loop] Prompt: ${prompt}`);
       }
 
+      const before = session.getSessionStats().tokens.total;
       await session.sendUserMessage(prompt);
 
       const stats = session.getSessionStats();
+      const cycleTokens = stats.tokens.total - before;
+
+      if (cycleTokens > validated.rateLimits.maxTokensPerCycle) {
+        throw new Error(
+          `[pi-loop] Cycle ${status.cycle} exceeded maxTokensPerCycle: used ${cycleTokens}, limit ${validated.rateLimits.maxTokensPerCycle}`
+        );
+      }
+
       status.tokensUsed = stats.tokens.total;
       lastSummary = session.getLastAssistantText() || `Completed cycle ${status.cycle}`;
     }

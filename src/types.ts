@@ -51,26 +51,26 @@ export interface TypedLoop<Config extends LoopConfig> {
 
 export const configSchema = z.object({
   agent: z.object({
-    model: z.string(),
-    projectDir: z.string(),
-    maxTokensPerCycle: z.number().optional()
+    model: z.string().min(1),
+    projectDir: z.string().min(1),
+    maxTokensPerCycle: z.number().int().positive().optional()
   }).passthrough(),
   strategy: z.custom<CycleStrategy>((val) => {
     return typeof val === 'object' && val !== null && 'nextPrompt' in val;
   }, "Strategy must have a nextPrompt method"),
   rateLimits: z.object({
-    cycleDelay: z.string(),
-    maxTokensPerCycle: z.number(),
-    maxOpsPerMinute: z.number(),
-    maxCyclesBeforePause: z.number().optional()
+    cycleDelay: z.string().min(1),
+    maxTokensPerCycle: z.number().int().positive(),
+    maxOpsPerMinute: z.number().int().positive(),
+    maxCyclesBeforePause: z.number().int().positive().optional()
   }),
   metrics: z.object({
-    prometheusPort: z.number().optional(),
+    prometheusPort: z.number().int().positive().optional(),
     enableLogging: z.boolean().optional()
   }).optional(),
   systemd: z.object({
-    restartSec: z.number().optional(),
-    nice: z.number().optional(),
+    restartSec: z.number().int().positive().optional(),
+    nice: z.number().int().optional(),
     user: z.string().optional(),
     workingDir: z.string().optional(),
     environment: z.record(z.string().optional()).optional()
