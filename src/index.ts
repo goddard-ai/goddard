@@ -100,6 +100,7 @@ export function createLoop<Config extends LoopConfig>(
     const { session } = await createAgentSession({
       cwd: validated.agent.projectDir,
       model: configuredModel,
+      thinkingLevel: validated.agent.thinkingLevel,
     });
 
     while (true) {

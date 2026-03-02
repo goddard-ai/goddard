@@ -97,14 +97,14 @@ export default createLoopConfig({
   agent: {
     model: 'claude-sonnet-4',
     projectDir: './',
-    maxTokensPerCycle: 8000,
+    thinkingLevel: 'low',
   },
   strategy: new DefaultStrategy(),
   rateLimits: {
     cycleDelay: '30m',
-    maxTokensPerCycle: 8000,
-    maxOpsPerMinute: 20,
-    maxCyclesBeforePause: 24,
+    maxTokensPerCycle: 128000,
+    maxOpsPerMinute: 120,
+    maxCyclesBeforePause: 100,
   },
   retries: {
     maxAttempts: 3,
@@ -113,18 +113,9 @@ export default createLoopConfig({
     backoffFactor: 2,
     jitterRatio: 0.2,
     retryableErrors: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      return !/maxTokensPerCycle/i.test(message);
+      return true;
     },
   },
-  metrics: {
-    prometheusPort: 9090,
-    enableLogging: true,
-  },
-  systemd: {
-    restartSec: 10,
-    nice: 10,
-  }
 });
 `;
     fs.writeFileSync(configPath, configContent);
@@ -140,6 +131,7 @@ program
   .option('--cycle-delay <delay>', 'Override the cycle delay (e.g. 30m, 1h)')
   .option('--max-tokens <tokens>', 'Override max tokens per cycle', parseInt)
   .option('--max-ops <ops>', 'Override max ops per minute', parseInt)
+  .option('--thinking-level <level>', 'Override the agent thinking level')
   .action(async (options) => {
     const localConfigPath = path.join(process.cwd(), 'pi-loop.config.ts');
     const globalConfigPath = path.join(os.homedir(), '.pi-loop', 'config.ts');
@@ -174,11 +166,13 @@ program
       if (options.projectDir) {
         config.agent.projectDir = options.projectDir;
       }
+      if (options.thinkingLevel !== undefined) {
+        config.agent.thinkingLevel = options.thinkingLevel;
+      }
       if (options.cycleDelay) {
         config.rateLimits.cycleDelay = options.cycleDelay;
       }
       if (options.maxTokens !== undefined && !isNaN(options.maxTokens)) {
-        config.agent.maxTokensPerCycle = options.maxTokens;
         config.rateLimits.maxTokensPerCycle = options.maxTokens;
       }
       if (options.maxOps !== undefined && !isNaN(options.maxOps)) {
