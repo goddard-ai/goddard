@@ -13,13 +13,14 @@ Creates `pi-loop.config.ts` using a default template.
 
 ## Command: `pi-loop run`
 
-Loads config (`local` then `global`) and starts endless loop.
+Loads config (`local` then `global`) and starts loop execution.
 
 ### Behavior
 - Fails with guidance if no config is found.
 - Loads TypeScript config via `jiti`.
 - Requires default export (or module object fallback).
 - Instantiates loop and calls `start()`.
+- If loop ends due to `DONE`, prints completion logs and exits successfully.
 
 ## Command: `pi-loop generate-systemd`
 
@@ -38,4 +39,5 @@ Generates a `pi-loop.service` file under `./systemd` (or `~/systemd` with `--glo
 ## Exit behavior
 
 - Operational/configuration errors exit process with status code `1`.
+- `DONE` completion exits with status code `0`.
 - Successful commands print human-readable progress logs.
