@@ -14,6 +14,12 @@ export default createLoopConfig({
     maxOpsPerMinute: 20,
     maxCyclesBeforePause: 24, // Daily pause
   },
+  retries: {
+    maxAttempts: 3,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+    backoffFactor: 2,
+  },
   metrics: {
     prometheusPort: 9090,
     enableLogging: true,

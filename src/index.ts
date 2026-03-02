@@ -4,6 +4,10 @@ import { AuthStorage, ModelRegistry, createAgentSession } from '@mariozechner/pi
 
 export * from './types';
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function resolveConfiguredModel(modelRef: string) {
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
@@ -61,6 +65,12 @@ export function createLoop<Config extends LoopConfig>(
   const validated = configSchema.parse(config);
   const limiter = new RateLimiter(validated.rateLimits);
   const strategy = validated.strategy;
+  const retryConfig = {
+    maxAttempts: validated.retries?.maxAttempts ?? 1,
+    initialDelayMs: validated.retries?.initialDelayMs ?? 1000,
+    maxDelayMs: validated.retries?.maxDelayMs ?? 30000,
+    backoffFactor: validated.retries?.backoffFactor ?? 2,
+  };
 
   const status = {
     cycle: 0,
@@ -109,7 +119,33 @@ export function createLoop<Config extends LoopConfig>(
       }
 
       const before = session.getSessionStats().tokens.total;
-      await session.sendUserMessage(prompt);
+
+      let attempt = 0;
+      while (true) {
+        try {
+          await session.sendUserMessage(prompt);
+          break;
+        } catch (error) {
+          attempt++;
+          if (attempt >= retryConfig.maxAttempts) {
+            throw error;
+          }
+
+          const retryDelay = Math.min(
+            retryConfig.maxDelayMs,
+            Math.round(retryConfig.initialDelayMs * Math.pow(retryConfig.backoffFactor, attempt - 1))
+          );
+
+          if (validated.metrics?.enableLogging) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(
+              `[pi-loop] Cycle ${status.cycle} failed (attempt ${attempt}/${retryConfig.maxAttempts}). Retrying in ${retryDelay}ms: ${message}`
+            );
+          }
+
+          await sleep(retryDelay);
+        }
+      }
 
       const stats = session.getSessionStats();
       const cycleTokens = stats.tokens.total - before;

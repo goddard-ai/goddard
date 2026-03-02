@@ -24,6 +24,12 @@ interface LoopConfig {
     maxOpsPerMinute: number;
     maxCyclesBeforePause?: number;
   };
+  retries?: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    backoffFactor?: number;
+  };
   metrics?: {
     prometheusPort?: number;
     enableLogging?: boolean;
@@ -46,6 +52,7 @@ interface LoopConfig {
 - `strategy` must expose `nextPrompt`.
 - `rateLimits` fields are required except `maxCyclesBeforePause`.
 - If `agent.maxTokensPerCycle` is set, it must equal `rateLimits.maxTokensPerCycle`.
+- Retry values (when set) must be positive, with `maxDelayMs >= initialDelayMs`.
 
 ## Strategy contract
 

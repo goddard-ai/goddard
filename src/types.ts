@@ -25,6 +25,12 @@ export interface LoopConfig {
     maxOpsPerMinute: number;
     maxCyclesBeforePause?: number;
   };
+  retries?: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    backoffFactor?: number;
+  };
   metrics?: {
     prometheusPort?: number;
     enableLogging?: boolean;
@@ -64,6 +70,12 @@ export const configSchema = z.object({
     maxOpsPerMinute: z.number().int().positive(),
     maxCyclesBeforePause: z.number().int().positive().optional()
   }),
+  retries: z.object({
+    maxAttempts: z.number().int().positive().optional(),
+    initialDelayMs: z.number().int().nonnegative().optional(),
+    maxDelayMs: z.number().int().positive().optional(),
+    backoffFactor: z.number().positive().optional()
+  }).optional(),
   metrics: z.object({
     prometheusPort: z.number().int().positive().optional(),
     enableLogging: z.boolean().optional()
@@ -84,6 +96,18 @@ export const configSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['agent', 'maxTokensPerCycle'],
       message: `agent.maxTokensPerCycle (${agentLimit}) must match rateLimits.maxTokensPerCycle (${rateLimit}) when both are set.`
+    });
+  }
+
+  if (
+    config.retries?.initialDelayMs !== undefined &&
+    config.retries?.maxDelayMs !== undefined &&
+    config.retries.maxDelayMs < config.retries.initialDelayMs
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['retries', 'maxDelayMs'],
+      message: `retries.maxDelayMs (${config.retries.maxDelayMs}) must be >= retries.initialDelayMs (${config.retries.initialDelayMs}).`
     });
   }
 });
