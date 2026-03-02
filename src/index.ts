@@ -231,8 +231,20 @@ export function createLoop<Config extends LoopConfig>(
     }
   };
 
+  let isRunning = false;
+
   return {
-    start: async () => endlessLoop({ limiter, strategy }),
+    start: async () => {
+      if (isRunning) {
+        throw new Error('Loop is already running');
+      }
+      isRunning = true;
+      try {
+        await endlessLoop({ limiter, strategy });
+      } finally {
+        isRunning = false;
+      }
+    },
     get status() {
       return {
         ...status,
