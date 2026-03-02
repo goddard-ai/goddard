@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import { createJiti } from 'jiti';
+import { log } from '@clack/prompts';
 import { createLoop } from './index';
 
 const jiti = createJiti(process.cwd());
@@ -59,7 +60,7 @@ program
           }
         };
         fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2));
-        console.log(`Created package.json with link to global pi-loop at ${packageRoot}`);
+        log.info(`Created package.json with link to global pi-loop at ${packageRoot}`);
         
         let installCmd = 'npm install';
         try {
@@ -80,13 +81,13 @@ program
         try {
           execSync(installCmd, { cwd: targetDir, stdio: 'inherit' });
         } catch (e) {
-          console.error(`Failed to run ${installCmd} in ` + targetDir);
+          log.error(`Failed to run ${installCmd} in ` + targetDir);
         }
       }
     }
 
     if (fs.existsSync(configPath)) {
-      console.error(`Config file already exists at ${configPath}`);
+      log.error(`Config file already exists at ${configPath}`);
       process.exit(1);
     }
 
@@ -119,8 +120,8 @@ export default createLoopConfig({
 });
 `;
     fs.writeFileSync(configPath, configContent);
-    console.log(`Created configuration at ${configPath}`);
-    console.log('You can now run it using: pi-loop run');
+    log.success(`Created configuration at ${configPath}`);
+    log.info('You can now run it using: pi-loop run');
   });
 
 program
@@ -140,13 +141,13 @@ program
 
     if (fs.existsSync(localConfigPath)) {
       configPathToLoad = localConfigPath;
-      console.log(`Found local config at ${localConfigPath}`);
+      log.info(`Found local config at ${localConfigPath}`);
     } else if (fs.existsSync(globalConfigPath)) {
       configPathToLoad = globalConfigPath;
-      console.log(`Found global config at ${globalConfigPath}`);
+      log.info(`Found global config at ${globalConfigPath}`);
     } else {
-      console.error('Could not find pi-loop.config.ts in the current directory or config.ts in the home directory.');
-      console.error('Run `pi-loop init` to create one.');
+      log.error('Could not find pi-loop.config.ts in the current directory or config.ts in the home directory.');
+      log.info('Run `pi-loop init` to create one.');
       process.exit(1);
     }
 
@@ -179,11 +180,11 @@ program
         config.rateLimits.maxOpsPerMinute = options.maxOps;
       }
 
-      console.log('Starting pi-loop daemon...');
+      log.step('Starting pi-loop daemon...');
       const loop = createLoop(config);
       await loop.start();
     } catch (error) {
-      console.error('Failed to run pi-loop:', error);
+      log.error(`Failed to run pi-loop: ${error}`);
       process.exit(1);
     }
   });
@@ -198,7 +199,7 @@ program
     const configPath = path.join(targetDir, configFileName);
 
     if (!fs.existsSync(configPath)) {
-      console.error(`Could not find config at ${configPath}`);
+      log.error(`Could not find config at ${configPath}`);
       process.exit(1);
     }
 
@@ -236,9 +237,9 @@ WantedBy=multi-user.target
       }
       const outPath = path.join(systemdDir, 'pi-loop.service');
       fs.writeFileSync(outPath, serviceContent);
-      console.log(`Created systemd service file at ${outPath}`);
+      log.success(`Created systemd service file at ${outPath}`);
     } catch (error) {
-      console.error('Failed to generate systemd file:', error);
+      log.error(`Failed to generate systemd file: ${error}`);
       process.exit(1);
     }
   });

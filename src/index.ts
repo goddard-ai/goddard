@@ -1,6 +1,7 @@
 import { LoopConfig, TypedLoop, configSchema } from './types';
 import { RateLimiter } from './rate-limiter';
 import { AuthStorage, ModelRegistry, createAgentSession } from '@mariozechner/pi-coding-agent';
+import { log } from '@clack/prompts';
 
 export * from './types';
 
@@ -127,8 +128,8 @@ export function createLoop<Config extends LoopConfig>(
 
       // Run pi-coding-agent
       if (validated.metrics?.enableLogging) {
-        console.log(`[pi-loop] Cycle ${status.cycle}: Starting...`);
-        console.log(`[pi-loop] Prompt: ${prompt}`);
+        log.step(`[pi-loop] Cycle ${status.cycle}: Starting...`);
+        log.info(`[pi-loop] Prompt: ${prompt}`);
       }
 
       const before = session.getSessionStats().tokens.total;
@@ -161,7 +162,7 @@ export function createLoop<Config extends LoopConfig>(
 
           if (validated.metrics?.enableLogging) {
             const message = error instanceof Error ? error.message : String(error);
-            console.warn(
+            log.warn(
               `[pi-loop] Cycle ${status.cycle} failed (attempt ${attempt}/${retryConfig.maxAttempts}). Retrying in ${retryDelay}ms: ${message}`
             );
           }
@@ -184,8 +185,8 @@ export function createLoop<Config extends LoopConfig>(
 
       if (isDoneSignal(lastSummary)) {
         if (validated.metrics?.enableLogging) {
-          console.log('[pi-loop] Completed: received DONE signal from strategy response.');
-          console.log(`[pi-loop] Final summary: ${lastSummary}`);
+          log.success('[pi-loop] Completed: received DONE signal from strategy response.');
+          log.info(`[pi-loop] Final summary: ${lastSummary}`);
         }
         return;
       }
