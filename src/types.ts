@@ -128,8 +128,8 @@ export const configSchema = z.object({
   }).optional(),
   metrics: z.object({
     prometheusPort: z.number().int().positive().optional(),
-    enableLogging: z.boolean().optional()
-  }).optional(),
+    enableLogging: z.boolean().default(true)
+  }).default({ enableLogging: true }),
   systemd: z.object({
     restartSec: z.number().int().positive().optional(),
     nice: z.number().int().optional(),
