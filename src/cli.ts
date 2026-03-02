@@ -7,6 +7,7 @@ import * as os from 'os';
 import { execSync } from 'child_process';
 import { createJiti } from 'jiti';
 import { log } from '@clack/prompts';
+import exitHook from 'exit-hook';
 import { createLoop } from './index';
 
 const jiti = createJiti(process.cwd());
@@ -194,31 +195,17 @@ program
       process.exit(1);
     }
 
-    let lockRemoved = false;
-    const cleanupLock = () => {
-      if (!lockRemoved) {
-        try {
-          if (fs.existsSync(lockFilePath)) {
-            const currentLockPid = parseInt(fs.readFileSync(lockFilePath, 'utf8').trim(), 10);
-            if (currentLockPid === process.pid) {
-              fs.unlinkSync(lockFilePath);
-            }
+    exitHook(() => {
+      try {
+        if (fs.existsSync(lockFilePath)) {
+          const currentLockPid = parseInt(fs.readFileSync(lockFilePath, 'utf8').trim(), 10);
+          if (currentLockPid === process.pid) {
+            fs.unlinkSync(lockFilePath);
           }
-        } catch (e) {
-          // Ignore errors during cleanup
         }
-        lockRemoved = true;
+      } catch (e) {
+        // Ignore errors during cleanup
       }
-    };
-
-    process.on('exit', cleanupLock);
-    process.on('SIGINT', () => {
-      cleanupLock();
-      process.exit(0);
-    });
-    process.on('SIGTERM', () => {
-      cleanupLock();
-      process.exit(0);
     });
 
     try {

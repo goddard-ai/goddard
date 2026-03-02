@@ -37,6 +37,7 @@
     "@clack/prompts": "^1.0.1",
     "commander": "^12.1.0",
     "cron-parser": "^4.9.0",
+    "exit-hook": "^5.1.0",
     "jiti": "^2.6.1",
     "p-limit": "^6.2.0",
     "zod": "^3.24.2"
