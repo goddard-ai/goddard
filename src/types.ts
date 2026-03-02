@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 export interface PiAgentConfig {
   model: string;
   projectDir: string;
-  maxTokensPerCycle?: number;
+  thinkingLevel?: ThinkingLevel;
   [key: string]: any;
 }
 
@@ -100,7 +102,7 @@ export const configSchema = z.object({
   agent: z.object({
     model: z.string().min(1),
     projectDir: z.string().min(1),
-    maxTokensPerCycle: z.number().int().positive().optional()
+    thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional()
   }).passthrough(),
   strategy: z.custom<CycleStrategy>((val) => {
     return typeof val === 'object' && val !== null && 'nextPrompt' in val;
@@ -134,17 +136,6 @@ export const configSchema = z.object({
     environment: z.record(z.string().optional()).optional()
   }).optional()
 }).superRefine((config, ctx) => {
-  const agentLimit = config.agent.maxTokensPerCycle;
-  const rateLimit = config.rateLimits.maxTokensPerCycle;
-
-  if (agentLimit !== undefined && agentLimit !== rateLimit) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['agent', 'maxTokensPerCycle'],
-      message: `agent.maxTokensPerCycle (${agentLimit}) must match rateLimits.maxTokensPerCycle (${rateLimit}) when both are set.`
-    });
-  }
-
   if (
     config.retries?.initialDelayMs !== undefined &&
     config.retries?.maxDelayMs !== undefined &&
