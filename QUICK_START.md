@@ -44,7 +44,7 @@ pnpm run check
 In **Terminal A**:
 
 ```bash
-pnpm --filter @goddard-ai/backend start
+pnpm --dir=backend start
 ```
 
 Expected: backend starts on `http://127.0.0.1:8787`.
@@ -57,13 +57,13 @@ Keep this terminal running.
 Open **Terminal B** in repo root.
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts login --username <your-github-name>
+pnpm --dir=cmd goddard login --username <your-github-name>
 ```
 
 Example:
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts login --username alec
+pnpm --dir=cmd goddard login --username alec
 ```
 
 Expected output:
@@ -75,7 +75,7 @@ Logged in as @alec
 Verify session:
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts whoami
+pnpm --dir=cmd goddard whoami
 ```
 
 Expected output:
@@ -89,7 +89,7 @@ Expected output:
 ## 4) Create a PR intent
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts pr create \
+pnpm --dir=cmd goddard pr create \
   --repo owner/repo \
   --title "Test PR from quick start" \
   --head feature/quickstart \
@@ -109,7 +109,7 @@ PR #1 created: https://github.com/owner/repo/pull/1
 ## 5) Trigger an action intent
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts actions trigger \
+pnpm --dir=cmd goddard actions trigger \
   --repo owner/repo \
   --workflow ci \
   --ref main
@@ -128,7 +128,7 @@ Action queued: run <id> (ci on main)
 Open **Terminal C** and run:
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts stream --repo owner/repo
+pnpm --dir=cmd goddard stream --repo owner/repo
 ```
 
 Expected first line:
@@ -146,7 +146,7 @@ Leave this running.
 With stream still open in Terminal C, send a webhook payload:
 
 ```bash
-pnpm --filter @goddard-ai/github-app exec tsx --eval "import { createGitHubApp } from './src/index.ts'; (async () => { const app = createGitHubApp({ backendBaseUrl: 'http://127.0.0.1:8787' }); const result = await app.handleWebhook({ type: 'issue_comment', owner: 'owner', repo: 'repo', prNumber: 1, author: 'teammate', body: 'Looks good' }); console.log(result); })();"
+pnpm --dir=github-app tsx --eval "import { createGitHubApp } from './src/index.ts'; (async () => { const app = createGitHubApp({ backendBaseUrl: 'http://127.0.0.1:8787' }); const result = await app.handleWebhook({ type: 'issue_comment', owner: 'owner', repo: 'repo', prNumber: 1, author: 'teammate', body: 'Looks good' }); console.log(result); })();"
 ```
 
 Expected in **Terminal C** (stream): JSON event printed with `"type":"comment"` and `"reactionAdded":"eyes"`.
@@ -156,7 +156,7 @@ Expected in **Terminal C** (stream): JSON event printed with `"type":"comment"` 
 ## 8) Test review webhook (optional)
 
 ```bash
-pnpm --filter @goddard-ai/github-app exec tsx --eval "import { createGitHubApp } from './src/index.ts'; (async () => { const app = createGitHubApp({ backendBaseUrl: 'http://127.0.0.1:8787' }); await app.handleWebhook({ type: 'pull_request_review', owner: 'owner', repo: 'repo', prNumber: 1, author: 'reviewer', state: 'approved', body: 'Ship it' }); console.log('review webhook sent'); })();"
+pnpm --dir=github-app tsx --eval "import { createGitHubApp } from './src/index.ts'; (async () => { const app = createGitHubApp({ backendBaseUrl: 'http://127.0.0.1:8787' }); await app.handleWebhook({ type: 'pull_request_review', owner: 'owner', repo: 'repo', prNumber: 1, author: 'reviewer', state: 'approved', body: 'Ship it' }); console.log('review webhook sent'); })();"
 ```
 
 Expected in stream: JSON event with `"type":"review"`.
@@ -168,7 +168,7 @@ Expected in stream: JSON event with `"type":"review"`.
 In Terminal B:
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts logout
+pnpm --dir=cmd goddard logout
 ```
 
 Stop stream with `Ctrl+C` in Terminal C, and stop backend with `Ctrl+C` in Terminal A.

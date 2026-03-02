@@ -24,7 +24,7 @@ pnpm run check
 ### 1) Start the backend
 
 ```bash
-pnpm --filter @goddard-ai/backend start
+pnpm --dir=backend start
 ```
 
 Backend runs at `http://127.0.0.1:8787`.
@@ -32,11 +32,11 @@ Backend runs at `http://127.0.0.1:8787`.
 ### 2) Use the CLI
 
 ```bash
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts login --username <github-user>
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts whoami
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts pr create --repo owner/repo --title "Test PR" --head feature/demo --base main
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts actions trigger --repo owner/repo --workflow ci --ref main
-pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts stream --repo owner/repo
+pnpm --dir=cmd goddard login --username <github-user>
+pnpm --dir=cmd goddard whoami
+pnpm --dir=cmd goddard pr create --repo owner/repo --title "Test PR" --head feature/demo --base main
+pnpm --dir=cmd goddard actions trigger --repo owner/repo --workflow ci --ref main
+pnpm --dir=cmd goddard stream --repo owner/repo
 ```
 
 ### 3) Simulate a GitHub webhook
@@ -44,7 +44,7 @@ pnpm --filter @goddard-ai/cmd exec tsx bin/goddard.ts stream --repo owner/repo
 Use `@goddard-ai/github-app` to forward webhook events to backend:
 
 ```bash
-pnpm --filter @goddard-ai/github-app exec tsx --eval "import { createGitHubApp } from './src/index.ts'; (async () => { const app = createGitHubApp({ backendBaseUrl: 'http://127.0.0.1:8787' }); await app.handleWebhook({ type: 'issue_comment', owner: 'owner', repo: 'repo', prNumber: 1, author: 'teammate', body: 'Looks good' }); console.log('webhook sent'); })();"
+pnpm --dir=github-app exec tsx --eval "import { createGitHubApp } from './src/index.ts'; (async () => { const app = createGitHubApp({ backendBaseUrl: 'http://127.0.0.1:8787' }); await app.handleWebhook({ type: 'issue_comment', owner: 'owner', repo: 'repo', prNumber: 1, author: 'teammate', body: 'Looks good' }); console.log('webhook sent'); })();"
 ```
 
 ## CI
