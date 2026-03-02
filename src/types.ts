@@ -30,6 +30,7 @@ export interface LoopConfig {
     initialDelayMs?: number;
     maxDelayMs?: number;
     backoffFactor?: number;
+    jitterRatio?: number;
   };
   metrics?: {
     prometheusPort?: number;
@@ -74,7 +75,8 @@ export const configSchema = z.object({
     maxAttempts: z.number().int().positive().optional(),
     initialDelayMs: z.number().int().nonnegative().optional(),
     maxDelayMs: z.number().int().positive().optional(),
-    backoffFactor: z.number().positive().optional()
+    backoffFactor: z.number().positive().optional(),
+    jitterRatio: z.number().min(0).max(1).optional()
   }).optional(),
   metrics: z.object({
     prometheusPort: z.number().int().positive().optional(),

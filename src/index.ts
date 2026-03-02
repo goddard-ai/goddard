@@ -8,6 +8,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function withJitter(delayMs: number, jitterRatio: number): number {
+  if (jitterRatio <= 0) {
+    return delayMs;
+  }
+
+  const min = Math.max(0, delayMs * (1 - jitterRatio));
+  const max = delayMs * (1 + jitterRatio);
+  return Math.round(min + Math.random() * (max - min));
+}
+
 function resolveConfiguredModel(modelRef: string) {
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
@@ -70,6 +80,7 @@ export function createLoop<Config extends LoopConfig>(
     initialDelayMs: validated.retries?.initialDelayMs ?? 1000,
     maxDelayMs: validated.retries?.maxDelayMs ?? 30000,
     backoffFactor: validated.retries?.backoffFactor ?? 2,
+    jitterRatio: validated.retries?.jitterRatio ?? 0.2,
   };
 
   const status = {
@@ -131,10 +142,11 @@ export function createLoop<Config extends LoopConfig>(
             throw error;
           }
 
-          const retryDelay = Math.min(
+          const baseDelay = Math.min(
             retryConfig.maxDelayMs,
             Math.round(retryConfig.initialDelayMs * Math.pow(retryConfig.backoffFactor, attempt - 1))
           );
+          const retryDelay = withJitter(baseDelay, retryConfig.jitterRatio);
 
           if (validated.metrics?.enableLogging) {
             const message = error instanceof Error ? error.message : String(error);

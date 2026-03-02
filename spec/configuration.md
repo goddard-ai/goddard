@@ -29,6 +29,7 @@ interface LoopConfig {
     initialDelayMs?: number;
     maxDelayMs?: number;
     backoffFactor?: number;
+    jitterRatio?: number;
   };
   metrics?: {
     prometheusPort?: number;
@@ -53,6 +54,7 @@ interface LoopConfig {
 - `rateLimits` fields are required except `maxCyclesBeforePause`.
 - If `agent.maxTokensPerCycle` is set, it must equal `rateLimits.maxTokensPerCycle`.
 - Retry values (when set) must be positive, with `maxDelayMs >= initialDelayMs`.
+- `retries.jitterRatio` must be between `0` and `1`.
 
 ## Strategy contract
 

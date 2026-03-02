@@ -51,5 +51,5 @@ The session instance is intentionally reused across cycles so context accumulate
 - Unknown/ambiguous configured model values fail fast during startup.
 - Exceeding `maxTokensPerCycle` throws and terminates the loop (expected to be handled by external supervisor if desired).
 - `DONE` causes deterministic successful loop termination.
-- Agent prompt execution can retry with exponential backoff when `retries` is configured.
+- Agent prompt execution can retry with exponential backoff and optional jitter when `retries` is configured.
 - Errors still escape after max attempts, so external supervisors remain recommended.

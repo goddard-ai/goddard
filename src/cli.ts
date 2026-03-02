@@ -64,6 +64,7 @@ export default createLoopConfig({
     initialDelayMs: 1000,
     maxDelayMs: 30000,
     backoffFactor: 2,
+    jitterRatio: 0.2,
   },
   metrics: {
     prometheusPort: 9090,
