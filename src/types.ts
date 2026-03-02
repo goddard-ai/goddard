@@ -45,7 +45,7 @@ export interface LoopStatus {
 }
 
 export interface TypedLoop<Config extends LoopConfig> {
-  start: () => Promise<never>;
+  start: () => Promise<void>;
   status: LoopStatus;
 }
 

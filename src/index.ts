@@ -4,16 +4,6 @@ import { AuthStorage, ModelRegistry, createAgentSession } from '@mariozechner/pi
 
 export * from './types';
 
-export class LoopCompletedError extends Error {
-  readonly lastSummary?: string;
-
-  constructor(lastSummary?: string) {
-    super('Loop completed after receiving DONE signal from strategy response.');
-    this.name = 'LoopCompletedError';
-    this.lastSummary = lastSummary;
-  }
-}
-
 function resolveConfiguredModel(modelRef: string) {
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
@@ -79,7 +69,7 @@ export function createLoop<Config extends LoopConfig>(
     startTime: Date.now()
   };
 
-  const endlessLoop = async ({ limiter, strategy }: { limiter: RateLimiter; strategy: Config['strategy'] }): Promise<never> => {
+  const endlessLoop = async ({ limiter, strategy }: { limiter: RateLimiter; strategy: Config['strategy'] }): Promise<void> => {
     let lastSummary: string | undefined = undefined;
 
     const configuredModel = resolveConfiguredModel(validated.agent.model);
@@ -134,7 +124,11 @@ export function createLoop<Config extends LoopConfig>(
       lastSummary = session.getLastAssistantText() || `Completed cycle ${status.cycle}`;
 
       if (isDoneSignal(lastSummary)) {
-        throw new LoopCompletedError(lastSummary);
+        if (validated.metrics?.enableLogging) {
+          console.log('[pi-loop] Completed: received DONE signal from strategy response.');
+          console.log(`[pi-loop] Final summary: ${lastSummary}`);
+        }
+        return;
       }
     }
   };

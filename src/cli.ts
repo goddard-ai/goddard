@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createJiti } from 'jiti';
-import { LoopCompletedError, createLoop } from './index';
+import { createLoop } from './index';
 
 const jiti = createJiti(process.cwd());
 
@@ -108,14 +108,6 @@ program
       const loop = createLoop(config);
       await loop.start();
     } catch (error) {
-      if (error instanceof LoopCompletedError) {
-        console.log('[pi-loop] Completed: received DONE signal from strategy response.');
-        if (error.lastSummary) {
-          console.log(`[pi-loop] Final summary: ${error.lastSummary}`);
-        }
-        process.exit(0);
-      }
-
       console.error('Failed to run pi-loop:', error);
       process.exit(1);
     }
