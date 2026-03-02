@@ -4,6 +4,16 @@ import { AuthStorage, ModelRegistry, createAgentSession } from '@mariozechner/pi
 
 export * from './types';
 
+export class LoopCompletedError extends Error {
+  readonly lastSummary?: string;
+
+  constructor(lastSummary?: string) {
+    super('Loop completed after receiving DONE signal from strategy response.');
+    this.name = 'LoopCompletedError';
+    this.lastSummary = lastSummary;
+  }
+}
+
 function resolveConfiguredModel(modelRef: string) {
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
@@ -36,6 +46,23 @@ function resolveConfiguredModel(modelRef: string) {
   }
 
   return matches[0];
+}
+
+function isDoneSignal(text: string | undefined): boolean {
+  if (!text) {
+    return false;
+  }
+
+  const normalized = text.trim();
+  if (normalized.toUpperCase() === 'DONE') {
+    return true;
+  }
+
+  if (/^SUMMARY\s*\|\s*DONE$/i.test(normalized)) {
+    return true;
+  }
+
+  return /(^|\n)\s*DONE\s*$/i.test(text);
 }
 
 export function createLoop<Config extends LoopConfig>(
@@ -105,6 +132,10 @@ export function createLoop<Config extends LoopConfig>(
 
       status.tokensUsed = stats.tokens.total;
       lastSummary = session.getLastAssistantText() || `Completed cycle ${status.cycle}`;
+
+      if (isDoneSignal(lastSummary)) {
+        throw new LoopCompletedError(lastSummary);
+      }
     }
   };
 

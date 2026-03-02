@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createJiti } from 'jiti';
-import { createLoop } from './index';
+import { LoopCompletedError, createLoop } from './index';
 
 const jiti = createJiti(process.cwd());
 
@@ -92,6 +92,14 @@ program
       const loop = createLoop(config);
       await loop.start();
     } catch (error) {
+      if (error instanceof LoopCompletedError) {
+        console.log('[pi-loop] Completed: received DONE signal from strategy response.');
+        if (error.lastSummary) {
+          console.log(`[pi-loop] Final summary: ${error.lastSummary}`);
+        }
+        process.exit(0);
+      }
+
       console.error('Failed to run pi-loop:', error);
       process.exit(1);
     }
@@ -119,8 +127,7 @@ program
       const restartSec = config.systemd?.restartSec || 10;
       const nice = config.systemd?.nice || 10;
 
-      // Try to resolve the global path to pi-loop
-      let execStart = 'pi-loop run';
+      const execStart = 'pi-loop run';
 
       const serviceContent = `[Unit]
 Description=pi-loop Daemon

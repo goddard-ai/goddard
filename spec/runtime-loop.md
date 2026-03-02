@@ -14,7 +14,7 @@ On creation:
 On `start()`:
 1. The configured model string is resolved against `pi-coding-agent`'s model registry.
 2. A persistent `pi-coding-agent` session is created once using resolved model + `projectDir` as cwd.
-3. The process enters an infinite cycle loop.
+3. The process enters a cycle loop.
 
 ## Per-cycle behavior
 
@@ -30,6 +30,7 @@ For each cycle:
 9. Read session stats, compute per-cycle token delta, and enforce `maxTokensPerCycle`.
 10. Update cumulative `tokensUsed`.
 11. Save last assistant text as `lastSummary` (or fallback text).
+12. If assistant output indicates `DONE` (`DONE`, `SUMMARY|DONE`, or trailing line `DONE`), terminate via `LoopCompletedError`.
 
 ## Persistent context model
 
@@ -49,8 +50,5 @@ The session instance is intentionally reused across cycles so context accumulate
 - Startup/load errors surface as thrown exceptions.
 - Unknown/ambiguous configured model values fail fast during startup.
 - Exceeding `maxTokensPerCycle` throws and terminates the loop (expected to be handled by external supervisor if desired).
+- `DONE` causes deterministic loop completion signaling (`LoopCompletedError`).
 - Runtime loop does not implement internal retry/backoff around agent calls; exceptions will escape unless handled externally by process supervisor.
-
-## Remaining functional gap
-
-- No semantic handling for model outputs like `DONE`.
