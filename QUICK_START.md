@@ -4,36 +4,35 @@
 
 ## 1. Install Dependencies
 
-You need `typescript`, `ts-node` (or `tsx`), `@types/node`, and `pi-loop` installed in your project:
+Install `pi-loop` globally so that you can use the CLI, and ensure `typescript` and `@mariozechner/pi-coding-agent` are available in your project.
 
 ```bash
-pnpm install pi-loop typescript @types/node -D
+npm install -g pi-loop
+npm install typescript @types/node -D
 ```
-
-*(Note: `pi-loop` assumes `@mariozechner/pi-coding-agent` is available in your environment).*
 
 ## 2. Initialize the Loop Configuration
 
 Run the CLI to scaffold your fully-typed configuration:
 
 ```bash
-npx pi-loop init
+pi-loop init
 ```
 
 This will create:
 - `pi-loop.config.ts`: Your main configuration file.
-- `tsconfig.json`: TypeScript settings (if one didn't exist).
-- `systemd/`: A directory for deployment configurations.
+
+*(You can also use `pi-loop init --global` to store the config in your home directory, e.g. `~/pi-loop.config.ts`)*
 
 ## 3. Review Your Configuration
 
 Open the generated `pi-loop.config.ts` and adjust it to fit your needs. The default configuration looks like this:
 
 ```typescript
-import { createLoop, createLoopConfig } from 'pi-loop';
+import { createLoopConfig } from 'pi-loop';
 import { DefaultStrategy } from 'pi-loop/strategies';
 
-const config = createLoopConfig({
+export default createLoopConfig({
   agent: {
     model: 'claude-sonnet-4',
     projectDir: './',
@@ -55,19 +54,14 @@ const config = createLoopConfig({
     nice: 10,
   }
 });
-
-const loop = createLoop(config);
-loop.start().catch(console.error);
-
-export default config;
 ```
 
 ## 4. Run the Daemon
 
-Execute the configuration file directly using `tsx` (or compile and run via node):
+Start the loop using the CLI:
 
 ```bash
-npx tsx pi-loop.config.ts
+pi-loop run
 ```
 
-Your `pi-coding-agent` is now running autonomously in a supervised loop!
+This command automatically parses your `pi-loop.config.ts` (local takes precedence over global) and starts the loop! Your `pi-coding-agent` is now running autonomously in a supervised loop.

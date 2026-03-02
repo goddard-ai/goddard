@@ -2,12 +2,13 @@
 
 `pi-loop` is a zero-dependency npm package wrapping `@mariozechner/pi-coding-agent` in a configurable, endlessly running agentic loop with precise rate limiting.
 
-**Core Value**: `await loop.start()` transforms a single-shot `agent.run()` into a production-grade daemon with zod-validated TypeScript configs.
+**Core Value**: `pi-loop run` transforms a single-shot `agent.run()` into a production-grade daemon with zod-validated TypeScript configs.
 
 ## Features
 
 - **Endless execution:** Safely loops `pi-coding-agent` with configurable delays between cycles.
 - **Zero-Dependency TypeScript Configs:** Configuration is 100% typed out-of-the-box (`createLoopConfig()`).
+- **Global or Local CLI:** Run `pi-loop` globally to target local (`./pi-loop.config.ts`) or global (`~/pi-loop.config.ts`) configurations.
 - **Rate-Limiting Engine:** Prevents blowing past your token budgets or operations limits per minute.
 - **Custom Strategies:** Control exactly what prompts are given to the agent each cycle.
 - **Daemon Deployable:** Scaffolds configuration for easy deployment using `systemd`.
@@ -17,7 +18,9 @@
 If you want to quickly run a daemon, see our [QUICK_START.md](./QUICK_START.md).
 
 ```bash
-npx pi-loop init
+npm i -g pi-loop
+pi-loop init
+pi-loop run
 ```
 
 ## Public TypeScript API
@@ -25,10 +28,10 @@ npx pi-loop init
 `pi-loop` exposes a tiny API surface area:
 
 ```typescript
-import { createLoop, createLoopConfig } from "pi-loop";
+import { createLoopConfig } from "pi-loop";
 import { DefaultStrategy } from "pi-loop/strategies";
 
-const config = createLoopConfig({
+export default createLoopConfig({
   agent: {
     model: 'claude-sonnet-4',
     projectDir: './',
@@ -42,35 +45,29 @@ const config = createLoopConfig({
     maxCyclesBeforePause: 24, // Pause after N cycles
   }
 });
-
-const loop = createLoop(config);
-
-// type LoopStatus = { cycle: number, tokensUsed: number, uptime: number }
-console.log(loop.status);
-
-await loop.start(); // Inferred return type, never returns until SIGTERM
 ```
+
+You can then run the configuration directly using the CLI:
+
+```bash
+pi-loop run
+```
+
+*Note: You can still invoke the programmatically via `createLoop(config).start()`!*
 
 ## CLI Configuration Scaffolding
 
 ```bash
-npx pi-loop init my-project
+pi-loop init
 ```
+
+*Note: Use `pi-loop init --global` to save the config to `~/pi-loop.config.ts`.*
 
 **Creates**:
 
 ```text
 my-project/
-├── pi-loop.config.ts         # Fully typed, zod-validated
-├── tsconfig.json             # Strict mode
-└── systemd/
-    └── pi-loop.service       # Auto-generated from config.systemd
-```
-
-You can then run the configuration directly using tools like `tsx`:
-
-```bash
-npx tsx pi-loop.config.ts
+└── pi-loop.config.ts         # Fully typed, zod-validated
 ```
 
 ## Strategy System
@@ -101,10 +98,10 @@ systemd: {
 }
 ```
 
-Then, you can generate the systemd daemon config file:
+Then, you can generate the systemd daemon config file (which writes to `./systemd/pi-loop.service` or `~/systemd/pi-loop.service`):
 
 ```bash
-npx pi-loop generate-systemd
+pi-loop generate-systemd
 sudo cp systemd/pi-loop.service /etc/systemd/system/
 sudo systemctl enable pi-loop
 ```

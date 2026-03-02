@@ -1,7 +1,7 @@
-import { createLoop, createLoopConfig } from './src/index';
+import { createLoopConfig } from './src/index';
 import { DefaultStrategy } from './src/strategies/index';
 
-const config = createLoopConfig({
+export default createLoopConfig({
   agent: {
     model: 'claude-sonnet-4',
     projectDir: './',
@@ -23,8 +23,3 @@ const config = createLoopConfig({
     nice: 10, // Low CPU priority
   }
 });
-
-const loop = createLoop(config);
-loop.start().catch(console.error);
-
-export default config;
