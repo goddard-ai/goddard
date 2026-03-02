@@ -107,7 +107,9 @@ export function createLoop<Config extends LoopConfig>(
       status.uptime = Date.now() - status.startTime;
 
       // Throttle
-      await limiter.throttle();
+      if (status.cycle > 1) {
+        await limiter.throttle();
+      }
 
       // Check max cycles pause
       if (
