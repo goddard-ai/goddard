@@ -85,7 +85,7 @@ test("unknown command prints help and exits 1", async () => {
   );
 
   assert.equal(code, 1);
-  assert.equal(lines[0], "goddard commands:");
+  assert.ok(lines[0]?.includes("ERR:error: found 1 error"));
 });
 
 test("spec command spawns pi with SPEC_SYSTEM_PROMPT and exits 0", async () => {

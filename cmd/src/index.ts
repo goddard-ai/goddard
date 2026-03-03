@@ -2,6 +2,7 @@ import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMP
 import { inferRepoFromGitConfig, splitRepo } from "./git.ts";
 import { FileTokenStorage } from "./storage.ts";
 import { spawnSync } from "node:child_process";
+import { command, runSafely, string, option, subcommands, restPositionals, binary } from "cmd-ts";
 
 export type CliIo = {
   stdout: (line: string) => void;
@@ -29,139 +30,224 @@ export type CliDeps = {
 };
 
 export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDeps = {}): Promise<number> {
-  const command = argv[0];
-  const subcommand = argv[1];
-  const options = parseOptions(argv);
-
-  const baseUrl = options["base-url"] ?? process.env.GODDARD_BASE_URL ?? "http://127.0.0.1:8787";
-  const sdk =
-    deps.createSdkClient?.(baseUrl) ??
-    createSdk({
-      baseUrl,
-      tokenStorage: new FileTokenStorage()
-    });
-
+  const getSdk = (baseUrlOpt?: string) => {
+    const baseUrl = baseUrlOpt ?? process.env.GODDARD_BASE_URL ?? "http://127.0.0.1:8787";
+    return deps.createSdkClient?.(baseUrl) ?? createSdk({ baseUrl, tokenStorage: new FileTokenStorage() });
+  };
   const spawnPi = deps.spawnPi ?? defaultSpawnPi;
 
-  try {
-    if (command === "login") {
-      const username = requiredOption(options, "username");
-      const session = await sdk.auth.startDeviceFlow({ githubUsername: username });
-      const auth = await sdk.auth.completeDeviceFlow({
-        deviceCode: session.deviceCode,
-        githubUsername: username
-      });
-      io.stdout(`Logged in as @${auth.githubUsername}`);
-      return 0;
-    }
-
-    if (command === "logout") {
-      await sdk.auth.logout();
-      io.stdout("Logged out");
-      return 0;
-    }
-
-    if (command === "whoami") {
-      const session = await sdk.auth.whoami();
-      io.stdout(`@${session.githubUsername} (id:${session.githubUserId})`);
-      return 0;
-    }
-
-    if (command === "pr" && subcommand === "create") {
-      const repoRef = await resolveRepoRef(options["repo"]);
-      const { owner, repo } = splitRepo(repoRef);
-      const title = requiredOption(options, "title");
-      const head = options.head ?? "main";
-      const base = options.base ?? "main";
-      const body = options.body;
-
-      const pr = await sdk.pr.create({ owner, repo, title, body, head, base });
-      io.stdout(`PR #${pr.number} created: ${pr.url}`);
-      return 0;
-    }
-
-    if (command === "stream") {
-      const repoRef = await resolveRepoRef(options["repo"]);
-      const { owner, repo } = splitRepo(repoRef);
-      const sub = await sdk.stream.subscribeToRepo({ owner, repo });
-
-      io.stdout(`Streaming ${owner}/${repo}. Press Ctrl+C to exit.`);
-      sub.on("event", (payload) => {
-        io.stdout(JSON.stringify(payload));
-      });
-
-      await new Promise<void>((resolve) => {
-        process.on("SIGINT", () => {
-          sub.close();
-          resolve();
+  const loginCmd = command({
+    name: "login",
+    args: {
+      username: option({ type: string, long: "username" }),
+      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
+    },
+    handler: async (args) => {
+      try {
+        const sdk = getSdk(args.baseUrl || undefined);
+        const session = await sdk.auth.startDeviceFlow({ githubUsername: args.username });
+        const auth = await sdk.auth.completeDeviceFlow({
+          deviceCode: session.deviceCode,
+          githubUsername: args.username
         });
-      });
-
-      return 0;
+        io.stdout(`Logged in as @${auth.githubUsername}`);
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
     }
+  });
 
-    if (command === "spec") {
-      // Launch pi configured as the Intent Guardian (spec-guardian mode).
-      // The SPEC_SYSTEM_PROMPT replaces the default coding-agent system prompt so
-      // pi focuses exclusively on maintaining the spec/ Knowledge Graph.
-      const exitCode = spawnPi(["--system-prompt", SPEC_SYSTEM_PROMPT]);
-      return exitCode;
+  const logoutCmd = command({
+    name: "logout",
+    args: {
+      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
+    },
+    handler: async (args) => {
+      try {
+        const sdk = getSdk(args.baseUrl || undefined);
+        await sdk.auth.logout();
+        io.stdout("Logged out");
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
     }
+  });
 
-    if (command === "propose") {
-      // Launch pi configured as the Feature Proposer.
-      // Positional arguments (the feature idea) are passed to pi.
-      const exitCode = spawnPi(["--system-prompt", PROPOSE_SYSTEM_PROMPT, ...argv.slice(1)]);
-      return exitCode;
+  const whoamiCmd = command({
+    name: "whoami",
+    args: {
+      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
+    },
+    handler: async (args) => {
+      try {
+        const sdk = getSdk(args.baseUrl || undefined);
+        const session = await sdk.auth.whoami();
+        io.stdout(`@${session.githubUsername} (id:${session.githubUserId})`);
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
     }
+  });
 
-    if (command === "agents" && subcommand === "init") {
-      const agentsPath = await sdk.agents.appendSpecInstructions(process.cwd());
-      io.stdout(`Updated agents configuration at ${agentsPath}`);
-      return 0;
+  const prCreateCmd = command({
+    name: "create",
+    args: {
+      title: option({ type: string, long: "title" }),
+      body: option({ type: string, long: "body", defaultValue: () => undefined as any }),
+      head: option({ type: string, long: "head", defaultValue: () => "main" }),
+      base: option({ type: string, long: "base", defaultValue: () => "main" }),
+      repo: option({ type: string, long: "repo", defaultValue: () => undefined as any }),
+      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
+    },
+    handler: async (args) => {
+      try {
+        const sdk = getSdk(args.baseUrl || undefined);
+        const repoRef = await resolveRepoRef(args.repo);
+        const { owner, repo } = splitRepo(repoRef);
+        const pr = await sdk.pr.create({
+          owner,
+          repo,
+          title: args.title,
+          body: args.body,
+          head: args.head,
+          base: args.base
+        });
+        io.stdout(`PR #${pr.number} created: ${pr.url}`);
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
     }
+  });
 
-    printHelp(io);
-    return 1;
-  } catch (error) {
-    io.stderr(error instanceof Error ? error.message : String(error));
-    return 1;
+  const prCmd = subcommands({
+    name: "pr",
+    cmds: { create: prCreateCmd }
+  });
+
+  const streamCmd = command({
+    name: "stream",
+    args: {
+      repo: option({ type: string, long: "repo", defaultValue: () => undefined as any }),
+      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
+    },
+    handler: async (args) => {
+      try {
+        const sdk = getSdk(args.baseUrl || undefined);
+        const repoRef = await resolveRepoRef(args.repo);
+        const { owner, repo } = splitRepo(repoRef);
+        const sub = await sdk.stream.subscribeToRepo({ owner, repo });
+
+        io.stdout(`Streaming ${owner}/${repo}. Press Ctrl+C to exit.`);
+        sub.on("event", (payload) => {
+          io.stdout(JSON.stringify(payload));
+        });
+
+        await new Promise<void>((resolve) => {
+          process.on("SIGINT", () => {
+            sub.close();
+            resolve();
+          });
+        });
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const specCmd = command({
+    name: "spec",
+    args: {},
+    handler: async () => {
+      try {
+        const exitCode = spawnPi(["--system-prompt", SPEC_SYSTEM_PROMPT]);
+        return exitCode;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const proposeCmd = command({
+    name: "propose",
+    args: {
+      prompt: restPositionals({ type: string, displayName: "prompt" })
+    },
+    handler: async (args) => {
+      try {
+        const exitCode = spawnPi(["--system-prompt", PROPOSE_SYSTEM_PROMPT, ...args.prompt]);
+        return exitCode;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const agentsInitCmd = command({
+    name: "init",
+    args: {},
+    handler: async () => {
+      try {
+        const sdk = getSdk();
+        const agentsPath = await sdk.agents.appendSpecInstructions(process.cwd());
+        io.stdout(`Updated agents configuration at ${agentsPath}`);
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const agentsCmd = subcommands({
+    name: "agents",
+    cmds: { init: agentsInitCmd }
+  });
+
+  const app = subcommands({
+    name: "goddard",
+    cmds: {
+      login: loginCmd,
+      logout: logoutCmd,
+      whoami: whoamiCmd,
+      pr: prCmd,
+      stream: streamCmd,
+      spec: specCmd,
+      propose: proposeCmd,
+      agents: agentsCmd
+    }
+  });
+
+  const res = await runSafely(app, argv);
+  if (res._tag === "error") {
+    io.stderr(res.error.config.message);
+    return res.error.config.exitCode;
   }
+
+  if (typeof res.value === "number") {
+    return res.value;
+  }
+  if (res.value && typeof (res.value as any).value === "number") {
+    return (res.value as any).value;
+  }
+  return 0;
 }
 
 const defaultIo: CliIo = {
   stdout: (line) => process.stdout.write(`${line}\n`),
   stderr: (line) => process.stderr.write(`${line}\n`)
 };
-
-function parseOptions(args: string[]): Record<string, string> {
-  const output: Record<string, string> = {};
-
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (!arg.startsWith("--")) {
-      continue;
-    }
-    const key = arg.slice(2);
-    const value = args[i + 1];
-    if (!value || value.startsWith("--")) {
-      output[key] = "true";
-      continue;
-    }
-    output[key] = value;
-    i += 1;
-  }
-
-  return output;
-}
-
-function requiredOption(options: Record<string, string>, key: string): string {
-  const value = options[key];
-  if (!value) {
-    throw new Error(`Missing required --${key}`);
-  }
-  return value;
-}
 
 async function resolveRepoRef(inputRepo?: string): Promise<string> {
   if (inputRepo) {
@@ -174,19 +260,4 @@ async function resolveRepoRef(inputRepo?: string): Promise<string> {
   }
 
   return inferred;
-}
-
-function printHelp(io: CliIo): void {
-  io.stdout("goddard commands:");
-  io.stdout("  login --username <name> [--base-url <url>]");
-  io.stdout("  logout [--base-url <url>]");
-  io.stdout("  whoami [--base-url <url>]");
-  io.stdout("  pr create --title <title> [--body <body>] [--head <branch>] [--base <branch>] [--repo owner/repo]");
-  io.stdout("  stream [--repo owner/repo] [--base-url <url>]");
-  io.stdout("  spec                               Start a pi session as the Intent Guardian (spec/ mode)");
-  io.stdout("  propose <prompt>                   Start a pi session to draft a feature proposal");
-  io.stdout("  loop init [--global]               Create goddard.config.ts from the default template");
-  io.stdout("  loop run                           Start the autonomous agent loop (uses LOOP_SYSTEM_PROMPT by default)");
-  io.stdout("  loop generate-systemd [--global]   Generate a systemd unit file");
-  io.stdout("  agents init");
 }

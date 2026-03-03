@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@goddard-ai/sdk": "workspace:*"
+    "@goddard-ai/sdk": "workspace:*",
+    "cmd-ts": "^0.15.0"
   },
   "bin": {
     "goddard": "./bin/goddard.ts"
@@ -17,6 +18,5 @@
     "goddard": "tsx bin/goddard.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test"
-  },
-  "devDependencies": {}
+  }
 }
