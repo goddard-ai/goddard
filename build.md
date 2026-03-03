@@ -99,12 +99,33 @@ Latest hardening pass:
 - Added SDK stream payload guards so malformed frames emit `error` instead of crashing listeners.
 - Added tests for session expiry, invalid JSON handling, and malformed stream payloads.
 
-## 8. Remaining Work to Reach Deployable External Sync
+## 8. Path to Production Deployment
 
-What is still not done for a production-style `main` deployment that syncs standalone repos:
-- Configure `SYNC_PAT` in GitHub Actions secrets for this repository.
-- Initialize `git-subrepo` metadata (`.gitrepo`) in `backend/`, `cmd/`, `github-app/`, and `sdk/`.
-- Point each `.gitrepo` to real external repository URLs and verify push permissions.
-- Merge to `main` and verify `.github/workflows/sync-subrepos.yml` successfully pushes all targets.
+While the local MVP is fully functional and tested, the following work is required to transition to the production architecture described in sections 3-5:
 
-Status note: local MVP runtime is deployable today (backend + CLI + SDK + webhook bridge). External subrepo publishing automation is not fully deployable until the steps above are completed.
+### A. Persistence & Infrastructure (The "Control Plane")
+*   **Database Migration:** Replace the `InMemoryBackendControlPlane` with a production implementation using **Turso** (SQLite at the edge) and **Drizzle ORM**.
+    *   Define schema for `users`, `auth_sessions`, `pull_requests`, and `action_runs`.
+    *   Implement migration scripts for Turso.
+*   **Cloudflare Workers Deployment:**
+    *   Port the `backend` package to the Cloudflare Workers runtime.
+    *   Replace the in-memory WebSocket management with **Cloudflare Durable Objects** for scalable, real-time broadcasting.
+    *   Add `wrangler.toml` for deployment configuration.
+*   **Production Secrets:**
+    *   Provision and configure `TURSO_DB_URL` and `TURSO_DB_AUTH_TOKEN` in the production environment.
+    *   Configure GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`) for real PR creation and action triggering.
+
+### B. Monorepo Distribution (`git-subrepo`)
+*   **External Repository Provisioning:** Create the four standalone repositories on GitHub (e.g., `goddard-sdk`, `goddard-cli`, etc.).
+*   **Subrepo Initialization:**
+    *   Run `git subrepo init` for `backend/`, `cmd/`, `github-app/`, and `sdk/` to create their `.gitrepo` metadata.
+    *   Verify push/pull permissions between the monorepo and standalone targets.
+*   **CI/CD Automation:**
+    *   Configure the `SYNC_PAT` (Personal Access Token) as a repository secret in the monorepo.
+    *   Activate and verify the `.github/workflows/sync-subrepos.yml` workflow on the `main` branch.
+
+### C. Developer Experience (Local Dev)
+*   **Local Persistence Support:** Add a local SQLite/Drizzle mode for developers who want to test persistence without a Turso account.
+*   **Environment Validation:** Add a pre-flight check to the CLI/Backend to ensure all required environment variables are present before starting.
+
+Status note: Local MVP runtime is deployable today (backend + CLI + SDK + webhook bridge) for transient testing. Production persistence and automated subrepo publishing require the infrastructure and metadata setup described above.
