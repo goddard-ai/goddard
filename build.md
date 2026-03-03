@@ -106,7 +106,8 @@ While the local MVP is fully functional and tested, the following work is requir
 ### A. Persistence & Infrastructure (The "Control Plane")
 *   **Database Migration:** Replace the `InMemoryBackendControlPlane` with a production implementation using **Turso** (SQLite at the edge) and **Drizzle ORM**.
     *   Define schema for `users`, `auth_sessions`, `pull_requests`, and `action_runs`.
-    *   Implement migration scripts for Turso.
+    *   Use **declarative schemas** managed by **`psqldef`** (or `sqlite3def`) to apply migrations to Turso.
+    *   Maintain an **`init.sql`** script for bootstrap logic or features not supported by the declarative migration tool.
 *   **Cloudflare Workers Deployment:**
     *   Port the `backend` package to the Cloudflare Workers runtime.
     *   Replace the in-memory WebSocket management with **Cloudflare Durable Objects** for scalable, real-time broadcasting.
