@@ -79,6 +79,15 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
 
+  daemon:
+    dependencies:
+      '@goddard-ai/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      cmd-ts:
+        specifier: ^0.15.0
+        version: 0.15.0
+
   github-app:
     dependencies:
       '@goddard-ai/sdk':

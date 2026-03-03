@@ -141,38 +141,6 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     cmds: { create: prCreateCmd }
   });
 
-  const streamCmd = command({
-    name: "stream",
-    args: {
-      repo: option({ type: string, long: "repo", defaultValue: () => undefined as any }),
-      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
-    },
-    handler: async (args) => {
-      try {
-        const sdk = getSdk(args.baseUrl || undefined);
-        const repoRef = await resolveRepoRef(args.repo);
-        const { owner, repo } = splitRepo(repoRef);
-        const sub = await sdk.stream.subscribeToRepo({ owner, repo });
-
-        io.stdout(`Streaming ${owner}/${repo}. Press Ctrl+C to exit.`);
-        sub.on("event", (payload) => {
-          io.stdout(JSON.stringify(payload));
-        });
-
-        await new Promise<void>((resolve) => {
-          process.on("SIGINT", () => {
-            sub.close();
-            resolve();
-          });
-        });
-        return 0;
-      } catch (e) {
-        io.stderr(e instanceof Error ? e.message : String(e));
-        return 1;
-      }
-    }
-  });
-
   const specCmd = command({
     name: "spec",
     args: {},
@@ -342,7 +310,6 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       logout: logoutCmd,
       whoami: whoamiCmd,
       pr: prCmd,
-      stream: streamCmd,
       loop: loopCmd,
       spec: specCmd,
       propose: proposeCmd,

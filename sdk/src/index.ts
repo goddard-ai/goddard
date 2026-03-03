@@ -85,6 +85,7 @@ export class GoddardSdk {
 
   readonly pr: {
     create: (input: CreatePrInput) => Promise<PullRequestRecord>;
+    isManaged: (input: RepoRef & { prNumber: number }) => Promise<boolean>;
   };
 
   readonly stream: {
@@ -145,6 +146,19 @@ export class GoddardSdk {
             })
           )
         );
+      },
+      isManaged: async ({ owner, repo, prNumber }) => {
+        const token = await this.#requireToken();
+        const url = new URL(
+          `/pr/managed?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&prNumber=${prNumber}`,
+          this.#baseUrl
+        );
+        const result = await this.#sendJson<{ managed: boolean }>(
+          this.#fetchImpl(url.toString(), {
+            headers: { authorization: `Bearer ${token}` }
+          })
+        );
+        return result.managed;
       }
     };
 

@@ -25,7 +25,8 @@ Start at `spec/vision.md` to understand the mission, product pillars, and system
 | User Outcomes | `spec/product.md` | Personas, jobs-to-be-done, MVP success criteria |
 | System Architecture | `spec/architecture.md` | Tech stack, repo layout, component responsibilities |
 | Data Flows | `spec/data-flows.md` | E2E request and event-propagation sequences |
-| CLI — Interactive | `spec/cli/interactive.md` | `goddard login`, `pr create`, `stream`, `actions trigger` |
+| CLI — Interactive | `spec/cli/interactive.md` | `goddard login`, `pr create`, `actions trigger`, `spec`, `propose`, `agents init` |
+| Daemon — PR Feedback Automation | `spec/daemon/index.md` | Webhook stream consumer that launches local one-shot `pi` sessions |
 | CLI — Loop | `spec/cli/loop.md` | `goddard loop init`, `run`, `generate-systemd` |
 | Runtime Loop | `spec/runtime-loop.md` | Cycle lifecycle, persistent context, failure model |
 | Configuration | `spec/configuration.md` | Typed config shape, discovery order, validation rules |

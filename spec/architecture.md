@@ -12,6 +12,8 @@ links:
     target: spec/adr/002-edge-native-backend.md
   - type: Relates-To
     target: spec/adr/004-sse-repo-stream.md
+  - type: Relates-To
+    target: spec/daemon/index.md
 ---
 
 # Architecture
@@ -41,6 +43,8 @@ goddard/                     # Monorepo Root
 │   └── .gitrepo             → github.com/goddard-ai/goddard-github-app
 ├── sdk/                     # Framework-agnostic TypeScript client library
 │   └── .gitrepo             → github.com/goddard-ai/goddard-sdk
+├── daemon/                  # Feedback-triggered one-shot runtime consumer
+│   └── .gitrepo             → github.com/goddard-ai/goddard-daemon
 └── pnpm-workspace.yaml      # Cross-package dependency management
 ```
 
@@ -90,6 +94,16 @@ Package name: `@goddard-ai/cmd`. A thin consumer of `@goddard-ai/sdk`.
 **Responsibilities:** Terminal UX, local `TokenStorage` implementation, and `.git/config` parsing for automatic `owner/repo` inference.
 
 → See [`cli/interactive.md`](./cli/interactive.md) for the full command specification.
+
+---
+
+### Feedback Daemon (`daemon/`)
+
+Package name: `@goddard-ai/daemon`. A long-running stream consumer built on `@goddard-ai/sdk`.
+
+**Responsibilities:** Subscribe to repository events, identify managed PR feedback events, and launch local one-shot `pi` sessions with PR-context prompts.
+
+→ See [`daemon/index.md`](./daemon/index.md) for daemon behavior.
 
 ---
 

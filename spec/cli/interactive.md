@@ -6,6 +6,8 @@ links:
     target: spec/architecture.md
   - type: Depends-On
     target: spec/data-flows.md
+  - type: Relates-To
+    target: spec/daemon/pr-feedback-one-shot.md
 ---
 
 # CLI Specification — Interactive Mode
@@ -66,18 +68,33 @@ Creates a pull request attributed to the authenticated developer via `goddard[bo
 
 ---
 
-## Command: `goddard stream`
+## Command: `goddard spec`
 
-Opens a real-time SSE subscription to repository events.
-
-### Options
-- `--repo <owner/repo>` — repository to subscribe to (auto-inferred from `.git/config` if omitted).
+Launches a focused `pi` session with the specification-guardian system prompt.
 
 ### Behavior
-- Opens an SSE connection to the backend Durable Object for the specified repository.
-- Begins printing events (comments, reviews) to the terminal within 2 seconds of a GitHub event firing.
-- Formats each event with timestamp, actor, and event type for readability.
-- Runs indefinitely until the process is interrupted (Ctrl-C).
+- Spawns local `pi` process with the spec-focused system prompt.
+- Inherits terminal stdio so the session is fully interactive.
+
+---
+
+## Command: `goddard propose [...prompt]`
+
+Launches a focused `pi` session with the proposal-review system prompt.
+
+### Behavior
+- Spawns local `pi` process with the proposal-focused system prompt.
+- Passes remaining positional arguments through as prompt content.
+
+---
+
+## Command: `goddard agents init`
+
+Appends Goddard spec instructions to local agent configuration.
+
+### Behavior
+- Delegates to SDK helper to update `.pi/agent/AGENTS.md` guidance in the current project.
+- Prints the updated path.
 
 ---
 
@@ -87,6 +104,5 @@ Opens a real-time SSE subscription to repository events.
 |-----------|-----------|
 | Operational or config error | `1` |
 | Successful command completion | `0` |
-| Stream interrupted by user | `0` |
 
 All errors are written to stdout as human-readable messages.

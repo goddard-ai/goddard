@@ -8,6 +8,8 @@ links:
     target: spec/product.md
   - type: Leads-To
     target: spec/architecture.md
+  - type: Leads-To
+    target: spec/daemon/index.md
 ---
 
 # Vision: Goddard
@@ -28,8 +30,8 @@ Modern developer workflows split across too many surfaces: GitHub UI for PR revi
 
 Goddard solves both:
 
-1. **The interactive gap** — developers need real-time GitHub event streaming directly in their terminals.
-2. **The autonomous gap** — AI coding agents need a principled runtime that controls cadence, token spend, and operational safety for long-running cycles.
+1. **The interactive gap** — developers need terminal-native GitHub operations (auth, PR creation, workflow triggers) without context switching.
+2. **The autonomous gap** — AI coding agents need principled runtimes for both long-running cycles and feedback-triggered one-shot reactions.
 
 ---
 
@@ -87,20 +89,19 @@ Goddard solves both:
 
 A human developer authenticates once, then uses the terminal to:
 - Create PRs attributed to `goddard[bot]` on their behalf.
-- Subscribe to live repository events (comments, reviews) streamed as they happen.
 - Trigger GitHub Actions workflows.
+- Launch focused `pi` sessions for specification and proposal tasks.
 
 → See [`cli/interactive.md`](./cli/interactive.md) for the full command specification.
 
-### Mode 2: Autonomous Agent Loop
+### Mode 2: Autonomous Agent Runtimes
 
-An operator configures `goddard.config.ts` and launches a long-running process that:
-- Repeatedly drives a `pi-coding-agent` session against a codebase.
-- Enforces per-cycle token budgets, per-minute operation caps, and configurable cycle delays.
-- Uses the SDK to create PRs and act on review feedback automatically.
-- Runs reliably under `systemd` with generated unit files.
+An operator can run autonomous processes that:
+- Repeatedly drive a `pi-coding-agent` session against a codebase (loop mode).
+- Listen to webhook-derived PR feedback events and trigger local one-shot `pi` sessions (daemon mode).
+- Enforce safety limits (token budgets, operation caps, cycle delays) where applicable.
 
-→ See [`runtime-loop.md`](./runtime-loop.md) and [`cli/loop.md`](./cli/loop.md) for details.
+→ See [`runtime-loop.md`](./runtime-loop.md), [`cli/loop.md`](./cli/loop.md), and [`daemon/index.md`](./daemon/index.md) for details.
 
 Both modes consume the same `@goddard-ai/sdk`.
 
@@ -115,6 +116,7 @@ Both modes consume the same `@goddard-ai/sdk`.
 | [`architecture.md`](./architecture.md) | System components, technology choices, deployment model |
 | [`data-flows.md`](./data-flows.md) | E2E request and event-propagation sequences |
 | [`cli/interactive.md`](./cli/interactive.md) | Interactive CLI command behavior |
+| [`daemon/index.md`](./daemon/index.md) | Daemon behavior for feedback-triggered one-shot sessions |
 | [`cli/loop.md`](./cli/loop.md) | Autonomous loop CLI command behavior |
 | [`runtime-loop.md`](./runtime-loop.md) | Loop lifecycle, context model, failure semantics |
 | [`configuration.md`](./configuration.md) | Typed config contract, validation, discovery |

@@ -6,6 +6,8 @@ links:
     target: spec/architecture.md
   - type: Relates-To
     target: spec/cli/interactive.md
+  - type: Relates-To
+    target: spec/daemon/pr-feedback-one-shot.md
 ---
 
 # Data Flows
@@ -50,12 +52,12 @@ Sequence for the initial `goddard login` flow.
 
 ---
 
-## Real-Time Event Stream (Subscription)
+## Real-Time Event Stream (Daemon Subscription)
 
-Sequence for `goddard stream` after authentication.
+Sequence for daemon PR-feedback automation.
 
 ```
-1. CLI → SDK: subscribeToRepo("owner/repo")
+1. Daemon → SDK: subscribeToRepo("owner/repo")
 2. SDK → Worker: GET /stream?owner=...&repo=...&token=...  (Accept: text/event-stream)
 3. Worker: validates session, routes to Durable Object for that repo
 4. Durable Object: registers SSE connection
@@ -64,7 +66,8 @@ Sequence for `goddard stream` after authentication.
 7. Worker → Durable Object: forward event payload
 8. Durable Object → SSE stream: broadcast typed JSON frames to all subscribers
 9. SDK: parse frames, validate shape, emit typed `comment` / `review` / `error` event
-10. CLI: format and print event to terminal
+10. Daemon: verifies PR is Goddard-managed
+11. Daemon: launches one-shot local `pi` session with PR feedback context
 ```
 
 ---

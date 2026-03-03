@@ -1,6 +1,7 @@
 packages:
   - 'backend'
   - 'cmd'
+  - 'daemon'
   - 'github-app'
   - 'sdk'
   - 'schema'
