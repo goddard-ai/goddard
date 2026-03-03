@@ -22,7 +22,7 @@ export const pullRequests = sqliteTable("pull_requests", {
   owner: text("owner").notNull(),
   repo: text("repo").notNull(),
   title: text("title").notNull(),
-  body: text("body").notNull().default(""),
+  body: text("body"),
   head: text("head").notNull(),
   base: text("base").notNull(),
   url: text("url").notNull(),
