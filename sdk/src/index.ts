@@ -217,4 +217,4 @@ export type {
   GitHubWebhookInput
 };
 export { InMemoryTokenStorage };
-export { LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "./prompts.ts";
+export { LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./prompts.ts";

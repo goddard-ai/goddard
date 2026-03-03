@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "../src/prompts.ts";
+import { LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "../src/prompts.ts";
 
 test("LOOP_SYSTEM_PROMPT is a non-empty string", () => {
   assert.equal(typeof LOOP_SYSTEM_PROMPT, "string");
@@ -10,6 +10,11 @@ test("LOOP_SYSTEM_PROMPT is a non-empty string", () => {
 test("SPEC_SYSTEM_PROMPT is a non-empty string", () => {
   assert.equal(typeof SPEC_SYSTEM_PROMPT, "string");
   assert.ok(SPEC_SYSTEM_PROMPT.length > 0, "SPEC_SYSTEM_PROMPT must not be empty");
+});
+
+test("PROPOSE_SYSTEM_PROMPT is a non-empty string", () => {
+  assert.equal(typeof PROPOSE_SYSTEM_PROMPT, "string");
+  assert.ok(PROPOSE_SYSTEM_PROMPT.length > 0, "PROPOSE_SYSTEM_PROMPT must not be empty");
 });
 
 test("LOOP_SYSTEM_PROMPT describes autonomous engineer role", () => {
@@ -26,6 +31,13 @@ test("SPEC_SYSTEM_PROMPT describes intent guardian role", () => {
   );
 });
 
+test("PROPOSE_SYSTEM_PROMPT describes feature proposer role", () => {
+  assert.ok(
+    PROPOSE_SYSTEM_PROMPT.includes("Feature Proposer"),
+    "propose prompt must identify the Feature Proposer role"
+  );
+});
+
 test("LOOP_SYSTEM_PROMPT and SPEC_SYSTEM_PROMPT are distinct", () => {
   assert.notEqual(
     LOOP_SYSTEM_PROMPT,
@@ -38,6 +50,8 @@ test("prompts are re-exported from SDK root index", async () => {
   const sdk = await import("../src/index.ts");
   assert.equal(typeof sdk.LOOP_SYSTEM_PROMPT, "string");
   assert.equal(typeof sdk.SPEC_SYSTEM_PROMPT, "string");
+  assert.equal(typeof sdk.PROPOSE_SYSTEM_PROMPT, "string");
   assert.ok(sdk.LOOP_SYSTEM_PROMPT.length > 0);
   assert.ok(sdk.SPEC_SYSTEM_PROMPT.length > 0);
+  assert.ok(sdk.PROPOSE_SYSTEM_PROMPT.length > 0);
 });

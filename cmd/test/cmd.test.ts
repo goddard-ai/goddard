@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/index.ts";
-import { createSdk, SPEC_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
 
 test("login command prints authenticated user", async () => {
   const lines: string[] = [];
@@ -120,6 +120,28 @@ test("spec command propagates non-zero exit from pi", async () => {
   );
 
   assert.equal(code, 1);
+});
+
+test("propose command spawns pi with PROPOSE_SYSTEM_PROMPT and passes args", async () => {
+  const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+
+  const code = await runCli(
+    ["propose", "add auth"],
+    { stdout: () => {}, stderr: () => {} },
+    {
+      createSdkClient: () => createMockSdk({}),
+      spawnPi: (args) => {
+        spawnCalls.push({ cmd: "pi", args });
+        return 0;
+      }
+    }
+  );
+
+  assert.equal(code, 0);
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0]!.args[0], "--system-prompt");
+  assert.equal(spawnCalls[0]!.args[1], PROPOSE_SYSTEM_PROMPT);
+  assert.equal(spawnCalls[0]!.args[2], "add auth");
 });
 
 type SdkClient = ReturnType<typeof createSdk>;

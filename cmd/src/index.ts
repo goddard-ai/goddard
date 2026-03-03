@@ -1,4 +1,4 @@
-import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
 import { inferRepoFromGitConfig, splitRepo } from "./git.ts";
 import { FileTokenStorage } from "./storage.ts";
 import { spawnSync } from "node:child_process";
@@ -108,6 +108,13 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       return exitCode;
     }
 
+    if (command === "propose") {
+      // Launch pi configured as the Feature Proposer.
+      // Positional arguments (the feature idea) are passed to pi.
+      const exitCode = spawnPi(["--system-prompt", PROPOSE_SYSTEM_PROMPT, ...argv.slice(1)]);
+      return exitCode;
+    }
+
     printHelp(io);
     return 1;
   } catch (error) {
@@ -171,6 +178,7 @@ function printHelp(io: CliIo): void {
   io.stdout("  pr create --title <title> [--body <body>] [--head <branch>] [--base <branch>] [--repo owner/repo]");
   io.stdout("  stream [--repo owner/repo] [--base-url <url>]");
   io.stdout("  spec                               Start a pi session as the Intent Guardian (spec/ mode)");
+  io.stdout("  propose <prompt>                   Start a pi session to draft a feature proposal");
   io.stdout("  loop init [--global]               Create goddard.config.ts from the default template");
   io.stdout("  loop run                           Start the autonomous agent loop (uses LOOP_SYSTEM_PROMPT by default)");
   io.stdout("  loop generate-systemd [--global]   Generate a systemd unit file");
