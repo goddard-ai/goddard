@@ -47,23 +47,6 @@ export type PullRequestRecord = {
   createdAt: string;
 };
 
-export type TriggerActionInput = RepoRef & {
-  workflowId: string;
-  ref: string;
-  inputs?: Record<string, string>;
-};
-
-export type ActionRunRecord = {
-  id: number;
-  owner: string;
-  repo: string;
-  workflowId: string;
-  ref: string;
-  status: "queued" | "in_progress" | "completed";
-  triggeredBy: string;
-  createdAt: string;
-};
-
 export type RepoEvent =
   | {
       type: "comment";
@@ -92,16 +75,6 @@ export type RepoEvent =
       repo: string;
       prNumber: number;
       title: string;
-      author: string;
-      createdAt: string;
-    }
-  | {
-      type: "action.triggered";
-      owner: string;
-      repo: string;
-      workflowId: string;
-      runId: number;
-      status: "queued";
       author: string;
       createdAt: string;
     };

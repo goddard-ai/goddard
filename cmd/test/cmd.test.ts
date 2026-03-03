@@ -93,7 +93,6 @@ type SdkClient = ReturnType<typeof createSdk>;
 type PartialSdk = {
   auth?: Partial<SdkClient["auth"]>;
   pr?: Partial<SdkClient["pr"]>;
-  actions?: Partial<SdkClient["actions"]>;
   stream?: Partial<SdkClient["stream"]>;
 };
 
@@ -117,12 +116,6 @@ function createMockSdk(partial: PartialSdk): SdkClient {
         throw new Error("not mocked");
       },
       ...partial.pr
-    },
-    actions: {
-      trigger: async () => {
-        throw new Error("not mocked");
-      },
-      ...partial.actions
     },
     stream: {
       subscribeToRepo: async () => {

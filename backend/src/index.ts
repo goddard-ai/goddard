@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import type {
-  ActionRunRecord,
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
@@ -9,8 +8,7 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent,
-  TriggerActionInput
+  RepoEvent
 } from "@goddard-ai/sdk";
 import { WebSocketServer, type WebSocket } from "ws";
 import { type BackendControlPlane, HttpError, assertRepo } from "./control-plane.ts";
@@ -37,10 +35,8 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   #deviceSessions = new Map<string, DeviceSessionRecord>();
   #authSessions = new Map<string, SessionRecord>();
   #pullRequests: PullRequestRecord[] = [];
-  #actionRuns: ActionRunRecord[] = [];
   #streamsByRepo = new Map<string, Set<WebSocket>>();
   #nextPrId = 1;
-  #nextRunId = 1;
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
     const githubUsername = input.githubUsername?.trim() || "developer";
@@ -144,39 +140,6 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     });
 
     return record;
-  }
-
-  triggerAction(token: string, input: TriggerActionInput): ActionRunRecord {
-    const session = this.getSession(token);
-    assertRepo(input.owner, input.repo);
-    if (!input.workflowId.trim()) {
-      throw new HttpError(400, "workflowId is required");
-    }
-
-    const run: ActionRunRecord = {
-      id: this.#nextRunId++,
-      owner: input.owner,
-      repo: input.repo,
-      workflowId: input.workflowId,
-      ref: input.ref,
-      status: "queued",
-      triggeredBy: session.githubUsername,
-      createdAt: new Date().toISOString()
-    };
-    this.#actionRuns.push(run);
-
-    this.broadcast({
-      type: "action.triggered",
-      owner: input.owner,
-      repo: input.repo,
-      workflowId: run.workflowId,
-      runId: run.id,
-      status: "queued",
-      author: run.triggeredBy,
-      createdAt: run.createdAt
-    });
-
-    return run;
   }
 
   handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
@@ -331,12 +294,6 @@ async function handleHttpRequest(
     const token = readBearerToken(req);
     const body = await readJson<CreatePrInput>(req);
     return writeJson(res, 200, await controlPlane.createPr(token, body));
-  }
-
-  if (method === "POST" && requestUrl.pathname === "/actions/trigger") {
-    const token = readBearerToken(req);
-    const body = await readJson<TriggerActionInput>(req);
-    return writeJson(res, 200, await controlPlane.triggerAction(token, body));
   }
 
   if (method === "POST" && requestUrl.pathname === "/webhooks/github") {

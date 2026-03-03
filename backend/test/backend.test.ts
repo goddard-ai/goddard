@@ -22,7 +22,7 @@ test("control plane creates PR authored by authenticated user", () => {
   assert.match(pr.body, /Authored via CLI by @alec/);
 });
 
-test("http api supports login, pr creation, and action trigger", async () => {
+test("http api supports login and pr creation", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
@@ -46,19 +46,6 @@ test("http api supports login, pr creation, and action trigger", async () => {
     );
 
     assert.equal(pr.number, 1);
-
-    const run = await postJson(
-      `${baseUrl}/actions/trigger`,
-      {
-        owner: "goddard-ai",
-        repo: "cmd",
-        workflowId: "ci",
-        ref: "main"
-      },
-      session.token
-    );
-
-    assert.equal(run.status, "queued");
   } finally {
     await server.close();
   }

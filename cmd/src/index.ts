@@ -63,17 +63,6 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       return 0;
     }
 
-    if (command === "actions" && subcommand === "trigger") {
-      const repoRef = await resolveRepoRef(options["repo"]);
-      const { owner, repo } = splitRepo(repoRef);
-      const workflowId = requiredOption(options, "workflow");
-      const ref = options.ref ?? "main";
-
-      const run = await sdk.actions.trigger({ owner, repo, workflowId, ref });
-      io.stdout(`Action queued: run ${run.id} (${run.workflowId} on ${run.ref})`);
-      return 0;
-    }
-
     if (command === "stream") {
       const repoRef = await resolveRepoRef(options["repo"]);
       const { owner, repo } = splitRepo(repoRef);
@@ -155,6 +144,5 @@ function printHelp(io: CliIo): void {
   io.stdout("  logout [--base-url <url>]");
   io.stdout("  whoami [--base-url <url>]");
   io.stdout("  pr create --title <title> [--body <body>] [--head <branch>] [--base <branch>] [--repo owner/repo]");
-  io.stdout("  actions trigger --workflow <workflow-id> [--ref <ref>] [--repo owner/repo]");
   io.stdout("  stream [--repo owner/repo] [--base-url <url>]");
 }
