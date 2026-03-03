@@ -1,3 +1,28 @@
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/**
+ * Configuration passed through to pi-coding-agent when creating a session.
+ * Supports extra provider-specific fields via the index signature.
+ */
+export type PiAgentConfig = {
+  /** pi-coding-agent model string, e.g. "anthropic/claude-opus-4-5" */
+  model: string;
+  /** Absolute path to the project the agent should operate in */
+  projectDir: string;
+  /** Thinking / reasoning depth. Defaults to "medium". */
+  thinkingLevel?: ThinkingLevel;
+  /** Override path to the pi agent directory (~/.pi/agent by default) */
+  agentDir?: string;
+  /**
+   * System prompt to inject into the agent session.
+   * Defaults to LOOP_SYSTEM_PROMPT when running via `goddard loop`.
+   * Pass SPEC_SYSTEM_PROMPT when running via `goddard spec`.
+   */
+  systemPrompt?: string;
+  /** Allow provider-specific pass-through fields */
+  [key: string]: unknown;
+};
+
 export type RepoRef = {
   owner: string;
   repo: string;

@@ -5,10 +5,12 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
   GitHubWebhookInput,
+  PiAgentConfig,
   PullRequestRecord,
   RepoEvent,
   RepoRef,
-  StreamMessage
+  StreamMessage,
+  ThinkingLevel
 } from "./types.ts";
 import { InMemoryTokenStorage, type TokenStorage } from "./token-storage.ts";
 
@@ -206,10 +208,13 @@ export type {
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+  PiAgentConfig,
   PullRequestRecord,
   RepoEvent,
   RepoRef,
+  ThinkingLevel,
   TokenStorage,
   GitHubWebhookInput
 };
 export { InMemoryTokenStorage };
+export { LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "./prompts.ts";
