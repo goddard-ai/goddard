@@ -113,11 +113,11 @@ While the local MVP is fully functional and tested, the following work is requir
     `backend/schema.sql` is the **single source of truth** for table structure. To apply or update the schema against a Turso / LibSQL database:
 
     ```bash
-    # 1. Apply pragmas and any seed data (items sqlite3def cannot manage)
-    sqlite3 <db-file> < backend/init.sql
-
-    # 2. Converge the schema declaratively
+    # 1. Converge the schema declaratively
     sqlite3def --file backend/schema.sql <db-file>
+
+    # 2. Apply pragmas, seed data, triggers, and views (items sqlite3def cannot manage)
+    sqlite3 <db-file> < backend/init.sql
     ```
 
     When you need to add a column or a new table, **edit `schema.sql`** and re-run `sqlite3def`. It will generate and apply only the necessary `ALTER TABLE` statements. Never write migration SQL by hand.
@@ -134,7 +134,7 @@ While the local MVP is fully functional and tested, the following work is requir
 
     #### Why `init.sql` is always required
 
-    `init.sql` is a **permanent first step**, not a fallback. It handles items `sqlite3def` structurally cannot:
+    `init.sql` is a **permanent final step**, not a fallback. It handles items `sqlite3def` structurally cannot:
 
     1.  **`PRAGMA` statements** — `sqlite3def` never emits these. `PRAGMA foreign_keys = ON` is especially critical: without it SQLite silently ignores `REFERENCES` constraints at runtime, regardless of what the schema declares.
 

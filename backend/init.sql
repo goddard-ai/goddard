@@ -1,10 +1,10 @@
--- Bootstrap script — always run before sqlite3def.
+-- Bootstrap script — always run after sqlite3def.
 --
 -- This file handles items sqlite3def cannot manage. It is not a fallback;
--- it is a required first step in every environment, applied via:
+-- it is a required final step in every environment, applied via:
 --
---   sqlite3 <db-file> < backend/init.sql
 --   sqlite3def --file backend/schema.sql <db-file>
+--   sqlite3 <db-file> < backend/init.sql
 --
 -- What belongs here:
 --
