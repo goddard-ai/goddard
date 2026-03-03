@@ -2,15 +2,15 @@
 
 ## Format
 
-Configuration is authored in TypeScript (`pi-loop.config.ts`) and exported as default via `createLoopConfig(...)`.
+Configuration is authored in TypeScript (`goddard.config.ts`) and exported as default via `createGoddardConfig(...)`.
 
 ---
 
 ## Discovery Order
 
-At runtime (`pi-loop run`):
-1. `./pi-loop.config.ts` — current working directory (local config).
-2. `~/.pi-loop/config.ts` — home directory (global config).
+At runtime (`goddard loop run`):
+1. `./goddard.config.ts` — current working directory (local config).
+2. `~/.goddard/config.ts` — home directory (global config).
 
 Local config takes precedence over global config.
 
@@ -19,7 +19,7 @@ Local config takes precedence over global config.
 ## Top-Level Shape
 
 ```ts
-interface LoopConfig {
+interface GoddardConfig {
   agent: PiAgentConfig;       // passed through to pi-coding-agent; supports extra provider fields
   strategy: CycleStrategy;    // must expose nextPrompt()
 

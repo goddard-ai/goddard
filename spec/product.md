@@ -18,7 +18,7 @@
 4. Trigger GitHub Actions workflows programmatically.
 
 ### Autonomous mode
-1. Initialize a typed loop config quickly (`pi-loop init`).
+1. Initialize a typed loop config quickly (`goddard loop init`).
 2. Run autonomous agent cycles indefinitely with bounded operational behavior.
 3. Adjust prompt strategy without modifying loop internals.
 4. Control cadence and operation rate to avoid excessive spend or load.
@@ -30,9 +30,9 @@
 
 - `goddard login` completes in under 60 seconds with no manual token management.
 - `goddard stream --repo owner/repo` begins streaming events within 2 seconds of a GitHub event.
-- `pi-loop init` produces a valid, runnable `pi-loop.config.ts` immediately.
-- `pi-loop run` discovers and loads local config automatically.
-- `pi-loop generate-systemd` emits a ready-to-use `.service` file.
+- `goddard loop init` produces a valid, runnable `goddard.config.ts` immediately.
+- `goddard loop run` discovers and loads local config automatically.
+- `goddard loop generate-systemd` emits a ready-to-use `.service` file.
 - All commands emit deterministic, human-readable errors for missing or invalid config.
 
 ---
@@ -46,8 +46,8 @@
 - GitHub App: automated reactions on managed PRs.
 
 ### Agent Orchestration (loop)
-- CLI commands: `init`, `run`, `generate-systemd`.
-- Public API exports `createLoop` and `createLoopConfig`.
+- CLI commands: `goddard loop init`, `goddard loop run`, `goddard loop generate-systemd`.
+- Public API exports `createGoddardLoop` and `createGoddardConfig`.
 - Strategy contract supports custom classes implementing `nextPrompt(ctx)`.
 - Runtime performs repeated cycles and carries forward prior summary context.
 

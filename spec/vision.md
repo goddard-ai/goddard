@@ -80,7 +80,7 @@ A human developer authenticates once, then uses the terminal to:
 
 ### Mode 2: Autonomous Agent Loop
 
-An operator configures `pi-loop.config.ts` and launches a long-running process that:
+An operator configures `goddard.config.ts` and launches a long-running process that:
 - Repeatedly drives a `pi-coding-agent` session against a codebase.
 - Enforces per-cycle token budgets, per-minute operation caps, and configurable cycle delays.
 - Uses the SDK to create PRs and act on review feedback automatically.

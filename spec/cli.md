@@ -1,23 +1,23 @@
-# CLI Specification
+# CLI Specification — Autonomous Loop
 
-This document covers the autonomous loop CLI (`pi-loop`). For the interactive developer CLI, see [`architecture.md`](./architecture.md#interactive-cli-cmd).
+This document covers the `goddard loop` subcommand group, which manages autonomous agent cycles. For the interactive developer CLI (`goddard pr`, `goddard stream`, etc.), see [`architecture.md`](./architecture.md).
 
 ---
 
-## Command: `pi-loop init`
+## Command: `goddard loop init`
 
-Creates `pi-loop.config.ts` from a default template.
+Creates `goddard.config.ts` from a default template.
 
 ### Options
-- `--global` / `-g` — write to home directory (`~/.pi-loop/config.ts`) instead of current directory.
+- `--global` / `-g` — write to home directory (`~/.goddard/config.ts`) instead of current directory.
 
 ### Behavior
 - Fails with a clear error if the target config file already exists.
-- Prints the created path and the suggested next step (`pi-loop run`).
+- Prints the created path and the suggested next step (`goddard loop run`).
 
 ---
 
-## Command: `pi-loop run`
+## Command: `goddard loop run`
 
 Loads config (local, then global) and starts loop execution.
 
@@ -31,23 +31,23 @@ Loads config (local, then global) and starts loop execution.
 
 ---
 
-## Command: `pi-loop generate-systemd`
+## Command: `goddard loop generate-systemd`
 
-Generates a `pi-loop.service` systemd unit file.
+Generates a `goddard.service` systemd unit file.
 
 ### Options
 - `--global` / `-g` — use global config; output path rooted in home directory.
 
 ### Output path
-- Local: `./systemd/pi-loop.service`
-- Global: `~/systemd/pi-loop.service`
+- Local: `./systemd/goddard.service`
+- Global: `~/systemd/goddard.service`
 
 ### Behavior
 - Reads `systemd` tuning values from config when available.
 - Uses configurable `User` and `WorkingDirectory` when provided.
 - Emits `Environment=` lines for each defined entry in `systemd.environment`.
 - Emits a service file with:
-  - `ExecStart=pi-loop run`
+  - `ExecStart=goddard loop run`
   - `Restart=always`
   - Configurable `RestartSec` and `Nice`
 
@@ -61,7 +61,7 @@ After=network.target
 Type=simple
 User=deployer
 WorkingDirectory=/opt/myproject
-ExecStart=pi-loop run
+ExecStart=goddard loop run
 Restart=always
 RestartSec=5
 Nice=10

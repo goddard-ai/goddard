@@ -22,4 +22,4 @@ Start at the top and traverse as deep as your task requires.
 The following files are the historical sources that were synthesized into this spec set. They are preserved for reference but are **not** the canonical source of intent:
 
 - `build.md` — implementation architecture proposal for the Goddard platform.
-- `old-cmd/spec/` — modular spec set for the original `pi-loop` autonomous agent layer.
+- `old-cmd/spec/` — modular spec set for the original autonomous agent loop layer (formerly `pi-loop`).
