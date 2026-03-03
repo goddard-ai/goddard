@@ -44,14 +44,3 @@ CREATE TABLE pull_requests (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-
-CREATE TABLE action_runs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  owner TEXT NOT NULL,
-  repo TEXT NOT NULL,
-  workflow_id TEXT NOT NULL,
-  ref TEXT NOT NULL,
-  status TEXT NOT NULL,
-  triggered_by TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);

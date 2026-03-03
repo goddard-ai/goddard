@@ -29,14 +29,3 @@ export const pullRequests = sqliteTable("pull_requests", {
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull(),
 });
-
-export const actionRuns = sqliteTable("action_runs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  owner: text("owner").notNull(),
-  repo: text("repo").notNull(),
-  workflowId: text("workflow_id").notNull(),
-  ref: text("ref").notNull(),
-  status: text("status").$type<"queued" | "in_progress" | "completed">().notNull(),
-  triggeredBy: text("triggered_by").notNull(),
-  createdAt: text("created_at").notNull(),
-});

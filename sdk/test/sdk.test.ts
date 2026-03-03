@@ -54,7 +54,7 @@ test("device flow stores token and whoami uses auth header", async () => {
   assert.equal(me.githubUserId, 42);
 });
 
-test("pr create and action trigger require authentication", async () => {
+test("pr create requires authentication", async () => {
   const storage = new InMemoryTokenStorage();
 
   const fetchImpl: typeof fetch = async (input) => {
@@ -71,19 +71,6 @@ test("pr create and action trigger require authentication", async () => {
         base: "main",
         url: "https://github.com/org/repo/pull/1",
         createdBy: "alec",
-        createdAt: new Date().toISOString()
-      });
-    }
-
-    if (url.endsWith("/actions/trigger")) {
-      return jsonResponse(200, {
-        id: 10,
-        owner: "org",
-        repo: "repo",
-        workflowId: "ci",
-        ref: "main",
-        status: "queued",
-        triggeredBy: "alec",
         createdAt: new Date().toISOString()
       });
     }
@@ -105,9 +92,6 @@ test("pr create and action trigger require authentication", async () => {
 
   const pr = await sdk.pr.create({ owner: "org", repo: "repo", title: "demo", head: "feat", base: "main" });
   assert.equal(pr.number, 1);
-
-  const run = await sdk.actions.trigger({ owner: "org", repo: "repo", workflowId: "ci", ref: "main" });
-  assert.equal(run.status, "queued");
 });
 
 test("stream emits error event for malformed payloads", async () => {

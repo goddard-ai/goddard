@@ -1,5 +1,4 @@
 import type {
-  ActionRunRecord,
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
@@ -7,8 +6,7 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent,
-  TriggerActionInput
+  RepoEvent
 } from "@goddard-ai/sdk";
 
 export interface BackendControlPlane {
@@ -16,7 +14,6 @@ export interface BackendControlPlane {
   completeDeviceFlow(input: DeviceFlowComplete): Promise<AuthSession> | AuthSession;
   getSession(token: string): Promise<AuthSession> | AuthSession;
   createPr(token: string, input: CreatePrInput): Promise<PullRequestRecord> | PullRequestRecord;
-  triggerAction(token: string, input: TriggerActionInput): Promise<ActionRunRecord> | ActionRunRecord;
   handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent;
   addStreamSocket?(repoKey: string, socket: unknown): void;
   removeStreamSocket?(repoKey: string, socket: unknown): void;

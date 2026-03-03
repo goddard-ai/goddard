@@ -5,8 +5,7 @@ import type {
   CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowStart,
-  GitHubWebhookInput,
-  TriggerActionInput
+  GitHubWebhookInput
 } from "@goddard-ai/sdk";
 import { RepoStream } from "./objects/RepoStream.ts";
 
@@ -62,26 +61,6 @@ export default {
         });
 
         return writeJson(200, pr);
-      }
-
-      if (method === "POST" && url.pathname === "/actions/trigger") {
-        const token = readBearerToken(request);
-        const body = (await request.json()) as TriggerActionInput;
-        const run = await controlPlane.triggerAction(token, body);
-
-        // Broadcast to Durable Object
-        await broadcastToRepo(env, run.owner, run.repo, {
-          type: "action.triggered",
-          owner: run.owner,
-          repo: run.repo,
-          workflowId: run.workflowId,
-          runId: run.id,
-          status: run.status,
-          author: run.triggeredBy,
-          createdAt: run.createdAt
-        });
-
-        return writeJson(200, run);
       }
 
       if (method === "POST" && url.pathname === "/webhooks/github") {

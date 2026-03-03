@@ -2,7 +2,6 @@ import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "./schema.ts";
 import type {
-  ActionRunRecord,
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
@@ -10,8 +9,7 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent,
-  TriggerActionInput
+  RepoEvent
 } from "@goddard-ai/sdk";
 import { eq, and, gt } from "drizzle-orm";
 import { type BackendControlPlane, HttpError, assertRepo } from "./control-plane.ts";
@@ -129,29 +127,6 @@ export class TursoBackendControlPlane implements BackendControlPlane {
       .where(eq(schema.pullRequests.id, inserted.id));
 
     return { ...inserted, number: finalNumber, url: finalUrl, body: inserted.body ?? "" };
-  }
-
-  async triggerAction(token: string, input: TriggerActionInput): Promise<ActionRunRecord> {
-    const session = await this.getSession(token);
-    assertRepo(input.owner, input.repo);
-    if (!input.workflowId.trim()) {
-      throw new HttpError(400, "workflowId is required");
-    }
-
-    const [run] = await this.#db
-      .insert(schema.actionRuns)
-      .values({
-        owner: input.owner,
-        repo: input.repo,
-        workflowId: input.workflowId,
-        ref: input.ref,
-        status: "queued",
-        triggeredBy: session.githubUsername,
-        createdAt: new Date().toISOString()
-      })
-      .returning();
-
-    return run;
   }
 
   async handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> {

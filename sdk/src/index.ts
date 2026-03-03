@@ -1,5 +1,4 @@
 import type {
-  ActionRunRecord,
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
@@ -9,8 +8,7 @@ import type {
   PullRequestRecord,
   RepoEvent,
   RepoRef,
-  StreamMessage,
-  TriggerActionInput
+  StreamMessage
 } from "./types.ts";
 import { InMemoryTokenStorage, type TokenStorage } from "./token-storage.ts";
 
@@ -69,10 +67,6 @@ export class GoddardSdk {
     create: (input: CreatePrInput) => Promise<PullRequestRecord>;
   };
 
-  readonly actions: {
-    trigger: (input: TriggerActionInput) => Promise<ActionRunRecord>;
-  };
-
   readonly stream: {
     subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>;
   };
@@ -108,12 +102,6 @@ export class GoddardSdk {
     this.pr = {
       create: async (input) => {
         return this.#request<PullRequestRecord>("POST", "/pr/create", input, true);
-      }
-    };
-
-    this.actions = {
-      trigger: async (input) => {
-        return this.#request<ActionRunRecord>("POST", "/actions/trigger", input, true);
       }
     };
 
@@ -213,7 +201,6 @@ export function createSdk(options: GoddardSdkOptions): GoddardSdk {
 }
 
 export type {
-  ActionRunRecord,
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
@@ -223,7 +210,6 @@ export type {
   RepoEvent,
   RepoRef,
   TokenStorage,
-  TriggerActionInput,
   GitHubWebhookInput
 };
 export { InMemoryTokenStorage };

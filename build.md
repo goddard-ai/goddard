@@ -9,7 +9,6 @@ To ensure maximum ecosystem compatibility, the core logic is packaged as a frame
 *   **Delegated PR Creation:** The CLI creates PRs via the GitHub App identity (`goddard[bot]`), while explicitly mentioning the authenticated human developer responsible for the action.
 *   **Real-Time Terminal Streaming:** The CLI subscribes to repository events (comments, reviews) via WebSockets, streaming them directly into the developer's terminal in real-time.
 *   **Automated Reactions:** The GitHub App automatically reacts (e.g., 👀 emoji) to comments/reviews on PRs it manages.
-*   **Action Triggers:** Developers can trigger GitHub Actions workflows programmatically or via the CLI.
 *   **SDK-First Design:** All capabilities are exposed via a TypeScript SDK, allowing third parties to build custom automations, bots, or GUIs without relying on CLI subprocesses.
 
 ---
@@ -61,7 +60,6 @@ A framework-agnostic TypeScript library (`@goddard/sdk`). It contains zero assum
 *   **Dependency Injection:** Accepts a `TokenStorage` interface to allow flexibility in how session tokens are stored (in-memory, file system, or `localStorage`).
 *   **Modules:**
     *   `sdk.pr.create()`: Sends intents to the backend.
-    *   `sdk.actions.trigger()`: Dispatches workflows.
     *   `sdk.stream.subscribeToRepo()`: Manages the WebSocket connection and normalizes incoming frames into standard `EventEmitter` events (e.g., `stream.on('comment', handler)`).
 
 ### C. The CLI (`cmd/`)
@@ -89,7 +87,7 @@ A thin UI wrapper around the SDK (`@goddard/cli`).
 
 Implemented in this repository:
 - SDK-first architecture (`sdk/`) used by CLI (`cmd/`) and integrations.
-- Local backend control plane with auth flow endpoints, PR creation, action trigger, webhook ingest, and WebSocket repo streams.
+- Local backend control plane with auth flow endpoints, PR creation, webhook ingest, and WebSocket repo streams.
 - GitHub App shim (`github-app/`) that forwards webhook events to backend.
 - Monorepo CI and subrepo sync workflow scaffolding.
 
@@ -105,7 +103,7 @@ While the local MVP is fully functional and tested, the following work is requir
 
 ### A. Persistence & Infrastructure (The "Control Plane")
 *   **Database Migration:** Replace the `InMemoryBackendControlPlane` with a production implementation using **Turso** (SQLite at the edge) and **Drizzle ORM**.
-    *   Define schema for `users`, `auth_sessions`, `pull_requests`, and `action_runs`.
+    *   Define schema for `users`, `auth_sessions`, and `pull_requests`.
     *   Use **`sqlite3def`** (the SQLite member of the [psqldef](https://github.com/sqldef/sqldef) family) for all schema management. `sqlite3def` compares `backend/schema.sql` against the live database and emits the minimal `ALTER TABLE` / `CREATE TABLE` DDL required to converge — no hand-written migration files.
 
     #### Schema management with `sqlite3def` (primary path)
@@ -149,7 +147,7 @@ While the local MVP is fully functional and tested, the following work is requir
     *   Add `wrangler.toml` for deployment configuration.
 *   **Production Secrets:**
     *   Provision and configure `TURSO_DB_URL` and `TURSO_DB_AUTH_TOKEN` in the production environment.
-    *   Configure GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`) for real PR creation and action triggering.
+    *   Configure GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`) for real PR creation.
 
 ### B. Monorepo Distribution (`git-subrepo`)
 *   **External Repository Provisioning:** Create the four standalone repositories on GitHub (e.g., `goddard-sdk`, `goddard-cli`, etc.).
