@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWebhookHandler } from "../src/index.ts";
+import { GoddardGitHubApp } from "../src/index.ts";
 
-test("webhook handler returns handled payload", () => {
-  const handleWebhook = createWebhookHandler();
-  assert.deepEqual(handleWebhook({ name: "push" }), {
-    handled: true,
-    eventName: "push",
-    sdk: "pong:github-app"
+test("GoddardGitHubApp initialization", () => {
+  const app = new GoddardGitHubApp({
+    appId: "123",
+    privateKey: "some-key",
+    webhookSecret: "secret"
   });
+  
+  assert.ok(app.app);
+  assert.ok(app.app.webhooks);
 });
