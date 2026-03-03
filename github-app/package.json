@@ -7,7 +7,9 @@
   "dependencies": {
     "@goddard-ai/sdk": "workspace:*",
     "@libsql/client": "^0.17.0",
-    "drizzle-orm": "^0.45.1"
+    "@octokit/webhooks": "^14.2.0",
+    "drizzle-orm": "^0.45.1",
+    "octokit": "^5.0.5"
   },
   "exports": {
     ".": "./src/index.ts"

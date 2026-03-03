@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createGitHubApp } from "../src/index.ts";
+import { GoddardGitHubApp, createGitHubApp } from "../src/index.ts";
+
+test("GoddardGitHubApp initialization", () => {
+  const app = new GoddardGitHubApp({
+    appId: "123",
+    privateKey: "some-key",
+    webhookSecret: "secret",
+    backendBaseUrl: "http://127.0.0.1:8787"
+  });
+  
+  assert.ok(app.app);
+  assert.ok(app.app.webhooks);
+});
 
 test("github-app forwards webhooks to backend and returns handled event", async () => {
   const fetchImpl: typeof fetch = async (input, init) => {
