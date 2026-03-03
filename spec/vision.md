@@ -1,3 +1,15 @@
+---
+id: goddard-vision
+status: ACTIVE
+links:
+  - type: Leads-To
+    target: spec/manifest.md
+  - type: Leads-To
+    target: spec/product.md
+  - type: Leads-To
+    target: spec/architecture.md
+---
+
 # Vision: Goddard
 
 ## Mission
@@ -71,12 +83,14 @@ Goddard solves both:
 
 ## Two Usage Modes
 
-### Mode 1: Interactive Developer CLI (`cmd/`)
+### Mode 1: Interactive Developer CLI
 
 A human developer authenticates once, then uses the terminal to:
 - Create PRs attributed to `goddard[bot]` on their behalf.
 - Subscribe to live repository events (comments, reviews) streamed as they happen.
 - Trigger GitHub Actions workflows.
+
+→ See [`cli/interactive.md`](./cli/interactive.md) for the full command specification.
 
 ### Mode 2: Autonomous Agent Loop
 
@@ -86,32 +100,24 @@ An operator configures `goddard.config.ts` and launches a long-running process t
 - Uses the SDK to create PRs and act on review feedback automatically.
 - Runs reliably under `systemd` with generated unit files.
 
+→ See [`runtime-loop.md`](./runtime-loop.md) and [`cli/loop.md`](./cli/loop.md) for details.
+
 Both modes consume the same `@goddard-ai/sdk`.
 
 ---
 
 ## Spec Map
 
-This vision is decomposed into the following supporting specifications:
-
 | Document | Scope |
 |----------|-------|
-| [`architecture.md`](./architecture.md) | System components, data flows, technology choices, deployment |
+| [`manifest.md`](./manifest.md) | Routing hub — start here to navigate the graph |
 | [`product.md`](./product.md) | User outcomes, success criteria, MVP scope |
-| [`runtime-loop.md`](./runtime-loop.md) | Autonomous loop lifecycle and status semantics |
+| [`architecture.md`](./architecture.md) | System components, technology choices, deployment model |
+| [`data-flows.md`](./data-flows.md) | E2E request and event-propagation sequences |
+| [`cli/interactive.md`](./cli/interactive.md) | Interactive CLI command behavior |
+| [`cli/loop.md`](./cli/loop.md) | Autonomous loop CLI command behavior |
+| [`runtime-loop.md`](./runtime-loop.md) | Loop lifecycle, context model, failure semantics |
 | [`configuration.md`](./configuration.md) | Typed config contract, validation, discovery |
-| [`cli.md`](./cli.md) | CLI command behavior (`init`, `run`, `generate-systemd`) |
 | [`rate-limiting.md`](./rate-limiting.md) | Cycle delay, ops throttling, token enforcement |
 | [`non-goals.md`](./non-goals.md) | Explicit boundaries and exclusions |
-
----
-
-## Source Grounding
-
-This vision is synthesized from:
-
-- `build.md` — implementation architecture for the Goddard platform (auth, streaming, SDK, deploy path).
-- `old-cmd/spec/vision.md` and supporting spec docs — product vision for the autonomous agent loop layer.
-- Current implementation in `backend/`, `cmd/`, `github-app/`, `sdk/`.
-
-Where historical documents conflict, current shipped behavior takes precedence unless explicitly marked as a planned evolution.
+| [`adr/`](./adr/) | Architecture Decision Records |

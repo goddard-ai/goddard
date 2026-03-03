@@ -1,8 +1,20 @@
+---
+id: configuration-contract
+status: ACTIVE
+links:
+  - type: Extends
+    target: spec/runtime-loop.md
+  - type: Depends-On
+    target: spec/rate-limiting.md
+  - type: Relates-To
+    target: spec/cli/loop.md
+---
+
 # Configuration Contract
 
 ## Format
 
-Configuration is authored in TypeScript (`goddard.config.ts`) and exported as default via `createGoddardConfig(...)`.
+Configuration is authored in TypeScript (`goddard.config.ts`) and exported as default via `createGoddardConfig(...)`. TypeScript authoring provides IDE completion and static type checks without a separate schema file.
 
 ---
 
@@ -61,7 +73,7 @@ interface GoddardConfig {
 
 ## Validation Rules
 
-All validation is performed by Zod before loop startup.
+All validation is performed by Zod at startup. Invalid config throws before the first cycle begins.
 
 | Field | Rule |
 |-------|------|
@@ -92,5 +104,5 @@ Strategies are pluggable: any object implementing `nextPrompt` can be passed as 
 ## Configuration Guarantees
 
 - **Fail fast:** Invalid config throws at startup, not mid-cycle.
-- **IDE-friendly:** TypeScript users get editor completion and static type checks when using exported helpers.
+- **IDE-friendly:** TypeScript users get editor completion and static type checks via exported helpers.
 - **Immutable after validation:** Config is treated as read-only once the loop has started.

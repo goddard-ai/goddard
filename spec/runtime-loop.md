@@ -1,8 +1,22 @@
+---
+id: runtime-loop-semantics
+status: ACTIVE
+links:
+  - type: Extends
+    target: spec/vision.md
+  - type: Depends-On
+    target: spec/configuration.md
+  - type: Depends-On
+    target: spec/rate-limiting.md
+  - type: Relates-To
+    target: spec/cli/loop.md
+---
+
 # Runtime Loop Semantics
 
 ## Overview
 
-`createLoop(config).start()` enters a process that is intended not to return under normal operation.
+`createLoop(config).start()` enters a process that is intended not to return under normal operation. The loop is designed to be supervised externally (e.g., `systemd`) rather than self-healing internally.
 
 ---
 
@@ -30,7 +44,7 @@ For each cycle:
 4. If `maxCyclesBeforePause` is configured and the boundary is reached, sleep for 24 h.
 5. Build prompt via `strategy.nextPrompt({ cycleNumber, lastSummary })`.
 6. Optionally log prompt/cycle info if `metrics.enableLogging` is `true`.
-7. Capture pre-prompt total token count.
+7. Capture pre-prompt cumulative token count.
 8. Send prompt to agent session (with optional retry + exponential backoff + jitter; `retryableErrors` can short-circuit retries).
 9. Read session stats, compute per-cycle token delta, and enforce `maxTokensPerCycle`.
 10. Update cumulative `tokensUsed`.
@@ -41,7 +55,7 @@ For each cycle:
 
 ## Persistent Context Model
 
-The `pi-coding-agent` session is intentionally reused across cycles so that context accumulates over time. Each prompt builds on the agent's knowledge of previous cycles via `lastSummary`.
+The `pi-coding-agent` session is intentionally reused across cycles so that context accumulates over time. Each prompt builds on the agent's accumulated knowledge of the codebase and prior cycles via `lastSummary`. This is a deliberate design choice — see [`adr/003-persistent-agent-session.md`](./adr/003-persistent-agent-session.md).
 
 ---
 
@@ -71,4 +85,4 @@ The `pi-coding-agent` session is intentionally reused across cycles so that cont
 | Non-retryable errors | `retryableErrors` function classifies; escapes immediately without retry. |
 | Max retries exhausted | Error propagates; external supervisor (e.g., `systemd`) handles restart. |
 
-Errors that escape the loop are intentionally unhandled inside the runtime — external process managers are the recommended supervisory mechanism.
+Errors that escape the loop are intentionally unhandled inside the runtime. External process managers are the recommended supervisory mechanism — this is a deliberate architectural boundary, not an oversight.

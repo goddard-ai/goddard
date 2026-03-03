@@ -1,6 +1,24 @@
+---
+id: cli-loop-commands
+status: ACTIVE
+links:
+  - type: Depends-On
+    target: spec/configuration.md
+  - type: Depends-On
+    target: spec/runtime-loop.md
+  - type: Relates-To
+    target: spec/cli/interactive.md
+---
+
 # CLI Specification — Autonomous Loop
 
-This document covers the `goddard loop` subcommand group, which manages autonomous agent cycles. For the interactive developer CLI (`goddard pr`, `goddard stream`, etc.), see [`architecture.md`](./architecture.md).
+This document covers the `goddard loop` subcommand group, which manages autonomous agent cycles. For interactive developer commands, see [`cli/interactive.md`](./interactive.md).
+
+---
+
+## Actors
+
+**Operator** — configures and supervises a long-running autonomous agent loop against a codebase.
 
 ---
 
@@ -33,7 +51,7 @@ Loads config (local, then global) and starts loop execution.
 
 ## Command: `goddard loop generate-systemd`
 
-Generates a `goddard.service` systemd unit file.
+Generates a `goddard.service` systemd unit file for production deployment.
 
 ### Options
 - `--global` / `-g` — use global config; output path rooted in home directory.
