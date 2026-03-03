@@ -6,6 +6,7 @@ export interface PiAgentConfig {
   model: string;
   projectDir: string;
   thinkingLevel?: ThinkingLevel;
+  agentDir?: string;
   [key: string]: any;
 }
 
@@ -102,7 +103,8 @@ export const configSchema = z.object({
   agent: z.object({
     model: z.string().min(1),
     projectDir: z.string().min(1),
-    thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional()
+    thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+    agentDir: z.string().optional()
   }).passthrough(),
   strategy: z.custom<CycleStrategy>((val) => {
     return typeof val === 'object' && val !== null && 'nextPrompt' in val;

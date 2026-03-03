@@ -148,6 +148,7 @@ program
   .option('--max-tokens <tokens>', 'Override max tokens per cycle', parseInt)
   .option('--max-ops <ops>', 'Override max ops per minute', parseInt)
   .option('--thinking <level>', 'Override the agent thinking level')
+  .option('--agent-dir <dir>', 'Override the agent global directory')
   .action(async (options) => {
     const localConfigPath = path.join(process.cwd(), 'pi-loop.config.ts');
     const globalConfigPath = path.join(os.homedir(), '.pi-loop', 'config.ts');
@@ -226,6 +227,9 @@ program
       }
       if (options.thinking !== undefined) {
         config.agent.thinkingLevel = options.thinking;
+      }
+      if (options.agentDir) {
+        config.agent.agentDir = options.agentDir;
       }
       if (options.cycleDelay) {
         config.rateLimits.cycleDelay = options.cycleDelay;
