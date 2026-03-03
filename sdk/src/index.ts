@@ -13,6 +13,7 @@ import type {
   ThinkingLevel
 } from "./types.ts";
 import { InMemoryTokenStorage, type TokenStorage } from "./token-storage.ts";
+import { appendSpecInstructions } from "./agents.ts";
 
 export const SDK_VERSION = "0.1.0";
 
@@ -71,6 +72,10 @@ export class GoddardSdk {
 
   readonly stream: {
     subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>;
+  };
+
+  readonly agents: {
+    appendSpecInstructions: (cwd?: string) => Promise<string>;
   };
 
   readonly #baseUrl: URL;
@@ -137,6 +142,12 @@ export class GoddardSdk {
 
         await waitForSocketOpen(socket);
         return subscription;
+      }
+    };
+
+    this.agents = {
+      appendSpecInstructions: async (cwd) => {
+        return appendSpecInstructions(cwd);
       }
     };
   }

@@ -115,6 +115,12 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       return exitCode;
     }
 
+    if (command === "agents" && subcommand === "init") {
+      const agentsPath = await sdk.agents.appendSpecInstructions(process.cwd());
+      io.stdout(`Updated agents configuration at ${agentsPath}`);
+      return 0;
+    }
+
     printHelp(io);
     return 1;
   } catch (error) {
@@ -182,4 +188,5 @@ function printHelp(io: CliIo): void {
   io.stdout("  loop init [--global]               Create goddard.config.ts from the default template");
   io.stdout("  loop run                           Start the autonomous agent loop (uses LOOP_SYSTEM_PROMPT by default)");
   io.stdout("  loop generate-systemd [--global]   Generate a systemd unit file");
+  io.stdout("  agents init");
 }

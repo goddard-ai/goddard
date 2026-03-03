@@ -150,6 +150,7 @@ type PartialSdk = {
   auth?: Partial<SdkClient["auth"]>;
   pr?: Partial<SdkClient["pr"]>;
   stream?: Partial<SdkClient["stream"]>;
+  agents?: Partial<SdkClient["agents"]>;
 };
 
 function createMockSdk(partial: PartialSdk): SdkClient {
@@ -178,6 +179,31 @@ function createMockSdk(partial: PartialSdk): SdkClient {
         throw new Error("not mocked");
       },
       ...partial.stream
+    },
+    agents: {
+      appendSpecInstructions: async () => {
+        throw new Error("not mocked");
+      },
+      ...partial.agents
     }
   } as SdkClient;
 }
+
+test("agents init command calls sdk.agents.appendSpecInstructions", async () => {
+  const lines: string[] = [];
+
+  const sdk = createMockSdk({
+    agents: {
+      appendSpecInstructions: async (cwd?: string) => `${cwd ?? "mock"}/AGENTS.md`
+    }
+  });
+
+  const code = await runCli(
+    ["agents", "init"],
+    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
+    { createSdkClient: () => sdk }
+  );
+
+  assert.equal(code, 0);
+  assert.equal(lines[0], `Updated agents configuration at ${process.cwd()}/AGENTS.md`);
+});

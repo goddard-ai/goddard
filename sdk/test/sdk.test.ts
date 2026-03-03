@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import { createSdk, InMemoryTokenStorage } from "../src/index.ts";
 
 test("device flow stores token and whoami uses auth header", async () => {
@@ -161,3 +164,23 @@ class FakeWebSocket {
     this.#listeners.get(eventName)?.forEach((listener) => listener(payload));
   }
 }
+
+test("agents.appendSpecInstructions creates AGENTS.md with correct instructions", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-test-"));
+
+  try {
+    const sdk = createSdk({
+      baseUrl: "http://127.0.0.1:8787",
+      tokenStorage: new InMemoryTokenStorage()
+    });
+
+    const agentsPath = await sdk.agents.appendSpecInstructions(tempDir);
+    assert.equal(agentsPath, path.join(tempDir, "AGENTS.md"));
+
+    const content = await fs.readFile(agentsPath, "utf-8");
+    assert.match(content, /The `spec` Folder/);
+    assert.match(content, /domain routing hub/);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
