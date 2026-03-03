@@ -1,6 +1,7 @@
-import { createSdk } from "@goddard-ai/sdk";
+import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "@goddard-ai/sdk";
 import { inferRepoFromGitConfig, splitRepo } from "./git.ts";
 import { FileTokenStorage } from "./storage.ts";
+import { spawnSync } from "node:child_process";
 
 export type CliIo = {
   stdout: (line: string) => void;
@@ -9,8 +10,22 @@ export type CliIo = {
 
 type SdkClient = ReturnType<typeof createSdk>;
 
+/**
+ * Spawns the `pi` binary with the given args and returns its exit code.
+ * Uses stdio: "inherit" so the interactive TUI flows directly to the terminal.
+ */
+function defaultSpawnPi(args: string[]): number {
+  const result = spawnSync("pi", args, { stdio: "inherit" });
+  return result.status ?? 1;
+}
+
 export type CliDeps = {
   createSdkClient?: (baseUrl: string) => SdkClient;
+  /**
+   * Injectable pi spawner for testing. Defaults to spawning the `pi` binary.
+   * Receives the full argv array (everything after "pi") and returns the exit code.
+   */
+  spawnPi?: (args: string[]) => number;
 };
 
 export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDeps = {}): Promise<number> {
@@ -25,6 +40,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       baseUrl,
       tokenStorage: new FileTokenStorage()
     });
+
+  const spawnPi = deps.spawnPi ?? defaultSpawnPi;
 
   try {
     if (command === "login") {
@@ -81,6 +98,14 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       });
 
       return 0;
+    }
+
+    if (command === "spec") {
+      // Launch pi configured as the Intent Guardian (spec-guardian mode).
+      // The SPEC_SYSTEM_PROMPT replaces the default coding-agent system prompt so
+      // pi focuses exclusively on maintaining the spec/ Knowledge Graph.
+      const exitCode = spawnPi(["--system-prompt", SPEC_SYSTEM_PROMPT]);
+      return exitCode;
     }
 
     printHelp(io);
@@ -145,4 +170,8 @@ function printHelp(io: CliIo): void {
   io.stdout("  whoami [--base-url <url>]");
   io.stdout("  pr create --title <title> [--body <body>] [--head <branch>] [--base <branch>] [--repo owner/repo]");
   io.stdout("  stream [--repo owner/repo] [--base-url <url>]");
+  io.stdout("  spec                               Start a pi session as the Intent Guardian (spec/ mode)");
+  io.stdout("  loop init [--global]               Create goddard.config.ts from the default template");
+  io.stdout("  loop run                           Start the autonomous agent loop (uses LOOP_SYSTEM_PROMPT by default)");
+  io.stdout("  loop generate-systemd [--global]   Generate a systemd unit file");
 }

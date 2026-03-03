@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/index.ts";
-import { createSdk } from "@goddard-ai/sdk";
+import { createSdk, SPEC_SYSTEM_PROMPT } from "@goddard-ai/sdk";
 
 test("login command prints authenticated user", async () => {
   const lines: string[] = [];
@@ -86,6 +86,40 @@ test("unknown command prints help and exits 1", async () => {
 
   assert.equal(code, 1);
   assert.equal(lines[0], "goddard commands:");
+});
+
+test("spec command spawns pi with SPEC_SYSTEM_PROMPT and exits 0", async () => {
+  const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+
+  const code = await runCli(
+    ["spec"],
+    { stdout: () => {}, stderr: () => {} },
+    {
+      createSdkClient: () => createMockSdk({}),
+      spawnPi: (args) => {
+        spawnCalls.push({ cmd: "pi", args });
+        return 0;
+      }
+    }
+  );
+
+  assert.equal(code, 0);
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0]!.args[0], "--system-prompt");
+  assert.equal(spawnCalls[0]!.args[1], SPEC_SYSTEM_PROMPT);
+});
+
+test("spec command propagates non-zero exit from pi", async () => {
+  const code = await runCli(
+    ["spec"],
+    { stdout: () => {}, stderr: () => {} },
+    {
+      createSdkClient: () => createMockSdk({}),
+      spawnPi: () => 1
+    }
+  );
+
+  assert.equal(code, 1);
 });
 
 type SdkClient = ReturnType<typeof createSdk>;
