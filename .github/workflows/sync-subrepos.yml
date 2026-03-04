@@ -37,6 +37,7 @@ jobs:
 
           # Inject the PAT into Git so git-subrepo can push to external HTTPS URLs
           git config --global url."https://${{ secrets.SYNC_PAT }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.SYNC_PAT }}@github.com/".insteadOf "git@github.com:"
 
       - name: Install git-subrepo
         run: |
