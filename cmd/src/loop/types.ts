@@ -2,8 +2,10 @@ import { z } from "zod";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+import type { Model } from "./models.ts";
+
 export interface PiAgentConfig {
-  model: string;
+  model: Model;
   projectDir: string;
   thinkingLevel?: ThinkingLevel;
   agentDir?: string;

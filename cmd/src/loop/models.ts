@@ -10,3 +10,5 @@ export const Models = {
   OpenAiGpt52Codex: "openai/gpt-5.2-codex",
   OpenAiGpt53Codex: "openai/gpt-5.3-codex",
 } as const;
+
+export type Model = (typeof Models)[keyof typeof Models] | (string & {});
