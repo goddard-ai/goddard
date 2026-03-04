@@ -4,15 +4,6 @@
 
 ### 1. GitHub & Git Distribution
 - [ ] Create a GitHub Personal Access Token (PAT) with write access to this repository and each external subrepo.
-- [ ] Add the PAT as a repository secret named **`SYNC_PAT`**.
-- [ ] Provision five standalone repositories (e.g., `goddard-sdk`, `goddard-cli`, etc.).
-- [ ] Initialize each folder as a `git-subrepo` locally and point to the correct HTTPS URLs:
-  - `backend/`
-  - `daemon/`
-  - `cmd/`
-  - `github-app/`
-  - `sdk/`
-- [ ] Merge to `main` and verify `.github/workflows/sync-subrepos.yml` can push all five subrepos.
 
 ### 2. Infrastructure & Production Secrets
 - [ ] Provision a **Turso** database for the production control plane.
