@@ -32,8 +32,8 @@ pnpm --dir=cmd goddard login --username <your-github-username>
 # Create a Pull Request
 pnpm --dir=cmd goddard pr create --repo <owner/repo> --title "My local test PR"
 
-# Start the event stream
-pnpm --dir=cmd goddard stream --repo <owner/repo>
+# Start the PR-feedback daemon
+pnpm --dir=daemon daemon run --repo <owner/repo> --project-dir $(pwd)
 
 # Initialize and run autonomous loop
 pnpm --dir=cmd goddard loop init

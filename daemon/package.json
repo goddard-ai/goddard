@@ -1,0 +1,24 @@
+{
+  "name": "@goddard-ai/daemon",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@goddard-ai/sdk": "workspace:*",
+    "@xterm/headless": "^6.0.0",
+    "cmd-ts": "^0.15.0",
+    "node-pty": "^1.1.0"
+  },
+  "bin": {
+    "goddard-daemon": "./bin/goddard-daemon.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "daemon": "tsx bin/goddard-daemon.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test"
+  }
+}

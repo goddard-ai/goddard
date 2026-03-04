@@ -6,11 +6,13 @@ TypeScript-only monorepo for:
 - `@goddard-ai/backend`
 - `@goddard-ai/github-app`
 - `@goddard-ai/cmd`
+- `@goddard-ai/daemon`
 
 ## Workspace
 
 - `backend`
 - `cmd`
+- `daemon`
 - `github-app`
 - `sdk`
 
@@ -35,11 +37,12 @@ Backend runs at `http://127.0.0.1:8787`.
 pnpm --dir=cmd goddard login --username <github-user>
 pnpm --dir=cmd goddard whoami
 pnpm --dir=cmd goddard pr create --repo owner/repo --title "Test PR" --head feature/demo --base main
-pnpm --dir=cmd goddard actions trigger --repo owner/repo --workflow ci --ref main
-pnpm --dir=cmd goddard stream --repo owner/repo
+pnpm --dir=cmd goddard spec
+pnpm --dir=cmd goddard propose "summarize recent PR feedback"
 pnpm --dir=cmd goddard loop init
 pnpm --dir=cmd goddard loop run
 pnpm --dir=cmd goddard loop generate-systemd
+pnpm --dir=daemon daemon run --repo owner/repo --project-dir $(pwd)
 ```
 
 ### 3) Simulate a GitHub webhook

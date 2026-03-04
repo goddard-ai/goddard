@@ -133,6 +133,27 @@ export class TursoBackendControlPlane implements BackendControlPlane {
     return { ...inserted, number: finalNumber, url: finalUrl, body: inserted.body ?? "" };
   }
 
+  async isManagedPr(owner: string, repo: string, prNumber: number): Promise<boolean> {
+    assertRepo(owner, repo);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      throw new HttpError(400, "prNumber must be a positive integer");
+    }
+
+    const [match] = await this.#db
+      .select({ id: schema.pullRequests.id })
+      .from(schema.pullRequests)
+      .where(
+        and(
+          eq(schema.pullRequests.owner, owner),
+          eq(schema.pullRequests.repo, repo),
+          eq(schema.pullRequests.number, prNumber)
+        )
+      )
+      .limit(1);
+
+    return Boolean(match);
+  }
+
   async handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> {
     assertRepo(event.owner, event.repo);
 
