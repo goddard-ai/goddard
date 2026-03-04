@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import type {
+import {
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
@@ -8,8 +8,12 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent
-} from "@goddard-ai/sdk";
+  RepoEvent,
+  DeviceFlowStartSchema,
+  DeviceFlowCompleteSchema,
+  CreatePrInputSchema,
+  GitHubWebhookInputSchema
+} from "@goddard-ai/schema";
 import { WebSocketServer, type WebSocket } from "ws";
 import { type BackendControlPlane, HttpError, assertRepo } from "./control-plane.ts";
 
@@ -275,30 +279,41 @@ async function handleHttpRequest(
   const method = req.method ?? "GET";
   const requestUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
-  if (method === "POST" && requestUrl.pathname === "/auth/device/start") {
-    const body = await readJson<DeviceFlowStart>(req);
-    return writeJson(res, 200, await controlPlane.startDeviceFlow(body));
-  }
+  try {
+    if (method === "POST" && requestUrl.pathname === "/auth/device/start") {
+      const body = await readJson<unknown>(req);
+      const parsed = DeviceFlowStartSchema.parse(body);
+      return writeJson(res, 200, await controlPlane.startDeviceFlow(parsed));
+    }
 
-  if (method === "POST" && requestUrl.pathname === "/auth/device/complete") {
-    const body = await readJson<DeviceFlowComplete>(req);
-    return writeJson(res, 200, await controlPlane.completeDeviceFlow(body));
-  }
+    if (method === "POST" && requestUrl.pathname === "/auth/device/complete") {
+      const body = await readJson<unknown>(req);
+      const parsed = DeviceFlowCompleteSchema.parse(body);
+      return writeJson(res, 200, await controlPlane.completeDeviceFlow(parsed));
+    }
 
-  if (method === "GET" && requestUrl.pathname === "/auth/session") {
-    const token = readBearerToken(req);
-    return writeJson(res, 200, await controlPlane.getSession(token));
-  }
+    if (method === "GET" && requestUrl.pathname === "/auth/session") {
+      const token = readBearerToken(req);
+      return writeJson(res, 200, await controlPlane.getSession(token));
+    }
 
-  if (method === "POST" && requestUrl.pathname === "/pr/create") {
-    const token = readBearerToken(req);
-    const body = await readJson<CreatePrInput>(req);
-    return writeJson(res, 200, await controlPlane.createPr(token, body));
-  }
+    if (method === "POST" && requestUrl.pathname === "/pr/create") {
+      const token = readBearerToken(req);
+      const body = await readJson<unknown>(req);
+      const parsed = CreatePrInputSchema.parse(body);
+      return writeJson(res, 200, await controlPlane.createPr(token, parsed));
+    }
 
-  if (method === "POST" && requestUrl.pathname === "/webhooks/github") {
-    const body = await readJson<GitHubWebhookInput>(req);
-    return writeJson(res, 200, await controlPlane.handleGitHubWebhook(body));
+    if (method === "POST" && requestUrl.pathname === "/webhooks/github") {
+      const body = await readJson<unknown>(req);
+      const parsed = GitHubWebhookInputSchema.parse(body);
+      return writeJson(res, 200, await controlPlane.handleGitHubWebhook(parsed));
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && "name" in error && error.name === "ZodError") {
+      throw new HttpError(400, "Invalid JSON body format");
+    }
+    throw error;
   }
 
   throw new HttpError(404, "Not found");
