@@ -6,7 +6,7 @@ import type {
   DeviceFlowComplete,
   DeviceFlowStart,
   GitHubWebhookInput
-} from "@goddard-ai/sdk";
+} from "@goddard-ai/shared";
 import { RepoStream } from "./objects/RepoStream.ts";
 
 export { RepoStream };

@@ -10,7 +10,7 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent
-} from "@goddard-ai/sdk";
+} from "@goddard-ai/shared";
 import { eq, and, gt } from "drizzle-orm";
 import { type BackendControlPlane, HttpError, assertRepo } from "./control-plane.ts";
 import { randomUUID } from "node:crypto";

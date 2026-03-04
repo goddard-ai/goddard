@@ -7,7 +7,7 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent
-} from "@goddard-ai/sdk";
+} from "@goddard-ai/shared";
 
 export interface BackendControlPlane {
   startDeviceFlow(input?: DeviceFlowStart): Promise<DeviceFlowSession> | DeviceFlowSession;
