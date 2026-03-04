@@ -48,7 +48,7 @@ pnpm --dir=cmd goddard loop generate-systemd
 Goddard is designed to be deployed as a globally distributed control plane.
 
 ### Infrastructure Requirements
-- **Cloudflare Workers**: Host the API and Durable Objects for WebSockets.
+- **Cloudflare Workers**: Host the API and Durable Objects for SSE fan-out.
 - **Turso**: Edge SQLite database for persistence.
 - **GitHub App**: Handles official PR creation and webhook ingestion.
 

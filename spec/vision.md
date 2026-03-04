@@ -38,7 +38,7 @@ Goddard solves both:
 | # | Pillar | What it means |
 |---|--------|---------------|
 | 1 | **SDK-first** | All capabilities live in `@goddard-ai/sdk`. CLI and agent loops are thin consumers. |
-| 2 | **Real-time** | Repository events stream to connected terminals with sub-second latency via WebSocket. |
+| 2 | **Real-time** | Repository events stream to connected terminals with sub-second latency via Server-Sent Events (SSE). |
 | 3 | **Delegated identity** | The Goddard GitHub App (`goddard[bot]`) acts on behalf of authenticated developers. |
 | 4 | **Autonomous control** | A built-in orchestration layer runs `pi-coding-agent` cycles under configurable safety limits. |
 | 5 | **Type safety** | Configuration and APIs are TypeScript-first with Zod validation and IDE completion. |
@@ -65,7 +65,7 @@ Goddard solves both:
 │               │  sdk.stream.subscribe │                 │
 │               └───────────┬───────────┘                 │
 └───────────────────────────┼─────────────────────────────┘
-                            │ HTTPS / WebSocket
+                            │ HTTPS / SSE
 ┌───────────────────────────▼─────────────────────────────┐
 │  Backend (Cloudflare Workers + Durable Objects)          │
 │  Auth · PR creation · Webhook ingest · Stream broadcast  │

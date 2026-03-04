@@ -52,7 +52,7 @@ links:
 ### Platform (goddard)
 - CLI commands: `login`, `whoami`, `pr create`, `actions trigger`, `stream`.
 - SDK exports: `createGoddardSdk(config)`, `TokenStorage` interface.
-- Backend: auth, PR creation, webhook handling, WebSocket broadcast.
+- Backend: auth, PR creation, webhook handling, SSE broadcast.
 - GitHub App: automated reactions on managed PRs.
 
 ### Agent Orchestration (loop)

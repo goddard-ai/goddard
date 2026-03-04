@@ -24,7 +24,7 @@ End-to-end sequence from developer command to GitHub PR creation and live event 
 7.  GitHub → Worker: POST webhook (issue_comment event)
 8.  Worker → Octokit: add 👀 reaction to comment
 9.  Worker → Durable Object: route event payload to repo's Durable Object
-10. Durable Object → WebSocket: broadcast to all subscribed CLI clients for that repo
+10. Durable Object → SSE stream: broadcast to all subscribed CLI clients for that repo
 11. SDK: parse broadcast frame, emit typed `comment` event
 12. CLI: print comment natively in terminal
 ```
@@ -56,14 +56,14 @@ Sequence for `goddard stream` after authentication.
 
 ```
 1. CLI → SDK: subscribeToRepo("owner/repo")
-2. SDK → Worker: GET /stream/owner/repo  (Upgrade: websocket, with session token)
+2. SDK → Worker: GET /stream?owner=...&repo=...&token=...  (Accept: text/event-stream)
 3. Worker: validates session, routes to Durable Object for that repo
-4. Durable Object: registers WebSocket connection
+4. Durable Object: registers SSE connection
 5. GitHub event fires (e.g., new PR comment)
 6. GitHub → Worker: POST webhook
 7. Worker → Durable Object: forward event payload
-8. Durable Object → WebSocket: broadcast typed JSON frame to all subscribers
-9. SDK: parse frame, validate shape, emit typed `comment` / `review` / `error` event
+8. Durable Object → SSE stream: broadcast typed JSON frames to all subscribers
+9. SDK: parse frames, validate shape, emit typed `comment` / `review` / `error` event
 10. CLI: format and print event to terminal
 ```
 

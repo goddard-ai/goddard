@@ -15,18 +15,18 @@ ACTIVE
 
 The Goddard backend must handle two distinct workloads:
 1. **Stateless request handling** — auth, PR creation, webhook ingest. These are short-lived, independently scalable operations.
-2. **Stateful real-time fan-out** — maintaining open WebSocket connections per repository and broadcasting events to all subscribers. This requires per-repository state that survives across individual requests.
+2. **Stateful real-time fan-out** — maintaining open SSE connections per repository and broadcasting events to all subscribers. This requires per-repository state that survives across individual requests.
 
 We needed a deployment model that serves both workloads with sub-second global latency, without managing servers.
 
 ## Decision
 
-The backend runs on **Cloudflare Workers** (stateless request handlers) with **Cloudflare Durable Objects** for per-repository WebSocket state and event fan-out. **Turso** (SQLite at the Edge) provides durable persistence for users, sessions, and GitHub App installations.
+The backend runs on **Cloudflare Workers** (stateless request handlers) with **Cloudflare Durable Objects** for per-repository SSE state and event fan-out. **Turso** (SQLite at the Edge) provides durable persistence for users, sessions, and GitHub App installations.
 
 ## Rationale
 
 - **Global low latency:** Workers execute at the edge closest to the requester, satisfying the Real-Time pillar from [`../vision.md`](../vision.md).
-- **Durable Objects as session anchors:** Each `owner/repo` maps to a Durable Object instance that owns all WebSocket connections for that repo, providing strong isolation with no cross-repo interference.
+- **Durable Objects as session anchors:** Each `owner/repo` maps to a Durable Object instance that owns all SSE connections for that repo, providing strong isolation with no cross-repo interference.
 - **No server management:** Cloudflare handles scaling, availability, and distribution.
 - **Turso complements the edge model:** SQLite at the edge avoids round-trips to a centralized database region.
 

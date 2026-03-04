@@ -83,13 +83,13 @@ Triggers a GitHub Actions workflow run.
 
 ## Command: `goddard stream`
 
-Opens a real-time WebSocket subscription to repository events.
+Opens a real-time SSE subscription to repository events.
 
 ### Options
 - `--repo <owner/repo>` — repository to subscribe to (auto-inferred from `.git/config` if omitted).
 
 ### Behavior
-- Opens a WebSocket connection to the backend Durable Object for the specified repository.
+- Opens an SSE connection to the backend Durable Object for the specified repository.
 - Begins printing events (comments, reviews) to the terminal within 2 seconds of a GitHub event firing.
 - Formats each event with timestamp, actor, and event type for readability.
 - Runs indefinitely until the process is interrupted (Ctrl-C).

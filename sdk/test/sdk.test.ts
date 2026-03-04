@@ -101,10 +101,33 @@ test("stream emits error event for malformed payloads", async () => {
   const storage = new InMemoryTokenStorage();
   await storage.setToken("tok_stream");
 
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/stream?")) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          controller = ctrl;
+        }
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream"
+        }
+      });
+    }
+
+    return jsonResponse(404, { error: "not found" });
+  };
+
   const sdk = createSdk({
     baseUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
-    webSocketImpl: FakeWebSocket as unknown as typeof WebSocket
+    fetchImpl
   });
 
   const sub = await sdk.stream.subscribeToRepo({ owner: "org", repo: "repo" });
@@ -114,8 +137,11 @@ test("stream emits error event for malformed payloads", async () => {
     errorMessage = error instanceof Error ? error.message : String(error);
   });
 
-  FakeWebSocket.lastInstance?.emit("message", { data: "{" });
+  controller?.enqueue(encoder.encode("data: {\n\n"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
   assert.match(errorMessage, /Invalid stream payload/);
+  sub.close();
 });
 
 function jsonResponse(status: number, payload: unknown): Response {
@@ -125,44 +151,6 @@ function jsonResponse(status: number, payload: unknown): Response {
       "content-type": "application/json"
     }
   });
-}
-
-type Listener = (event?: any) => void;
-
-class FakeWebSocket {
-  static readonly OPEN = 1;
-  static lastInstance: FakeWebSocket | null = null;
-
-  readonly OPEN = FakeWebSocket.OPEN;
-  readyState = FakeWebSocket.OPEN;
-  #listeners = new Map<string, Set<Listener>>();
-
-  constructor(_url: URL) {
-    FakeWebSocket.lastInstance = this;
-
-    queueMicrotask(() => {
-      this.emit("open");
-    });
-  }
-
-  addEventListener(eventName: string, listener: Listener): void {
-    const listeners = this.#listeners.get(eventName) ?? new Set<Listener>();
-    listeners.add(listener);
-    this.#listeners.set(eventName, listeners);
-  }
-
-  removeEventListener(eventName: string, listener: Listener): void {
-    this.#listeners.get(eventName)?.delete(listener);
-  }
-
-  close(): void {
-    this.readyState = 3;
-    this.emit("close");
-  }
-
-  emit(eventName: string, payload?: any): void {
-    this.#listeners.get(eventName)?.forEach((listener) => listener(payload));
-  }
 }
 
 test("agents.appendSpecInstructions creates AGENTS.md with correct instructions", async () => {

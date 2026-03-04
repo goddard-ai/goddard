@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts";
-import { WebSocket } from "ws";
 
 test("control plane creates PR authored by authenticated user", () => {
   const backend = new InMemoryBackendControlPlane();
@@ -89,7 +87,7 @@ test("invalid JSON body returns 400", async () => {
   }
 });
 
-test("websocket stream receives webhook events", async () => {
+test("sse stream receives webhook events", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
@@ -100,12 +98,17 @@ test("websocket stream receives webhook events", async () => {
       githubUsername: "alec"
     });
 
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${server.port}/stream?owner=goddard-ai&repo=sdk&token=${session.token}`
+    const streamResponse = await fetch(
+      `${baseUrl}/stream?owner=goddard-ai&repo=sdk&token=${session.token}`,
+      {
+        headers: {
+          accept: "text/event-stream"
+        }
+      }
     );
-    await once(ws, "open");
 
-    const messagePromise = once(ws, "message");
+    assert.equal(streamResponse.status, 200);
+    const eventPromise = readFirstSseEvent(streamResponse);
 
     await postJson(`${baseUrl}/webhooks/github`, {
       type: "issue_comment",
@@ -116,17 +119,52 @@ test("websocket stream receives webhook events", async () => {
       body: "looks good"
     });
 
-    const [payload] = await messagePromise;
-    const parsed = JSON.parse(String(payload)) as { event: { type: string; reactionAdded: string } };
-
+    const parsed = (await eventPromise) as { event: { type: string; reactionAdded: string } };
     assert.equal(parsed.event.type, "comment");
     assert.equal(parsed.event.reactionAdded, "eyes");
-
-    ws.close();
   } finally {
     await server.close();
   }
 });
+
+async function readFirstSseEvent(response: Response): Promise<unknown> {
+  if (!response.body) {
+    throw new Error("Missing SSE response body");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let separatorIndex = buffer.indexOf("\n\n");
+    while (separatorIndex !== -1) {
+      const rawEvent = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+
+      const dataLines = rawEvent
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice("data:".length).trimStart());
+
+      if (dataLines.length > 0) {
+        await reader.cancel();
+        return JSON.parse(dataLines.join("\n"));
+      }
+
+      separatorIndex = buffer.indexOf("\n\n");
+    }
+  }
+
+  throw new Error("SSE stream ended before emitting data");
+}
 
 async function postJson(url: string, payload: unknown, token?: string): Promise<any> {
   const response = await fetch(url, {

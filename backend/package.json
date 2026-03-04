@@ -12,7 +12,6 @@
     "alchemy": "^0.87.0",
     "drizzle-orm": "1.0.0-beta.15-859cf75",
     "rouzer": "^1.4.0",
-    "ws": "^8.18.0",
     "zod": "^4.1.11"
   },
   "exports": {

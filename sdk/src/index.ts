@@ -25,24 +25,23 @@ import { appendSpecInstructions } from "./agents.ts";
 export const SDK_VERSION = "0.1.0";
 
 type FetchLike = typeof fetch;
-type WebSocketCtor = typeof WebSocket;
 type RouzerHttpClient = ReturnType<typeof createClient<typeof apiRoutes>>;
 
 export type GoddardSdkOptions = {
   baseUrl: string;
   tokenStorage?: TokenStorage;
   fetchImpl?: FetchLike;
-  webSocketImpl?: WebSocketCtor;
 };
 
 type StreamHandler = (event?: unknown) => void;
 
 export class StreamSubscription {
-  #socket: WebSocket;
+  #dispose: () => void;
   #listeners = new Map<string, Set<StreamHandler>>();
+  #isClosed = false;
 
-  constructor(socket: WebSocket) {
-    this.#socket = socket;
+  constructor(dispose: () => void) {
+    this.#dispose = dispose;
   }
 
   on(eventName: string, handler: StreamHandler): this {
@@ -62,7 +61,17 @@ export class StreamSubscription {
   }
 
   close(): void {
-    this.#socket.close();
+    if (this.#isClosed) {
+      return;
+    }
+
+    this.#isClosed = true;
+    this.#dispose();
+    this.emit("close");
+  }
+
+  isClosed(): boolean {
+    return this.#isClosed;
   }
 }
 
@@ -89,14 +98,12 @@ export class GoddardSdk {
   readonly #baseUrl: URL;
   readonly #tokenStorage: TokenStorage;
   readonly #fetchImpl: FetchLike;
-  readonly #webSocketImpl: WebSocketCtor;
   readonly #rouzerClient: RouzerHttpClient;
 
   constructor(options: GoddardSdkOptions) {
     this.#baseUrl = new URL(options.baseUrl);
     this.#tokenStorage = options.tokenStorage ?? new InMemoryTokenStorage();
     this.#fetchImpl = options.fetchImpl ?? fetch;
-    this.#webSocketImpl = options.webSocketImpl ?? WebSocket;
     this.#rouzerClient = createClient({
       baseURL: this.#baseUrl.toString(),
       fetch: this.#fetchImpl,
@@ -156,24 +163,31 @@ export class GoddardSdk {
           }
         });
         const streamUrl = buildRouteUrl(this.#baseUrl, streamRequest);
+        const abortController = new AbortController();
 
-        const socket = new this.#webSocketImpl(streamUrl);
-        const subscription = new StreamSubscription(socket);
-
-        socket.addEventListener("open", () => subscription.emit("open"));
-        socket.addEventListener("close", () => subscription.emit("close"));
-        socket.addEventListener("error", (error) => subscription.emit("error", error));
-        socket.addEventListener("message", (event) => {
-          try {
-            const parsed = JSON.parse(String(event.data)) as StreamMessage;
-            subscription.emit("event", parsed.event);
-            subscription.emit(parsed.event.type, parsed.event);
-          } catch (error) {
-            subscription.emit("error", new Error(`Invalid stream payload: ${String(error)}`));
-          }
+        const response = await this.#fetchImpl(streamUrl, {
+          method: "GET",
+          headers: {
+            accept: "text/event-stream"
+          },
+          signal: abortController.signal
         });
 
-        await waitForSocketOpen(socket);
+        if (!response.ok) {
+          throw new Error(`Stream request failed (${response.status}): ${await response.text()}`);
+        }
+
+        if (!response.body) {
+          throw new Error("Stream response did not include a body");
+        }
+
+        const subscription = new StreamSubscription(() => {
+          abortController.abort();
+        });
+
+        subscription.emit("open");
+        void consumeSseResponse(response.body, subscription, abortController.signal);
+
         return subscription;
       }
     };
@@ -222,28 +236,82 @@ function buildRouteUrl(baseUrl: URL, request: RouteRequest): URL {
   return url;
 }
 
-async function waitForSocketOpen(socket: WebSocket): Promise<void> {
-  if (socket.readyState === WebSocket.OPEN) {
-    return;
+async function consumeSseResponse(
+  body: ReadableStream<Uint8Array>,
+  subscription: StreamSubscription,
+  signal: AbortSignal
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      buffer = flushSseBuffer(buffer, subscription);
+    }
+
+    buffer += decoder.decode();
+    flushSseBuffer(buffer, subscription);
+  } catch (error) {
+    if (!signal.aborted) {
+      subscription.emit("error", error);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    if (!subscription.isClosed()) {
+      subscription.close();
+    }
+  }
+}
+
+function flushSseBuffer(buffer: string, subscription: StreamSubscription): string {
+  let remaining = buffer;
+
+  while (true) {
+    const match = remaining.match(/\r?\n\r?\n/);
+    if (!match || match.index === undefined) {
+      return remaining;
+    }
+
+    const chunk = remaining.slice(0, match.index);
+    remaining = remaining.slice(match.index + match[0].length);
+
+    const data = parseSseData(chunk);
+    if (!data) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(data) as StreamMessage;
+      subscription.emit("event", parsed.event);
+      subscription.emit(parsed.event.type, parsed.event);
+    } catch (error) {
+      subscription.emit("error", new Error(`Invalid stream payload: ${String(error)}`));
+    }
+  }
+}
+
+function parseSseData(chunk: string): string | null {
+  const lines = chunk.split(/\r?\n/);
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const onOpen = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = (error: unknown) => {
-      cleanup();
-      reject(error);
-    };
-    const cleanup = () => {
-      socket.removeEventListener("open", onOpen);
-      socket.removeEventListener("error", onError);
-    };
-
-    socket.addEventListener("open", onOpen, { once: true });
-    socket.addEventListener("error", onError, { once: true });
-  });
+  return dataLines.length > 0 ? dataLines.join("\n") : null;
 }
 
 export function createSdk(options: GoddardSdkOptions): GoddardSdk {
