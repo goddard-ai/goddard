@@ -3,14 +3,14 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { TokenStorage } from "@goddard-ai/sdk";
 
-type ConfigFile = {
+type CredentialsFile = {
   token?: string;
 };
 
 export class FileTokenStorage implements TokenStorage {
   readonly #path: string;
 
-  constructor(path = join(homedir(), ".goddard", "config.json")) {
+  constructor(path = join(homedir(), ".goddard", "credentials.json")) {
     this.#path = path;
   }
 
@@ -27,16 +27,16 @@ export class FileTokenStorage implements TokenStorage {
     await this.#writeConfig({});
   }
 
-  async #readConfig(): Promise<ConfigFile> {
+  async #readConfig(): Promise<CredentialsFile> {
     try {
       const raw = await readFile(this.#path, "utf-8");
-      return JSON.parse(raw) as ConfigFile;
+      return JSON.parse(raw) as CredentialsFile;
     } catch {
       return {};
     }
   }
 
-  async #writeConfig(config: ConfigFile): Promise<void> {
+  async #writeConfig(config: CredentialsFile): Promise<void> {
     await mkdir(dirname(this.#path), { recursive: true });
     await writeFile(this.#path, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
   }
