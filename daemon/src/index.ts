@@ -118,25 +118,31 @@ function defaultRunOneShot(input: OneShotInput): number {
 
   // Use copy-on-write clone to create the workspace instantly based on OS
   try {
-    let cpArgs = ["-R", input.projectDir, worktreeDir];
+    let cpArgs = ["-R", input.projectDir + "/", worktreeDir];
     if (process.platform === "darwin") {
-      cpArgs = ["-cR", input.projectDir, worktreeDir];
+      cpArgs = ["-cR", input.projectDir + "/", worktreeDir];
     } else if (process.platform === "linux") {
-      cpArgs = ["--reflink=auto", "-R", input.projectDir, worktreeDir];
+      cpArgs = ["--reflink=auto", "-R", input.projectDir + "/", worktreeDir];
     }
 
-    const cloneResult = spawnSync("cp", cpArgs, {
-      stdio: "ignore"
-    });
+    let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" });
     
     if (cloneResult.status !== 0 && process.platform === "darwin") {
       // Fallback to regular copy if APFS clone fails on macOS
-      spawnSync("cp", ["-R", input.projectDir, worktreeDir], {
-        stdio: "ignore"
-      });
+      cloneResult = spawnSync("cp", ["-R", input.projectDir + "/", worktreeDir], { encoding: "utf8" });
+    }
+
+    if (cloneResult.status !== 0) {
+      console.error(`\n[ERROR] Failed to create agent workspace at ${worktreeDir}`);
+      console.error(`Attempted command: cp ${cpArgs.join(" ")}`);
+      if (cloneResult.stderr) console.error(`Error output: ${cloneResult.stderr.trim()}`);
+      if (cloneResult.error) console.error(`System error: ${cloneResult.error.message}`);
+      console.error("Cannot proceed with one-shot pi session. Aborting.\n");
+      return 1;
     }
   } catch (e) {
-    // Ignore error
+    console.error(`\n[ERROR] Exception thrown while creating agent workspace at ${worktreeDir}:`, e);
+    return 1;
   }
 
   // Fetch and checkout the branch in the new workspace
