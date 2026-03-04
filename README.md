@@ -7,6 +7,9 @@ TypeScript-only monorepo for:
 - `@goddard-ai/github-app`
 - `@goddard-ai/cmd`
 - `@goddard-ai/daemon`
+
+Core packages:
+
 - `@goddard-ai/schema`
 - `@goddard-ai/storage`
 
@@ -25,11 +28,14 @@ Please direct bug reports and feature requests to the Issues URL of the appropri
 
 - `backend`
 - `cmd`
-- `core/schema`
-- `core/storage`
 - `daemon`
 - `github-app`
 - `sdk`
+
+Core packages:
+
+- `core/schema`
+- `core/storage`
 
 ## Quick start (local)
 
