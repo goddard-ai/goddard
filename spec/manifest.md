@@ -7,7 +7,7 @@ status: ACTIVE
 
 This file is the sole routing hub for the Goddard specification graph. It contains no domain logic.
 
-Policy: inline Markdown links are prohibited in this manifest. Use plain file paths below to navigate.
+Policy: frontmatter links are prohibited in this manifest. Use the domain map below for routing.
 
 ## Trailhead
 
