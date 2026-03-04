@@ -45,7 +45,7 @@ export async function runDaemonCli(
 
       try {
         const { owner, repo } = splitRepo(args.repo);
-        const runningPrs = new Map<number, { sessionName: string }>();
+        const runningPrs = new Map<number, { sessionName: string; isTmux: boolean }>();
         const subscription = await sdk.stream.subscribeToRepo({ owner, repo });
 
         io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`);
@@ -62,22 +62,29 @@ export async function runDaemonCli(
           if (activeSession) {
             io.stdout(`Injecting new feedback into existing session for PR #${event.prNumber}.`);
             try {
-              // Send the new prompt as input to the running tmux session via send-keys
-              spawnSync("tmux", [
-                "send-keys",
-                "-t",
-                activeSession.sessionName,
-                `"${prompt.replace(/"/g, '\\"')}"`,
-                "Enter"
-              ]);
+              if (activeSession.isTmux) {
+                // Send the new prompt as input to the running tmux session via send-keys
+                spawnSync("tmux", [
+                  "send-keys",
+                  "-t",
+                  activeSession.sessionName,
+                  `"${prompt.replace(/"/g, '\\"')}"`,
+                  "Enter"
+                ]);
+              } else {
+                // Not running in tmux; we can't easily write to its stdin here since spawnSync blocks.
+                // We'd need to change runOneShot to async spawn if we wanted to pipe stdin to non-tmux.
+                io.stderr(`Cannot inject feedback dynamically because tmux is not installed. Ignoring feedback.`);
+              }
             } catch (err) {
-              io.stderr(`Failed to inject feedback into tmux session for PR #${event.prNumber}: ${err}`);
+              io.stderr(`Failed to inject feedback into session for PR #${event.prNumber}: ${err}`);
             }
             return;
           }
 
           const sessionName = `pi-pr-${event.prNumber}-${Date.now()}`;
-          runningPrs.set(event.prNumber, { sessionName });
+          const isTmux = spawnSync("which", ["tmux"]).status === 0;
+          runningPrs.set(event.prNumber, { sessionName, isTmux });
 
           try {
             const managed = await sdk.pr.isManaged({ owner: event.owner, repo: event.repo, prNumber: event.prNumber });
@@ -198,16 +205,11 @@ function defaultRunOneShot(input: OneShotInput): number {
     // Also log how to attach
     console.log(`\nStarted pi session in tmux. Attach with: tmux attach -t ${input.sessionName}\n`);
   } else {
-    // Fallback: spawn in background and pipe logs
-    const logFile = `${worktreeDir}/.goddard-pi.log`;
-    const cmd = `${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}' > '${logFile}' 2>&1 &`;
-    
-    result = spawnSync("sh", ["-c", cmd], {
+    // Fallback: spawn directly and inherit stdio (since daemon runs continuously)
+    result = spawnSync(input.piBin, [input.prompt], {
       cwd: worktreeDir,
-      stdio: "ignore"
+      stdio: "inherit"
     });
-
-    console.log(`\nStarted pi session in background (tmux not found). Logs: tail -f ${logFile}\n`);
   }
 
   return result.status ?? 1;
