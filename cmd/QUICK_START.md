@@ -74,6 +74,23 @@ Keep this running to see live updates as they happen on GitHub.
 
 ---
 
+## 6. Autonomous Loop
+
+Initialize and run the loop runtime:
+
+```bash
+goddard loop init
+goddard loop run
+```
+
+Generate a systemd unit file:
+
+```bash
+goddard loop generate-systemd
+```
+
+---
+
 ## Troubleshooting
 
 - **`Not authenticated. Run login first.`**

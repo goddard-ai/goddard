@@ -34,6 +34,11 @@ pnpm --dir=cmd goddard pr create --repo <owner/repo> --title "My local test PR"
 
 # Start the event stream
 pnpm --dir=cmd goddard stream --repo <owner/repo>
+
+# Initialize and run autonomous loop
+pnpm --dir=cmd goddard loop init
+pnpm --dir=cmd goddard loop run
+pnpm --dir=cmd goddard loop generate-systemd
 ```
 
 ---
