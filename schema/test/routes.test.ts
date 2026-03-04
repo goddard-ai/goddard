@@ -6,15 +6,14 @@ import {
   authSessionRoute,
   prCreateRoute,
   githubWebhookRoute,
-  repoStreamRoute,
-  routePath
+  repoStreamRoute
 } from "../src/index.ts";
 
 test("schema exports rouzer route declarations with stable paths", () => {
-  assert.equal(routePath(authDeviceStartRoute), "/auth/device/start");
-  assert.equal(routePath(authDeviceCompleteRoute), "/auth/device/complete");
-  assert.equal(routePath(authSessionRoute), "/auth/session");
-  assert.equal(routePath(prCreateRoute), "/pr/create");
-  assert.equal(routePath(githubWebhookRoute), "/webhooks/github");
-  assert.equal(routePath(repoStreamRoute), "/stream");
+  assert.equal(authDeviceStartRoute.path.source, "auth/device/start");
+  assert.equal(authDeviceCompleteRoute.path.source, "auth/device/complete");
+  assert.equal(authSessionRoute.path.source, "auth/session");
+  assert.equal(prCreateRoute.path.source, "pr/create");
+  assert.equal(githubWebhookRoute.path.source, "webhooks/github");
+  assert.equal(repoStreamRoute.path.source, "stream");
 });

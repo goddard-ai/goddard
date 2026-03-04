@@ -113,10 +113,6 @@ export const apiRoutes = {
   repoStreamRoute
 } as const;
 
-export function routePath(routeDefinition: Route): string {
-  return `/${routeDefinition.path.source.replace(/^\/+/, "")}`;
-}
-
 export type {
   CreatePrInput,
   DeviceFlowComplete,
