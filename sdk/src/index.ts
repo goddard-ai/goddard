@@ -1,11 +1,4 @@
 import {
-  apiRoutes,
-  authDeviceCompleteRoute,
-  authDeviceStartRoute,
-  authSessionRoute,
-  prCreateRoute,
-  prManagedRoute,
-  repoStreamRoute,
   type AuthSession,
   type CreatePrInput,
   type DeviceFlowComplete,
@@ -19,6 +12,7 @@ import {
   type StreamMessage,
   type ThinkingLevel
 } from "@goddard-ai/schema";
+import * as routes from "@goddard-ai/schema/routes";
 import { createClient, type RouteRequest } from "rouzer";
 import { InMemoryTokenStorage, type TokenStorage } from "./token-storage.ts";
 import { appendSpecInstructions } from "./agents.ts";
@@ -26,7 +20,7 @@ import { appendSpecInstructions } from "./agents.ts";
 export const SDK_VERSION = "0.1.0";
 
 type FetchLike = typeof fetch;
-type RouzerHttpClient = ReturnType<typeof createClient<typeof apiRoutes>>;
+type RouzerHttpClient = ReturnType<typeof createClient<typeof routes.apiRoutes>>;
 
 export type GoddardSdkOptions = {
   baseUrl: string;
@@ -109,18 +103,18 @@ export class GoddardSdk {
     this.#rouzerClient = createClient({
       baseURL: this.#baseUrl.toString(),
       fetch: this.#fetchImpl,
-      routes: apiRoutes
+      routes: routes.apiRoutes
     });
 
     this.auth = {
       startDeviceFlow: async (input = {}) => {
         return this.#sendJson<DeviceFlowSession>(
-          this.#rouzerClient.request(authDeviceStartRoute.POST({ body: input }))
+          this.#rouzerClient.request(routes.authDeviceStartRoute.POST({ body: input }))
         );
       },
       completeDeviceFlow: async (input) => {
         const session = await this.#sendJson<AuthSession>(
-          this.#rouzerClient.request(authDeviceCompleteRoute.POST({ body: input }))
+          this.#rouzerClient.request(routes.authDeviceCompleteRoute.POST({ body: input }))
         );
         await this.#tokenStorage.setToken(session.token);
         return session;
@@ -128,7 +122,7 @@ export class GoddardSdk {
       whoami: async () => {
         const token = await this.#requireToken();
         return this.#sendJson<AuthSession>(
-          this.#rouzerClient.request(authSessionRoute.GET({ headers: { authorization: `Bearer ${token}` } }))
+          this.#rouzerClient.request(routes.authSessionRoute.GET({ headers: { authorization: `Bearer ${token}` } }))
         );
       },
       logout: async () => {
@@ -141,7 +135,7 @@ export class GoddardSdk {
         const token = await this.#requireToken();
         return this.#sendJson<PullRequestRecord>(
           this.#rouzerClient.request(
-            prCreateRoute.POST({
+            routes.prCreateRoute.POST({
               headers: { authorization: `Bearer ${token}` },
               body: input
             })
@@ -152,7 +146,7 @@ export class GoddardSdk {
         const token = await this.#requireToken();
         const result = await this.#sendJson<{ managed: boolean }>(
           this.#rouzerClient.request(
-            prManagedRoute.GET({
+            routes.prManagedRoute.GET({
               headers: { authorization: `Bearer ${token}` },
               query: { owner, repo, prNumber }
             })
@@ -169,7 +163,7 @@ export class GoddardSdk {
           throw new Error("Not authenticated. Run login first.");
         }
 
-        const streamRequest = repoStreamRoute.GET({
+        const streamRequest = routes.repoStreamRoute.GET({
           headers: { authorization: `Bearer ${token}` },
           query: { owner, repo }
         });

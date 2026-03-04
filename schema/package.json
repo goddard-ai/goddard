@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./routes": "./src/routes.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",

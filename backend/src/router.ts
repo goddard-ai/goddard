@@ -1,8 +1,6 @@
 import { createClient } from "@libsql/client/web";
-import {
-  apiRoutes,
-  type RepoEvent
-} from "@goddard-ai/schema";
+import { type RepoEvent } from "@goddard-ai/schema";
+import * as routes from "@goddard-ai/schema/routes";
 import { createRouter } from "rouzer";
 import { TursoBackendControlPlane } from "./persistence.ts";
 import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.ts";
@@ -19,7 +17,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const broadcastToRepo = dependencies.broadcastToRepo ?? noopBroadcast;
   const handleRepoStream = dependencies.handleRepoStream ?? defaultHandleRepoStream;
 
-  return createRouter<Env>({ debug: false }).use(apiRoutes, {
+  return createRouter<Env>({ debug: false }).use(routes.apiRoutes, {
     authDeviceStartRoute: {
       POST: async (ctx) => {
         try {
