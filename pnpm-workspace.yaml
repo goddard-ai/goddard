@@ -4,5 +4,5 @@ packages:
   - 'daemon'
   - 'github-app'
   - 'sdk'
-  - 'schema'
-  - 'storage'
+  - 'core/schema'
+  - 'core/storage'

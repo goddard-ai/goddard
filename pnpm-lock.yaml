@@ -28,7 +28,7 @@ importers:
     dependencies:
       '@goddard-ai/schema':
         specifier: workspace:^
-        version: link:../schema
+        version: link:../core/schema
       '@hattip/adapter-cloudflare-workers':
         specifier: ^0.0.49
         version: 0.0.49
@@ -68,7 +68,7 @@ importers:
         version: link:../sdk
       '@goddard-ai/storage':
         specifier: workspace:^
-        version: link:../storage
+        version: link:../core/storage
       '@mariozechner/jiti':
         specifier: ^2.6.1
         version: 2.6.5
@@ -84,6 +84,31 @@ importers:
       zod:
         specifier: ^3.24.2
         version: 3.25.76
+
+  core/schema:
+    dependencies:
+      rouzer:
+        specifier: ^1.4.0
+        version: 1.4.0(zod@4.3.6)
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
+  core/storage:
+    dependencies:
+      '@goddard-ai/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.35
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
 
   daemon:
     dependencies:
@@ -112,20 +137,11 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5
 
-  schema:
-    dependencies:
-      rouzer:
-        specifier: ^1.4.0
-        version: 1.4.0(zod@4.3.6)
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
-
   sdk:
     dependencies:
       '@goddard-ai/schema':
         specifier: workspace:^
-        version: link:../schema
+        version: link:../core/schema
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
@@ -142,22 +158,6 @@ importers:
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9
-
-  storage:
-    dependencies:
-      '@goddard-ai/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.35
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
-      typescript:
-        specifier: ^5.0.0
-        version: 5.9.3
 
 packages:
 

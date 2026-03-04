@@ -9,8 +9,8 @@
     "daemon",
     "github-app",
     "sdk",
-    "schema",
-    "storage"
+    "core/schema",
+    "core/storage"
   ],
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260301.1",

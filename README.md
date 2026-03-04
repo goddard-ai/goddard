@@ -8,6 +8,22 @@ TypeScript-only monorepo for:
 - `@goddard-ai/cmd`
 - `@goddard-ai/daemon`
 
+Core packages:
+
+- `@goddard-ai/schema`
+- `@goddard-ai/storage`
+
+## Issues & Feature Requests
+
+Please direct bug reports and feature requests to the Issues URL of the appropriate subpackage repository:
+
+- **[goddard-ai/sdk](https://github.com/goddard-ai/sdk/issues)**: For issues related to the SDK.
+- **[goddard-ai/backend](https://github.com/goddard-ai/backend/issues)**: For issues related to the backend service.
+- **[goddard-ai/github-app](https://github.com/goddard-ai/github-app/issues)**: For issues related to the GitHub app.
+- **[goddard-ai/cmd](https://github.com/goddard-ai/cmd/issues)**: For issues related to the CLI tools.
+- **[goddard-ai/daemon](https://github.com/goddard-ai/daemon/issues)**: For issues related to the daemon.
+- **[goddard-ai/core](https://github.com/goddard-ai/core/issues)**: For issues related to the shared core utilities (`schema` and `storage`).
+
 ## Workspace
 
 - `backend`
@@ -15,6 +31,11 @@ TypeScript-only monorepo for:
 - `daemon`
 - `github-app`
 - `sdk`
+
+Core packages:
+
+- `core/schema`
+- `core/storage`
 
 ## Quick start (local)
 

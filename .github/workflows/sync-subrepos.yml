@@ -11,6 +11,7 @@ on:
       - 'cmd/**'
       - 'github-app/**'
       - 'sdk/**'
+      - 'core/**'
 
 # Ensure only one sync runs at a time to prevent git conflicts on the .gitrepo files
 concurrency:
@@ -52,6 +53,7 @@ jobs:
           git subrepo push cmd || true
           git subrepo push github-app || true
           git subrepo push sdk || true
+          git subrepo push core || true
 
       - name: Push .gitrepo updates to monorepo
         run: |

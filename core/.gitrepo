@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = git@github.com:goddard-ai/core.git
+	branch = main
+	commit = 4c7ec5c5e2e19ebed8c81a082bc318f01ff0a7d7
+	method = merge
+	cmdver = 0.4.9
+	parent = f8a7a0ab5a43b826e2d83cd5d36955f9febf46f4
