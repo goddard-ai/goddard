@@ -170,11 +170,8 @@ export class GoddardSdk {
         }
 
         const streamRequest = repoStreamRoute.GET({
-          query: {
-            owner,
-            repo,
-            token
-          }
+          headers: { authorization: `Bearer ${token}` },
+          query: { owner, repo }
         });
         const streamUrl = buildRouteUrl(this.#baseUrl, streamRequest);
         const abortController = new AbortController();
@@ -182,7 +179,8 @@ export class GoddardSdk {
         const response = await this.#fetchImpl(streamUrl, {
           method: "GET",
           headers: {
-            accept: "text/event-stream"
+            accept: "text/event-stream",
+            authorization: `Bearer ${token}`
           },
           signal: abortController.signal
         });

@@ -93,7 +93,8 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         try {
           const env = readEnv(ctx);
           const controlPlane = createControlPlane(env);
-          const { owner, repo, token } = ctx.query;
+          const token = readBearerToken(ctx.headers.authorization);
+          const { owner, repo } = ctx.query;
           assertRepo(owner, repo);
           await controlPlane.getSession(token);
 

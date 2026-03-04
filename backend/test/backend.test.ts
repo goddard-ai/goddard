@@ -148,10 +148,11 @@ test("sse stream receives webhook events", async () => {
     });
 
     const streamResponse = await fetch(
-      `${baseUrl}/stream?owner=goddard-ai&repo=sdk&token=${session.token}`,
+      `${baseUrl}/stream?owner=goddard-ai&repo=sdk`,
       {
         headers: {
-          accept: "text/event-stream"
+          accept: "text/event-stream",
+          authorization: `Bearer ${session.token}`
         }
       }
     );

@@ -70,7 +70,9 @@ test("createBackendRouter delegates stream route to injected handleRepoStream", 
   });
 
   const response = await router(
-    createContext(new Request("https://example.test/stream?owner=goddard-ai&repo=sdk&token=tok_1")) as any
+    createContext(new Request("https://example.test/stream?owner=goddard-ai&repo=sdk", {
+      headers: { authorization: "Bearer tok_1" }
+    })) as any
   );
 
   assert.equal(response.status, 200);
