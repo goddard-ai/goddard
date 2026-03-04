@@ -8,49 +8,58 @@ links:
     target: spec/data-flows.md
   - type: Relates-To
     target: spec/cli/interactive.md
+  - type: Relates-To
+    target: spec/non-goals.md
 ---
 
 # PR Feedback One-Shot Daemon
 
 ## Goal
 
-Use the real-time repository stream to autonomously react to PR feedback without requiring a human to run a dedicated stream command.
+Use real-time repository feedback to trigger focused, local one-shot `pi` sessions without manual stream monitoring.
 
 ## Hypothesis
 
-We believe that running a local daemon that listens for PR comment/review events and launches a targeted one-shot `pi` session will reduce PR turnaround time and keep AI-driven PRs responsive to reviewer input.
+We believe that immediate, automated handling of managed-PR comments/reviews will reduce reviewer wait time and improve PR throughput.
 
 ## Actors
 
-- **Daemon Operator** — runs the daemon process on a machine with repository access.
-- **Reviewer** — leaves a PR comment or review on GitHub.
-- **Goddard GitHub App** — source of managed PRs and webhook events.
+- **Daemon Operator** — runs daemon on a machine with repository access.
+- **Reviewer** — submits PR comments or reviews on GitHub.
+- **Goddard GitHub App** — origin of managed PR metadata and webhook events.
 
 ## State Model
 
-`Idle -> Subscribed -> EventReceived -> EligibilityChecked -> OneShotRunning -> OneShotCompleted -> Idle`
+`Idle -> Subscribed -> EventReceived -> EligibilityChecked -> OneShotQueued -> OneShotRunning -> OneShotCompleted -> Idle`
 
-## Behavior
+## Core Behavior
 
-1. Daemon subscribes to repository stream events through the SDK.
-2. On `comment` or `review` events, daemon checks whether the PR is managed by Goddard GitHub App.
-3. If managed, daemon starts a local one-shot `pi` session with context about repo, PR number, and reviewer feedback.
-4. Session prompt must instruct the AI to finish by replying on the responsible PR thread.
-5. Daemon returns to subscribed state and continues processing subsequent events.
+1. Daemon subscribes to repository stream events through SDK.
+2. On feedback events, daemon checks whether PR is Goddard-managed.
+3. Eligible events enqueue one one-shot task per PR.
+4. Task launches local `pi` with repository, PR number, and reviewer feedback context.
+5. Prompt contract requires the session to conclude by posting a PR-thread response.
+6. Daemon returns to subscribed mode and continues event processing.
 
-## Constraints
+## Hard Constraints
 
-- Must only trigger on comment/review feedback events.
-- Must ignore PRs that are not managed by Goddard.
-- Must run continuously until interrupted.
-- Must avoid overlapping one-shot runs for the same PR.
+- Trigger only on PR comment/review feedback events.
+- Ignore non-managed PRs.
+- Avoid overlapping one-shot execution for the same PR.
+- Continue running until interrupted by operator or host supervisor.
+
+## Failure Handling Expectations
+
+- Stream disconnects should trigger reconnect attempts with bounded backoff.
+- One-shot launch failures must be logged with PR context and must not crash daemon process.
+- If multiple events arrive while a PR task is active, daemon should coalesce or queue by PR (never run concurrently for same PR).
 
 ## Non-Goals
 
-- NON-GOAL: Implement a long-running autonomous planning loop in this daemon.
-- NON-GOAL: Replace existing `goddard loop` workflows.
-- NON-GOAL: Build custom GitHub review UI in terminal.
+- NON-GOAL: Implement long-running autonomous planning in this daemon.
+- NON-GOAL: Replace `goddard loop` workflows.
+- NON-GOAL: Provide a terminal-native GitHub review UI.
 
 ## Decision Memory
 
-- Pivoted from exposing event streaming as a human-facing CLI command to daemon consumption, because stream events are primarily operational inputs for automated PR follow-up.
+Pivoted from a human-facing stream command to daemon ownership because stream events are operational automation triggers, not primarily interactive output.

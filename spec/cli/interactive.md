@@ -12,91 +12,67 @@ links:
 
 # CLI Specification — Interactive Mode
 
-This document covers the `goddard` root commands used by a human developer in an interactive terminal session. For autonomous loop commands, see [`cli/loop.md`](./loop.md).
+This node defines root `goddard` commands for manual terminal use. For autonomous loop commands, see [`cli/loop.md`](./loop.md).
 
----
+## Actor
 
-## Actors
+**Interactive Developer** — authenticates via GitHub Device Flow and runs commands directly.
 
-**Interactive Developer** — authenticated via GitHub Device Flow; executes commands manually from a terminal.
+## Commands
 
----
+### `goddard login`
 
-## Command: `goddard login`
+Options:
+- `--username <github-user>`
 
-Initiates GitHub Device Flow authentication.
+Behavior:
+- Starts Device Flow via backend.
+- Displays `user_code` and `verification_uri` for browser authorization.
+- Polls until authorized, then persists the session token via `TokenStorage` (`~/.goddard/config.json`).
+- Under normal network conditions, completes within 60 seconds.
 
-### Options
-- `--username <github-user>` — GitHub username to authenticate as.
+### `goddard whoami`
 
-### Behavior
-- Requests a device code from the backend Worker.
-- Displays the `user_code` and `verification_uri` for the developer to authorize in a browser.
-- Polls the backend until the session is authorized.
-- Persists the session token to `~/.goddard/config.json` via `TokenStorage`.
-- Completes in under 60 seconds under normal network conditions.
-- Prints a success confirmation with the authenticated GitHub username.
+Behavior:
+- Reads local token and resolves associated GitHub identity from backend.
+- Returns a clear auth error when no token exists.
 
----
+### `goddard pr create`
 
-## Command: `goddard whoami`
+Options:
+- `--repo <owner/repo>` (auto-inferred from `.git/config` when possible)
+- `--title <string>`
+- `--head <branch>`
+- `--base <branch>`
 
-Displays the currently authenticated GitHub identity.
+Behavior:
+- Delegates creation intent through `sdk.pr.create()`.
+- Backend creates PR as `goddard[bot]` with developer attribution text.
+- Prints created PR URL.
 
-### Behavior
-- Reads the session token from `TokenStorage`.
-- Queries the backend to resolve and display the associated GitHub username.
-- Fails with a clear error if no session token is present.
+### `goddard spec`
 
----
+Behavior:
+- Spawns local `pi` with the specification-guardian prompt.
+- Uses inherited stdio for interactive operation.
 
-## Command: `goddard pr create`
+### `goddard propose [...prompt]`
 
-Creates a pull request attributed to the authenticated developer via `goddard[bot]`.
+Behavior:
+- Spawns local `pi` with proposal-review prompt.
+- Forwards positional arguments as prompt content.
 
-### Options
-- `--repo <owner/repo>` — target repository (auto-inferred from `.git/config` if omitted).
-- `--title <string>` — PR title.
-- `--head <branch>` — source branch.
-- `--base <branch>` — target branch.
+### `goddard agents init`
 
-### Behavior
-- Resolves `owner/repo` from `.git/config` when `--repo` is omitted.
-- Sends a PR creation request to the backend via `sdk.pr.create()`.
-- The backend creates the PR as `goddard[bot]` and appends "Authored by @username" to the description.
-- Prints the created PR URL on success.
+Behavior:
+- Updates local `.pi/agent/AGENTS.md` guidance via SDK helper.
+- Prints updated path.
 
----
+## Failure and Degradation Expectations
 
-## Command: `goddard spec`
-
-Launches a focused `pi` session with the specification-guardian system prompt.
-
-### Behavior
-- Spawns local `pi` process with the spec-focused system prompt.
-- Inherits terminal stdio so the session is fully interactive.
-
----
-
-## Command: `goddard propose [...prompt]`
-
-Launches a focused `pi` session with the proposal-review system prompt.
-
-### Behavior
-- Spawns local `pi` process with the proposal-focused system prompt.
-- Passes remaining positional arguments through as prompt content.
-
----
-
-## Command: `goddard agents init`
-
-Appends Goddard spec instructions to local agent configuration.
-
-### Behavior
-- Delegates to SDK helper to update `.pi/agent/AGENTS.md` guidance in the current project.
-- Prints the updated path.
-
----
+- Missing auth state must produce an actionable re-login error.
+- If repo inference fails, command requires explicit `--repo` and explains why.
+- Network/API failures must surface deterministic, human-readable errors without stack-trace noise by default.
 
 ## Exit Behavior
 
@@ -105,4 +81,4 @@ Appends Goddard spec instructions to local agent configuration.
 | Operational or config error | `1` |
 | Successful command completion | `0` |
 
-All errors are written to stdout as human-readable messages.
+Errors should be presented in human-readable form suitable for direct terminal use.
