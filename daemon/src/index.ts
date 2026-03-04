@@ -109,10 +109,52 @@ export async function runDaemonCli(
 }
 
 function defaultRunOneShot(input: OneShotInput): number {
-  const result = spawnSync(input.piBin, [input.prompt], {
-    cwd: input.projectDir,
+  const branchName = `pr-${input.event.prNumber}`;
+  const agentsDir = `${input.projectDir}/.goddard-agents`;
+  const worktreeDir = `${agentsDir}/${branchName}-${Date.now()}`;
+
+  // Ensure agents dir exists
+  spawnSync("mkdir", ["-p", agentsDir]);
+
+  // Use APFS copy-on-write clone to create the workspace instantly
+  try {
+    const cloneResult = spawnSync("cp", ["-cR", input.projectDir, worktreeDir], {
+      stdio: "ignore"
+    });
+    if (cloneResult.status !== 0) {
+      // Fallback to regular copy if APFS clone fails
+      spawnSync("cp", ["-R", input.projectDir, worktreeDir], {
+        stdio: "ignore"
+      });
+    }
+  } catch (e) {
+    // Ignore error
+  }
+
+  // Fetch and checkout the branch in the new workspace
+  try {
+    spawnSync("git", ["fetch", "origin", `pull/${input.event.prNumber}/head:${branchName}`], {
+      cwd: worktreeDir,
+      stdio: "ignore"
+    });
+    spawnSync("git", ["checkout", branchName], {
+      cwd: worktreeDir,
+      stdio: "ignore"
+    });
+  } catch(e) {
+    // Ignore error
+  }
+
+  const sessionName = `pi-pr-${input.event.prNumber}-${Date.now()}`;
+  const tmuxCmd = `tmux new-session -d -s ${sessionName} -c ${worktreeDir} "${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`;
+
+  const result = spawnSync("sh", ["-c", tmuxCmd], {
     stdio: "inherit"
   });
+  
+  // Also log how to attach
+  console.log(`\nStarted pi session in tmux. Attach with: tmux attach -t ${sessionName}\n`);
+
   return result.status ?? 1;
 }
 
