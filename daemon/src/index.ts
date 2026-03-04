@@ -15,6 +15,7 @@ type OneShotInput = {
   prompt: string;
   projectDir: string;
   piBin: string;
+  sessionName: string;
 };
 
 export type DaemonDeps = {
@@ -44,7 +45,7 @@ export async function runDaemonCli(
 
       try {
         const { owner, repo } = splitRepo(args.repo);
-        const runningPrs = new Set<number>();
+        const runningPrs = new Map<number, { sessionName: string }>();
         const subscription = await sdk.stream.subscribeToRepo({ owner, repo });
 
         io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`);
@@ -55,12 +56,29 @@ export async function runDaemonCli(
             return;
           }
 
-          if (runningPrs.has(event.prNumber)) {
-            io.stdout(`Skipping PR #${event.prNumber}; one-shot already running.`);
+          const prompt = buildPrompt(event);
+          const activeSession = runningPrs.get(event.prNumber);
+
+          if (activeSession) {
+            io.stdout(`Injecting new feedback into existing session for PR #${event.prNumber}.`);
+            try {
+              // Send the new prompt as input to the running tmux session via send-keys
+              spawnSync("tmux", [
+                "send-keys",
+                "-t",
+                activeSession.sessionName,
+                `"${prompt.replace(/"/g, '\\"')}"`,
+                "Enter"
+              ]);
+            } catch (err) {
+              io.stderr(`Failed to inject feedback into tmux session for PR #${event.prNumber}: ${err}`);
+            }
             return;
           }
 
-          runningPrs.add(event.prNumber);
+          const sessionName = `pi-pr-${event.prNumber}-${Date.now()}`;
+          runningPrs.set(event.prNumber, { sessionName });
+
           try {
             const managed = await sdk.pr.isManaged({ owner: event.owner, repo: event.repo, prNumber: event.prNumber });
             if (!managed) {
@@ -68,14 +86,15 @@ export async function runDaemonCli(
               return;
             }
 
-            const prompt = buildPrompt(event);
             io.stdout(`Launching one-shot pi session for ${event.type} on PR #${event.prNumber}...`);
-            const exitCode = await runOneShot({ event, prompt, projectDir: args.projectDir, piBin: args.piBin });
+            const exitCode = await runOneShot({ event, prompt, projectDir: args.projectDir, piBin: args.piBin, sessionName });
             io.stdout(`One-shot pi session finished for PR #${event.prNumber} (exit ${exitCode}).`);
           } catch (error) {
             io.stderr(error instanceof Error ? error.message : String(error));
           } finally {
-            runningPrs.delete(event.prNumber);
+            if (runningPrs.get(event.prNumber)?.sessionName === sessionName) {
+              runningPrs.delete(event.prNumber);
+            }
           }
         });
 
@@ -170,15 +189,14 @@ function defaultRunOneShot(input: OneShotInput): number {
 
   let result;
   if (hasTmux) {
-    const sessionName = `pi-pr-${input.event.prNumber}-${Date.now()}`;
-    const tmuxCmd = `tmux new-session -d -s ${sessionName} -c ${worktreeDir} "${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`;
+    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`;
 
     result = spawnSync("sh", ["-c", tmuxCmd], {
       stdio: "inherit"
     });
     
     // Also log how to attach
-    console.log(`\nStarted pi session in tmux. Attach with: tmux attach -t ${sessionName}\n`);
+    console.log(`\nStarted pi session in tmux. Attach with: tmux attach -t ${input.sessionName}\n`);
   } else {
     // Fallback: spawn in background and pipe logs
     const logFile = `${worktreeDir}/.goddard-pi.log`;
