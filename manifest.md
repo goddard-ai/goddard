@@ -7,15 +7,11 @@ status: ACTIVE
 
 This file is the sole routing hub for the Goddard specification graph. It contains no domain logic.
 
-Policy: links are prohibited in this manifest. Use the plain file paths below to navigate.
-
----
+Policy: inline Markdown links are prohibited in this manifest. Use plain file paths below to navigate.
 
 ## Trailhead
 
-Start at `spec/vision.md` to understand the mission, product pillars, and system layers. Then open only the paths relevant to your task.
-
----
+Start at `spec/vision.md` for mission context, then open only paths relevant to your task.
 
 ## Domain Map
 
