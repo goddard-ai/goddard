@@ -102,6 +102,23 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           return toErrorResponse(error);
         }
       }
+    },
+    prManagedRoute: {
+      GET: async (ctx) => {
+        try {
+          const env = readEnv(ctx);
+          const controlPlane = createControlPlane(env);
+          const token = readBearerToken(ctx.headers.authorization);
+          await controlPlane.getSession(token);
+
+          const { owner, repo, prNumber } = ctx.query;
+          const numPr = typeof prNumber === "string" ? parseInt(prNumber, 10) : prNumber;
+          const managed = await controlPlane.isManagedPr(owner, repo, numPr);
+          return { managed };
+        } catch (error) {
+          return toErrorResponse(error);
+        }
+      }
     }
   });
 }

@@ -49,6 +49,55 @@ test("http api supports login and pr creation", async () => {
   }
 });
 
+test("managed PR endpoint returns true only for PRs created by Goddard", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 });
+  const baseUrl = `http://127.0.0.1:${server.port}`;
+
+  try {
+    const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" });
+    const session = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: flow.deviceCode,
+      githubUsername: "alec"
+    });
+
+    await postJson(
+      `${baseUrl}/pr/create`,
+      {
+        owner: "goddard-ai",
+        repo: "cmd",
+        title: "Add CLI",
+        head: "feat/cli",
+        base: "main"
+      },
+      session.token
+    );
+
+    const managedResponse = await fetch(
+      `${baseUrl}/pr/managed?owner=goddard-ai&repo=cmd&prNumber=1`,
+      {
+        headers: {
+          authorization: `Bearer ${session.token}`
+        }
+      }
+    );
+    assert.equal(managedResponse.status, 200);
+    assert.deepEqual(await managedResponse.json(), { managed: true });
+
+    const unmanagedResponse = await fetch(
+      `${baseUrl}/pr/managed?owner=goddard-ai&repo=cmd&prNumber=9`,
+      {
+        headers: {
+          authorization: `Bearer ${session.token}`
+        }
+      }
+    );
+    assert.equal(unmanagedResponse.status, 200);
+    assert.deepEqual(await unmanagedResponse.json(), { managed: false });
+  } finally {
+    await server.close();
+  }
+});
+
 test("expired auth sessions are rejected", () => {
   const originalNow = Date.now;
 

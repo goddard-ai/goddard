@@ -1,5 +1,5 @@
 {
-  "name": "@goddard-ai/cmd",
+  "name": "@goddard-ai/daemon",
   "version": "0.1.0",
   "license": "MIT",
   "private": true,
@@ -7,21 +7,18 @@
   "dependencies": {
     "@goddard-ai/sdk": "workspace:*",
     "@goddard-ai/storage": "workspace:^",
-    "@mariozechner/jiti": "^2.6.1",
-    "@mariozechner/pi-coding-agent": "^0.55.3",
+    "@xterm/headless": "^6.0.0",
     "cmd-ts": "^0.15.0",
-    "cron-parser": "^4.9.0",
-    "zod": "^3.24.2"
+    "node-pty": "^1.1.0"
   },
   "bin": {
-    "goddard": "./bin/goddard.ts"
+    "goddard-daemon": "./bin/goddard-daemon.ts"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./loop": "./src/loop/index.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "goddard": "tsx bin/goddard.ts",
+    "daemon": "tsx bin/goddard-daemon.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test"
   }

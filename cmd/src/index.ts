@@ -1,6 +1,6 @@
 import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
 import { inferRepoFromGitConfig, splitRepo } from "./git.ts";
-import { FileTokenStorage } from "./storage.ts";
+import { FileTokenStorage, getLocalConfigPath, getGlobalConfigPath, fileExists, resolveLoopConfigPath } from "@goddard-ai/storage";
 import { spawnSync } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
@@ -141,38 +141,6 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     cmds: { create: prCreateCmd }
   });
 
-  const streamCmd = command({
-    name: "stream",
-    args: {
-      repo: option({ type: string, long: "repo", defaultValue: () => undefined as any }),
-      baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
-    },
-    handler: async (args) => {
-      try {
-        const sdk = getSdk(args.baseUrl || undefined);
-        const repoRef = await resolveRepoRef(args.repo);
-        const { owner, repo } = splitRepo(repoRef);
-        const sub = await sdk.stream.subscribeToRepo({ owner, repo });
-
-        io.stdout(`Streaming ${owner}/${repo}. Press Ctrl+C to exit.`);
-        sub.on("event", (payload) => {
-          io.stdout(JSON.stringify(payload));
-        });
-
-        await new Promise<void>((resolve) => {
-          process.on("SIGINT", () => {
-            sub.close();
-            resolve();
-          });
-        });
-        return 0;
-      } catch (e) {
-        io.stderr(e instanceof Error ? e.message : String(e));
-        return 1;
-      }
-    }
-  });
-
   const specCmd = command({
     name: "spec",
     args: {},
@@ -232,8 +200,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     handler: async (args) => {
       try {
         const targetPath = args.global
-          ? join(homedir(), ".goddard", "config.ts")
-          : join(process.cwd(), "goddard.config.ts");
+          ? getGlobalConfigPath()
+          : getLocalConfigPath();
 
         if (await fileExists(targetPath)) {
           io.stderr(`Config file already exists at ${targetPath}`);
@@ -292,8 +260,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     handler: async (args) => {
       try {
         const configPath = args.global
-          ? join(homedir(), ".goddard", "config.ts")
-          : join(process.cwd(), "goddard.config.ts");
+          ? getGlobalConfigPath()
+          : getLocalConfigPath();
 
         if (!(await fileExists(configPath))) {
           io.stderr(`Could not find config at ${configPath}`);
@@ -342,7 +310,6 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       logout: logoutCmd,
       whoami: whoamiCmd,
       pr: prCmd,
-      stream: streamCmd,
       loop: loopCmd,
       spec: specCmd,
       propose: proposeCmd,
@@ -381,29 +348,6 @@ async function resolveRepoRef(inputRepo?: string): Promise<string> {
   }
 
   return inferred;
-}
-
-async function resolveLoopConfigPath(): Promise<string | null> {
-  const localPath = join(process.cwd(), "goddard.config.ts");
-  if (await fileExists(localPath)) {
-    return localPath;
-  }
-
-  const globalPath = join(homedir(), ".goddard", "config.ts");
-  if (await fileExists(globalPath)) {
-    return globalPath;
-  }
-
-  return null;
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await access(path, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function renderSystemdEnvironment(environment?: Record<string, string | undefined>): string {

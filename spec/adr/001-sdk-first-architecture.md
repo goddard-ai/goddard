@@ -15,7 +15,7 @@ ACTIVE
 
 ## Context
 
-Goddard has two usage modes: an interactive CLI for human developers and an autonomous agent loop for operators. Both modes need access to the same platform capabilities: PR creation, webhook event streaming, and GitHub identity management.
+Goddard has multiple runtime consumers: an interactive CLI for human developers, a feedback daemon, and an autonomous agent loop for operators. These consumers need shared platform capabilities: PR creation, webhook event streaming, and GitHub identity management.
 
 The question was how to share those capabilities without duplicating logic across consumers or coupling them to each other.
 

@@ -97,6 +97,29 @@ test("pr create requires authentication", async () => {
   assert.equal(pr.number, 1);
 });
 
+test("pr.isManaged returns managed status", async () => {
+  const storage = new InMemoryTokenStorage();
+  await storage.setToken("tok_pr");
+
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.includes("/pr/managed?")) {
+      assert.equal(init?.headers && (init.headers as Record<string, string>).authorization, "Bearer tok_pr");
+      return jsonResponse(200, { managed: true });
+    }
+    return jsonResponse(404, { error: "not found" });
+  };
+
+  const sdk = createSdk({
+    baseUrl: "http://127.0.0.1:8787",
+    tokenStorage: storage,
+    fetchImpl
+  });
+
+  const managed = await sdk.pr.isManaged({ owner: "org", repo: "repo", prNumber: 12 });
+  assert.equal(managed, true);
+});
+
 test("stream emits error event for malformed payloads", async () => {
   const storage = new InMemoryTokenStorage();
   await storage.setToken("tok_stream");

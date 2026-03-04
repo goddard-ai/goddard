@@ -145,6 +145,19 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     return record;
   }
 
+  isManagedPr(owner: string, repo: string, prNumber: number): boolean {
+    assertRepo(owner, repo);
+    const numPr = typeof prNumber === "string" ? parseInt(prNumber, 10) : prNumber;
+    if (!Number.isInteger(numPr) || numPr <= 0) {
+      throw new HttpError(400, "prNumber must be a positive integer");
+    }
+
+    return this.#pullRequests.some(
+      (pullRequest) =>
+        pullRequest.owner === owner && pullRequest.repo === repo && pullRequest.number === numPr
+    );
+  }
+
   handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
     assertRepo(event.owner, event.repo);
 

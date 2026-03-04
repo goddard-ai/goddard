@@ -6,6 +6,8 @@ links:
     target: spec/vision.md
   - type: Relates-To
     target: spec/non-goals.md
+  - type: Relates-To
+    target: spec/daemon/pr-feedback-one-shot.md
 ---
 
 # Product Specification
@@ -14,8 +16,8 @@ links:
 
 | Persona | Description |
 |---------|-------------|
-| **Interactive Developer** | Runs `goddard` CLI to create PRs and watch repository events from the terminal. |
-| **Operator** | Configures and supervises a long-running autonomous agent loop against a codebase. |
+| **Interactive Developer** | Runs `goddard` CLI to authenticate, create PRs, and drive focused AI sessions from the terminal. |
+| **Operator** | Configures and supervises autonomous runtimes (loop and daemon) against a codebase. |
 
 ---
 
@@ -24,22 +26,23 @@ links:
 ### Interactive Developer
 1. Authenticate with GitHub once via Device Flow — no manual token management.
 2. Create PRs without leaving the terminal, attributed to the real developer via `goddard[bot]`.
-3. Receive real-time repository event notifications (comments, reviews) while working.
-4. Trigger GitHub Actions workflows programmatically.
+3. Trigger GitHub Actions workflows programmatically.
+4. Launch focused local AI sessions (`spec`, `propose`) when needed.
 
 ### Operator
 1. Initialize a typed loop config quickly (`goddard loop init`).
 2. Run autonomous agent cycles indefinitely with bounded operational behavior.
-3. Adjust prompt strategy without modifying loop internals.
-4. Control cadence and operation rate to avoid excessive spend or load.
-5. Deploy as a `systemd` service in production environments.
+3. Run a daemon that listens for PR feedback and triggers one-shot AI sessions.
+4. Adjust prompt strategy without modifying runtime internals.
+5. Control cadence and operation rate to avoid excessive spend or load.
+6. Deploy as a `systemd` service in production environments.
 
 ---
 
 ## Key User Outcomes
 
 - `goddard login` completes in under 60 seconds with no manual token management.
-- `goddard stream --repo owner/repo` begins streaming events within 2 seconds of a GitHub event.
+- `goddard-daemon run --repo owner/repo` receives and reacts to feedback events within 2 seconds of webhook ingest.
 - `goddard loop init` produces a valid, runnable `goddard.config.ts` immediately.
 - `goddard loop run` discovers and loads local config automatically without a pre-compile step.
 - `goddard loop generate-systemd` emits a ready-to-use `.service` file.
@@ -50,9 +53,10 @@ links:
 ## MVP Success Criteria
 
 ### Platform (goddard)
-- CLI commands: `login`, `whoami`, `pr create`, `actions trigger`, `stream`.
-- SDK exports: `createGoddardSdk(config)`, `TokenStorage` interface.
-- Backend: auth, PR creation, webhook handling, SSE broadcast.
+- CLI commands: `login`, `logout`, `whoami`, `pr create`, `spec`, `propose`, `agents init`.
+- Daemon command: `goddard-daemon run`.
+- SDK exports: `createSdk(config)`, `TokenStorage` interface.
+- Backend: auth, PR creation, managed-PR lookup, webhook handling, SSE broadcast.
 - GitHub App: automated reactions on managed PRs.
 
 ### Agent Orchestration (loop)

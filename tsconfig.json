@@ -13,6 +13,9 @@
     "github-app/test/**/*.ts",
     "cmd/src/**/*.ts",
     "cmd/test/**/*.ts",
-    "cmd/bin/**/*.ts"
+    "cmd/bin/**/*.ts",
+    "daemon/src/**/*.ts",
+    "daemon/test/**/*.ts",
+    "daemon/bin/**/*.ts"
   ]
 }

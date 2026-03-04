@@ -6,14 +6,18 @@
   "workspaces": [
     "backend",
     "cmd",
+    "daemon",
     "github-app",
-    "sdk"
+    "sdk",
+    "schema",
+    "storage"
   ],
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260301.1",
     "@types/node": "^22.13.10",
     "tsx": "^4.21.0",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^1.0.0"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
