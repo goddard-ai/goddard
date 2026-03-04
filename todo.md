@@ -2,9 +2,6 @@
 
 ## Remaining Human Requirements (Manual Setup)
 
-### 1. GitHub & Git Distribution
-- [ ] Create a GitHub Personal Access Token (PAT) with write access to this repository and each external subrepo.
-
 ### 2. Infrastructure & Production Secrets
 - [ ] Provision a **Turso** database for the production control plane.
 - [ ] Configure production secrets for the Cloudflare Worker:
