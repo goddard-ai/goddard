@@ -24,5 +24,15 @@
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "check": "pnpm run typecheck && pnpm run test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "koffi",
+      "node-pty",
+      "protobufjs",
+      "sharp",
+      "workerd"
+    ]
   }
 }
