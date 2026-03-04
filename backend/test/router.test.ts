@@ -4,6 +4,8 @@ import { createBackendRouter } from "../src/router.ts";
 import { HttpError, type BackendControlPlane } from "../src/control-plane.ts";
 import type { Env } from "../src/env.ts";
 
+const notUsed = () => { throw new Error("not used"); };
+
 test("createBackendRouter handles auth device start via rouzer route map", async () => {
   const controlPlane: BackendControlPlane = {
     startDeviceFlow(input) {
@@ -16,18 +18,11 @@ test("createBackendRouter handles auth device start via rouzer route map", async
         interval: 5
       };
     },
-    completeDeviceFlow() {
-      throw new Error("not used");
-    },
-    getSession() {
-      throw new Error("not used");
-    },
-    createPr() {
-      throw new Error("not used");
-    },
-    handleGitHubWebhook() {
-      throw new Error("not used");
-    }
+    completeDeviceFlow: notUsed,
+    getSession: notUsed,
+    createPr: notUsed,
+    isManagedPr: notUsed,
+    handleGitHubWebhook: notUsed
   };
 
   const router = createBackendRouter({
@@ -49,71 +44,51 @@ test("createBackendRouter handles auth device start via rouzer route map", async
   assert.equal(payload.deviceCode, "dev_1");
 });
 
-test("createBackendRouter proxies stream route to durable object", async () => {
-  let requestedRepo = "";
-  const env = createEnv({
-    REPO_STREAM: {
-      idFromName(name: string) {
-        requestedRepo = name;
-        return { toString: () => name } as DurableObjectId;
-      },
-      get() {
-        return {
-          fetch: async () => new Response("stream-ok", { status: 200 })
-        } as unknown as DurableObjectStub;
-      }
-    } as unknown as DurableObjectNamespace
-  });
+test("createBackendRouter delegates stream route to injected handleRepoStream", async () => {
+  let capturedOwner = "";
+  let capturedRepo = "";
 
   const controlPlane: BackendControlPlane = {
-    startDeviceFlow() {
-      throw new Error("not used");
-    },
-    completeDeviceFlow() {
-      throw new Error("not used");
-    },
+    startDeviceFlow: notUsed,
+    completeDeviceFlow: notUsed,
     getSession(token) {
       assert.equal(token, "tok_1");
       return { token, githubUsername: "alec", githubUserId: 1 };
     },
-    createPr() {
-      throw new Error("not used");
-    },
-    handleGitHubWebhook() {
-      throw new Error("not used");
-    }
+    createPr: notUsed,
+    isManagedPr: notUsed,
+    handleGitHubWebhook: notUsed
   };
 
   const router = createBackendRouter({
-    createControlPlane: () => controlPlane
+    createControlPlane: () => controlPlane,
+    handleRepoStream: async (_env, owner, repo, _request) => {
+      capturedOwner = owner;
+      capturedRepo = repo;
+      return new Response("stream-ok", { status: 200 });
+    }
   });
 
   const response = await router(
-    createContext(new Request("https://example.test/stream?owner=goddard-ai&repo=sdk&token=tok_1"), env) as any
+    createContext(new Request("https://example.test/stream?owner=goddard-ai&repo=sdk&token=tok_1")) as any
   );
 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "stream-ok");
-  assert.equal(requestedRepo, "goddard-ai/sdk");
+  assert.equal(capturedOwner, "goddard-ai");
+  assert.equal(capturedRepo, "sdk");
 });
 
 test("createBackendRouter serializes HttpError responses", async () => {
   const controlPlane: BackendControlPlane = {
-    startDeviceFlow() {
-      throw new Error("not used");
-    },
-    completeDeviceFlow() {
-      throw new Error("not used");
-    },
+    startDeviceFlow: notUsed,
+    completeDeviceFlow: notUsed,
     getSession() {
       throw new HttpError(401, "Invalid token");
     },
-    createPr() {
-      throw new Error("not used");
-    },
-    handleGitHubWebhook() {
-      throw new Error("not used");
-    }
+    createPr: notUsed,
+    isManagedPr: notUsed,
+    handleGitHubWebhook: notUsed
   };
 
   const router = createBackendRouter({
@@ -149,16 +124,6 @@ function createEnv(overrides: Partial<Env> = {}): Env {
   return {
     TURSO_DB_URL: "libsql://test",
     TURSO_DB_AUTH_TOKEN: "token",
-    REPO_STREAM: {
-      idFromName(name: string) {
-        return { toString: () => name } as DurableObjectId;
-      },
-      get() {
-        return {
-          fetch: async () => new Response("ok")
-        } as unknown as DurableObjectStub;
-      }
-    } as unknown as DurableObjectNamespace,
     ...overrides
   };
 }

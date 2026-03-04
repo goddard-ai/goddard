@@ -16,7 +16,7 @@ type RouterDependencies = {
 
 export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane;
-  const broadcastToRepo = dependencies.broadcastToRepo ?? defaultBroadcastToRepo;
+  const broadcastToRepo = dependencies.broadcastToRepo ?? noopBroadcast;
   const handleRepoStream = dependencies.handleRepoStream ?? defaultHandleRepoStream;
 
   return createRouter<Env>({ debug: false }).use(apiRoutes, {
@@ -115,29 +115,28 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
   return new TursoBackendControlPlane(client as any);
 }
 
-async function defaultBroadcastToRepo(env: Env, owner: string, repo: string, event: RepoEvent): Promise<void> {
-  const id = env.REPO_STREAM.idFromName(`${owner}/${repo}`);
-  const obj = env.REPO_STREAM.get(id);
-
-  await obj.fetch(
-    new Request("https://internal/broadcast", {
-      method: "POST",
-      body: JSON.stringify(event)
-    })
-  );
+async function noopBroadcast(
+  _env: Env,
+  _owner: string,
+  _repo: string,
+  _event: RepoEvent
+): Promise<void> {
+  // No-op: the caller (e.g. worker.ts) should provide a real implementation.
 }
 
-async function defaultHandleRepoStream(env: Env, owner: string, repo: string, request: Request): Promise<Response> {
-  const id = env.REPO_STREAM.idFromName(`${owner}/${repo}`);
-  const obj = env.REPO_STREAM.get(id);
-  return obj.fetch(request);
+async function defaultHandleRepoStream(
+  _env: Env,
+  _owner: string,
+  _repo: string,
+  _request: Request
+): Promise<Response> {
+  return new Response("SSE handler not configured", { status: 501 });
 }
 
 function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
   return {
     TURSO_DB_URL: ctx.env("TURSO_DB_URL"),
-    TURSO_DB_AUTH_TOKEN: ctx.env("TURSO_DB_AUTH_TOKEN"),
-    REPO_STREAM: ctx.env("REPO_STREAM")
+    TURSO_DB_AUTH_TOKEN: ctx.env("TURSO_DB_AUTH_TOKEN")
   };
 }
 
