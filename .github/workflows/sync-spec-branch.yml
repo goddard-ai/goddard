@@ -46,4 +46,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             /repos/goddard-ai/roadmap/dispatches \
-            -f "event_type=spec_updated"
+            -f "event_type=sync-spec"
