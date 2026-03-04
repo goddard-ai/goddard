@@ -8,22 +8,21 @@ import {
   type DeviceFlowStart,
   type GitHubWebhookInput,
   type PullRequestRecord,
-  type RepoEvent,
-  repoStreamRoute,
-  routePath
+  type RepoEvent
 } from "@goddard-ai/schema";
-import { WebSocketServer, type WebSocket } from "ws";
 import { type BackendControlPlane, HttpError, assertRepo } from "./control-plane.ts";
 import { createBackendRouter } from "./router.ts";
 
 type SessionRecord = AuthSession & { expiresAt: number };
 type DeviceSessionRecord = { githubUsername: string; createdAt: number; expiresAt: number };
+type StreamSink = {
+  send: (payload: string) => void;
+  close?: () => void;
+};
 
 const DEVICE_FLOW_EXPIRES_IN_SECONDS = 900;
 const DEVICE_FLOW_INTERVAL_SECONDS = 5;
 const AUTH_SESSION_TTL_MS = 1000 * 60 * 60 * 24;
-
-const REPO_STREAM_PATH = routePath(repoStreamRoute);
 
 type StartServerOptions = {
   port?: number;
@@ -39,7 +38,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   #deviceSessions = new Map<string, DeviceSessionRecord>();
   #authSessions = new Map<string, SessionRecord>();
   #pullRequests: PullRequestRecord[] = [];
-  #streamsByRepo = new Map<string, Set<WebSocket>>();
+  #streamsByRepo = new Map<string, Set<StreamSink>>();
   #nextPrId = 1;
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
@@ -178,13 +177,21 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     return mapped;
   }
 
-  addStreamSocket(repoKey: string, socket: WebSocket): void {
-    const room = this.#streamsByRepo.get(repoKey) ?? new Set<WebSocket>();
+  addStreamSocket(repoKey: string, socket: unknown): void {
+    if (!isStreamSink(socket)) {
+      return;
+    }
+
+    const room = this.#streamsByRepo.get(repoKey) ?? new Set<StreamSink>();
     room.add(socket);
     this.#streamsByRepo.set(repoKey, room);
   }
 
-  removeStreamSocket(repoKey: string, socket: WebSocket): void {
+  removeStreamSocket(repoKey: string, socket: unknown): void {
+    if (!isStreamSink(socket)) {
+      return;
+    }
+
     const room = this.#streamsByRepo.get(repoKey);
     room?.delete(socket);
     if (room && room.size === 0) {
@@ -201,9 +208,16 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
 
     const payload = JSON.stringify({ event });
     for (const socket of sockets) {
-      if (socket.readyState === socket.OPEN) {
+      try {
         socket.send(payload);
+      } catch {
+        sockets.delete(socket);
+        socket.close?.();
       }
+    }
+
+    if (sockets.size === 0) {
+      this.#streamsByRepo.delete(repoKey);
     }
   }
 }
@@ -220,53 +234,33 @@ export async function startBackendServer(
     broadcastToRepo: async (_env, _owner, _repo, event) => {
       broadcastToInMemoryStreams(controlPlane, event);
     },
-    handleRepoStream: async () => {
-      return new Response("Expected Upgrade: websocket", { status: 426 });
+    handleRepoStream: async (_env, owner, repo, request) => {
+      const repoKey = `${owner}/${repo}`;
+      const sseSession = createSseSession(() => {
+        controlPlane.removeStreamSocket?.(repoKey, sseSession.sink);
+      });
+
+      controlPlane.addStreamSocket?.(repoKey, sseSession.sink);
+      request.signal.addEventListener(
+        "abort",
+        () => {
+          controlPlane.removeStreamSocket?.(repoKey, sseSession.sink);
+          sseSession.sink.close?.();
+        },
+        { once: true }
+      );
+
+      return sseSession.response;
     }
   });
 
   const httpServer = createNodeServer(router);
-  const wss = new WebSocketServer({ noServer: true });
-
-  httpServer.on("upgrade", (request, socket, head) => {
-    const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host}`);
-    if (requestUrl.pathname !== REPO_STREAM_PATH) {
-      socket.destroy();
-      return;
-    }
-
-    try {
-      const streamRequest = repoStreamRoute.GET({
-        query: {
-          owner: requestUrl.searchParams.get("owner") ?? "",
-          repo: requestUrl.searchParams.get("repo") ?? "",
-          token: requestUrl.searchParams.get("token") ?? ""
-        }
-      });
-
-      const { owner, repo, token } = streamRequest.args.query;
-      assertRepo(owner, repo);
-      controlPlane.getSession(token);
-
-      const repoKey = `${owner}/${repo}`;
-
-      wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
-        controlPlane.addStreamSocket?.(repoKey, ws);
-        ws.on("close", () => controlPlane.removeStreamSocket?.(repoKey, ws));
-      });
-    } catch {
-      socket.destroy();
-    }
-  });
 
   await new Promise<void>((resolve) => httpServer.listen(port, host, () => resolve()));
 
   return {
     port: Number((httpServer.address() as { port: number }).port),
     close: async () => {
-      for (const client of wss.clients) {
-        client.close();
-      }
       await new Promise<void>((resolve, reject) => {
         httpServer.close((error) => {
           if (error) {
@@ -284,6 +278,63 @@ function broadcastToInMemoryStreams(controlPlane: BackendControlPlane, event: Re
   if ("broadcast" in controlPlane && typeof controlPlane.broadcast === "function") {
     controlPlane.broadcast(event);
   }
+}
+
+function isStreamSink(value: unknown): value is StreamSink {
+  return !!value && typeof value === "object" && "send" in value && typeof (value as StreamSink).send === "function";
+}
+
+function createSseSession(onClose: () => void): { response: Response; sink: StreamSink } {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let isClosed = false;
+
+  const close = () => {
+    if (isClosed) {
+      return;
+    }
+
+    isClosed = true;
+    try {
+      controller?.close();
+    } catch {
+      // no-op: controller can already be closed by the runtime
+    }
+    onClose();
+  };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(ctrl) {
+      controller = ctrl;
+      ctrl.enqueue(encoder.encode(": connected\n\n"));
+    },
+    cancel() {
+      close();
+    }
+  });
+
+  const sink: StreamSink = {
+    send(payload) {
+      if (isClosed || !controller) {
+        return;
+      }
+
+      controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+    },
+    close
+  };
+
+  return {
+    response: new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive"
+      }
+    }),
+    sink
+  };
 }
 
 function toPublicSession(session: SessionRecord): AuthSession {
