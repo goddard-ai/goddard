@@ -66,21 +66,6 @@ Creates a pull request attributed to the authenticated developer via `goddard[bo
 
 ---
 
-## Command: `goddard actions trigger`
-
-Triggers a GitHub Actions workflow run.
-
-### Options
-- `--repo <owner/repo>` — target repository.
-- `--workflow <name>` — workflow filename or ID.
-- `--ref <ref>` — Git ref to run the workflow on (branch, tag, or SHA).
-
-### Behavior
-- Delegates to the backend, which calls the GitHub Actions API via the installed GitHub App.
-- Prints a confirmation with the triggered workflow run URL.
-
----
-
 ## Command: `goddard stream`
 
 Opens a real-time SSE subscription to repository events.
