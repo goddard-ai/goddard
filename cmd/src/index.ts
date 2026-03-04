@@ -2,7 +2,14 @@ import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMP
 import { inferRepoFromGitConfig, splitRepo } from "./git.ts";
 import { FileTokenStorage } from "./storage.ts";
 import { spawnSync } from "node:child_process";
-import { command, runSafely, string, option, subcommands, restPositionals, binary } from "cmd-ts";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { createJiti } from "@mariozechner/jiti";
+import { createLoop } from "./loop/index.ts";
+import type { GoddardLoopConfig } from "./loop/index.ts";
+import { command, runSafely, string, option, subcommands, restPositionals, flag } from "cmd-ts";
 
 export type CliIo = {
   stdout: (line: string) => void;
@@ -27,6 +34,7 @@ export type CliDeps = {
    * Receives the full argv array (everything after "pi") and returns the exit code.
    */
   spawnPi?: (args: string[]) => number;
+  createLoopRuntime?: (config: GoddardLoopConfig) => { start: () => Promise<void> };
 };
 
 export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDeps = {}): Promise<number> {
@@ -35,6 +43,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     return deps.createSdkClient?.(baseUrl) ?? createSdk({ baseUrl, tokenStorage: new FileTokenStorage() });
   };
   const spawnPi = deps.spawnPi ?? defaultSpawnPi;
+  const createLoopRuntime = deps.createLoopRuntime ?? createLoop;
 
   const loginCmd = command({
     name: "login",
@@ -215,6 +224,117 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     cmds: { init: agentsInitCmd }
   });
 
+  const loopInitCmd = command({
+    name: "init",
+    args: {
+      global: flag({ long: "global", short: "g" })
+    },
+    handler: async (args) => {
+      try {
+        const targetPath = args.global
+          ? join(homedir(), ".goddard", "config.ts")
+          : join(process.cwd(), "goddard.config.ts");
+
+        if (await fileExists(targetPath)) {
+          io.stderr(`Config file already exists at ${targetPath}`);
+          return 1;
+        }
+
+        await mkdir(dirname(targetPath), { recursive: true });
+        await writeFile(targetPath, DEFAULT_LOOP_CONFIG_TEMPLATE, "utf-8");
+
+        io.stdout(`Created configuration at ${targetPath}`);
+        io.stdout("Next step: goddard loop run");
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const loopRunCmd = command({
+    name: "run",
+    args: {},
+    handler: async () => {
+      try {
+        const configPath = await resolveLoopConfigPath();
+        if (!configPath) {
+          io.stderr("Could not find goddard.config.ts in the current directory or config.ts in ~/.goddard.");
+          io.stderr("Run `goddard loop init` to create one.");
+          return 1;
+        }
+
+        const jiti = createJiti(process.cwd());
+        const module = await jiti.import(configPath);
+        const config = (module as any).default ?? module;
+        if (!config) {
+          io.stderr("Config file must export a default configuration object.");
+          return 1;
+        }
+
+        const loop = createLoopRuntime(config as GoddardLoopConfig);
+        await loop.start();
+        io.stdout("Loop completed after DONE signal.");
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const loopGenerateSystemdCmd = command({
+    name: "generate-systemd",
+    args: {
+      global: flag({ long: "global", short: "g" })
+    },
+    handler: async (args) => {
+      try {
+        const configPath = args.global
+          ? join(homedir(), ".goddard", "config.ts")
+          : join(process.cwd(), "goddard.config.ts");
+
+        if (!(await fileExists(configPath))) {
+          io.stderr(`Could not find config at ${configPath}`);
+          return 1;
+        }
+
+        const jiti = createJiti(process.cwd());
+        const module = await jiti.import(configPath);
+        const config = ((module as any).default ?? module) as GoddardLoopConfig;
+
+        const targetRoot = args.global ? homedir() : process.cwd();
+        const outputPath = join(targetRoot, "systemd", "goddard.service");
+
+        const user = config.systemd?.user ?? process.env.USER ?? "root";
+        const workingDir = config.systemd?.workingDir ?? process.cwd();
+        const restartSec = config.systemd?.restartSec ?? 10;
+        const nice = config.systemd?.nice ?? 10;
+        const environment = renderSystemdEnvironment(config.systemd?.environment);
+
+        const service = `[Unit]\nDescription=Goddard Autonomous Agent Loop\nAfter=network.target\n\n[Service]\nType=simple\nUser=${user}\nWorkingDirectory=${workingDir}\nExecStart=goddard loop run\nRestart=always\nRestartSec=${restartSec}\nNice=${nice}\n${environment}[Install]\nWantedBy=multi-user.target\n`;
+
+        await mkdir(dirname(outputPath), { recursive: true });
+        await writeFile(outputPath, service, "utf-8");
+        io.stdout(`Created systemd service file at ${outputPath}`);
+        return 0;
+      } catch (e) {
+        io.stderr(e instanceof Error ? e.message : String(e));
+        return 1;
+      }
+    }
+  });
+
+  const loopCmd = subcommands({
+    name: "loop",
+    cmds: {
+      init: loopInitCmd,
+      run: loopRunCmd,
+      "generate-systemd": loopGenerateSystemdCmd
+    }
+  });
+
   const app = subcommands({
     name: "goddard",
     cmds: {
@@ -223,6 +343,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       whoami: whoamiCmd,
       pr: prCmd,
       stream: streamCmd,
+      loop: loopCmd,
       spec: specCmd,
       propose: proposeCmd,
       agents: agentsCmd
@@ -261,3 +382,72 @@ async function resolveRepoRef(inputRepo?: string): Promise<string> {
 
   return inferred;
 }
+
+async function resolveLoopConfigPath(): Promise<string | null> {
+  const localPath = join(process.cwd(), "goddard.config.ts");
+  if (await fileExists(localPath)) {
+    return localPath;
+  }
+
+  const globalPath = join(homedir(), ".goddard", "config.ts");
+  if (await fileExists(globalPath)) {
+    return globalPath;
+  }
+
+  return null;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderSystemdEnvironment(environment?: Record<string, string | undefined>): string {
+  if (!environment) {
+    return "";
+  }
+
+  const lines = Object.entries(environment)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `Environment=${key}=${quoteSystemdValue(value as string)}`);
+
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+}
+
+function quoteSystemdValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
+const DEFAULT_LOOP_CONFIG_TEMPLATE = `export default {
+  agent: {
+    model: "anthropic/claude-sonnet-4-5",
+    projectDir: "./",
+    thinkingLevel: "low"
+  },
+  strategy: {
+    nextPrompt: ({ cycleNumber, lastSummary }) =>
+      \`Cycle \${cycleNumber}. Last summary: \${lastSummary ?? "none"}. Make one safe improvement, then answer with SUMMARY|DONE when ready.\`
+  },
+  rateLimits: {
+    cycleDelay: "30m",
+    maxTokensPerCycle: 128000,
+    maxOpsPerMinute: 120,
+    maxCyclesBeforePause: 100
+  },
+  retries: {
+    maxAttempts: 3,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+    backoffFactor: 2,
+    jitterRatio: 0.2,
+    retryableErrors: () => true
+  },
+  metrics: {
+    enableLogging: true
+  }
+};
+`;

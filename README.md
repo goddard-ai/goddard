@@ -37,6 +37,9 @@ pnpm --dir=cmd goddard whoami
 pnpm --dir=cmd goddard pr create --repo owner/repo --title "Test PR" --head feature/demo --base main
 pnpm --dir=cmd goddard actions trigger --repo owner/repo --workflow ci --ref main
 pnpm --dir=cmd goddard stream --repo owner/repo
+pnpm --dir=cmd goddard loop init
+pnpm --dir=cmd goddard loop run
+pnpm --dir=cmd goddard loop generate-systemd
 ```
 
 ### 3) Simulate a GitHub webhook
