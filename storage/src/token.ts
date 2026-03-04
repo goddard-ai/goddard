@@ -10,7 +10,7 @@ type ConfigFile = {
 export class FileTokenStorage implements TokenStorage {
   readonly #path: string;
 
-  constructor(path = join(getGoddardGlobalDir(), "config.json")) {
+  constructor(path = join(getGoddardGlobalDir(), "credentials.json")) {
     this.#path = path;
   }
 
@@ -39,11 +39,5 @@ export class FileTokenStorage implements TokenStorage {
   async #writeConfig(config: ConfigFile): Promise<void> {
     await mkdir(dirname(this.#path), { recursive: true });
     await writeFile(this.#path, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
-  }
-}
-
-export class CredentialsTokenStorage extends FileTokenStorage {
-  constructor(path = join(getGoddardGlobalDir(), "credentials.json")) {
-    super(path);
   }
 }

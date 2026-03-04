@@ -28,7 +28,7 @@ Options:
 Behavior:
 - Starts Device Flow via backend.
 - Displays `user_code` and `verification_uri` for browser authorization.
-- Polls until authorized, then persists the session token via `TokenStorage` (`~/.goddard/config.json`).
+- Polls until authorized, then persists the session token via `TokenStorage` (`~/.goddard/credentials.json`).
 - Under normal network conditions, completes within 60 seconds.
 
 ### `goddard whoami`
