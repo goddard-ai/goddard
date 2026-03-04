@@ -3,3 +3,4 @@ packages:
   - 'cmd'
   - 'github-app'
   - 'sdk'
+  - 'schema'
