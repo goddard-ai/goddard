@@ -126,15 +126,21 @@ function defaultRunOneShot(input: OneShotInput): number {
     }
 
     let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" });
+    let fallbackAttempted = false;
     
     if (cloneResult.status !== 0 && process.platform === "darwin") {
       // Fallback to regular copy if APFS clone fails on macOS
-      cloneResult = spawnSync("cp", ["-R", input.projectDir + "/", worktreeDir], { encoding: "utf8" });
+      fallbackAttempted = true;
+      cpArgs = ["-R", input.projectDir + "/", worktreeDir];
+      cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" });
     }
 
     if (cloneResult.status !== 0) {
       console.error(`\n[ERROR] Failed to create agent workspace at ${worktreeDir}`);
-      console.error(`Attempted command: cp ${cpArgs.join(" ")}`);
+      if (fallbackAttempted) {
+        console.error("Attempted APFS clone (cp -cR) and fallback copy (cp -R). Both failed.");
+      }
+      console.error(`Last attempted command: cp ${cpArgs.join(" ")}`);
       if (cloneResult.stderr) console.error(`Error output: ${cloneResult.stderr.trim()}`);
       if (cloneResult.error) console.error(`System error: ${cloneResult.error.message}`);
       console.error("Cannot proceed with one-shot pi session. Aborting.\n");
