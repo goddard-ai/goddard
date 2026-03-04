@@ -6,8 +6,18 @@ import type { Env } from "../src/env.ts";
 
 const notUsed = () => { throw new Error("not used"); };
 
+const stubControlPlane: BackendControlPlane = {
+  startDeviceFlow: notUsed,
+  completeDeviceFlow: notUsed,
+  getSession: notUsed,
+  createPr: notUsed,
+  isManagedPr: notUsed,
+  handleGitHubWebhook: notUsed
+};
+
 test("createBackendRouter handles auth device start via rouzer route map", async () => {
   const controlPlane: BackendControlPlane = {
+    ...stubControlPlane,
     startDeviceFlow(input) {
       assert.equal(input?.githubUsername, "alec");
       return {
@@ -18,11 +28,6 @@ test("createBackendRouter handles auth device start via rouzer route map", async
         interval: 5
       };
     },
-    completeDeviceFlow: notUsed,
-    getSession: notUsed,
-    createPr: notUsed,
-    isManagedPr: notUsed,
-    handleGitHubWebhook: notUsed
   };
 
   const router = createBackendRouter({
@@ -49,15 +54,11 @@ test("createBackendRouter delegates stream route to injected handleRepoStream", 
   let capturedRepo = "";
 
   const controlPlane: BackendControlPlane = {
-    startDeviceFlow: notUsed,
-    completeDeviceFlow: notUsed,
+    ...stubControlPlane,
     getSession(token) {
       assert.equal(token, "tok_1");
       return { token, githubUsername: "alec", githubUserId: 1 };
     },
-    createPr: notUsed,
-    isManagedPr: notUsed,
-    handleGitHubWebhook: notUsed
   };
 
   const router = createBackendRouter({
@@ -81,14 +82,10 @@ test("createBackendRouter delegates stream route to injected handleRepoStream", 
 
 test("createBackendRouter serializes HttpError responses", async () => {
   const controlPlane: BackendControlPlane = {
-    startDeviceFlow: notUsed,
-    completeDeviceFlow: notUsed,
+    ...stubControlPlane,
     getSession() {
       throw new HttpError(401, "Invalid token");
     },
-    createPr: notUsed,
-    isManagedPr: notUsed,
-    handleGitHubWebhook: notUsed
   };
 
   const router = createBackendRouter({
