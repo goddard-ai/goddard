@@ -1,6 +1,7 @@
 name: Sync Spec Branch
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
