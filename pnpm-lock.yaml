@@ -29,6 +29,9 @@ importers:
       '@goddard-ai/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@goddard-ai/shared':
+        specifier: workspace:^
+        version: link:../shared
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
@@ -37,7 +40,7 @@ importers:
         version: 0.87.0(@libsql/client@0.17.0)(workerd@1.20260305.0)(wrangler@4.69.0(@cloudflare/workers-types@4.20260301.1))
       drizzle-orm:
         specifier: 1.0.0-beta.15-859cf75
-        version: 1.0.0-beta.15-859cf75(@cloudflare/workers-types@4.20260301.1)(@libsql/client@0.17.0)(@types/mssql@9.1.9(@azure/core-client@1.10.1))(mssql@11.0.1(@azure/core-client@1.10.1))
+        version: 1.0.0-beta.15-859cf75(@cloudflare/workers-types@4.20260301.1)(@libsql/client@0.17.0)(@types/mssql@9.1.9(@azure/core-client@1.10.1))(mssql@11.0.1(@azure/core-client@1.10.1))(zod@3.25.76)
       ws:
         specifier: ^8.18.0
         version: 8.19.0
@@ -75,6 +78,9 @@ importers:
 
   sdk:
     dependencies:
+      '@goddard-ai/shared':
+        specifier: workspace:^
+        version: link:../shared
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
@@ -85,6 +91,12 @@ importers:
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9
+
+  shared:
+    dependencies:
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
 
 packages:
 
@@ -2460,6 +2472,9 @@ packages:
   youch@4.1.0-beta.10:
     resolution: {integrity: sha512-rLfVLB4FgQneDr0dv1oddCVZmKjcJ6yX6mS4pU82Mq/Dt9a3cLZQ62pDBL4AUO+uVrCvtWz3ZFUL2HFAFJ/BXQ==}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
 
   '@aws-crypto/sha256-browser@5.2.0':
@@ -4185,13 +4200,14 @@ snapshots:
       '@cloudflare/workers-types': 4.20260301.1
       '@libsql/client': 0.17.0
 
-  drizzle-orm@1.0.0-beta.15-859cf75(@cloudflare/workers-types@4.20260301.1)(@libsql/client@0.17.0)(@types/mssql@9.1.9(@azure/core-client@1.10.1))(mssql@11.0.1(@azure/core-client@1.10.1)):
+  drizzle-orm@1.0.0-beta.15-859cf75(@cloudflare/workers-types@4.20260301.1)(@libsql/client@0.17.0)(@types/mssql@9.1.9(@azure/core-client@1.10.1))(mssql@11.0.1(@azure/core-client@1.10.1))(zod@3.25.76):
     dependencies:
       '@types/mssql': 9.1.9(@azure/core-client@1.10.1)
       mssql: 11.0.1(@azure/core-client@1.10.1)
     optionalDependencies:
       '@cloudflare/workers-types': 4.20260301.1
       '@libsql/client': 0.17.0
+      zod: 3.25.76
 
   eastasianwidth@0.2.0: {}
 
@@ -4921,3 +4937,5 @@ snapshots:
       '@speed-highlight/core': 1.2.14
       cookie: 1.1.1
       youch-core: 0.3.3
+
+  zod@3.25.76: {}

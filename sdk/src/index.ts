@@ -11,7 +11,7 @@ import type {
   RepoRef,
   StreamMessage,
   ThinkingLevel
-} from "./types.ts";
+} from "@goddard-ai/shared";
 import { InMemoryTokenStorage, type TokenStorage } from "./token-storage.ts";
 import { appendSpecInstructions } from "./agents.ts";
 
