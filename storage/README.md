@@ -15,10 +15,9 @@ The package centralizes logic for resolving configuration paths:
 ### Token Storage (`src/token.ts`)
 
 It includes utilities to securely read, set, and clear tokens using JSON-based storage:
-- **`FileTokenStorage`:** Default storage location for general tokens, defaulting to `~/.goddard/config.json`.
-- **`CredentialsTokenStorage`:** A specific storage class for credential tokens, defaulting to `~/.goddard/credentials.json`.
+- **`FileTokenStorage`:** Default storage location for tokens, defaulting to `~/.goddard/credentials.json`.
 
-Both classes implement the `TokenStorage` interface from `@goddard-ai/sdk`.
+Implements the `TokenStorage` interface from `@goddard-ai/sdk`.
 
 ## Usage
 
