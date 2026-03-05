@@ -4,6 +4,7 @@ import { FileTokenStorage, getLocalConfigPath, getGlobalConfigPath, fileExists, 
 import { spawnSync } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import * as p from "@clack/prompts";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createJiti } from "@mariozechner/jiti";
@@ -35,6 +36,15 @@ export type CliDeps = {
    */
   spawnPi?: (args: string[]) => number;
   createLoopRuntime?: (config: GoddardLoopConfig) => { start: () => Promise<void> };
+  /**
+   * Injectable git operation runner for testing.
+   */
+  execGit?: (command: string, args: string[]) => void;
+  /**
+   * Injectable prompts for testing interactiveness.
+   */
+  promptCommitMessage?: () => Promise<string | symbol>;
+  promptPushBranch?: () => Promise<boolean | symbol>;
 };
 
 export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDeps = {}): Promise<number> {
@@ -179,6 +189,70 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
         const sdk = getSdk();
         const agentsPath = await sdk.agents.appendSpecInstructions(process.cwd());
         io.stdout(`Updated agents configuration at ${agentsPath}`);
+
+        const promptCommitMessage = deps.promptCommitMessage ?? (async () => {
+          return p.text({
+            message: "Commit message (clear the text to skip commit)",
+            initialValue: "Configure Goddard agent specifications",
+          });
+        });
+
+        const commitMessage = await promptCommitMessage();
+
+        if (p.isCancel(commitMessage)) {
+          io.stdout("Commit skipped.");
+          return 0;
+        }
+
+        const msg = (commitMessage as string).trim();
+        if (!msg) {
+          io.stdout("Commit skipped.");
+          return 0;
+        }
+
+        const execGit = deps.execGit ?? ((cmd: string, args: string[]) => {
+          const res = spawnSync("git", [cmd, ...args], { stdio: "inherit" });
+          if (res.error) throw res.error;
+          if (res.status !== 0) throw new Error(`git ${cmd} exited with status ${res.status}`);
+        });
+
+        try {
+          execGit("add", [agentsPath]);
+          execGit("commit", ["-m", msg]);
+          io.stdout(`Committed changes: ${msg}`);
+        } catch (e) {
+          io.stderr("Failed to commit changes.");
+          io.stderr(e instanceof Error ? e.message : String(e));
+          return 1;
+        }
+
+        const promptPushBranch = deps.promptPushBranch ?? (async () => {
+          return p.confirm({
+            message: "Would you like to push the branch?",
+            initialValue: true,
+          });
+        });
+
+        const shouldPush = await promptPushBranch();
+
+        if (p.isCancel(shouldPush)) {
+          io.stdout("Push skipped.");
+          return 0;
+        }
+
+        if (shouldPush) {
+          try {
+            execGit("push", []);
+            io.stdout("Pushed changes successfully.");
+          } catch (e) {
+            io.stderr("Failed to push changes.");
+            io.stderr(e instanceof Error ? e.message : String(e));
+            return 1;
+          }
+        } else {
+          io.stdout("Push skipped.");
+        }
+
         return 0;
       } catch (e) {
         io.stderr(e instanceof Error ? e.message : String(e));
