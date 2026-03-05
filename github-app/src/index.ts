@@ -35,6 +35,12 @@ export class GoddardGitHubApp {
       });
 
       this.app.webhooks.onAny(async ({ id, name, payload }) => {
+        // Prevent infinite loops by ignoring events triggered by bot accounts.
+        const sender = (payload as any).sender;
+        if (sender && sender.type === "Bot") {
+          return;
+        }
+
         try {
           await this.#fetchImpl(new URL("/webhooks/github", this.#baseUrl), {
             method: "POST",
