@@ -10,3 +10,7 @@ import { CreatePrInputSchema, type CreatePrInput } from "@goddard-ai/schema";
 // Validate payload
 const input = CreatePrInputSchema.parse(payload);
 ```
+
+## License
+
+This project is licensed under the [MIT License](../LICENSE).

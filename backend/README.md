@@ -5,3 +5,7 @@ The Goddard Backend is an edge-based service built using Cloudflare Workers, Tur
 ## Issues & Feature Requests
 
 Please direct bug reports and feature requests to the [Issue Tracker](https://github.com/goddard-ai/backend/issues).
+
+## License
+
+This project is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](./LICENSE).

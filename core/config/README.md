@@ -69,3 +69,7 @@ const validated = configSchema.parse(rawConfig);
 | `CycleContext` | Argument passed to `nextPrompt` each cycle |
 | `ThinkingLevel` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` |
 | `Model` | Loose literal union of all known model strings (open-ended) |
+
+## License
+
+This project is licensed under the [MIT License](../LICENSE).

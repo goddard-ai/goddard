@@ -10,3 +10,7 @@ Core packages included here:
 ## Issues & Feature Requests
 
 Please direct bug reports and feature requests to the [Issue Tracker](https://github.com/goddard-ai/core/issues).
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).

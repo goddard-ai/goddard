@@ -32,3 +32,7 @@ const storage = new FileTokenStorage();
 await storage.setToken('my-secure-token');
 const token = await storage.getToken();
 ```
+
+## License
+
+This project is licensed under the [MIT License](../LICENSE).

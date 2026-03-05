@@ -5,3 +5,7 @@ The Goddard Daemon is a local background process that executes autonomous coding
 ## Issues & Feature Requests
 
 Please direct bug reports and feature requests to the [Issue Tracker](https://github.com/goddard-ai/daemon/issues).
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
