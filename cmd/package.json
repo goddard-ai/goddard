@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@clack/prompts": "^1.1.0",
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/sdk": "workspace:*",
     "@goddard-ai/storage": "workspace:^",

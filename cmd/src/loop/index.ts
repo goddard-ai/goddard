@@ -1,8 +1,7 @@
 import type { GoddardLoop, GoddardLoopConfig } from "./types.ts";
 import { configSchema } from "./types.ts";
 import { RateLimiter } from "./rate-limiter.ts";
-import { AuthStorage, ModelRegistry, createAgentSession } from "@mariozechner/pi-coding-agent";
-import { log } from "@clack/prompts";
+import { AuthStorage, ModelRegistry, createAgentSession, InteractiveMode } from "@mariozechner/pi-coding-agent";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -129,51 +128,16 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
       agentDir: resolvedAgentDir
     });
 
-    session.subscribe((event) => {
-      switch (event.type) {
-        case "message_update":
-          if (
-            event.assistantMessageEvent.type === "text_delta" ||
-            event.assistantMessageEvent.type === "thinking_delta"
-          ) {
-            process.stdout.write(event.assistantMessageEvent.delta);
-          }
-          break;
-        case "message_end":
-          process.stdout.write("\n");
-          break;
-        case "tool_execution_start":
-          log.info(`Tool: ${event.toolName}(${JSON.stringify(event.args).slice(0, 100)}${JSON.stringify(event.args).length > 100 ? '...' : ''})`);
-          break;
-        case "tool_execution_end":
-          if (event.isError) {
-            log.error(`Tool error: ${String(event.result)}`);
-          } else {
-            log.success(`Tool complete: ${event.toolName}`);
-          }
-          break;
-      }
-    });
+    const ui = new InteractiveMode(session);
+    await ui.init();
 
     while (true) {
       status.cycle += 1;
       status.uptime = Date.now() - status.startTime;
 
       const countdownPause = async (delayMs: number) => {
-        if (!process.stdout.isTTY) {
-          log.info(`Pausing for ${Math.round(delayMs / 1000)} seconds...`);
-          await sleep(delayMs);
-          return;
-        }
-
-        const end = Date.now() + delayMs;
-        while (Date.now() < end) {
-          const remaining = Math.max(0, end - Date.now());
-          const remainingSecs = Math.ceil(remaining / 1000);
-          process.stdout.write(`\r\x1b[K\x1b[36m◆\x1b[0m Pausing loop... restarting in ${remainingSecs}s`);
-          await sleep(Math.min(1000, remaining));
-        }
-        process.stdout.write(`\r\x1b[K`);
+        ui.showWarning(`Rate limit reached. Pausing loop for ${Math.round(delayMs / 1000)} seconds...`);
+        await sleep(delayMs);
       };
 
       if (status.cycle > 1) {
