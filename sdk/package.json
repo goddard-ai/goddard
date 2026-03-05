@@ -10,7 +10,7 @@
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --loader ../tsx-raw-loader.mjs --test",
+    "test": "node --test",
     "build": "tsdown"
   },
   "dependencies": {

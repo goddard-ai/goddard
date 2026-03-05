@@ -6,6 +6,6 @@ export default defineConfig({
   target: 'node18',
   clean: true,
   outDir: 'dist',
-  outExtension: () => ({ js: '.js' }),
+  outExtension: () => ({ js: '.mjs' }),
   treeshake: true,
 });
