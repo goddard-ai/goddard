@@ -3,3 +3,6 @@ node_modules
 /roadmap
 /app
 *.py
+
+# Third-party documentation fetched on-demand by sync-docs.ts
+docs/third_party/
