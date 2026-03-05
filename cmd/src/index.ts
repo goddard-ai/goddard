@@ -192,14 +192,42 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
           return { status: res.status, stdout: res.stdout, stderr: res.stderr };
         });
 
-        const statusRes = execGit("status", ["--porcelain", "**/AGENTS.md", "AGENTS.md"]);
-        if (statusRes.stdout.trim() !== "") {
+        const statusRes = execGit("status", ["--porcelain"]);
+        const lines = statusRes.stdout.split('\n').filter(Boolean);
+
+        const hasStaged = lines.some(line => {
+          const status = line.substring(0, 2);
+          return status[0] !== ' ' && status[0] !== '?';
+        });
+
+        if (hasStaged) {
+          io.stderr("Error: You have staged changes. Please commit or stash them first.");
+          return 1;
+        }
+
+        let agentsPath = join(process.cwd(), "AGENTS.md");
+        let currentDir = process.cwd();
+        while (true) {
+          const candidatePath = join(currentDir, "AGENTS.md");
+          try {
+            await access(candidatePath, fsConstants.F_OK);
+            agentsPath = candidatePath;
+            break;
+          } catch {
+            const nextDir = dirname(currentDir);
+            if (nextDir === currentDir) break;
+            currentDir = nextDir;
+          }
+        }
+
+        const agentsStatusRes = execGit("status", ["--porcelain", agentsPath]);
+        if (agentsStatusRes.stdout.trim() !== "") {
           io.stderr("Error: AGENTS.md has uncommitted changes. Please commit or stash them first.");
           return 1;
         }
 
         const sdk = getSdk();
-        const agentsPath = await sdk.agents.appendSpecInstructions(process.cwd());
+        await sdk.agents.appendSpecInstructions(process.cwd());
         io.stdout(`Updated agents configuration at ${agentsPath}`);
 
         try {

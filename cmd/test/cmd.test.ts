@@ -219,10 +219,10 @@ test("agents init command calls sdk.agents.appendSpecInstructions and handles co
   assert.equal(lines[1], "Committed changes: My custom config");
   assert.equal(lines[2], "Pushed changes successfully.");
 
-  assert.equal(execGitCalls.length, 5); // status, diff, add, commit, push
-  assert.deepEqual(execGitCalls[2], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
-  assert.deepEqual(execGitCalls[3], { cmd: "commit", args: ["-m", "My custom config"] });
-  assert.deepEqual(execGitCalls[4], { cmd: "push", args: [] });
+  assert.equal(execGitCalls.length, 6); // status (all), status (AGENTS.md), diff, add, commit, push
+  assert.deepEqual(execGitCalls[3], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
+  assert.deepEqual(execGitCalls[4], { cmd: "commit", args: ["-m", "My custom config"] });
+  assert.deepEqual(execGitCalls[5], { cmd: "push", args: [] });
 });
 
 test("agents init command allows skipping commit", async () => {
@@ -253,7 +253,7 @@ test("agents init command allows skipping commit", async () => {
   assert.equal(lines[0], `Updated agents configuration at ${process.cwd()}/AGENTS.md`);
   assert.equal(lines[1], "Commit skipped.");
 
-  assert.equal(execGitCalls.length, 2); // status, diff
+  assert.equal(execGitCalls.length, 3); // status, status, diff
 });
 
 test("agents init command allows skipping push", async () => {
@@ -285,7 +285,7 @@ test("agents init command allows skipping push", async () => {
   assert.equal(lines[1], "Committed changes: My custom config");
   assert.equal(lines[2], "Push skipped.");
 
-  assert.equal(execGitCalls.length, 4); // status, diff, add, commit
-  assert.deepEqual(execGitCalls[2], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
-  assert.deepEqual(execGitCalls[3], { cmd: "commit", args: ["-m", "My custom config"] });
+  assert.equal(execGitCalls.length, 5); // status, status, diff, add, commit
+  assert.deepEqual(execGitCalls[3], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
+  assert.deepEqual(execGitCalls[4], { cmd: "commit", args: ["-m", "My custom config"] });
 });
