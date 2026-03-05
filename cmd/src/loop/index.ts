@@ -131,77 +131,95 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
     const ui = new InteractiveMode(session);
     await ui.init();
 
-    while (true) {
-      status.cycle += 1;
-      status.uptime = Date.now() - status.startTime;
+    const onSigint = () => {
+      ui.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", onSigint);
 
-      const countdownPause = async (delayMs: number) => {
-        ui.showWarning(`Rate limit reached. Pausing loop for ${Math.round(delayMs / 1000)} seconds...`);
-        await sleep(delayMs);
-      };
-
-      if (status.cycle > 1) {
-        await limiter.throttle(countdownPause);
-      }
-
-      if (
-        validated.rateLimits.maxCyclesBeforePause &&
-        status.cycle % validated.rateLimits.maxCyclesBeforePause === 0
-      ) {
-        await countdownPause(24 * 60 * 60 * 1000);
-      }
-
-      const prompt = strategy.nextPrompt({
-        cycleNumber: status.cycle,
-        lastSummary
-      });
-
-      const before = session.getSessionStats().tokens.total;
-
-      let attempt = 0;
+    try {
       while (true) {
-        try {
-          await session.sendUserMessage(prompt);
-          break;
-        } catch (error) {
-          attempt += 1;
+        status.cycle += 1;
+        status.uptime = Date.now() - status.startTime;
 
-          const isRetryable = retryConfig.retryableErrors
-            ? retryConfig.retryableErrors(error, {
-                cycle: status.cycle,
-                attempt,
-                maxAttempts: retryConfig.maxAttempts
-              })
-            : true;
+        const countdownPause = async (delayMs: number) => {
+          ui.showWarning(`Rate limit reached. Pausing loop for ${Math.round(delayMs / 1000)} seconds...`);
+          await sleep(delayMs);
+        };
 
-          if (!isRetryable || attempt >= retryConfig.maxAttempts) {
-            throw error;
+        if (status.cycle > 1) {
+          await limiter.throttle(countdownPause);
+        }
+
+        if (
+          validated.rateLimits.maxCyclesBeforePause &&
+          status.cycle % validated.rateLimits.maxCyclesBeforePause === 0
+        ) {
+          await countdownPause(24 * 60 * 60 * 1000);
+        }
+
+        const prompt = strategy.nextPrompt({
+          cycleNumber: status.cycle,
+          lastSummary
+        });
+
+        const before = session.getSessionStats().tokens.total;
+
+        let attempt = 0;
+        while (true) {
+          try {
+            await session.sendUserMessage(prompt);
+            break;
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              (error.name === "AbortError" || error.message.toLowerCase().includes("abort"))
+            ) {
+              return;
+            }
+
+            attempt += 1;
+
+            const isRetryable = retryConfig.retryableErrors
+              ? retryConfig.retryableErrors(error, {
+                  cycle: status.cycle,
+                  attempt,
+                  maxAttempts: retryConfig.maxAttempts
+                })
+              : true;
+
+            if (!isRetryable || attempt >= retryConfig.maxAttempts) {
+              throw error;
+            }
+
+            const baseDelay = Math.min(
+              retryConfig.maxDelayMs,
+              Math.round(retryConfig.initialDelayMs * Math.pow(retryConfig.backoffFactor, attempt - 1))
+            );
+            const retryDelay = withJitter(baseDelay, retryConfig.jitterRatio);
+
+            await sleep(retryDelay);
           }
+        }
 
-          const baseDelay = Math.min(
-            retryConfig.maxDelayMs,
-            Math.round(retryConfig.initialDelayMs * Math.pow(retryConfig.backoffFactor, attempt - 1))
+        const stats = session.getSessionStats();
+        const cycleTokens = stats.tokens.total - before;
+        if (cycleTokens > validated.rateLimits.maxTokensPerCycle) {
+          throw new Error(
+            `[goddard loop] Cycle ${status.cycle} exceeded maxTokensPerCycle: used ${cycleTokens}, limit ${validated.rateLimits.maxTokensPerCycle}`
           );
-          const retryDelay = withJitter(baseDelay, retryConfig.jitterRatio);
+        }
 
-          await sleep(retryDelay);
+        status.tokensUsed = stats.tokens.total;
+        lastSummary = session.getLastAssistantText() || `Completed cycle ${status.cycle}`;
+
+        if (isDoneSignal(lastSummary)) {
+          return;
         }
       }
-
-      const stats = session.getSessionStats();
-      const cycleTokens = stats.tokens.total - before;
-      if (cycleTokens > validated.rateLimits.maxTokensPerCycle) {
-        throw new Error(
-          `[goddard loop] Cycle ${status.cycle} exceeded maxTokensPerCycle: used ${cycleTokens}, limit ${validated.rateLimits.maxTokensPerCycle}`
-        );
-      }
-
-      status.tokensUsed = stats.tokens.total;
-      lastSummary = session.getLastAssistantText() || `Completed cycle ${status.cycle}`;
-
-      if (isDoneSignal(lastSummary)) {
-        return;
-      }
+    } finally {
+      ui.stop();
+      process.removeListener("SIGINT", onSigint);
     }
   };
 
