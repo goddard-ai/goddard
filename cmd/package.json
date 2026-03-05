@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@goddard-ai/config": "workspace:*",
     "@goddard-ai/sdk": "workspace:*",
     "@goddard-ai/storage": "workspace:^",
     "@mariozechner/jiti": "^2.6.1",
     "@mariozechner/pi-coding-agent": "^0.55.3",
     "cmd-ts": "^0.15.0",
     "cron-parser": "^4.9.0",
-    "zod": "^3.24.2",
-    "@goddard-ai/config": "workspace:*"
+    "zod": "^3.24.2"
   },
   "bin": {
     "goddard": "./bin/goddard.ts"
