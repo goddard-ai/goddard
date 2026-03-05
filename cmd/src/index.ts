@@ -1,4 +1,5 @@
-import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { LOOP_SYSTEM_PROMPT } from "@goddard-ai/loop";
 import { inferRepoFromGitConfig, inferPrNumberFromGit, splitRepo } from "./git.ts";
 import { FileTokenStorage, getLocalConfigPath, getGlobalConfigPath, fileExists, resolveLoopConfigPath } from "@goddard-ai/storage";
 import { spawnSync } from "node:child_process";
@@ -8,8 +9,8 @@ import * as p from "@clack/prompts";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createJiti } from "@mariozechner/jiti";
-import { createLoop } from "./loop/index.ts";
-import type { GoddardLoopConfig } from "./loop/index.ts";
+import { createLoop } from "@goddard-ai/loop";
+import type { GoddardLoopConfig } from "@goddard-ai/loop";
 import { command, runSafely, string, option, subcommands, restPositionals, flag } from "cmd-ts";
 
 export type CliIo = {

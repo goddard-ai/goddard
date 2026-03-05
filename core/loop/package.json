@@ -1,0 +1,24 @@
+{
+  "name": "@goddard-ai/loop",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@goddard-ai/config": "workspace:*",
+    "@mariozechner/pi-coding-agent": "^0.55.3",
+    "cron-parser": "^4.9.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "tsdown": "^0.20.3"
+  }
+}

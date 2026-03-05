@@ -7,3 +7,4 @@ packages:
   - 'core/schema'
   - 'core/storage'
   - 'core/config'
+  - 'core/loop'

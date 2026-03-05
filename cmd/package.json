@@ -7,6 +7,7 @@
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@goddard-ai/config": "workspace:*",
+    "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/sdk": "workspace:*",
     "@goddard-ai/storage": "workspace:^",
     "@mariozechner/jiti": "^2.6.1",
@@ -19,8 +20,7 @@
     "goddard": "./bin/goddard.js"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./loop": "./src/loop/index.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "goddard": "tsx src/cli.ts",
