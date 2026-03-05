@@ -18,8 +18,6 @@ export interface BackendControlPlane {
   handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent;
   addStreamSocket?(repoKey: string, socket: unknown): void;
   removeStreamSocket?(repoKey: string, socket: unknown): void;
-  createPiSession(owner: string, repo: string, prNumber: number): Promise<PiSessionRecord> | PiSessionRecord;
-  updatePiSession(id: number, status: string): Promise<PiSessionRecord> | PiSessionRecord;
 }
 
 export class HttpError extends Error {

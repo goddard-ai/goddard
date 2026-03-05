@@ -5,10 +5,19 @@ import { createSdk, type RepoEvent } from "@goddard-ai/sdk";
 
 type SdkClient = ReturnType<typeof createSdk>;
 
+import { LocalSessionStorage } from "@goddard-ai/storage";
+
 test("daemon launches one-shot for managed PR comment event", async () => {
-  const lines: string[] = [];
-  const oneShots: string[] = [];
-  const subscription = new MockSubscription();
+  const originalCreateSession = LocalSessionStorage.prototype.createSession;
+  const originalUpdateSession = LocalSessionStorage.prototype.updateSession;
+
+  LocalSessionStorage.prototype.createSession = async () => ({ id: 1 } as any);
+  LocalSessionStorage.prototype.updateSession = async () => ({} as any);
+
+  try {
+    const lines: string[] = [];
+    const oneShots: string[] = [];
+    const subscription = new MockSubscription();
 
   const sdk = createMockSdk({
     pr: {
@@ -45,10 +54,14 @@ test("daemon launches one-shot for managed PR comment event", async () => {
     }
   );
 
-  assert.equal(code, 0);
-  assert.equal(oneShots.length, 1);
-  assert.match(oneShots[0]!, /goddard-ai\/sdk#42/);
-  assert.ok(lines.some((line) => line.includes("Launching one-shot pi session")));
+    assert.equal(code, 0);
+    assert.equal(oneShots.length, 1);
+    assert.match(oneShots[0]!, /goddard-ai\/sdk#42/);
+    assert.ok(lines.some((line) => line.includes("Launching one-shot pi session")));
+  } finally {
+    LocalSessionStorage.prototype.createSession = originalCreateSession;
+    LocalSessionStorage.prototype.updateSession = originalUpdateSession;
+  }
 });
 
 test("daemon ignores unmanaged PR feedback", async () => {

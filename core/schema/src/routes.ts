@@ -8,9 +8,7 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent,
-  CreatePiSessionInput,
-  PiSessionRecord
+  RepoEvent
 } from "./types.ts";
 
 const bearerHeaderSchema = z.object({
@@ -105,31 +103,6 @@ export const githubWebhookRoute = route("webhooks/github", {
   }
 });
 
-export const piSessionsRoute = route("pi-sessions", {
-  POST: {
-    headers: bearerHeaderSchema,
-    body: z.object({
-      owner: z.string(),
-      repo: z.string(),
-      prNumber: z.number()
-    }),
-    response: $type<PiSessionRecord>()
-  }
-});
-
-export const piSessionUpdateRoute = route("pi-sessions/:id", {
-  PATCH: {
-    headers: bearerHeaderSchema,
-    path: z.object({
-      id: z.coerce.number()
-    }),
-    body: z.object({
-      status: z.string()
-    }),
-    response: $type<PiSessionRecord>()
-  }
-});
-
 export const repoStreamRoute = route("stream", {
   GET: {
     headers: bearerHeaderSchema,
@@ -144,7 +117,5 @@ export type {
   CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowStart,
-  GitHubWebhookInput,
-  CreatePiSessionInput,
-  PiSessionRecord
+  GitHubWebhookInput
 };

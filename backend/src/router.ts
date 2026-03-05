@@ -101,45 +101,6 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         }
       }
     },
-    piSessionsRoute: {
-      POST: async (ctx) => {
-        try {
-          const env = readEnv(ctx);
-          const controlPlane = createControlPlane(env);
-          const token = parseBearerToken(ctx.headers.authorization);
-          if (!token) {
-            throw new HttpError(401, "Missing or invalid authorization header");
-          }
-          await controlPlane.getSession(token);
-
-          const { owner, repo, prNumber } = ctx.body;
-          const session = await controlPlane.createPiSession(owner, repo, prNumber);
-          return session;
-        } catch (error) {
-          return toErrorResponse(error);
-        }
-      }
-    },
-    piSessionUpdateRoute: {
-      PATCH: async (ctx) => {
-        try {
-          const env = readEnv(ctx);
-          const controlPlane = createControlPlane(env);
-          const token = parseBearerToken(ctx.headers.authorization);
-          if (!token) {
-            throw new HttpError(401, "Missing or invalid authorization header");
-          }
-          await controlPlane.getSession(token);
-
-          const { id } = ctx.path;
-          const { status } = ctx.body;
-          const session = await controlPlane.updatePiSession(id, status);
-          return session;
-        } catch (error) {
-          return toErrorResponse(error);
-        }
-      }
-    },
     repoStreamRoute: {
       GET: async (ctx) => {
         try {

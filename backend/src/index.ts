@@ -210,28 +210,6 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     return mapped;
   }
 
-  createPiSession(owner: string, repo: string, prNumber: number) {
-    return {
-      id: 1,
-      repoOwner: owner,
-      repoName: repo,
-      prNumber,
-      status: "active",
-      createdAt: new Date().toISOString()
-    };
-  }
-
-  updatePiSession(id: number, status: string) {
-    return {
-      id,
-      repoOwner: "owner",
-      repoName: "repo",
-      prNumber: 1,
-      status,
-      createdAt: new Date().toISOString()
-    };
-  }
-
   addStreamSocket(repoKey: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
       return;

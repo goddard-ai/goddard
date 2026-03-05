@@ -149,20 +149,3 @@ export const GitHubWebhookInputSchema = z.discriminatedUnion("type", [
   })
 ]);
 export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInputSchema>;
-
-export const CreatePiSessionInputSchema = z.object({
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number(),
-});
-export type CreatePiSessionInput = z.infer<typeof CreatePiSessionInputSchema>;
-
-export const PiSessionRecordSchema = z.object({
-  id: z.number(),
-  repoOwner: z.string(),
-  repoName: z.string(),
-  prNumber: z.number(),
-  status: z.string(),
-  createdAt: z.string(),
-});
-export type PiSessionRecord = z.infer<typeof PiSessionRecordSchema>;

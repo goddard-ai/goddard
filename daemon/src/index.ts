@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import * as pty from "node-pty";
 import { command, option, runSafely, string, subcommands } from "cmd-ts";
 import { FileTokenStorage } from "./storage.ts";
+import { LocalSessionStorage } from "@goddard-ai/storage";
 
 export type DaemonIo = {
   stdout: (line: string) => void;
@@ -103,15 +104,17 @@ export async function runDaemonCli(
             io.stdout(`Launching one-shot pi session for ${event.type} on PR #${event.prNumber}...`);
 
             let sessionId: number | undefined;
+            let sessionStorage: LocalSessionStorage | undefined;
             try {
-              const sessionRecord = await sdk.piSessions.create({
-                owner: event.owner,
-                repo: event.repo,
-                prNumber: event.prNumber
-              });
+              sessionStorage = new LocalSessionStorage();
+              const sessionRecord = await sessionStorage.createSession(
+                event.owner,
+                event.repo,
+                event.prNumber
+              );
               sessionId = sessionRecord.id;
             } catch (err) {
-              io.stderr(`Failed to record active pi session in backend: ${err}`);
+              io.stderr(`Failed to record active pi session locally: ${err}`);
             }
 
             const exitCode = await runOneShot({ 
@@ -126,14 +129,11 @@ export async function runDaemonCli(
               }
             });
 
-            if (sessionId !== undefined) {
+            if (sessionId !== undefined && sessionStorage) {
               try {
-                await sdk.piSessions.update({
-                  id: sessionId,
-                  status: "completed"
-                });
+                await sessionStorage.updateSession(sessionId, "completed");
               } catch (err) {
-                io.stderr(`Failed to mark active pi session as completed in backend: ${err}`);
+                io.stderr(`Failed to mark active pi session as completed locally: ${err}`);
               }
             }
 

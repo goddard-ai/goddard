@@ -29,12 +29,3 @@ export const pullRequests = sqliteTable("pull_requests", {
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull(),
 });
-
-export const piSessions = sqliteTable("pi_sessions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  repoOwner: text("repo_owner").notNull(),
-  repoName: text("repo_name").notNull(),
-  prNumber: integer("pr_number").notNull(),
-  status: text("status").notNull(),
-  createdAt: text("created_at").notNull(),
-});

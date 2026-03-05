@@ -201,38 +201,6 @@ export class TursoBackendControlPlane implements BackendControlPlane {
 
     return mapped;
   }
-
-  async createPiSession(owner: string, repo: string, prNumber: number) {
-    assertRepo(owner, repo);
-    const createdAt = new Date().toISOString();
-
-    const [inserted] = await this.#db
-      .insert(schema.piSessions)
-      .values({
-        repoOwner: owner,
-        repoName: repo,
-        prNumber,
-        status: "active",
-        createdAt
-      })
-      .returning();
-
-    return inserted;
-  }
-
-  async updatePiSession(id: number, status: string) {
-    const [updated] = await this.#db
-      .update(schema.piSessions)
-      .set({ status })
-      .where(eq(schema.piSessions.id, id))
-      .returning();
-
-    if (!updated) {
-      throw new HttpError(404, "Session not found");
-    }
-
-    return updated;
-  }
 }
 
 function hashToInteger(value: string): number {

@@ -91,11 +91,6 @@ export class GoddardSdk {
     appendSpecInstructions: (cwd?: string) => Promise<string>;
   };
 
-  readonly piSessions: {
-    create: (input: { owner: string; repo: string; prNumber: number }) => Promise<{ id: number; status: string }>;
-    update: (input: { id: number; status: string }) => Promise<{ id: number; status: string }>;
-  };
-
   readonly #baseUrl: URL;
   readonly #tokenStorage: TokenStorage;
   readonly #fetchImpl: FetchLike;
@@ -206,32 +201,6 @@ export class GoddardSdk {
     this.agents = {
       appendSpecInstructions: async (cwd) => {
         return appendSpecInstructions(cwd);
-      }
-    };
-
-    this.piSessions = {
-      create: async (input) => {
-        const token = await this.#requireToken();
-        return this.#sendJson<{ id: number; status: string }>(
-          this.#rouzerClient.request(
-            routes.piSessionsRoute.POST({
-              headers: { authorization: `Bearer ${token}` },
-              body: input
-            })
-          )
-        );
-      },
-      update: async (input) => {
-        const token = await this.#requireToken();
-        return this.#sendJson<{ id: number; status: string }>(
-          this.#rouzerClient.request(
-            routes.piSessionUpdateRoute.PATCH({
-              headers: { authorization: `Bearer ${token}` },
-              path: { id: input.id },
-              body: { status: input.status }
-            })
-          )
-        );
       }
     };
   }
