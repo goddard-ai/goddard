@@ -3,7 +3,7 @@
  * sync-docs.ts
  *
  * Fetch third-party documentation into docs/third_party/<repo-name>/.
- * Only *.md files (plus the .git/ bookkeeping folder) are kept after the clone.
+ * Only *.md and *.mdx files (plus the .git/ bookkeeping folder) are kept after the clone.
  *
  * Usage:
  *   pnpm sync-docs                          # sync all repos listed in synced_docs.json
@@ -57,7 +57,7 @@ function repoNameFromUrl(url: string): string {
 }
 
 /**
- * Recursively delete every file that is NOT a *.md file.
+ * Recursively delete every file that is NOT a *.md or *.mdx file.
  * Directories are pruned if they become empty after the sweep.
  * The .git/ directory at the root is always preserved untouched.
  */
@@ -82,7 +82,7 @@ function declutter(dir: string, isRoot = true): boolean {
         fs.rmSync(full, { recursive: true, force: true });
       }
     } else {
-      if (entry.endsWith(".md")) {
+      if (entry.endsWith(".md") || entry.endsWith(".mdx")) {
         hasKeeper = true;
       } else {
         fs.rmSync(full, { force: true });

@@ -100,7 +100,7 @@ stripped so the resolved value is a bare version string.
 
 Clones are written to `docs/third_party/<repo-name>/`, where `<repo-name>` is the
 last segment of the repo URL or the `name` field if one is set in `synced_docs.json`.
-After cloning, every file that is not a `*.md` file is deleted; only Markdown and
+After cloning, every file that is not a `*.md` or `*.mdx` file is deleted; only Markdown and
 the `.git/` bookkeeping folder survive. This keeps the directory lightweight and
 diff-free.
 
