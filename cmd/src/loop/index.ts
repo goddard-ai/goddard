@@ -159,13 +159,32 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
       status.cycle += 1;
       status.uptime = Date.now() - status.startTime;
 
-      await limiter.throttle();
+      const countdownPause = async (delayMs: number) => {
+        if (!process.stdout.isTTY) {
+          log.info(`Pausing for ${Math.round(delayMs / 1000)} seconds...`);
+          await sleep(delayMs);
+          return;
+        }
+
+        const end = Date.now() + delayMs;
+        while (Date.now() < end) {
+          const remaining = Math.max(0, end - Date.now());
+          const remainingSecs = Math.ceil(remaining / 1000);
+          process.stdout.write(`\r\x1b[K\x1b[36m◆\x1b[0m Pausing loop... restarting in ${remainingSecs}s`);
+          await sleep(Math.min(1000, remaining));
+        }
+        process.stdout.write(`\r\x1b[K`);
+      };
+
+      if (status.cycle > 1) {
+        await limiter.throttle(countdownPause);
+      }
 
       if (
         validated.rateLimits.maxCyclesBeforePause &&
         status.cycle % validated.rateLimits.maxCyclesBeforePause === 0
       ) {
-        await sleep(24 * 60 * 60 * 1000);
+        await countdownPause(24 * 60 * 60 * 1000);
       }
 
       const prompt = strategy.nextPrompt({

@@ -10,7 +10,7 @@ export class RateLimiter {
     this.#opsLimit = config.maxOpsPerMinute;
   }
 
-  async throttle(): Promise<void> {
+  async throttle(onPause?: (ms: number) => Promise<void>): Promise<void> {
     const delayRegex = /^(\d+)([smhd])$/;
     const match = this.#wallclockDelay.match(delayRegex);
     let delayMs = 0;
@@ -54,7 +54,11 @@ export class RateLimiter {
     }
 
     if (delayMs > 0) {
-      await sleep(delayMs);
+      if (onPause) {
+        await onPause(delayMs);
+      } else {
+        await sleep(delayMs);
+      }
     }
 
     this.#opsWindow.push(Date.now());
