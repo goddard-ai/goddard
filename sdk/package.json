@@ -5,10 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "default": "./dist/index.mjs"
-    }
+    ".": "./src/index.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",

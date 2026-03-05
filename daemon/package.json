@@ -14,10 +14,7 @@
     "goddard-daemon": "./bin/goddard-daemon.ts"
   },
   "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "default": "./dist/index.mjs"
-    }
+    ".": "./src/index.ts"
   },
   "scripts": {
     "daemon": "tsx bin/goddard-daemon.ts",

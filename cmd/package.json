@@ -19,8 +19,8 @@
     "goddard": "./bin/goddard.js"
   },
   "exports": {
-    ".": "./dist/index.js",
-    "./loop": "./dist/loop/index.js"
+    ".": "./src/index.ts",
+    "./loop": "./src/loop/index.ts"
   },
   "scripts": {
     "goddard": "tsx src/cli.ts",
