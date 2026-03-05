@@ -14,7 +14,10 @@
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test"
+    "test": "node --import tsx --test",
+    "build": "tsdown"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "tsdown": "^0.20.3"
+  }
 }

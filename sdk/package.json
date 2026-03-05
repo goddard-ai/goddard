@@ -9,7 +9,8 @@
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test"
+    "test": "node --import tsx --test",
+    "build": "tsdown"
   },
   "dependencies": {
     "@goddard-ai/schema": "workspace:^",
@@ -19,6 +20,7 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.9"
+    "drizzle-kit": "^0.31.9",
+    "tsdown": "^0.20.3"
   }
 }

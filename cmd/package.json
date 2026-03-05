@@ -16,15 +16,19 @@
     "zod": "^3.24.2"
   },
   "bin": {
-    "goddard": "./bin/goddard.ts"
+    "goddard": "./bin/goddard.js"
   },
   "exports": {
     ".": "./src/index.ts",
     "./loop": "./src/loop/index.ts"
   },
   "scripts": {
-    "goddard": "tsx bin/goddard.ts",
+    "goddard": "tsx src/cli.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test"
+    "test": "node --import tsx --test",
+    "build": "tsdown"
+  },
+  "devDependencies": {
+    "tsdown": "^0.20.3"
   }
 }

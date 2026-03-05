@@ -19,6 +19,10 @@
   "scripts": {
     "daemon": "tsx bin/goddard-daemon.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test"
+    "test": "node --import tsx --test",
+    "build": "tsdown"
+  },
+  "devDependencies": {
+    "tsdown": "^0.20.3"
   }
 }
