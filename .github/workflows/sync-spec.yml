@@ -1,0 +1,34 @@
+name: Sync Spec Folder
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-subrepo
+        run: |
+          git clone https://github.com/ingydotnet/git-subrepo.git /tmp/git-subrepo
+          sudo make -C /tmp/git-subrepo install
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Pull latest spec
+        run: |
+          git subrepo pull spec
+
+      - name: Push changes
+        run: |
+          git push
