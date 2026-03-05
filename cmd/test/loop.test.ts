@@ -38,7 +38,7 @@ test("loop run loads config and executes loop runtime", async () => {
     await mkdir(join(cwd, ".goddard"), { recursive: true });
     await writeFile(
       join(cwd, ".goddard", "config.ts"),
-      `import { defineConfig } from "@goddard-ai/config";\nexport default defineConfig({\n  agent: { model: "provider/model", projectDir: "." },\n  strategy: { nextPrompt: () => "DONE" },\n  rateLimits: { cycleDelay: "1s", maxTokensPerCycle: 1000, maxOpsPerMinute: 60 }\n});\n`,
+      `export default {\n  agent: { model: "provider/model", projectDir: "." },\n  strategy: { nextPrompt: () => "DONE" },\n  rateLimits: { cycleDelay: "1s", maxTokensPerCycle: 1000, maxOpsPerMinute: 60 }\n};\n`,
       "utf-8"
     );
 
@@ -71,7 +71,7 @@ test("loop generate-systemd creates goddard.service", async () => {
     await mkdir(join(cwd, ".goddard"), { recursive: true });
     await writeFile(
       join(cwd, ".goddard", "config.ts"),
-      `import { defineConfig } from "@goddard-ai/config";\nexport default defineConfig({\n  agent: { model: "provider/model", projectDir: "." },\n  strategy: { nextPrompt: () => "DONE" },\n  rateLimits: { cycleDelay: "1s", maxTokensPerCycle: 1000, maxOpsPerMinute: 60 },\n  systemd: { user: "deployer", workingDir: "/opt/repo" }\n});\n`,
+      `export default {\n  agent: { model: "provider/model", projectDir: "." },\n  strategy: { nextPrompt: () => "DONE" },\n  rateLimits: { cycleDelay: "1s", maxTokensPerCycle: 1000, maxOpsPerMinute: 60 },\n  systemd: { user: "deployer", workingDir: "/opt/repo" }\n};\n`,
       "utf-8"
     );
 
