@@ -63,6 +63,9 @@ importers:
 
   cmd:
     dependencies:
+      '@goddard-ai/config':
+        specifier: workspace:*
+        version: link:../core/config
       '@goddard-ai/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -84,6 +87,22 @@ importers:
       zod:
         specifier: ^3.24.2
         version: 3.25.76
+
+  core/config:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.35
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
 
   core/schema:
     dependencies:

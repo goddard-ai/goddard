@@ -12,7 +12,7 @@ export function getGlobalConfigPath(): string {
 }
 
 export function getLocalConfigPath(): string {
-  return join(process.cwd(), "goddard.config.ts");
+  return join(process.cwd(), ".goddard", "config.ts");
 }
 
 export async function fileExists(path: string): Promise<boolean> {

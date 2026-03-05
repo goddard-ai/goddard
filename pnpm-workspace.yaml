@@ -6,3 +6,4 @@ packages:
   - 'sdk'
   - 'core/schema'
   - 'core/storage'
+  - 'core/config'

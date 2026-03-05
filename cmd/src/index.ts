@@ -228,7 +228,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
       try {
         const configPath = await resolveLoopConfigPath();
         if (!configPath) {
-          io.stderr("Could not find goddard.config.ts in the current directory or config.ts in ~/.goddard.");
+          io.stderr("Could not find config.ts in the current directory's .goddard/ folder or in ~/.goddard.");
           io.stderr("Run `goddard loop init` to create one.");
           return 1;
         }
@@ -366,9 +366,9 @@ function quoteSystemdValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
 }
 
-const DEFAULT_LOOP_CONFIG_TEMPLATE = `import { Models } from "@goddard-ai/cmd/loop";
+const DEFAULT_LOOP_CONFIG_TEMPLATE = `import { Models, defineConfig } from "@goddard-ai/config";
 
-export default {
+export default defineConfig({
   agent: {
     model: Models.Anthropic.ClaudeSonnet45,
     projectDir: "./",
@@ -395,5 +395,5 @@ export default {
   metrics: {
     enableLogging: true
   }
-};
+});
 `;
