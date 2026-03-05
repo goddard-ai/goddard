@@ -27,6 +27,27 @@ export async function inferRepoFromGitConfig(path = ".git/config"): Promise<stri
   return null;
 }
 
+import { spawnSync } from "node:child_process";
+
+export function inferPrNumberFromGit(dir = process.cwd()): number | null {
+  const result = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: dir,
+    encoding: "utf-8"
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const branch = result.stdout.trim();
+  const match = branch.match(/^pr-(\d+)$/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+
+  return null;
+}
+
 export function splitRepo(repoRef: string): { owner: string; repo: string } {
   const [owner, repo] = repoRef.split("/");
   if (!owner || !repo) {

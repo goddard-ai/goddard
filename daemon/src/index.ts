@@ -266,7 +266,7 @@ function buildPrompt(event: Extract<RepoEvent, { type: "comment" | "review" }>):
     `You are responding to PR feedback for ${event.owner}/${event.repo}#${event.prNumber}.`,
     feedback,
     "Assess the feedback, apply any necessary repository changes, and finish by posting a reply on that PR thread explaining what you changed or why no change was needed.",
-    `To post your reply, use the Goddard CLI:\n\`goddard pr reply --pr ${event.prNumber} --body "Your reply here"\``,
+    `To post your reply, use the Goddard CLI:\n\`goddard pr reply --body "Your reply here"\``,
     "Do not switch to another PR; stay scoped to this event's PR."
   ].join("\n\n");
 }

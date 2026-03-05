@@ -1,5 +1,5 @@
 import { createSdk, LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
-import { inferRepoFromGitConfig, splitRepo } from "./git.ts";
+import { inferRepoFromGitConfig, inferPrNumberFromGit, splitRepo } from "./git.ts";
 import { FileTokenStorage, getLocalConfigPath, getGlobalConfigPath, fileExists, resolveLoopConfigPath } from "@goddard-ai/storage";
 import { spawnSync } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
@@ -140,7 +140,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     name: "reply",
     args: {
       body: option({ type: string, long: "body" }),
-      pr: option({ type: string, long: "pr" }),
+      pr: option({ type: string, long: "pr", defaultValue: () => "" }),
       repo: option({ type: string, long: "repo", defaultValue: () => undefined as any }),
       baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" })
     },
@@ -149,13 +149,25 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
         const sdk = getSdk(args.baseUrl || undefined);
         const repoRef = await resolveRepoRef(args.repo);
         const { owner, repo } = splitRepo(repoRef);
+
+        let prNumber: number;
+        if (args.pr) {
+          prNumber = parseInt(args.pr, 10);
+        } else {
+          const inferred = inferPrNumberFromGit();
+          if (!inferred) {
+            throw new Error("Unable to infer PR number from current branch. Pass --pr <number>.");
+          }
+          prNumber = inferred;
+        }
+
         await sdk.pr.reply({
           owner,
           repo,
-          prNumber: parseInt(args.pr, 10),
+          prNumber,
           body: args.body
         });
-        io.stdout(`Reply posted to PR #${args.pr}`);
+        io.stdout(`Reply posted to PR #${prNumber}`);
         return 0;
       } catch (e) {
         io.stderr(e instanceof Error ? e.message : String(e));
