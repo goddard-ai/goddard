@@ -222,6 +222,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
     args: {},
     handler: async () => {
       try {
+        const sdk = getSdk();
+        
         const execGit = deps.execGit ?? ((cmd: string, args: string[]) => {
           const res = spawnSync("git", [cmd, ...args], { encoding: "utf-8" });
           if (res.error) throw res.error;
@@ -241,29 +243,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
           return 1;
         }
 
-        let agentsPath = join(process.cwd(), "AGENTS.md");
-        let currentDir = process.cwd();
-        while (true) {
-          const candidatePath = join(currentDir, "AGENTS.md");
-          try {
-            await access(candidatePath, fsConstants.F_OK);
-            agentsPath = candidatePath;
-            break;
-          } catch {
-            const nextDir = dirname(currentDir);
-            if (nextDir === currentDir) break;
-            currentDir = nextDir;
-          }
-        }
-
-        const agentsStatusRes = execGit("status", ["--porcelain", agentsPath]);
-        if (agentsStatusRes.stdout.trim() !== "") {
-          io.stderr("Error: AGENTS.md has uncommitted changes. Please commit or stash them first.");
-          return 1;
-        }
-
-        const sdk = getSdk();
-        await sdk.agents.appendSpecInstructions(process.cwd());
+        const { path: agentsPath } = await sdk.agents.init(process.cwd());
+        
         io.stdout(`Updated agents configuration at ${agentsPath}`);
 
         try {

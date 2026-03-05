@@ -15,9 +15,8 @@ import {
 import * as routes from "@goddard-ai/schema/routes";
 import { createClient, type RouteRequest } from "rouzer";
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage";
-import { appendSpecInstructions } from "./agents.ts";
+import { init as initAgents, initLoopConfig, runLoop, generateLoopSystemdService, loadLoopConfig } from "./node/index.ts";
 import { Models, type Model } from "@goddard-ai/config";
-import { initLoopConfig, runLoop, generateLoopSystemdService, loadLoopConfig } from "./loop.ts";
 
 export const SDK_VERSION = "0.1.0";
 
@@ -92,7 +91,7 @@ export class GoddardSdk {
   };
 
   readonly agents: {
-    appendSpecInstructions: (cwd?: string) => Promise<string>;
+    init: (cwd?: string) => Promise<{ path: string }>;
   };
 
   readonly loop: {
@@ -248,8 +247,8 @@ export class GoddardSdk {
     };
 
     this.agents = {
-      appendSpecInstructions: async (cwd) => {
-        return appendSpecInstructions(cwd);
+      init: async (cwd) => {
+        return initAgents(cwd);
       }
     };
 

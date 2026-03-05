@@ -9,7 +9,7 @@ The \`spec\` directory is the Theory of Mind for the Goddard platform.
 - If you are tasked with modifying or reasoning about specifications, start at \`spec/manifest.md\` as the domain routing hub.
 `;
 
-export async function appendSpecInstructions(cwd: string = process.cwd()): Promise<string> {
+export async function init(cwd: string = process.cwd()): Promise<{ path: string }> {
   let currentDir = path.resolve(cwd);
 
   while (currentDir !== path.parse(currentDir).root) {
@@ -22,7 +22,7 @@ export async function appendSpecInstructions(cwd: string = process.cwd()): Promi
         if (!content.includes("## The `spec` Folder")) {
           await fs.appendFile(agentsPath, "\n" + SPEC_INSTRUCTIONS);
         }
-        return agentsPath;
+        return { path: agentsPath };
       }
     } catch {
       // File does not exist, move up
@@ -34,5 +34,5 @@ export async function appendSpecInstructions(cwd: string = process.cwd()): Promi
   // If we reach the root and didn't find it, create it in the original cwd
   const defaultPath = path.join(path.resolve(cwd), "AGENTS.md");
   await fs.writeFile(defaultPath, SPEC_INSTRUCTIONS.trimStart());
-  return defaultPath;
+  return { path: defaultPath };
 }

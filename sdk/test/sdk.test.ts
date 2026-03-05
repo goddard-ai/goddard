@@ -176,7 +176,7 @@ function jsonResponse(status: number, payload: unknown): Response {
   });
 }
 
-test("agents.appendSpecInstructions creates AGENTS.md with correct instructions", async () => {
+test("agents.init creates AGENTS.md with correct instructions", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-test-"));
 
   try {
@@ -185,7 +185,7 @@ test("agents.appendSpecInstructions creates AGENTS.md with correct instructions"
       tokenStorage: new InMemoryTokenStorage()
     });
 
-    const agentsPath = await sdk.agents.appendSpecInstructions(tempDir);
+    const { path: agentsPath } = await sdk.agents.init(tempDir);
     assert.equal(agentsPath, path.join(tempDir, "AGENTS.md"));
 
     const content = await fs.readFile(agentsPath, "utf-8");
