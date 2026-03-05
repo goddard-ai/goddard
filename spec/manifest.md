@@ -21,6 +21,7 @@ Start at `spec/vision.md` for mission context, then open only paths relevant to 
 | User Outcomes | `spec/product.md` | Personas, jobs-to-be-done, MVP success criteria |
 | System Architecture | `spec/architecture.md` | Stack choices and component boundaries |
 | Data Flows | `spec/data-flows.md` | High-level request/event sequences |
+| Desktop Application | `spec/app/index.md` | Desktop UX intent, screen contracts, and data requirements |
 | CLI — Interactive | `spec/cli/interactive.md` | `login`, `pr create`, `spec`, `propose`, `agents init` |
 | Daemon — PR Feedback | `spec/daemon/index.md` | Feedback-triggered one-shot `pi` execution |
 | CLI — Loop | `spec/cli/loop.md` | `loop init`, `run`, `generate-systemd` |

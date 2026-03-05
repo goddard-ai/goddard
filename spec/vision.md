@@ -11,6 +11,8 @@ links:
   - type: Leads-To
     target: spec/data-flows.md
   - type: Leads-To
+    target: spec/app/index.md
+  - type: Leads-To
     target: spec/cli/interactive.md
   - type: Leads-To
     target: spec/cli/loop.md
@@ -58,7 +60,13 @@ A human developer uses terminal commands to authenticate, create PRs, trigger wo
 
 See [`cli/interactive.md`](./cli/interactive.md).
 
-### 2) Autonomous Agent Runtimes
+### 2) Desktop Workspace
+
+A human developer uses a unified, IDE-like desktop surface to monitor sessions, review pull requests, browse specs, and manage roadmap context without hopping across multiple tools.
+
+See [`app/index.md`](./app/index.md).
+
+### 3) Autonomous Agent Runtimes
 
 An operator runs unattended execution modes:
 - Loop mode for recurring `pi-coding-agent` cycles.
@@ -67,7 +75,7 @@ An operator runs unattended execution modes:
 
 See [`runtime-loop.md`](./runtime-loop.md), [`cli/loop.md`](./cli/loop.md), and [`daemon/index.md`](./daemon/index.md).
 
-Both modes consume the same SDK.
+All modes consume the same SDK and backend authority model.
 
 ## Navigation
 
