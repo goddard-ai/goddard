@@ -2,6 +2,7 @@ import type { GoddardLoop, GoddardLoopConfig } from "./types.ts";
 import { configSchema } from "./types.ts";
 import { RateLimiter } from "./rate-limiter.ts";
 import { AuthStorage, ModelRegistry, createAgentSession } from "@mariozechner/pi-coding-agent";
+import { log } from "@clack/prompts";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -126,6 +127,32 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
       model: configuredModel,
       thinkingLevel: validated.agent.thinkingLevel,
       agentDir: resolvedAgentDir
+    });
+
+    session.subscribe((event) => {
+      switch (event.type) {
+        case "message_update":
+          if (
+            event.assistantMessageEvent.type === "text_delta" ||
+            event.assistantMessageEvent.type === "thinking_delta"
+          ) {
+            process.stdout.write(event.assistantMessageEvent.delta);
+          }
+          break;
+        case "message_end":
+          process.stdout.write("\n");
+          break;
+        case "tool_execution_start":
+          log.info(`Tool: ${event.toolName}(${JSON.stringify(event.args).slice(0, 100)}${JSON.stringify(event.args).length > 100 ? '...' : ''})`);
+          break;
+        case "tool_execution_end":
+          if (event.isError) {
+            log.error(`Tool error: ${String(event.result)}`);
+          } else {
+            log.success(`Tool complete: ${event.toolName}`);
+          }
+          break;
+      }
     });
 
     while (true) {
