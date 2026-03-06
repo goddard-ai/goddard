@@ -1,15 +1,17 @@
 {
   "name": "@goddard-ai/sdk",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
     "./node": "./dist/node/index.mjs"
   },
   "scripts": {
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "build": "tsdown"
   },

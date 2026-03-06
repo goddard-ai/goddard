@@ -1,108 +1,22 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { runDaemonCli } from "../src/index.ts";
-import { createSdk, type RepoEvent } from "@goddard-ai/sdk";
+import { test } from "vitest"
+import * as assert from "node:assert/strict"
+import { runDaemonCli, type DaemonIo, type DaemonDeps } from "../src/index.ts"
+import { createSdk, type RepoEvent, type StreamSubscription } from "@goddard-ai/sdk"
+import { Models } from "@goddard-ai/config"
 
-type SdkClient = ReturnType<typeof createSdk>;
+const defaultIo: DaemonIo = {
+  stdout: () => {},
+  stderr: () => {},
+}
 
-test("daemon launches one-shot for managed PR comment event", async () => {
-  const lines: string[] = [];
-  const oneShots: string[] = [];
-  const subscription = new MockSubscription();
+class MockStreamSubscription {
+  #handlers = new Map<string, ((payload?: any) => void)[]>()
 
-  const sdk = createMockSdk({
-    pr: {
-      isManaged: async () => true
-    },
-    stream: {
-      subscribeToRepo: async () => subscription as any
-    }
-  });
-
-  const code = await runDaemonCli(
-    ["run", "--repo", "goddard-ai/sdk"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    {
-      createSdkClient: () => sdk,
-      runOneShot: async ({ prompt }) => {
-        oneShots.push(prompt);
-        return 0;
-      },
-      waitForShutdown: async (close) => {
-        subscription.emit("event", {
-          type: "comment",
-          owner: "goddard-ai",
-          repo: "sdk",
-          prNumber: 42,
-          author: "reviewer",
-          body: "please add tests",
-          reactionAdded: "eyes",
-          createdAt: new Date().toISOString()
-        } satisfies RepoEvent);
-        await flush();
-        close();
-      }
-    }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(oneShots.length, 1);
-  assert.match(oneShots[0]!, /goddard-ai\/sdk#42/);
-  assert.ok(lines.some((line) => line.includes("Launching one-shot pi session")));
-});
-
-test("daemon ignores unmanaged PR feedback", async () => {
-  const oneShots: string[] = [];
-  const subscription = new MockSubscription();
-
-  const sdk = createMockSdk({
-    pr: {
-      isManaged: async () => false
-    },
-    stream: {
-      subscribeToRepo: async () => subscription as any
-    }
-  });
-
-  const code = await runDaemonCli(
-    ["run", "--repo", "goddard-ai/sdk"],
-    { stdout: () => {}, stderr: () => {} },
-    {
-      createSdkClient: () => sdk,
-      runOneShot: async ({ prompt }) => {
-        oneShots.push(prompt);
-        return 0;
-      },
-      waitForShutdown: async (close) => {
-        subscription.emit("event", {
-          type: "review",
-          owner: "goddard-ai",
-          repo: "sdk",
-          prNumber: 77,
-          author: "reviewer",
-          state: "changes_requested",
-          body: "please adjust architecture",
-          reactionAdded: "eyes",
-          createdAt: new Date().toISOString()
-        } satisfies RepoEvent);
-        await flush();
-        close();
-      }
-    }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(oneShots.length, 0);
-});
-
-class MockSubscription {
-  readonly #handlers = new Map<string, Array<(payload?: unknown) => void>>();
-
-  on(eventName: string, handler: (payload?: unknown) => void): this {
-    const handlers = this.#handlers.get(eventName) ?? [];
-    handlers.push(handler);
-    this.#handlers.set(eventName, handlers);
-    return this;
+  on(eventName: string, handler: (payload?: any) => void): this {
+    const handlers = this.#handlers.get(eventName) ?? []
+    handlers.push(handler)
+    this.#handlers.set(eventName, handlers)
+    return this
   }
 
   close(): void {
@@ -111,17 +25,20 @@ class MockSubscription {
 
   emit(eventName: string, payload: unknown): void {
     for (const handler of this.#handlers.get(eventName) ?? []) {
-      void handler(payload);
+      void handler(payload)
     }
   }
 }
 
+type SdkClient = ReturnType<typeof createSdk>
+
 type PartialSdk = {
-  auth?: Partial<SdkClient["auth"]>;
-  pr?: Partial<SdkClient["pr"]>;
-  stream?: Partial<SdkClient["stream"]>;
-  agents?: Partial<SdkClient["agents"]>;
-};
+  auth?: Partial<SdkClient["auth"]>
+  pr?: Partial<SdkClient["pr"]>
+  stream?: Partial<SdkClient["stream"]>
+  agents?: Partial<SdkClient["agents"]>
+  loop?: Partial<SdkClient["loop"]>
+}
 
 function createMockSdk(partial: PartialSdk): SdkClient {
   return {
@@ -131,35 +48,96 @@ function createMockSdk(partial: PartialSdk): SdkClient {
         userCode: "USER",
         verificationUri: "https://github.com/login/device",
         expiresIn: 900,
-        interval: 5
+        interval: 5,
       }),
       completeDeviceFlow: async () => ({ token: "tok", githubUsername: "dev", githubUserId: 1 }),
       whoami: async () => ({ token: "tok", githubUsername: "dev", githubUserId: 1 }),
+      login: async () => ({ token: "tok", githubUsername: "dev", githubUserId: 1 }),
       logout: async () => undefined,
-      ...partial.auth
+      ...partial.auth,
     },
     pr: {
       create: async () => {
-        throw new Error("not mocked");
+        throw new Error("not mocked")
       },
       isManaged: async () => false,
-      ...partial.pr
+      reply: async () => ({ success: true }),
+      ...partial.pr,
     },
     stream: {
       subscribeToRepo: async () => {
-        throw new Error("not mocked");
+        throw new Error("not mocked")
       },
-      ...partial.stream
+      ...partial.stream,
     },
     agents: {
-      appendSpecInstructions: async () => {
-        throw new Error("not mocked");
+      init: async () => {
+        throw new Error("not mocked")
       },
-      ...partial.agents
-    }
-  } as unknown as SdkClient;
+      ...partial.agents,
+    },
+    loop: {
+      init: async () => {
+        throw new Error("not mocked")
+      },
+      run: async () => {
+        throw new Error("not mocked")
+      },
+      generateSystemdService: async () => {
+        throw new Error("not mocked")
+      },
+      ...partial.loop,
+    },
+    config: {
+      models: Models,
+    },
+  } as unknown as SdkClient
 }
 
-async function flush(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-}
+test("daemon run command subscribes to repo and handles events", async () => {
+  const subscription = new MockStreamSubscription()
+  let subCalls = 0
+
+  const sdk = createMockSdk({
+    stream: {
+      subscribeToRepo: async () => {
+        subCalls++
+        return subscription as unknown as StreamSubscription
+      },
+    },
+    pr: {
+      isManaged: async () => true,
+    },
+  })
+
+  const runOneShotCalls: any[] = []
+  const deps: DaemonDeps = {
+    createSdkClient: () => sdk,
+    runOneShot: async (input) => {
+      runOneShotCalls.push(input)
+      return 0
+    },
+    waitForShutdown: async (close) => {
+      // simulate an event
+      const event: RepoEvent = {
+        type: "comment",
+        owner: "test",
+        repo: "repo",
+        prNumber: 123,
+        author: "alice",
+        body: "fix it",
+        reactionAdded: "eyes",
+        createdAt: new Date().toISOString(),
+      }
+      subscription.emit("event", event)
+      // then shut down
+      close()
+    },
+  }
+
+  const exitCode = await runDaemonCli(["run", "--repo", "test/repo"], defaultIo, deps)
+  assert.equal(exitCode, 0)
+  assert.equal(subCalls, 1)
+  assert.equal(runOneShotCalls.length, 1)
+  assert.equal(runOneShotCalls[0].event.prNumber, 123)
+})

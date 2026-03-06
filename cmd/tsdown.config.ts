@@ -1,11 +1,11 @@
-import { defineConfig } from 'tsdown';
+import { defineConfig } from "tsdown"
 
 export default defineConfig({
-  entry: ['./src/cli.ts', './src/index.ts'],
-  format: 'esm',
-  target: 'node18',
+  entry: ["./src/cli.ts", "./src/index.ts"],
+  format: "esm",
+  target: "node18",
   clean: true,
-  outDir: 'dist',
-  outExtension: () => ({ js: '.mjs' }),
+  outDir: "dist",
+  outExtension: () => ({ js: ".mjs" }),
   treeshake: true,
-});
+})

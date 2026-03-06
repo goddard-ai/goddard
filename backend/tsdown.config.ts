@@ -1,12 +1,9 @@
 import { defineConfig } from "tsdown"
-import unpluginRaw from "unplugin-raw/rollup"
 
 export default defineConfig({
-  entry: ["./src/index.ts", "./src/node/index.ts"],
+  entry: ["./src/server.ts"],
   format: "esm",
   target: "node18",
   clean: true,
   outDir: "dist",
-  dts: true,
-  plugins: [unpluginRaw()],
 })

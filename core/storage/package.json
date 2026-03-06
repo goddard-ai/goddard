@@ -9,14 +9,16 @@
   },
   "scripts": {
     "build": "tsc",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@goddard-ai/sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
-  },
-  "dependencies": {
-    "@goddard-ai/sdk": "workspace:*"
   }
 }

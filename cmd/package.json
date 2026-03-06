@@ -1,9 +1,24 @@
 {
   "name": "@goddard-ai/cmd",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
+  "bin": {
+    "goddard": "./dist/cli.mjs"
+  },
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./dist/cli.mjs"
+  },
+  "scripts": {
+    "goddard": "node dist/cli.mjs",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "tsdown"
+  },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@goddard-ai/sdk": "workspace:*",
@@ -11,20 +26,8 @@
     "cron-parser": "^4.9.0",
     "zod": "^3.24.2"
   },
-  "bin": {
-    "goddard": "./dist/cli.mjs"
-  },
-  "exports": {
-    ".": "./src/index.ts",
-    "./cli": "./dist/cli.mjs"
-  },
-  "scripts": {
-    "goddard": "node dist/cli.mjs",
-    "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "build": "tsdown"
-  },
   "devDependencies": {
+    "@goddard-ai/config": "workspace:^",
     "tsdown": "^0.20.3"
   }
 }

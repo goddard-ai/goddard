@@ -1,4 +1,10 @@
 {
   "extends": "../tsconfig.base.json",
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@goddard-ai/sdk": ["../sdk/src/index.ts"]
+    }
+  },
+  "include": ["raw.d.ts", "src/**/*.ts", "test/**/*.ts"]
 }

@@ -1,6 +1,6 @@
-import adapter from "@hattip/adapter-cloudflare-workers/no-static";
-import type { Env } from "./env.ts";
-import { createBackendRouter } from "./router.ts";
+import adapter from "@hattip/adapter-cloudflare-workers/no-static"
+import type { Env } from "./env.ts"
+import { createBackendRouter } from "./router.ts"
 
 const router = createBackendRouter({
   broadcastToRepo: async (_env, _owner, _repo, _event) => {
@@ -10,30 +10,30 @@ const router = createBackendRouter({
     // invocation is not possible in pure Workers.
   },
   handleRepoStream: async (_env, _owner, _repo, request) => {
-    return createSseStream(request);
-  }
-});
+    return createSseStream(request)
+  },
+})
 
 export default {
-  fetch: adapter(router)
-} satisfies ExportedHandler<Env>;
+  fetch: adapter(router),
+} satisfies ExportedHandler<Env>
 
-function createSseStream(request: Request): Response {
-  const encoder = new TextEncoder();
+function createSseStream(_request: Request): Response {
+  const encoder = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode(": connected\n\n"));
+      controller.enqueue(encoder.encode(": connected\n\n"))
     },
-    cancel() {}
-  });
+    cancel() {},
+  })
 
   return new Response(stream, {
     status: 200,
     headers: {
       "content-type": "text/event-stream",
       "cache-control": "no-cache, no-transform",
-      connection: "keep-alive"
-    }
-  });
+      connection: "keep-alive",
+    },
+  })
 }

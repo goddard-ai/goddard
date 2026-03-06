@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod"
 
 // ---------------------------------------------------------------------------
 // Models
@@ -47,9 +47,9 @@ export const Models = {
     /** `openai/gpt-5.3-codex` */
     Gpt53Codex: "openai/gpt-5.3-codex",
   },
-} as const;
+} as const
 
-type _ValueOf<T> = T[keyof T];
+type _ValueOf<T> = T[keyof T]
 
 /**
  * A model identifier string.
@@ -68,13 +68,13 @@ type _ValueOf<T> = T[keyof T];
 export type Model =
   | _ValueOf<typeof Models.Anthropic>
   | _ValueOf<typeof Models.OpenAi>
-  | (string & {});
+  | (string & {})
 
 // ---------------------------------------------------------------------------
 // Primitive schemas
 // ---------------------------------------------------------------------------
 
-const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"])
 
 /**
  * Controls how much extended thinking budget the agent receives per turn.
@@ -84,7 +84,7 @@ const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "
  *   larger budgets. Higher levels improve reasoning quality but increase
  *   latency and token cost.
  */
-export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>;
+export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
 
 // ---------------------------------------------------------------------------
 // CycleContext
@@ -93,13 +93,13 @@ export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>;
 const cycleContextSchema = z.object({
   cycleNumber: z.number(),
   lastSummary: z.string().optional(),
-});
+})
 
 /**
  * Snapshot of loop state passed to {@link CycleStrategy.nextPrompt} at the
  * start of every cycle.
  */
-export type CycleContext = z.infer<typeof cycleContextSchema>;
+export type CycleContext = z.infer<typeof cycleContextSchema>
 
 // ---------------------------------------------------------------------------
 // CycleStrategy
@@ -111,16 +111,16 @@ export type CycleContext = z.infer<typeof cycleContextSchema>;
 // ---------------------------------------------------------------------------
 
 type _CycleStrategyShape = {
-  nextPrompt(ctx: CycleContext): string;
-};
+  nextPrompt(ctx: CycleContext): string
+}
 
 const cycleStrategySchema = z.custom<_CycleStrategyShape>(
   (val) =>
     typeof val === "object" &&
     val !== null &&
     typeof (val as _CycleStrategyShape).nextPrompt === "function",
-  "Strategy must have a nextPrompt method"
-);
+  "Strategy must have a nextPrompt method",
+)
 
 /**
  * Determines the prompt sent to the agent at the start of each cycle.
@@ -138,7 +138,7 @@ const cycleStrategySchema = z.custom<_CycleStrategyShape>(
  * };
  * ```
  */
-export type CycleStrategy = z.infer<typeof cycleStrategySchema>;
+export type CycleStrategy = z.infer<typeof cycleStrategySchema>
 
 // ---------------------------------------------------------------------------
 // Agent sub-schema
@@ -153,7 +153,7 @@ const agentSchema = z
     thinkingLevel: thinkingLevelSchema.optional(),
     agentDir: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
 
 /**
  * Configuration for the underlying pi coding agent.
@@ -172,7 +172,7 @@ const agentSchema = z
  * (`passthrough`), so you can supply provider-specific options without
  * needing a type cast.
  */
-export type PiAgentConfig = z.infer<typeof agentSchema>;
+export type PiAgentConfig = z.infer<typeof agentSchema>
 
 // ---------------------------------------------------------------------------
 // configSchema (top-level)
@@ -229,11 +229,11 @@ export const configSchema = z
           .custom<
             (
               error: unknown,
-              context: { cycle: number; attempt: number; maxAttempts: number }
+              context: { cycle: number; attempt: number; maxAttempts: number },
             ) => boolean
           >(
             (val) => val === undefined || typeof val === "function",
-            "retries.retryableErrors must be a function"
+            "retries.retryableErrors must be a function",
           )
           .optional(),
       })
@@ -271,9 +271,9 @@ export const configSchema = z
         code: z.ZodIssueCode.custom,
         path: ["retries", "maxDelayMs"],
         message: `retries.maxDelayMs (${config.retries.maxDelayMs}) must be >= retries.initialDelayMs (${config.retries.initialDelayMs}).`,
-      });
+      })
     }
-  });
+  })
 
 /**
  * Full configuration object for a Goddard agent loop.
@@ -305,7 +305,7 @@ export const configSchema = z
  * });
  * ```
  */
-export type GoddardLoopConfig = z.infer<typeof configSchema>;
+export type GoddardLoopConfig = z.infer<typeof configSchema>
 
 // ---------------------------------------------------------------------------
 // defineConfig
@@ -331,5 +331,5 @@ export type GoddardLoopConfig = z.infer<typeof configSchema>;
  * ```
  */
 export function defineConfig(config: GoddardLoopConfig): GoddardLoopConfig {
-  return config;
+  return config
 }

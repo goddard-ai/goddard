@@ -1,39 +1,39 @@
-import { join } from "node:path";
-import { homedir } from "node:os";
-import { access } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { join } from "node:path"
+import { homedir } from "node:os"
+import { access } from "node:fs/promises"
+import { constants as fsConstants } from "node:fs"
 
 export function getGoddardGlobalDir(): string {
-  return join(homedir(), ".goddard");
+  return join(homedir(), ".goddard")
 }
 
 export function getGlobalConfigPath(): string {
-  return join(getGoddardGlobalDir(), "config.ts");
+  return join(getGoddardGlobalDir(), "config.ts")
 }
 
 export function getLocalConfigPath(): string {
-  return join(process.cwd(), ".goddard", "config.ts");
+  return join(process.cwd(), ".goddard", "config.ts")
 }
 
 export async function fileExists(path: string): Promise<boolean> {
   try {
-    await access(path, fsConstants.F_OK);
-    return true;
+    await access(path, fsConstants.F_OK)
+    return true
   } catch {
-    return false;
+    return false
   }
 }
 
 export async function resolveLoopConfigPath(): Promise<string | null> {
-  const localPath = getLocalConfigPath();
+  const localPath = getLocalConfigPath()
   if (await fileExists(localPath)) {
-    return localPath;
+    return localPath
   }
 
-  const globalPath = getGlobalConfigPath();
+  const globalPath = getGlobalConfigPath()
   if (await fileExists(globalPath)) {
-    return globalPath;
+    return globalPath
   }
 
-  return null;
+  return null
 }

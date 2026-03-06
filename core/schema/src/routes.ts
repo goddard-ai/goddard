@@ -1,5 +1,5 @@
-import { $type, route } from "rouzer";
-import * as z from "zod/mini";
+import { $type, route } from "rouzer"
+import * as z from "zod/mini"
 import type {
   AuthSession,
   CreatePrInput,
@@ -8,38 +8,38 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent
-} from "./types.ts";
+  RepoEvent,
+} from "./types.ts"
 
 const bearerHeaderSchema = z.object({
-  authorization: z.string()
-});
+  authorization: z.string(),
+})
 
 export const authDeviceStartRoute = route("auth/device/start", {
   POST: {
     body: z.object({
-      githubUsername: z.optional(z.string())
+      githubUsername: z.optional(z.string()),
     }),
-    response: $type<DeviceFlowSession>()
-  }
-});
+    response: $type<DeviceFlowSession>(),
+  },
+})
 
 export const authDeviceCompleteRoute = route("auth/device/complete", {
   POST: {
     body: z.object({
       deviceCode: z.string(),
-      githubUsername: z.string()
+      githubUsername: z.string(),
     }),
-    response: $type<AuthSession>()
-  }
-});
+    response: $type<AuthSession>(),
+  },
+})
 
 export const authSessionRoute = route("auth/session", {
   GET: {
     headers: bearerHeaderSchema,
-    response: $type<AuthSession>()
-  }
-});
+    response: $type<AuthSession>(),
+  },
+})
 
 export const prCreateRoute = route("pr/create", {
   POST: {
@@ -50,11 +50,11 @@ export const prCreateRoute = route("pr/create", {
       title: z.string(),
       body: z.optional(z.string()),
       head: z.string(),
-      base: z.string()
+      base: z.string(),
     }),
-    response: $type<PullRequestRecord>()
-  }
-});
+    response: $type<PullRequestRecord>(),
+  },
+})
 
 export const prReplyRoute = route("pr/reply", {
   POST: {
@@ -63,11 +63,11 @@ export const prReplyRoute = route("pr/reply", {
       owner: z.string(),
       repo: z.string(),
       prNumber: z.number(),
-      body: z.string()
+      body: z.string(),
     }),
-    response: $type<{ success: boolean }>()
-  }
-});
+    response: $type<{ success: boolean }>(),
+  },
+})
 
 export const prManagedRoute = route("pr/managed", {
   GET: {
@@ -75,11 +75,11 @@ export const prManagedRoute = route("pr/managed", {
     query: z.object({
       owner: z.string(),
       repo: z.string(),
-      prNumber: z.coerce.number()
+      prNumber: z.coerce.number(),
     }),
-    response: $type<{ managed: boolean }>()
-  }
-});
+    response: $type<{ managed: boolean }>(),
+  },
+})
 
 export const githubWebhookRoute = route("webhooks/github", {
   POST: {
@@ -90,7 +90,7 @@ export const githubWebhookRoute = route("webhooks/github", {
         repo: z.string(),
         prNumber: z.number(),
         author: z.string(),
-        body: z.string()
+        body: z.string(),
       }),
       z.object({
         type: z.literal("pull_request_review"),
@@ -99,27 +99,27 @@ export const githubWebhookRoute = route("webhooks/github", {
         prNumber: z.number(),
         author: z.string(),
         state: z.enum(["approved", "changes_requested", "commented"]),
-        body: z.string()
-      })
+        body: z.string(),
+      }),
     ]),
-    response: $type<RepoEvent>()
-  }
-});
+    response: $type<RepoEvent>(),
+  },
+})
 
 export const repoStreamRoute = route("stream", {
   GET: {
     headers: bearerHeaderSchema,
     query: z.object({
       owner: z.string(),
-      repo: z.string()
-    })
-  }
-});
+      repo: z.string(),
+    }),
+  },
+})
 
 export type {
   CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowStart,
   GitHubWebhookInput,
-  ReplyPrInput
-} from "./types.ts";
+  ReplyPrInput,
+} from "./types.ts"

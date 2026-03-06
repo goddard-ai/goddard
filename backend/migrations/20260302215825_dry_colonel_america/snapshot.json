@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "4d092f2f-49ca-47d2-8b9b-83ed6e5295d5",
-  "prevIds": [
-    "00000000-0000-0000-0000-000000000000"
-  ],
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
   "ddl": [
     {
       "name": "auth_sessions",
@@ -209,13 +207,9 @@
       "table": "users"
     },
     {
-      "columns": [
-        "github_user_id"
-      ],
+      "columns": ["github_user_id"],
       "tableTo": "users",
-      "columnsTo": [
-        "github_user_id"
-      ],
+      "columnsTo": ["github_user_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -224,27 +218,21 @@
       "table": "auth_sessions"
     },
     {
-      "columns": [
-        "token"
-      ],
+      "columns": ["token"],
       "nameExplicit": false,
       "name": "auth_sessions_pk",
       "table": "auth_sessions",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "pull_requests_pk",
       "table": "pull_requests",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "github_user_id"
-      ],
+      "columns": ["github_user_id"],
       "nameExplicit": false,
       "name": "users_pk",
       "table": "users",

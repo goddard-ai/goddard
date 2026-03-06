@@ -1,6 +1,6 @@
-import { createClient, type Client } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import * as schema from "./schema.ts";
+import { type Client } from "@libsql/client"
+import { drizzle } from "drizzle-orm/libsql"
+import * as schema from "./schema.ts"
 import type {
   AuthSession,
   CreatePrInput,
@@ -9,28 +9,29 @@ import type {
   DeviceFlowStart,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent
-} from "@goddard-ai/schema";
-import { eq, and, gt } from "drizzle-orm";
-import { type BackendControlPlane, HttpError, assertRepo, postPrCommentViaApp } from "./control-plane.ts";
-import { randomUUID } from "node:crypto";
-import type { Env } from "./env.ts";
+  RepoEvent,
+} from "@goddard-ai/schema"
+import { eq, and, gt } from "drizzle-orm"
+import {
+  type BackendControlPlane,
+  HttpError,
+  assertRepo,
+  postPrCommentViaApp,
+} from "./control-plane.ts"
+import { randomUUID } from "node:crypto"
+import type { Env } from "./env.ts"
 
 export class TursoBackendControlPlane implements BackendControlPlane {
-  readonly #db: ReturnType<typeof drizzle<typeof schema>>;
+  readonly #db: ReturnType<typeof drizzle<typeof schema>>
 
-  readonly #env?: Env;
-
-  constructor(client: Client, env?: Env) {
-    this.#db = drizzle({ client, schema });
-    this.#env = env;
+  constructor(client: Client, _env?: Env) {
+    this.#db = drizzle({ client, schema })
   }
 
-  async startDeviceFlow(input: DeviceFlowStart = {}): Promise<DeviceFlowSession> {
-    const githubUsername = input.githubUsername?.trim() || "developer";
-    const deviceCode = `dev_${randomUUID()}`;
-    const userCode = randomUUID().slice(0, 8).toUpperCase();
-    const expiresIn = 900;
+  async startDeviceFlow(_input: DeviceFlowStart = {}): Promise<DeviceFlowSession> {
+    const deviceCode = `dev_${randomUUID()}`
+    const userCode = randomUUID().slice(0, 8).toUpperCase()
+    const expiresIn = 900
 
     // In a real production app, we would store this in Turso or KV.
     // For now we'll focus on the core data records.
@@ -39,19 +40,19 @@ export class TursoBackendControlPlane implements BackendControlPlane {
       userCode,
       verificationUri: "https://github.com/login/device",
       expiresIn,
-      interval: 5
-    };
+      interval: 5,
+    }
   }
 
   async completeDeviceFlow(input: DeviceFlowComplete): Promise<AuthSession> {
-    const githubUsername = input.githubUsername.trim();
+    const githubUsername = input.githubUsername.trim()
     if (!githubUsername) {
-      throw new HttpError(400, "githubUsername is required");
+      throw new HttpError(400, "githubUsername is required")
     }
 
-    const token = `tok_${randomUUID()}`;
-    const githubUserId = hashToInteger(githubUsername);
-    const expiresAt = Date.now() + 1000 * 60 * 60 * 24;
+    const token = `tok_${randomUUID()}`
+    const githubUserId = hashToInteger(githubUsername)
+    const expiresAt = Date.now() + 1000 * 60 * 60 * 24
 
     await this.#db.transaction(async (tx) => {
       await tx
@@ -59,23 +60,23 @@ export class TursoBackendControlPlane implements BackendControlPlane {
         .values({
           githubUserId,
           githubUsername,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         })
         .onConflictDoUpdate({
           target: schema.users.githubUserId,
-          set: { githubUsername }
-        });
+          set: { githubUsername },
+        })
 
       await tx.insert(schema.authSessions).values({
         token,
         githubUserId,
         githubUsername,
         expiresAt,
-        createdAt: new Date().toISOString()
-      });
-    });
+        createdAt: new Date().toISOString(),
+      })
+    })
 
-    return { token, githubUsername, githubUserId };
+    return { token, githubUsername, githubUserId }
   }
 
   async getSession(token: string): Promise<AuthSession> {
@@ -83,33 +84,31 @@ export class TursoBackendControlPlane implements BackendControlPlane {
       .select()
       .from(schema.authSessions)
       .where(
-        and(
-          eq(schema.authSessions.token, token),
-          gt(schema.authSessions.expiresAt, Date.now())
-        )
+        and(eq(schema.authSessions.token, token), gt(schema.authSessions.expiresAt, Date.now())),
       )
-      .limit(1);
+      .limit(1)
 
     if (!session) {
-      throw new HttpError(401, "Invalid or expired session");
+      throw new HttpError(401, "Invalid or expired session")
     }
 
     return {
       token: session.token,
       githubUsername: session.githubUsername,
-      githubUserId: session.githubUserId
-    };
+      githubUserId: session.githubUserId,
+    }
   }
 
   async createPr(token: string, input: CreatePrInput): Promise<PullRequestRecord> {
-    const session = await this.getSession(token);
-    assertRepo(input.owner, input.repo);
+    const session = await this.getSession(token)
+    assertRepo(input.owner, input.repo)
     if (!input.title.trim()) {
-      throw new HttpError(400, "title is required");
+      throw new HttpError(400, "title is required")
     }
 
-    const now = new Date().toISOString();
-    const body = `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim();
+    const now = new Date().toISOString()
+    const body =
+      `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
 
     const [inserted] = await this.#db
       .insert(schema.pullRequests)
@@ -123,39 +122,53 @@ export class TursoBackendControlPlane implements BackendControlPlane {
         base: input.base,
         url: `https://github.com/${input.owner}/${input.repo}/pull/0`,
         createdBy: session.githubUsername,
-        createdAt: now
+        createdAt: now,
       })
-      .returning();
+      .returning()
 
-    const finalNumber = inserted.id;
-    const finalUrl = `https://github.com/${input.owner}/${input.repo}/pull/${finalNumber}`;
+    const finalNumber = inserted.id
+    const finalUrl = `https://github.com/${input.owner}/${input.repo}/pull/${finalNumber}`
     await this.#db
       .update(schema.pullRequests)
       .set({ number: finalNumber, url: finalUrl })
-      .where(eq(schema.pullRequests.id, inserted.id));
+      .where(eq(schema.pullRequests.id, inserted.id))
 
-    return { ...inserted, number: finalNumber, url: finalUrl, body: inserted.body ?? "" };
+    return { ...inserted, number: finalNumber, url: finalUrl, body: inserted.body ?? "" }
   }
 
-  async replyToPr(token: string, input: { owner: string; repo: string; prNumber: number; body: string }, env?: Env): Promise<void> {
-    const session = await this.getSession(token);
-    assertRepo(input.owner, input.repo);
+  async replyToPr(
+    token: string,
+    input: { owner: string; repo: string; prNumber: number; body: string },
+    env?: Env,
+  ): Promise<void> {
+    const session = await this.getSession(token)
+    assertRepo(input.owner, input.repo)
     if (!input.body.trim()) {
-      throw new HttpError(400, "body is required");
+      throw new HttpError(400, "body is required")
     }
 
-    const managed = await this.isManagedPr(input.owner, input.repo, input.prNumber, session.githubUsername);
+    const managed = await this.isManagedPr(
+      input.owner,
+      input.repo,
+      input.prNumber,
+      session.githubUsername,
+    )
     if (!managed) {
-      throw new HttpError(403, "Cannot reply to a PR that is not managed by you");
+      throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
 
-    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body);
+    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
   }
 
-  async isManagedPr(owner: string, repo: string, prNumber: number, githubUsername: string): Promise<boolean> {
-    assertRepo(owner, repo);
+  async isManagedPr(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    githubUsername: string,
+  ): Promise<boolean> {
+    assertRepo(owner, repo)
     if (!Number.isInteger(prNumber) || prNumber <= 0) {
-      throw new HttpError(400, "prNumber must be a positive integer");
+      throw new HttpError(400, "prNumber must be a positive integer")
     }
 
     const [match] = await this.#db
@@ -166,18 +179,18 @@ export class TursoBackendControlPlane implements BackendControlPlane {
           eq(schema.pullRequests.owner, owner),
           eq(schema.pullRequests.repo, repo),
           eq(schema.pullRequests.number, prNumber),
-          eq(schema.pullRequests.createdBy, githubUsername)
-        )
+          eq(schema.pullRequests.createdBy, githubUsername),
+        ),
       )
-      .limit(1);
+      .limit(1)
 
-    return Boolean(match);
+    return Boolean(match)
   }
 
   async handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> {
-    assertRepo(event.owner, event.repo);
+    assertRepo(event.owner, event.repo)
 
-    const createdAt = new Date().toISOString();
+    const createdAt = new Date().toISOString()
     const mapped: RepoEvent =
       event.type === "issue_comment"
         ? {
@@ -188,7 +201,7 @@ export class TursoBackendControlPlane implements BackendControlPlane {
             author: event.author,
             body: event.body,
             reactionAdded: "eyes",
-            createdAt
+            createdAt,
           }
         : {
             type: "review",
@@ -199,18 +212,18 @@ export class TursoBackendControlPlane implements BackendControlPlane {
             state: event.state,
             body: event.body,
             reactionAdded: "eyes",
-            createdAt
-          };
+            createdAt,
+          }
 
-    return mapped;
+    return mapped
   }
 }
 
 function hashToInteger(value: string): number {
-  let hash = 0;
+  let hash = 0
   for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
   }
-  return Math.abs(hash) + 1000;
+  return Math.abs(hash) + 1000
 }

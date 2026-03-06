@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { createServer as createNodeServer } from "@hattip/adapter-node";
-import type { Env } from "./env.ts";
+import { randomUUID } from "node:crypto"
+import { createServer as createNodeServer } from "@hattip/adapter-node"
+import type { Env } from "./env.ts"
 import {
   type AuthSession,
   type CreatePrInput,
@@ -9,113 +9,119 @@ import {
   type DeviceFlowStart,
   type GitHubWebhookInput,
   type PullRequestRecord,
-  type RepoEvent
-} from "@goddard-ai/schema";
-import { type BackendControlPlane, HttpError, assertRepo, postPrCommentViaApp } from "./control-plane.ts";
-import { createBackendRouter } from "./router.ts";
+  type RepoEvent,
+} from "@goddard-ai/schema"
+import {
+  type BackendControlPlane,
+  HttpError,
+  assertRepo,
+  postPrCommentViaApp,
+} from "./control-plane.ts"
+import { createBackendRouter } from "./router.ts"
 
-type SessionRecord = AuthSession & { expiresAt: number };
-type DeviceSessionRecord = { githubUsername: string; createdAt: number; expiresAt: number };
+type SessionRecord = AuthSession & { expiresAt: number }
+type DeviceSessionRecord = { githubUsername: string; createdAt: number; expiresAt: number }
 type StreamSink = {
-  send: (payload: string) => void;
-  close?: () => void;
-};
+  send: (payload: string) => void
+  close?: () => void
+}
 
-const DEVICE_FLOW_EXPIRES_IN_SECONDS = 900;
-const DEVICE_FLOW_INTERVAL_SECONDS = 5;
-const AUTH_SESSION_TTL_MS = 1000 * 60 * 60 * 24;
+const DEVICE_FLOW_EXPIRES_IN_SECONDS = 900
+const DEVICE_FLOW_INTERVAL_SECONDS = 5
+const AUTH_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 
 type StartServerOptions = {
-  port?: number;
-  host?: string;
-};
+  port?: number
+  host?: string
+}
 
 export type BackendServer = {
-  port: number;
-  close: () => Promise<void>;
-};
+  port: number
+  close: () => Promise<void>
+}
 
 export class InMemoryBackendControlPlane implements BackendControlPlane {
-  #deviceSessions = new Map<string, DeviceSessionRecord>();
-  #authSessions = new Map<string, SessionRecord>();
-  #pullRequests: PullRequestRecord[] = [];
-  #streamsByRepo = new Map<string, Set<StreamSink>>();
-  #nextPrId = 1;
+  #deviceSessions = new Map<string, DeviceSessionRecord>()
+  #authSessions = new Map<string, SessionRecord>()
+  #pullRequests: PullRequestRecord[] = []
+  #streamsByRepo = new Map<string, Set<StreamSink>>()
+  #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
-    const githubUsername = input.githubUsername?.trim() || "developer";
-    const deviceCode = `dev_${randomUUID()}`;
-    const userCode = randomUUID().slice(0, 8).toUpperCase();
-    const createdAt = Date.now();
+    const githubUsername = input.githubUsername?.trim() || "developer"
+    const deviceCode = `dev_${randomUUID()}`
+    const userCode = randomUUID().slice(0, 8).toUpperCase()
+    const createdAt = Date.now()
 
     this.#deviceSessions.set(deviceCode, {
       githubUsername,
       createdAt,
-      expiresAt: createdAt + DEVICE_FLOW_EXPIRES_IN_SECONDS * 1000
-    });
+      expiresAt: createdAt + DEVICE_FLOW_EXPIRES_IN_SECONDS * 1000,
+    })
 
     return {
       deviceCode,
       userCode,
       verificationUri: "https://github.com/login/device",
       expiresIn: DEVICE_FLOW_EXPIRES_IN_SECONDS,
-      interval: DEVICE_FLOW_INTERVAL_SECONDS
-    };
+      interval: DEVICE_FLOW_INTERVAL_SECONDS,
+    }
   }
 
   completeDeviceFlow(input: DeviceFlowComplete): AuthSession {
-    const pending = this.#deviceSessions.get(input.deviceCode);
+    const pending = this.#deviceSessions.get(input.deviceCode)
     if (!pending) {
-      throw new HttpError(404, "Unknown device code");
+      throw new HttpError(404, "Unknown device code")
     }
 
     if (pending.expiresAt <= Date.now()) {
-      this.#deviceSessions.delete(input.deviceCode);
-      throw new HttpError(410, "Device code expired");
+      this.#deviceSessions.delete(input.deviceCode)
+      throw new HttpError(410, "Device code expired")
     }
 
-    const githubUsername = input.githubUsername.trim();
+    const githubUsername = input.githubUsername.trim()
     if (!githubUsername) {
-      throw new HttpError(400, "githubUsername is required");
+      throw new HttpError(400, "githubUsername is required")
     }
 
-    const expiresAt = Date.now() + AUTH_SESSION_TTL_MS;
+    const expiresAt = Date.now() + AUTH_SESSION_TTL_MS
     const session: SessionRecord = {
       token: `tok_${randomUUID()}`,
       githubUsername,
       githubUserId: hashToInteger(githubUsername),
-      expiresAt
-    };
+      expiresAt,
+    }
 
-    this.#authSessions.set(session.token, session);
-    this.#deviceSessions.delete(input.deviceCode);
+    this.#authSessions.set(session.token, session)
+    this.#deviceSessions.delete(input.deviceCode)
 
-    return toPublicSession(session);
+    return toPublicSession(session)
   }
 
   getSession(token: string): AuthSession {
-    const session = this.#authSessions.get(token);
+    const session = this.#authSessions.get(token)
     if (!session) {
-      throw new HttpError(401, "Invalid token");
+      throw new HttpError(401, "Invalid token")
     }
 
     if (session.expiresAt <= Date.now()) {
-      this.#authSessions.delete(token);
-      throw new HttpError(401, "Session expired");
+      this.#authSessions.delete(token)
+      throw new HttpError(401, "Session expired")
     }
 
-    return toPublicSession(session);
+    return toPublicSession(session)
   }
 
   createPr(token: string, input: CreatePrInput): PullRequestRecord {
-    const session = this.getSession(token);
-    assertRepo(input.owner, input.repo);
+    const session = this.getSession(token)
+    assertRepo(input.owner, input.repo)
     if (!input.title.trim()) {
-      throw new HttpError(400, "title is required");
+      throw new HttpError(400, "title is required")
     }
 
-    const prNumber = this.#pullRequests.length + 1;
-    const body = `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim();
+    const prNumber = this.#pullRequests.length + 1
+    const body =
+      `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
 
     const record: PullRequestRecord = {
       id: this.#nextPrId++,
@@ -128,10 +134,10 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
       base: input.base,
       url: `https://github.com/${input.owner}/${input.repo}/pull/${prNumber}`,
       createdBy: session.githubUsername,
-      createdAt: new Date().toISOString()
-    };
+      createdAt: new Date().toISOString(),
+    }
 
-    this.#pullRequests.push(record);
+    this.#pullRequests.push(record)
 
     this.broadcast({
       type: "pr.created",
@@ -140,31 +146,40 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
       prNumber: record.number,
       title: record.title,
       author: session.githubUsername,
-      createdAt: record.createdAt
-    });
+      createdAt: record.createdAt,
+    })
 
-    return record;
+    return record
   }
 
-  async replyToPr(token: string, input: { owner: string; repo: string; prNumber: number; body: string }, env?: Env): Promise<void> {
-    const session = this.getSession(token);
-    assertRepo(input.owner, input.repo);
+  async replyToPr(
+    token: string,
+    input: { owner: string; repo: string; prNumber: number; body: string },
+    env?: Env,
+  ): Promise<void> {
+    const session = this.getSession(token)
+    assertRepo(input.owner, input.repo)
     if (!input.body.trim()) {
-      throw new HttpError(400, "body is required");
+      throw new HttpError(400, "body is required")
     }
 
-    const managed = this.isManagedPr(input.owner, input.repo, input.prNumber, session.githubUsername);
+    const managed = this.isManagedPr(
+      input.owner,
+      input.repo,
+      input.prNumber,
+      session.githubUsername,
+    )
     if (!managed) {
-      throw new HttpError(403, "Cannot reply to a PR that is not managed by you");
+      throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
 
-    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body);
+    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
   }
 
   isManagedPr(owner: string, repo: string, prNumber: number, githubUsername: string): boolean {
-    assertRepo(owner, repo);
+    assertRepo(owner, repo)
     if (!Number.isInteger(prNumber) || prNumber <= 0) {
-      throw new HttpError(400, "prNumber must be a positive integer");
+      throw new HttpError(400, "prNumber must be a positive integer")
     }
 
     return this.#pullRequests.some(
@@ -172,14 +187,14 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
         pullRequest.owner === owner &&
         pullRequest.repo === repo &&
         pullRequest.number === prNumber &&
-        pullRequest.createdBy === githubUsername
-    );
+        pullRequest.createdBy === githubUsername,
+    )
   }
 
   handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
-    assertRepo(event.owner, event.repo);
+    assertRepo(event.owner, event.repo)
 
-    const createdAt = new Date().toISOString();
+    const createdAt = new Date().toISOString()
     const mapped: RepoEvent =
       event.type === "issue_comment"
         ? {
@@ -190,7 +205,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
             author: event.author,
             body: event.body,
             reactionAdded: "eyes",
-            createdAt
+            createdAt,
           }
         : {
             type: "review",
@@ -201,93 +216,93 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
             state: event.state,
             body: event.body,
             reactionAdded: "eyes",
-            createdAt
-          };
+            createdAt,
+          }
 
-    this.broadcast(mapped);
-    return mapped;
+    this.broadcast(mapped)
+    return mapped
   }
 
   addStreamSocket(repoKey: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
-      return;
+      return
     }
 
-    const room = this.#streamsByRepo.get(repoKey) ?? new Set<StreamSink>();
-    room.add(socket);
-    this.#streamsByRepo.set(repoKey, room);
+    const room = this.#streamsByRepo.get(repoKey) ?? new Set<StreamSink>()
+    room.add(socket)
+    this.#streamsByRepo.set(repoKey, room)
   }
 
   removeStreamSocket(repoKey: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
-      return;
+      return
     }
 
-    const room = this.#streamsByRepo.get(repoKey);
-    room?.delete(socket);
+    const room = this.#streamsByRepo.get(repoKey)
+    room?.delete(socket)
     if (room && room.size === 0) {
-      this.#streamsByRepo.delete(repoKey);
+      this.#streamsByRepo.delete(repoKey)
     }
   }
 
   broadcast(event: RepoEvent): void {
-    const repoKey = `${event.owner}/${event.repo}`;
-    const sockets = this.#streamsByRepo.get(repoKey);
+    const repoKey = `${event.owner}/${event.repo}`
+    const sockets = this.#streamsByRepo.get(repoKey)
     if (!sockets) {
-      return;
+      return
     }
 
-    const payload = JSON.stringify({ event });
+    const payload = JSON.stringify({ event })
     for (const socket of sockets) {
       try {
-        socket.send(payload);
+        socket.send(payload)
       } catch {
-        sockets.delete(socket);
-        socket.close?.();
+        sockets.delete(socket)
+        socket.close?.()
       }
     }
 
     if (sockets.size === 0) {
-      this.#streamsByRepo.delete(repoKey);
+      this.#streamsByRepo.delete(repoKey)
     }
   }
 }
 
 export async function startBackendServer(
   controlPlane: BackendControlPlane = new InMemoryBackendControlPlane(),
-  options: StartServerOptions = {}
+  options: StartServerOptions = {},
 ): Promise<BackendServer> {
-  const host = options.host ?? "127.0.0.1";
-  const port = options.port ?? 8787;
+  const host = options.host ?? "127.0.0.1"
+  const port = options.port ?? 8787
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
     broadcastToRepo: async (_env, _owner, _repo, event) => {
-      broadcastToInMemoryStreams(controlPlane, event);
+      broadcastToInMemoryStreams(controlPlane, event)
     },
     handleRepoStream: async (_env, owner, repo, request) => {
-      const repoKey = `${owner}/${repo}`;
+      const repoKey = `${owner}/${repo}`
       const sseSession = createSseSession(() => {
-        controlPlane.removeStreamSocket?.(repoKey, sseSession.sink);
-      });
+        controlPlane.removeStreamSocket?.(repoKey, sseSession.sink)
+      })
 
-      controlPlane.addStreamSocket?.(repoKey, sseSession.sink);
+      controlPlane.addStreamSocket?.(repoKey, sseSession.sink)
       request.signal.addEventListener(
         "abort",
         () => {
-          controlPlane.removeStreamSocket?.(repoKey, sseSession.sink);
-          sseSession.sink.close?.();
+          controlPlane.removeStreamSocket?.(repoKey, sseSession.sink)
+          sseSession.sink.close?.()
         },
-        { once: true }
-      );
+        { once: true },
+      )
 
-      return sseSession.response;
-    }
-  });
+      return sseSession.response
+    },
+  })
 
-  const httpServer = createNodeServer(router);
+  const httpServer = createNodeServer(router)
 
-  await new Promise<void>((resolve) => httpServer.listen(port, host, () => resolve()));
+  await new Promise<void>((resolve) => httpServer.listen(port, host, () => resolve()))
 
   return {
     port: Number((httpServer.address() as { port: number }).port),
@@ -295,65 +310,70 @@ export async function startBackendServer(
       await new Promise<void>((resolve, reject) => {
         httpServer.close((error) => {
           if (error) {
-            reject(error);
-            return;
+            reject(error)
+            return
           }
-          resolve();
-        });
-      });
-    }
-  };
+          resolve()
+        })
+      })
+    },
+  }
 }
 
 function broadcastToInMemoryStreams(controlPlane: BackendControlPlane, event: RepoEvent): void {
   if ("broadcast" in controlPlane && typeof controlPlane.broadcast === "function") {
-    controlPlane.broadcast(event);
+    controlPlane.broadcast(event)
   }
 }
 
 function isStreamSink(value: unknown): value is StreamSink {
-  return !!value && typeof value === "object" && "send" in value && typeof (value as StreamSink).send === "function";
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "send" in value &&
+    typeof (value as StreamSink).send === "function"
+  )
 }
 
 function createSseSession(onClose: () => void): { response: Response; sink: StreamSink } {
-  const encoder = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let isClosed = false;
+  const encoder = new TextEncoder()
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+  let isClosed = false
 
   const close = () => {
     if (isClosed) {
-      return;
+      return
     }
 
-    isClosed = true;
+    isClosed = true
     try {
-      controller?.close();
+      controller?.close()
     } catch {
       // no-op: controller can already be closed by the runtime
     }
-    onClose();
-  };
+    onClose()
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     start(ctrl) {
-      controller = ctrl;
-      ctrl.enqueue(encoder.encode(": connected\n\n"));
+      controller = ctrl
+      ctrl.enqueue(encoder.encode(": connected\n\n"))
     },
     cancel() {
-      close();
-    }
-  });
+      close()
+    },
+  })
 
   const sink: StreamSink = {
     send(payload) {
       if (isClosed || !controller) {
-        return;
+        return
       }
 
-      controller.enqueue(encoder.encode(formatSseDataFrame(payload)));
+      controller.enqueue(encoder.encode(formatSseDataFrame(payload)))
     },
-    close
-  };
+    close,
+  }
 
   return {
     response: new Response(stream, {
@@ -361,32 +381,32 @@ function createSseSession(onClose: () => void): { response: Response; sink: Stre
       headers: {
         "content-type": "text/event-stream",
         "cache-control": "no-cache, no-transform",
-        connection: "keep-alive"
-      }
+        connection: "keep-alive",
+      },
     }),
-    sink
-  };
+    sink,
+  }
 }
 
 function formatSseDataFrame(payload: string): string {
-  const normalized = payload.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = normalized.split("\n");
-  return `${lines.map((line) => `data: ${line}`).join("\n")}\n\n`;
+  const normalized = payload.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+  const lines = normalized.split("\n")
+  return `${lines.map((line) => `data: ${line}`).join("\n")}\n\n`
 }
 
 function toPublicSession(session: SessionRecord): AuthSession {
   return {
     token: session.token,
     githubUsername: session.githubUsername,
-    githubUserId: session.githubUserId
-  };
+    githubUserId: session.githubUserId,
+  }
 }
 
 function hashToInteger(value: string): number {
-  let hash = 0;
+  let hash = 0
   for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
   }
-  return Math.abs(hash) + 1000;
+  return Math.abs(hash) + 1000
 }
