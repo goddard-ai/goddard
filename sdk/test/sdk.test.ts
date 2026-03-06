@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { createSdk, InMemoryTokenStorage } from "../src/index.ts";
+import { init as agentsInit } from "../src/node/index.ts";
 
 test("device flow stores token and whoami uses auth header", async () => {
   const storage = new InMemoryTokenStorage();
@@ -180,12 +181,7 @@ test("agents.init creates AGENTS.md with correct instructions", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-test-"));
 
   try {
-    const sdk = createSdk({
-      baseUrl: "http://127.0.0.1:8787",
-      tokenStorage: new InMemoryTokenStorage()
-    });
-
-    const { path: agentsPath } = await sdk.agents.init(tempDir);
+    const { path: agentsPath } = await agentsInit(tempDir);
     assert.equal(agentsPath, path.join(tempDir, "AGENTS.md"));
 
     const content = await fs.readFile(agentsPath, "utf-8");

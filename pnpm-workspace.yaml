@@ -1,10 +1,11 @@
 packages:
-  - 'backend'
-  - 'cmd'
-  - 'daemon'
-  - 'github-app'
-  - 'sdk'
-  - 'core/schema'
-  - 'core/storage'
-  - 'core/config'
-  - 'core/loop'
+  - "app"
+  - "backend"
+  - "cmd"
+  - "daemon"
+  - "github-app"
+  - "sdk"
+  - "core/schema"
+  - "core/storage"
+  - "core/config"
+  - "core/loop"

@@ -1,4 +1,5 @@
-import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT, FileTokenStorage, LOOP_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT, LOOP_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { FileTokenStorage } from "@goddard-ai/sdk/node";
 import type { GoddardLoopConfig } from "@goddard-ai/sdk";
 import { inferRepoFromGitConfig, inferPrNumberFromGit, splitRepo } from "./git.ts";
 import { spawnSync } from "node:child_process";
