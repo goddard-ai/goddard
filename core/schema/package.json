@@ -12,7 +12,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test"
+    "test": "vitest run"
   },
   "dependencies": {
     "rouzer": "^1.4.0",
