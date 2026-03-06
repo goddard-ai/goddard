@@ -1,10 +1,9 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  entry: ['./src/index.ts', './bin/goddard-daemon.ts'],
+  entry: ['./bin/server.ts'],
   format: 'esm',
   target: 'node18',
   clean: true,
   outDir: 'dist',
-  dts: true,
 });

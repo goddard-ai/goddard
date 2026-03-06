@@ -1,4 +1,3 @@
-#!/usr/bin/env -S pnpm tsx
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts";
 import { TursoBackendControlPlane } from "../src/persistence.ts";
 import { createClient } from "@libsql/client";

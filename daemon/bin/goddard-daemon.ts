@@ -1,4 +1,3 @@
-#!/usr/bin/env -S pnpm tsx
 import { runDaemonCli } from "../src/index.ts";
 
 const exitCode = await runDaemonCli(process.argv.slice(2));

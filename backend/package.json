@@ -19,10 +19,11 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "goddard-backend": "./bin/server.ts"
+    "goddard-backend": "./dist/server.mjs"
   },
   "scripts": {
-    "start": "tsx bin/server.ts",
+    "start": "node dist/server.mjs",
+    "build": "tsdown",
     "dev": "wrangler dev",
     "deploy": "alchemy deploy",
     "db:generate": "drizzle-kit generate",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260301.1",
     "drizzle-kit": "1.0.0-beta.15-859cf75",
+    "tsdown": "^0.20.3",
     "wrangler": "^4.69.0"
   }
 }

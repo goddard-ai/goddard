@@ -11,13 +11,13 @@
     "node-pty": "^1.1.0"
   },
   "bin": {
-    "goddard-daemon": "./bin/goddard-daemon.ts"
+    "goddard-daemon": "./dist/goddard-daemon.mjs"
   },
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "daemon": "tsx bin/goddard-daemon.ts",
+    "daemon": "node dist/goddard-daemon.mjs",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
