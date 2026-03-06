@@ -8,18 +8,16 @@ test("login command prints authenticated user", async () => {
 
   const sdk = createMockSdk({
     auth: {
-      startDeviceFlow: async () => ({
-        deviceCode: "dev_1",
-        userCode: "ABCD",
-        verificationUri: "https://github.com/login/device",
-        expiresIn: 900,
-        interval: 5
-      }),
-      completeDeviceFlow: async () => ({
-        token: "tok_1",
-        githubUsername: "alec",
-        githubUserId: 42
-      })
+      login: async ({ onPrompt }) => {
+        if (onPrompt) {
+          onPrompt("https://github.com/login/device", "ABCD");
+        }
+        return {
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42
+        };
+      }
     }
   });
 
@@ -30,7 +28,8 @@ test("login command prints authenticated user", async () => {
   );
 
   assert.equal(code, 0);
-  assert.equal(lines[0], "Logged in as @alec");
+  assert.equal(lines[0], "Please visit https://github.com/login/device and enter code: ABCD");
+  assert.equal(lines[1], "Logged in as @alec");
 });
 
 test("pr create command formats output", async () => {
@@ -156,6 +155,7 @@ type PartialSdk = {
 function createMockSdk(partial: PartialSdk): SdkClient {
   return {
     auth: {
+      login: async () => ({ token: "tok", githubUsername: "dev", githubUserId: 1 }),
       startDeviceFlow: async () => ({
         deviceCode: "dev_default",
         userCode: "USER",
@@ -182,7 +182,7 @@ function createMockSdk(partial: PartialSdk): SdkClient {
       ...partial.stream
     },
     agents: {
-      appendSpecInstructions: async () => {
+      init: async () => {
         throw new Error("not mocked");
       },
       ...partial.agents
@@ -196,7 +196,7 @@ test("agents init command calls sdk.agents.appendSpecInstructions and handles co
 
   const sdk = createMockSdk({
     agents: {
-      appendSpecInstructions: async (cwd?: string) => `${cwd ?? "mock"}/AGENTS.md`
+      init: async (cwd?: string) => ({ path: `${cwd ?? "mock"}/AGENTS.md` })
     }
   });
 
@@ -219,10 +219,10 @@ test("agents init command calls sdk.agents.appendSpecInstructions and handles co
   assert.equal(lines[1], "Committed changes: My custom config");
   assert.equal(lines[2], "Pushed changes successfully.");
 
-  assert.equal(execGitCalls.length, 6); // status (all), status (AGENTS.md), diff, add, commit, push
-  assert.deepEqual(execGitCalls[3], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
-  assert.deepEqual(execGitCalls[4], { cmd: "commit", args: ["-m", "My custom config"] });
-  assert.deepEqual(execGitCalls[5], { cmd: "push", args: [] });
+  assert.equal(execGitCalls.length, 5); // status (all), status (AGENTS.md), diff, add, commit, push
+  assert.deepEqual(execGitCalls[2], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
+  assert.deepEqual(execGitCalls[3], { cmd: "commit", args: ["-m", "My custom config"] });
+  assert.deepEqual(execGitCalls[4], { cmd: "push", args: [] });
 });
 
 test("agents init command allows skipping commit", async () => {
@@ -231,7 +231,7 @@ test("agents init command allows skipping commit", async () => {
 
   const sdk = createMockSdk({
     agents: {
-      appendSpecInstructions: async (cwd?: string) => `${cwd ?? "mock"}/AGENTS.md`
+      init: async (cwd?: string) => ({ path: `${cwd ?? "mock"}/AGENTS.md` })
     }
   });
 
@@ -253,7 +253,7 @@ test("agents init command allows skipping commit", async () => {
   assert.equal(lines[0], `Updated agents configuration at ${process.cwd()}/AGENTS.md`);
   assert.equal(lines[1], "Commit skipped.");
 
-  assert.equal(execGitCalls.length, 3); // status, status, diff
+  assert.equal(execGitCalls.length, 2); // status, diff
 });
 
 test("agents init command allows skipping push", async () => {
@@ -262,7 +262,7 @@ test("agents init command allows skipping push", async () => {
 
   const sdk = createMockSdk({
     agents: {
-      appendSpecInstructions: async (cwd?: string) => `${cwd ?? "mock"}/AGENTS.md`
+      init: async (cwd?: string) => ({ path: `${cwd ?? "mock"}/AGENTS.md` })
     }
   });
 
@@ -285,7 +285,59 @@ test("agents init command allows skipping push", async () => {
   assert.equal(lines[1], "Committed changes: My custom config");
   assert.equal(lines[2], "Push skipped.");
 
-  assert.equal(execGitCalls.length, 5); // status, status, diff, add, commit
-  assert.deepEqual(execGitCalls[3], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
-  assert.deepEqual(execGitCalls[4], { cmd: "commit", args: ["-m", "My custom config"] });
+  assert.equal(execGitCalls.length, 4); // status, diff, add, commit
+  assert.deepEqual(execGitCalls[2], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
+  assert.deepEqual(execGitCalls[3], { cmd: "commit", args: ["-m", "My custom config"] });
+});
+test("loop init creates config", async () => {
+  const lines: string[] = [];
+  const sdk = createMockSdk({} as any);
+  (sdk as any).loop = {
+    init: async () => ({ path: "/mock/.goddard/config.ts" })
+  };
+
+  const code = await runCli(
+    ["loop", "init"],
+    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
+    { createSdkClient: () => sdk }
+  );
+
+  assert.equal(code, 0);
+  assert.equal(lines[0], "Created configuration at /mock/.goddard/config.ts");
+});
+
+test("loop run executes runLoop", async () => {
+  const lines: string[] = [];
+  const sdk = createMockSdk({} as any);
+  let runCalled = false;
+  (sdk as any).loop = {
+    run: async () => { runCalled = true; }
+  };
+
+  const code = await runCli(
+    ["loop", "run"],
+    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
+    { createSdkClient: () => sdk }
+  );
+
+  assert.equal(code, 0);
+  assert.equal(runCalled, true);
+  assert.equal(lines[0], "Loop completed after DONE signal.");
+});
+
+test("loop generate-systemd calls sdk generator", async () => {
+  const lines: string[] = [];
+  const sdk = createMockSdk({} as any);
+  (sdk as any).loop = {
+    generateSystemdService: async () => ({ path: "/mock/systemd/goddard.service" })
+  };
+
+  const code = await runCli(
+    ["loop", "generate-systemd"],
+    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
+    { createSdkClient: () => sdk }
+  );
+
+  assert.equal(code, 0);
+  assert.equal(lines[0], "Created systemd service file at /mock/systemd/goddard.service");
 });

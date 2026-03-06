@@ -20,6 +20,9 @@ importers:
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
+      unplugin-raw:
+        specifier: ^0.6.4
+        version: 0.6.4(esbuild@0.27.3)
       vitest:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@22.19.13)
@@ -69,21 +72,9 @@ importers:
       '@clack/prompts':
         specifier: ^1.1.0
         version: 1.1.0
-      '@goddard-ai/config':
-        specifier: workspace:*
-        version: link:../core/config
       '@goddard-ai/sdk':
         specifier: workspace:*
         version: link:../sdk
-      '@goddard-ai/storage':
-        specifier: workspace:^
-        version: link:../core/storage
-      '@mariozechner/jiti':
-        specifier: ^2.6.1
-        version: 2.6.5
-      '@mariozechner/pi-coding-agent':
-        specifier: ^0.55.3
-        version: 0.55.4(ws@8.19.0)(zod@3.25.76)
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0
@@ -113,6 +104,25 @@ importers:
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
+
+  core/loop:
+    dependencies:
+      '@goddard-ai/config':
+        specifier: workspace:*
+        version: link:../config
+      '@mariozechner/pi-coding-agent':
+        specifier: ^0.55.3
+        version: 0.55.4(ws@8.19.0)(zod@3.25.76)
+      cron-parser:
+        specifier: ^4.9.0
+        version: 4.9.0
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      tsdown:
+        specifier: ^0.20.3
+        version: 0.20.3(typescript@5.9.3)
 
   core/schema:
     dependencies:
@@ -176,12 +186,24 @@ importers:
 
   sdk:
     dependencies:
+      '@goddard-ai/config':
+        specifier: workspace:*
+        version: link:../core/config
+      '@goddard-ai/loop':
+        specifier: workspace:*
+        version: link:../core/loop
       '@goddard-ai/schema':
         specifier: workspace:^
         version: link:../core/schema
+      '@goddard-ai/storage':
+        specifier: workspace:^
+        version: link:../core/storage
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
+      '@mariozechner/jiti':
+        specifier: ^2.6.5
+        version: 2.6.5
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.1(@cloudflare/workers-types@4.20260301.1)(@libsql/client@0.17.0)
@@ -1306,6 +1328,9 @@ packages:
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
+
+  '@jridgewell/remapping@2.3.5':
+    resolution: {integrity: sha512-LI9u/+laYG4Ds1TDKSJW2YPrIlcVYOwi2fUC6xB43lueCjgxV4lffOCZCtYFiH6TNOX+tQKXx97T4IKHbhyHEQ==}
 
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
@@ -3908,6 +3933,23 @@ packages:
   universal-user-agent@7.0.3:
     resolution: {integrity: sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A==}
 
+  unplugin-raw@0.6.4:
+    resolution: {integrity: sha512-Cxxk4mtLVJKwJjGVijQwVMkEOxBzBSz37jSfm44/Fw9lzo6z+oetXty5PrnkgWzKJYpeoJdBk6PnklibG0pLqg==}
+    engines: {node: '>=20.19.0'}
+    peerDependencies:
+      esbuild: '>=0.25.0'
+    peerDependenciesMeta:
+      esbuild:
+        optional: true
+
+  unplugin-utils@0.3.1:
+    resolution: {integrity: sha512-5lWVjgi6vuHhJ526bI4nlCOmkCIF3nnfXkCMDeMJrtdvxTs6ZFCM8oNufGTsDbKv/tJ/xj8RpvXjRuPBZJuJog==}
+    engines: {node: '>=20.19.0'}
+
+  unplugin@2.3.11:
+    resolution: {integrity: sha512-5uKD0nqiYVzlmCRs01Fhs2BdkEgBS3SAVP6ndrBsuK42iC2+JHyxM05Rm9G8+5mkmRtzMZGY8Ct5+mliZxU/Ww==}
+    engines: {node: '>=18.12.0'}
+
   unrun@0.2.29:
     resolution: {integrity: sha512-smM+bKuQiyfmKr0/3H+/MRxSoAPDjDQRMZYYWlJGDRUero4jRu0UKuYHkQXLnKDE2XUihM8Y6bWi2fI0/JwBSw==}
     engines: {node: '>=20.19.0'}
@@ -3995,6 +4037,9 @@ packages:
 
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
+
+  webpack-virtual-modules@0.6.2:
+    resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
   whatwg-url@5.0.0:
     resolution: {integrity: sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==}
@@ -5263,6 +5308,11 @@ snapshots:
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/trace-mapping': 0.3.31
+
+  '@jridgewell/remapping@2.3.5':
+    dependencies:
+      '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
 
   '@jridgewell/resolve-uri@3.1.2': {}
@@ -7924,6 +7974,25 @@ snapshots:
 
   universal-user-agent@7.0.3: {}
 
+  unplugin-raw@0.6.4(esbuild@0.27.3):
+    dependencies:
+      unplugin: 2.3.11
+      unplugin-utils: 0.3.1
+    optionalDependencies:
+      esbuild: 0.27.3
+
+  unplugin-utils@0.3.1:
+    dependencies:
+      pathe: 2.0.3
+      picomatch: 4.0.3
+
+  unplugin@2.3.11:
+    dependencies:
+      '@jridgewell/remapping': 2.3.5
+      acorn: 8.16.0
+      picomatch: 4.0.3
+      webpack-virtual-modules: 0.6.2
+
   unrun@0.2.29:
     dependencies:
       rolldown: 1.0.0-rc.6
@@ -7998,6 +8067,8 @@ snapshots:
   web-streams-polyfill@3.3.3: {}
 
   webidl-conversions@3.0.1: {}
+
+  webpack-virtual-modules@0.6.2: {}
 
   whatwg-url@5.0.0:
     dependencies:

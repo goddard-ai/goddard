@@ -15,14 +15,15 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260301.1",
     "@types/node": "^22.13.10",
-    "tsx": "^4.21.0",
     "typescript": "^5.8.2",
+    "unplugin-raw": "^0.6.4",
     "vitest": "^1.0.0"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm -r run lint",
-    "test": "pnpm -r run test",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "check": "pnpm run typecheck && pnpm run test"
   },
   "pnpm": {

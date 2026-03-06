@@ -14,8 +14,8 @@ import {
 } from "@goddard-ai/schema";
 import * as routes from "@goddard-ai/schema/routes";
 import { createClient, type RouteRequest } from "rouzer";
-import { InMemoryTokenStorage, type TokenStorage } from "./token-storage.ts";
-import { appendSpecInstructions } from "./agents.ts";
+import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage";
+import { Models } from "@goddard-ai/config";
 
 export const SDK_VERSION = "0.1.0";
 
@@ -74,6 +74,7 @@ export class GoddardSdk {
   readonly auth: {
     startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>;
     completeDeviceFlow: (input: DeviceFlowComplete) => Promise<AuthSession>;
+    login: (options: { githubUsername?: string; onPrompt: (verificationUri: string, userCode: string) => void }) => Promise<AuthSession>;
     whoami: () => Promise<AuthSession>;
     logout: () => Promise<void>;
   };
@@ -88,8 +89,8 @@ export class GoddardSdk {
     subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>;
   };
 
-  readonly agents: {
-    appendSpecInstructions: (cwd?: string) => Promise<string>;
+  readonly config: {
+    models: typeof Models;
   };
 
   readonly #baseUrl: URL;
@@ -119,6 +120,29 @@ export class GoddardSdk {
         );
         await this.#tokenStorage.setToken(session.token);
         return session;
+      },
+      login: async ({ githubUsername, onPrompt }) => {
+        const start = await this.auth.startDeviceFlow({ githubUsername });
+        onPrompt(start.verificationUri, start.userCode);
+        
+        const expiresAt = Date.now() + start.expiresIn * 1000;
+        let delay = start.interval * 1000;
+
+        while (Date.now() < expiresAt) {
+          try {
+            return await this.auth.completeDeviceFlow({ deviceCode: start.deviceCode, githubUsername: githubUsername ?? "" });
+          } catch (e: any) {
+             // Continue polling if not an unexpected error
+             if (e.message && !e.message.includes("authorization_pending") && !e.message.includes("slow_down")) {
+                 throw e;
+             }
+             if (e.message && e.message.includes("slow_down")) {
+                 delay += 5000;
+             }
+          }
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+        throw new Error("Device flow authentication timed out.");
       },
       whoami: async () => {
         const token = await this.#requireToken();
@@ -210,10 +234,8 @@ export class GoddardSdk {
       }
     };
 
-    this.agents = {
-      appendSpecInstructions: async (cwd) => {
-        return appendSpecInstructions(cwd);
-      }
+    this.config = {
+      models: Models
     };
   }
 
@@ -350,5 +372,8 @@ export type {
   TokenStorage,
   GitHubWebhookInput
 };
+
 export { InMemoryTokenStorage };
-export { LOOP_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./prompts.ts";
+export { SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./prompts.ts";
+export { LOOP_SYSTEM_PROMPT } from "@goddard-ai/loop";
+export type { GoddardLoopConfig } from "@goddard-ai/loop";

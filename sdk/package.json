@@ -5,16 +5,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.mjs",
+    "./node": "./dist/node/index.mjs"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test",
+    "test": "vitest run",
     "build": "tsdown"
   },
   "dependencies": {
+    "@goddard-ai/config": "workspace:*",
+    "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/storage": "workspace:^",
     "@libsql/client": "^0.17.0",
+    "@mariozechner/jiti": "^2.6.5",
     "drizzle-orm": "^0.45.1",
     "rouzer": "^1.4.0",
     "zod": "^4.1.11"

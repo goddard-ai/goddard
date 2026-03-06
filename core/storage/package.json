@@ -10,11 +10,10 @@
   "scripts": {
     "build": "tsc",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
