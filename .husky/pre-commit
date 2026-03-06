@@ -1,0 +1,23 @@
+#!/bin/sh
+
+# Check if pnpm-lock.yaml in the root is staged for commit
+if git diff --cached --name-only | grep -q "^pnpm-lock.yaml$"; then
+  echo "Root pnpm-lock.yaml modified, running pnpm install --lockfile-only in subrepos..."
+
+  # Find all directories containing a .gitrepo file, ignoring node_modules
+  find . -name node_modules -prune -o -name .gitrepo -print | while read -r gitrepo; do
+    dir=$(dirname "$gitrepo")
+    # Check if a package.json exists in this subrepo (not all might be pnpm workspaces/packages)
+    if [ -f "$dir/package.json" ]; then
+      echo "Updating lockfile in $dir..."
+      (cd "$dir" && pnpm install --lockfile-only)
+
+      # If a lockfile was updated/created, stage it
+      if [ -f "$dir/pnpm-lock.yaml" ]; then
+        git add "$dir/pnpm-lock.yaml"
+      fi
+    fi
+  done
+
+  echo "Subrepo lockfiles updated."
+fi
