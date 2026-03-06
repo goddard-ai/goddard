@@ -25,6 +25,7 @@
     "build": "tsdown"
   },
   "devDependencies": {
+    "@goddard-ai/config": "workspace:^",
     "tsdown": "^0.20.3"
   }
 }

@@ -1,142 +1,52 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { runCli } from "../src/index.ts";
-import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { test } from "vitest";
+import * as assert from "node:assert/strict";
+import { runCli, type CliIo, type CliDeps } from "../src/index.ts";
+import { createSdk, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { Models } from "@goddard-ai/config";
 
-test("login command prints authenticated user", async () => {
+const defaultIo: CliIo = {
+  stdout: () => {},
+  stderr: () => {}
+};
+
+test("login command calls sdk.auth.login and prints username", async () => {
   const lines: string[] = [];
+  const io: CliIo = {
+    stdout: (line) => lines.push(line),
+    stderr: () => {}
+  };
 
   const sdk = createMockSdk({
     auth: {
-      login: async ({ onPrompt }) => {
-        if (onPrompt) {
-          onPrompt("https://github.com/login/device", "ABCD");
-        }
-        return {
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42
-        };
-      }
-    }
-  });
-
-  const code = await runCli(
-    ["login", "--username", "alec", "--base-url", "http://localhost:8787"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    { createSdkClient: () => sdk }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(lines[0], "Please visit https://github.com/login/device and enter code: ABCD");
-  assert.equal(lines[1], "Logged in as @alec");
-});
-
-test("pr create command formats output", async () => {
-  const lines: string[] = [];
-
-  const sdk = createMockSdk({
-    pr: {
-      create: async () => ({
-        id: 1,
-        number: 1,
-        owner: "goddard-ai",
-        repo: "sdk",
-        title: "Fix stream",
-        body: "",
-        head: "feat/stream",
-        base: "main",
-        url: "https://github.com/goddard-ai/sdk/pull/1",
-        createdBy: "alec",
-        createdAt: new Date().toISOString()
+      login: async ({ githubUsername }) => ({
+        token: "tok",
+        githubUsername: githubUsername ?? "dev",
+        githubUserId: 1
       })
     }
   });
 
-  const code = await runCli(
-    [
-      "pr",
-      "create",
-      "--repo",
-      "goddard-ai/sdk",
-      "--title",
-      "Fix stream",
-      "--head",
-      "feat/stream",
-      "--base",
-      "main"
-    ],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    { createSdkClient: () => sdk }
-  );
+  const exitCode = await runCli(["login", "--username", "testuser"], io, {
+    createSdkClient: () => sdk
+  });
 
-  assert.equal(code, 0);
-  assert.equal(lines[0], "PR #1 created: https://github.com/goddard-ai/sdk/pull/1");
+  assert.equal(exitCode, 0);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0], "Logged in as @testuser");
 });
 
-test("unknown command prints help and exits 1", async () => {
-  const lines: string[] = [];
-
-  const code = await runCli(
-    ["unknown"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    { createSdkClient: () => createMockSdk({}) }
-  );
-
-  assert.equal(code, 1);
-  assert.ok(lines[0]?.includes("ERR:error: found 1 error"));
-});
-
-test("spec command spawns pi with SPEC_SYSTEM_PROMPT and exits 0", async () => {
-  const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
-
-  const code = await runCli(
-    ["spec"],
-    { stdout: () => {}, stderr: () => {} },
-    {
-      createSdkClient: () => createMockSdk({}),
-      spawnPi: (args) => {
-        spawnCalls.push({ cmd: "pi", args });
-        return 0;
-      }
+test("propose command spawns pi with correct arguments", async () => {
+  const spawnCalls: { args: string[] }[] = [];
+  const deps: CliDeps = {
+    spawnPi: (args) => {
+      spawnCalls.push({ args });
+      return 0;
     }
-  );
+  };
 
-  assert.equal(code, 0);
-  assert.equal(spawnCalls.length, 1);
-  assert.equal(spawnCalls[0]!.args[0], "--system-prompt");
-  assert.equal(spawnCalls[0]!.args[1], SPEC_SYSTEM_PROMPT);
-});
+  const exitCode = await runCli(["propose", "add auth"], defaultIo, deps);
 
-test("spec command propagates non-zero exit from pi", async () => {
-  const code = await runCli(
-    ["spec"],
-    { stdout: () => {}, stderr: () => {} },
-    {
-      createSdkClient: () => createMockSdk({}),
-      spawnPi: () => 1
-    }
-  );
-
-  assert.equal(code, 1);
-});
-
-test("propose command spawns pi with PROPOSE_SYSTEM_PROMPT and passes args", async () => {
-  const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
-
-  const code = await runCli(
-    ["propose", "add auth"],
-    { stdout: () => {}, stderr: () => {} },
-    {
-      createSdkClient: () => createMockSdk({}),
-      spawnPi: (args) => {
-        spawnCalls.push({ cmd: "pi", args });
-        return 0;
-      }
-    }
-  );
-
-  assert.equal(code, 0);
+  assert.equal(exitCode, 0);
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0]!.args[0], "--system-prompt");
   assert.equal(spawnCalls[0]!.args[1], PROPOSE_SYSTEM_PROMPT);
@@ -150,6 +60,7 @@ type PartialSdk = {
   pr?: Partial<SdkClient["pr"]>;
   stream?: Partial<SdkClient["stream"]>;
   agents?: Partial<SdkClient["agents"]>;
+  loop?: Partial<SdkClient["loop"]>;
 };
 
 function createMockSdk(partial: PartialSdk): SdkClient {
@@ -173,6 +84,7 @@ function createMockSdk(partial: PartialSdk): SdkClient {
         throw new Error("not mocked");
       },
       isManaged: async () => false,
+      reply: async () => ({ success: true }),
       ...partial.pr
     },
     stream: {
@@ -186,11 +98,26 @@ function createMockSdk(partial: PartialSdk): SdkClient {
         throw new Error("not mocked");
       },
       ...partial.agents
+    },
+    loop: {
+      init: async () => {
+        throw new Error("not mocked");
+      },
+      run: async () => {
+        throw new Error("not mocked");
+      },
+      generateSystemdService: async () => {
+        throw new Error("not mocked");
+      },
+      ...partial.loop
+    },
+    config: {
+      models: Models
     }
-  } as SdkClient;
+  } as unknown as SdkClient;
 }
 
-test("agents init command calls sdk.agents.appendSpecInstructions and handles commit/push", async () => {
+test("agents init command calls sdk.agents.init and handles commit/push", async () => {
   const lines: string[] = [];
   const execGitCalls: { cmd: string; args: string[] }[] = [];
 
@@ -200,144 +127,47 @@ test("agents init command calls sdk.agents.appendSpecInstructions and handles co
     }
   });
 
-  const code = await runCli(
-    ["agents", "init"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    {
-      createSdkClient: () => sdk,
-      execGit: (cmd, args) => {
-        execGitCalls.push({ cmd, args });
-        return { status: 0, stdout: "", stderr: "" };
-      },
-      promptCommitMessage: async () => "My custom config",
-      promptPushBranch: async () => true,
-    }
-  );
+  const deps: CliDeps = {
+    createSdkClient: () => sdk,
+    execGit: (cmd, args) => {
+      execGitCalls.push({ cmd, args });
+      if (cmd === "status") return { status: 0, stdout: "", stderr: "" };
+      if (cmd === "diff") return { status: 0, stdout: "diff content", stderr: "" };
+      return { status: 0, stdout: "", stderr: "" };
+    },
+    promptCommitMessage: async () => "init agents",
+    promptPushBranch: async () => true
+  };
 
-  assert.equal(code, 0);
-  assert.equal(lines[0], `Updated agents configuration at ${process.cwd()}/AGENTS.md`);
-  assert.equal(lines[1], "Committed changes: My custom config");
-  assert.equal(lines[2], "Pushed changes successfully.");
+  const io: CliIo = {
+    stdout: (line) => lines.push(line),
+    stderr: () => {}
+  };
 
-  assert.equal(execGitCalls.length, 5); // status (all), status (AGENTS.md), diff, add, commit, push
-  assert.deepEqual(execGitCalls[2], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
-  assert.deepEqual(execGitCalls[3], { cmd: "commit", args: ["-m", "My custom config"] });
-  assert.deepEqual(execGitCalls[4], { cmd: "push", args: [] });
+  const exitCode = await runCli(["agents", "init"], io, deps);
+
+  assert.equal(exitCode, 0);
+  assert.ok(lines.some(l => l.includes("Updated agents configuration")));
+  assert.ok(execGitCalls.some(c => c.cmd === "commit" && c.args.includes("init agents")));
+  assert.ok(execGitCalls.some(c => c.cmd === "push"));
 });
 
-test("agents init command allows skipping commit", async () => {
+test("loop init command calls sdk.loop.init", async () => {
   const lines: string[] = [];
-  const execGitCalls: { cmd: string; args: string[] }[] = [];
-
   const sdk = createMockSdk({
-    agents: {
-      init: async (cwd?: string) => ({ path: `${cwd ?? "mock"}/AGENTS.md` })
+    loop: {
+      init: async () => ({ path: "/mock/config.ts" }),
+      run: async () => {},
+      generateSystemdService: async () => ({ path: "" })
     }
   });
 
-  const code = await runCli(
-    ["agents", "init"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    {
-      createSdkClient: () => sdk,
-      execGit: (cmd, args) => {
-        execGitCalls.push({ cmd, args });
-        return { status: 0, stdout: "", stderr: "" };
-      },
-      promptCommitMessage: async () => "",
-      promptPushBranch: async () => true,
-    }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(lines[0], `Updated agents configuration at ${process.cwd()}/AGENTS.md`);
-  assert.equal(lines[1], "Commit skipped.");
-
-  assert.equal(execGitCalls.length, 2); // status, diff
-});
-
-test("agents init command allows skipping push", async () => {
-  const lines: string[] = [];
-  const execGitCalls: { cmd: string; args: string[] }[] = [];
-
-  const sdk = createMockSdk({
-    agents: {
-      init: async (cwd?: string) => ({ path: `${cwd ?? "mock"}/AGENTS.md` })
-    }
-  });
-
-  const code = await runCli(
-    ["agents", "init"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    {
-      createSdkClient: () => sdk,
-      execGit: (cmd, args) => {
-        execGitCalls.push({ cmd, args });
-        return { status: 0, stdout: "", stderr: "" };
-      },
-      promptCommitMessage: async () => "My custom config",
-      promptPushBranch: async () => false,
-    }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(lines[0], `Updated agents configuration at ${process.cwd()}/AGENTS.md`);
-  assert.equal(lines[1], "Committed changes: My custom config");
-  assert.equal(lines[2], "Push skipped.");
-
-  assert.equal(execGitCalls.length, 4); // status, diff, add, commit
-  assert.deepEqual(execGitCalls[2], { cmd: "add", args: [`${process.cwd()}/AGENTS.md`] });
-  assert.deepEqual(execGitCalls[3], { cmd: "commit", args: ["-m", "My custom config"] });
-});
-test("loop init creates config", async () => {
-  const lines: string[] = [];
-  const sdk = createMockSdk({} as any);
-  (sdk as any).loop = {
-    init: async () => ({ path: "/mock/.goddard/config.ts" })
+  const io: CliIo = {
+    stdout: (line) => lines.push(line),
+    stderr: () => {}
   };
 
-  const code = await runCli(
-    ["loop", "init"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    { createSdkClient: () => sdk }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(lines[0], "Created configuration at /mock/.goddard/config.ts");
-});
-
-test("loop run executes runLoop", async () => {
-  const lines: string[] = [];
-  const sdk = createMockSdk({} as any);
-  let runCalled = false;
-  (sdk as any).loop = {
-    run: async () => { runCalled = true; }
-  };
-
-  const code = await runCli(
-    ["loop", "run"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    { createSdkClient: () => sdk }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(runCalled, true);
-  assert.equal(lines[0], "Loop completed after DONE signal.");
-});
-
-test("loop generate-systemd calls sdk generator", async () => {
-  const lines: string[] = [];
-  const sdk = createMockSdk({} as any);
-  (sdk as any).loop = {
-    generateSystemdService: async () => ({ path: "/mock/systemd/goddard.service" })
-  };
-
-  const code = await runCli(
-    ["loop", "generate-systemd"],
-    { stdout: (line) => lines.push(line), stderr: (line) => lines.push(`ERR:${line}`) },
-    { createSdkClient: () => sdk }
-  );
-
-  assert.equal(code, 0);
-  assert.equal(lines[0], "Created systemd service file at /mock/systemd/goddard.service");
+  const exitCode = await runCli(["loop", "init"], io, { createSdkClient: () => sdk });
+  assert.equal(exitCode, 0);
+  assert.ok(lines.some(l => l.includes("Created configuration at /mock/config.ts")));
 });

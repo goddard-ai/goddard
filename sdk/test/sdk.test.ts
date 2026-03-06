@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -30,7 +29,7 @@ test("device flow stores token and whoami uses auth header", async () => {
     }
 
     if (url.endsWith("/auth/session")) {
-      assert.equal(init?.headers && (init.headers as Record<string, string>).authorization, "Bearer tok_1");
+      expect(init?.headers && (init.headers as Record<string, string>).authorization).toBe("Bearer tok_1");
       return jsonResponse(200, {
         token: "tok_1",
         githubUsername: "alec",
@@ -48,14 +47,14 @@ test("device flow stores token and whoami uses auth header", async () => {
   });
 
   const start = await sdk.auth.startDeviceFlow();
-  assert.equal(start.deviceCode, "dev_1");
+  expect(start.deviceCode).toBe("dev_1");
 
   const session = await sdk.auth.completeDeviceFlow({ deviceCode: start.deviceCode, githubUsername: "alec" });
-  assert.equal(session.githubUsername, "alec");
-  assert.equal(await storage.getToken(), "tok_1");
+  expect(session.githubUsername).toBe("alec");
+  expect(await storage.getToken()).toBe("tok_1");
 
   const me = await sdk.auth.whoami();
-  assert.equal(me.githubUserId, 42);
+  expect(me.githubUserId).toBe(42);
 });
 
 test("pr create requires authentication", async () => {
@@ -88,14 +87,14 @@ test("pr create requires authentication", async () => {
     fetchImpl
   });
 
-  await assert.rejects(() =>
+  await expect(() =>
     sdk.pr.create({ owner: "org", repo: "repo", title: "demo", head: "feat", base: "main" })
-  );
+  ).rejects.toThrow();
 
   await storage.setToken("tok_2");
 
   const pr = await sdk.pr.create({ owner: "org", repo: "repo", title: "demo", head: "feat", base: "main" });
-  assert.equal(pr.number, 1);
+  expect(pr.number).toBe(1);
 });
 
 test("pr.isManaged returns managed status", async () => {
@@ -105,7 +104,7 @@ test("pr.isManaged returns managed status", async () => {
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url.includes("/pr/managed?")) {
-      assert.equal(init?.headers && (init.headers as Record<string, string>).authorization, "Bearer tok_pr");
+      expect(init?.headers && (init.headers as Record<string, string>).authorization).toBe("Bearer tok_pr");
       return jsonResponse(200, { managed: true });
     }
     return jsonResponse(404, { error: "not found" });
@@ -118,7 +117,7 @@ test("pr.isManaged returns managed status", async () => {
   });
 
   const managed = await sdk.pr.isManaged({ owner: "org", repo: "repo", prNumber: 12 });
-  assert.equal(managed, true);
+  expect(managed).toBe(true);
 });
 
 test("stream emits error event for malformed payloads", async () => {
@@ -164,7 +163,7 @@ test("stream emits error event for malformed payloads", async () => {
   controller?.enqueue(encoder.encode("data: {\n\n"));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.match(errorMessage, /Invalid stream payload/);
+  expect(errorMessage).toMatch(/Invalid stream payload/);
   sub.close();
 });
 
@@ -182,11 +181,11 @@ test("agents.init creates AGENTS.md with correct instructions", async () => {
 
   try {
     const { path: agentsPath } = await agentsInit(tempDir);
-    assert.equal(agentsPath, path.join(tempDir, "AGENTS.md"));
+    expect(agentsPath).toBe(path.join(tempDir, "AGENTS.md"));
 
     const content = await fs.readFile(agentsPath, "utf-8");
-    assert.match(content, /The `spec` Folder/);
-    assert.match(content, /domain routing hub/);
+    expect(content).toMatch(/The `spec` Folder/);
+    expect(content).toMatch(/domain routing hub/);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
