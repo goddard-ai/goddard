@@ -374,6 +374,6 @@ export type {
 };
 
 export { InMemoryTokenStorage };
-export { SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./prompts.ts";
+export { SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./node/prompts.ts";
 export { LOOP_SYSTEM_PROMPT } from "@goddard-ai/loop";
 export type { GoddardLoopConfig } from "@goddard-ai/loop";
