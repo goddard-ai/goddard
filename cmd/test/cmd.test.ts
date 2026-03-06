@@ -8,7 +8,7 @@ test("login command prints authenticated user", async () => {
 
   const sdk = createMockSdk({
     auth: {
-      login: async ({ onPrompt }) => {
+      login: async ({ onPrompt }: { onPrompt?: (uri: string, code: string) => void }) => {
         if (onPrompt) {
           onPrompt("https://github.com/login/device", "ABCD");
         }

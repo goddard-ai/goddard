@@ -1,4 +1,5 @@
-import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT, FileTokenStorage, LOOP_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT, LOOP_SYSTEM_PROMPT } from "@goddard-ai/sdk";
+import { FileTokenStorage } from "@goddard-ai/storage";
 import type { GoddardLoopConfig } from "@goddard-ai/sdk";
 import { inferRepoFromGitConfig, inferPrNumberFromGit, splitRepo } from "./git.ts";
 import { spawnSync } from "node:child_process";
@@ -61,7 +62,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo, deps: CliDep
         const sdk = getSdk(args.baseUrl || undefined);
         const auth = await sdk.auth.login({
           githubUsername: args.username || undefined,
-          onPrompt: (uri, code) => {
+          onPrompt: (uri: string, code: string) => {
             io.stdout(`Please visit ${uri} and enter code: ${code}`);
           }
         });

@@ -52,7 +52,7 @@ export async function runDaemonCli(
 
         io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`);
 
-        subscription.on("event", async (payload) => {
+        subscription.on("event", async (payload: any) => {
           const event = payload as RepoEvent;
           if (!isFeedbackEvent(event)) {
             return;

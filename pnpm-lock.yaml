@@ -72,6 +72,9 @@ importers:
       '@goddard-ai/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@goddard-ai/storage':
+        specifier: workspace:*
+        version: link:../core/storage
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0

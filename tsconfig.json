@@ -1,9 +1,18 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node", "@cloudflare/workers-types"]
+    "types": ["node", "@cloudflare/workers-types"],
+    "paths": {
+      "@goddard-ai/sdk": ["./sdk/src"],
+      "@goddard-ai/schema": ["./core/schema/src"],
+      "@goddard-ai/schema/*": ["./core/schema/src/*"],
+      "@goddard-ai/storage": ["./core/storage/src"],
+      "@goddard-ai/config": ["./core/config/src"],
+      "@goddard-ai/loop": ["./core/loop/src"]
+    }
   },
   "include": [
+    "sdk/raw.d.ts",
     "sdk/src/**/*.ts",
     "sdk/test/**/*.ts",
     "backend/src/**/*.ts",

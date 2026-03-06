@@ -9,7 +9,7 @@ import {
   resolveLoopConfigPath
 } from "@goddard-ai/storage";
 
-import DEFAULT_LOOP_CONFIG_TEMPLATE from "../default-config.ts?raw";
+import DEFAULT_LOOP_CONFIG_TEMPLATE from "../../default-config.ts?raw";
 
 export async function initLoopConfig(options: { global?: boolean }): Promise<{ path: string }> {
   const targetPath = options.global ? getGlobalConfigPath() : getLocalConfigPath();

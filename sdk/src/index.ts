@@ -89,6 +89,16 @@ export class GoddardSdk {
     subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>;
   };
 
+  readonly agents: {
+    init: (cwd?: string) => Promise<{ path: string }>;
+  };
+
+  readonly loop: {
+    init: (options?: { global?: boolean }) => Promise<{ path: string }>;
+    run: (cwd?: string, deps?: { createLoopRuntime?: any }) => Promise<void>;
+    generateSystemdService: (cwd?: string, options?: { global?: boolean, user?: string }) => Promise<{ path: string }>;
+  };
+
   readonly config: {
     models: typeof Models;
   };
@@ -190,6 +200,16 @@ export class GoddardSdk {
           )
         );
       }
+    };
+
+    this.agents = {
+      init: async () => { throw new Error("agents.init must be imported from @goddard-ai/sdk/node"); }
+    };
+
+    this.loop = {
+      init: async () => { throw new Error("loop.init must be imported from @goddard-ai/sdk/node"); },
+      run: async () => { throw new Error("loop.run must be imported from @goddard-ai/sdk/node"); },
+      generateSystemdService: async () => { throw new Error("loop.generateSystemdService must be imported from @goddard-ai/sdk/node"); }
     };
 
     this.stream = {
