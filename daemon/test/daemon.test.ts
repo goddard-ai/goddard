@@ -157,7 +157,7 @@ function createMockSdk(partial: PartialSdk): SdkClient {
       },
       ...partial.agents
     }
-  } as SdkClient;
+  } as unknown as SdkClient;
 }
 
 async function flush(): Promise<void> {

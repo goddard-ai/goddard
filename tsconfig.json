@@ -16,6 +16,14 @@
     "cmd/bin/**/*.ts",
     "daemon/src/**/*.ts",
     "daemon/test/**/*.ts",
-    "daemon/bin/**/*.ts"
+    "daemon/bin/**/*.ts",
+    "core/loop/src/**/*.ts",
+    "core/loop/test/**/*.ts",
+    "core/schema/src/**/*.ts",
+    "core/schema/test/**/*.ts",
+    "core/storage/src/**/*.ts",
+    "core/storage/test/**/*.ts",
+    "core/config/src/**/*.ts",
+    "core/config/test/**/*.ts"
   ]
 }
