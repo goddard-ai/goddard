@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { buildCodexArgs } from "../src/plugins/codex"
-import { buildGeminiArgs } from "../src/plugins/gemini"
-import { loadEmbeddedPlugin, type PluginImporter } from "../src/plugins/registry"
+import { buildCodexArgs } from "../src/drivers/codex"
+import { buildGeminiArgs } from "../src/drivers/gemini"
+import { loadEmbeddedDriver, type DriverImporter } from "../src/drivers/registry"
 
-describe("embedded plugins", () => {
+describe("embedded drivers", () => {
   it("builds gemini args with resume and prompt", () => {
     expect(buildGeminiArgs({ resume: "session-id", initialPrompt: "hello" })).toEqual([
       "--output-format",
@@ -26,17 +26,17 @@ describe("embedded plugins", () => {
     ])
   })
 
-  it("loads an embedded plugin via dynamic importer", async () => {
+  it("loads an embedded driver via dynamic importer", async () => {
     const importer = vi.fn(async () => ({
-      plugin: {
+      driver: {
         name: "gemini",
         run: async () => 0,
       },
-    })) as PluginImporter
+    })) as DriverImporter
 
-    const plugin = await loadEmbeddedPlugin("gemini", importer)
+    const driver = await loadEmbeddedDriver("gemini", importer)
 
     expect(importer).toHaveBeenCalledWith("./gemini.ts")
-    expect(plugin.name).toBe("gemini")
+    expect(driver.name).toBe("gemini")
   })
 })

@@ -3,11 +3,11 @@ import path from "node:path"
 
 import { SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent"
 
-import type { SessionPlugin, SessionPluginContext, SessionPluginInput } from "./types.ts"
+import type { SessionDriver, SessionDriverContext, SessionDriverInput } from "./types.ts"
 
 async function resolveSessionManager(
-  input: SessionPluginInput,
-  context: SessionPluginContext,
+  input: SessionDriverInput,
+  context: SessionDriverContext,
 ): Promise<SessionManager> {
   if (!input.resume) {
     return SessionManager.create(context.cwd)
@@ -28,13 +28,13 @@ async function resolveSessionManager(
   }
 
   if (matches.length > 1) {
-    throw new Error(`Resume target \"${input.resume}\" is ambiguous. Provide a full session id.`)
+    throw new Error(`Resume target "${input.resume}" is ambiguous. Provide a full session id.`)
   }
 
-  throw new Error(`Unable to resolve pi session \"${input.resume}\"`)
+  throw new Error(`Unable to resolve pi session "${input.resume}"`)
 }
 
-export const plugin: SessionPlugin = {
+export const driver: SessionDriver = {
   name: "pi",
   run: async (input, context) => {
     const sessionManager = await resolveSessionManager(input, context)

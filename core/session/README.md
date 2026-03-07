@@ -1,10 +1,10 @@
 # `@goddard-ai/session`
 
-Session runtime with embedded, dynamically loaded plugins.
+Session runtime with embedded, dynamically loaded drivers.
 
-## Plugins
+## Drivers
 
-Current embedded plugins:
+Current embedded drivers:
 
 - `pi` — programmatic `AgentSession` via `@mariozechner/pi-coding-agent` (no subprocess)
 - `gemini` — subprocess: `gemini --output-format stream-json`
@@ -52,6 +52,6 @@ From this package directory:
 
 ## Dynamic loading model
 
-Plugins are currently embedded in this package but loaded via dynamic imports through the plugin registry.
+Drivers are currently embedded in this package but loaded via dynamic imports through the driver registry.
 
-This gives us a plugin architecture now, while still keeping first-party plugins hard-coded during this phase.
+This gives us a driver architecture now, while still keeping first-party drivers hard-coded during this phase.

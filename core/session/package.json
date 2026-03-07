@@ -9,7 +9,7 @@
   },
   "exports": {
     ".": "./src/server.ts",
-    "./plugins": "./src/plugins/index.ts",
+    "./drivers": "./src/drivers/index.ts",
     "./cli": "./src/cli.ts"
   },
   "scripts": {

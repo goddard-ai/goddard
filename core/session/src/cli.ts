@@ -1,17 +1,23 @@
 import { command, option, restPositionals, runSafely, string, subcommands } from "cmd-ts"
 
-import { loadEmbeddedPlugin } from "./plugins/registry.ts"
-import type { SessionPluginName } from "./plugins/types.ts"
+import { loadEmbeddedDriver } from "./drivers/registry.ts"
+import type { SessionDriverName } from "./drivers/types.ts"
 
 function mergePrompt(parts: string[]): string | undefined {
   const prompt = parts.join(" ").trim()
   return prompt.length > 0 ? prompt : undefined
 }
 
-async function runPlugin(name: SessionPluginName, args: { resume?: string; prompt: string[]; argv?: string[] }) {
-  const plugin = await loadEmbeddedPlugin(name)
+async function runDriver(
+  name: SessionDriverName,
+  args: { resume?: string; prompt: string[]; argv?: string[] },
+) {
+  const driver = await loadEmbeddedDriver(name)
+  if (!driver.run) {
+    throw new Error(`Driver "${name}" does not support CLI mode`)
+  }
 
-  return await plugin.run(
+  return await driver.run(
     {
       resume: args.resume,
       initialPrompt: mergePrompt(args.prompt),
@@ -54,7 +60,7 @@ export async function runSessionCli(argv: string[]): Promise<number> {
       ...promptArgs(),
     },
     handler: async (args) => {
-      return await runPlugin("pi", { resume: args.resume || undefined, prompt: args.prompt })
+      return await runDriver("pi", { resume: args.resume || undefined, prompt: args.prompt })
     },
   })
 
@@ -65,7 +71,7 @@ export async function runSessionCli(argv: string[]): Promise<number> {
       ...promptArgs(),
     },
     handler: async (args) => {
-      return await runPlugin("gemini", { resume: args.resume || undefined, prompt: args.prompt })
+      return await runDriver("gemini", { resume: args.resume || undefined, prompt: args.prompt })
     },
   })
 
@@ -76,7 +82,7 @@ export async function runSessionCli(argv: string[]): Promise<number> {
       ...promptArgs(),
     },
     handler: async (args) => {
-      return await runPlugin("codex", { resume: args.resume || undefined, prompt: args.prompt })
+      return await runDriver("codex", { resume: args.resume || undefined, prompt: args.prompt })
     },
   })
 
@@ -86,7 +92,7 @@ export async function runSessionCli(argv: string[]): Promise<number> {
       argv: restPositionals({ type: string, displayName: "argv" }),
     },
     handler: async (args) => {
-      return await runPlugin("pty", { prompt: [], argv: args.argv })
+      return await runDriver("pty", { prompt: [], argv: args.argv })
     },
   })
 

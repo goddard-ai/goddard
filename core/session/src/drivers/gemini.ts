@@ -1,7 +1,7 @@
 import { runSubprocess } from "./subprocess.ts"
-import type { SessionPlugin, SessionPluginInput } from "./types.ts"
+import type { SessionDriver, SessionDriverInput } from "./types.ts"
 
-export function buildGeminiArgs(input: SessionPluginInput): string[] {
+export function buildGeminiArgs(input: SessionDriverInput): string[] {
   const args = ["--output-format", "stream-json"]
 
   if (input.resume) {
@@ -15,7 +15,7 @@ export function buildGeminiArgs(input: SessionPluginInput): string[] {
   return args
 }
 
-export const plugin: SessionPlugin = {
+export const driver: SessionDriver = {
   name: "gemini",
   run: async (input, context) => {
     return await runSubprocess("gemini", buildGeminiArgs(input), context)

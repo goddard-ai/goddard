@@ -1,13 +1,13 @@
 import * as pty from "node-pty"
 
-import type { SessionPlugin } from "./types.ts"
+import type { SessionDriver } from "./types.ts"
 
-export const plugin: SessionPlugin = {
+export const driver: SessionDriver = {
   name: "pty",
   run: async (input, context) => {
     const argv = input.argv ?? []
     if (argv.length === 0) {
-      throw new Error("pty plugin requires a command, e.g. session pty -- bash")
+      throw new Error("pty driver requires a command, e.g. session pty -- bash")
     }
 
     const [command, ...args] = argv

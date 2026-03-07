@@ -1,7 +1,7 @@
 import { runSubprocess } from "./subprocess.ts"
-import type { SessionPlugin, SessionPluginInput } from "./types.ts"
+import type { SessionDriver, SessionDriverInput } from "./types.ts"
 
-export function buildCodexArgs(input: SessionPluginInput): string[] {
+export function buildCodexArgs(input: SessionDriverInput): string[] {
   const args = ["exec"]
 
   if (input.resume) {
@@ -17,7 +17,7 @@ export function buildCodexArgs(input: SessionPluginInput): string[] {
   return args
 }
 
-export const plugin: SessionPlugin = {
+export const driver: SessionDriver = {
   name: "codex",
   run: async (input, context) => {
     return await runSubprocess("codex", buildCodexArgs(input), context)

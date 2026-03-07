@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process"
 
-import type { SessionPluginContext } from "./types.ts"
+import type { SessionDriverContext } from "./types.ts"
 
 export async function runSubprocess(
   command: string,
   args: string[],
-  context: SessionPluginContext,
+  context: SessionDriverContext,
 ): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const child = spawn(command, args, {
