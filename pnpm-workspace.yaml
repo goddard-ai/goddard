@@ -1,11 +1,6 @@
 packages:
   - "app"
-  - "backend"
   - "cmd"
+  - "core/*"
   - "daemon"
   - "github-app"
-  - "sdk"
-  - "core/schema"
-  - "core/storage"
-  - "core/config"
-  - "core/loop"

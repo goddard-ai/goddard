@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.0.0",
   "workspaces": [
-    "backend",
+    "core/backend",
     "cmd",
     "daemon",
     "github-app",
-    "sdk",
+    "core/sdk",
     "core/schema",
     "core/storage"
   ],

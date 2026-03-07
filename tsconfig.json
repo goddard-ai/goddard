@@ -4,11 +4,11 @@
     "types": ["node", "@cloudflare/workers-types"]
   },
   "include": [
-    "sdk/src/**/*.ts",
-    "sdk/test/**/*.ts",
-    "backend/src/**/*.ts",
-    "backend/test/**/*.ts",
-    "backend/bin/**/*.ts",
+    "core/sdk/src/**/*.ts",
+    "core/sdk/test/**/*.ts",
+    "core/backend/src/**/*.ts",
+    "core/backend/test/**/*.ts",
+    "core/backend/bin/**/*.ts",
     "github-app/src/**/*.ts",
     "github-app/test/**/*.ts",
     "cmd/src/**/*.ts",
