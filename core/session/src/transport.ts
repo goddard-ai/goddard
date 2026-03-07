@@ -67,7 +67,10 @@ export function resolveServerListenTarget(options: TransportOptions = {}): Serve
 
 // The externally shared endpoint must contain the real bound address, not the
 // requested listen target, because TCP port 0 is resolved only after binding.
-export function createServerEndpoint(listenTarget: ServerListenTarget, address: string | null): ServerEndpoint {
+export function createServerEndpoint(
+  listenTarget: ServerListenTarget,
+  address: string | null,
+): ServerEndpoint {
   if (listenTarget.kind === "ipc") {
     return {
       kind: "ipc",

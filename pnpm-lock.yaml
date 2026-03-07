@@ -228,8 +228,8 @@ importers:
   core/session:
     dependencies:
       '@xterm/headless':
-        specifier: ^5.3.0
-        version: 5.5.0
+        specifier: ^6.0.0
+        version: 6.0.0
       json-rpc-2.0:
         specifier: ^1.7.1
         version: 1.7.1
@@ -237,14 +237,14 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
       ws:
-        specifier: ^8.18.0
+        specifier: ^8.19.0
         version: 8.19.0
     devDependencies:
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^25.3.5
+        version: 25.3.5
       '@types/ws':
-        specifier: ^8.5.10
+        specifier: ^8.18.1
         version: 8.18.1
 
   core/session-client:
@@ -253,15 +253,24 @@ importers:
         specifier: ^1.7.1
         version: 1.7.1
       ws:
-        specifier: ^8.18.0
+        specifier: ^8.19.0
         version: 8.19.0
     devDependencies:
+      '@goddard-ai/session':
+        specifier: workspace:^
+        version: link:../session
+      '@goddard-ai/session-client':
+        specifier: 'link:'
+        version: 'link:'
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^25.3.5
+        version: 25.3.5
       '@types/ws':
-        specifier: ^8.5.10
+        specifier: ^8.18.1
         version: 8.18.1
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
 
   core/storage:
     dependencies:
@@ -2597,9 +2606,6 @@ packages:
   '@types/mssql@9.1.9':
     resolution: {integrity: sha512-P0nCgw6vzY23UxZMnbI4N7fnLGANt4LI4yvxze1paPj+LuN28cFv5EI+QidP8udnId/BKhkcRhm/BleNsjK65A==}
 
-  '@types/node@22.19.15':
-    resolution: {integrity: sha512-F0R/h2+dsy5wJAUe3tAU6oqa2qbWY5TpNfL/RGmo1y38hiyO1w3x2jPtt76wmuaJI4DQnOBu21cNXQ2STIUUWg==}
-
   '@types/node@25.3.5':
     resolution: {integrity: sha512-oX8xrhvpiyRCQkG1MFchB09f+cXftgIXb3a7UUa4Y3wpmZPw5tyZGTLWhlESOLq1Rq6oDlc8npVU2/9xiCuXMA==}
 
@@ -2655,9 +2661,6 @@ packages:
   '@whatwg-node/node-fetch@0.6.0':
     resolution: {integrity: sha512-tcZAhrpx6oVlkEsRngeTEEE7I5/QdLjeEz4IlekabGaESP7+Dkm/6a9KcF1KdCBB7mO9PXtBkwCuTCt8+UPg8Q==}
     engines: {node: '>=18.0.0'}
-
-  '@xterm/headless@5.5.0':
-    resolution: {integrity: sha512-5xXB7kdQlFBP82ViMJTwwEc3gKCLGKR/eoxQm4zge7GPBl86tCdI0IdPJjoKd8mUSFXz5V7i/25sfsEkP4j46g==}
 
   '@xterm/headless@6.0.0':
     resolution: {integrity: sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw==}
@@ -3659,6 +3662,7 @@ packages:
 
   libsql@0.5.22:
     resolution: {integrity: sha512-NscWthMQt7fpU8lqd7LXMvT9pi+KhhmTHAJWUB/Lj6MWa0MKFv0F2V4C6WKKpjCVZl0VwcDz4nOI3CyaT1DDiA==}
+    cpu: [x64, arm64, wasm32, arm]
     os: [darwin, linux, win32]
 
   lie@3.3.0:
@@ -4313,9 +4317,6 @@ packages:
 
   unconfig-core@7.5.0:
     resolution: {integrity: sha512-Su3FauozOGP44ZmKdHy2oE6LPjk51M/TRRjHv2HNCWiDvfvCoxC2lno6jevMA91MYAdCdwP05QnWdWpSbncX/w==}
-
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -7027,10 +7028,6 @@ snapshots:
       - '@azure/core-client'
       - supports-color
 
-  '@types/node@22.19.15':
-    dependencies:
-      undici-types: 6.21.0
-
   '@types/node@25.3.5':
     dependencies:
       undici-types: 7.18.2
@@ -7043,7 +7040,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 22.19.15
+      '@types/node': 25.3.5
 
   '@types/yauzl@2.10.3':
     dependencies:
@@ -7108,8 +7105,6 @@ snapshots:
       busboy: 1.6.0
       fast-querystring: 1.1.2
       tslib: 2.8.1
-
-  '@xterm/headless@5.5.0': {}
 
   '@xterm/headless@6.0.0': {}
 
@@ -8676,7 +8671,6 @@ snapshots:
       get-tsconfig: 4.13.6
     optionalDependencies:
       fsevents: 2.3.3
-    optional: true
 
   typescript@5.9.3: {}
 
@@ -8688,8 +8682,6 @@ snapshots:
     dependencies:
       '@quansync/fs': 1.0.0
       quansync: 1.0.0
-
-  undici-types@6.21.0: {}
 
   undici-types@7.18.2: {}
 

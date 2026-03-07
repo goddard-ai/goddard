@@ -1,7 +1,7 @@
 import { JSONRPCClient, type JSONRPCRequest } from "json-rpc-2.0"
 import WebSocket from "ws"
 
-import { createClientUrl, type ServerEndpoint } from "./transport"
+import { createClientUrl, type ServerEndpoint } from "./transport.ts"
 
 export interface ClientOptions {
   endpoint: ServerEndpoint

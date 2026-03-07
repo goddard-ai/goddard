@@ -11,16 +11,17 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "find node_modules -name \"spawn-helper\" -exec chmod +x {} +"
   },
   "dependencies": {
-    "@xterm/headless": "^5.3.0",
+    "@xterm/headless": "^6.0.0",
     "json-rpc-2.0": "^1.7.1",
     "node-pty": "^1.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "@types/ws": "^8.5.10"
+    "@types/node": "^25.3.5",
+    "@types/ws": "^8.18.1"
   }
 }

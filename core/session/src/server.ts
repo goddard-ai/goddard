@@ -2,13 +2,13 @@ import { rmSync } from "node:fs"
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 
-import { Terminal } from "@xterm/headless"
+import XtermHeadless from "@xterm/headless"
 import { JSONRPCServer } from "json-rpc-2.0"
 import * as pty from "node-pty"
 import { WebSocketServer } from "ws"
 import type { WebSocket } from "ws"
 
-import { createServerEndpoint, resolveServerListenTarget } from "./transport"
+import { createServerEndpoint, resolveServerListenTarget } from "./transport.ts"
 
 export interface ServerOptions {
   transport?: "tcp" | "ipc"
@@ -22,19 +22,17 @@ export interface ServerOptions {
 export async function startServer(options: ServerOptions = {}) {
   // Resolve a concrete listen target up front so the caller can persist the
   // same transport coordinates that the server will later expose as `endpoint`.
-  const listenTarget = resolveServerListenTarget({
-    ...options,
-    socketPath: options.socketPath,
-  })
+  const listenTarget = resolveServerListenTarget(options)
   const command = options.command || "bash"
   const args = options.args || []
   const cwd = options.cwd || process.cwd()
 
   // The headless terminal gives us a stable screen buffer that can be queried
   // over JSON-RPC without requiring a real TTY on the server side.
-  const headlessTerm = new Terminal({
+  const headlessTerm = new XtermHeadless.Terminal({
     cols: 80,
     rows: 24,
+    allowProposedApi: true,
   })
 
   // The PTY preserves terminal semantics for interactive programs so the
