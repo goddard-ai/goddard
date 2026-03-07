@@ -2,12 +2,14 @@
   "name": "@goddard-ai/config",
   "version": "0.1.0",
   "type": "module",
-  "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
