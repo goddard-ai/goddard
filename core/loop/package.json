@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@goddard-ai/config": "workspace:*",
-    "@mariozechner/pi-coding-agent": "^0.55.3",
-    "cron-parser": "^4.9.0",
-    "zod": "^3.24.2"
+    "@mariozechner/pi-coding-agent": "^0.57.0",
+    "cron-parser": "^5.5.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "tsdown": "^0.20.3"
+    "tsdown": "^0.21.0"
   }
 }

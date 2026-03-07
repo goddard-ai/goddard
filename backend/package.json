@@ -23,7 +23,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@goddard-ai/schema": "workspace:^",
     "@hattip/adapter-cloudflare-workers": "^0.0.49",
     "@hattip/adapter-node": "^0.0.49",
     "@libsql/client": "^0.17.0",
@@ -31,12 +30,13 @@
     "drizzle-orm": "1.0.0-beta.15-859cf75",
     "octokit": "^5.0.5",
     "rouzer": "^1.4.0",
-    "zod": "^4.1.11"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260301.1",
+    "@cloudflare/workers-types": "^4.20260307.1",
+    "@goddard-ai/schema": "workspace:^",
     "drizzle-kit": "1.0.0-beta.15-859cf75",
-    "tsdown": "^0.20.3",
-    "wrangler": "^4.69.0"
+    "tsdown": "^0.21.0",
+    "wrangler": "^4.71.0"
   }
 }
