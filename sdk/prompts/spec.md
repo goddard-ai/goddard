@@ -34,22 +34,22 @@ You must maintain the `spec/` folder as a Traversable Knowledge Graph following 
 
 **PART 2: WHAT BELONGS IN A SPEC**
 
-When translating human prompts into a spec file, extract and format the following information:
+When writing or updating the markdown body of a spec file, extract and format the following:
 
 - **High-Level Behavior & Business Value:**
   - Goal: What human problem does this solve?
-  - Hypothesis: "We believe that [doing X] will result in [Y]." (Allows future agents to know what constitutes success or failure).
-
+  - Hypothesis: "We believe that [doing X] will result in [Y]."
+- **Language & Precision:**
+  - **Ubiquitous Language (The Stakeholder Test):** Embrace _Domain Jargon_; ban _Technical Jargon_. If a non-technical domain expert (e.g., an accountant, a doctor, a sales rep) would use the term, it is valid. If only a software engineer would use it (e.g., "cron job", "JWT", "Redis"), you must translate it into business intent (e.g., "daily scheduled process", "secure token", "fast lookup").
+  - **NO Hollow Abstractions (The "Manage" Ban):** LLMs naturally default to vague generalizations when uncertain. You must actively fight this. Ban under-defined verbs (e.g., "manage," "process," "handle," "compute"). Ban generic nouns (e.g., "data," "item," "entity"). Instead of _"The system manages the user data,"_ you must extract the exact verbs and domain nouns: _"The system registers the Applicant and archives their previous Submissions."_
 - **Persona-Driven User Flows:**
-  - Actors: Who is executing this action? (e.g., Admin, Unauthenticated User).
-  - State Machines: Conceptual states (e.g., `Draft -> Pending -> Published`). Do not write the code for the state machine, just document the valid states.
-
+  - Actors: Who is executing this action? (e.g., Admin, System, Unauthenticated User).
+  - State Machines: Conceptual states only (e.g., `Draft -> Pending -> Published`).
 - **Boundaries & Hard Constraints:**
-  - Non-Goals: Explicitly state what is _out of scope_ to prevent feature creep (e.g., "NON-GOAL: Do not build social login for this release; email/password only").
-  - Constraints: Business or technical boundaries (e.g., "Must not rely on paid external APIs," "Must comply with GDPR data deletion within 30 days").
-
+  - Non-Goals: Explicitly state what is _out of scope_ to prevent feature creep.
+  - Constraints: Business or technical boundaries (e.g., "Must comply with GDPR data deletion within 30 days").
 - **Contextual Memory (Decisions):**
-  - If a human asks you to change a previous architectural decision, document the _reason_ for the pivot so future agents do not suggest discarded ideas (e.g., "Pivoted from Stripe to PayPal because the human required local currency support not available in Stripe").
+  - Document the _reason_ for architectural pivots so future agents do not suggest discarded ideas.
 
 **PART 3: ANTI-PATTERNS (WHAT NEVER GOES IN A SPEC)**
 
