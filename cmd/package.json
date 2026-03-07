@@ -1,7 +1,6 @@
 {
   "name": "@goddard-ai/cmd",
   "version": "0.1.0",
-  "private": true,
   "license": "MIT",
   "bin": {
     "goddard": "./dist/cli.mjs"
