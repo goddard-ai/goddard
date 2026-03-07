@@ -17,7 +17,7 @@
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "postinstall": "find node_modules -name \"spawn-helper\" -exec chmod +x {} +"
+    "postinstall": "node ./scripts/postinstall.mjs"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.57.0",
