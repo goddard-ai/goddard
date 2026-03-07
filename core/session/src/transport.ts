@@ -16,6 +16,8 @@ export type ServerEndpoint =
   | { kind: "tcp"; port: number; url: string }
   | { kind: "ipc"; socketPath: string; url: string }
 
+// Node uses the special `\\.\pipe` namespace for Windows named pipes, while
+// Unix platforms expose local sockets as filesystem paths under a temp dir.
 export function getDefaultIpcDirectory(platform = process.platform): string {
   if (platform === "win32") {
     return "\\\\.\\pipe"
@@ -24,6 +26,8 @@ export function getDefaultIpcDirectory(platform = process.platform): string {
   return os.tmpdir()
 }
 
+// Session endpoints must not collide, so IPC mode generates a unique path for
+// each session when the caller does not provide one explicitly.
 export function createRandomSocketPath(platform = process.platform): string {
   const id = randomUUID()
 
@@ -34,6 +38,8 @@ export function createRandomSocketPath(platform = process.platform): string {
   return path.join(getDefaultIpcDirectory(platform), `goddard-session-${id}.sock`)
 }
 
+// This resolves the requested transport into the actual value passed to
+// `server.listen(...)`. TCP defaults to port 0 so the OS allocates a free port.
 export function resolveServerListenTarget(options: TransportOptions = {}): ServerListenTarget {
   if (options.socketPath) {
     return {
@@ -59,6 +65,8 @@ export function resolveServerListenTarget(options: TransportOptions = {}): Serve
   }
 }
 
+// The externally shared endpoint must contain the real bound address, not the
+// requested listen target, because TCP port 0 is resolved only after binding.
 export function createServerEndpoint(listenTarget: ServerListenTarget, address: string | null): ServerEndpoint {
   if (listenTarget.kind === "ipc") {
     return {
