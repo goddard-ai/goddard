@@ -227,9 +227,15 @@ importers:
 
   core/session:
     dependencies:
+      '@mariozechner/pi-coding-agent':
+        specifier: ^0.57.0
+        version: 0.57.0(ws@8.19.0)(zod@4.3.6)
       '@xterm/headless':
         specifier: ^6.0.0
         version: 6.0.0
+      cmd-ts:
+        specifier: ^0.15.0
+        version: 0.15.0
       json-rpc-2.0:
         specifier: ^1.7.1
         version: 1.7.1
@@ -246,6 +252,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
 
   core/session-client:
     dependencies:

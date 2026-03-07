@@ -4,8 +4,13 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "session": "./bin/session"
+  },
   "exports": {
-    ".": "./src/server.ts"
+    ".": "./src/server.ts",
+    "./plugins": "./src/plugins/index.ts",
+    "./cli": "./src/cli.ts"
   },
   "scripts": {
     "lint": "oxlint",
@@ -15,13 +20,16 @@
     "postinstall": "find node_modules -name \"spawn-helper\" -exec chmod +x {} +"
   },
   "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.57.0",
     "@xterm/headless": "^6.0.0",
+    "cmd-ts": "^0.15.0",
     "json-rpc-2.0": "^1.7.1",
     "node-pty": "^1.1.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0"
   }
 }
