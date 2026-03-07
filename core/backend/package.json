@@ -20,7 +20,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@hattip/adapter-cloudflare-workers": "^0.0.49",
