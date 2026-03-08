@@ -55,3 +55,39 @@ From this package directory:
 Drivers are currently embedded in this package but loaded via dynamic imports through the driver registry.
 
 This gives us a driver architecture now, while still keeping first-party drivers hard-coded during this phase.
+
+## JSON-RPC server notes
+
+Public packages:
+
+- `@goddard-ai/session`
+- `@goddard-ai/session-client`
+- `@goddard-ai/session-protocol`
+
+`startServer(...)` now supports:
+
+- `session_initialize`
+- `session_send_event { event }`
+- `session_get_state`
+
+Server notifications emitted to connected websocket clients:
+
+- `session_event { sequence, event }`
+
+Driver input events:
+
+- `input.text { text }`
+- `input.terminal { data }`
+- `terminal.resize { cols, rows }`
+
+Driver output events:
+
+- `output.text { text }`
+- `output.terminal { data }`
+- `output.normalized { payload }`
+- `session.exit { exitCode }`
+- `session.error { message }`
+
+The `output.normalized` payload is driver-agnostic (`schemaVersion: 1`) and intended for persistence across mixed driver sessions.
+
+For terminal-native streams (for example PTY), the server emits `payload.kind: "terminal"` with the latest screen snapshot (`cols`, `rows`, `lines`, `cursor`) after terminal output events.

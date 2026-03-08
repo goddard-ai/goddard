@@ -1,17 +1,15 @@
 import { startServer } from "@goddard-ai/session"
-import { startClient } from "@goddard-ai/session-client"
+
+import { startClient } from "../src/index"
 
 try {
-  // Start the server
   const server = await startServer({ command: "/bin/bash", args: [] })
   console.log("Server started with endpoint:")
   console.log(JSON.stringify(server.endpoint, null, 2))
 
-  // Start the client
   console.log("Starting session client...")
   const client = startClient({
     endpoint: server.endpoint,
-    refreshRateMs: 250,
   })
 
   const shutdown = async () => {

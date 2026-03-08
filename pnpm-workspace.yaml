@@ -2,5 +2,6 @@ packages:
   - "app"
   - "cmd"
   - "core/*"
+  - "core/session/*"
   - "daemon"
   - "github-app"

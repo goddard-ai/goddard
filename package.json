@@ -9,6 +9,8 @@
     "daemon",
     "github-app",
     "core/sdk",
+    "core/session",
+    "core/session/*",
     "core/schema",
     "core/storage"
   ],

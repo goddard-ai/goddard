@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
+import type { SessionEndpoint } from "@goddard-ai/session-protocol"
 
 export interface TransportOptions {
   transport?: "tcp" | "ipc"
@@ -11,10 +12,6 @@ export interface TransportOptions {
 export type ServerListenTarget =
   | { kind: "tcp"; value: number; display: string }
   | { kind: "ipc"; value: string; display: string }
-
-export type ServerEndpoint =
-  | { kind: "tcp"; port: number; url: string }
-  | { kind: "ipc"; socketPath: string; url: string }
 
 // Node uses the special `\\.\pipe` namespace for Windows named pipes, while
 // Unix platforms expose local sockets as filesystem paths under a temp dir.
@@ -70,7 +67,7 @@ export function resolveServerListenTarget(options: TransportOptions = {}): Serve
 export function createServerEndpoint(
   listenTarget: ServerListenTarget,
   address: string | null,
-): ServerEndpoint {
+): SessionEndpoint {
   if (listenTarget.kind === "ipc") {
     return {
       kind: "ipc",

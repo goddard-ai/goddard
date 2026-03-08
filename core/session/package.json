@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "type": "module",
   "bin": {
     "session": "./bin/session"
   },
+  "type": "module",
   "exports": {
     ".": "./src/server.ts",
     "./drivers": "./src/drivers/index.ts",
@@ -19,6 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@goddard-ai/session-protocol": "workspace:^",
     "@mariozechner/pi-coding-agent": "^0.57.0",
     "@xterm/headless": "^6.0.0",
     "cmd-ts": "^0.15.0",

@@ -1,13 +1,13 @@
 import os from "node:os"
 import path from "node:path"
 
+import type { SessionEndpoint } from "@goddard-ai/session-protocol"
 import { describe, expect, it } from "vitest"
 
 import {
   createRandomSocketPath,
   getDefaultIpcDirectory,
   resolveServerListenTarget,
-  type ServerEndpoint,
 } from "../src/transport"
 
 describe("transport", () => {
@@ -52,12 +52,12 @@ describe("transport", () => {
   })
 
   it("returns a websocket URL from the actual bound tcp port", () => {
-    const endpoint: ServerEndpoint = { kind: "tcp", port: 54321, url: "ws://localhost:54321" }
+    const endpoint: SessionEndpoint = { kind: "tcp", port: 54321, url: "ws://localhost:54321" }
     expect(endpoint.url).toBe("ws://localhost:54321")
   })
 
   it("returns a websocket URL from the actual bound IPC path", () => {
-    const endpoint: ServerEndpoint = {
+    const endpoint: SessionEndpoint = {
       kind: "ipc",
       socketPath: "/tmp/goddard.sock",
       url: "ws+unix:///tmp/goddard.sock",

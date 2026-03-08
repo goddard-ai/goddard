@@ -27,6 +27,7 @@ async function resolveSessionManager(
     return SessionManager.open(matches[0].path)
   }
 
+  // To prevent resuming the wrong session, we only allow ambiguous targets if there's exactly one match.
   if (matches.length > 1) {
     throw new Error(`Resume target "${input.resume}" is ambiguous. Provide a full session id.`)
   }

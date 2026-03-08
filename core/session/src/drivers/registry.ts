@@ -8,6 +8,8 @@ const EMBEDDED_DRIVER_IMPORTS: Record<SessionDriverName, string> = {
   pty: "./pty.ts",
 }
 
+// DriverImporter allows for custom import logic, which is particularly useful for
+// testing or for platforms where dynamic imports are handled differently.
 export type DriverImporter = (specifier: string) => Promise<{ driver?: SessionDriver }>
 
 const defaultImporter: DriverImporter = async (specifier) => {

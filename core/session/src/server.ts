@@ -4,11 +4,17 @@ import type { AddressInfo } from "node:net"
 
 import XtermHeadless from "@xterm/headless"
 import { JSONRPCServer } from "json-rpc-2.0"
-import * as pty from "node-pty"
+import type {
+  SessionClientEvent,
+  SessionDriverCapabilities,
+  SessionServerEvent,
+  SessionTerminalState,
+} from "@goddard-ai/session-protocol"
 import { WebSocketServer } from "ws"
 import type { WebSocket } from "ws"
 
 import type { SessionDriver } from "./drivers/types.ts"
+import { createPtyServerDriver } from "./drivers/pty.ts"
 import { createServerEndpoint, resolveServerListenTarget } from "./transport.ts"
 
 export interface ServerOptions {
@@ -21,40 +27,20 @@ export interface ServerOptions {
   driver?: SessionDriver
 }
 
-function createDefaultPtyDriver(options: Pick<ServerOptions, "command" | "args" | "cwd">): SessionDriver {
-  const command = options.command || "bash"
-  const args = options.args || []
-  const cwd = options.cwd || process.cwd()
-
-  const ptyProcess = pty.spawn(command, args, {
-    name: "xterm-color",
-    cols: 80,
-    rows: 24,
-    cwd,
-    env: process.env as Record<string, string>,
-  })
-
-  return {
-    name: "pty",
-    writeInput: (key: string) => {
-      ptyProcess.write(key)
-    },
-    onData: (listener) => {
-      const disposable = ptyProcess.onData((data) => listener(data))
-      return () => disposable.dispose()
-    },
-    close: () => {
-      ptyProcess.kill()
-    },
-  }
-}
-
 export async function startServer(options: ServerOptions = {}) {
   const listenTarget = resolveServerListenTarget(options)
 
-  const driver = options.driver ?? createDefaultPtyDriver(options)
-  if (!driver.writeInput || !driver.onData) {
-    throw new Error("startServer requires a driver with writeInput and onData methods")
+  const driver = options.driver ?? createPtyServerDriver(options)
+  if (!driver.sendEvent || !driver.onEvent) {
+    throw new Error("startServer requires a driver with sendEvent and onEvent methods")
+  }
+  const capabilities: SessionDriverCapabilities = driver.getCapabilities?.() ?? {
+    terminal: {
+      enabled: false,
+      canResize: false,
+      hasScreenState: false,
+    },
+    normalizedOutput: false,
   }
 
   const headlessTerm = new XtermHeadless.Terminal({
@@ -63,20 +49,105 @@ export async function startServer(options: ServerOptions = {}) {
     allowProposedApi: true,
   })
 
-  const unsubscribeFromDriver = driver.onData((data) => {
-    headlessTerm.write(data)
-  })
+  const clients = new Set<WebSocket>()
+
+  const sendNotification = (method: string, params: unknown) => {
+    const payload = JSON.stringify({ jsonrpc: "2.0", method, params })
+    for (const client of clients) {
+      if (client.readyState === 1) {
+        client.send(payload)
+      }
+    }
+  }
+
+  let eventSequence = 0
+  const emitSessionEvent = (event: SessionServerEvent) => {
+    eventSequence += 1
+    sendNotification("session_event", {
+      sequence: eventSequence,
+      event,
+    })
+  }
+
+  const onDriverEvent = (event: SessionServerEvent) => {
+    if (event.type === "output.terminal") {
+      headlessTerm.write(event.data)
+      emitSessionEvent(event)
+      emitSessionEvent({
+        type: "output.normalized",
+        payload: {
+          schemaVersion: 1,
+          source: {
+            driver: driver.name,
+            format: "terminal",
+          },
+          kind: "terminal",
+          terminal: getTerminalState(),
+          raw: {
+            data: event.data,
+          },
+        },
+      })
+      return
+    }
+
+    if (event.type === "output.text") {
+      headlessTerm.write(event.text)
+      emitSessionEvent(event)
+      return
+    }
+
+    if (event.type === "output.normalized") {
+      emitSessionEvent(event)
+      return
+    }
+
+    emitSessionEvent(event)
+  }
+
+  const unsubscribeFromDriver = driver.onEvent(onDriverEvent)
 
   const rpcServer = new JSONRPCServer()
 
-  rpcServer.addMethod("rpc_write_input", (params) => {
-    const { key } = params as { key: string }
-    if (key) {
-      driver.writeInput?.(key)
-    }
-  })
+  function ensureObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null
+  }
 
-  rpcServer.addMethod("rpc_get_screen_state", () => {
+  function parseClientEvent(params: unknown): SessionClientEvent {
+    if (
+      !ensureObject(params) ||
+      !ensureObject(params.event) ||
+      typeof params.event.type !== "string"
+    ) {
+      throw new Error("session_send_event requires an `event` object with a `type` field")
+    }
+
+    const event = params.event as Record<string, unknown>
+    if (event.type === "input.text") {
+      if (typeof event.text !== "string" || event.text.length === 0) {
+        throw new Error("input.text requires non-empty string `text`")
+      }
+      return { type: "input.text", text: event.text }
+    }
+
+    if (event.type === "input.terminal") {
+      if (typeof event.data !== "string" || event.data.length === 0) {
+        throw new Error("input.terminal requires non-empty string `data`")
+      }
+      return { type: "input.terminal", data: event.data }
+    }
+
+    if (event.type === "terminal.resize") {
+      if (typeof event.cols !== "number" || typeof event.rows !== "number") {
+        throw new Error("terminal.resize requires numeric `cols` and `rows`")
+      }
+      return { type: "terminal.resize", cols: event.cols, rows: event.rows }
+    }
+
+    throw new Error(`Unsupported client event type: ${event.type}`)
+  }
+
+  function getTerminalState(): SessionTerminalState {
     const buffer = headlessTerm.buffer.active
     const lines: string[] = []
 
@@ -85,19 +156,91 @@ export async function startServer(options: ServerOptions = {}) {
       lines.push(line ? line.translateToString(true) : "")
     }
 
-    return lines
+    return {
+      cols: headlessTerm.cols,
+      rows: headlessTerm.rows,
+      lines,
+      cursor: {
+        x: buffer.cursorX,
+        y: buffer.cursorY,
+      },
+    }
+  }
+
+  rpcServer.addMethod("session_initialize", () => {
+    return {
+      protocolVersion: 1,
+      driver: driver.name,
+      capabilities,
+      state: {
+        terminal: capabilities.terminal.hasScreenState ? getTerminalState() : null,
+      },
+    }
+  })
+
+  rpcServer.addMethod("session_send_event", async (params) => {
+    const event = parseClientEvent(params)
+    if (event.type === "terminal.resize") {
+      if (!capabilities.terminal.canResize) {
+        throw new Error("terminal.resize is not supported by this driver")
+      }
+      const cols = Math.max(1, Math.floor(event.cols))
+      const rows = Math.max(1, Math.floor(event.rows))
+      headlessTerm.resize(cols, rows)
+      await driver.sendEvent?.({ type: "terminal.resize", cols, rows })
+      return { ok: true, normalizedEvent: { type: "terminal.resize", cols, rows } }
+    }
+
+    await driver.sendEvent?.(event)
+    return { ok: true, normalizedEvent: event }
+  })
+
+  rpcServer.addMethod("session_get_state", () => {
+    return {
+      terminal: capabilities.terminal.hasScreenState ? getTerminalState() : null,
+    }
   })
 
   const httpServer = createServer()
   const wss = new WebSocketServer({ server: httpServer })
 
   wss.on("connection", (ws: WebSocket) => {
+    clients.add(ws)
+
+    ws.on("close", () => {
+      clients.delete(ws)
+    })
+
     ws.on("message", (message) => {
-      rpcServer.receive(JSON.parse(message.toString())).then((response) => {
-        if (response) {
-          ws.send(JSON.stringify(response))
-        }
-      })
+      let payload: unknown
+      try {
+        payload = JSON.parse(message.toString())
+      } catch {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32700, message: "Parse error" },
+          }),
+        )
+        return
+      }
+
+      Promise.resolve(rpcServer.receive(payload as any))
+        .then((response) => {
+          if (response) {
+            ws.send(JSON.stringify(response))
+          }
+        })
+        .catch(() => {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: null,
+              error: { code: -32603, message: "Internal error" },
+            }),
+          )
+        })
     })
   })
 

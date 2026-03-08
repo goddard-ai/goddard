@@ -1,3 +1,9 @@
+import type {
+  SessionClientEvent,
+  SessionDriverCapabilities,
+  SessionServerEvent,
+} from "@goddard-ai/session-protocol"
+
 export type SessionDriverName = "pi" | "pi-rpc" | "gemini" | "codex" | "pty"
 
 export interface SessionDriverInput {
@@ -13,14 +19,12 @@ export interface SessionDriverContext {
   stderr: NodeJS.WriteStream
 }
 
-export type SessionDriverDataListener = (data: string) => void
-
 /**
  * Unified session driver contract.
  *
  * Drivers can implement either (or both) modes:
  * - CLI mode via run(...)
- * - RPC server mode via writeInput/onData/close
+ * - RPC server mode via sendEvent/onEvent/getCapabilities/close
  */
 export interface SessionDriver {
   readonly name: SessionDriverName
@@ -29,7 +33,8 @@ export interface SessionDriver {
   run?(input: SessionDriverInput, context: SessionDriverContext): Promise<number>
 
   // Server mode
-  writeInput?(key: string): void
-  onData?(listener: SessionDriverDataListener): () => void
+  sendEvent?(event: SessionClientEvent): void | Promise<void>
+  onEvent?(listener: (event: SessionServerEvent) => void): () => void
+  getCapabilities?(): SessionDriverCapabilities
   close?(): void
 }

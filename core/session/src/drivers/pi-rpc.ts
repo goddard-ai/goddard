@@ -1,20 +1,19 @@
-import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { createRequire } from "node:module"
 import { spawn } from "node:child_process"
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const require = createRequire(import.meta.url)
 
-const rpcClientPath = path.resolve(__dirname, "../../node_modules/@mariozechner/pi-coding-agent/dist/modes/rpc/rpc-client.js")
+const rpcClientPath = require.resolve("@mariozechner/pi-coding-agent/dist/modes/rpc/rpc-client.js")
 
 const { RpcClient } = await import(rpcClientPath)
 
 import type { SessionDriver, SessionDriverContext, SessionDriverInput } from "./types.ts"
 
 export const driver: SessionDriver = {
-  name: "pi-rpc" as any,
+  name: "pi-rpc",
   run: async (input: SessionDriverInput, context: SessionDriverContext) => {
-    // Custom RPC client that spawns via 'pi' command directly instead of 'node <cliPath>'
+    // Standard RpcClient from @mariozechner/pi-coding-agent expects a Node.js script path,
+    // so we override it to use the globally available 'pi' command directly.
     const ExternalRpcClient: any = class extends (RpcClient as any) {
       async start() {
         const args = ["--mode", "rpc", ...(this.options.args || [])]
@@ -24,8 +23,11 @@ export const driver: SessionDriver = {
           stdio: ["pipe", "pipe", "pipe"],
         })
 
+        let stdoutBuffer = ""
         this.process.stdout.on("data", (data: Buffer) => {
-          const lines = data.toString().split("\n")
+          stdoutBuffer += data.toString()
+          const lines = stdoutBuffer.split("\n")
+          stdoutBuffer = lines.pop() ?? ""
           for (const line of lines) {
             if (line.trim()) {
               this.handleLine(line)
@@ -38,6 +40,7 @@ export const driver: SessionDriver = {
         })
 
         return new Promise<void>((resolve, reject) => {
+          // Wait for the 'agent_start' event before resolving to ensure the RPC process is ready.
           const onStart = (event: any) => {
             if (event.type === "agent_start") {
               this.eventListeners.delete(onStart)
@@ -45,7 +48,7 @@ export const driver: SessionDriver = {
             }
           }
           this.onEvent(onStart)
-          
+
           this.process.on("error", reject)
           this.process.on("exit", (code: number) => {
             if (code !== 0 && code !== null) {

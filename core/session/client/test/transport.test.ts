@@ -1,15 +1,16 @@
+import type { SessionEndpoint } from "@goddard-ai/session-protocol"
 import { describe, expect, it } from "vitest"
 
-import { createClientUrl, type ServerEndpoint } from "../src/transport"
+import { createClientUrl } from "../src/transport"
 
 describe("session client transport", () => {
   it("creates a websocket URL from a tcp endpoint", () => {
-    const endpoint: ServerEndpoint = { kind: "tcp", port: 4321, url: "ws://localhost:4321" }
+    const endpoint: SessionEndpoint = { kind: "tcp", port: 4321, url: "ws://localhost:4321" }
     expect(createClientUrl(endpoint)).toBe("ws://localhost:4321")
   })
 
   it("creates a websocket URL from a Unix socket endpoint", () => {
-    const endpoint: ServerEndpoint = {
+    const endpoint: SessionEndpoint = {
       kind: "ipc",
       socketPath: "/tmp/goddard.sock",
       url: "ws+unix:///tmp/goddard.sock",
