@@ -15,6 +15,9 @@ async function runDriver(
   const server = await startServer({
     driver,
     transport: "ipc",
+    startupInput: {
+      resume: args.resume,
+    },
   })
 
   return await new Promise<number>((resolve, reject) => {
@@ -67,12 +70,9 @@ function parseEndpoint(url: string): SessionEndpoint {
   throw new Error(`Unsupported endpoint scheme: ${url}`)
 }
 
-async function connectToServer(args: { endpoint: string; resume?: string }) {
+async function connectToServer(args: { endpoint: string }) {
   const client = startClient({
     endpoint: parseEndpoint(args.endpoint),
-    startupInput: {
-      resume: args.resume,
-    },
   })
 
   return await new Promise<number>((resolve) => {
@@ -162,12 +162,10 @@ export async function runSessionCli(argv: string[]): Promise<number> {
         type: string,
         long: "endpoint",
       }),
-      ...resumeArg(),
     },
     handler: async (args) => {
       return await connectToServer({
         endpoint: args.endpoint,
-        resume: args.resume || undefined,
       })
     },
   })
