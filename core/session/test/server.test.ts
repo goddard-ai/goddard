@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import WebSocket from "ws"
 
-import type {
-  NormalizedSessionPayload,
-  SessionClientEvent,
-  SessionServerEvent,
-} from "@goddard-ai/session-protocol"
+import type { NormalizedSessionPayload, SessionClientEvent } from "@goddard-ai/session-protocol"
 import { startServer } from "../src/server"
 import { SessionDriver } from "../src/drivers/types"
 
