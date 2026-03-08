@@ -8,7 +8,12 @@ import type {
   SessionClientEvent,
   SessionDriverCapabilities,
   SessionServerEvent,
+  SessionStartupInput,
   SessionTerminalState,
+} from "@goddard-ai/session-protocol"
+import {
+  sessionClientEventSchema,
+  sessionInitializeParamsSchema,
 } from "@goddard-ai/session-protocol"
 import { WebSocketServer } from "ws"
 import type { WebSocket } from "ws"
@@ -50,6 +55,8 @@ export async function startServer(options: ServerOptions = {}) {
   })
 
   const clients = new Set<WebSocket>()
+  let started = false
+  let resolvedStartupInput: SessionStartupInput = {}
 
   const sendNotification = (method: string, params: unknown) => {
     const payload = JSON.stringify({ jsonrpc: "2.0", method, params })
@@ -109,42 +116,51 @@ export async function startServer(options: ServerOptions = {}) {
 
   const rpcServer = new JSONRPCServer()
 
-  function ensureObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null
+  function formatSchemaError(error: {
+    issues: Array<{ path: ReadonlyArray<PropertyKey>; message: string }>
+  }) {
+    const [issue] = error.issues
+    if (!issue) {
+      return "Invalid request payload"
+    }
+
+    const path = issue.path.length > 0 ? issue.path.map(String).join(".") : "request"
+    return `${path}: ${issue.message}`
+  }
+
+  function parseInitializeParams(params: unknown): SessionStartupInput {
+    const result = sessionInitializeParamsSchema.safeParse(params)
+    if (!result.success) {
+      throw new Error(`Invalid session_initialize params: ${formatSchemaError(result.error)}`)
+    }
+
+    return result.data?.input ?? {}
+  }
+
+  async function ensureDriverStarted(input: SessionStartupInput = {}) {
+    if (!started) {
+      resolvedStartupInput = { ...input }
+      await driver.start?.(resolvedStartupInput)
+      started = true
+      return
+    }
+
+    const nextResume = input.resume
+    const currentResume = resolvedStartupInput.resume
+    if (nextResume !== undefined && nextResume !== currentResume) {
+      throw new Error(
+        `session already initialized with resume ${currentResume ?? "<none>"}; cannot switch to ${nextResume}`,
+      )
+    }
   }
 
   function parseClientEvent(params: unknown): SessionClientEvent {
-    if (
-      !ensureObject(params) ||
-      !ensureObject(params.event) ||
-      typeof params.event.type !== "string"
-    ) {
-      throw new Error("session_send_event requires an `event` object with a `type` field")
+    const event = (params as { event?: unknown } | null | undefined)?.event
+    const result = sessionClientEventSchema.safeParse(event)
+    if (!result.success) {
+      throw new Error(`Invalid session_send_event params: ${formatSchemaError(result.error)}`)
     }
-
-    const event = params.event as Record<string, unknown>
-    if (event.type === "input.text") {
-      if (typeof event.text !== "string" || event.text.length === 0) {
-        throw new Error("input.text requires non-empty string `text`")
-      }
-      return { type: "input.text", text: event.text }
-    }
-
-    if (event.type === "input.terminal") {
-      if (typeof event.data !== "string" || event.data.length === 0) {
-        throw new Error("input.terminal requires non-empty string `data`")
-      }
-      return { type: "input.terminal", data: event.data }
-    }
-
-    if (event.type === "terminal.resize") {
-      if (typeof event.cols !== "number" || typeof event.rows !== "number") {
-        throw new Error("terminal.resize requires numeric `cols` and `rows`")
-      }
-      return { type: "terminal.resize", cols: event.cols, rows: event.rows }
-    }
-
-    throw new Error(`Unsupported client event type: ${event.type}`)
+    return result.data
   }
 
   function getTerminalState(): SessionTerminalState {
@@ -167,7 +183,8 @@ export async function startServer(options: ServerOptions = {}) {
     }
   }
 
-  rpcServer.addMethod("session_initialize", () => {
+  rpcServer.addMethod("session_initialize", async (params) => {
+    await ensureDriverStarted(parseInitializeParams(params))
     return {
       protocolVersion: 1,
       driver: driver.name,
@@ -179,6 +196,7 @@ export async function startServer(options: ServerOptions = {}) {
   })
 
   rpcServer.addMethod("session_send_event", async (params) => {
+    await ensureDriverStarted()
     const event = parseClientEvent(params)
     if (event.type === "terminal.resize") {
       if (!capabilities.terminal.canResize) {
@@ -195,7 +213,8 @@ export async function startServer(options: ServerOptions = {}) {
     return { ok: true, normalizedEvent: event }
   })
 
-  rpcServer.addMethod("session_get_state", () => {
+  rpcServer.addMethod("session_get_state", async () => {
+    await ensureDriverStarted()
     return {
       terminal: capabilities.terminal.hasScreenState ? getTerminalState() : null,
     }

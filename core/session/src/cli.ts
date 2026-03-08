@@ -1,35 +1,83 @@
-import { command, option, restPositionals, runSafely, string, subcommands } from "cmd-ts"
+import { command, option, restPositionals, run, string, subcommands } from "cmd-ts"
+import type { SessionEndpoint } from "@goddard-ai/session-protocol"
 
+import { startClient } from "../client/src/index.ts"
 import { loadEmbeddedDriver } from "./drivers/registry.ts"
 import type { SessionDriverName } from "./drivers/types.ts"
-
-function mergePrompt(parts: string[]): string | undefined {
-  const prompt = parts.join(" ").trim()
-  return prompt.length > 0 ? prompt : undefined
-}
+import { startServer } from "./server.ts"
 
 async function runDriver(
   name: SessionDriverName,
   args: { resume?: string; prompt: string[]; argv?: string[] },
 ) {
   const driver = await loadEmbeddedDriver(name)
-  if (!driver.run) {
-    throw new Error(`Driver "${name}" does not support CLI mode`)
+
+  const server = await startServer({
+    driver,
+    transport: "ipc",
+  })
+
+  return await new Promise<number>((resolve, reject) => {
+    let closing = false
+
+    const cleanup = () => {
+      process.off("SIGINT", shutdown)
+      process.off("SIGTERM", shutdown)
+    }
+
+    const shutdown = () => {
+      if (closing) {
+        return
+      }
+
+      closing = true
+      cleanup()
+      void server.close().then(() => resolve(0), reject)
+    }
+
+    process.once("SIGINT", shutdown)
+    process.once("SIGTERM", shutdown)
+  })
+}
+
+function parseEndpoint(url: string): SessionEndpoint {
+  if (url.startsWith("ws+unix://")) {
+    return {
+      kind: "ipc",
+      socketPath: url.slice("ws+unix://".length),
+      url,
+    }
   }
 
-  return await driver.run(
-    {
+  if (url.startsWith("ws://")) {
+    const parsed = new URL(url)
+    const port = Number(parsed.port)
+
+    if (!Number.isFinite(port) || port <= 0) {
+      throw new Error(`Invalid websocket endpoint: ${url}`)
+    }
+
+    return {
+      kind: "tcp",
+      port,
+      url,
+    }
+  }
+
+  throw new Error(`Unsupported endpoint scheme: ${url}`)
+}
+
+async function connectToServer(args: { endpoint: string; resume?: string }) {
+  const client = startClient({
+    endpoint: parseEndpoint(args.endpoint),
+    startupInput: {
       resume: args.resume,
-      initialPrompt: mergePrompt(args.prompt),
-      argv: args.argv,
     },
-    {
-      cwd: process.cwd(),
-      stdin: process.stdin,
-      stdout: process.stdout,
-      stderr: process.stderr,
-    },
-  )
+  })
+
+  return await new Promise<number>((resolve) => {
+    client.ws.on("close", (code) => resolve(code))
+  })
 }
 
 function promptArgs() {
@@ -107,6 +155,23 @@ export async function runSessionCli(argv: string[]): Promise<number> {
     },
   })
 
+  const connectCmd = command({
+    name: "connect",
+    args: {
+      endpoint: option({
+        type: string,
+        long: "endpoint",
+      }),
+      ...resumeArg(),
+    },
+    handler: async (args) => {
+      return await connectToServer({
+        endpoint: args.endpoint,
+        resume: args.resume || undefined,
+      })
+    },
+  })
+
   const app = subcommands({
     name: "session",
     cmds: {
@@ -115,17 +180,19 @@ export async function runSessionCli(argv: string[]): Promise<number> {
       gemini: geminiCmd,
       codex: codexCmd,
       pty: ptyCmd,
+      connect: connectCmd,
     },
   })
 
-  const result = await runSafely(app, argv)
-  if (result._tag === "error") {
-    const error = (result as any).error
+  let result
+  try {
+    result = await run(app, argv)
+  } catch (error: any) {
     process.stderr.write(`${error?.message || "Unknown error"}\n`)
     return error?.config?.exitCode || 1
   }
 
-  const value = (result as any).value
+  const value = await result.value
 
   if (typeof value === "number") {
     return value
