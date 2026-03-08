@@ -144,17 +144,6 @@ export async function runSessionCli(argv: string[]): Promise<number> {
     },
   })
 
-  const piRpcCmd = command({
-    name: "pi-rpc",
-    args: {
-      ...resumeArg(),
-      ...promptArgs(),
-    },
-    handler: async (args) => {
-      return await runDriver("pi-rpc", { resume: args.resume || undefined, prompt: args.prompt })
-    },
-  })
-
   const connectCmd = command({
     name: "connect",
     args: {
@@ -174,7 +163,6 @@ export async function runSessionCli(argv: string[]): Promise<number> {
     name: "session",
     cmds: {
       pi: piCmd,
-      "pi-rpc": piRpcCmd,
       gemini: geminiCmd,
       codex: codexCmd,
       pty: ptyCmd,

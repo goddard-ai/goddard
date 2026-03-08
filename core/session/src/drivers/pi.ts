@@ -6,24 +6,21 @@ import type {
   SessionServerEvent,
   SessionStartupInput,
 } from "@goddard-ai/session-protocol"
-import { SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent"
+import { AgentSession, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent"
 
-import type { SessionDriver } from "./types.ts"
+import { SessionDriver } from "./types.ts"
 
-async function resolveSessionManager(
-  input: SessionStartupInput,
-  cwd: string,
-): Promise<SessionManager> {
+async function resolveSessionManager(input: SessionStartupInput): Promise<SessionManager> {
   if (!input.resume) {
-    return SessionManager.create(cwd)
+    return SessionManager.create(process.cwd())
   }
 
-  const candidatePath = path.resolve(cwd, input.resume)
+  const candidatePath = path.resolve(input.resume)
   if (existsSync(candidatePath)) {
     return SessionManager.open(candidatePath)
   }
 
-  const sessions = await SessionManager.list(cwd)
+  const sessions = await SessionManager.list(process.cwd())
   const matches = sessions.filter(
     (session) => session.id === input.resume || session.id.startsWith(input.resume || ""),
   )
@@ -78,220 +75,207 @@ function createPiPayload(
   } as NormalizedSessionPayload
 }
 
-const listeners = new Set<(event: SessionServerEvent) => void>()
-let serverSessionPromise:
-  | Promise<Awaited<ReturnType<typeof createAgentSession>>["session"]>
-  | undefined
-let serverSession: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined
-let serverUnsubscribe: (() => void) | undefined
-let serverQueue = Promise.resolve()
-let serverStartupInput: SessionStartupInput = {}
+export default class PiDriver extends SessionDriver {
+  readonly name = "pi" as const
+  private sessionPromise: Promise<void> | undefined
+  private session: AgentSession | undefined
+  private unsubscribeSession: (() => void) | undefined
 
-function emit(event: SessionServerEvent) {
-  for (const listener of listeners) {
-    listener(event)
-  }
-}
-
-async function ensureServerSession() {
-  if (serverSession) {
-    return serverSession
+  private async getSession() {
+    if (this.sessionPromise) {
+      await this.sessionPromise
+    }
+    return this.session
   }
 
-  if (!serverSessionPromise) {
-    serverSessionPromise = (async () => {
-      const sessionManager = await resolveSessionManager(serverStartupInput, process.cwd())
-      const created = await createAgentSession({
-        cwd: process.cwd(),
-        sessionManager,
-      })
-      serverSession = created.session
-      serverUnsubscribe = created.session.subscribe((event: any) => {
-        if (event.type === "message_update") {
-          const update = event.assistantMessageEvent
-
-          if (update?.type === "text_delta" && typeof update.delta === "string") {
-            emit({ type: "output.text", text: update.delta })
-            emit({
-              type: "output.normalized",
-              payload: createPiPayload("delta", event, created.session.sessionId, {
-                role: "assistant",
-                text: update.delta,
-              }),
-            })
-            return
-          }
-
-          if (update?.type === "toolcall_end") {
-            emit({
-              type: "output.normalized",
-              payload: createPiPayload("tool_call", event, created.session.sessionId, {
-                tool: {
-                  name:
-                    typeof update.toolCall?.toolName === "string"
-                      ? update.toolCall.toolName
-                      : undefined,
-                  arguments: update.toolCall,
-                },
-              }),
-            })
-            return
-          }
-
-          if (update?.type === "done") {
-            emit({
-              type: "output.normalized",
-              payload: createPiPayload("status", event, created.session.sessionId, {
-                done: true,
-                message: typeof update.reason === "string" ? update.reason : "done",
-              }),
-            })
-            return
-          }
-
-          if (update?.type === "error") {
-            emit({
-              type: "output.normalized",
-              payload: createPiPayload("error", event, created.session.sessionId, {
-                message: typeof update.reason === "string" ? update.reason : "message_update:error",
-              }),
-            })
-            return
-          }
-
-          emit({
-            type: "output.normalized",
-            payload: createPiPayload("status", event, created.session.sessionId, {
-              message:
-                typeof update?.type === "string"
-                  ? `message_update:${update.type}`
-                  : "message_update",
-            }),
-          })
-          return
-        }
-
-        if (event.type === "message_end") {
-          emit({
-            type: "output.normalized",
-            payload: createPiPayload("message", event, created.session.sessionId, {
-              role:
-                event.message?.role === "assistant" ||
-                event.message?.role === "user" ||
-                event.message?.role === "system" ||
-                event.message?.role === "tool"
-                  ? event.message.role
-                  : undefined,
-              text: getPiMessageText(event.message),
-            }),
-          })
-          return
-        }
-
-        if (event.type === "tool_execution_start") {
-          emit({
-            type: "output.normalized",
-            payload: createPiPayload("tool_call", event, created.session.sessionId, {
-              tool: {
-                name: typeof event.toolName === "string" ? event.toolName : undefined,
-                arguments: event.args,
-              },
-            }),
-          })
-          return
-        }
-
-        if (event.type === "tool_execution_end") {
-          emit({
-            type: "output.normalized",
-            payload: createPiPayload(
-              event.isError ? "error" : "tool_result",
-              event,
-              created.session.sessionId,
-              event.isError
-                ? {
-                    message:
-                      typeof event.toolName === "string"
-                        ? `${event.toolName} failed`
-                        : "tool execution failed",
-                  }
-                : {
-                    tool: {
-                      name: typeof event.toolName === "string" ? event.toolName : undefined,
-                      result: event.result,
-                    },
-                  },
-            ),
-          })
-          return
-        }
-
-        emit({
-          type: "output.normalized",
-          payload: createPiPayload("status", event, created.session.sessionId, {
-            message: typeof event.type === "string" ? event.type : "event",
-          }),
-        })
-      })
-
-      return created.session
-    })()
-  }
-
-  return await serverSessionPromise
-}
-
-export const driver: SessionDriver = {
-  name: "pi",
-  start: async (input) => {
-    if (serverSession || serverSessionPromise) {
-      if (input.resume !== serverStartupInput.resume) {
-        throw new Error("pi session has already been started")
-      }
+  private onSessionEvent = (event: any) => {
+    const session = this.session
+    if (!session) {
       return
     }
 
-    serverStartupInput = { ...input }
-  },
-  sendEvent: async (event) => {
+    if (event.type === "message_update") {
+      const update = event.assistantMessageEvent
+
+      if (update?.type === "text_delta" && typeof update.delta === "string") {
+        this.emit({ type: "output.text", text: update.delta })
+        this.emit({
+          type: "output.normalized",
+          payload: createPiPayload("delta", event, session.sessionId, {
+            role: "assistant",
+            text: update.delta,
+          }),
+        })
+        return
+      }
+
+      if (update?.type === "toolcall_end") {
+        this.emit({
+          type: "output.normalized",
+          payload: createPiPayload("tool_call", event, session.sessionId, {
+            tool: {
+              name:
+                typeof update.toolCall?.toolName === "string"
+                  ? update.toolCall.toolName
+                  : undefined,
+              arguments: update.toolCall,
+            },
+          }),
+        })
+        return
+      }
+
+      if (update?.type === "done") {
+        this.emit({
+          type: "output.normalized",
+          payload: createPiPayload("status", event, session.sessionId, {
+            done: true,
+            message: typeof update.reason === "string" ? update.reason : "done",
+          }),
+        })
+        return
+      }
+
+      if (update?.type === "error") {
+        this.emit({
+          type: "output.normalized",
+          payload: createPiPayload("error", event, session.sessionId, {
+            message: typeof update.reason === "string" ? update.reason : "message_update:error",
+          }),
+        })
+        return
+      }
+
+      this.emit({
+        type: "output.normalized",
+        payload: createPiPayload("status", event, session.sessionId, {
+          message:
+            typeof update?.type === "string" ? `message_update:${update.type}` : "message_update",
+        }),
+      })
+      return
+    }
+
+    if (event.type === "message_end") {
+      this.emit({
+        type: "output.normalized",
+        payload: createPiPayload("message", event, session.sessionId, {
+          role:
+            event.message?.role === "assistant" ||
+            event.message?.role === "user" ||
+            event.message?.role === "system" ||
+            event.message?.role === "tool"
+              ? event.message.role
+              : undefined,
+          text: getPiMessageText(event.message),
+        }),
+      })
+      return
+    }
+
+    if (event.type === "tool_execution_start") {
+      this.emit({
+        type: "output.normalized",
+        payload: createPiPayload("tool_call", event, session.sessionId, {
+          tool: {
+            name: typeof event.toolName === "string" ? event.toolName : undefined,
+            arguments: event.args,
+          },
+        }),
+      })
+      return
+    }
+
+    if (event.type === "tool_execution_end") {
+      this.emit({
+        type: "output.normalized",
+        payload: createPiPayload(
+          event.isError ? "error" : "tool_result",
+          event,
+          session.sessionId,
+          event.isError
+            ? {
+                message:
+                  typeof event.toolName === "string"
+                    ? `${event.toolName} failed`
+                    : "tool execution failed",
+              }
+            : {
+                tool: {
+                  name: typeof event.toolName === "string" ? event.toolName : undefined,
+                  result: event.result,
+                },
+              },
+        ),
+      })
+      return
+    }
+
+    this.emit({
+      type: "output.normalized",
+      payload: createPiPayload("status", event, session.sessionId, {
+        message: typeof event.type === "string" ? event.type : "event",
+      }),
+    })
+  }
+
+  async start(input: SessionStartupInput) {
+    if (this.session || this.sessionPromise) {
+      throw new Error("pi session is already running")
+    }
+
+    let sessionPromise: Promise<void> | undefined
+    sessionPromise = (async () => {
+      const sessionManager = await resolveSessionManager(input)
+      const { session } = await createAgentSession({
+        sessionManager,
+      })
+
+      if (sessionPromise !== this.sessionPromise) {
+        session.dispose()
+        return
+      }
+
+      this.session = session
+      this.sessionPromise = undefined
+      this.unsubscribeSession = session.subscribe(this.onSessionEvent)
+    })()
+
+    this.sessionPromise = sessionPromise
+    await sessionPromise
+  }
+
+  async sendEvent(event: Parameters<SessionDriver["sendEvent"]>[0]) {
     if (event.type !== "input.text") {
       throw new Error("pi only supports input.text events")
     }
 
-    serverQueue = serverQueue.then(
-      async () => {
-        const session = await ensureServerSession()
-        await session.prompt(event.text)
-      },
-      async () => {
-        const session = await ensureServerSession()
-        await session.prompt(event.text)
-      },
-    )
-
-    await serverQueue
-  },
-  onEvent: (listener) => {
-    listeners.add(listener)
-    return () => {
-      listeners.delete(listener)
+    const session = await this.getSession()
+    if (session) {
+      await session.abort()
+      await session.prompt(event.text)
+      return
     }
-  },
-  getCapabilities: () => ({
-    terminal: {
-      enabled: false,
-      canResize: false,
-      hasScreenState: false,
-    },
-    normalizedOutput: true,
-  }),
-  close: () => {
-    serverUnsubscribe?.()
-    serverUnsubscribe = undefined
-    serverSession?.dispose()
-    serverSession = undefined
-    serverSessionPromise = undefined
-    serverQueue = Promise.resolve()
-    serverStartupInput = {}
-  },
+
+    throw new Error("pi session has not been started")
+  }
+
+  getCapabilities() {
+    return {
+      terminal: {
+        enabled: false,
+        canResize: false,
+        hasScreenState: false,
+      },
+      normalizedOutput: true,
+    }
+  }
+
+  close() {
+    this.unsubscribeSession?.()
+    this.unsubscribeSession = undefined
+    this.session?.dispose()
+    this.session = undefined
+    this.sessionPromise = undefined
+  }
 }

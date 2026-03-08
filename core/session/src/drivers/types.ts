@@ -1,11 +1,12 @@
-import type {
-  SessionClientEvent,
-  SessionDriverCapabilities,
-  SessionServerEvent,
-  SessionStartupInput,
+import {
+  sessionServerEventSchema,
+  type SessionClientEvent,
+  type SessionDriverCapabilities,
+  type SessionServerEvent,
+  type SessionStartupInput,
 } from "@goddard-ai/session-protocol"
 
-export type SessionDriverName = "pi" | "pi-rpc" | "gemini" | "codex" | "pty"
+export type SessionDriverName = "pi" | "gemini" | "codex" | "pty"
 
 export interface SessionDriverInput extends SessionStartupInput {
   initialPrompt?: string
@@ -13,15 +14,31 @@ export interface SessionDriverInput extends SessionStartupInput {
 }
 
 /**
- * Unified session driver contract.
+ * Unified session driver base class.
  */
-export interface SessionDriver {
-  readonly name: SessionDriverName
+export abstract class SessionDriver {
+  abstract readonly name: SessionDriverName
+
+  private readonly listeners = new Set<(event: SessionServerEvent) => void>()
 
   // Server mode
-  start(input: SessionStartupInput): void | Promise<void>
-  sendEvent(event: SessionClientEvent): void | Promise<void>
-  onEvent(listener: (event: SessionServerEvent) => void): () => void
+  abstract start(input: SessionStartupInput): void | Promise<void>
+  abstract sendEvent(event: SessionClientEvent): void | Promise<void>
+
+  onEvent(listener: (event: SessionServerEvent) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  protected emit(event: SessionServerEvent) {
+    const parsed = sessionServerEventSchema.parse(event)
+    for (const listener of this.listeners) {
+      listener(parsed)
+    }
+  }
+
   getCapabilities?(): SessionDriverCapabilities
   close?(): void
 }

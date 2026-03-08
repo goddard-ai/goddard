@@ -1,7 +1,7 @@
 import type { NormalizedSessionPayload } from "@goddard-ai/session-protocol"
 
 import { JsonLineSubprocess } from "./subprocess.ts"
-import type { SessionDriver, SessionDriverInput } from "./types.ts"
+import type { SessionDriverInput } from "./types.ts"
 
 export function buildCodexArgs(input: SessionDriverInput): string[] {
   const args = ["exec"]
@@ -36,15 +36,22 @@ function createCodexPayload(
   } as NormalizedSessionPayload
 }
 
-export const driver: SessionDriver = JsonLineSubprocess.createSessionDriver({
-  name: "codex",
-  command: "codex",
-  buildArgs: (text, threadId) =>
-    buildCodexArgs({
+export default class CodexDriver extends JsonLineSubprocess.SessionDriver {
+  constructor() {
+    super({
+      name: "codex",
+      command: "codex",
+    })
+  }
+
+  protected buildArgs(text: string, threadId?: string) {
+    return buildCodexArgs({
       resume: threadId,
       initialPrompt: text,
-    }),
-  handleJsonLine: (payload, context) => {
+    })
+  }
+
+  protected handleJsonLine(payload: unknown, context: JsonLineSubprocess.HandlerContext) {
     const event = payload as Record<string, unknown>
     const type = typeof event.type === "string" ? event.type : ""
 
@@ -93,8 +100,7 @@ export const driver: SessionDriver = JsonLineSubprocess.createSessionDriver({
     if (type === "turn.completed") {
       const usage = event.usage as Record<string, unknown> | undefined
       const inputTokens = typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined
-      const outputTokens =
-        typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined
+      const outputTokens = typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined
       context.emit({
         type: "output.normalized",
         payload: createCodexPayload("usage", payload, {
@@ -119,5 +125,5 @@ export const driver: SessionDriver = JsonLineSubprocess.createSessionDriver({
         id: context.getSessionId(),
       }),
     })
-  },
-})
+  }
+}

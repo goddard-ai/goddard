@@ -1,9 +1,9 @@
 import type { NormalizedSessionPayload } from "@goddard-ai/session-protocol"
 
 import { JsonLineSubprocess } from "./subprocess.ts"
-import type { SessionDriver, SessionDriverInput } from "./types.ts"
+import type { SessionDriverInput } from "./types.ts"
 
-function buildGeminiArgs(input: SessionDriverInput): string[] {
+export function buildGeminiArgs(input: SessionDriverInput): string[] {
   const args = ["--output-format", "stream-json"]
 
   if (input.resume) {
@@ -34,15 +34,22 @@ function createGeminiPayload(
   } as NormalizedSessionPayload
 }
 
-export const driver: SessionDriver = JsonLineSubprocess.createSessionDriver({
-  name: "gemini",
-  command: "gemini",
-  buildArgs: (text, sessionId) =>
-    buildGeminiArgs({
+export default class GeminiDriver extends JsonLineSubprocess.SessionDriver {
+  constructor() {
+    super({
+      name: "gemini",
+      command: "gemini",
+    })
+  }
+
+  protected buildArgs(text: string, sessionId?: string) {
+    return buildGeminiArgs({
       resume: sessionId,
       initialPrompt: text,
-    }),
-  handleJsonLine: (payload, context) => {
+    })
+  }
+
+  protected handleJsonLine(payload: unknown, context: JsonLineSubprocess.HandlerContext) {
     const event = payload as Record<string, unknown>
     const type = typeof event.type === "string" ? event.type : ""
 
@@ -87,8 +94,7 @@ export const driver: SessionDriver = JsonLineSubprocess.createSessionDriver({
     if (type === "result") {
       const stats = event.stats as Record<string, unknown> | undefined
       const inputTokens = typeof stats?.input_tokens === "number" ? stats.input_tokens : undefined
-      const outputTokens =
-        typeof stats?.output_tokens === "number" ? stats.output_tokens : undefined
+      const outputTokens = typeof stats?.output_tokens === "number" ? stats.output_tokens : undefined
       const totalTokens = typeof stats?.total_tokens === "number" ? stats.total_tokens : undefined
 
       context.emit({
@@ -121,5 +127,5 @@ export const driver: SessionDriver = JsonLineSubprocess.createSessionDriver({
         id: context.getSessionId(),
       }),
     })
-  },
-})
+  }
+}

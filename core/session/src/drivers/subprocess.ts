@@ -1,4 +1,6 @@
-import { ChildProcessByStdio, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn } from "node:child_process"
+import type { ChildProcessByStdio } from "node:child_process"
+import { Readable } from "node:stream"
 
 import {
   sessionServerEventSchema,
@@ -7,54 +9,91 @@ import {
   type SessionStartupInput,
 } from "@goddard-ai/session-protocol"
 
-import type { SessionDriverName } from "./types.ts"
-import { Readable } from "node:stream"
-
-export declare namespace JsonLineSubprocess {
-  interface ServerDriverOptions {
-    name: SessionDriverName
-    command: string
-    cwd?: string
-    buildArgs: (text: string, sessionId?: string) => string[]
-    handleJsonLine: (
-      payload: unknown,
-      context: {
-        emit: (event: SessionServerEvent) => void
-        getSessionId: () => string | undefined
-        setSessionId: (id: string) => void
-      },
-    ) => void
-  }
-}
+import { SessionDriver as BaseSessionDriver, type SessionDriverName } from "./types.ts"
 
 type ChildProcess = ChildProcessByStdio<null, Readable, Readable>
 
-export const JsonLineSubprocess = {
-  createSessionDriver(options: JsonLineSubprocess.ServerDriverOptions) {
-    const listeners = new Set<(event: SessionServerEvent) => void>()
-    let sessionId: string | undefined
-    let activeChild: ChildProcess | undefined
-    let closed = false
-    let queue = Promise.resolve()
+export namespace JsonLineSubprocess {
+  export interface DriverOptions {
+    name: SessionDriverName
+    command: string
+    cwd?: string
+  }
 
-    const emit = (event: SessionServerEvent) => {
-      event = sessionServerEventSchema.parse(event)
-      for (const listener of listeners) {
-        listener(event)
+  export interface HandlerContext {
+    emit: (event: SessionServerEvent) => void
+    getSessionId: () => string | undefined
+    setSessionId: (id: string) => void
+  }
+
+  export abstract class SessionDriver extends BaseSessionDriver {
+    readonly name: SessionDriverName
+    protected readonly command: string
+    protected readonly cwd?: string
+
+    private sessionId: string | undefined
+    private activeChild: ChildProcess | undefined
+    private closed = false
+    private queue = Promise.resolve()
+
+    constructor(options: DriverOptions) {
+      super()
+      this.name = options.name
+      this.command = options.command
+      this.cwd = options.cwd
+    }
+
+    protected abstract buildArgs(text: string, sessionId?: string): string[]
+
+    protected abstract handleJsonLine(payload: unknown, context: HandlerContext): void
+
+    start(input: SessionStartupInput) {
+      this.sessionId = input.resume
+    }
+
+    async sendEvent(event: SessionClientEvent) {
+      if (event.type !== "input.text") {
+        throw new Error(`${this.name} only supports input.text events`)
+      }
+
+      if (this.activeChild) {
+        this.activeChild.kill()
+        this.activeChild = undefined
+      }
+
+      const p = this.runTurn(event.text)
+      this.queue = p
+      await p
+    }
+
+    getCapabilities() {
+      return {
+        terminal: {
+          enabled: false,
+          canResize: false,
+          hasScreenState: false,
+        },
+        normalizedOutput: true,
       }
     }
 
-    const runTurn = async (text: string) => {
-      if (closed) {
-        throw new Error(`${options.name} driver is closed`)
+    close() {
+      this.closed = true
+      this.activeChild?.kill()
+      this.activeChild = undefined
+    }
+
+    private async runTurn(text: string) {
+      if (this.closed) {
+        throw new Error(`${this.name} driver is closed`)
       }
 
-      const child = spawn(options.command, options.buildArgs(text, sessionId), {
+      const child = spawn(this.command, this.buildArgs(text, this.sessionId), {
         stdio: ["ignore", "pipe", "pipe"],
-        cwd: options.cwd,
+        cwd: this.cwd,
         env: process.env,
       })
-      activeChild = child
+      this.activeChild = child
 
       let stdoutBuffer = ""
       let stderrBuffer = ""
@@ -67,15 +106,15 @@ export const JsonLineSubprocess = {
 
         try {
           const payload = JSON.parse(trimmed) as unknown
-          options.handleJsonLine(payload, {
-            emit,
-            getSessionId: () => sessionId,
-            setSessionId: (id: string) => {
-              sessionId = id
+          this.handleJsonLine(payload, {
+            emit: (event) => this.emit(event),
+            getSessionId: () => this.sessionId,
+            setSessionId: (id) => {
+              this.sessionId = id
             },
           })
         } catch {
-          emit({ type: "output.text", text: `${line}\n` })
+          this.emit({ type: "output.text", text: `${line}\n` })
         }
       }
 
@@ -91,7 +130,7 @@ export const JsonLineSubprocess = {
       child.stderr.on("data", (data: Buffer) => {
         const textChunk = data.toString()
         stderrBuffer += textChunk
-        emit({ type: "output.text", text: textChunk })
+        this.emit({ type: "output.text", text: textChunk })
       })
 
       await new Promise<void>((resolve, reject) => {
@@ -101,16 +140,16 @@ export const JsonLineSubprocess = {
             flushStdoutLine(stdoutBuffer)
           }
 
-          activeChild = undefined
+          this.activeChild = undefined
 
           if (signal || code === null || code !== 0) {
             const detail = stderrBuffer.trim()
-            emit({
+            this.emit({
               type: "session.error",
               message:
                 detail.length > 0
                   ? detail
-                  : `${options.name} exited with code ${code ?? "unknown"}${signal ? ` (signal: ${signal})` : ""}`,
+                  : `${this.name} exited with code ${code ?? "unknown"}${signal ? ` (signal: ${signal})` : ""}`,
             })
           }
 
@@ -118,42 +157,5 @@ export const JsonLineSubprocess = {
         })
       })
     }
-
-    return {
-      name: options.name,
-      start: (input: SessionStartupInput) => {
-        sessionId = input.resume
-      },
-      sendEvent: async (event: SessionClientEvent) => {
-        if (event.type !== "input.text") {
-          throw new Error(`${options.name} only supports input.text events`)
-        }
-
-        queue = queue.then(
-          async () => await runTurn(event.text),
-          async () => await runTurn(event.text),
-        )
-        await queue
-      },
-      onEvent: (listener: (event: SessionServerEvent) => void) => {
-        listeners.add(listener)
-        return () => {
-          listeners.delete(listener)
-        }
-      },
-      getCapabilities: () => ({
-        terminal: {
-          enabled: false,
-          canResize: false,
-          hasScreenState: false,
-        },
-        normalizedOutput: true,
-      }),
-      close: () => {
-        closed = true
-        activeChild?.kill()
-        activeChild = undefined
-      },
-    }
-  },
+  }
 }

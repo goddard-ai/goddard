@@ -1,7 +1,14 @@
 import { z } from "zod"
 
 export const sessionPayloadRoleSchema = z.enum(["assistant", "user", "system", "tool"])
-export const sessionPayloadDriverSchema = z.enum(["pi", "pi-rpc", "gemini", "codex", "pty", "unknown"])
+export const sessionPayloadDriverSchema = z.enum([
+  "pi",
+  "pi-rpc",
+  "gemini",
+  "codex",
+  "pty",
+  "unknown",
+])
 export const sessionPayloadFormatSchema = z.enum(["json-line", "terminal"])
 
 export const sessionPayloadSourceSchema = z.object({

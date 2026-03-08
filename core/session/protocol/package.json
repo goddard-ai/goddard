@@ -9,13 +9,13 @@
     "./rpc": "./src/rpc.ts",
     "./transport": "./src/transport.ts"
   },
-  "dependencies": {
-    "zod": "^4.3.6"
-  },
   "scripts": {
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   }
 }

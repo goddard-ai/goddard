@@ -1,34 +1,38 @@
 import type { SessionDriver, SessionDriverName } from "./types.ts"
 
-const EMBEDDED_DRIVER_IMPORTS: Record<SessionDriverName, string> = {
-  pi: "./pi.ts",
-  "pi-rpc": "./pi-rpc.ts",
-  gemini: "./gemini.ts",
-  codex: "./codex.ts",
-  pty: "./pty.ts",
+type SessionDriverConstructor = new () => SessionDriver
+type DriverImportThunk = () => Promise<{ default?: SessionDriverConstructor }>
+
+const EMBEDDED_DRIVER_IMPORTS: Record<SessionDriverName, DriverImportThunk> = {
+  pi: () => import("./pi.ts"),
+  gemini: () => import("./gemini.ts"),
+  codex: () => import("./codex.ts"),
+  pty: () => import("./pty.ts"),
 }
 
-// DriverImporter allows for custom import logic, which is particularly useful for
-// testing or for platforms where dynamic imports are handled differently.
-export type DriverImporter = (specifier: string) => Promise<{ driver?: SessionDriver }>
+export type DriverImporter = (
+  name: SessionDriverName,
+) => Promise<{ default?: SessionDriverConstructor }>
 
-const defaultImporter: DriverImporter = async (specifier) => {
-  const module = (await import(specifier)) as { driver?: SessionDriver }
-  return module
+const defaultImporter: DriverImporter = async (name) => {
+  const importThunk = EMBEDDED_DRIVER_IMPORTS[name]
+  if (!importThunk) {
+    throw new Error(`Driver module for ${name} not found`)
+  }
+  return await importThunk()
 }
 
 export async function loadEmbeddedDriver(
   name: SessionDriverName,
   importer: DriverImporter = defaultImporter,
 ): Promise<SessionDriver> {
-  const specifier = EMBEDDED_DRIVER_IMPORTS[name]
-  const loaded = await importer(specifier)
+  const loaded = await importer(name)
 
-  if (!loaded.driver) {
-    throw new Error(`Driver module ${specifier} did not export a driver`)
+  if (!loaded.default) {
+    throw new Error(`Driver module for ${name} did not export a default driver class`)
   }
 
-  return loaded.driver
+  return new loaded.default()
 }
 
 export function listEmbeddedDrivers(): SessionDriverName[] {
