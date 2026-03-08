@@ -7,27 +7,13 @@ import type {
   SessionServerEvent,
 } from "@goddard-ai/session-protocol"
 import { startServer } from "../src/server"
-import type { SessionDriver } from "../src/drivers/types"
+import { SessionDriver } from "../src/drivers/types"
 
-class MockDriver implements SessionDriver {
+class MockDriver extends SessionDriver {
   readonly name = "pty" as const
   readonly start = vi.fn<(input: { resume?: string }) => void>()
   readonly sendEvent = vi.fn<(event: SessionClientEvent) => void>()
   readonly close = vi.fn<() => void>()
-  private listener?: (event: SessionServerEvent) => void
-
-  onEvent(listener: (event: SessionServerEvent) => void) {
-    this.listener = listener
-    return () => {
-      if (this.listener === listener) {
-        this.listener = undefined
-      }
-    }
-  }
-
-  emit(event: SessionServerEvent) {
-    this.listener?.(event)
-  }
 
   getCapabilities() {
     return {

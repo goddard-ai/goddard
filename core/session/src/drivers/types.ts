@@ -32,7 +32,7 @@ export abstract class SessionDriver {
     }
   }
 
-  protected emit(event: SessionServerEvent) {
+  emit(event: SessionServerEvent) {
     const parsed = sessionServerEventSchema.parse(event)
     for (const listener of this.listeners) {
       listener(parsed)

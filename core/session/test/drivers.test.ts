@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { buildCodexArgs } from "../src/drivers/codex"
 import { buildGeminiArgs } from "../src/drivers/gemini"
 import { loadEmbeddedDriver, type DriverImporter } from "../src/drivers/registry"
-import type { SessionDriver } from "../src/drivers/types"
+import { SessionDriver } from "../src/drivers/types"
 
 describe("embedded drivers", () => {
   it("builds gemini args with resume and prompt", () => {
@@ -28,14 +28,13 @@ describe("embedded drivers", () => {
   })
 
   it("loads an embedded driver via dynamic importer", async () => {
-    const importer = vi.fn(async () => ({
-      default: class implements SessionDriver {
+    const importer = vi.fn<DriverImporter>(async () => ({
+      default: class extends SessionDriver {
         readonly name = "gemini" as const
         start = vi.fn()
         sendEvent = vi.fn()
-        onEvent = vi.fn(() => () => {})
       },
-    })) as DriverImporter
+    }))
 
     const driver = await loadEmbeddedDriver("gemini", importer)
 
