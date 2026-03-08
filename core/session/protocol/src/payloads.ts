@@ -1,102 +1,126 @@
-export type SessionPayloadRole = "assistant" | "user" | "system" | "tool"
-export type SessionPayloadDriver = "pi" | "pi-rpc" | "gemini" | "codex" | "pty" | "unknown"
-export type SessionPayloadFormat = "json-line" | "terminal"
+import { z } from "zod"
 
-export interface SessionPayloadSource {
-  driver: SessionPayloadDriver
-  format: SessionPayloadFormat
-}
+export const sessionPayloadRoleSchema = z.enum(["assistant", "user", "system", "tool"])
+export const sessionPayloadDriverSchema = z.enum(["pi", "pi-rpc", "gemini", "codex", "pty", "unknown"])
+export const sessionPayloadFormatSchema = z.enum(["json-line", "terminal"])
 
-export interface SessionPayloadBase {
-  schemaVersion: 1
-  source: SessionPayloadSource
-  id?: string
-  done?: boolean
-  raw: unknown
-}
+export const sessionPayloadSourceSchema = z.object({
+  driver: sessionPayloadDriverSchema,
+  format: sessionPayloadFormatSchema,
+})
 
-export interface SessionPayloadUsage {
-  inputTokens?: number
-  outputTokens?: number
-  totalTokens?: number
-}
+export const sessionPayloadBaseSchema = z.object({
+  schemaVersion: z.literal(1),
+  source: sessionPayloadSourceSchema,
+  id: z.string().optional(),
+  done: z.boolean().optional(),
+  raw: z.unknown(),
+})
 
-export interface SessionPayloadToolCall {
-  name?: string
-  arguments?: unknown
-}
+export const sessionPayloadUsageSchema = z.object({
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  totalTokens: z.number().optional(),
+})
 
-export interface SessionPayloadToolResult {
-  name?: string
-  result?: unknown
-}
+export const sessionPayloadToolCallSchema = z.object({
+  name: z.string().optional(),
+  arguments: z.unknown().optional(),
+})
 
-export interface SessionPayloadCursor {
-  x: number
-  y: number
-}
+export const sessionPayloadToolResultSchema = z.object({
+  name: z.string().optional(),
+  result: z.unknown().optional(),
+})
 
-export interface SessionPayloadTerminalState {
-  cols: number
-  rows: number
-  lines: string[]
-  cursor: SessionPayloadCursor
-}
+export const sessionPayloadCursorSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+})
 
-export interface DeltaPayload extends SessionPayloadBase {
-  kind: "delta"
-  role?: SessionPayloadRole
-  text?: string
-}
+export const sessionPayloadTerminalStateSchema = z.object({
+  cols: z.number(),
+  rows: z.number(),
+  lines: z.array(z.string()),
+  cursor: sessionPayloadCursorSchema,
+})
 
-export interface MessagePayload extends SessionPayloadBase {
-  kind: "message"
-  role?: SessionPayloadRole
-  text?: string
-  message?: string
-}
+export const deltaPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("delta"),
+  role: sessionPayloadRoleSchema.optional(),
+  text: z.string().optional(),
+})
 
-export interface ToolCallPayload extends SessionPayloadBase {
-  kind: "tool_call"
-  tool?: SessionPayloadToolCall
-}
+export const messagePayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("message"),
+  role: sessionPayloadRoleSchema.optional(),
+  text: z.string().optional(),
+  message: z.string().optional(),
+})
 
-export interface ToolResultPayload extends SessionPayloadBase {
-  kind: "tool_result"
-  tool?: SessionPayloadToolResult
-}
+export const toolCallPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("tool_call"),
+  tool: sessionPayloadToolCallSchema.optional(),
+})
 
-export interface UsagePayload extends SessionPayloadBase {
-  kind: "usage"
-  usage?: SessionPayloadUsage
-}
+export const toolResultPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("tool_result"),
+  tool: sessionPayloadToolResultSchema.optional(),
+})
 
-export interface ErrorPayload extends SessionPayloadBase {
-  kind: "error"
-  message?: string
-}
+export const usagePayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("usage"),
+  usage: sessionPayloadUsageSchema.optional(),
+})
 
-export interface StatusPayload extends SessionPayloadBase {
-  kind: "status"
-  message?: string
-}
+export const errorPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("error"),
+  message: z.string().optional(),
+})
 
-export interface TerminalPayload extends SessionPayloadBase {
-  kind: "terminal"
-  terminal: SessionPayloadTerminalState
-}
+export const statusPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("status"),
+  message: z.string().optional(),
+})
 
-export interface UnknownPayload extends SessionPayloadBase {
-  kind: "unknown"
-}
+export const terminalPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("terminal"),
+  terminal: sessionPayloadTerminalStateSchema,
+})
 
-export type NormalizedSessionPayload =
-  | DeltaPayload
-  | MessagePayload
-  | ToolCallPayload
-  | ToolResultPayload
-  | UsagePayload
-  | ErrorPayload
-  | StatusPayload
-  | TerminalPayload
-  | UnknownPayload
+export const unknownPayloadSchema = sessionPayloadBaseSchema.extend({
+  kind: z.literal("unknown"),
+})
+
+export const normalizedSessionPayloadSchema = z.discriminatedUnion("kind", [
+  deltaPayloadSchema,
+  messagePayloadSchema,
+  toolCallPayloadSchema,
+  toolResultPayloadSchema,
+  usagePayloadSchema,
+  errorPayloadSchema,
+  statusPayloadSchema,
+  terminalPayloadSchema,
+  unknownPayloadSchema,
+])
+
+export type SessionPayloadRole = z.infer<typeof sessionPayloadRoleSchema>
+export type SessionPayloadDriver = z.infer<typeof sessionPayloadDriverSchema>
+export type SessionPayloadFormat = z.infer<typeof sessionPayloadFormatSchema>
+export type SessionPayloadSource = z.infer<typeof sessionPayloadSourceSchema>
+export type SessionPayloadBase = z.infer<typeof sessionPayloadBaseSchema>
+export type SessionPayloadUsage = z.infer<typeof sessionPayloadUsageSchema>
+export type SessionPayloadToolCall = z.infer<typeof sessionPayloadToolCallSchema>
+export type SessionPayloadToolResult = z.infer<typeof sessionPayloadToolResultSchema>
+export type SessionPayloadCursor = z.infer<typeof sessionPayloadCursorSchema>
+export type SessionPayloadTerminalState = z.infer<typeof sessionPayloadTerminalStateSchema>
+export type DeltaPayload = z.infer<typeof deltaPayloadSchema>
+export type MessagePayload = z.infer<typeof messagePayloadSchema>
+export type ToolCallPayload = z.infer<typeof toolCallPayloadSchema>
+export type ToolResultPayload = z.infer<typeof toolResultPayloadSchema>
+export type UsagePayload = z.infer<typeof usagePayloadSchema>
+export type ErrorPayload = z.infer<typeof errorPayloadSchema>
+export type StatusPayload = z.infer<typeof statusPayloadSchema>
+export type TerminalPayload = z.infer<typeof terminalPayloadSchema>
+export type UnknownPayload = z.infer<typeof unknownPayloadSchema>
+export type NormalizedSessionPayload = z.infer<typeof normalizedSessionPayloadSchema>

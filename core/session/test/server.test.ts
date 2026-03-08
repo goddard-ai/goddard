@@ -11,6 +11,7 @@ import type { SessionDriver } from "../src/drivers/types"
 
 class MockDriver implements SessionDriver {
   readonly name = "pty" as const
+  readonly start = vi.fn<(input: { resume?: string }) => void>()
   readonly sendEvent = vi.fn<(event: SessionClientEvent) => void>()
   readonly close = vi.fn<() => void>()
   private listener?: (event: SessionServerEvent) => void
@@ -93,6 +94,41 @@ describe("server", () => {
     await server.close()
   })
 
+  it("returns JSON-RPC errors for invalid request params", async () => {
+    const driver = new MockDriver()
+    const server = await startServer({ transport: "tcp", driver })
+    const ws = new WebSocket(server.endpoint.url)
+    await waitForOpen(ws)
+    const messages = createMessageQueue(ws)
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session_initialize",
+        params: { input: { resume: 123 } },
+      }),
+    )
+    const initError = (await messages.next()) as any
+    expect(initError.error.message).toContain("Invalid session_initialize params")
+    expect(driver.start).not.toHaveBeenCalled()
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "session_send_event",
+        params: { event: { type: "input.text", text: "" } },
+      }),
+    )
+    const eventError = (await messages.next()) as any
+    expect(eventError.error.message).toContain("Invalid session_send_event params")
+    expect(driver.sendEvent).not.toHaveBeenCalled()
+
+    ws.close()
+    await server.close()
+  })
+
   it("supports initialize, event sending, state reads, and session_event notifications", async () => {
     const driver = new MockDriver()
     const server = await startServer({ transport: "tcp", driver })
@@ -104,6 +140,21 @@ describe("server", () => {
       JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
+        method: "session_initialize",
+        params: { input: { resume: "resume-123" } },
+      }),
+    )
+    const infoResponse = (await messages.next()) as any
+    expect(infoResponse.result.driver).toBe("pty")
+    expect(infoResponse.result.protocolVersion).toBe(1)
+    expect(infoResponse.result.capabilities.terminal.canResize).toBe(true)
+    expect(infoResponse.result.capabilities.normalizedOutput).toBe(true)
+    expect(driver.start).toHaveBeenCalledWith({ resume: "resume-123" })
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
         method: "session_send_event",
         params: { event: { type: "input.terminal", data: "a" } },
       }),
@@ -115,7 +166,7 @@ describe("server", () => {
     ws.send(
       JSON.stringify({
         jsonrpc: "2.0",
-        id: 2,
+        id: 3,
         method: "session_send_event",
         params: { event: { type: "terminal.resize", cols: 120, rows: 40 } },
       }),
@@ -128,13 +179,6 @@ describe("server", () => {
       rows: 40,
     })
     expect(driver.sendEvent).toHaveBeenCalledWith({ type: "terminal.resize", cols: 120, rows: 40 })
-
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "session_initialize" }))
-    const infoResponse = (await messages.next()) as any
-    expect(infoResponse.result.driver).toBe("pty")
-    expect(infoResponse.result.protocolVersion).toBe(1)
-    expect(infoResponse.result.capabilities.terminal.canResize).toBe(true)
-    expect(infoResponse.result.capabilities.normalizedOutput).toBe(true)
 
     driver.emit({ type: "output.terminal", data: "hello" })
     const outputNotification = (await messages.next()) as any
