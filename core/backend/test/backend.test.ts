@@ -1,5 +1,4 @@
-import test from "node:test"
-import assert from "node:assert/strict"
+import { test, assert } from "vitest"
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
 
 test("control plane creates PR authored by authenticated user", () => {

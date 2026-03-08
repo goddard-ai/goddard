@@ -1,5 +1,4 @@
-import test from "node:test"
-import assert from "node:assert/strict"
+import { test, assert } from "vitest"
 import {
   authDeviceStartRoute,
   authDeviceCompleteRoute,

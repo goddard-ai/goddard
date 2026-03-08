@@ -1,5 +1,4 @@
-import test from "node:test"
-import assert from "node:assert/strict"
+import { test, assert } from "vitest"
 import { createBackendRouter } from "../src/router.ts"
 import { HttpError, type BackendControlPlane } from "../src/control-plane.ts"
 import type { Env } from "../src/env.ts"
