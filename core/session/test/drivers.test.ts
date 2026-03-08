@@ -30,7 +30,9 @@ describe("embedded drivers", () => {
     const importer = vi.fn(async () => ({
       driver: {
         name: "gemini",
-        run: async () => 0,
+        start: vi.fn(),
+        sendEvent: vi.fn(),
+        onEvent: vi.fn(() => () => {}),
       },
     })) as DriverImporter
 

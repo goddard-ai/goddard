@@ -66,7 +66,7 @@ Public packages:
 
 `startServer(...)` now supports:
 
-- `session_initialize`
+- `session_initialize { input?: { resume } }`
 - `session_send_event { event }`
 - `session_get_state`
 
@@ -91,3 +91,10 @@ Driver output events:
 The `output.normalized` payload is driver-agnostic (`schemaVersion: 1`) and intended for persistence across mixed driver sessions.
 
 For terminal-native streams (for example PTY), the server emits `payload.kind: "terminal"` with the latest screen snapshot (`cols`, `rows`, `lines`, `cursor`) after terminal output events.
+
+Initialization notes:
+
+- Resume/session selection is now startup state, not per-turn state.
+- JSON-RPC clients should pass resume targets through `session_initialize`.
+- Drivers that support resume (`pi`, `pi-rpc`, `gemini`, `codex`) bind that state once at startup.
+- `pty` implements the same startup hook but rejects `resume`, because terminal streams have no session identity to reopen.

@@ -30,15 +30,13 @@ export interface ServerOptions {
   args?: string[]
   cwd?: string
   driver?: SessionDriver
+  startupInput?: SessionStartupInput
 }
 
 export async function startServer(options: ServerOptions = {}) {
   const listenTarget = resolveServerListenTarget(options)
 
   const driver = options.driver ?? createPtyServerDriver(options)
-  if (!driver.sendEvent || !driver.onEvent) {
-    throw new Error("startServer requires a driver with sendEvent and onEvent methods")
-  }
   const capabilities: SessionDriverCapabilities = driver.getCapabilities?.() ?? {
     terminal: {
       enabled: false,
@@ -55,8 +53,6 @@ export async function startServer(options: ServerOptions = {}) {
   })
 
   const clients = new Set<WebSocket>()
-  let started = false
-  let resolvedStartupInput: SessionStartupInput = {}
 
   const sendNotification = (method: string, params: unknown) => {
     const payload = JSON.stringify({ jsonrpc: "2.0", method, params })
@@ -113,6 +109,7 @@ export async function startServer(options: ServerOptions = {}) {
   }
 
   const unsubscribeFromDriver = driver.onEvent(onDriverEvent)
+  await driver.start(options.startupInput ?? {})
 
   const rpcServer = new JSONRPCServer()
 
@@ -128,29 +125,10 @@ export async function startServer(options: ServerOptions = {}) {
     return `${path}: ${issue.message}`
   }
 
-  function parseInitializeParams(params: unknown): SessionStartupInput {
+  function parseInitializeParams(params: unknown) {
     const result = sessionInitializeParamsSchema.safeParse(params)
     if (!result.success) {
       throw new Error(`Invalid session_initialize params: ${formatSchemaError(result.error)}`)
-    }
-
-    return result.data?.input ?? {}
-  }
-
-  async function ensureDriverStarted(input: SessionStartupInput = {}) {
-    if (!started) {
-      resolvedStartupInput = { ...input }
-      await driver.start?.(resolvedStartupInput)
-      started = true
-      return
-    }
-
-    const nextResume = input.resume
-    const currentResume = resolvedStartupInput.resume
-    if (nextResume !== undefined && nextResume !== currentResume) {
-      throw new Error(
-        `session already initialized with resume ${currentResume ?? "<none>"}; cannot switch to ${nextResume}`,
-      )
     }
   }
 
@@ -184,7 +162,7 @@ export async function startServer(options: ServerOptions = {}) {
   }
 
   rpcServer.addMethod("session_initialize", async (params) => {
-    await ensureDriverStarted(parseInitializeParams(params))
+    parseInitializeParams(params)
     return {
       protocolVersion: 1,
       driver: driver.name,
@@ -196,7 +174,6 @@ export async function startServer(options: ServerOptions = {}) {
   })
 
   rpcServer.addMethod("session_send_event", async (params) => {
-    await ensureDriverStarted()
     const event = parseClientEvent(params)
     if (event.type === "terminal.resize") {
       if (!capabilities.terminal.canResize) {
@@ -205,16 +182,15 @@ export async function startServer(options: ServerOptions = {}) {
       const cols = Math.max(1, Math.floor(event.cols))
       const rows = Math.max(1, Math.floor(event.rows))
       headlessTerm.resize(cols, rows)
-      await driver.sendEvent?.({ type: "terminal.resize", cols, rows })
+      await driver.sendEvent({ type: "terminal.resize", cols, rows })
       return { ok: true, normalizedEvent: { type: "terminal.resize", cols, rows } }
     }
 
-    await driver.sendEvent?.(event)
+    await driver.sendEvent(event)
     return { ok: true, normalizedEvent: event }
   })
 
   rpcServer.addMethod("session_get_state", async () => {
-    await ensureDriverStarted()
     return {
       terminal: capabilities.terminal.hasScreenState ? getTerminalState() : null,
     }

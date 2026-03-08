@@ -111,7 +111,7 @@ export function startClient(options: ClientOptions) {
   })
 
   ws.on("open", async () => {
-    const init = (await rpcClient.request("session_initialize", {})) as SessionInitializeResult
+    const init = (await rpcClient.request("session_initialize")) as SessionInitializeResult
     terminalMode = canUseTerminalInput(init.capabilities)
 
     if (terminalMode && stdin.isTTY) {

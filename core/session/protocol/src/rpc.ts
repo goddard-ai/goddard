@@ -28,11 +28,7 @@ export const sessionStartupInputSchema = z.object({
   resume: z.string().optional(),
 })
 
-export const sessionInitializeParamsSchema = z
-  .object({
-    input: sessionStartupInputSchema.optional(),
-  })
-  .optional()
+export const sessionInitializeParamsSchema = z.undefined().optional()
 
 export const sessionTextOutputEventSchema = z.object({
   type: z.literal("output.text"),

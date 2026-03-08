@@ -97,6 +97,7 @@ describe("server", () => {
   it("returns JSON-RPC errors for invalid request params", async () => {
     const driver = new MockDriver()
     const server = await startServer({ transport: "tcp", driver })
+    expect(driver.start).toHaveBeenCalledWith({})
     const ws = new WebSocket(server.endpoint.url)
     await waitForOpen(ws)
     const messages = createMessageQueue(ws)
@@ -106,12 +107,11 @@ describe("server", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "session_initialize",
-        params: { input: { resume: 123 } },
+        params: {},
       }),
     )
     const initError = (await messages.next()) as any
     expect(initError.error.message).toContain("Invalid session_initialize params")
-    expect(driver.start).not.toHaveBeenCalled()
 
     ws.send(
       JSON.stringify({
@@ -131,25 +131,22 @@ describe("server", () => {
 
   it("supports initialize, event sending, state reads, and session_event notifications", async () => {
     const driver = new MockDriver()
-    const server = await startServer({ transport: "tcp", driver })
+    const server = await startServer({
+      transport: "tcp",
+      driver,
+      startupInput: { resume: "resume-123" },
+    })
+    expect(driver.start).toHaveBeenCalledWith({ resume: "resume-123" })
     const ws = new WebSocket(server.endpoint.url)
     await waitForOpen(ws)
     const messages = createMessageQueue(ws)
 
-    ws.send(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "session_initialize",
-        params: { input: { resume: "resume-123" } },
-      }),
-    )
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session_initialize" }))
     const infoResponse = (await messages.next()) as any
     expect(infoResponse.result.driver).toBe("pty")
     expect(infoResponse.result.protocolVersion).toBe(1)
     expect(infoResponse.result.capabilities.terminal.canResize).toBe(true)
     expect(infoResponse.result.capabilities.normalizedOutput).toBe(true)
-    expect(driver.start).toHaveBeenCalledWith({ resume: "resume-123" })
 
     ws.send(
       JSON.stringify({
