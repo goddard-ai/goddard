@@ -11,4 +11,7 @@ export default defineConfig({
     eager: true,
   },
   plugins: [unpluginRaw()],
+  deps: {
+    onlyAllowBundle: false
+  }
 })

@@ -15,12 +15,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
-    "better-sqlite3": "^12.6.2",
-    "drizzle-kit": "1.0.0-beta.16-ea816b6",
-    "drizzle-orm": "1.0.0-beta.16-ea816b6"
+    "@goddard-ai/storage": "workspace:^"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.5",
     "tsx": "^4.21.0"
   }

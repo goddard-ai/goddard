@@ -230,6 +230,22 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.15.0
         version: 0.15.0(zod@4.3.6)
+      '@goddard-ai/storage':
+        specifier: workspace:^
+        version: link:../storage
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.5
+        version: 25.3.5
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+
+  core/storage:
+    dependencies:
+      '@goddard-ai/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
@@ -243,19 +259,6 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
-
-  core/storage:
-    dependencies:
-      '@goddard-ai/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-    devDependencies:
       '@types/node':
         specifier: ^25.3.5
         version: 25.3.5

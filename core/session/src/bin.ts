@@ -1,20 +1,32 @@
-import { SessionServer } from "./server.js";
-import { initDb } from "./db.js";
+import { SessionServer } from "./server.js"
 
 async function main() {
-    await initDb();
+  let agentName: string | undefined
+  let resumeId: string | undefined
 
-    const agentName = process.argv[2];
-    if (!agentName) {
-        console.error("Usage: goddard-session <agent-name>");
-        process.exit(1);
+  for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] === "--resume") {
+      resumeId = process.argv[++i]
+    } else if (!agentName) {
+      agentName = process.argv[i]
     }
+  }
 
-    const server = new SessionServer(agentName);
-    await server.listen();
+  if (!agentName) {
+    console.error("Usage: goddard-session <agent-name> [--resume <id>]")
+    process.exit(1)
+  }
+
+  const server = new SessionServer(agentName)
+
+  if (resumeId) {
+    await server.loadSession({ sessionId: resumeId, mcpServers: [], cwd: process.cwd() })
+  }
+
+  await server.listen()
 }
 
-main().catch(err => {
-    console.error(err);
-    process.exit(1);
-});
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})
