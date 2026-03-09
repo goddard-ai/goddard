@@ -3,6 +3,7 @@
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "oxc.enable.oxfmt": true,
   "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit",
     "source.fixAll.oxc": "explicit"
   },
   "[javascript]": {

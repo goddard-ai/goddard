@@ -1,5 +1,3 @@
-// Basic implementation to read from agent registry schemas
-// For now, minimal local implementation mimicking fetch
 export interface RegistryAgent {
   name: string
   version: string
@@ -13,7 +11,9 @@ export interface RegistryAgent {
   }
 }
 
-export async function fetchRegistryAgent(agentName: string): Promise<RegistryAgent | null> {
+export async function fetchRegistryAgent(
+  agentName: string,
+): Promise<RegistryAgent | null> {
   try {
     const url = `https://raw.githubusercontent.com/agentclientprotocol/registry/main/agents/${agentName}/agent.json`
     const res = await fetch(url)
