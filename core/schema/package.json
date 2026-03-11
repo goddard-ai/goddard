@@ -5,8 +5,7 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./routes": "./src/routes.ts"
+    "./*": "./src/*.ts"
   },
   "scripts": {
     "lint": "oxlint",
@@ -15,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.15.0",
     "rouzer": "^1.4.0",
     "zod": "^4.3.6"
   }

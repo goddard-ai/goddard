@@ -6,7 +6,7 @@ import {
   prCreateRoute,
   githubWebhookRoute,
   repoStreamRoute,
-} from "../src/routes.ts"
+} from "../src/backend/routes.ts"
 
 test("schema exports rouzer route declarations with stable paths", () => {
   assert.equal(authDeviceStartRoute.path.source, "auth/device/start")
