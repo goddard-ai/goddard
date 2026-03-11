@@ -1,100 +1,55 @@
-# `@goddard-ai/session`
+# @goddard-ai/session
 
-Session runtime with embedded, dynamically loaded drivers.
+Session orchestration for ACP-compatible agents.
 
-## Drivers
+## What this package provides
 
-Current embedded drivers:
+- Session server bootstrap and lifecycle management
+- ACP websocket bridge for client ↔ agent communication
+- Session metadata persistence via `@goddard-ai/storage`
+- CLI tools under `src/bin/`
 
-- `pi` — programmatic `AgentSession` via `@mariozechner/pi-coding-agent` (no subprocess)
-- `gemini` — subprocess: `gemini --output-format stream-json`
-- `codex` — subprocess: `codex exec --json`
-- `pty` — PTY wrapper for arbitrary command argv
+## Client demo
 
-## CLI
+A local-first demo client is available at:
 
-This package exposes a `session` cmd-ts executable.
+- `core/session/src/bin/client-demo.ts`
 
-From this package directory:
+By default, it uses a **custom local ACP example agent** (no remote auth/token usage).
 
-```bash
-./bin/session <pi|gemini|codex|pty> ...
-```
+### Build first
 
-### `pi`
+From repo root:
 
 ```bash
-./bin/session pi "explain this repository"
-./bin/session pi --resume <session-id-or-path> "continue from where we left off"
+pnpm --filter @goddard-ai/session build
 ```
 
-### `gemini`
+### Run demo (local/no auth)
 
 ```bash
-./bin/session gemini "what is 1 + 1? no tool calls"
-./bin/session gemini --resume <session-id> "add 1 to that"
+node core/session/dist/bin/client-demo.mjs
 ```
 
-### `codex`
+### Run demo with real-world auth flow
 
 ```bash
-./bin/session codex "what is 1 + 1?"
-./bin/session codex --resume <thread-id> "add 1 to that"
+node core/session/dist/bin/client-demo.mjs --enable-auth
 ```
 
-### `pty`
+### Useful flags
+
+- `--agent <name|json>`: registry name (e.g. `claude-code`) or inline JSON `AgentDistribution`
+- `--agent-file <path>`: path to JSON `AgentDistribution` file
+- `--cwd <path>`: working directory passed to the session
+- `--prompt <text>`: prompt to send after startup
+- `--help`: print usage
+
+Examples:
 
 ```bash
-./bin/session pty bash
-./bin/session pty python3
-./bin/session pty gemini --output-format stream-json --prompt "hello"
+node core/session/dist/bin/client-demo.mjs --cwd "$PWD" --prompt "Summarize this project"
+node core/session/dist/bin/client-demo.mjs --agent claude-code
+node core/session/dist/bin/client-demo.mjs --agent '{"type":"binary","cmd":"node","args":["./my-local-agent.js"]}'
+node core/session/dist/bin/client-demo.mjs --agent-file ./agent-distribution.json
 ```
-
-## Dynamic loading model
-
-Drivers are currently embedded in this package but loaded via dynamic imports through the driver registry.
-
-This gives us a driver architecture now, while still keeping first-party drivers hard-coded during this phase.
-
-## JSON-RPC server notes
-
-Public packages:
-
-- `@goddard-ai/session`
-- `@goddard-ai/session-client`
-- `@goddard-ai/session-protocol`
-
-`startServer(...)` now supports:
-
-- `session_initialize { input?: { resume } }`
-- `session_send_event { event }`
-- `session_get_state`
-
-Server notifications emitted to connected websocket clients:
-
-- `session_event { sequence, event }`
-
-Driver input events:
-
-- `input.text { text }`
-- `input.terminal { data }`
-- `terminal.resize { cols, rows }`
-
-Driver output events:
-
-- `output.text { text }`
-- `output.terminal { data }`
-- `output.normalized { payload }`
-- `session.exit { exitCode }`
-- `session.error { message }`
-
-The `output.normalized` payload is driver-agnostic (`schemaVersion: 1`) and intended for persistence across mixed driver sessions.
-
-For terminal-native streams (for example PTY), the server emits `payload.kind: "terminal"` with the latest screen snapshot (`cols`, `rows`, `lines`, `cursor`) after terminal output events.
-
-Initialization notes:
-
-- Resume/session selection is now startup state, not per-turn state.
-- JSON-RPC clients should pass resume targets through `session_initialize`.
-- Drivers that support resume (`pi`, `pi-rpc`, `gemini`, `codex`) bind that state once at startup.
-- `pty` implements the same startup hook but rejects `resume`, because terminal streams have no session identity to reopen.

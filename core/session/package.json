@@ -1,35 +1,32 @@
 {
   "name": "@goddard-ai/session",
   "version": "0.1.0",
-  "private": true,
   "license": "MIT",
-  "bin": {
-    "session": "./bin/session"
-  },
   "type": "module",
   "exports": {
-    ".": "./src/server.ts",
-    "./drivers": "./src/drivers/index.ts",
-    "./cli": "./src/cli.ts"
+    ".": "./dist/index.mjs",
+    "./*": "./dist/*.mjs"
   },
   "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@goddard-ai/session-protocol": "workspace:^",
-    "@mariozechner/pi-coding-agent": "^0.57.0",
-    "@xterm/headless": "^6.0.0",
-    "cmd-ts": "^0.15.0",
-    "json-rpc-2.0": "^1.7.1",
-    "node-pty": "^1.1.0",
+    "@agentclientprotocol/sdk": "^0.15.0",
+    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/storage": "workspace:^",
+    "@types/ws": "^8.18.1",
+    "cmd-ts": "^0.13.0",
+    "reconnecting-websocket": "^4.4.0",
+    "srvx": "^0.8.6",
     "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
-    "@types/ws": "^8.18.1",
-    "tsx": "^4.21.0"
+    "tsdown": "^0.21.0"
   }
 }
