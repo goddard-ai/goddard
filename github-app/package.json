@@ -15,11 +15,11 @@
     "build": "tsdown"
   },
   "dependencies": {
-    "@goddard-ai/sdk": "workspace:*",
     "@octokit/webhooks": "^14.2.0",
     "octokit": "^5.0.5"
   },
   "devDependencies": {
+    "@goddard-ai/schema": "workspace:^",
     "tsdown": "^0.21.0"
   }
 }

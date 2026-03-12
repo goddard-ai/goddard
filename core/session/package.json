@@ -8,7 +8,7 @@
     "./*": "./dist/*.mjs"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tree-build && tsdown",
     "dev": "tsdown --watch",
     "lint": "oxlint",
     "fmt": "oxfmt",

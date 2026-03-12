@@ -16,7 +16,7 @@
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "build": "tsdown"
+    "build": "tree-build && tsdown"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
