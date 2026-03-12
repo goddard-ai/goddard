@@ -9,8 +9,8 @@ import { serve } from "srvx"
 import manifest from "../package.json" assert { type: "json" }
 import { createAgentConnection, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "./acp.js"
 import { createWebSocketHandler } from "./node/websocket-server.js"
+import * as prompts from "./prompts/index.js"
 import { fetchRegistryAgent } from "./registry.js"
-import SYSTEM_PROMPT from "./system-prompt.md?raw"
 
 /** The current version of `@goddard-ai/session` */
 const VERSION = manifest.version
@@ -192,7 +192,11 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
           sessionId: newSession.sessionId,
           prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
         },
-        SYSTEM_PROMPT,
+        renderPrompt(prompts.BACKGROUND, {
+          declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
+          report_blocker: prompts.CMD_REPORT_BLOCKER,
+          global_rules: prompts.GLOBAL_RULES,
+        }),
         params.appendSystemPrompt,
       )
 
@@ -392,4 +396,21 @@ export async function serveAgent(serverId: string, params: SessionParams) {
     serverAddress,
     sessionId: session.sessionId,
   }
+}
+
+function renderPrompt(prompt: string, variables: Record<string, string>) {
+  const usedVariables = new Set<string>()
+  const renderResult = prompt.replace(/\${(\w+)}/g, (_, key) => {
+    const value = variables[key]
+    if (typeof value !== "string") {
+      throw new Error(`Prompt variable "${key}" is not a string`)
+    }
+    usedVariables.add(key)
+    return value
+  })
+  if (usedVariables.size !== Object.keys(variables).length) {
+    const unusedVariables = Object.keys(variables).filter((key) => !usedVariables.has(key))
+    throw new Error(`Prompt variables were defined but never used: ${unusedVariables.join(", ")}`)
+  }
+  return renderResult
 }
