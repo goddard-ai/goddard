@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
-    "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/storage": "workspace:^",
     "@types/ws": "^8.18.1",
     "cmd-ts": "^0.13.0",
@@ -26,6 +25,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@goddard-ai/schema": "workspace:^",
     "@types/node": "^25.3.5",
     "tsdown": "^0.21.0"
   }

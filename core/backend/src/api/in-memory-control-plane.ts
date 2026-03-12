@@ -9,7 +9,7 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
-} from "@goddard-ai/schema"
+} from "@goddard-ai/schema/backend"
 import {
   type BackendControlPlane,
   HttpError,
