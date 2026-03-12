@@ -178,7 +178,7 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
   }
 
   try {
-    const session = await runAgent({
+    await runAgent({
       agent: "pi",
       cwd: worktreeDir,
       mcpServers: [],
@@ -189,21 +189,6 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
         prNumber: input.event.prNumber,
       },
     })
-
-    // Wait for the one-shot session to complete
-    const { SessionStorage } = await import("@goddard-ai/storage")
-    while (true) {
-      const dbSession = await SessionStorage.get(session.sessionId)
-      if (!dbSession) {
-        break
-      }
-      if (dbSession.status === "done" || dbSession.status === "error" || dbSession.status === "cancelled") {
-        break
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-    }
-
-    await session.stop()
     return 0
   } catch (error) {
     console.error(`\n[ERROR] runAgent failed: ${error instanceof Error ? error.message : String(error)}`)
