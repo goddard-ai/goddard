@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import * as z from "zod"
+import type { ACPAdapterName } from "./acp-adapters"
 
 export interface AgentDistribution {
   type: "binary" | "npx" | "uvx"
@@ -9,7 +10,7 @@ export interface AgentDistribution {
 }
 
 interface BaseSessionParams {
-  agent: string | AgentDistribution
+  agent: ACPAdapterName | AgentDistribution
   cwd: string
   mcpServers: acp.McpServer[]
   metadata?: {
