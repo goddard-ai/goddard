@@ -210,6 +210,7 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
       if (promptResponse.stopReason === "end_turn") {
         session.status = "done"
       }
+      session.isFirstPrompt = false
     }
     return {
       ...session,
@@ -277,7 +278,11 @@ export async function serveAgent(serverId: string, params: SessionParams) {
           session.isFirstPrompt = false
           message.params = injectSystemPrompt(
             message.params,
-            SYSTEM_PROMPT,
+            renderPrompt(prompts.BACKGROUND, {
+              declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
+              report_blocker: prompts.CMD_REPORT_BLOCKER,
+              global_rules: prompts.GLOBAL_RULES,
+            }),
             "appendSystemPrompt" in params ? params.appendSystemPrompt : undefined,
           )
         }
