@@ -12,10 +12,12 @@
     "core/session",
     "core/session/*",
     "core/schema",
-    "core/storage"
+    "core/storage",
+    "core/tree-build"
   ],
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
+    "@goddard/tree-build": "workspace:*",
     "@types/node": "^25.3.5",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
