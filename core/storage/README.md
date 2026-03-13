@@ -1,6 +1,6 @@
 # `@goddard-ai/storage`
 
-This package provides file resolution and token storage capabilities for the Goddard tools, particularly the `cmd` (CLI) and `daemon` (background loop) applications.
+This package provides file resolution and token storage capabilities for the Goddard tools, particularly the `daemon` (background loop) application.
 
 ## Features
 
