@@ -3,7 +3,6 @@
 ## Feature Implementation Requirements
 When adding a feature that grants the user a new ability, it must be added to all of these packages in the same PR:
 - `sdk`
-- `cmd`
 - `app`
 
 ## `spec/` Folder Purpose and Guidelines

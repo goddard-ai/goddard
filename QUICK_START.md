@@ -24,21 +24,10 @@ pnpm --dir=backend start
 # Backend starts on http://127.0.0.1:8787
 ```
 
-### Step 3: Use the CLI (Terminal B)
+### Step 3: Use the Daemon (Terminal B)
 ```bash
-# Login
-pnpm --dir=cmd goddard login --username <your-github-username>
-
-# Create a Pull Request
-pnpm --dir=cmd goddard pr create --repo <owner/repo> --title "My local test PR"
-
 # Start the PR-feedback daemon
 pnpm --dir=daemon daemon run --repo <owner/repo> --project-dir $(pwd)
-
-# Initialize and run autonomous loop
-pnpm --dir=cmd goddard loop init
-pnpm --dir=cmd goddard loop run
-pnpm --dir=cmd goddard loop generate-systemd
 ```
 
 ---
@@ -70,8 +59,4 @@ Goddard is designed to be deployed as a globally distributed control plane.
     - Create a GitHub App and configure `GITHUB_APP_ID` and `GITHUB_PRIVATE_KEY`.
 3.  **Backend Deployment**:
     - Deploy the `backend/` package using `wrangler deploy`.
-4.  **CLI Distribution**:
-    - The CLI is distributed via npm as `@goddard-ai/cmd`.
-
 For architectural details, see [build.md](./build.md).
-For standalone CLI documentation, see [cmd/QUICK_START.md](./cmd/QUICK_START.md).

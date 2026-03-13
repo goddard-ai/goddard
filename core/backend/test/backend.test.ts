@@ -37,7 +37,7 @@ test("http api supports login and pr creation", async () => {
       `${baseUrl}/pr/create`,
       {
         owner: "goddard-ai",
-        repo: "cmd",
+        repo: "test-repo",
         title: "Add CLI",
         head: "feat/cli",
         base: "main",
@@ -65,13 +65,13 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
 
     await postJson(
       `${baseUrl}/pr/create`,
-      { owner: "goddard-ai", repo: "cmd", title: "Add CLI", head: "feat/cli", base: "main" },
+      { owner: "goddard-ai", repo: "test-repo", title: "Add CLI", head: "feat/cli", base: "main" },
       alecSession.token,
     )
 
     // alec sees her own PR as managed
     const managedResponse = await fetch(
-      `${baseUrl}/pr/managed?owner=goddard-ai&repo=cmd&prNumber=1`,
+      `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
     assert.equal(managedResponse.status, 200)
@@ -79,7 +79,7 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
 
     // alec sees non-existent PR as unmanaged
     const unmanagedResponse = await fetch(
-      `${baseUrl}/pr/managed?owner=goddard-ai&repo=cmd&prNumber=9`,
+      `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=9`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
     assert.equal(unmanagedResponse.status, 200)
@@ -93,7 +93,7 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     })
 
     const foreignResponse = await fetch(
-      `${baseUrl}/pr/managed?owner=goddard-ai&repo=cmd&prNumber=1`,
+      `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${bobSession.token}` } },
     )
     assert.equal(foreignResponse.status, 200)

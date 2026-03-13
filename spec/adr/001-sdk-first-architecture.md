@@ -5,13 +5,13 @@ ACTIVE
 
 ## Context
 
-Goddard has multiple runtime consumers: an interactive CLI for human developers, a feedback daemon, and an autonomous agent loop for operators. These consumers need shared platform capabilities: PR creation, webhook event streaming, and GitHub identity management.
+Goddard has multiple runtime consumers: a feedback daemon, and an autonomous agent loop for operators. These consumers need shared platform capabilities: PR creation, webhook event streaming, and GitHub identity management.
 
 The question was how to share those capabilities without duplicating logic across consumers or coupling them to each other.
 
 ## Decision
 
-All platform capabilities are implemented once in `@goddard-ai/sdk`. The CLI (`@goddard-ai/cmd`) and the agent loop are thin consumers of the SDK — they add terminal UX and orchestration behavior, not platform logic.
+All platform capabilities are implemented once in `@goddard-ai/sdk`. The agent loop is a thin consumer of the SDK — it adds orchestration behavior, not platform logic.
 
 No capability that belongs in the SDK may be re-implemented in a consumer package.
 

@@ -7,7 +7,6 @@ This is a TypeScript-only monorepo containing:
 - `@goddard-ai/sdk`
 - `@goddard-ai/backend`
 - `@goddard-ai/github-app`
-- `@goddard-ai/cmd`
 - `@goddard-ai/daemon`
 
 Core packages:
@@ -27,7 +26,6 @@ Project Goddard provides a comprehensive toolkit for bringing an autonomous codi
 
 ## Capabilities
 
-- **CLI (`@goddard-ai/cmd`)**: Powerful developer tools to manage your AI pair programmer (`goddard loop`), manage PRs, parse structured specifications, and translate human intent into actionable proposals.
 - **Background Daemon (`@goddard-ai/daemon`)**: A local listener that spins up autonomous "pi sessions" to fix failing tests, implement feedback, and tackle features based on live events.
 - **Backend & Webhooks (`@goddard-ai/backend`, `@goddard-ai/github-app`)**: Edge services that intercept GitHub events and instantly stream them to your local daemon via Server-Sent Events (SSE), enabling instant AI responses to PR feedback.
 - **Extensible SDK (`@goddard-ai/sdk`)**: A core library containing the `pi-coding-agent`, logic for file parsing, AI model definitions, and system prompts.
@@ -40,7 +38,7 @@ Project Goddard provides a comprehensive toolkit for bringing an autonomous codi
 To balance open-source flexibility with the sustainability of our platform, this monorepo utilizes a dual-licensing strategy:
 
 - The root of the monorepo and specific services—such as the Backend service (`@goddard-ai/backend`) and the GitHub App package (`@goddard-ai/github-app`)—are licensed under the **GNU Affero General Public License v3.0 (AGPLv3)**.
-- Reusable integration libraries and specific sub-packages—such as the SDK (`@goddard-ai/sdk`), the CLI (`@goddard-ai/cmd`), and the background daemon (`@goddard-ai/daemon`)—are licensed under the permissive **MIT License**. This allows for widespread adoption, easier integration into your own tools, and prevents virality for consumers of the SDK.
+- Reusable integration libraries and specific sub-packages—such as the SDK (`@goddard-ai/sdk`) and the background daemon (`@goddard-ai/daemon`)—are licensed under the permissive **MIT License**. This allows for widespread adoption, easier integration into your own tools, and prevents virality for consumers of the SDK.
 
 Please see the `LICENSE` file in the root directory and the respective `LICENSE` files in the subdirectories for exact legal details.
 
@@ -53,7 +51,6 @@ Please direct bug reports and feature requests to the Issues URL of the appropri
 - **[goddard-ai/sdk](https://github.com/goddard-ai/sdk/issues)**: For issues related to the SDK.
 - **[goddard-ai/backend](https://github.com/goddard-ai/backend/issues)**: For issues related to the backend service.
 - **[goddard-ai/github-app](https://github.com/goddard-ai/github-app/issues)**: For issues related to the GitHub app.
-- **[goddard-ai/cmd](https://github.com/goddard-ai/cmd/issues)**: For issues related to the CLI tools.
 - **[goddard-ai/daemon](https://github.com/goddard-ai/daemon/issues)**: For issues related to the daemon.
 - **[goddard-ai/core](https://github.com/goddard-ai/core/issues)**: For issues related to the shared core utilities (`schema` and `storage`).
 
@@ -72,21 +69,7 @@ pnpm --dir=backend start
 
 Backend runs at `http://127.0.0.1:8787`.
 
-### 2) Use the CLI
-
-```bash
-pnpm --dir=cmd goddard login --username <github-user>
-pnpm --dir=cmd goddard whoami
-pnpm --dir=cmd goddard pr create --repo owner/repo --title "Test PR" --head feature/demo --base main
-pnpm --dir=cmd goddard spec
-pnpm --dir=cmd goddard propose "summarize recent PR feedback"
-pnpm --dir=cmd goddard loop init
-pnpm --dir=cmd goddard loop run
-pnpm --dir=cmd goddard loop generate-systemd
-pnpm --dir=daemon daemon run --repo owner/repo --project-dir $(pwd)
-```
-
-### 3) Simulate a GitHub webhook
+### 2) Simulate a GitHub webhook
 
 Use `@goddard-ai/github-app` to forward webhook events to backend:
 

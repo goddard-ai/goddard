@@ -15,7 +15,6 @@ Monorepo packages:
 - `backend/` — Worker control plane.
 - `github-app/` — GitHub App integration and webhook-facing behavior.
 - `sdk/` — framework-agnostic platform client (`@goddard-ai/sdk`).
-- `cmd/` — terminal UX for interactive and loop commands.
 - `daemon/` — stream consumer for PR-feedback one-shot automation.
 
 Each package can also be published as a standalone repository via subrepo sync.
@@ -38,20 +37,10 @@ Design rule: platform capabilities live here first.
 - Normalize stream frames into stable event contracts.
 - Accept injected `TokenStorage` to avoid environment lock-in.
 
-### Interactive CLI (`cmd/`)
-- Human terminal UX and command parsing.
-- Local token persistence.
-- Repo inference from `.git/config` when possible.
-
 ### Feedback Daemon (`daemon/`)
 - Subscribe to repo streams via SDK.
 - Filter for managed PR feedback events.
 - Launch local one-shot `pi` sessions with PR context.
-
-### Autonomous Loop (`cmd/` loop)
-- Config discovery and validation handoff.
-- Loop runtime instantiation.
-- `systemd` unit generation for supervised deployments.
 
 ## Deployment Model
 Target runtime is Cloudflare Workers.
