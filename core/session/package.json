@@ -4,8 +4,16 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./dist/index.mjs",
-    "./*": "./dist/*.mjs"
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "import": "./dist/*.mjs",
+      "types": "./dist/*.d.mts",
+      "default": "./src/*.ts"
+    }
   },
   "scripts": {
     "build": "tree-build && tsdown",

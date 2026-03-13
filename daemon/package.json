@@ -7,9 +7,6 @@
     "goddard-daemon": "./dist/goddard-daemon.mjs"
   },
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
     "daemon": "node dist/goddard-daemon.mjs",
     "lint": "oxlint",

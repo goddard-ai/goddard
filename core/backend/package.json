@@ -8,7 +8,11 @@
   },
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "default": "./src/index.ts"
+    }
   },
   "scripts": {
     "start": "node dist/server.mjs",

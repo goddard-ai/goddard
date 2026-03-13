@@ -6,10 +6,6 @@
     "goddard": "./dist/cli.mjs"
   },
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./cli": "./dist/cli.mjs"
-  },
   "scripts": {
     "goddard": "node dist/cli.mjs",
     "lint": "oxlint",
