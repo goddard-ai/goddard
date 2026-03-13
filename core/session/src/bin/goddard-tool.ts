@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { SessionStorage } from "@goddard-ai/storage"
 import { command, option, run, string, subcommands } from "cmd-ts"
+import * as fs from "node:fs/promises"
 
 async function requireSessionId(): Promise<string> {
   const serverId = process.env.GODDARD_SERVER_ID
@@ -39,6 +40,20 @@ export async function reportCompleted(sessionId: string) {
   })
 }
 
+export async function submitPr(sessionId: string, title: string, body: string) {
+  await SessionStorage.update(sessionId, {
+    status: "done",
+    lastAgentMessage: `PR Submitted: ${title}\n\n${body}`,
+  })
+}
+
+export async function replyPr(sessionId: string, message: string) {
+  await SessionStorage.update(sessionId, {
+    status: "done",
+    lastAgentMessage: `PR Reply: ${message}`,
+  })
+}
+
 export async function main(argv: string[]) {
   const app = subcommands({
     name: "goddard",
@@ -63,15 +78,16 @@ export async function main(argv: string[]) {
         name: "report-blocker",
         description: "Report a blocker that prevents further progress.",
         args: {
-          reason: option({
+          reasonFile: option({
             type: string,
-            long: "reason",
-            description: "The reason for the blocker.",
+            long: "reason-file",
+            description: "The file containing the reason for the blocker.",
           }),
         },
         handler: async (args) => {
-          await reportBlocker(await requireSessionId(), args.reason)
-          console.log(`Blocker reported: ${args.reason}`)
+          const reason = await fs.readFile(args.reasonFile, "utf-8")
+          await reportBlocker(await requireSessionId(), reason)
+          console.log(`Blocker reported from file: ${args.reasonFile}`)
         },
       }),
 
@@ -82,6 +98,45 @@ export async function main(argv: string[]) {
         handler: async () => {
           await reportCompleted(await requireSessionId())
           console.log("Work reported as completed.")
+        },
+      }),
+
+      "submit-pr": command({
+        name: "submit-pr",
+        description: "Submit a pull request.",
+        args: {
+          title: option({
+            type: string,
+            long: "title",
+            description: "The title of the PR.",
+          }),
+          bodyFile: option({
+            type: string,
+            long: "body-file",
+            description: "The file containing the body of the PR.",
+          }),
+        },
+        handler: async (args) => {
+          const body = await fs.readFile(args.bodyFile, "utf-8")
+          await submitPr(await requireSessionId(), args.title, body)
+          console.log(`PR submitted with title: ${args.title}`)
+        },
+      }),
+
+      "reply-pr": command({
+        name: "reply-pr",
+        description: "Reply to a pull request feedback.",
+        args: {
+          messageFile: option({
+            type: string,
+            long: "message-file",
+            description: "The file containing the reply message.",
+          }),
+        },
+        handler: async (args) => {
+          const message = await fs.readFile(args.messageFile, "utf-8")
+          await replyPr(await requireSessionId(), message)
+          console.log(`PR replied from file: ${args.messageFile}`)
         },
       }),
     },
