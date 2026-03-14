@@ -33,13 +33,16 @@ export const defaultPlugin: WorktreePlugin = {
       }
 
       if (cloneResult.status !== 0) {
-        throw new Error(`Cannot proceed with one-shot pi session. Aborting.\n`)
+        throw new Error(`Cannot proceed with one-shot pi session. Aborting.`)
       }
     } catch (err) {
       if (err instanceof Error && err.message.includes("Cannot proceed")) {
         throw err
       }
-      throw new Error("Failed to create workspace")
+      throw new Error(
+        `Failed to create workspace: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      )
     }
 
     // Fetch and checkout the branch in the new workspace

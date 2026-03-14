@@ -20,7 +20,11 @@ export class Worktree {
     this.plugin = candidates.find((p) => p.isApplicable(this.projectDir)) || defaultPlugin
   }
 
-  setup(prNumber: number): { worktreeDir: string; branchName: string; isWorktrunk: boolean } {
+  get poweredBy(): string {
+    return this.plugin.name
+  }
+
+  setup(prNumber: number): { worktreeDir: string; branchName: string } {
     const branchName = `pr-${prNumber}`
 
     // Evaluate the initially selected custom plugin or worktrunkPlugin
@@ -29,18 +33,15 @@ export class Worktree {
       try {
         worktreeDir = this.plugin.setup(this.projectDir, prNumber, branchName)
       } catch (err) {
-        console.error(`[WARN] Plugin ${this.plugin.name} threw an error during setup. Falling back to default plugin.`)
+        // Suppress console output; default plugin handles fallback
       }
 
       if (worktreeDir) {
         return {
           worktreeDir,
           branchName,
-          isWorktrunk: this.plugin.name === "worktrunk",
         }
       }
-
-      console.warn(`[WARN] Plugin ${this.plugin.name} failed to setup worktree (returned null). Falling back to default plugin.`)
 
       // Since it failed, permanently change the active plugin to defaultPlugin for cleanup
       this.plugin = defaultPlugin
@@ -50,18 +51,20 @@ export class Worktree {
     let worktreeDir: string | null = null
     try {
       worktreeDir = defaultPlugin.setup(this.projectDir, prNumber, branchName)
-    } catch {
-       // Intentionally left blank, fallback failure is handled immediately below
+    } catch (err) {
+      throw new Error(
+        `Default worktree plugin failed to setup the workspace: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      )
     }
 
     if (!worktreeDir) {
-      throw new Error(`Default worktree plugin failed to setup the workspace.`)
+      throw new Error(`Default worktree plugin failed to setup the workspace (returned null).`)
     }
 
     return {
       worktreeDir,
       branchName,
-      isWorktrunk: false,
     }
   }
 

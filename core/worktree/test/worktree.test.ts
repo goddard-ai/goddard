@@ -75,7 +75,7 @@ describe("Worktree", () => {
     const result = worktree.setup(prNumber)
 
     expect(worktree.plugin.name).toBe("worktrunk")
-    expect(result.isWorktrunk).toBe(true)
+    expect(worktree.poweredBy).toBe("worktrunk")
     expect(result.branchName).toBe("pr-123")
     expect(result.worktreeDir).toBe("/test/dir/.wt/pr-123")
 
@@ -103,12 +103,13 @@ describe("Worktree", () => {
 
     // Should initially select worktrunk because it's applicable
     expect(worktree.plugin.name).toBe("worktrunk")
+    expect(worktree.poweredBy).toBe("worktrunk")
 
     const result = worktree.setup(prNumber)
 
     // Plugin should have been updated to the fallback due to failure
     expect(worktree.plugin.name).toBe("default")
-    expect(result.isWorktrunk).toBe(false)
+    expect(worktree.poweredBy).toBe("default")
     expect(result.branchName).toBe("pr-123")
     expect(result.worktreeDir).toMatch(/^\/test\/dir\/.goddard-agents\/pr-123-\d+$/)
 
