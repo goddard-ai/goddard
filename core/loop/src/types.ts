@@ -1,11 +1,4 @@
-import type {
-  ThinkingLevel,
-  PiAgentConfig,
-  CycleContext,
-  CycleStrategy,
-  GoddardLoopConfig,
-  Model
-} from "@goddard-ai/config";
+import type { GoddardLoopConfig } from "@goddard-ai/config";
 import { configSchema } from "@goddard-ai/config";
 
 export interface LoopStatus {
@@ -20,4 +13,4 @@ export interface GoddardLoop {
 }
 
 export { configSchema };
-export type { ThinkingLevel, PiAgentConfig, CycleContext, CycleStrategy, GoddardLoopConfig, Model };
+export type { GoddardLoopConfig };

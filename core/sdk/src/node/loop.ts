@@ -2,6 +2,7 @@ import { createJiti } from "@mariozechner/jiti"
 import { dirname, join } from "node:path"
 import { mkdir, writeFile } from "node:fs/promises"
 import { createLoop, type GoddardLoopConfig } from "@goddard-ai/loop"
+import { LoopStorage } from "@goddard-ai/storage"
 import {
   getGlobalConfigPath,
   getLocalConfigPath,
@@ -53,7 +54,36 @@ export async function loadLoopConfig(
     throw new Error("Config file must export a default configuration object.")
   }
 
-  return { config: config as GoddardLoopConfig, path: configPath }
+
+  const typedConfig = config as GoddardLoopConfig;
+
+  // Persist to loop storage
+  const existing = await LoopStorage.get(typedConfig.id);
+  if (existing) {
+    await LoopStorage.update(typedConfig.id, {
+      agent: typedConfig.agent,
+      systemPrompt: typedConfig.systemPrompt,
+      strategy: typedConfig.strategy,
+      displayName: typedConfig.displayName,
+      cwd: typedConfig.cwd,
+      mcpServers: typedConfig.mcpServers,
+      gitRemote: typedConfig.gitRemote
+    });
+  } else {
+    await LoopStorage.create({
+      id: typedConfig.id,
+      agent: typedConfig.agent,
+      systemPrompt: typedConfig.systemPrompt,
+      strategy: typedConfig.strategy ?? "",
+      displayName: typedConfig.displayName,
+      cwd: typedConfig.cwd,
+      mcpServers: typedConfig.mcpServers,
+      gitRemote: typedConfig.gitRemote
+    });
+  }
+
+  return { config: typedConfig, path: configPath }
+
 }
 
 export async function runLoop(

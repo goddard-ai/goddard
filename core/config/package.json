@@ -17,6 +17,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.15.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

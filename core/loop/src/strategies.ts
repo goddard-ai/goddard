@@ -1,4 +1,11 @@
-import type { CycleContext, CycleStrategy } from "./types.ts";
+export type CycleContext = {
+  cycleNumber: number;
+  lastSummary?: string;
+};
+
+export type CycleStrategy = {
+  nextPrompt(ctx: CycleContext): string;
+};
 
 export class DefaultStrategy implements CycleStrategy {
   nextPrompt(ctx: CycleContext): string {

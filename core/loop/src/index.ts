@@ -118,13 +118,13 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
     status.uptime = 0;
     status.startTime = Date.now();
 
-    const resolvedAgentDir = resolveAgentDir(validated.agent.agentDir);
-    const configuredModel = resolveConfiguredModel(validated.agent.model, resolvedAgentDir);
+    const resolvedAgentDir = resolveAgentDir(undefined);
+    const configuredModel = resolveConfiguredModel(validated.agent, resolvedAgentDir);
 
     const { session } = await createAgentSession({
-      cwd: validated.agent.projectDir,
+      cwd: validated.cwd,
       model: configuredModel,
-      thinkingLevel: validated.agent.thinkingLevel,
+      thinkingLevel: "medium" as const,
       agentDir: resolvedAgentDir
     });
 
@@ -158,10 +158,8 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
           await countdownPause(24 * 60 * 60 * 1000);
         }
 
-        const prompt = strategy.nextPrompt({
-          cycleNumber: status.cycle,
-          lastSummary
-        });
+        // In absence of custom strategy logic, fallback to generic prompt
+        const prompt = `Cycle ${status.cycle}. Last: ${lastSummary ?? "none"}. ${validated.systemPrompt}`;
 
         const before = session.getSessionStats().tokens.total;
 
@@ -250,7 +248,7 @@ export function createGoddardConfig(config: GoddardLoopConfig): GoddardLoopConfi
   return config;
 }
 
-export type { CycleContext, CycleStrategy, GoddardLoopConfig, PiAgentConfig } from "./types.ts";
+export type { GoddardLoopConfig } from "./types.ts";
+export type { CycleContext, CycleStrategy } from "./strategies.ts";
 export { DefaultStrategy } from "./strategies.ts";
-export { Models, type Model } from "@goddard-ai/config";
 export { LOOP_SYSTEM_PROMPT } from "./prompts.ts";

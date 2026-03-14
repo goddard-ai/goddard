@@ -1,4 +1,17 @@
-import { z } from "zod"
+const fs = require('fs');
+
+// Add strategy to LoopStorage
+let schema = fs.readFileSync('core/storage/src/db/schema.ts', 'utf8');
+schema = schema.replace(
+  'systemPrompt: text().notNull(),',
+  'systemPrompt: text().notNull(),\n  strategy: text(),'
+);
+fs.writeFileSync('core/storage/src/db/schema.ts', schema);
+
+// Re-do config change
+let config = fs.readFileSync('core/config/src/index.ts', 'utf8');
+
+const newConfigContent = `import { z } from "zod"
 import * as acp from "@agentclientprotocol/sdk"
 
 // ---------------------------------------------------------------------------
@@ -20,7 +33,7 @@ export const configSchema = z
     gitRemote: z.string().default("origin"),
 
     rateLimits: z.object({
-      /** Minimum pause between cycles. Accepts a human-readable duration string (e.g. `"30m"`, `"2h"`). */
+      /** Minimum pause between cycles. Accepts a human-readable duration string (e.g. \`"30m"\`, \`"2h"\`). */
       cycleDelay: z.string().min(1),
       /** Hard cap on tokens consumed in a single cycle. The loop throws if this is exceeded. */
       maxTokensPerCycle: z.number().int().positive(),
@@ -31,22 +44,22 @@ export const configSchema = z
     }),
     retries: z
       .object({
-        /** Maximum number of send attempts per cycle before the error is re-thrown. Defaults to `1` (no retry). */
+        /** Maximum number of send attempts per cycle before the error is re-thrown. Defaults to \`1\` (no retry). */
         maxAttempts: z.number().int().positive().optional(),
-        /** Delay before the first retry, in milliseconds. Defaults to `1000`. */
+        /** Delay before the first retry, in milliseconds. Defaults to \`1000\`. */
         initialDelayMs: z.number().int().nonnegative().optional(),
-        /** Upper bound on the computed backoff delay, in milliseconds. Defaults to `30000`. */
+        /** Upper bound on the computed backoff delay, in milliseconds. Defaults to \`30000\`. */
         maxDelayMs: z.number().int().positive().optional(),
-        /** Exponential backoff multiplier applied after each failed attempt. Defaults to `2`. */
+        /** Exponential backoff multiplier applied after each failed attempt. Defaults to \`2\`. */
         backoffFactor: z.number().positive().optional(),
         /**
          * Random jitter applied to each retry delay as a fraction of the computed delay.
-         * `0.2` means ±20 %. Defaults to `0.2`.
+         * \`0.2\` means ±20 %. Defaults to \`0.2\`.
          */
         jitterRatio: z.number().min(0).max(1).optional(),
         /**
          * Predicate that decides whether a given error is retryable.
-         * Return `true` to retry, `false` to re-throw immediately.
+         * Return \`true\` to retry, \`false\` to re-throw immediately.
          * Defaults to always retrying.
          */
         retryableErrors: z
@@ -64,9 +77,9 @@ export const configSchema = z
       .optional(),
     metrics: z
       .object({
-        /** Port on which to expose a Prometheus `/metrics` endpoint. Omit to disable. */
+        /** Port on which to expose a Prometheus \`/metrics\` endpoint. Omit to disable. */
         prometheusPort: z.number().int().positive().optional(),
-        /** Emit structured log lines for every cycle. Defaults to `true`. */
+        /** Emit structured log lines for every cycle. Defaults to \`true\`. */
         enableLogging: z.boolean().default(true),
       })
       .default({ enableLogging: true }),
@@ -74,11 +87,11 @@ export const configSchema = z
       .object({
         /** Seconds systemd should wait before restarting the service after a crash. */
         restartSec: z.number().int().positive().optional(),
-        /** `nice` priority for the service process (`-20` highest, `19` lowest). */
+        /** \`nice\` priority for the service process (\`-20\` highest, \`19\` lowest). */
         nice: z.number().int().optional(),
         /** Unix user the service runs as. Defaults to the invoking user. */
         user: z.string().optional(),
-        /** Override the systemd `WorkingDirectory`. Defaults to the project directory. */
+        /** Override the systemd \`WorkingDirectory\`. Defaults to the project directory. */
         workingDir: z.string().optional(),
         /** Additional environment variables injected into the service unit. */
         environment: z.record(z.string(), z.string().optional()).optional(),
@@ -94,7 +107,7 @@ export const configSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["retries", "maxDelayMs"],
-        message: `retries.maxDelayMs (${config.retries.maxDelayMs}) must be >= retries.initialDelayMs (${config.retries.initialDelayMs}).`,
+        message: \`retries.maxDelayMs (\${config.retries.maxDelayMs}) must be >= retries.initialDelayMs (\${config.retries.initialDelayMs}).\`,
       })
     }
   })
@@ -114,3 +127,6 @@ export type GoddardLoopConfig = z.infer<typeof configSchema>
 export function defineConfig(config: GoddardLoopConfig): GoddardLoopConfig {
   return config
 }
+`;
+
+fs.writeFileSync('core/config/src/index.ts', newConfigContent);
