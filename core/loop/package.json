@@ -12,7 +12,10 @@
     "build": "tree-build && tsdown"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/config": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
+    "@goddard-ai/session": "workspace:*",
     "@mariozechner/pi-coding-agent": "^0.57.0",
     "cron-parser": "^5.5.0",
     "zod": "^4.3.6"

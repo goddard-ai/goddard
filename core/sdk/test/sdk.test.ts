@@ -2,7 +2,7 @@ import { test, expect } from "vitest"
 import { promises as fs } from "node:fs"
 import * as path from "node:path"
 import * as os from "node:os"
-import { createSdk, InMemoryTokenStorage } from "../src/index.ts"
+import { GoddardSdk, InMemoryTokenStorage } from "../src/index.ts"
 import { init as agentsInit } from "../src/node/index.ts"
 
 test("device flow stores token and whoami uses auth header", async () => {
@@ -42,7 +42,7 @@ test("device flow stores token and whoami uses auth header", async () => {
     return jsonResponse(404, { error: "not found" })
   }
 
-  const sdk = createSdk({
+  const sdk = new GoddardSdk({
     baseUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
     fetchImpl,
@@ -86,7 +86,7 @@ test("pr create requires authentication", async () => {
     return jsonResponse(404, { error: "not found" })
   }
 
-  const sdk = createSdk({
+  const sdk = new GoddardSdk({
     baseUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
     fetchImpl,
@@ -123,7 +123,7 @@ test("pr.isManaged returns managed status", async () => {
     return jsonResponse(404, { error: "not found" })
   }
 
-  const sdk = createSdk({
+  const sdk = new GoddardSdk({
     baseUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
     fetchImpl,
@@ -160,7 +160,7 @@ test("stream emits error event for malformed payloads", async () => {
     return jsonResponse(404, { error: "not found" })
   }
 
-  const sdk = createSdk({
+  const sdk = new GoddardSdk({
     baseUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
     fetchImpl,

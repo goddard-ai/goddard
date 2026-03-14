@@ -108,6 +108,54 @@ describe("system prompt injection", () => {
     )
     expect((injected.prompt[2] as { text: string }).text).toBe("Hello")
   })
+
+  test("inserts multiple appended system prompts in order", () => {
+    const request = {
+      sessionId: "session-1",
+      prompt: [{ type: "text", text: "Hello" }],
+    } as any
+
+    const injected = injectSystemPrompt(
+      request,
+      '<system-prompt name="Goddard CLI">base</system-prompt>',
+      ["Follow internal policy", "Use repository conventions"],
+    )
+
+    expect((injected.prompt[0] as { text: string }).text).toContain(
+      '<system-prompt name="Goddard CLI">base</system-prompt>',
+    )
+    expect((injected.prompt[1] as { text: string }).text).toBe(
+      "<system-prompt>Follow internal policy</system-prompt>",
+    )
+    expect((injected.prompt[2] as { text: string }).text).toBe(
+      "<system-prompt>Use repository conventions</system-prompt>",
+    )
+    expect((injected.prompt[3] as { text: string }).text).toBe("Hello")
+  })
+
+  test("flattens nested appended system prompts and drops falsy values", () => {
+    const request = {
+      sessionId: "session-1",
+      prompt: [{ type: "text", text: "Hello" }],
+    } as any
+
+    const injected = injectSystemPrompt(
+      request,
+      '<system-prompt name="Goddard CLI">base</system-prompt>',
+      ["Follow internal policy", null, ["Use repository conventions", "", false]],
+    )
+
+    expect((injected.prompt[0] as { text: string }).text).toContain(
+      '<system-prompt name="Goddard CLI">base</system-prompt>',
+    )
+    expect((injected.prompt[1] as { text: string }).text).toBe(
+      "<system-prompt>Follow internal policy</system-prompt>",
+    )
+    expect((injected.prompt[2] as { text: string }).text).toBe(
+      "<system-prompt>Use repository conventions</system-prompt>",
+    )
+    expect((injected.prompt[3] as { text: string }).text).toBe("Hello")
+  })
 })
 
 describe("one-shot session behavior", () => {

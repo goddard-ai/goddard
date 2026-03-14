@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { SessionStatus } from "@goddard-ai/schema/db"
-import type { AgentDistribution, SessionParams } from "@goddard-ai/schema/session-server"
+import type { AgentDistribution, AppendSystemPrompt, SessionParams } from "@goddard-ai/schema/session-server"
 import { SessionStorage, SQLSessionUpdate } from "@goddard-ai/storage"
 import { spawn } from "node:child_process"
 import { join } from "node:path"
@@ -19,16 +19,18 @@ const VERSION = manifest.version
 export function injectSystemPrompt(
   request: acp.PromptRequest,
   systemPrompt: string,
-  appendSystemPrompt?: string,
+  appendSystemPrompt?: AppendSystemPrompt,
 ): acp.PromptRequest {
   const injectedPrompt: acp.ContentBlock[] = [
     { type: "text", text: `<system-prompt name="Goddard CLI">${systemPrompt}</system-prompt>` },
   ]
 
-  if (appendSystemPrompt) {
+  const appendedPrompts = flattenAppendSystemPrompt(appendSystemPrompt)
+
+  for (const prompt of appendedPrompts) {
     injectedPrompt.push({
       type: "text",
-      text: `<system-prompt>${appendSystemPrompt}</system-prompt>`,
+      text: `<system-prompt>${prompt}</system-prompt>`,
     })
   }
 
@@ -36,6 +38,18 @@ export function injectSystemPrompt(
     ...request,
     prompt: [...injectedPrompt, ...request.prompt],
   }
+}
+
+function flattenAppendSystemPrompt(appendSystemPrompt?: AppendSystemPrompt): string[] {
+  if (!appendSystemPrompt) {
+    return []
+  }
+
+  if (Array.isArray(appendSystemPrompt)) {
+    return appendSystemPrompt.flatMap((prompt) => flattenAppendSystemPrompt(prompt))
+  }
+
+  return [appendSystemPrompt]
 }
 
 export function sessionStatusFromClientMessage(

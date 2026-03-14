@@ -17,6 +17,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@goddard-ai/schema": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {

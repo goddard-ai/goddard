@@ -1,3 +1,4 @@
+import { Models } from "@goddard-ai/config"
 import {
   type AuthSession,
   type CreatePrInput,
@@ -13,9 +14,8 @@ import {
   type ThinkingLevel,
 } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
-import { createClient, type RouteRequest } from "rouzer"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
-import { Models } from "@goddard-ai/config"
+import { createClient, type RouteRequest } from "rouzer"
 
 export const SDK_VERSION = "0.1.0"
 
@@ -70,19 +70,6 @@ export class StreamSubscription {
   }
 }
 
-export interface GoddardAgentsApi {
-  init: (cwd?: string) => Promise<{ path: string }>
-}
-
-export interface GoddardLoopApi {
-  init: (options: { global?: boolean }) => Promise<{ path: string }>
-  run: (cwd?: string, options?: { createLoopRuntime?: any }) => Promise<void>
-  generateSystemdService: (
-    cwd: string,
-    options: { global?: boolean; user?: string },
-  ) => Promise<{ path: string }>
-}
-
 export class GoddardSdk {
   readonly auth: {
     startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>
@@ -108,9 +95,6 @@ export class GoddardSdk {
   readonly config: {
     models: typeof Models
   }
-
-  readonly agents: GoddardAgentsApi
-  readonly loop: GoddardLoopApi
 
   readonly #baseUrl: URL
   readonly #tokenStorage: TokenStorage
@@ -265,24 +249,6 @@ export class GoddardSdk {
     this.config = {
       models: Models,
     }
-
-    this.agents = {
-      init: async () => {
-        throw new Error("agents.init is only supported in Node.js environments.")
-      },
-    }
-
-    this.loop = {
-      init: async () => {
-        throw new Error("loop.init is only supported in Node.js environments.")
-      },
-      run: async () => {
-        throw new Error("loop.run is only supported in Node.js environments.")
-      },
-      generateSystemdService: async () => {
-        throw new Error("loop.generateSystemdService is only supported in Node.js environments.")
-      },
-    }
   }
 
   async #sendJson<T>(responsePromise: Promise<Response>): Promise<T> {
@@ -400,26 +366,20 @@ function parseSseData(chunk: string): string | null {
   return dataLines.length > 0 ? dataLines.join("\n") : null
 }
 
-export function createSdk(options: GoddardSdkOptions): GoddardSdk {
-  return new GoddardSdk(options)
-}
-
 export type {
   AuthSession,
   CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowSession,
-  DeviceFlowStart,
-  PiAgentConfig,
+  DeviceFlowStart, GitHubWebhookInput, PiAgentConfig,
   PullRequestRecord,
   RepoEvent,
   RepoRef,
   ThinkingLevel,
-  TokenStorage,
-  GitHubWebhookInput,
+  TokenStorage
 }
 
-export { InMemoryTokenStorage }
-export { SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./prompts.ts"
 export { LOOP_SYSTEM_PROMPT } from "@goddard-ai/loop"
 export type { GoddardLoopConfig } from "@goddard-ai/loop"
+export { PROPOSE_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "./prompts.ts"
+export { InMemoryTokenStorage }

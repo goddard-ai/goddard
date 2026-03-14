@@ -1,8 +1,7 @@
 {
   "name": "goddard",
-  "private": true,
   "version": "0.1.0",
-  "packageManager": "pnpm@10.0.0",
+  "private": true,
   "workspaces": [
     "core/backend",
     "daemon",
@@ -15,6 +14,15 @@
     "core/loop",
     "core/tree-build"
   ],
+  "scripts": {
+    "fmt": "pnpm -r run fmt",
+    "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run test",
+    "postinstall": "node ./scripts/postinstall.mjs"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
     "@goddard/tree-build": "workspace:*",
@@ -27,14 +35,7 @@
     "unplugin-raw": "^0.6.4",
     "vitest": "^4.0.18"
   },
-  "scripts": {
-    "fmt": "pnpm -r run fmt",
-    "typecheck": "pnpm -r run typecheck",
-    "lint": "pnpm -r run lint",
-    "test": "pnpm -r run test",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run test",
-    "postinstall": "node ./scripts/postinstall.mjs"
-  },
+  "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",

@@ -136,6 +136,9 @@ importers:
 
   core/config:
     dependencies:
+      '@goddard-ai/schema':
+        specifier: workspace:*
+        version: link:../schema
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -146,9 +149,18 @@ importers:
 
   core/loop:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.3.6)
       '@goddard-ai/config':
         specifier: workspace:*
         version: link:../config
+      '@goddard-ai/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@goddard-ai/session':
+        specifier: workspace:*
+        version: link:../session
       '@mariozechner/pi-coding-agent':
         specifier: ^0.57.0
         version: 0.57.0(ws@8.19.0)(zod@4.3.6)
@@ -195,6 +207,9 @@ importers:
       rouzer:
         specifier: ^1.4.0
         version: 1.4.0(zod@4.3.6)
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
       zod:
         specifier: ^4.3.6
         version: 4.3.6

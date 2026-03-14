@@ -1,4 +1,6 @@
 import { z } from "zod"
+import type { LoopStrategy, LoopContext } from "@goddard-ai/schema/loop"
+export type { LoopStrategy, LoopContext }
 
 // ---------------------------------------------------------------------------
 // Models
@@ -87,22 +89,7 @@ const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "
 export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
 
 // ---------------------------------------------------------------------------
-// CycleContext
-// ---------------------------------------------------------------------------
-
-const cycleContextSchema = z.object({
-  cycleNumber: z.number(),
-  lastSummary: z.string().optional(),
-})
-
-/**
- * Snapshot of loop state passed to {@link CycleStrategy.nextPrompt} at the
- * start of every cycle.
- */
-export type CycleContext = z.infer<typeof cycleContextSchema>
-
-// ---------------------------------------------------------------------------
-// CycleStrategy
+// LoopStrategy
 // ---------------------------------------------------------------------------
 
 /**
@@ -114,22 +101,19 @@ export type CycleContext = z.infer<typeof cycleContextSchema>
  *
  * @example
  * ```ts
- * const strategy: CycleStrategy = {
+ * const strategy: LoopStrategy = {
  *   nextPrompt({ cycleNumber, lastSummary }) {
  *     return `Cycle ${cycleNumber}. Previous: ${lastSummary ?? "none"}. Continue.`;
  *   },
  * };
  * ```
  */
-export type CycleStrategy = {
-  nextPrompt(ctx: CycleContext): string
-}
 
-const cycleStrategySchema = z.custom<CycleStrategy>(
+const loopStrategySchema = z.custom<LoopStrategy>(
   (val) =>
     typeof val === "object" &&
     val !== null &&
-    typeof (val as CycleStrategy).nextPrompt === "function",
+    typeof (val as LoopStrategy).nextPrompt === "function",
   "Strategy must have a nextPrompt method",
 )
 
@@ -187,7 +171,7 @@ export type PiAgentConfig = z.infer<typeof agentSchema>
 export const configSchema = z
   .object({
     agent: agentSchema,
-    strategy: cycleStrategySchema,
+    strategy: loopStrategySchema,
     rateLimits: z.object({
       /** Minimum pause between cycles. Accepts a human-readable duration string (e.g. `"30m"`, `"2h"`). */
       cycleDelay: z.string().min(1),
@@ -198,39 +182,34 @@ export const configSchema = z
       /** Pause the loop for 24 hours after this many cycles. Omit to run indefinitely. */
       maxCyclesBeforePause: z.number().int().positive().optional(),
     }),
-    retries: z
-      .object({
-        /** Maximum number of send attempts per cycle before the error is re-thrown. Defaults to `1` (no retry). */
-        maxAttempts: z.number().int().positive().optional(),
-        /** Delay before the first retry, in milliseconds. Defaults to `1000`. */
-        initialDelayMs: z.number().int().nonnegative().optional(),
-        /** Upper bound on the computed backoff delay, in milliseconds. Defaults to `30000`. */
-        maxDelayMs: z.number().int().positive().optional(),
-        /** Exponential backoff multiplier applied after each failed attempt. Defaults to `2`. */
-        backoffFactor: z.number().positive().optional(),
-        /**
-         * Random jitter applied to each retry delay as a fraction of the computed delay.
-         * `0.2` means ±20 %. Defaults to `0.2`.
-         */
-        jitterRatio: z.number().min(0).max(1).optional(),
-        /**
-         * Predicate that decides whether a given error is retryable.
-         * Return `true` to retry, `false` to re-throw immediately.
-         * Defaults to always retrying.
-         */
-        retryableErrors: z
-          .custom<
-            (
-              error: unknown,
-              context: { cycle: number; attempt: number; maxAttempts: number },
-            ) => boolean
-          >(
-            (val) => val === undefined || typeof val === "function",
-            "retries.retryableErrors must be a function",
-          )
-          .optional(),
-      })
-      .optional(),
+    retries: z.object({
+      /** Maximum number of send attempts per cycle before the error is re-thrown. */
+      maxAttempts: z.number().int().positive(),
+      /** Delay before the first retry, in milliseconds. */
+      initialDelayMs: z.number().int().nonnegative(),
+      /** Upper bound on the computed backoff delay, in milliseconds. */
+      maxDelayMs: z.number().int().positive(),
+      /** Exponential backoff multiplier applied after each failed attempt. */
+      backoffFactor: z.number().positive(),
+      /**
+       * Random jitter applied to each retry delay as a fraction of the computed delay.
+       * `0.2` means ±20 %.
+       */
+      jitterRatio: z.number().min(0).max(1),
+      /**
+       * Predicate that decides whether a given error is retryable.
+       * Return `true` to retry, `false` to re-throw immediately.
+       */
+      retryableErrors: z.custom<
+        (
+          error: unknown,
+          context: { cycle: number; attempt: number; maxAttempts: number },
+        ) => boolean
+      >(
+        (val) => typeof val === "function",
+        "retries.retryableErrors must be a function",
+      ),
+    }),
     metrics: z
       .object({
         /** Port on which to expose a Prometheus `/metrics` endpoint. Omit to disable. */

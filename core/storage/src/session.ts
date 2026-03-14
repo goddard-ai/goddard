@@ -26,12 +26,4 @@ export namespace SessionStorage {
       .set({ ...data, updatedAt: new Date() })
       .where(eq(sessions.id, id))
   }
-
-  export async function updateStatus(id: string, status: (typeof sessions.$inferSelect)["status"]) {
-    return update(id, { status })
-  }
-
-  export async function clearInitiative(id: string) {
-    return update(id, { initiative: null })
-  }
 }

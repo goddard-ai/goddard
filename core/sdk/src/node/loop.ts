@@ -1,15 +1,26 @@
 import { createJiti } from "@mariozechner/jiti"
 import { dirname, join } from "node:path"
 import { mkdir, writeFile } from "node:fs/promises"
-import { createLoop, type GoddardLoopConfig } from "@goddard-ai/loop"
+import {
+  runAgentLoop as coreRunAgentLoop,
+  type AgentLoopHandler,
+  type AgentLoopParams,
+  type GoddardLoopConfig,
+} from "@goddard-ai/loop"
 import {
   getGlobalConfigPath,
   getLocalConfigPath,
   fileExists,
   resolveLoopConfigPath,
 } from "@goddard-ai/storage"
+import type { NodeGoddardLoopRunOverrides } from "./index.ts"
 
 import DEFAULT_LOOP_CONFIG_TEMPLATE from "../../default-config.ts?raw"
+
+type NodeLoopConfig = Omit<GoddardLoopConfig, "retries"> & {
+  retries: AgentLoopParams["retries"]
+}
+type LoopConfigModule = NodeLoopConfig | { default: NodeLoopConfig }
 
 export async function initLoopConfig(options: { global?: boolean }): Promise<{ path: string }> {
   const targetPath = options.global ? getGlobalConfigPath() : getLocalConfigPath()
@@ -27,7 +38,7 @@ export async function initLoopConfig(options: { global?: boolean }): Promise<{ p
 export async function loadLoopConfig(
   cwd: string = process.cwd(),
   options?: { global?: boolean },
-): Promise<{ config: GoddardLoopConfig; path: string }> {
+): Promise<{ config: NodeLoopConfig; path: string }> {
   let configPath: string | null = null
 
   if (options?.global !== undefined) {
@@ -46,24 +57,25 @@ export async function loadLoopConfig(
   }
 
   const jiti = createJiti(cwd)
-  const module = await jiti.import(configPath)
-  const config = (module as any).default ?? module
+  const module = (await jiti.import(configPath)) as LoopConfigModule
+  const config = "default" in module ? module.default : module
 
   if (!config) {
     throw new Error("Config file must export a default configuration object.")
   }
 
-  return { config: config as GoddardLoopConfig, path: configPath }
+  return { config, path: configPath }
 }
 
-export async function runLoop(
+export async function runAgentLoop(
   cwd: string = process.cwd(),
-  deps?: { createLoopRuntime?: typeof createLoop },
+  overrides?: NodeGoddardLoopRunOverrides,
+  handler?: AgentLoopHandler,
 ): Promise<void> {
   const { config } = await loadLoopConfig(cwd)
-  const runtime = deps?.createLoopRuntime ?? createLoop
-  const loop = runtime(config)
-  await loop.start()
+  const loopParams = mergeLoopParams(config, overrides)
+
+  await coreRunAgentLoop(loopParams, handler)
 }
 
 function quoteSystemdValue(value: string): string {
@@ -104,4 +116,35 @@ export async function generateLoopSystemdService(
   await writeFile(outputPath, service, "utf-8")
 
   return { path: outputPath }
+}
+
+function mergeLoopParams(
+  config: NodeLoopConfig,
+  overrides?: NodeGoddardLoopRunOverrides,
+): AgentLoopParams {
+  const baseParams = configToLoopParams(config)
+
+  return {
+    session: {
+      ...baseParams.session,
+      ...overrides?.session,
+    },
+    strategy: overrides?.strategy ?? baseParams.strategy,
+    rateLimits: overrides?.rateLimits ?? baseParams.rateLimits,
+    retries: overrides?.retries ?? baseParams.retries,
+  }
+}
+
+function configToLoopParams(config: NodeLoopConfig): AgentLoopParams {
+  return {
+    session: {
+      agent: "pi-acp",
+      cwd: config.agent.projectDir,
+      mcpServers: [],
+      ...config.agent,
+    },
+    strategy: config.strategy,
+    rateLimits: config.rateLimits,
+    retries: config.retries,
+  }
 }
