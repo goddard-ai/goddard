@@ -22,3 +22,20 @@ export const sessions = sqliteTable("sessions", {
   serverAddress: text(),
   serverPid: integer(),
 })
+
+export const loops = sqliteTable("loops", {
+  id: text().primaryKey(),
+  agent: text().notNull(),
+  systemPrompt: text().notNull(),
+  strategy: text(),
+  displayName: text().notNull(),
+  cwd: text().notNull(),
+  mcpServers: text({ mode: "json" }).notNull().$type<acp.McpServer[]>(),
+  gitRemote: text().notNull().default("origin"),
+  createdAt: integer({ mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer({ mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+})
