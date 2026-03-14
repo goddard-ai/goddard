@@ -22,7 +22,7 @@ describe("Worktree", () => {
       if (cmd === "wt" && args?.[0] === "--version") return { status: 1, stdout: "", error: undefined } as any
       return { status: 0, stdout: "", error: undefined } as any
     })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git"))
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git") || String(p).includes(".worktrees"))
 
     const cwd = "/test/dir"
     const branchName = "pr-123"
@@ -33,13 +33,40 @@ describe("Worktree", () => {
     expect(result.branchName).toBe("pr-123")
     expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
 
-    // Check that mkdir and cp were called
-    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", ["-p", "/test/dir/.worktrees"])
     expect(childProcess.spawnSync).toHaveBeenCalledWith(
       "cp",
       expect.any(Array),
       expect.objectContaining({ encoding: "utf8" })
     )
+  })
+
+  it("should throw if no .worktrees directory exists and no override is provided", () => {
+    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
+      if (cmd === "wt" && args?.[0] === "--version") return { status: 1, stdout: "", error: undefined } as any
+      return { status: 0, stdout: "", error: undefined } as any
+    })
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git")) // Only .git exists
+
+    const cwd = "/test/dir"
+    const branchName = "pr-123"
+    const worktree = new Worktree({ cwd })
+
+    expect(() => worktree.setup(branchName)).toThrowError(/No default worktree directory found/)
+  })
+
+  it("should use a custom default directory if provided", () => {
+    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
+      if (cmd === "wt" && args?.[0] === "--version") return { status: 1, stdout: "", error: undefined } as any
+      return { status: 0, stdout: "", error: undefined } as any
+    })
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git"))
+
+    const cwd = "/test/dir"
+    const branchName = "pr-123"
+    const worktree = new Worktree({ cwd, defaultPluginDirName: ".custom-dir" })
+    const result = worktree.setup(branchName)
+
+    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.custom-dir\/pr-123-\d+$/)
   })
 
   it("should handle git fetch and checkout errors gracefully", () => {
@@ -49,7 +76,7 @@ describe("Worktree", () => {
       if (cmd === "git") return { status: 1, stdout: "", error: undefined } as any
       return { status: 0, stdout: "", error: undefined } as any
     })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git"))
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git") || String(p).includes(".worktrees"))
 
     const cwd = "/test/dir"
     const branchName = "pr-123"
@@ -96,7 +123,7 @@ describe("Worktree", () => {
 
       return { status: 0, stdout: "", error: undefined } as any
     })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".config/wt.toml") || String(p).includes(".git"))
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".config/wt.toml") || String(p).includes(".git") || String(p).includes(".worktrees"))
 
     const cwd = "/test/dir"
     const branchName = "pr-123"
@@ -115,7 +142,6 @@ describe("Worktree", () => {
     expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
 
     // Check that fallback legacy copy commands were executed
-    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", ["-p", "/test/dir/.worktrees"])
     expect(childProcess.spawnSync).toHaveBeenCalledWith(
       "cp",
       expect.any(Array),

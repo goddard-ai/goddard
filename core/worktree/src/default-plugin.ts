@@ -19,27 +19,14 @@ export const defaultPlugin: WorktreePlugin = {
       } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
         agentsDirName = "worktrees"
       } else {
-        agentsDirName = ".worktrees"
+        throw new Error(
+          `No default worktree directory found. Please create '.worktrees/' or 'worktrees/' in your repository.`,
+        )
       }
     }
 
     const agentsDirPath = path.join(options.cwd, agentsDirName)
     const worktreeDir = path.join(agentsDirPath, `${options.branchName}-${Date.now()}`)
-
-    // Ensure agents dir exists
-    if (!fs.existsSync(agentsDirPath)) {
-      spawnSync("mkdir", ["-p", agentsDirPath])
-
-      const checkIgnore = spawnSync("git", ["check-ignore", agentsDirName], {
-        cwd: options.cwd,
-        encoding: "utf8"
-      })
-
-      // If status is 1, git is not ignoring this folder
-      if (checkIgnore.status === 1) {
-        fs.appendFileSync(path.join(options.cwd, ".gitignore"), `\n${agentsDirName}\n`)
-      }
-    }
 
     // Use copy-on-write clone to create the workspace instantly based on OS
     try {
