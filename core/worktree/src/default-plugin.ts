@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import * as os from "node:os"
+import * as crypto from "node:crypto"
 import type { WorktreePlugin, WorktreeSetupOptions } from "./types.js"
 
 export const defaultPlugin: WorktreePlugin = {
@@ -21,8 +22,9 @@ export const defaultPlugin: WorktreePlugin = {
     } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
       agentsDirPath = path.join(options.cwd, "worktrees")
     } else {
-      // Use system temp directory if no specific directory is present
-      agentsDirPath = path.join(os.tmpdir(), "goddard-worktrees", path.basename(options.cwd))
+      // Use system temp directory if no specific directory is present, appending hash to prevent collisions
+      const hash = crypto.createHash("sha256").update(options.cwd).digest("hex").substring(0, 7)
+      agentsDirPath = path.join(os.tmpdir(), "goddard-worktrees", `${path.basename(options.cwd)}-${hash}`)
     }
 
     const worktreeDir = path.join(agentsDirPath, `${options.branchName}-${Date.now()}`)

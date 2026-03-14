@@ -52,8 +52,9 @@ describe("Worktree", () => {
     const worktree = new Worktree({ cwd })
     const result = worktree.setup(branchName)
 
-    expect(result.worktreeDir).toMatch(/\/goddard-worktrees\/dir\/pr-123-\d+$/)
-    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", ["-p", expect.stringMatching(/\/goddard-worktrees\/dir$/)])
+    // Hash of '/test/dir' is approx: 9b2d...
+    expect(result.worktreeDir).toMatch(/\/goddard-worktrees\/dir-[a-f0-9]{7}\/pr-123-\d+$/)
+    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", ["-p", expect.stringMatching(/\/goddard-worktrees\/dir-[a-f0-9]{7}$/)])
   })
 
   it("should use a custom default directory if provided", () => {
