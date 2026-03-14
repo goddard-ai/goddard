@@ -24,7 +24,11 @@ export const defaultPlugin: WorktreePlugin = {
     } else {
       // Use system temp directory if no specific directory is present, appending hash to prevent collisions
       const hash = crypto.createHash("sha256").update(options.cwd).digest("hex").substring(0, 7)
-      agentsDirPath = path.join(os.tmpdir(), "goddard-worktrees", `${path.basename(options.cwd)}-${hash}`)
+      agentsDirPath = path.join(
+        os.tmpdir(),
+        "goddard-worktrees",
+        `${path.basename(options.cwd)}-${hash}`,
+      )
     }
 
     const worktreeDir = path.join(agentsDirPath, `${options.branchName}-${Date.now()}`)
@@ -67,10 +71,14 @@ export const defaultPlugin: WorktreePlugin = {
     try {
       const prNumberMatch = options.branchName.match(/^pr-(\d+)$/)
       if (prNumberMatch) {
-        spawnSync("git", ["fetch", "origin", `pull/${prNumberMatch[1]}/head:${options.branchName}`], {
-          cwd: worktreeDir,
-          stdio: "ignore",
-        })
+        spawnSync(
+          "git",
+          ["fetch", "origin", `pull/${prNumberMatch[1]}/head:${options.branchName}`],
+          {
+            cwd: worktreeDir,
+            stdio: "ignore",
+          },
+        )
       }
 
       spawnSync("git", ["checkout", options.branchName], {
