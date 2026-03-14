@@ -6,7 +6,7 @@ import type { WorktreePlugin } from "./types.js"
 export const worktrunkPlugin: WorktreePlugin = {
   name: "worktrunk",
 
-  isApplicable(projectDir: string): boolean {
+  isApplicable(cwd: string): boolean {
     try {
       const versionResult = spawnSync("wt", ["--version"])
       if (versionResult.status !== 0) {
@@ -14,16 +14,16 @@ export const worktrunkPlugin: WorktreePlugin = {
       }
 
       // Check if the current project is a valid worktrunk environment by checking for .config/wt.toml
-      return fs.existsSync(path.join(projectDir, ".config", "wt.toml"))
+      return fs.existsSync(path.join(cwd, ".config", "wt.toml"))
     } catch {
       return false
     }
   },
 
-  setup(projectDir: string, prNumber: number, branchName: string): string | null {
+  setup(options): string | null {
     try {
-      const switchResult = spawnSync("wt", ["switch", `pr:${prNumber}`], {
-        cwd: projectDir,
+      const switchResult = spawnSync("wt", ["switch", options.branchName], {
+        cwd: options.cwd,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       })
@@ -31,14 +31,14 @@ export const worktrunkPlugin: WorktreePlugin = {
       if (switchResult.status === 0) {
         // Find the newly created worktree path using git from within the project dir
         const worktreeListResult = spawnSync("git", ["worktree", "list"], {
-          cwd: projectDir,
+          cwd: options.cwd,
           encoding: "utf8",
         })
 
         if (worktreeListResult.status === 0) {
           const lines = worktreeListResult.stdout.split("\n")
           for (const line of lines) {
-            if (line.includes(`[${branchName}]`)) {
+            if (line.includes(`[${options.branchName}]`)) {
               const wtPath = line.split(" ")[0]
               if (wtPath) {
                 return wtPath
@@ -51,8 +51,8 @@ export const worktrunkPlugin: WorktreePlugin = {
       // Edge case: Worktrunk switch succeeded but we couldn't find the path.
       // Let's try to remove it before falling back so we don't leak it.
       if (switchResult.status === 0) {
-        spawnSync("wt", ["remove", branchName], {
-          cwd: projectDir,
+        spawnSync("wt", ["remove", options.branchName], {
+          cwd: options.cwd,
           encoding: "utf8",
           stdio: "ignore",
         })

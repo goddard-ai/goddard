@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process"
-import type { WorktreePlugin } from "./types.js"
+import * as fs from "node:fs"
+import * as path from "node:path"
+import type { WorktreePlugin, WorktreeSetupOptions } from "./types.js"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",
@@ -8,27 +10,51 @@ export const defaultPlugin: WorktreePlugin = {
     return true
   },
 
-  setup(projectDir: string, prNumber: number, branchName: string): string | null {
-    const agentsDir = `${projectDir}/.goddard-agents`
-    const worktreeDir = `${agentsDir}/${branchName}-${Date.now()}`
+  setup(options: WorktreeSetupOptions): string | null {
+    let agentsDirName = options.defaultDirName
+
+    if (!agentsDirName) {
+      if (fs.existsSync(path.join(options.cwd, ".worktrees"))) {
+        agentsDirName = ".worktrees"
+      } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
+        agentsDirName = "worktrees"
+      } else {
+        agentsDirName = ".worktrees"
+      }
+    }
+
+    const agentsDirPath = path.join(options.cwd, agentsDirName)
+    const worktreeDir = path.join(agentsDirPath, `${options.branchName}-${Date.now()}`)
 
     // Ensure agents dir exists
-    spawnSync("mkdir", ["-p", agentsDir])
+    if (!fs.existsSync(agentsDirPath)) {
+      spawnSync("mkdir", ["-p", agentsDirPath])
+
+      const checkIgnore = spawnSync("git", ["check-ignore", agentsDirName], {
+        cwd: options.cwd,
+        encoding: "utf8"
+      })
+
+      // If status is 1, git is not ignoring this folder
+      if (checkIgnore.status === 1) {
+        fs.appendFileSync(path.join(options.cwd, ".gitignore"), `\n${agentsDirName}\n`)
+      }
+    }
 
     // Use copy-on-write clone to create the workspace instantly based on OS
     try {
-      let cpArgs = ["-R", projectDir + "/", worktreeDir]
+      let cpArgs = ["-R", options.cwd + "/", worktreeDir]
       if (process.platform === "darwin") {
-        cpArgs = ["-cR", projectDir + "/", worktreeDir]
+        cpArgs = ["-cR", options.cwd + "/", worktreeDir]
       } else if (process.platform === "linux") {
-        cpArgs = ["--reflink=auto", "-R", projectDir + "/", worktreeDir]
+        cpArgs = ["--reflink=auto", "-R", options.cwd + "/", worktreeDir]
       }
 
       let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
 
       if (cloneResult.status !== 0 && process.platform === "darwin") {
         // Fallback to regular copy if APFS clone fails on macOS
-        cpArgs = ["-R", projectDir + "/", worktreeDir]
+        cpArgs = ["-R", options.cwd + "/", worktreeDir]
         cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
       }
 
@@ -47,11 +73,15 @@ export const defaultPlugin: WorktreePlugin = {
 
     // Fetch and checkout the branch in the new workspace
     try {
-      spawnSync("git", ["fetch", "origin", `pull/${prNumber}/head:${branchName}`], {
-        cwd: worktreeDir,
-        stdio: "ignore",
-      })
-      spawnSync("git", ["checkout", branchName], {
+      const prNumberMatch = options.branchName.match(/^pr-(\d+)$/)
+      if (prNumberMatch) {
+        spawnSync("git", ["fetch", "origin", `pull/${prNumberMatch[1]}/head:${options.branchName}`], {
+          cwd: worktreeDir,
+          stdio: "ignore",
+        })
+      }
+
+      spawnSync("git", ["checkout", options.branchName], {
         cwd: worktreeDir,
         stdio: "ignore",
       })

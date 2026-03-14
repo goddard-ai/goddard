@@ -1,37 +1,50 @@
 import { worktrunkPlugin } from "./worktrunk.js"
 import { defaultPlugin } from "./default-plugin.js"
-import type { WorktreePlugin } from "./types.js"
+import type { WorktreePlugin, WorktreeSetupOptions } from "./types.js"
+import * as fs from "node:fs"
+import * as path from "node:path"
 
-export type { WorktreePlugin }
+export type { WorktreePlugin, WorktreeSetupOptions }
 
 export interface WorktreeOptions {
   plugins?: WorktreePlugin[]
-  projectDir: string
+  cwd: string
+  defaultPluginDirName?: string
 }
 
 export class Worktree {
-  readonly projectDir: string
+  readonly cwd: string
+  readonly defaultPluginDirName?: string
   plugin: WorktreePlugin
 
   constructor(options: WorktreeOptions) {
-    this.projectDir = options.projectDir
+    this.cwd = options.cwd
+    this.defaultPluginDirName = options.defaultPluginDirName
+
+    if (!fs.existsSync(path.join(this.cwd, ".git"))) {
+      throw new Error(`Not a git repository: ${this.cwd}`)
+    }
 
     const candidates = [...(options.plugins || []), worktrunkPlugin]
-    this.plugin = candidates.find((p) => p.isApplicable(this.projectDir)) || defaultPlugin
+    this.plugin = candidates.find((p) => p.isApplicable(this.cwd)) || defaultPlugin
   }
 
   get poweredBy(): string {
     return this.plugin.name
   }
 
-  setup(prNumber: number): { worktreeDir: string; branchName: string } {
-    const branchName = `pr-${prNumber}`
+  setup(branchName: string): { worktreeDir: string; branchName: string } {
+    const setupOptions: WorktreeSetupOptions = {
+      cwd: this.cwd,
+      branchName,
+      defaultDirName: this.defaultPluginDirName,
+    }
 
     // Evaluate the initially selected custom plugin or worktrunkPlugin
     if (this.plugin !== defaultPlugin) {
       let worktreeDir: string | null = null
       try {
-        worktreeDir = this.plugin.setup(this.projectDir, prNumber, branchName)
+        worktreeDir = this.plugin.setup(setupOptions)
       } catch (err) {
         // Suppress console output; default plugin handles fallback
       }
@@ -50,7 +63,7 @@ export class Worktree {
     // Evaluate the default fallback
     let worktreeDir: string | null = null
     try {
-      worktreeDir = defaultPlugin.setup(this.projectDir, prNumber, branchName)
+      worktreeDir = defaultPlugin.setup(setupOptions)
     } catch (err) {
       throw new Error(
         `Default worktree plugin failed to setup the workspace: ${err instanceof Error ? err.message : String(err)}`,
