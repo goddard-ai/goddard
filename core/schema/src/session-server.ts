@@ -2,12 +2,24 @@ import * as acp from "@agentclientprotocol/sdk"
 import * as z from "zod"
 import type { ACPAdapterName } from "./acp-adapters"
 
+export type {
+  /**
+   * The namespace for Agent Client Protocol (ACP) types. Re-exported from
+   * `@agentclientprotocol/sdk`.
+   */
+  acp,
+}
+
 export interface AgentDistribution {
   type: "binary" | "npx" | "uvx"
   package?: string
   cmd?: string
   args?: string[]
 }
+
+type Falsy = false | null | undefined
+
+export type AppendSystemPrompt = string | readonly AppendSystemPrompt[] | Falsy
 
 interface BaseSessionParams {
   agent: ACPAdapterName | AgentDistribution
@@ -24,7 +36,7 @@ export interface NewSessionParams extends BaseSessionParams {
   sessionId?: undefined
   initialPrompt?: string | acp.ContentBlock[]
   oneShot?: boolean
-  appendSystemPrompt?: string
+  appendSystemPrompt?: AppendSystemPrompt
 }
 
 export interface LoadSessionParams extends BaseSessionParams {

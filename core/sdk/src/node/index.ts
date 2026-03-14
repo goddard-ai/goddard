@@ -1,11 +1,14 @@
 import { type AgentLoopHandler, type AgentLoopParams } from "@goddard-ai/loop"
 import { GoddardSdk, type GoddardSdkOptions } from "../index.ts"
+import * as actions from "./actions.ts"
+import type { RunAgentActionParams } from "./actions.ts"
 import * as agents from "./agents.ts"
 import * as loop from "./loop.ts"
 export { FileTokenStorage } from "@goddard-ai/storage"
 
 export interface NodeGoddardAgentsApi {
   init: typeof agents.init
+  runAgentAction: (action: string, options: RunAgentActionParams) => Promise<any>
 }
 
 export interface NodeGoddardLoopRunOverrides {
@@ -34,6 +37,7 @@ export class NodeGoddardSdk extends GoddardSdk {
 
     this.agents = {
       init: agents.init,
+      runAgentAction: actions.runAgentAction,
     }
 
     this.loop = {
@@ -45,4 +49,5 @@ export class NodeGoddardSdk extends GoddardSdk {
 }
 
 export * from "./agents.ts"
+export * from "./actions.ts"
 export * from "./loop.ts"
