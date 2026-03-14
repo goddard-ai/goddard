@@ -1,4 +1,6 @@
-import { createLoop, type LoopRuntimeConfig } from "@goddard-ai/loop"
+const fs = require('fs');
+
+let sdkLoop = `import { createLoop, type LoopRuntimeConfig } from "@goddard-ai/loop"
 import { LoopStorage } from "@goddard-ai/storage"
 
 
@@ -43,3 +45,6 @@ export async function runLoop(
   const loop = runtime(config)
   await loop.start()
 }
+`
+
+fs.writeFileSync('core/sdk/src/node/loop.ts', sdkLoop);

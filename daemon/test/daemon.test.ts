@@ -2,7 +2,6 @@ import { test } from "vitest"
 import * as assert from "node:assert/strict"
 import { runDaemonCli, type DaemonIo, type DaemonDeps } from "../src/index.ts"
 import { createSdk, type RepoEvent, type StreamSubscription } from "@goddard-ai/sdk"
-import { Models } from "@goddard-ai/config"
 
 const defaultIo: DaemonIo = {
   stdout: () => {},
@@ -87,9 +86,6 @@ function createMockSdk(partial: PartialSdk): SdkClient {
         throw new Error("not mocked")
       },
       ...partial.loop,
-    },
-    config: {
-      models: Models,
     },
   } as unknown as SdkClient
 }

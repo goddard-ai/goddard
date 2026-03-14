@@ -12,9 +12,9 @@ export class NodeGoddardSdk extends GoddardSdk {
     }
 
     ;(this as any).loop = {
-      init: loop.initLoopConfig,
+
       run: loop.runLoop,
-      generateSystemdService: loop.generateLoopSystemdService,
+
     }
   }
 }

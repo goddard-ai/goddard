@@ -15,7 +15,6 @@ import {
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient, type RouteRequest } from "rouzer"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
-import { Models } from "@goddard-ai/config"
 
 export const SDK_VERSION = "0.1.0"
 
@@ -106,7 +105,7 @@ export class GoddardSdk {
   }
 
   readonly config: {
-    models: typeof Models
+
   }
 
   readonly agents: GoddardAgentsApi
@@ -263,7 +262,7 @@ export class GoddardSdk {
     }
 
     this.config = {
-      models: Models,
+
     }
 
     this.agents = {
@@ -422,4 +421,3 @@ export type {
 export { InMemoryTokenStorage }
 export { SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "./prompts.ts"
 export { LOOP_SYSTEM_PROMPT } from "@goddard-ai/loop"
-export type { GoddardLoopConfig } from "@goddard-ai/loop"

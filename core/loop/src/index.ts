@@ -1,5 +1,4 @@
-import type { GoddardLoop, GoddardLoopConfig } from "./types.ts";
-import { configSchema } from "./types.ts";
+import type { GoddardLoop } from "./types.ts";
 import { RateLimiter } from "./rate-limiter.ts";
 import { AuthStorage, ModelRegistry, createAgentSession, InteractiveMode } from "@mariozechner/pi-coding-agent";
 import { join } from "node:path";
@@ -90,18 +89,35 @@ function isDoneSignal(text: string | undefined): boolean {
   return /(^|\n)\s*DONE\s*$/i.test(text);
 }
 
-export function createLoop(config: GoddardLoopConfig): GoddardLoop {
-  const validated = configSchema.parse(config);
-  const limiter = new RateLimiter(validated.rateLimits);
-  const strategy = validated.strategy;
+export interface LoopRuntimeConfig {
+  agent: string;
+  cwd: string;
+  systemPrompt: string;
+  strategy?: string;
+  mcpServers?: any[];
+}
+
+export function createLoop(config: LoopRuntimeConfig): GoddardLoop {
+  const validated = config;
+  const limiter = new RateLimiter({
+    cycleDelay: "30m",
+    maxOpsPerMinute: 120,
+  });
   const retryConfig = {
-    maxAttempts: validated.retries?.maxAttempts ?? 1,
-    initialDelayMs: validated.retries?.initialDelayMs ?? 1000,
-    maxDelayMs: validated.retries?.maxDelayMs ?? 30_000,
-    backoffFactor: validated.retries?.backoffFactor ?? 2,
-    jitterRatio: validated.retries?.jitterRatio ?? 0.2,
-    retryableErrors: validated.retries?.retryableErrors
+    maxAttempts: 3,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+    backoffFactor: 2,
+    jitterRatio: 0.2,
+    retryableErrors: undefined
   };
+  const rateLimits = {
+    cycleDelay: "30m",
+    maxTokensPerCycle: 128000,
+    maxOpsPerMinute: 120,
+    maxCyclesBeforePause: 100,
+  };
+
 
   const status = {
     cycle: 0,
@@ -152,8 +168,8 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
         }
 
         if (
-          validated.rateLimits.maxCyclesBeforePause &&
-          status.cycle % validated.rateLimits.maxCyclesBeforePause === 0
+          rateLimits.maxCyclesBeforePause &&
+          status.cycle % rateLimits.maxCyclesBeforePause === 0
         ) {
           await countdownPause(24 * 60 * 60 * 1000);
         }
@@ -178,13 +194,7 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
 
             attempt += 1;
 
-            const isRetryable = retryConfig.retryableErrors
-              ? retryConfig.retryableErrors(error, {
-                  cycle: status.cycle,
-                  attempt,
-                  maxAttempts: retryConfig.maxAttempts
-                })
-              : true;
+            const isRetryable = true;
 
             if (!isRetryable || attempt >= retryConfig.maxAttempts) {
               throw error;
@@ -202,9 +212,9 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
 
         const stats = session.getSessionStats();
         const cycleTokens = stats.tokens.total - before;
-        if (cycleTokens > validated.rateLimits.maxTokensPerCycle) {
+        if (cycleTokens > rateLimits.maxTokensPerCycle) {
           throw new Error(
-            `[goddard loop] Cycle ${status.cycle} exceeded maxTokensPerCycle: used ${cycleTokens}, limit ${validated.rateLimits.maxTokensPerCycle}`
+            `[goddard loop] Cycle ${status.cycle} exceeded maxTokensPerCycle: used ${cycleTokens}, limit ${rateLimits.maxTokensPerCycle}`
           );
         }
 
@@ -244,11 +254,8 @@ export function createLoop(config: GoddardLoopConfig): GoddardLoop {
   };
 }
 
-export function createGoddardConfig(config: GoddardLoopConfig): GoddardLoopConfig {
-  return config;
-}
 
-export type { GoddardLoopConfig } from "./types.ts";
+
 export type { CycleContext, CycleStrategy } from "./strategies.ts";
 export { DefaultStrategy } from "./strategies.ts";
 export { LOOP_SYSTEM_PROMPT } from "./prompts.ts";
