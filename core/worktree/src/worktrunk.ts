@@ -68,7 +68,7 @@ export const worktrunkPlugin: WorktreePlugin = {
     try {
       const result = spawnSync("wt", ["remove", branchName], {
         // Execute command from parent dir so we aren't inside the directory we're trying to delete
-        cwd: worktreeDir.split("/").slice(0, -1).join("/") || "/",
+        cwd: path.dirname(worktreeDir) || "/",
         encoding: "utf8",
         stdio: "ignore",
       })

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import * as os from "node:os"
 import type { WorktreePlugin, WorktreeSetupOptions } from "./types.js"
 
 export const defaultPlugin: WorktreePlugin = {
@@ -11,22 +12,24 @@ export const defaultPlugin: WorktreePlugin = {
   },
 
   setup(options: WorktreeSetupOptions): string | null {
-    let agentsDirName = options.defaultDirName
+    let agentsDirPath: string
 
-    if (!agentsDirName) {
-      if (fs.existsSync(path.join(options.cwd, ".worktrees"))) {
-        agentsDirName = ".worktrees"
-      } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
-        agentsDirName = "worktrees"
-      } else {
-        throw new Error(
-          `No default worktree directory found. Please create '.worktrees/' or 'worktrees/' in your repository.`,
-        )
-      }
+    if (options.defaultDirName) {
+      agentsDirPath = path.join(options.cwd, options.defaultDirName)
+    } else if (fs.existsSync(path.join(options.cwd, ".worktrees"))) {
+      agentsDirPath = path.join(options.cwd, ".worktrees")
+    } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
+      agentsDirPath = path.join(options.cwd, "worktrees")
+    } else {
+      // Use system temp directory if no specific directory is present
+      agentsDirPath = path.join(os.tmpdir(), "goddard-worktrees", path.basename(options.cwd))
     }
 
-    const agentsDirPath = path.join(options.cwd, agentsDirName)
     const worktreeDir = path.join(agentsDirPath, `${options.branchName}-${Date.now()}`)
+
+    if (!fs.existsSync(agentsDirPath)) {
+      spawnSync("mkdir", ["-p", agentsDirPath])
+    }
 
     // Use copy-on-write clone to create the workspace instantly based on OS
     try {

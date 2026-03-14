@@ -40,18 +40,20 @@ describe("Worktree", () => {
     )
   })
 
-  it("should throw if no .worktrees directory exists and no override is provided", () => {
+  it("should fall back to os.tmpdir() if no .worktrees directory exists and no override is provided", () => {
     vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
       if (cmd === "wt" && args?.[0] === "--version") return { status: 1, stdout: "", error: undefined } as any
       return { status: 0, stdout: "", error: undefined } as any
     })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git")) // Only .git exists
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).endsWith(".git")) // Be specific that worktrees is false
 
     const cwd = "/test/dir"
     const branchName = "pr-123"
     const worktree = new Worktree({ cwd })
+    const result = worktree.setup(branchName)
 
-    expect(() => worktree.setup(branchName)).toThrowError(/No default worktree directory found/)
+    expect(result.worktreeDir).toMatch(/\/goddard-worktrees\/dir\/pr-123-\d+$/)
+    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", ["-p", expect.stringMatching(/\/goddard-worktrees\/dir$/)])
   })
 
   it("should use a custom default directory if provided", () => {
