@@ -58,27 +58,18 @@ export async function loadLoopConfig(
 
 export async function runAgentLoop(
   cwd: string = process.cwd(),
-  deps?: { createLoopRuntime?: typeof coreRunAgentLoop },
+  overrides?: Parameters<typeof coreRunAgentLoop>[0],
+  handler?: Parameters<typeof coreRunAgentLoop>[1],
 ): Promise<void> {
   const { config } = await loadLoopConfig(cwd)
-  const runtime = deps?.createLoopRuntime ?? coreRunAgentLoop
 
-  await runtime({
-    session: {
-      agent: "pi-coding-agent",
-      cwd: config.agent.projectDir || cwd,
-      mcpServers: [],
-      initialPrompt: undefined,
-      oneShot: undefined,
-    },
-    strategy: config.strategy,
-    rateLimits: {
-      cycleDelay: config.rateLimits?.cycleDelay,
-      maxTokensPerCycle: config.rateLimits?.maxTokensPerCycle,
-      maxOpsPerMinute: config.rateLimits?.maxOpsPerMinute,
-      maxCyclesBeforePause: config.rateLimits?.maxCyclesBeforePause
-    }
-  })
+  await coreRunAgentLoop(
+    {
+      ...config,
+      ...overrides
+    } as any,
+    handler
+  )
 }
 
 function quoteSystemdValue(value: string): string {
