@@ -90,16 +90,14 @@ export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
 // CycleContext
 // ---------------------------------------------------------------------------
 
-const cycleContextSchema = z.object({
-  cycleNumber: z.number(),
-  lastSummary: z.string().optional(),
-})
-
 /**
  * Snapshot of loop state passed to {@link CycleStrategy.nextPrompt} at the
- * start of every cycle.
+ * start of each cycle.
  */
-export type CycleContext = z.infer<typeof cycleContextSchema>
+export interface CycleContext {
+  cycleNumber: number;
+  lastSummary?: string;
+}
 
 // ---------------------------------------------------------------------------
 // CycleStrategy

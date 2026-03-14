@@ -1,7 +1,7 @@
 import { createJiti } from "@mariozechner/jiti"
 import { dirname, join } from "node:path"
 import { mkdir, writeFile } from "node:fs/promises"
-import { createLoop, type GoddardLoopConfig } from "@goddard-ai/loop"
+import { runAgentLoop, type GoddardLoopConfig } from "@goddard-ai/loop"
 import {
   getGlobalConfigPath,
   getLocalConfigPath,
@@ -58,12 +58,21 @@ export async function loadLoopConfig(
 
 export async function runLoop(
   cwd: string = process.cwd(),
-  deps?: { createLoopRuntime?: typeof createLoop },
+  deps?: { createLoopRuntime?: typeof runAgentLoop },
 ): Promise<void> {
   const { config } = await loadLoopConfig(cwd)
-  const runtime = deps?.createLoopRuntime ?? createLoop
-  const loop = runtime(config)
-  await loop.start()
+  const runtime = deps?.createLoopRuntime ?? runAgentLoop
+
+  await runtime({
+    session: {
+      agent: "pi-coding-agent",
+      cwd: config.agent.projectDir || cwd,
+      mcpServers: [],
+      initialPrompt: undefined,
+      oneShot: undefined,
+    },
+    strategy: config.strategy
+  })
 }
 
 function quoteSystemdValue(value: string): string {
