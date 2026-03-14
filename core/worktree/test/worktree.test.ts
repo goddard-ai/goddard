@@ -54,6 +54,7 @@ describe("Worktree", () => {
   it("should use worktrunk if available", () => {
     vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
       if (cmd === "wt" && args?.[0] === "--version") return { status: 0, stdout: "1.0.0", error: undefined } as any
+      if (cmd === "wt" && args?.[0] === "list") return { status: 0, stdout: "", error: undefined } as any
       if (cmd === "wt" && args?.[0] === "switch") return { status: 0, stdout: "", error: undefined } as any
       if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "list") {
         return { status: 0, stdout: "/test/dir/.wt/pr-123 e1234 [pr-123]\n/test/dir main [main]", error: undefined } as any
@@ -76,6 +77,41 @@ describe("Worktree", () => {
     // Ensure it does NOT check out PR code manually since worktrunk handles it natively
     expect(childProcess.spawnSync).not.toHaveBeenCalledWith("git", ["fetch", "origin", "pull/123/head:pr-123"], expect.any(Object))
     expect(childProcess.spawnSync).not.toHaveBeenCalledWith("git", ["checkout", "pr-123"], expect.any(Object))
+  })
+
+  it("should dynamically fallback to default plugin if worktrunk setup returns null", () => {
+    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
+      if (cmd === "wt" && args?.[0] === "--version") return { status: 0, stdout: "1.0.0", error: undefined } as any
+      if (cmd === "wt" && args?.[0] === "list") return { status: 0, stdout: "", error: undefined } as any
+
+      // Simulate worktrunk switch failing, causing it to return null
+      if (cmd === "wt" && args?.[0] === "switch") return { status: 1, stdout: "", error: undefined } as any
+
+      return { status: 0, stdout: "", error: undefined } as any
+    })
+
+    const projectDir = "/test/dir"
+    const prNumber = 123
+    const worktree = new Worktree({ projectDir })
+
+    // Should initially select worktrunk because it's applicable
+    expect(worktree.plugin.name).toBe("worktrunk")
+
+    const result = worktree.setup(prNumber)
+
+    // Plugin should have been updated to the fallback due to failure
+    expect(worktree.plugin.name).toBe("default")
+    expect(result.isWorktrunk).toBe(false)
+    expect(result.branchName).toBe("pr-123")
+    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.goddard-agents\/pr-123-\d+$/)
+
+    // Check that fallback legacy copy commands were executed
+    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", ["-p", "/test/dir/.goddard-agents"])
+    expect(childProcess.spawnSync).toHaveBeenCalledWith(
+      "cp",
+      expect.any(Array),
+      expect.objectContaining({ encoding: "utf8" })
+    )
   })
 })
 

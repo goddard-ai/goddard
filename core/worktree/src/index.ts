@@ -11,33 +11,58 @@ export interface WorktreeOptions {
 
 export class Worktree {
   readonly projectDir: string
-  readonly plugin: WorktreePlugin
+  plugin: WorktreePlugin
+  private readonly candidates: WorktreePlugin[]
 
   constructor(options: WorktreeOptions) {
     this.projectDir = options.projectDir
 
-    const candidates = [...(options.plugins || []), worktrunkPlugin, defaultPlugin]
-
-    const selected = candidates.find((p) => p.isApplicable(this.projectDir))
-    if (!selected) {
-      throw new Error("No applicable worktree plugin found.")
-    }
-
-    this.plugin = selected
+    this.candidates = [...(options.plugins || []), worktrunkPlugin]
+    this.plugin = this.candidates.find((p) => p.isApplicable(this.projectDir)) || defaultPlugin
   }
 
   setup(prNumber: number): { worktreeDir: string; branchName: string; isWorktrunk: boolean } {
     const branchName = `pr-${prNumber}`
-    const worktreeDir = this.plugin.setup(this.projectDir, prNumber, branchName)
+
+    // Evaluate the initially selected custom plugin or worktrunkPlugin
+    if (this.plugin !== defaultPlugin) {
+      let worktreeDir: string | null = null
+      try {
+        worktreeDir = this.plugin.setup(this.projectDir, prNumber, branchName)
+      } catch (err) {
+        console.error(`[WARN] Plugin ${this.plugin.name} threw an error during setup. Falling back to default plugin.`)
+      }
+
+      if (worktreeDir) {
+        return {
+          worktreeDir,
+          branchName,
+          isWorktrunk: this.plugin.name === "worktrunk",
+        }
+      }
+
+      console.warn(`[WARN] Plugin ${this.plugin.name} failed to setup worktree (returned null). Falling back to default plugin.`)
+
+      // Since it failed, permanently change the active plugin to defaultPlugin for cleanup
+      this.plugin = defaultPlugin
+    }
+
+    // Evaluate the default fallback
+    let worktreeDir: string | null = null
+    try {
+      worktreeDir = defaultPlugin.setup(this.projectDir, prNumber, branchName)
+    } catch {
+       // Intentionally left blank as default plugin logs its own errors
+    }
 
     if (!worktreeDir) {
-      throw new Error(`Plugin ${this.plugin.name} failed to setup worktree.`)
+      throw new Error(`Default worktree plugin failed to setup the workspace.`)
     }
 
     return {
       worktreeDir,
       branchName,
-      isWorktrunk: this.plugin.name === "worktrunk",
+      isWorktrunk: false,
     }
   }
 

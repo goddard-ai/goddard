@@ -4,10 +4,19 @@ import type { WorktreePlugin } from "./types.js"
 export const worktrunkPlugin: WorktreePlugin = {
   name: "worktrunk",
 
-  isApplicable(): boolean {
+  isApplicable(projectDir: string): boolean {
     try {
-      const result = spawnSync("wt", ["--version"])
-      return result.status === 0
+      const versionResult = spawnSync("wt", ["--version"])
+      if (versionResult.status !== 0) {
+        return false
+      }
+
+      // Check if the current project is a valid worktrunk environment by executing `wt list`
+      const listResult = spawnSync("wt", ["list"], {
+        cwd: projectDir,
+        stdio: "ignore",
+      })
+      return listResult.status === 0
     } catch {
       return false
     }
