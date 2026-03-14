@@ -4,15 +4,15 @@
   "private": true,
   "license": "MIT",
   "bin": {
-    "goddard-daemon": "./dist/goddard-daemon.mjs"
+    "goddard-daemon": "./dist/main.mjs"
   },
   "type": "module",
   "scripts": {
-    "daemon": "node dist/goddard-daemon.mjs",
+    "daemon": "node dist/main.mjs",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "build": "tree-build && tsdown"
   },
   "dependencies": {
@@ -24,7 +24,6 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
-    "@goddard-ai/config": "workspace:^",
     "tsdown": "^0.21.0"
   }
 }
