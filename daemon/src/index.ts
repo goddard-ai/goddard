@@ -1,6 +1,6 @@
 import { createSdk, type RepoEvent } from "@goddard-ai/sdk"
+import { runAgent } from "@goddard-ai/session"
 import { spawnSync } from "node:child_process"
-import * as pty from "node-pty"
 import { command, option, runSafely, string, subcommands } from "cmd-ts"
 import { FileTokenStorage } from "./storage.ts"
 
@@ -15,9 +15,6 @@ type OneShotInput = {
   event: Extract<RepoEvent, { type: "comment" | "review" }>
   prompt: string
   projectDir: string
-  piBin: string
-  sessionName: string
-  ptyProcessCb?: (ptyProcess: pty.IPty) => void
 }
 
 export type DaemonDeps = {
@@ -49,10 +46,7 @@ export async function runDaemonCli(
 
       try {
         const { owner, repo } = splitRepo(args.repo)
-        const runningPrs = new Map<
-          number,
-          { sessionName: string; isTmux: boolean; ptyProcess?: pty.IPty }
-        >()
+        const runningPrs = new Set<number>()
         const subscription = await sdk.stream.subscribeToRepo({ owner, repo })
 
         io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`)
@@ -64,34 +58,13 @@ export async function runDaemonCli(
           }
 
           const prompt = buildPrompt(event)
-          const activeSession = runningPrs.get(event.prNumber)
 
-          if (activeSession) {
-            io.stdout(`Injecting new feedback into existing session for PR #${event.prNumber}.`)
-            try {
-              if (activeSession.isTmux) {
-                // Send the new prompt as input to the running tmux session via send-keys
-                spawnSync("tmux", [
-                  "send-keys",
-                  "-t",
-                  activeSession.sessionName,
-                  `"${prompt.replace(/"/g, '\\"')}"`,
-                  "Enter",
-                ])
-              } else if (activeSession.ptyProcess) {
-                activeSession.ptyProcess.write(`\n${prompt}\n`)
-              } else {
-                io.stderr(`Cannot inject feedback dynamically. Ignoring feedback.`)
-              }
-            } catch (err) {
-              io.stderr(`Failed to inject feedback into session for PR #${event.prNumber}: ${err}`)
-            }
+          if (runningPrs.has(event.prNumber)) {
+            io.stdout(`Feedback received for PR #${event.prNumber}, but a session is already running. Ignoring for now.`)
             return
           }
 
-          const sessionName = `pi-pr-${event.prNumber}-${Date.now()}`
-          const isTmux = spawnSync("which", ["tmux"]).status === 0
-          runningPrs.set(event.prNumber, { sessionName, isTmux })
+          runningPrs.add(event.prNumber)
 
           try {
             const managed = await sdk.pr.isManaged({
@@ -109,20 +82,12 @@ export async function runDaemonCli(
               event,
               prompt,
               projectDir: args.projectDir,
-              piBin: args.piBin,
-              sessionName,
-              ptyProcessCb: (ptyProcess) => {
-                const session = runningPrs.get(event.prNumber)
-                if (session) session.ptyProcess = ptyProcess
-              },
             })
             io.stdout(`One-shot pi session finished for PR #${event.prNumber} (exit ${exitCode}).`)
           } catch (error) {
             io.stderr(error instanceof Error ? error.message : String(error))
           } finally {
-            if (runningPrs.get(event.prNumber)?.sessionName === sessionName) {
-              runningPrs.delete(event.prNumber)
-            }
+            runningPrs.delete(event.prNumber)
           }
         })
 
@@ -212,43 +177,37 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
     // Ignore error
   }
 
-  // Check if tmux is installed
-  const hasTmux = spawnSync("which", ["tmux"]).status === 0
-
-  let result
-  if (hasTmux) {
-    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
-
-    result = spawnSync("sh", ["-c", tmuxCmd], {
-      stdio: "inherit",
+  try {
+    const session = await runAgent({
+      agent: "pi",
+      cwd: worktreeDir,
+      mcpServers: [],
+      initialPrompt: input.prompt,
+      oneShot: true,
+      metadata: {
+        repository: `${input.event.owner}/${input.event.repo}`,
+        prNumber: input.event.prNumber,
+      },
     })
 
-    // Also log how to attach
-    console.log(`\nStarted pi session in tmux. Attach with: tmux attach -t ${input.sessionName}\n`)
-    return result.status ?? 1
-  } else {
-    // Fallback: use node-pty to spawn the process so we can inject stdin
-    return new Promise<number>((resolve) => {
-      const ptyProcess = pty.spawn(input.piBin, [input.prompt], {
-        name: "xterm-color",
-        cols: 80,
-        rows: 30,
-        cwd: worktreeDir,
-        env: process.env as any,
-      })
-
-      if (input.ptyProcessCb) {
-        input.ptyProcessCb(ptyProcess)
+    // Wait for the one-shot session to complete
+    const { SessionStorage } = await import("@goddard-ai/storage")
+    while (true) {
+      const dbSession = await SessionStorage.get(session.sessionId)
+      if (!dbSession) {
+        break
       }
+      if (dbSession.status === "done" || dbSession.status === "error" || dbSession.status === "cancelled") {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
 
-      ptyProcess.onData((data) => {
-        process.stdout.write(data)
-      })
-
-      ptyProcess.onExit(({ exitCode }) => {
-        resolve(exitCode)
-      })
-    })
+    await session.stop()
+    return 0
+  } catch (error) {
+    console.error(`\n[ERROR] runAgent failed: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
   }
 }
 
