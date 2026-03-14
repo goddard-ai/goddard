@@ -36,13 +36,13 @@ describe("tool session updates", () => {
     })
   })
 
-  test("report completed clears initiative and returns session to active", async () => {
+  test("report completed clears initiative and returns session to done", async () => {
     await reportCompleted("session-1")
 
     expect(updateMock).toHaveBeenCalledWith("session-1", {
       initiative: null,
       blockedReason: null,
-      status: "active",
+      status: "done",
     })
   })
 })

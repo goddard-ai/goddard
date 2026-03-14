@@ -18,9 +18,9 @@ async function requireSessionId(): Promise<string> {
 
 export async function declareInitiative(sessionId: string, title: string) {
   await SessionStorage.update(sessionId, {
+    status: "active",
     initiative: title,
     blockedReason: null,
-    status: "active",
   })
 }
 
@@ -33,9 +33,9 @@ export async function reportBlocker(sessionId: string, reason: string) {
 
 export async function reportCompleted(sessionId: string) {
   await SessionStorage.update(sessionId, {
+    status: "done",
     initiative: null,
     blockedReason: null,
-    status: "active",
   })
 }
 
