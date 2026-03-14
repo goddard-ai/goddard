@@ -1,4 +1,7 @@
 import { z } from "zod"
+import type { LoopStrategy, LoopContext } from "@goddard-ai/schema/loop";
+export type { LoopStrategy, LoopContext };
+
 
 // ---------------------------------------------------------------------------
 // Models
@@ -87,22 +90,7 @@ const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "
 export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
 
 // ---------------------------------------------------------------------------
-// CycleContext
-// ---------------------------------------------------------------------------
-
-const cycleContextSchema = z.object({
-  cycleNumber: z.number(),
-  lastSummary: z.string().optional(),
-})
-
-/**
- * Snapshot of loop state passed to {@link CycleStrategy.nextPrompt} at the
- * start of every cycle.
- */
-export type CycleContext = z.infer<typeof cycleContextSchema>
-
-// ---------------------------------------------------------------------------
-// CycleStrategy
+// LoopStrategy
 // ---------------------------------------------------------------------------
 
 /**
@@ -114,22 +102,19 @@ export type CycleContext = z.infer<typeof cycleContextSchema>
  *
  * @example
  * ```ts
- * const strategy: CycleStrategy = {
+ * const strategy: LoopStrategy = {
  *   nextPrompt({ cycleNumber, lastSummary }) {
  *     return `Cycle ${cycleNumber}. Previous: ${lastSummary ?? "none"}. Continue.`;
  *   },
  * };
  * ```
  */
-export type CycleStrategy = {
-  nextPrompt(ctx: CycleContext): string
-}
 
-const cycleStrategySchema = z.custom<CycleStrategy>(
+const loopStrategySchema = z.custom<LoopStrategy>(
   (val) =>
     typeof val === "object" &&
     val !== null &&
-    typeof (val as CycleStrategy).nextPrompt === "function",
+    typeof (val as LoopStrategy).nextPrompt === "function",
   "Strategy must have a nextPrompt method",
 )
 
@@ -187,7 +172,7 @@ export type PiAgentConfig = z.infer<typeof agentSchema>
 export const configSchema = z
   .object({
     agent: agentSchema,
-    strategy: cycleStrategySchema,
+    strategy: loopStrategySchema,
     rateLimits: z.object({
       /** Minimum pause between cycles. Accepts a human-readable duration string (e.g. `"30m"`, `"2h"`). */
       cycleDelay: z.string().min(1),

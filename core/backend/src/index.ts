@@ -9,6 +9,7 @@ import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 export { TursoBackendControlPlane } from "./db/persistence.ts"
 export * from "./api/control-plane.ts"
+export * from "./github-app.ts"
 
 type StartServerOptions = {
   port?: number

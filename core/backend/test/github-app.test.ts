@@ -1,8 +1,8 @@
 import { test, assert } from "vitest"
-import { GoddardGitHubApp, createGitHubApp } from "../src/index.ts"
+import { createGitHubApp } from "../src/github-app.ts"
 
 test("GoddardGitHubApp initialization", () => {
-  const app = new GoddardGitHubApp({
+  const app = createGitHubApp({
     appId: "123",
     privateKey: "some-key",
     webhookSecret: "secret",

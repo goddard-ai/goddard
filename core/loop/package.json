@@ -15,7 +15,10 @@
     "@goddard-ai/config": "workspace:*",
     "@mariozechner/pi-coding-agent": "^0.57.0",
     "cron-parser": "^5.5.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
+    "@agentclientprotocol/sdk": "^0.15.0"
   },
   "devDependencies": {
     "tsdown": "^0.21.0"

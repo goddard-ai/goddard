@@ -3,4 +3,3 @@ packages:
   - "core/*"
   - "core/session/*"
   - "daemon"
-  - "github-app"

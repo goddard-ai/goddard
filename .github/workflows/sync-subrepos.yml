@@ -8,7 +8,7 @@ on:
     # Optional: Only trigger this action if files in the subrepos actually changed
     paths:
       - "daemon/**"
-      - "github-app/**"
+      - "cmd/**"
       - "core/**"
 
 # Ensure only one sync runs at a time to prevent git conflicts on the .gitrepo files
@@ -51,7 +51,7 @@ jobs:
 
           # If one subrepo has no changes, don't fail the whole job
           git subrepo push daemon || true
-          git subrepo push github-app || true
+          git subrepo push cmd || true
           git subrepo push core || true
 
       - name: Push .gitrepo updates to monorepo

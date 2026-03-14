@@ -1,7 +1,7 @@
 import { createJiti } from "@mariozechner/jiti"
 import { dirname, join } from "node:path"
 import { mkdir, writeFile } from "node:fs/promises"
-import { createLoop, type GoddardLoopConfig } from "@goddard-ai/loop"
+import { runAgentLoop as coreRunAgentLoop, type GoddardLoopConfig } from "@goddard-ai/loop"
 import {
   getGlobalConfigPath,
   getLocalConfigPath,
@@ -56,14 +56,20 @@ export async function loadLoopConfig(
   return { config: config as GoddardLoopConfig, path: configPath }
 }
 
-export async function runLoop(
+export async function runAgentLoop(
   cwd: string = process.cwd(),
-  deps?: { createLoopRuntime?: typeof createLoop },
+  overrides?: Parameters<typeof coreRunAgentLoop>[0],
+  handler?: Parameters<typeof coreRunAgentLoop>[1],
 ): Promise<void> {
   const { config } = await loadLoopConfig(cwd)
-  const runtime = deps?.createLoopRuntime ?? createLoop
-  const loop = runtime(config)
-  await loop.start()
+
+  await coreRunAgentLoop(
+    {
+      ...config,
+      ...overrides
+    } as any,
+    handler
+  )
 }
 
 function quoteSystemdValue(value: string): string {
