@@ -1,6 +1,6 @@
 # Core System Specs
 
-Defines the fundamental operations, rules, and runtime components of the platform.
+Defines the fundamental operations, rules, and runtime components shared by the SDK, desktop app, and background automation.
 
 ## Encapsulated Sub-Specs
 

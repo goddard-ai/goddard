@@ -2,16 +2,16 @@
 
 ## Mission
 
-Goddard bridges local terminal workflows with GitHub operations and extends that bridge to autonomous AI execution.
+Goddard unifies local repository workflows with GitHub operations and extends that bridge to autonomous AI execution.
 
-> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and an orchestration runtime so developers and agents can create PRs, observe repository events, and act without leaving the terminal.
+> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can create PRs, observe repository events, and act from shared local context.
 
 ## The Problem
 
-Developer execution is fragmented across GitHub UI, CI dashboards, and chat tools. AI agents also lack a principled runtime for safe, long-running or feedback-triggered operation.
+Developer execution is fragmented across GitHub UI, IDEs, chat tools, and ad hoc local scripts. AI agents also lack a principled runtime for safe, long-running or feedback-triggered operation.
 
 Goddard addresses:
-1. **Interactive gap:** terminal-native GitHub operations with minimal context switching.
+1. **Workspace gap:** a unified local surface for GitHub operations and AI steering with minimal context switching.
 2. **Autonomous gap:** explicit runtimes for repeated cycles and one-shot PR-feedback reactions.
 
 ## Product Pillars
@@ -19,33 +19,33 @@ Goddard addresses:
 | # | Pillar | Meaning |
 |---|--------|---------|
 | 1 | SDK-first | Capabilities live in `@goddard-ai/sdk`; consumers stay thin. |
-| 2 | Real-time | Repository events stream to terminals with low latency. |
+| 2 | Real-time | Repository events stream to desktop workspaces and SDK consumers with low latency. |
 | 3 | Delegated identity | `goddard[bot]` acts on behalf of authenticated developers. |
 | 4 | Autonomous control | Built-in orchestration runs `pi-coding-agent` with safety limits. |
 | 5 | Type safety | APIs and configuration are TypeScript-first with runtime validation. |
-| 6 | Operability | CLI and `systemd` outputs support practical deployment. |
+| 6 | Operability | Desktop-managed local execution and external process supervisors support practical deployment. |
 | 7 | Edge-native | Backend runs on Workers for global fan-out. |
 
 ## Usage Modes
 
-### 1) Interactive Developer CLI
-A human developer uses terminal commands to authenticate, create PRs, trigger workflows, and launch focused `pi` sessions.
+### 1) SDK Integrations
+A developer or product integration uses `@goddard-ai/sdk` directly to authenticate, create pull requests, subscribe to repository events, and embed Goddard capabilities into custom hosts.
 
 ### 2) Desktop Workspace
 A human developer uses a unified, IDE-like desktop surface to monitor sessions, review pull requests, browse specs, and manage roadmap context without hopping across multiple tools.
 
-### 3) Autonomous Agent Runtimes
-An operator runs unattended execution modes:
+### 3) Background Automation
+A local runtime hosted by the desktop app or another SDK consumer handles unattended execution:
 - Loop mode for recurring `pi-coding-agent` cycles.
-- Daemon mode for webhook-derived PR-feedback one-shot sessions.
+- PR-feedback one-shot handling triggered by repository events.
 - Configurable limits for cadence, operations, and tokens.
 
 All modes consume the same SDK and backend authority model.
 
 ## Encapsulated Sub-Specs
 
-* `spec/core.md`: Core system runtime and configuration.
-* `spec/cli.md`: CLI commands and interactions.
-* `spec/daemon.md`: Background services and daemon functionality.
+* `spec/core.md`: Core system runtime and configuration shared by SDK, app, and background automation.
+* `spec/daemon.md`: Background automation and daemon functionality.
 * `spec/app.md`: Desktop application UX and features.
+* `spec/cli.md`: Decommissioned CLI surface and removal notes.
 * `spec/adr/`: Architecture decision records.
