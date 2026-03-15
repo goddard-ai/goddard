@@ -6,13 +6,9 @@ export default defineConfig({
     projectDir: "./",
     thinkingLevel: "low",
   },
-  strategy: {
-    nextPrompt: ({ cycleNumber, lastSummary }) =>
-      `Cycle ${cycleNumber}. Last summary: ${lastSummary ?? "none"}. Make one safe improvement, then answer with SUMMARY|DONE when ready.`,
-  },
+  nextPrompt: () => "Make one safe improvement.",
   rateLimits: {
     cycleDelay: "30m",
-    maxTokensPerCycle: 128000,
     maxOpsPerMinute: 120,
     maxCyclesBeforePause: 100,
   },

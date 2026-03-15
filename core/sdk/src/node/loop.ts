@@ -125,11 +125,11 @@ function mergeLoopParams(
   const baseParams = configToLoopParams(config)
 
   return {
+    nextPrompt: overrides?.nextPrompt ?? baseParams.nextPrompt,
     session: {
       ...baseParams.session,
       ...overrides?.session,
     },
-    strategy: overrides?.strategy ?? baseParams.strategy,
     rateLimits: overrides?.rateLimits ?? baseParams.rateLimits,
     retries: overrides?.retries ?? baseParams.retries,
   }
@@ -137,13 +137,13 @@ function mergeLoopParams(
 
 function configToLoopParams(config: NodeLoopConfig): AgentLoopParams {
   return {
+    nextPrompt: config.nextPrompt,
     session: {
       agent: "pi-acp",
       cwd: config.agent.projectDir,
       mcpServers: [],
       ...config.agent,
     },
-    strategy: config.strategy,
     rateLimits: config.rateLimits,
     retries: config.retries,
   }
