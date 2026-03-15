@@ -26,6 +26,11 @@ async function requestDaemon<T>(pathname: string, body: unknown): Promise<T> {
     throw new Error("GODDARD_DAEMON_URL is required")
   }
 
+  const sessionToken = process.env.GODDARD_SESSION_TOKEN
+  if (!sessionToken) {
+    throw new Error("GODDARD_SESSION_TOKEN is required")
+  }
+
   const socketPath = readSocketPathFromDaemonUrl(daemonUrl)
   const payload = JSON.stringify(body)
 
@@ -36,6 +41,7 @@ async function requestDaemon<T>(pathname: string, body: unknown): Promise<T> {
         path: pathname,
         method: "POST",
         headers: {
+          authorization: `Bearer ${sessionToken}`,
           "content-type": "application/json",
           "content-length": Buffer.byteLength(payload),
         },
