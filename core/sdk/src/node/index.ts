@@ -12,8 +12,8 @@ export interface NodeGoddardAgentsApi {
 }
 
 export interface NodeGoddardLoopRunOverrides {
+  nextPrompt?: AgentLoopParams["nextPrompt"]
   session?: Partial<AgentLoopParams["session"]>
-  strategy?: AgentLoopParams["strategy"]
   rateLimits?: AgentLoopParams["rateLimits"]
   retries?: AgentLoopParams["retries"]
 }

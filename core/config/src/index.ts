@@ -1,6 +1,4 @@
 import { z } from "zod"
-import type { LoopStrategy, LoopContext } from "@goddard-ai/schema/loop"
-export type { LoopStrategy, LoopContext }
 
 // ---------------------------------------------------------------------------
 // Models
@@ -77,6 +75,10 @@ export type Model =
 // ---------------------------------------------------------------------------
 
 const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"])
+const nextPromptSchema = z.custom<() => string>(
+  (val) => typeof val === "function",
+  "nextPrompt must be a function",
+)
 
 /**
  * Controls how much extended thinking budget the agent receives per turn.
@@ -87,35 +89,6 @@ const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "
  *   latency and token cost.
  */
 export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
-
-// ---------------------------------------------------------------------------
-// LoopStrategy
-// ---------------------------------------------------------------------------
-
-/**
- * Determines the prompt sent to the agent at the start of each cycle.
- *
- * Implement `nextPrompt` to encode your task description, any
- * cycle-to-cycle state you want the agent to recall, and your
- * completion/stop criteria.
- *
- * @example
- * ```ts
- * const strategy: LoopStrategy = {
- *   nextPrompt({ cycleNumber, lastSummary }) {
- *     return `Cycle ${cycleNumber}. Previous: ${lastSummary ?? "none"}. Continue.`;
- *   },
- * };
- * ```
- */
-
-const loopStrategySchema = z.custom<LoopStrategy>(
-  (val) =>
-    typeof val === "object" &&
-    val !== null &&
-    typeof (val as LoopStrategy).nextPrompt === "function",
-  "Strategy must have a nextPrompt method",
-)
 
 // ---------------------------------------------------------------------------
 // Agent sub-schema
@@ -171,16 +144,14 @@ export type PiAgentConfig = z.infer<typeof agentSchema>
 export const configSchema = z
   .object({
     agent: agentSchema,
-    strategy: loopStrategySchema,
+    nextPrompt: nextPromptSchema,
     rateLimits: z.object({
       /** Minimum pause between cycles. Accepts a human-readable duration string (e.g. `"30m"`, `"2h"`). */
       cycleDelay: z.string().min(1),
-      /** Hard cap on tokens consumed in a single cycle. The loop throws if this is exceeded. */
-      maxTokensPerCycle: z.number().int().positive(),
       /** Maximum agent operations (tool calls + messages) allowed per minute across all cycles. */
       maxOpsPerMinute: z.number().int().positive(),
-      /** Pause the loop for 24 hours after this many cycles. Omit to run indefinitely. */
-      maxCyclesBeforePause: z.number().int().positive().optional(),
+      /** Pause the loop for 24 hours after this many cycles. */
+      maxCyclesBeforePause: z.number().int().positive(),
     }),
     retries: z.object({
       /** Maximum number of send attempts per cycle before the error is re-thrown. */
@@ -264,14 +235,11 @@ export const configSchema = z
  *     projectDir: "./",
  *     thinkingLevel: "low",
  *   },
- *   strategy: {
- *     nextPrompt: ({ cycleNumber, lastSummary }) =>
- *       `Cycle ${cycleNumber}. Last: ${lastSummary ?? "none"}. Continue.`,
- *   },
+ *   nextPrompt: () => "Keep improving the codebase.",
  *   rateLimits: {
  *     cycleDelay: "30m",
- *     maxTokensPerCycle: 128_000,
  *     maxOpsPerMinute: 120,
+ *     maxCyclesBeforePause: 100,
  *   },
  *   metrics: { enableLogging: true },
  * });
@@ -297,8 +265,8 @@ export type GoddardLoopConfig = z.infer<typeof configSchema>
  *
  * export default defineConfig({
  *   agent: { model: Models.Anthropic.ClaudeSonnet45, projectDir: "./" },
- *   strategy: { nextPrompt: () => "Keep improving the codebase." },
- *   rateLimits: { cycleDelay: "30m", maxTokensPerCycle: 128_000, maxOpsPerMinute: 120 },
+ *   nextPrompt: () => "Keep improving the codebase.",
+ *   rateLimits: { cycleDelay: "30m", maxOpsPerMinute: 120, maxCyclesBeforePause: 100 },
  * });
  * ```
  */
