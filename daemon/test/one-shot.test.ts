@@ -50,4 +50,7 @@ test("runOneShot prepends daemon agent-bin to PATH before calling session runAge
   expect(params.env.PATH).toContain("/usr/bin:/bin")
   expect(params.env.PATH).toContain("/daemon/agent-bin")
   expect(params.env.GODDARD_AGENT_BIN_DIR).toBeUndefined()
+  expect(params.prompts.foreground).toContain("goddard")
+  expect(params.prompts.background).toContain("submit-pr")
+  expect(params.prompts.globalRules).toContain("goddard")
 })

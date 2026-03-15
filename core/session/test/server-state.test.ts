@@ -14,6 +14,7 @@ vi.mock("radashi", () => ({
 import {
   buildAgentProcessEnv,
   injectSystemPrompt,
+  resolveSessionPromptTemplates,
   sessionStatusFromAgentMessage,
   sessionStatusFromClientMessage,
   shouldExitAfterInitialPrompt,
@@ -208,5 +209,23 @@ describe("agent process environment", () => {
     expect(env.GODDARD_AGENT_BIN_DIR).toBe("/should/not/be/used")
     expect(env.CUSTOM_VAR).toBe("value")
     expect(env.GODDARD_SERVER_ID).toBe("server-1")
+  })
+})
+
+describe("session prompt templates", () => {
+  test("prefers host-provided prompt templates over built-in defaults", () => {
+    const templates = resolveSessionPromptTemplates({
+      foreground: "foreground from host ${global_rules}",
+      background: "background from host ${global_rules}",
+      declareInitiative: "declare from host",
+      reportBlocker: "blocker from host",
+      globalRules: "rules from host",
+    })
+
+    expect(templates.foreground).toBe("foreground from host ${global_rules}")
+    expect(templates.background).toBe("background from host ${global_rules}")
+    expect(templates.declareInitiative).toBe("declare from host")
+    expect(templates.reportBlocker).toBe("blocker from host")
+    expect(templates.globalRules).toBe("rules from host")
   })
 })

@@ -1,6 +1,11 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { SessionStatus } from "@goddard-ai/schema/db"
-import type { AgentDistribution, AppendSystemPrompt, SessionParams } from "@goddard-ai/schema/session-server"
+import type {
+  AgentDistribution,
+  AppendSystemPrompt,
+  SessionParams,
+  SessionPromptTemplates,
+} from "@goddard-ai/schema/session-server"
 import { SessionStorage, SQLSessionUpdate } from "@goddard-ai/storage"
 import { spawn } from "node:child_process"
 import { Readable, Writable } from "node:stream"
@@ -99,6 +104,20 @@ export function buildAgentProcessEnv(
     PATH: extraEnv?.PATH ?? process.env.PATH ?? "",
     GODDARD_SERVER_ID: serverId,
   }
+}
+
+const defaultSessionPromptTemplates: SessionPromptTemplates = {
+  foreground: prompts.FOREGROUND,
+  background: prompts.BACKGROUND,
+  declareInitiative: prompts.CMD_DECLARE_INITIATIVE,
+  reportBlocker: prompts.CMD_REPORT_BLOCKER,
+  globalRules: prompts.GLOBAL_RULES,
+}
+
+export function resolveSessionPromptTemplates(
+  templates?: SessionPromptTemplates,
+): SessionPromptTemplates {
+  return templates ?? defaultSessionPromptTemplates
 }
 
 /**
@@ -204,16 +223,17 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
 
     const newSession = await agent.newSession(params)
     if (isPropertyDefined(params, "initialPrompt")) {
+      const promptTemplates = resolveSessionPromptTemplates(params.prompts)
       const prompt = params.initialPrompt
       const promptRequest = injectSystemPrompt(
         {
           sessionId: newSession.sessionId,
           prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
         },
-        renderPrompt(prompts.BACKGROUND, {
-          declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
-          report_blocker: prompts.CMD_REPORT_BLOCKER,
-          global_rules: prompts.GLOBAL_RULES,
+        renderPrompt(promptTemplates.background, {
+          declare_initiative: promptTemplates.declareInitiative,
+          report_blocker: promptTemplates.reportBlocker,
+          global_rules: promptTemplates.globalRules,
         }),
         params.appendSystemPrompt,
       )
@@ -347,13 +367,14 @@ export async function serveAgent(serverId: string, params: SessionParams) {
           session.isFirstPrompt &&
           isAcpRequest<AcpPromptRequest>(message, acp.AGENT_METHODS.session_prompt)
         ) {
+          const promptTemplates = resolveSessionPromptTemplates(params.prompts)
           session.isFirstPrompt = false
           message.params = injectSystemPrompt(
             message.params,
-            renderPrompt(prompts.FOREGROUND, {
-              declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
-              report_blocker: prompts.CMD_REPORT_BLOCKER,
-              global_rules: prompts.GLOBAL_RULES,
+            renderPrompt(promptTemplates.foreground, {
+              declare_initiative: promptTemplates.declareInitiative,
+              report_blocker: promptTemplates.reportBlocker,
+              global_rules: promptTemplates.globalRules,
             }),
             "appendSystemPrompt" in params ? params.appendSystemPrompt : undefined,
           )

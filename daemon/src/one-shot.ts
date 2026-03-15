@@ -1,6 +1,7 @@
 import { runAgent } from "@goddard-ai/session"
 import { spawnSync } from "node:child_process"
 import { join } from "node:path"
+import * as prompts from "./prompts/index.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 
 export type OneShotInput = {
@@ -23,6 +24,14 @@ function buildOneShotEnv(inputEnv?: Record<string, string>): Record<string, stri
     PATH: existingPath ? `${agentBinDir}:${existingPath}` : agentBinDir,
   }
 }
+
+const goddardSessionPrompts = {
+  foreground: prompts.FOREGROUND,
+  background: prompts.BACKGROUND,
+  declareInitiative: prompts.CMD_DECLARE_INITIATIVE,
+  reportBlocker: prompts.CMD_REPORT_BLOCKER,
+  globalRules: prompts.GLOBAL_RULES,
+} as const
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
   const branchName = `pr-${input.event.prNumber}`
@@ -89,6 +98,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
         prNumber: input.event.prNumber,
       },
       env: buildOneShotEnv(input.env),
+      prompts: goddardSessionPrompts,
     })
     return 0
   } catch (error) {
