@@ -49,14 +49,23 @@ export const defaultPlugin: WorktreePlugin = {
 
       let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
 
-      if (cloneResult.status !== 0 && process.platform === "darwin") {
-        // Fallback to regular copy if APFS clone fails on macOS
-        cpArgs = ["-R", options.cwd + "/", worktreeDir]
-        cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
-      }
-
       if (cloneResult.status !== 0) {
-        throw new Error(`cp command exited with code ${cloneResult.status}`)
+        // Fallback to git worktree
+        const wtResult = spawnSync("git", ["worktree", "add", "--detach", worktreeDir], {
+          cwd: options.cwd,
+          encoding: "utf8",
+          stdio: "ignore",
+        })
+
+        if (wtResult.status !== 0) {
+          // Fallback to regular copy if git worktree fails
+          cpArgs = ["-R", options.cwd + "/", worktreeDir]
+          cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
+
+          if (cloneResult.status !== 0) {
+            throw new Error(`cp command exited with code ${cloneResult.status}`)
+          }
+        }
       }
     } catch (err) {
       if (err instanceof Error && err.message.includes("cp command exited with code")) {
@@ -93,12 +102,21 @@ export const defaultPlugin: WorktreePlugin = {
     return worktreeDir
   },
 
-  cleanup(worktreeDir: string): boolean {
+  cleanup(worktreeDir: string, branchName: string): boolean {
     try {
-      spawnSync("rm", ["-rf", worktreeDir], {
+      // First try to clean up if it was a git worktree
+      const wtResult = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
         encoding: "utf8",
         stdio: "ignore",
       })
+
+      if (wtResult.status !== 0) {
+        // Fallback to rm -rf if it wasn't a git worktree or remove failed
+        spawnSync("rm", ["-rf", worktreeDir], {
+          encoding: "utf8",
+          stdio: "ignore",
+        })
+      }
       return true
     } catch {
       return false

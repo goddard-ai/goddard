@@ -43,6 +43,76 @@ describe("Worktree", () => {
     )
   })
 
+  it("should fallback to git worktree add --detach if copy-on-write cp fails", () => {
+    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
+      if (cmd === "wt" && args?.[0] === "--version")
+        return { status: 1, stdout: "", error: undefined } as any
+      if (cmd === "cp" && (args?.[0] === "-cR" || args?.[0] === "--reflink=auto" || args?.[0] === "-R"))
+        return { status: 1, stdout: "", error: undefined } as any
+      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "add")
+        return { status: 0, stdout: "", error: undefined } as any
+      return { status: 0, stdout: "", error: undefined } as any
+    })
+    vi.mocked(fs.existsSync).mockImplementation(
+      (p) => String(p).includes(".git") || String(p).includes(".worktrees"),
+    )
+
+    const cwd = "/test/dir"
+    const branchName = "pr-123"
+    const worktree = new Worktree({ cwd })
+    const result = worktree.setup(branchName)
+
+    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
+
+    expect(childProcess.spawnSync).toHaveBeenCalledWith(
+      "git",
+      ["worktree", "add", "--detach", result.worktreeDir],
+      expect.objectContaining({ cwd: "/test/dir" })
+    )
+  })
+
+  it("should fallback to basic cp if both copy-on-write cp and git worktree fail", () => {
+    let cpCallCount = 0;
+    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
+      if (cmd === "wt" && args?.[0] === "--version")
+        return { status: 1, stdout: "", error: undefined } as any
+      if (cmd === "cp") {
+        cpCallCount++;
+        if (cpCallCount === 1) {
+          return { status: 1, stdout: "", error: undefined } as any
+        }
+        return { status: 0, stdout: "", error: undefined } as any
+      }
+      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "add")
+        return { status: 1, stdout: "", error: undefined } as any
+      return { status: 0, stdout: "", error: undefined } as any
+    })
+    vi.mocked(fs.existsSync).mockImplementation(
+      (p) => String(p).includes(".git") || String(p).includes(".worktrees"),
+    )
+
+    const cwd = "/test/dir"
+    const branchName = "pr-123"
+    const worktree = new Worktree({ cwd })
+    const result = worktree.setup(branchName)
+
+    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
+
+    // Verify it tried git worktree
+    expect(childProcess.spawnSync).toHaveBeenCalledWith(
+      "git",
+      ["worktree", "add", "--detach", result.worktreeDir],
+      expect.objectContaining({ cwd: "/test/dir" })
+    )
+
+    // Verify it fell back to basic cp
+    expect(childProcess.spawnSync).toHaveBeenCalledWith(
+      "cp",
+      ["-R", "/test/dir/", result.worktreeDir],
+      expect.objectContaining({ encoding: "utf8" })
+    )
+  })
+
   it("should fall back to ~/.goddard/worktrees/ if no .worktrees directory exists and no override is provided", () => {
     vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
       if (cmd === "wt" && args?.[0] === "--version")
@@ -196,9 +266,11 @@ describe("cleanupWorktree", () => {
     vi.clearAllMocks()
   })
 
-  it("should use rm -rf for non-worktrunk directories", () => {
+  it("should fallback to rm -rf for non-worktrunk directories when git worktree remove fails", () => {
     vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
       if (cmd === "wt" && args?.[0] === "--version")
+        return { status: 1, stdout: "", error: undefined } as any
+      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "remove")
         return { status: 1, stdout: "", error: undefined } as any
       return { status: 0, stdout: "", error: undefined } as any
     })
@@ -207,6 +279,11 @@ describe("cleanupWorktree", () => {
     const worktree = new Worktree({ cwd: "/test/dir" })
     worktree.cleanup("/test/dir/.goddard-agents/pr-123-1234", "pr-123")
 
+    expect(childProcess.spawnSync).toHaveBeenCalledWith(
+      "git",
+      ["worktree", "remove", "--force", "/test/dir/.goddard-agents/pr-123-1234"],
+      expect.any(Object),
+    )
     expect(childProcess.spawnSync).toHaveBeenCalledWith(
       "rm",
       ["-rf", "/test/dir/.goddard-agents/pr-123-1234"],
