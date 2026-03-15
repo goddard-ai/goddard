@@ -347,7 +347,7 @@ export async function serveAgent(serverId: string, params: SessionParams) {
           session.isFirstPrompt = false
           message.params = injectSystemPrompt(
             message.params,
-            renderPrompt(prompts.BACKGROUND, {
+            renderPrompt(prompts.FOREGROUND, {
               declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
               report_blocker: prompts.CMD_REPORT_BLOCKER,
               global_rules: prompts.GLOBAL_RULES,
