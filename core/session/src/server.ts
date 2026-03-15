@@ -89,6 +89,18 @@ export function shouldExitAfterInitialPrompt(
   return !isPropertyDefined(params, "sessionId") && params.oneShot === true
 }
 
+export function buildAgentProcessEnv(
+  serverId: string,
+  extraEnv?: Record<string, string>,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...(extraEnv ?? {}),
+    PATH: extraEnv?.PATH ?? process.env.PATH ?? "",
+    GODDARD_SERVER_ID: serverId,
+  }
+}
+
 /**
  * Resolve the agent executable and spawn the agent subprocess based on the
  * provided configuration. No messages are sent to the subprocess at this stage.
@@ -126,17 +138,9 @@ async function spawnAgentProcess(
     throw new Error("Unsupported agent distribution")
   }
 
-  const PATH = process.env.PATH || ""
-  const agentBinDir = process.env.GODDARD_AGENT_BIN_DIR
-
   return spawn(cmd, args, {
     stdio: ["pipe", "pipe", "inherit"],
-    env: {
-      ...process.env,
-      ...(params.env ?? {}),
-      PATH: agentBinDir ? `${agentBinDir}:${PATH}` : PATH,
-      GODDARD_SERVER_ID: serverId,
-    },
+    env: buildAgentProcessEnv(serverId, params.env),
   })
 }
 

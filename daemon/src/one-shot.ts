@@ -14,6 +14,16 @@ function getDaemonAgentBinDir(): string {
   return join(import.meta.dirname, "../agent-bin")
 }
 
+function buildOneShotEnv(inputEnv?: Record<string, string>): Record<string, string> {
+  const existingPath = inputEnv?.PATH ?? process.env.PATH ?? ""
+  const agentBinDir = getDaemonAgentBinDir()
+
+  return {
+    ...(inputEnv ?? {}),
+    PATH: existingPath ? `${agentBinDir}:${existingPath}` : agentBinDir,
+  }
+}
+
 export async function runOneShot(input: OneShotInput): Promise<number> {
   const branchName = `pr-${input.event.prNumber}`
   const agentsDir = `${input.projectDir}/.goddard-agents`
@@ -78,10 +88,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
         repository: `${input.event.owner}/${input.event.repo}`,
         prNumber: input.event.prNumber,
       },
-      env: {
-        ...(input.env ?? {}),
-        GODDARD_AGENT_BIN_DIR: getDaemonAgentBinDir(),
-      },
+      env: buildOneShotEnv(input.env),
     })
     return 0
   } catch (error) {

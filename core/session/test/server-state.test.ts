@@ -6,7 +6,13 @@ vi.mock("@goddard-ai/storage", () => ({
   },
 }))
 
+vi.mock("radashi", () => ({
+  noop: () => undefined,
+  once: <T extends (...args: any[]) => any>(fn: T) => fn,
+}))
+
 import {
+  buildAgentProcessEnv,
   injectSystemPrompt,
   sessionStatusFromAgentMessage,
   sessionStatusFromClientMessage,
@@ -187,5 +193,20 @@ describe("one-shot session behavior", () => {
         sessionId: "existing-session",
       }),
     ).toBe(false)
+  })
+})
+
+describe("agent process environment", () => {
+  test("preserves caller-provided PATH without using GODDARD_AGENT_BIN_DIR", () => {
+    const env = buildAgentProcessEnv("server-1", {
+      PATH: "/daemon/agent-bin:/usr/bin",
+      GODDARD_AGENT_BIN_DIR: "/should/not/be/used",
+      CUSTOM_VAR: "value",
+    })
+
+    expect(env.PATH).toBe("/daemon/agent-bin:/usr/bin")
+    expect(env.GODDARD_AGENT_BIN_DIR).toBe("/should/not/be/used")
+    expect(env.CUSTOM_VAR).toBe("value")
+    expect(env.GODDARD_SERVER_ID).toBe("server-1")
   })
 })
