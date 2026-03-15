@@ -1,25 +1,8 @@
-import { test, vi } from "vitest"
+import { test } from "vitest"
 import * as assert from "node:assert/strict"
-
-const { sdkCreateMock, mockedPrompts } = vi.hoisted(() => ({
-  sdkCreateMock: vi.fn(),
-  mockedPrompts: {
-    PROPOSE_SYSTEM_PROMPT: "mock propose prompt",
-    SPEC_SYSTEM_PROMPT: "mock spec prompt",
-  },
-}))
-
-vi.mock("@goddard-ai/sdk", () => ({
-  createSdk: sdkCreateMock,
-  PROPOSE_SYSTEM_PROMPT: mockedPrompts.PROPOSE_SYSTEM_PROMPT,
-  SPEC_SYSTEM_PROMPT: mockedPrompts.SPEC_SYSTEM_PROMPT,
-}))
-
-vi.mock("@goddard-ai/sdk/node", () => ({
-  FileTokenStorage: class MockFileTokenStorage {},
-}))
-
 import { runCli, type CliIo, type CliDeps } from "../src/index.ts"
+import { createSdk, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk"
+import { Models } from "@goddard-ai/config"
 
 const defaultIo: CliIo = {
   stdout: () => {},
@@ -44,7 +27,7 @@ test("login command calls sdk.auth.login and prints username", async () => {
   })
 
   const exitCode = await runCli(["login", "--username", "testuser"], io, {
-    createSdkClient: () => sdk as any,
+    createSdkClient: () => sdk,
   })
 
   assert.equal(exitCode, 0)
@@ -66,41 +49,11 @@ test("propose command spawns pi with correct arguments", async () => {
   assert.equal(exitCode, 0)
   assert.equal(spawnCalls.length, 1)
   assert.equal(spawnCalls[0]!.args[0], "--system-prompt")
-  assert.equal(spawnCalls[0]!.args[1], mockedPrompts.PROPOSE_SYSTEM_PROMPT)
+  assert.equal(spawnCalls[0]!.args[1], PROPOSE_SYSTEM_PROMPT)
   assert.equal(spawnCalls[0]!.args[2], "add auth")
 })
 
-type SdkClient = {
-  auth: {
-    login: (input: {
-      githubUsername?: string
-      onPrompt: (verificationUri: string, userCode: string) => void
-    }) => Promise<{ token: string; githubUsername: string; githubUserId: number }>
-    startDeviceFlow: () => Promise<unknown>
-    completeDeviceFlow: () => Promise<unknown>
-    whoami: () => Promise<{ token: string; githubUsername: string; githubUserId: number }>
-    logout: () => Promise<void>
-  }
-  pr: {
-    create: (input: any) => Promise<{ number: number; url: string }>
-    isManaged: (input: any) => Promise<boolean>
-    reply: (input: any) => Promise<{ success: boolean }>
-  }
-  stream: {
-    subscribeToRepo: (repo: { owner: string; repo: string }) => Promise<unknown>
-  }
-  agents: {
-    init: (cwd?: string) => Promise<{ path: string }>
-  }
-  loop: {
-    init: () => Promise<{ path: string }>
-    run: () => Promise<void>
-    generateSystemdService: () => Promise<{ path: string }>
-  }
-  config: {
-    models: Record<string, never>
-  }
-}
+type SdkClient = ReturnType<typeof createSdk>
 
 type PartialSdk = {
   auth?: Partial<SdkClient["auth"]>
@@ -159,9 +112,9 @@ function createMockSdk(partial: PartialSdk): SdkClient {
       ...partial.loop,
     },
     config: {
-      models: {} as Record<string, never>,
+      models: Models,
     },
-  }
+  } as unknown as SdkClient
 }
 
 test("agents init command calls sdk.agents.init and handles commit/push", async () => {
@@ -175,7 +128,7 @@ test("agents init command calls sdk.agents.init and handles commit/push", async 
   })
 
   const deps: CliDeps = {
-    createSdkClient: () => sdk as any,
+    createSdkClient: () => sdk,
     execGit: (cmd, args) => {
       execGitCalls.push({ cmd, args })
       if (cmd === "status") return { status: 0, stdout: "", stderr: "" }
@@ -214,110 +167,7 @@ test("loop init command calls sdk.loop.init", async () => {
     stderr: () => {},
   }
 
-  const exitCode = await runCli(["loop", "init"], io, { createSdkClient: () => sdk as any })
+  const exitCode = await runCli(["loop", "init"], io, { createSdkClient: () => sdk })
   assert.equal(exitCode, 0)
   assert.ok(lines.some((l) => l.includes("Created configuration at /mock/config.ts")))
-})
-
-test("pr create routes through the daemon when a session token is present", async () => {
-  const previousEnv = process.env
-  process.env = {
-    ...previousEnv,
-    GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
-    GODDARD_SESSION_TOKEN: "tok_session",
-  }
-
-  try {
-    const lines: string[] = []
-    const sdk = createMockSdk({
-      pr: {
-        create: async () => {
-          throw new Error("sdk should not be used")
-        },
-      },
-    })
-
-    const daemonCalls: Array<Record<string, unknown>> = []
-    const exitCode = await runCli(
-      ["pr", "create", "--title", "Secure daemon routing", "--body", "Done."],
-      {
-        stdout: (line) => lines.push(line),
-        stderr: () => {},
-      },
-      {
-        createSdkClient: () => sdk as any,
-        submitPrViaDaemon: async (input) => {
-          daemonCalls.push(input)
-          return {
-            number: 12,
-            url: "https://github.com/acme/widgets/pull/12",
-          }
-        },
-      },
-    )
-
-    assert.equal(exitCode, 0)
-    assert.deepEqual(daemonCalls, [
-      {
-        cwd: process.cwd(),
-        title: "Secure daemon routing",
-        body: "Done.",
-        head: "main",
-        base: "main",
-      },
-    ])
-    assert.ok(
-      lines.some((line) => line.includes("PR #12 created: https://github.com/acme/widgets/pull/12")),
-    )
-  } finally {
-    process.env = previousEnv
-  }
-})
-
-test("pr reply routes through the daemon when a session token is present", async () => {
-  const previousEnv = process.env
-  process.env = {
-    ...previousEnv,
-    GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
-    GODDARD_SESSION_TOKEN: "tok_session",
-  }
-
-  try {
-    const lines: string[] = []
-    const sdk = createMockSdk({
-      pr: {
-        reply: async () => {
-          throw new Error("sdk should not be used")
-        },
-      },
-    })
-
-    const daemonCalls: Array<Record<string, unknown>> = []
-    const exitCode = await runCli(
-      ["pr", "reply", "--body", "Updated per review", "--pr", "12"],
-      {
-        stdout: (line) => lines.push(line),
-        stderr: () => {},
-      },
-      {
-        createSdkClient: () => sdk as any,
-        replyPrViaDaemon: async (input) => {
-          daemonCalls.push(input)
-          return { success: true }
-        },
-      },
-    )
-
-    assert.equal(exitCode, 0)
-    assert.deepEqual(daemonCalls, [
-      {
-        cwd: process.cwd(),
-        message: "Updated per review",
-        prNumber: 12,
-      },
-    ])
-    assert.ok(lines.some((line) => line.includes("Reply posted to PR #12")))
-  } finally {
-    process.env = previousEnv
-  }
 })

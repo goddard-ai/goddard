@@ -233,6 +233,8 @@ test("daemon run command subscribes to repo and handles events", async () => {
   assert.equal(subCalls, 1)
   assert.equal(runOneShotCalls.length, 1)
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
+  assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
+  assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
   assert.equal(
     runOneShotCalls[0].daemonUrl,
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",

@@ -1,7 +1,6 @@
 import { createSdk, SPEC_SYSTEM_PROMPT, PROPOSE_SYSTEM_PROMPT } from "@goddard-ai/sdk"
 import { FileTokenStorage } from "@goddard-ai/sdk/node"
 import type { GoddardLoopConfig } from "@goddard-ai/sdk"
-import { hasDaemonSessionContext, replyPrViaDaemon, submitPrViaDaemon } from "./daemon-client.ts"
 import { inferRepoFromGitConfig, inferPrNumberFromGit, splitRepo } from "./git.ts"
 import { spawnSync } from "node:child_process"
 import * as p from "@clack/prompts"
@@ -31,18 +30,6 @@ export type CliDeps = {
    */
   spawnPi?: (args: string[]) => number
   createLoopRuntime?: (config: GoddardLoopConfig) => { start: () => Promise<void> }
-  submitPrViaDaemon?: (input: {
-    cwd: string
-    title: string
-    body: string
-    head?: string
-    base?: string
-  }) => Promise<{ number: number; url: string }>
-  replyPrViaDaemon?: (input: {
-    cwd: string
-    message: string
-    prNumber?: number
-  }) => Promise<{ success: boolean }>
   /**
    * Injectable git operation runner for testing.
    */
@@ -143,18 +130,6 @@ export async function runCli(
     },
     handler: async (args) => {
       try {
-        if (hasDaemonSessionContext()) {
-          const pr = await (deps.submitPrViaDaemon ?? submitPrViaDaemon)({
-            cwd: process.cwd(),
-            title: args.title,
-            body: args.body ?? "",
-            head: args.head,
-            base: args.base,
-          })
-          io.stdout(`PR #${pr.number} created: ${pr.url}`)
-          return 0
-        }
-
         const sdk = getSdk(args.baseUrl || undefined)
         const repoRef = await resolveRepoRef(args.repo)
         const { owner, repo } = splitRepo(repoRef)
@@ -185,33 +160,20 @@ export async function runCli(
     },
     handler: async (args) => {
       try {
-        let prNumber: number | undefined
+        const sdk = getSdk(args.baseUrl || undefined)
+        const repoRef = await resolveRepoRef(args.repo)
+        const { owner, repo } = splitRepo(repoRef)
+
+        let prNumber: number
         if (args.pr) {
           prNumber = parseInt(args.pr, 10)
         } else {
           const inferred = inferPrNumberFromGit()
-          if (inferred) {
-            prNumber = inferred
+          if (!inferred) {
+            throw new Error("Unable to infer PR number from current branch. Pass --pr <number>.")
           }
+          prNumber = inferred
         }
-
-        if (hasDaemonSessionContext()) {
-          await (deps.replyPrViaDaemon ?? replyPrViaDaemon)({
-            cwd: process.cwd(),
-            message: args.body,
-            prNumber,
-          })
-          io.stdout(`Reply posted to PR #${prNumber ?? "current"}`)
-          return 0
-        }
-
-        if (prNumber === undefined) {
-          throw new Error("Unable to infer PR number from current branch. Pass --pr <number>.")
-        }
-
-        const sdk = getSdk(args.baseUrl || undefined)
-        const repoRef = await resolveRepoRef(args.repo)
-        const { owner, repo } = splitRepo(repoRef)
 
         await sdk.pr.reply({
           owner,
