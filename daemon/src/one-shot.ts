@@ -25,13 +25,32 @@ function buildOneShotEnv(inputEnv?: Record<string, string>): Record<string, stri
   }
 }
 
-const goddardSessionPrompts = {
-  foreground: prompts.FOREGROUND,
-  background: prompts.BACKGROUND,
-  declareInitiative: prompts.CMD_DECLARE_INITIATIVE,
-  reportBlocker: prompts.CMD_REPORT_BLOCKER,
-  globalRules: prompts.GLOBAL_RULES,
-} as const
+function renderPrompt(template: string, variables: Record<string, string>): string {
+  const usedVariables = new Set<string>()
+  const renderResult = template.replace(/\${(\w+)}/g, (_, key) => {
+    const value = variables[key]
+    if (typeof value !== "string") {
+      throw new Error(`Prompt variable "${key}" is not a string`)
+    }
+    usedVariables.add(key)
+    return value
+  })
+
+  if (usedVariables.size !== Object.keys(variables).length) {
+    const unusedVariables = Object.keys(variables).filter((key) => !usedVariables.has(key))
+    throw new Error(`Prompt variables were defined but never used: ${unusedVariables.join(", ")}`)
+  }
+
+  return renderResult
+}
+
+function buildBackgroundSystemPrompt(): string {
+  return renderPrompt(prompts.BACKGROUND, {
+    declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
+    report_blocker: prompts.CMD_REPORT_BLOCKER,
+    global_rules: prompts.GLOBAL_RULES,
+  })
+}
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
   const branchName = `pr-${input.event.prNumber}`
@@ -93,12 +112,12 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       mcpServers: [],
       initialPrompt: input.prompt,
       oneShot: true,
+      systemPrompt: buildBackgroundSystemPrompt(),
       metadata: {
         repository: `${input.event.owner}/${input.event.repo}`,
         prNumber: input.event.prNumber,
       },
       env: buildOneShotEnv(input.env),
-      prompts: goddardSessionPrompts,
     })
     return 0
   } catch (error) {

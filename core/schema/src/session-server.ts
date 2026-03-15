@@ -17,24 +17,12 @@ export interface AgentDistribution {
   args?: string[]
 }
 
-type Falsy = false | null | undefined
-
-export type AppendSystemPrompt = string | readonly AppendSystemPrompt[] | Falsy
-
-export interface SessionPromptTemplates {
-  foreground: string
-  background: string
-  declareInitiative: string
-  reportBlocker: string
-  globalRules: string
-}
-
 interface BaseSessionParams {
   agent: ACPAdapterName | AgentDistribution
   cwd: string
   mcpServers: acp.McpServer[]
+  systemPrompt: string
   env?: Record<string, string>
-  prompts?: SessionPromptTemplates
   metadata?: {
     repository?: string
     prNumber?: number
@@ -46,7 +34,6 @@ export interface NewSessionParams extends BaseSessionParams {
   sessionId?: undefined
   initialPrompt?: string | acp.ContentBlock[]
   oneShot?: boolean
-  appendSystemPrompt?: AppendSystemPrompt
 }
 
 export interface LoadSessionParams extends BaseSessionParams {

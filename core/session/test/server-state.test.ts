@@ -14,7 +14,6 @@ vi.mock("radashi", () => ({
 import {
   buildAgentProcessEnv,
   injectSystemPrompt,
-  resolveSessionPromptTemplates,
   sessionStatusFromAgentMessage,
   sessionStatusFromClientMessage,
   shouldExitAfterInitialPrompt,
@@ -80,8 +79,8 @@ describe("session state transitions", () => {
 })
 
 describe("system prompt injection", () => {
-  test("prepends system prompt to a session/prompt payload", () => {
-    const systemPrompt = '<system-prompt name="Goddard CLI">base</system-prompt>'
+  test("prepends a single required system prompt to a session/prompt payload", () => {
+    const systemPrompt = "Follow repository conventions."
     const request = {
       sessionId: "session-1",
       prompt: [{ type: "text", text: "Hello" }],
@@ -89,79 +88,11 @@ describe("system prompt injection", () => {
 
     const injected = injectSystemPrompt(request, systemPrompt)
 
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">',
+    expect((injected.prompt[0] as { text: string }).text).toBe(
+      '<system-prompt name="Goddard CLI">Follow repository conventions.</system-prompt>',
     )
     expect((injected.prompt[1] as { text: string }).text).toBe("Hello")
-  })
-
-  test("inserts appended system prompt after the default prompt", () => {
-    const request = {
-      sessionId: "session-1",
-      prompt: [{ type: "text", text: "Hello" }],
-    } as any
-
-    const injected = injectSystemPrompt(
-      request,
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-      "Follow internal policy",
-    )
-
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-    )
-    expect((injected.prompt[1] as { text: string }).text).toBe(
-      "<system-prompt>Follow internal policy</system-prompt>",
-    )
-    expect((injected.prompt[2] as { text: string }).text).toBe("Hello")
-  })
-
-  test("inserts multiple appended system prompts in order", () => {
-    const request = {
-      sessionId: "session-1",
-      prompt: [{ type: "text", text: "Hello" }],
-    } as any
-
-    const injected = injectSystemPrompt(
-      request,
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-      ["Follow internal policy", "Use repository conventions"],
-    )
-
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-    )
-    expect((injected.prompt[1] as { text: string }).text).toBe(
-      "<system-prompt>Follow internal policy</system-prompt>",
-    )
-    expect((injected.prompt[2] as { text: string }).text).toBe(
-      "<system-prompt>Use repository conventions</system-prompt>",
-    )
-    expect((injected.prompt[3] as { text: string }).text).toBe("Hello")
-  })
-
-  test("flattens nested appended system prompts and drops falsy values", () => {
-    const request = {
-      sessionId: "session-1",
-      prompt: [{ type: "text", text: "Hello" }],
-    } as any
-
-    const injected = injectSystemPrompt(
-      request,
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-      ["Follow internal policy", null, ["Use repository conventions", "", false]],
-    )
-
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-    )
-    expect((injected.prompt[1] as { text: string }).text).toBe(
-      "<system-prompt>Follow internal policy</system-prompt>",
-    )
-    expect((injected.prompt[2] as { text: string }).text).toBe(
-      "<system-prompt>Use repository conventions</system-prompt>",
-    )
-    expect((injected.prompt[3] as { text: string }).text).toBe("Hello")
+    expect(injected.prompt).toHaveLength(2)
   })
 })
 
@@ -172,6 +103,7 @@ describe("one-shot session behavior", () => {
         agent: "pi",
         cwd: "/tmp",
         mcpServers: [],
+        systemPrompt: "Do the work safely.",
         initialPrompt: "hello",
         oneShot: true,
       }),
@@ -182,6 +114,7 @@ describe("one-shot session behavior", () => {
         agent: "pi",
         cwd: "/tmp",
         mcpServers: [],
+        systemPrompt: "Do the work safely.",
         initialPrompt: "hello",
       }),
     ).toBe(false)
@@ -191,6 +124,7 @@ describe("one-shot session behavior", () => {
         agent: "pi",
         cwd: "/tmp",
         mcpServers: [],
+        systemPrompt: "Do the work safely.",
         sessionId: "existing-session",
       }),
     ).toBe(false)
@@ -212,20 +146,3 @@ describe("agent process environment", () => {
   })
 })
 
-describe("session prompt templates", () => {
-  test("prefers host-provided prompt templates over built-in defaults", () => {
-    const templates = resolveSessionPromptTemplates({
-      foreground: "foreground from host ${global_rules}",
-      background: "background from host ${global_rules}",
-      declareInitiative: "declare from host",
-      reportBlocker: "blocker from host",
-      globalRules: "rules from host",
-    })
-
-    expect(templates.foreground).toBe("foreground from host ${global_rules}")
-    expect(templates.background).toBe("background from host ${global_rules}")
-    expect(templates.declareInitiative).toBe("declare from host")
-    expect(templates.reportBlocker).toBe("blocker from host")
-    expect(templates.globalRules).toBe("rules from host")
-  })
-})

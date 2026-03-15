@@ -127,7 +127,7 @@ export function buildActionSessionParams(
 
   return {
     ...mergedConfig,
-    appendSystemPrompt: [mergedConfig.appendSystemPrompt, action.prompt],
+    systemPrompt: [mergedConfig.systemPrompt, action.prompt].filter(Boolean).join("\n\n"),
   }
 }
 
