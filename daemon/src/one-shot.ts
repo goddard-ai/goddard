@@ -1,5 +1,6 @@
 import { runAgent } from "@goddard-ai/session"
 import { spawnSync } from "node:child_process"
+import { join } from "node:path"
 import type { FeedbackEvent } from "./feedback.ts"
 
 export type OneShotInput = {
@@ -7,6 +8,10 @@ export type OneShotInput = {
   prompt: string
   projectDir: string
   env?: Record<string, string>
+}
+
+function getDaemonAgentBinDir(): string {
+  return join(import.meta.dirname, "../agent-bin")
 }
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
@@ -73,7 +78,10 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
         repository: `${input.event.owner}/${input.event.repo}`,
         prNumber: input.event.prNumber,
       },
-      env: input.env,
+      env: {
+        ...(input.env ?? {}),
+        GODDARD_AGENT_BIN_DIR: getDaemonAgentBinDir(),
+      },
     })
     return 0
   } catch (error) {

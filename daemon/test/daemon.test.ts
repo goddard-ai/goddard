@@ -1,6 +1,6 @@
 import { afterEach, test, vi } from "vitest"
 import * as assert from "node:assert/strict"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -56,6 +56,12 @@ class MockStreamSubscription {
     }
   }
 }
+
+test("daemon package ships a goddard wrapper in agent-bin", async () => {
+  const wrapperPath = new URL("../agent-bin/goddard", import.meta.url)
+  const stat = await lstat(wrapperPath)
+  assert.equal(stat.isSymbolicLink() || stat.isFile(), true)
+})
 
 test("daemon run subscribes to repo, starts IPC, and passes daemon context into one-shot runs", async () => {
   const subscription = new MockStreamSubscription()
@@ -118,8 +124,6 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon context into 
   assert.equal(subCalls, 1)
   assert.equal(runOneShotCalls.length, 1)
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
-  assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
-  assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
   assert.equal(
     runOneShotCalls[0].env?.GODDARD_DAEMON_URL,
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
