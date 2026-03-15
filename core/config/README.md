@@ -34,14 +34,11 @@ export default defineConfig({
     projectDir: "./",
     thinkingLevel: "low",
   },
-  strategy: {
-    nextPrompt: ({ cycleNumber, lastSummary }) =>
-      `Cycle ${cycleNumber}. Last summary: ${lastSummary ?? "none"}. Make one safe improvement.`,
-  },
+  nextPrompt: () => "Make one safe improvement.",
   rateLimits: {
     cycleDelay: "30m",
-    maxTokensPerCycle: 128_000,
     maxOpsPerMinute: 120,
+    maxCyclesBeforePause: 100,
   },
   metrics: {
     enableLogging: true,
@@ -65,8 +62,6 @@ const validated = configSchema.parse(rawConfig)
 | ------------------- | -------------------------------------------------------------- |
 | `GoddardLoopConfig` | Top-level loop configuration                                   |
 | `PiAgentConfig`     | `agent` block — model, projectDir, thinkingLevel, …            |
-| `CycleStrategy`     | Object with `nextPrompt(ctx: CycleContext): string`            |
-| `CycleContext`      | Argument passed to `nextPrompt` each cycle                     |
 | `ThinkingLevel`     | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` |
 | `Model`             | Loose literal union of all known model strings (open-ended)    |
 
