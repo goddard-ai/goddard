@@ -93,7 +93,7 @@ export class GoddardSdk {
   }
 
   readonly config: {
-    models: typeof Models
+
   }
 
   readonly #baseUrl: URL
@@ -247,7 +247,7 @@ export class GoddardSdk {
     }
 
     this.config = {
-      models: Models,
+
     }
   }
 
