@@ -59,7 +59,7 @@ test("resolveAction loads folder actions and merges prompt frontmatter with conf
     path.join(actionDir, "prompt.md"),
     `---
 oneShot: true
-appendSystemPrompt: Start with the checklist.
+systemPrompt: Start with the checklist.
 ---
 Ship the change.
 `,
@@ -80,7 +80,7 @@ Ship the change.
   assert.equal(action.prompt, "Ship the change.\n")
   assert.deepEqual(action.config, {
     oneShot: false,
-    appendSystemPrompt: "Start with the checklist.",
+    systemPrompt: "Start with the checklist.",
     cwd: "/tmp/override",
     mcpServers: [{ name: "filesystem" }],
   })
@@ -103,7 +103,7 @@ test("buildActionSessionParams lets action config override defaults", () => {
     prompt: "Review the pull request.",
     config: {
       oneShot: false,
-      appendSystemPrompt: ["Follow the security checklist.", null, ["Use repo conventions.", ""]],
+      systemPrompt: "Follow the security checklist.",
       cwd: "/tmp/action-cwd",
     },
     path: "/tmp/review.md",
@@ -112,15 +112,13 @@ test("buildActionSessionParams lets action config override defaults", () => {
   const params = buildActionSessionParams(action, {
     cwd: "/tmp/caller-cwd",
     initialPrompt: "Check the latest changes.",
+    systemPrompt: "Start with repo conventions.",
   })
 
   assert.equal(params.cwd, "/tmp/action-cwd")
   assert.equal(params.oneShot, false)
   assert.equal(
-    "appendSystemPrompt" in params ? JSON.stringify(params.appendSystemPrompt) : undefined,
-    JSON.stringify([
-      ["Follow the security checklist.", null, ["Use repo conventions.", ""]],
-      "Review the pull request.",
-    ]),
+    params.systemPrompt,
+    ["Follow the security checklist.", "Review the pull request."].join("\n\n"),
   )
 })
