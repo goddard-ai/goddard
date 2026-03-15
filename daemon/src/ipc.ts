@@ -1,3 +1,7 @@
+import {
+  SessionPermissionsStorage,
+  type SessionPermissionsRecord,
+} from "@goddard-ai/storage/session-permissions"
 import { mkdir, rm } from "node:fs/promises"
 import { request as httpRequest } from "node:http"
 import { homedir } from "node:os"
@@ -29,11 +33,14 @@ export type SubmitPrDaemonRequest = {
   cwd: string
   title: string
   body: string
+  head?: string
+  base?: string
 }
 
 export type ReplyPrDaemonRequest = {
   cwd: string
   message: string
+  prNumber?: number
 }
 
 export type DaemonServer = {
@@ -42,11 +49,15 @@ export type DaemonServer = {
   close: () => Promise<void>
 }
 
+type AuthorizedSession = Pick<SessionPermissionsRecord, "sessionId" | "owner" | "repo" | "allowedPrNumbers">
+
 type DaemonServerDeps = {
   resolveSubmitRequest?: (input: SubmitPrDaemonRequest) => Promise<Parameters<SdkClient["pr"]["create"]>[0]>
   resolveReplyRequest?: (
     input: ReplyPrDaemonRequest,
   ) => Promise<Parameters<SdkClient["pr"]["reply"]>[0]>
+  getSessionByToken?: (token: string) => Promise<AuthorizedSession | null>
+  addAllowedPrToSession?: (sessionId: string, prNumber: number) => Promise<void>
 }
 
 export function getDefaultDaemonSocketPath(home = homedir()): string {
@@ -87,6 +98,9 @@ export async function startDaemonServer(
   const socketPath = options.socketPath ?? getDefaultDaemonSocketPath()
   const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
+  const getSessionByToken = deps.getSessionByToken ?? SessionPermissionsStorage.getByToken
+  const addAllowedPrToSession =
+    deps.addAllowedPrToSession ?? SessionPermissionsStorage.addAllowedPr
 
   if (process.platform !== "win32") {
     await mkdir(path.dirname(socketPath), { recursive: true })
@@ -105,32 +119,54 @@ export async function startDaemonServer(
         }
 
         if (request.method === "POST" && url.pathname === "/pr/submit") {
+          const session = await requireAuthorizedSession(request, getSessionByToken)
           const body = (await request.json()) as Partial<SubmitPrDaemonRequest>
-          const pr = await sdk.pr.create(
-            await resolveSubmitRequest({
-              cwd: requiredString(body.cwd, "cwd"),
-              title: requiredString(body.title, "title"),
-              body: optionalString(body.body, "body"),
-            }),
-          )
+          const resolvedInput = await resolveSubmitRequest({
+            cwd: requiredString(body.cwd, "cwd"),
+            title: requiredString(body.title, "title"),
+            body: optionalString(body.body, "body"),
+            head: optionalOptionalString(body.head, "head"),
+            base: optionalOptionalString(body.base, "base"),
+          })
+
+          const pr = await sdk.pr.create({
+            ...resolvedInput,
+            owner: session.owner,
+            repo: session.repo,
+          })
+          await addAllowedPrToSession(session.sessionId, pr.number)
           return Response.json({ number: pr.number, url: pr.url })
         }
 
         if (request.method === "POST" && url.pathname === "/pr/reply") {
+          const session = await requireAuthorizedSession(request, getSessionByToken)
           const body = (await request.json()) as Partial<ReplyPrDaemonRequest>
-          const result = await sdk.pr.reply(
-            await resolveReplyRequest({
-              cwd: requiredString(body.cwd, "cwd"),
-              message: optionalString(body.message, "message"),
-            }),
-          )
+          const resolvedInput = await resolveReplyRequest({
+            cwd: requiredString(body.cwd, "cwd"),
+            message: optionalString(body.message, "message"),
+            prNumber: optionalNumber(body.prNumber, "prNumber"),
+          })
+
+          if (!session.allowedPrNumbers.includes(resolvedInput.prNumber)) {
+            return Response.json(
+              { error: `PR #${resolvedInput.prNumber} is not allowed for this session` },
+              { status: 403 },
+            )
+          }
+
+          const result = await sdk.pr.reply({
+            ...resolvedInput,
+            owner: session.owner,
+            repo: session.repo,
+          })
           return Response.json(result)
         }
 
         return Response.json({ error: "Not Found" }, { status: 404 })
       } catch (error) {
+        const statusCode = error instanceof HttpError ? error.statusCode : 400
         const message = error instanceof Error ? error.message : String(error)
-        return Response.json({ error: message }, { status: 400 })
+        return Response.json({ error: message }, { status: statusCode })
       }
     },
   })
@@ -184,8 +220,8 @@ export async function resolveSubmitRequestFromGit(
     repo,
     title: input.title,
     body: input.body,
-    head: inferCurrentBranch(input.cwd),
-    base: inferBaseBranch(input.cwd),
+    head: input.head || inferCurrentBranch(input.cwd),
+    base: input.base || inferBaseBranch(input.cwd),
   }
 }
 
@@ -198,7 +234,7 @@ export async function resolveReplyRequestFromGit(
   return {
     owner,
     repo,
-    prNumber: inferPrNumberFromGit(input.cwd),
+    prNumber: input.prNumber ?? inferPrNumberFromGit(input.cwd),
     body: input.message,
   }
 }
@@ -237,6 +273,28 @@ function requestDaemonSocket(socketPath: string, pathname: string): Promise<void
   })
 }
 
+async function requireAuthorizedSession(
+  request: Request,
+  getSessionByToken: (token: string) => Promise<AuthorizedSession | null>,
+): Promise<AuthorizedSession> {
+  const authorization = request.headers.get("authorization")
+  if (!authorization) {
+    throw new HttpError(401, "Authorization header is required")
+  }
+
+  const match = authorization.match(/^Bearer\s+(.+)$/i)
+  if (!match) {
+    throw new HttpError(401, "Authorization header must use Bearer auth")
+  }
+
+  const session = await getSessionByToken(match[1]!)
+  if (!session) {
+    throw new HttpError(401, "Invalid session token")
+  }
+
+  return session
+}
+
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`${field} is required`)
@@ -250,6 +308,26 @@ function optionalString(value: unknown, field: string): string {
     throw new Error(`${field} is required`)
   }
 
+  return value
+}
+
+function optionalOptionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${field} must be a string`)
+  }
+  return value
+}
+
+function optionalNumber(value: unknown, field: string): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error(`${field} must be an integer`)
+  }
   return value
 }
 
@@ -315,4 +393,13 @@ function splitRepo(repoRef: string): { owner: string; repo: string } {
   }
 
   return { owner, repo }
+}
+
+class HttpError extends Error {
+  readonly statusCode: number
+
+  constructor(statusCode: number, message: string) {
+    super(message)
+    this.statusCode = statusCode
+  }
 }

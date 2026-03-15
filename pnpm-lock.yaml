@@ -295,6 +295,9 @@ importers:
       '@goddard-ai/sdk':
         specifier: workspace:*
         version: link:../core/sdk
+      '@goddard-ai/storage':
+        specifier: workspace:*
+        version: link:../core/storage
       '@xterm/headless':
         specifier: ^6.0.0
         version: 6.0.0

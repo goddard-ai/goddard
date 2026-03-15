@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto"
 import { spawnSync } from "node:child_process"
 import * as pty from "node-pty"
 import { command, option, runSafely, string, subcommands } from "cmd-ts"
+import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { FileTokenStorage } from "./storage.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 
@@ -78,6 +80,7 @@ type OneShotInput = {
   projectDir: string
   piBin: string
   sessionName: string
+  sessionToken: string
   daemonUrl: string
   ptyProcessCb?: (ptyProcess: pty.IPty) => void
 }
@@ -119,7 +122,7 @@ export async function runDaemonCli(
         const daemonUrl = ipcServer.daemonUrl
         const runningPrs = new Map<
           number,
-          { sessionName: string; isTmux: boolean; ptyProcess?: pty.IPty }
+          { sessionName: string; isTmux: boolean; ptyProcess?: pty.IPty; sessionId: string }
         >()
         const subscription = await sdk.stream.subscribeToRepo({ owner, repo })
 
@@ -158,8 +161,10 @@ export async function runDaemonCli(
           }
 
           const sessionName = `pi-pr-${event.prNumber}-${Date.now()}`
+          const sessionId = randomUUID()
+          const sessionToken = randomUUID()
           const isTmux = spawnSync("which", ["tmux"]).status === 0
-          runningPrs.set(event.prNumber, { sessionName, isTmux })
+          runningPrs.set(event.prNumber, { sessionName, isTmux, sessionId })
 
           try {
             const managed = await sdk.pr.isManaged({
@@ -172,6 +177,14 @@ export async function runDaemonCli(
               return
             }
 
+            await SessionPermissionsStorage.create({
+              sessionId,
+              token: sessionToken,
+              owner: event.owner,
+              repo: event.repo,
+              allowedPrNumbers: [event.prNumber],
+            })
+
             io.stdout(`Launching one-shot pi session for ${event.type} on PR #${event.prNumber}...`)
             const exitCode = await runOneShot({
               event,
@@ -179,6 +192,7 @@ export async function runDaemonCli(
               projectDir: args.projectDir,
               piBin: args.piBin,
               sessionName,
+              sessionToken,
               daemonUrl,
               ptyProcessCb: (ptyProcess) => {
                 const session = runningPrs.get(event.prNumber)
@@ -189,6 +203,7 @@ export async function runDaemonCli(
           } catch (error) {
             io.stderr(error instanceof Error ? error.message : String(error))
           } finally {
+            await SessionPermissionsStorage.revoke(sessionId).catch(() => {})
             if (runningPrs.get(event.prNumber)?.sessionName === sessionName) {
               runningPrs.delete(event.prNumber)
             }
@@ -294,7 +309,7 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
 
   let result
   if (hasTmux) {
-    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "env GODDARD_DAEMON_URL='${input.daemonUrl.replace(/'/g, "'\\''")}' ${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
+    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "env GODDARD_DAEMON_URL='${input.daemonUrl.replace(/'/g, "'\\''")}' GODDARD_SESSION_TOKEN='${input.sessionToken.replace(/'/g, "'\\''")}' ${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
 
     result = spawnSync("sh", ["-c", tmuxCmd], {
       stdio: "inherit",
@@ -314,6 +329,7 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
         env: {
           ...process.env,
           GODDARD_DAEMON_URL: input.daemonUrl,
+          GODDARD_SESSION_TOKEN: input.sessionToken,
         } as any,
       })
 

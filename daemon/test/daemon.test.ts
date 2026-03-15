@@ -1,5 +1,13 @@
-import { afterEach, test } from "vitest"
+import { afterEach, test, vi } from "vitest"
 import * as assert from "node:assert/strict"
+
+vi.mock("@goddard-ai/storage/session-permissions", () => ({
+  SessionPermissionsStorage: {
+    create: vi.fn(async () => undefined),
+    revoke: vi.fn(async () => undefined),
+  },
+}))
+
 import { runDaemonCli, type DaemonIo, type DaemonDeps } from "../src/index.ts"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -214,8 +222,9 @@ test("daemon run command subscribes to repo and handles events", async () => {
         createdAt: new Date().toISOString(),
       }
       subscription.emit("event", event)
+      await new Promise((resolve) => setTimeout(resolve, 0))
       // then shut down
-      close()
+      await close()
     },
   }
 
