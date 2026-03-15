@@ -5,10 +5,16 @@ type SubmitPrResult = {
   url: string
 }
 
+export function hasDaemonSessionContext(): boolean {
+  return Boolean(process.env.GODDARD_DAEMON_URL || process.env.GODDARD_SESSION_TOKEN)
+}
+
 export async function submitPrViaDaemon(input: {
   cwd: string
   title: string
   body: string
+  head?: string
+  base?: string
 }): Promise<SubmitPrResult> {
   return requestDaemon("/pr/submit", input)
 }
@@ -16,6 +22,7 @@ export async function submitPrViaDaemon(input: {
 export async function replyPrViaDaemon(input: {
   cwd: string
   message: string
+  prNumber?: number
 }): Promise<{ success: boolean }> {
   return requestDaemon("/pr/reply", input)
 }
