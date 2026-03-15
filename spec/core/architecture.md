@@ -11,35 +11,34 @@
 | Package management | `pnpm` Workspaces |
 | Distribution | `git-subrepo` to standalone repositories |
 
-## Repository Topology
-Monorepo packages:
-- `backend/` — Worker control plane.
-- `github-app/` — GitHub App integration and webhook-facing behavior.
-- `sdk/` — framework-agnostic platform client (`@goddard-ai/sdk`).
-- `app/` — Tauri desktop workspace and primary human-facing surface.
-- `daemon/` — background automation runtime for PR-feedback one-shot handling when local supervision is required.
+## Platform Components
+- **Control Plane** — worker-hosted authority for sessions, managed PR state, and repository event fan-out.
+- **GitHub Integration** — delegated GitHub identity and webhook-facing integration behavior.
+- **SDK** — framework-agnostic platform client for programmatic and embedded hosts.
+- **Desktop Workspace** — Tauri desktop app and primary human-facing surface.
+- **Background Runtime** — supervised local automation host for unattended PR-feedback reactions and loop execution when needed.
 
-Each package can also be published as a standalone repository via subrepo sync.
+These components can be packaged independently and synchronized to standalone repositories when distribution needs require it.
 
 ## Component Responsibilities
-### Backend (`backend/` + `github-app/`)
+### Control Plane
 - Device Flow state management and session issuance.
 - Session validation on protected requests.
-- Webhook ingest and routing (`pull_request`, `issue_comment`, `pull_request_review`).
+- Webhook ingest and routing for pull request and review feedback events.
 - Managed reaction behavior via GitHub App identity.
-- Per-repo event fan-out over SSE.
+- Per-repository event fan-out over SSE.
 
 Boundary:
 - Production persistence is Turso-backed.
 - Local in-memory mode is development-only convenience.
 
-### SDK (`sdk/`)
+### SDK
 Design rule: platform capabilities live here first.
 - Expose typed operations for authentication, PR creation, and stream subscription.
 - Normalize stream frames into stable event contracts.
 - Accept injected `TokenStorage` to avoid environment lock-in.
 
-### Desktop App (`app/`)
+### Desktop Workspace
 - Primary human-facing workspace for authentication, session steering, PR review, specs, tasks, and roadmap context.
 - Use SDK contracts for pull request operations, stream subscription, and other platform interactions.
 - Host or supervise local background automation when unattended execution is enabled.
@@ -48,14 +47,15 @@ Boundary:
 - Must remain Tauri-first and rely on official plugins for OS integrations.
 - Must not fork platform behavior away from SDK contracts.
 
-### Feedback Daemon (`daemon/`)
-- Subscribe to repo streams via SDK.
+### Background Runtime
+- Subscribe to repository streams via SDK.
 - Filter for managed PR feedback events.
 - Launch local one-shot `pi` sessions with PR context.
 - Operate as background automation rather than a user-facing command surface.
+- Be hostable by the desktop workspace or another SDK-based local supervisor.
 
 ## Deployment Model
-Target control-plane runtime is Cloudflare Workers. Primary local human-facing runtime is the Tauri desktop app.
+The control plane runs on Cloudflare Workers. The primary human-facing local runtime is the Tauri desktop workspace. Unattended automation may be hosted by the desktop workspace or by another SDK-based supervisor when needed.
 
 Production prerequisites:
 - Turso database.
