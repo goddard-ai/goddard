@@ -48,6 +48,10 @@ export class NodeGoddardSdk extends GoddardSdk {
   }
 }
 
+export function createSdk(options: GoddardSdkOptions): NodeGoddardSdk {
+  return new NodeGoddardSdk(options)
+}
+
 export * from "./agents.ts"
 export * from "./actions.ts"
 export * from "./loop.ts"

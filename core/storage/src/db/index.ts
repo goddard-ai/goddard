@@ -9,7 +9,16 @@ if (!fs.existsSync(dir)) {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-export const db = drizzle({
-  client: new Database(getDatabasePath()),
-  schema,
-})
+// Lazy init the DB to avoid better-sqlite3 loading issues in environments where it's imported but not used, or bindings not found at test time.
+let _db: ReturnType<typeof drizzle> | null = null;
+export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+  get(target, prop) {
+    if (!_db) {
+      _db = drizzle({
+        client: new Database(getDatabasePath()),
+        schema,
+      });
+    }
+    return (_db as any)[prop];
+  }
+});
