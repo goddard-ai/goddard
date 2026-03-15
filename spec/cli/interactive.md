@@ -1,72 +1,15 @@
-# CLI Specification — Interactive Mode
+# Interactive CLI Removal
 
-This node defines root `goddard` commands for manual terminal use.
+## Status
+Interactive `goddard` commands are removed and are not supported product behavior.
 
-## Actor
+## Replacement Surfaces
+- Authentication, pull request initiation, specification work, and proposal workflows belong in the desktop app.
+- Programmatic integrations must use the SDK directly.
 
-**Interactive Developer** — authenticates via GitHub Device Flow and runs commands directly.
+## Non-Goals
+- Preserving command parity with the removed interactive CLI.
+- Documenting shell flags, terminal prompts, or command exit behavior for removed workflows.
 
-## Commands
-
-### `goddard login`
-
-Options:
-- `--username <github-user>`
-
-Behavior:
-- Starts Device Flow via backend.
-- Displays `user_code` and `verification_uri` for browser authorization.
-- Polls until authorized, then persists the session token via `TokenStorage` (`~/.goddard/credentials.json`).
-- Under normal network conditions, completes within 60 seconds.
-
-### `goddard whoami`
-
-Behavior:
-- Reads local token and resolves associated GitHub identity from backend.
-- Returns a clear auth error when no token exists.
-
-### `goddard pr create`
-
-Options:
-- `--repo <owner/repo>` (auto-inferred from `.git/config` when possible)
-- `--title <string>`
-- `--head <branch>`
-- `--base <branch>`
-
-Behavior:
-- Delegates creation intent through `sdk.pr.create()`.
-- Backend creates PR as `goddard[bot]` with developer attribution text.
-- Prints created PR URL.
-
-### `goddard spec`
-
-Behavior:
-- Spawns local `pi` with the specification-guardian prompt.
-- Uses inherited stdio for interactive operation.
-
-### `goddard propose [...prompt]`
-
-Behavior:
-- Spawns local `pi` with proposal-review prompt.
-- Forwards positional arguments as prompt content.
-
-### `goddard agents init`
-
-Behavior:
-- Updates local `.pi/agent/AGENTS.md` guidance via SDK helper.
-- Prints updated path.
-
-## Failure and Degradation Expectations
-
-- Missing auth state must produce an actionable re-login error.
-- If repo inference fails, command requires explicit `--repo` and explains why.
-- Network/API failures must surface deterministic, human-readable errors without stack-trace noise by default.
-
-## Exit Behavior
-
-| Situation | Exit code |
-|-----------|-----------|
-| Operational or config error | `1` |
-| Successful command completion | `0` |
-
-Errors should be presented in human-readable form suitable for direct terminal use.
+## Decision Memory
+Interactive workflows were consolidated into the desktop app so Goddard has one primary human-facing surface instead of parallel terminal and desktop experiences.
