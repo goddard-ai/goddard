@@ -30,4 +30,4 @@ Rate limiting constrains three dimensions of autonomous loop behavior:
 - **Termination**: 
   - The loop terminates successfully if the agent explicitly signals completion.
   - The loop terminates with an error if hard limits (like token caps) are breached or if unrecoverable errors occur.
-  - The loop relies on external process supervisors (e.g., `systemd`) for recovery and restarts; it does not attempt complex internal self-healing for fatal errors.
+  - Recovery and restarts are the responsibility of the hosting runtime or external supervisor; the loop does not attempt complex internal self-healing for fatal errors.
