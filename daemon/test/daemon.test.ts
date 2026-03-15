@@ -118,6 +118,8 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon context into 
   assert.equal(subCalls, 1)
   assert.equal(runOneShotCalls.length, 1)
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
+  assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
+  assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
   assert.equal(
     runOneShotCalls[0].env?.GODDARD_DAEMON_URL,
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
