@@ -1,15 +1,76 @@
-import { createSdk, type RepoEvent } from "@goddard-ai/sdk"
 import { spawnSync } from "node:child_process"
 import * as pty from "node-pty"
 import { command, option, runSafely, string, subcommands } from "cmd-ts"
 import { FileTokenStorage } from "./storage.ts"
+import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 
 export type DaemonIo = {
   stdout: (line: string) => void
   stderr: (line: string) => void
 }
 
-type SdkClient = ReturnType<typeof createSdk>
+type StreamSubscription = {
+  on: (eventName: string, handler: (payload?: unknown) => void) => StreamSubscription
+  close: () => void
+}
+
+type SdkClient = {
+  pr: {
+    create: (input: {
+      owner: string
+      repo: string
+      title: string
+      body?: string
+      head: string
+      base: string
+    }) => Promise<{ number: number; url: string }>
+    isManaged: (input: { owner: string; repo: string; prNumber: number }) => Promise<boolean>
+    reply: (input: {
+      owner: string
+      repo: string
+      prNumber: number
+      body: string
+    }) => Promise<{ success: boolean }>
+  }
+  stream: {
+    subscribeToRepo: (repo: {
+      owner: string
+      repo: string
+    }) => Promise<StreamSubscription>
+  }
+}
+
+type RepoEvent =
+  | {
+      type: "comment"
+      owner: string
+      repo: string
+      prNumber: number
+      author: string
+      body: string
+      reactionAdded: string
+      createdAt: string
+    }
+  | {
+      type: "review"
+      owner: string
+      repo: string
+      prNumber: number
+      author: string
+      state: "approved" | "changes_requested" | "commented"
+      body: string
+      reactionAdded: string
+      createdAt: string
+    }
+  | {
+      type: "pr.created"
+      owner: string
+      repo: string
+      prNumber: number
+      title: string
+      author: string
+      createdAt: string
+    }
 
 type OneShotInput = {
   event: Extract<RepoEvent, { type: "comment" | "review" }>
@@ -17,13 +78,15 @@ type OneShotInput = {
   projectDir: string
   piBin: string
   sessionName: string
+  daemonUrl: string
   ptyProcessCb?: (ptyProcess: pty.IPty) => void
 }
 
 export type DaemonDeps = {
   createSdkClient?: (baseUrl: string) => SdkClient
+  startIpcServer?: (sdk: SdkClient) => Promise<DaemonServer>
   runOneShot?: (input: OneShotInput) => Promise<number> | number
-  waitForShutdown?: (close: () => void) => Promise<void>
+  waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
 }
 
 export async function runDaemonCli(
@@ -43,12 +106,17 @@ export async function runDaemonCli(
       const baseUrl = args.baseUrl || process.env.GODDARD_BASE_URL || "http://127.0.0.1:8787"
       const sdk =
         deps.createSdkClient?.(baseUrl) ??
-        createSdk({ baseUrl, tokenStorage: new FileTokenStorage() })
+        (await createSdkClient(baseUrl))
+      const startIpcServer = deps.startIpcServer ?? ((client) => startDaemonServer(client))
       const runOneShot = deps.runOneShot ?? defaultRunOneShot
       const waitForShutdown = deps.waitForShutdown ?? defaultWaitForShutdown
+      let ipcServer: DaemonServer | undefined
 
       try {
         const { owner, repo } = splitRepo(args.repo)
+        ipcServer = await startIpcServer(sdk)
+        const activeIpcServer = ipcServer
+        const daemonUrl = ipcServer.daemonUrl
         const runningPrs = new Map<
           number,
           { sessionName: string; isTmux: boolean; ptyProcess?: pty.IPty }
@@ -57,7 +125,7 @@ export async function runDaemonCli(
 
         io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`)
 
-        subscription.on("event", async (payload) => {
+        subscription.on("event", async (payload: unknown) => {
           const event = payload as RepoEvent
           if (!isFeedbackEvent(event)) {
             return
@@ -111,6 +179,7 @@ export async function runDaemonCli(
               projectDir: args.projectDir,
               piBin: args.piBin,
               sessionName,
+              daemonUrl,
               ptyProcessCb: (ptyProcess) => {
                 const session = runningPrs.get(event.prNumber)
                 if (session) session.ptyProcess = ptyProcess
@@ -126,11 +195,19 @@ export async function runDaemonCli(
           }
         })
 
-        await waitForShutdown(() => subscription.close())
+        await waitForShutdown(() =>
+          Promise.all([Promise.resolve(subscription.close()), activeIpcServer.close()]).then(
+            () => {},
+          ),
+        )
         return 0
       } catch (error) {
         io.stderr(error instanceof Error ? error.message : String(error))
         return 1
+      } finally {
+        if (ipcServer) {
+          await ipcServer.close().catch(() => {})
+        }
       }
     },
   })
@@ -217,7 +294,7 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
 
   let result
   if (hasTmux) {
-    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
+    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "env GODDARD_DAEMON_URL='${input.daemonUrl.replace(/'/g, "'\\''")}' ${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
 
     result = spawnSync("sh", ["-c", tmuxCmd], {
       stdio: "inherit",
@@ -234,7 +311,10 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
         cols: 80,
         rows: 30,
         cwd: worktreeDir,
-        env: process.env as any,
+        env: {
+          ...process.env,
+          GODDARD_DAEMON_URL: input.daemonUrl,
+        } as any,
       })
 
       if (input.ptyProcessCb) {
@@ -252,10 +332,10 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
   }
 }
 
-async function defaultWaitForShutdown(close: () => void): Promise<void> {
+async function defaultWaitForShutdown(close: () => void | Promise<void>): Promise<void> {
   await new Promise<void>((resolve) => {
     process.once("SIGINT", () => {
-      close()
+      void close()
       resolve()
     })
   })
@@ -293,4 +373,9 @@ function splitRepo(repoRef: string): { owner: string; repo: string } {
 const defaultIo: DaemonIo = {
   stdout: (line) => process.stdout.write(`${line}\n`),
   stderr: (line) => process.stderr.write(`${line}\n`),
+}
+
+async function createSdkClient(baseUrl: string): Promise<SdkClient> {
+  const { createSdk } = await import("@goddard-ai/sdk")
+  return createSdk({ baseUrl, tokenStorage: new FileTokenStorage() }) as SdkClient
 }

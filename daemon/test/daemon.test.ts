@@ -1,13 +1,29 @@
-import { test } from "vitest"
+import { afterEach, test } from "vitest"
 import * as assert from "node:assert/strict"
 import { runDaemonCli, type DaemonIo, type DaemonDeps } from "../src/index.ts"
-import { createSdk, type RepoEvent, type StreamSubscription } from "@goddard-ai/sdk"
-import { Models } from "@goddard-ai/config"
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { spawnSync } from "node:child_process"
+import {
+  createDaemonUrl,
+  readSocketPathFromDaemonUrl,
+  resolveReplyRequestFromGit,
+  resolveSubmitRequestFromGit,
+} from "../src/ipc.ts"
 
 const defaultIo: DaemonIo = {
   stdout: () => {},
   stderr: () => {},
 }
+
+const cleanup: Array<() => Promise<void>> = []
+
+afterEach(async () => {
+  while (cleanup.length > 0) {
+    await cleanup.pop()?.()
+  }
+})
 
 class MockStreamSubscription {
   #handlers = new Map<string, ((payload?: any) => void)[]>()
@@ -30,7 +46,70 @@ class MockStreamSubscription {
   }
 }
 
-type SdkClient = ReturnType<typeof createSdk>
+type StreamSubscription = {
+  on: (eventName: string, handler: (payload?: unknown) => void) => StreamSubscription
+  close: () => void
+}
+
+type RepoEvent = {
+  type: "comment" | "review" | "pr.created"
+  owner: string
+  repo: string
+  prNumber: number
+  author: string
+  createdAt: string
+  body?: string
+  reactionAdded?: string
+  state?: "approved" | "changes_requested" | "commented"
+  title?: string
+}
+
+type SdkClient = {
+  auth: {
+    startDeviceFlow: () => Promise<{
+      deviceCode: string
+      userCode: string
+      verificationUri: string
+      expiresIn: number
+      interval: number
+    }>
+    completeDeviceFlow: () => Promise<{ token: string; githubUsername: string; githubUserId: number }>
+    whoami: () => Promise<{ token: string; githubUsername: string; githubUserId: number }>
+    login: () => Promise<{ token: string; githubUsername: string; githubUserId: number }>
+    logout: () => Promise<void>
+  }
+  pr: {
+    create: (input: {
+      owner: string
+      repo: string
+      title: string
+      body?: string
+      head: string
+      base: string
+    }) => Promise<{ number: number; url: string }>
+    isManaged: (input: { owner: string; repo: string; prNumber: number }) => Promise<boolean>
+    reply: (input: {
+      owner: string
+      repo: string
+      prNumber: number
+      body: string
+    }) => Promise<{ success: boolean }>
+  }
+  stream: {
+    subscribeToRepo: (repo: { owner: string; repo: string }) => Promise<StreamSubscription>
+  }
+  agents: {
+    init: () => Promise<unknown>
+  }
+  loop: {
+    init: () => Promise<unknown>
+    run: () => Promise<void>
+    generateSystemdService: () => Promise<unknown>
+  }
+  config: {
+    models: Record<string, never>
+  }
+}
 
 type PartialSdk = {
   auth?: Partial<SdkClient["auth"]>
@@ -89,7 +168,7 @@ function createMockSdk(partial: PartialSdk): SdkClient {
       ...partial.loop,
     },
     config: {
-      models: Models,
+      models: {} as Record<string, never>,
     },
   } as unknown as SdkClient
 }
@@ -113,6 +192,11 @@ test("daemon run command subscribes to repo and handles events", async () => {
   const runOneShotCalls: any[] = []
   const deps: DaemonDeps = {
     createSdkClient: () => sdk,
+    startIpcServer: async () => ({
+      daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
+      socketPath: "/tmp/goddard-daemon-test.sock",
+      close: async () => {},
+    }),
     runOneShot: async (input) => {
       runOneShotCalls.push(input)
       return 0
@@ -140,4 +224,68 @@ test("daemon run command subscribes to repo and handles events", async () => {
   assert.equal(subCalls, 1)
   assert.equal(runOneShotCalls.length, 1)
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
+  assert.equal(
+    runOneShotCalls[0].daemonUrl,
+    "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
+  )
 })
+
+test("daemon URL round-trips the socket path", () => {
+  const socketPath = "/tmp/goddard-daemon.sock"
+  const daemonUrl = createDaemonUrl(socketPath)
+
+  assert.equal(daemonUrl, "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock")
+  assert.equal(readSocketPathFromDaemonUrl(daemonUrl), socketPath)
+})
+
+test("daemon resolves PR context from git metadata", async () => {
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-git-"))
+  cleanup.push(async () => {
+    await rm(repoDir, { recursive: true, force: true })
+  })
+
+  runGit(repoDir, ["init"])
+  runGit(repoDir, ["config", "user.name", "Goddard"])
+  runGit(repoDir, ["config", "user.email", "goddard@example.com"])
+  await writeFile(join(repoDir, "README.md"), "# test\n", "utf-8")
+  runGit(repoDir, ["add", "README.md"])
+  runGit(repoDir, ["commit", "-m", "init"])
+  runGit(repoDir, ["checkout", "-b", "feature/ipc"])
+  runGit(repoDir, ["remote", "add", "origin", "git@github.com:acme/widgets.git"])
+  await mkdir(join(repoDir, ".git", "refs", "remotes", "origin"), { recursive: true })
+  await writeFile(join(repoDir, ".git", "refs", "remotes", "origin", "HEAD"), "ref: refs/remotes/origin/main\n")
+
+  const submit = await resolveSubmitRequestFromGit({
+    cwd: repoDir,
+    title: "Implement IPC routing",
+    body: "Done.",
+  })
+  assert.deepEqual(submit, {
+    owner: "acme",
+    repo: "widgets",
+    title: "Implement IPC routing",
+    body: "Done.",
+    head: "feature/ipc",
+    base: "main",
+  })
+
+  runGit(repoDir, ["checkout", "-B", "pr-12"])
+  const reply = await resolveReplyRequestFromGit({
+    cwd: repoDir,
+    message: "Updated per review",
+  })
+  assert.deepEqual(reply, {
+    owner: "acme",
+    repo: "widgets",
+    prNumber: 12,
+    body: "Updated per review",
+  })
+})
+
+function runGit(cwd: string, args: string[]): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+  })
+  assert.equal(result.status, 0, result.stderr)
+}
