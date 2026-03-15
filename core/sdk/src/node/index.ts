@@ -19,13 +19,11 @@ export interface NodeGoddardLoopRunOverrides {
 }
 
 export interface NodeGoddardLoopApi {
-  init: typeof loop.initLoopConfig
   run: (
     cwd?: string,
     overrides?: NodeGoddardLoopRunOverrides,
     handler?: AgentLoopHandler,
   ) => Promise<void>
-  generateSystemdService: typeof loop.generateLoopSystemdService
 }
 
 export class NodeGoddardSdk extends GoddardSdk {
@@ -41,9 +39,7 @@ export class NodeGoddardSdk extends GoddardSdk {
     }
 
     this.loop = {
-      init: loop.initLoopConfig,
       run: loop.runAgentLoop,
-      generateSystemdService: loop.generateLoopSystemdService,
     }
   }
 }

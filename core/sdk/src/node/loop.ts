@@ -1,15 +1,8 @@
 import { createJiti } from "@mariozechner/jiti"
-import { mkdir, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { createLoop, type AgentLoopHandler, type LoopRuntimeConfig } from "@goddard-ai/loop"
 import { LoopStorage, fileExists, getGlobalConfigPath } from "@goddard-ai/storage"
 import type { NodeGoddardLoopRunOverrides } from "./index.ts"
-
-const DEFAULT_LOOP_CONFIG_TEMPLATE = `import { defineConfig } from "@goddard-ai/config"
-
-export default defineConfig({})
-`
 
 const DEFAULT_RUNTIME_CONFIG = {
   agent: "anthropic/claude-3-7-sonnet-20250219",
@@ -20,27 +13,6 @@ const DEFAULT_RUNTIME_CONFIG = {
 
 type LegacyLoopConfig = Record<string, unknown>
 type LoopConfigModule = LegacyLoopConfig | { default: LegacyLoopConfig }
-
-type LegacySystemdConfig = {
-  restartSec?: number
-  nice?: number
-  user?: string
-  workingDir?: string
-  environment?: Record<string, string | undefined>
-}
-
-export async function initLoopConfig(options: { global?: boolean }): Promise<{ path: string }> {
-  const targetPath = options.global ? getGlobalConfigPath() : getLocalConfigPath(process.cwd())
-
-  if (await fileExists(targetPath)) {
-    throw new Error(`Config file already exists at ${targetPath}`)
-  }
-
-  await mkdir(dirname(targetPath), { recursive: true })
-  await writeFile(targetPath, DEFAULT_LOOP_CONFIG_TEMPLATE, "utf-8")
-
-  return { path: targetPath }
-}
 
 export async function loadLoopConfig(
   cwd: string = process.cwd(),
@@ -94,29 +66,6 @@ export async function runLoop(
   await loop.start()
 }
 
-export async function generateLoopSystemdService(
-  cwd: string = process.cwd(),
-  options: { global?: boolean; user?: string },
-): Promise<{ path: string }> {
-  const legacy = await loadLegacyLoopConfig(cwd, { global: options.global })
-  const systemd = getSystemdConfig(legacy?.config)
-  const targetRoot = options.global ? homedir() : cwd
-  const outputPath = join(targetRoot, "systemd", "goddard.service")
-
-  const user = systemd?.user ?? options.user ?? process.env.USER ?? "root"
-  const workingDir = systemd?.workingDir ?? cwd
-  const restartSec = systemd?.restartSec ?? 10
-  const nice = systemd?.nice ?? 10
-  const environment = renderSystemdEnvironment(systemd?.environment)
-
-  const service = `[Unit]\nDescription=Goddard Autonomous Agent Loop\nAfter=network.target\n\n[Service]\nType=simple\nUser=${user}\nWorkingDirectory=${workingDir}\nExecStart=goddard loop run\nRestart=always\nRestartSec=${restartSec}\nNice=${nice}\n${environment}[Install]\nWantedBy=multi-user.target\n`
-
-  await mkdir(dirname(outputPath), { recursive: true })
-  await writeFile(outputPath, service, "utf-8")
-
-  return { path: outputPath }
-}
-
 async function loadLegacyLoopConfig(
   cwd: string,
   options?: { global?: boolean },
@@ -157,46 +106,6 @@ async function loadLegacyLoopConfig(
 
 function getLocalConfigPath(cwd: string): string {
   return join(cwd, ".goddard", "config.ts")
-}
-
-function quoteSystemdValue(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
-}
-
-function renderSystemdEnvironment(environment?: Record<string, string | undefined>): string {
-  if (!environment) {
-    return ""
-  }
-
-  const lines = Object.entries(environment)
-    .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `Environment=${key}=${quoteSystemdValue(value as string)}`)
-
-  return lines.length > 0 ? `${lines.join("\n")}\n` : ""
-}
-
-function getSystemdConfig(config?: LegacyLoopConfig): LegacySystemdConfig | undefined {
-  const systemd = asRecord(config?.systemd)
-  if (!systemd) {
-    return undefined
-  }
-
-  const environment = asRecord(systemd.environment)
-
-  return {
-    restartSec: typeof systemd.restartSec === "number" ? systemd.restartSec : undefined,
-    nice: typeof systemd.nice === "number" ? systemd.nice : undefined,
-    user: typeof systemd.user === "string" ? systemd.user : undefined,
-    workingDir: typeof systemd.workingDir === "string" ? systemd.workingDir : undefined,
-    environment: environment
-      ? Object.fromEntries(
-          Object.entries(environment).map(([key, value]) => [
-            key,
-            typeof value === "string" ? value : undefined,
-          ]),
-        )
-      : undefined,
-  }
 }
 
 async function upsertStoredLoopConfig(loopId: string, config: LoopRuntimeConfig): Promise<void> {
