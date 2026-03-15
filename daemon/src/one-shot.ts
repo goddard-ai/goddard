@@ -6,6 +6,7 @@ export type OneShotInput = {
   event: FeedbackEvent
   prompt: string
   projectDir: string
+  env?: Record<string, string>
 }
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
@@ -72,6 +73,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
         repository: `${input.event.owner}/${input.event.repo}`,
         prNumber: input.event.prNumber,
       },
+      env: input.env,
     })
     return 0
   } catch (error) {

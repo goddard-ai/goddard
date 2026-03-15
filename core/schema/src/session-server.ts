@@ -25,6 +25,7 @@ interface BaseSessionParams {
   agent: ACPAdapterName | AgentDistribution
   cwd: string
   mcpServers: acp.McpServer[]
+  env?: Record<string, string>
   metadata?: {
     repository?: string
     prNumber?: number

@@ -99,6 +99,7 @@ async function spawnAgentProcess(
   params: {
     agent: string | AgentDistribution
     sessionId?: string
+    env?: Record<string, string>
   },
 ) {
   let agent = params.agent
@@ -127,12 +128,13 @@ async function spawnAgentProcess(
   }
 
   const PATH = process.env.PATH || ""
-  const agentBinDir = join(import.meta.dirname, "../agent-bin")
+  const agentBinDir = process.env.GODDARD_AGENT_BIN_DIR || join(import.meta.dirname, "../agent-bin")
 
   return spawn(cmd, args, {
     stdio: ["pipe", "pipe", "inherit"],
     env: {
       ...process.env,
+      ...(params.env ?? {}),
       PATH: `${agentBinDir}:${PATH}`,
       GODDARD_SERVER_ID: serverId,
     },
