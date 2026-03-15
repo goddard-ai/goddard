@@ -3,7 +3,6 @@ import type { SessionStatus } from "@goddard-ai/schema/db"
 import type { AgentDistribution, SessionParams } from "@goddard-ai/schema/session-server"
 import { SessionStorage, SQLSessionUpdate } from "@goddard-ai/storage"
 import { spawn } from "node:child_process"
-import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { serve } from "srvx"
 import manifest from "../package.json" assert { type: "json" }
@@ -114,13 +113,13 @@ async function spawnAgentProcess(
   }
 
   const PATH = process.env.PATH || ""
-  const agentBinDir = join(import.meta.dirname, "../agent-bin")
+  const agentBinDir = process.env.GODDARD_AGENT_BIN_DIR
 
   return spawn(cmd, args, {
     stdio: ["pipe", "pipe", "inherit"],
     env: {
       ...process.env,
-      PATH: `${agentBinDir}:${PATH}`,
+      PATH: agentBinDir ? `${agentBinDir}:${PATH}` : PATH,
       GODDARD_SERVER_ID: serverId,
     },
   })

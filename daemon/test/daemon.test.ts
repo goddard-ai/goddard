@@ -9,7 +9,7 @@ vi.mock("@goddard-ai/storage/session-permissions", () => ({
 }))
 
 import { runDaemonCli, type DaemonIo, type DaemonDeps } from "../src/index.ts"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -180,6 +180,12 @@ function createMockSdk(partial: PartialSdk): SdkClient {
     },
   } as unknown as SdkClient
 }
+
+test("daemon package ships a goddard wrapper in agent-bin", async () => {
+  const wrapperPath = new URL("../agent-bin/goddard", import.meta.url)
+  const stat = await lstat(wrapperPath)
+  assert.equal(stat.isSymbolicLink() || stat.isFile(), true)
+})
 
 test("daemon run command subscribes to repo and handles events", async () => {
   const subscription = new MockStreamSubscription()

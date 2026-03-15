@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { spawnSync } from "node:child_process"
+import { delimiter, join } from "node:path"
 import * as pty from "node-pty"
 import { command, option, runSafely, string, subcommands } from "cmd-ts"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
@@ -247,6 +248,15 @@ export async function runDaemonCli(
   return 0
 }
 
+function getDaemonAgentBinDir(): string {
+  return join(import.meta.dirname, "../agent-bin")
+}
+
+function prependDaemonAgentBinToPath(currentPath = process.env.PATH || ""): string {
+  const agentBinDir = getDaemonAgentBinDir()
+  return currentPath ? `${agentBinDir}${delimiter}${currentPath}` : agentBinDir
+}
+
 async function defaultRunOneShot(input: OneShotInput): Promise<number> {
   const branchName = `pr-${input.event.prNumber}`
   const agentsDir = `${input.projectDir}/.goddard-agents`
@@ -306,10 +316,11 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
 
   // Check if tmux is installed
   const hasTmux = spawnSync("which", ["tmux"]).status === 0
+  const pathWithAgentBin = prependDaemonAgentBinToPath(process.env.PATH || "")
 
   let result
   if (hasTmux) {
-    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "env GODDARD_DAEMON_URL='${input.daemonUrl.replace(/'/g, "'\\''")}' GODDARD_SESSION_TOKEN='${input.sessionToken.replace(/'/g, "'\\''")}' ${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
+    const tmuxCmd = `tmux new-session -d -s ${input.sessionName} -c ${worktreeDir} "env PATH='${pathWithAgentBin.replace(/'/g, "'\\''")}' GODDARD_DAEMON_URL='${input.daemonUrl.replace(/'/g, "'\\''")}' GODDARD_SESSION_TOKEN='${input.sessionToken.replace(/'/g, "'\\''")}' ${input.piBin} '${input.prompt.replace(/'/g, "'\\''")}'"`
 
     result = spawnSync("sh", ["-c", tmuxCmd], {
       stdio: "inherit",
@@ -328,6 +339,7 @@ async function defaultRunOneShot(input: OneShotInput): Promise<number> {
         cwd: worktreeDir,
         env: {
           ...process.env,
+          PATH: pathWithAgentBin,
           GODDARD_DAEMON_URL: input.daemonUrl,
           GODDARD_SESSION_TOKEN: input.sessionToken,
         } as any,
