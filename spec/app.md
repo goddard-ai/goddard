@@ -1,13 +1,13 @@
 # Desktop App Intent Index
 
 ## Goal
-Provide a unified desktop workspace for Goddard operations so developers can run sessions, review outputs, and steer work from one visual surface instead of fragmented terminal + web tooling.
+Provide a unified desktop workspace for Goddard operations so developers can run sessions, review outputs, and steer work from one visual surface instead of fragmented repository, GitHub, and chat tooling.
 
 ## Hypothesis
 We believe that consolidating sessions, pull requests, specs, tasks, and roadmap context into one desktop app will reduce context switching and speed up AI-assisted delivery.
 
 ## Big Picture
-The desktop app is an alternative interface to the same Goddard runtime used by CLI and backend flows. It is not a forked product surface with separate logic. The app should reflect the same source of truth for identity, repository context, and real-time activity.
+The desktop app is the primary human-facing interface to the Goddard runtime. It is not a forked product surface with separate logic. The app should reflect the same SDK-backed source of truth for identity, repository context, and real-time activity used by other platform consumers.
 
 ## Primary Actors
 - Developer/operator managing one or more repositories
@@ -58,5 +58,5 @@ All screens consume normalized, real-time domain records with stable identities:
 - Must handle streaming updates gracefully for high-churn views.
 
 ## Non-Goals
-- Replacing CLI for advanced automation and CI usage.
+- Reintroducing a parallel CLI or other terminal-first workflow surface.
 - Implementing a full in-app code editor.
