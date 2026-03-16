@@ -7,9 +7,9 @@ on:
       - main
     # Optional: Only trigger this action if files in the subrepos actually changed
     paths:
-      - "daemon/**"
-      - "cmd/**"
+      - "app/**"
       - "core/**"
+      - "daemon/**"
 
 # Ensure only one sync runs at a time to prevent git conflicts on the .gitrepo files
 concurrency:
@@ -50,9 +50,9 @@ jobs:
           git checkout -b temp-sync-branch
 
           # If one subrepo has no changes, don't fail the whole job
-          git subrepo push daemon || true
-          git subrepo push cmd || true
+          git subrepo push app || true
           git subrepo push core || true
+          git subrepo push daemon || true
 
       - name: Push .gitrepo updates to monorepo
         run: |
