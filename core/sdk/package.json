@@ -28,7 +28,7 @@
     "@goddard-ai/session": "workspace:*",
     "@libsql/client": "^0.17.0",
     "drizzle-orm": "^0.45.1",
-    "rouzer": "^1.4.0",
+    "rouzer": "^1.5.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },

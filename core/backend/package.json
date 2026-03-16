@@ -37,7 +37,7 @@
     "alchemy": "^0.87.0",
     "drizzle-orm": "1.0.0-beta.15-859cf75",
     "octokit": "^5.0.5",
-    "rouzer": "^1.4.0",
+    "rouzer": "^1.5.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
