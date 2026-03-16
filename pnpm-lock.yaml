@@ -41,6 +41,9 @@ importers:
 
   app:
     dependencies:
+      '@goddard-ai/tauri-plugin-ipc':
+        specifier: workspace:^
+        version: link:../core/tauri-plugin-ipc
       '@preact/signals':
         specifier: ^2.8.1
         version: 2.8.1(preact@10.28.4)
@@ -136,6 +139,16 @@ importers:
       '@goddard-ai/schema':
         specifier: workspace:*
         version: link:../schema
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.5
+        version: 25.3.5
+
+  core/ipc:
+    dependencies:
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -275,6 +288,15 @@ importers:
       '@types/node':
         specifier: ^25.3.5
         version: 25.3.5
+
+  core/tauri-plugin-ipc:
+    dependencies:
+      '@goddard-ai/ipc':
+        specifier: workspace:^
+        version: link:../ipc
+      '@tauri-apps/api':
+        specifier: ^2.10.1
+        version: 2.10.1
 
   core/tree-build:
     dependencies:

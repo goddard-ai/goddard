@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Enables the IPC plugin commands."
+permissions = ["allow-send", "allow-subscribe", "allow-unsubscribe"]
