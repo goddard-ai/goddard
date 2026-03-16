@@ -8,12 +8,27 @@ export async function runAgentLoop(
   { nextPrompt, session: sessionParams, rateLimits, retries }: AgentLoopParams,
   handler?: AgentLoopHandler,
 ): Promise<AgentSession> {
-  const session = await runAgent(sessionParams, handler)
-
   const rateLimiter = new RateLimiter({
     cycleDelay: rateLimits.cycleDelay,
     maxOpsPerMinute: rateLimits.maxOpsPerMinute,
   })
+
+  const wrappedHandler: AgentLoopHandler = {
+    requestPermission: handler?.requestPermission
+      ? (params) => handler.requestPermission!(params)
+      : async () => ({ outcome: { outcome: "cancelled" } }),
+    sessionUpdate: async (params) => {
+      if (
+        "sessionUpdate" in params.update &&
+        (params.update as any).sessionUpdate === "tool_call"
+      ) {
+        await rateLimiter.throttleOp()
+      }
+      await handler?.sessionUpdate?.(params)
+    },
+  }
+
+  const session = await runAgent(sessionParams, wrappedHandler)
 
   const endlessLoop = async (): Promise<void> => {
     let cycleCount = 0
@@ -64,7 +79,7 @@ export async function runAgentLoop(
           }
         }
 
-        await rateLimiter.throttle()
+        await rateLimiter.throttleCycle()
 
         if (cycleCount % rateLimits.maxCyclesBeforePause === 0) {
           await sleep(24 * 60 * 60 * 1000)

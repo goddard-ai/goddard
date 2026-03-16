@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      tsx:
+        specifier: ^4.0.0
+        version: 4.21.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260307.1
@@ -192,6 +196,9 @@ importers:
 
   core/sdk:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.3.6)
       '@goddard-ai/config':
         specifier: workspace:*
         version: link:../config

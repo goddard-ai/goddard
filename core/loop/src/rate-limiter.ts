@@ -10,7 +10,7 @@ export class RateLimiter {
     this.#opsLimit = config.maxOpsPerMinute
   }
 
-  async throttle(onPause?: (ms: number) => Promise<void>): Promise<void> {
+  async throttleCycle(onPause?: (ms: number) => Promise<void>): Promise<void> {
     const delayRegex = /^(\d+)([smhd])$/
     const match = this.#wallclockDelay.match(delayRegex)
     let delayMs = 0
@@ -42,15 +42,23 @@ export class RateLimiter {
       }
     }
 
+    if (delayMs > 0) {
+      if (onPause) {
+        await onPause(delayMs)
+      } else {
+        await sleep(delayMs)
+      }
+    }
+  }
+
+  async throttleOp(onPause?: (ms: number) => Promise<void>): Promise<void> {
     const now = Date.now()
     this.#opsWindow = this.#opsWindow.filter((time) => now - time < 60_000)
 
+    let delayMs = 0
     if (this.#opsWindow.length >= this.#opsLimit) {
       const oldestOp = this.#opsWindow[0] ?? now
-      const waitTime = 60_000 - (now - oldestOp)
-      if (waitTime > delayMs) {
-        delayMs = waitTime
-      }
+      delayMs = 60_000 - (now - oldestOp)
     }
 
     if (delayMs > 0) {

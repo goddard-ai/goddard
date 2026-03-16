@@ -23,6 +23,7 @@
     "build": "tree-build && tsdown"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/loop": "workspace:*",
     "@libsql/client": "^0.17.0",

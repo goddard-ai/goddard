@@ -1,9 +1,9 @@
 import { join } from "node:path"
 import { readFile } from "node:fs/promises"
-import { runAgent, type SessionParams } from "@goddard-ai/session"
+import { runAgent } from "@goddard-ai/session"
+import type { SessionParams, NewSessionParams } from "@goddard-ai/schema/session-server"
 import { getGoddardGlobalDir } from "@goddard-ai/storage"
 import { parse as parseYaml } from "yaml"
-import type { NewSessionParams } from "@goddard-ai/session"
 
 export type ResolvedAgentAction = {
   prompt: string
@@ -11,7 +11,7 @@ export type ResolvedAgentAction = {
   path: string
 }
 
-export type RunAgentActionParams = Partial<NewSessionParams> & { initialPrompt: {} }
+export type RunAgentActionParams = Partial<NewSessionParams> & { initialPrompt: string | import("@agentclientprotocol/sdk").ContentBlock[] }
 
 const DEFAULT_AGENT = { type: "npx", package: "@mariozechner/pi-coding-agent" } as const
 
@@ -115,20 +115,21 @@ async function resolveActionFromRoot(
 export function buildActionSessionParams(
   action: ResolvedAgentAction,
   options: RunAgentActionParams,
-): SessionParams {
+): SessionParams & { oneShot: true; initialPrompt: string | import("@agentclientprotocol/sdk").ContentBlock[] } {
   const mergedConfig = {
     agent: DEFAULT_AGENT,
     cwd: process.cwd(),
     mcpServers: [],
-    oneShot: true,
+    oneShot: true as const,
     ...options,
     ...action.config,
   }
 
   return {
     ...mergedConfig,
+    oneShot: true as const,
     appendSystemPrompt: [mergedConfig.appendSystemPrompt, action.prompt],
-  }
+  } as SessionParams & { oneShot: true; initialPrompt: string | import("@agentclientprotocol/sdk").ContentBlock[] }
 }
 
 export async function resolveAction(

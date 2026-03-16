@@ -5,6 +5,7 @@ const mockedSession = vi.hoisted(() => {
   const promptMessages: string[] = []
   const promptPlans: Array<() => Promise<void> | void> = []
   const session = {
+    handler: undefined as any,
     prompt: vi.fn(async (message: string) => {
       promptMessages.push(message)
       await promptPlans.shift()?.()
@@ -14,12 +15,15 @@ const mockedSession = vi.hoisted(() => {
       throw new Error("getHistory should not be called")
     }),
   }
-  const runAgentMock = vi.fn(async () => session)
+  const runAgentMock = vi.fn(async (_params, handler) => {
+    session.handler = handler
+    return session
+  })
 
   return {
     promptMessages,
     promptPlans,
-    session,
+    session: session as typeof session & { handler?: any },
     runAgentMock,
   }
 })
@@ -135,11 +139,19 @@ test("applies cycleDelay and maxCyclesBeforePause between cycles", async () => {
   })
 })
 
-test("applies maxOpsPerMinute when cycles happen too quickly", async () => {
+test("applies maxOpsPerMinute when tool calls happen too quickly", async () => {
   vi.useFakeTimers()
 
-  mockedSession.promptPlans.push(() => {})
-  mockedSession.promptPlans.push(() => {})
+  mockedSession.promptPlans.push(async () => {
+    await mockedSession.session.handler?.sessionUpdate?.({
+      update: { sessionUpdate: "tool_call" }
+    })
+  })
+  mockedSession.promptPlans.push(async () => {
+    await mockedSession.session.handler?.sessionUpdate?.({
+      update: { sessionUpdate: "tool_call" }
+    })
+  })
   mockedSession.promptPlans.push(() => {
     throw createAbortError()
   })
@@ -162,5 +174,7 @@ test("applies maxOpsPerMinute when cycles happen too quickly", async () => {
   expect(mockedSession.promptMessages).toHaveLength(2)
 
   await vi.advanceTimersByTimeAsync(60_000)
-  expect(mockedSession.promptMessages.length).toBeGreaterThanOrEqual(3)
+  await vi.waitFor(() => {
+    expect(mockedSession.promptMessages.length).toBeGreaterThanOrEqual(3)
+  })
 })

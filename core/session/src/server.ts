@@ -49,7 +49,7 @@ function flattenAppendSystemPrompt(appendSystemPrompt?: AppendSystemPrompt): str
     return appendSystemPrompt.flatMap((prompt) => flattenAppendSystemPrompt(prompt))
   }
 
-  return [appendSystemPrompt]
+  return [appendSystemPrompt as string]
 }
 
 export function sessionStatusFromClientMessage(
