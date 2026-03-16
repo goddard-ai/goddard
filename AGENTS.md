@@ -1,9 +1,9 @@
 # AI Agent Instructions
 
-## Feature Implementation Requirements
-When adding a feature that grants the user a new ability, it must be added to all of these packages in the same PR:
-- `sdk`
-- `app`
+## Core/SDK and App Feature Parity
+When adding a feature that grants the user a new ability or capability within the Tauri `app`, it is strictly required that this same capability is also fully supported and implemented in the `core/sdk` package.
+
+Both packages must be updated within the same Pull Request (PR) to ensure feature parity and prevent discrepancies between the application and the underlying SDK.
 
 ## `spec/` Folder Purpose and Guidelines
 The `spec/` folder contains the canonical source of truth and theory of mind for the project.
