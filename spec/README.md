@@ -44,7 +44,8 @@ All modes consume the same SDK and backend authority model.
 
 ## Encapsulated Sub-Specs
 
-* `spec/core.md`: Core system runtime and configuration shared by SDK, app, and background automation.
+* `spec/configuration.md`: Configuration hierarchy, precedence, and named configurable entities.
+* `spec/core.md`: Core system runtime shared by SDK, app, and background automation.
 * `spec/daemon.md`: Background automation and daemon functionality.
 * `spec/app.md`: Desktop application UX and features.
 * `spec/cli.md`: Decommissioned CLI surface and removal notes.
