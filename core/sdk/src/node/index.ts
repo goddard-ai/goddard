@@ -1,9 +1,8 @@
-import { type AgentLoopHandler, type AgentLoopParams } from "@goddard-ai/loop"
+import * as loop from "@goddard-ai/loop"
 import { GoddardSdk, type GoddardSdkOptions } from "../index.ts"
-import * as actions from "./actions.ts"
 import type { RunAgentActionParams } from "./actions.ts"
+import * as actions from "./actions.ts"
 import * as agents from "./agents.ts"
-import * as loop from "./loop.ts"
 export { FileTokenStorage } from "@goddard-ai/storage"
 
 export interface NodeGoddardAgentsApi {
@@ -11,24 +10,11 @@ export interface NodeGoddardAgentsApi {
   runAgentAction: (action: string, options: RunAgentActionParams) => Promise<any>
 }
 
-export interface NodeGoddardLoopRunOverrides {
-  nextPrompt?: AgentLoopParams["nextPrompt"]
-  session?: Partial<AgentLoopParams["session"]>
-  rateLimits?: AgentLoopParams["rateLimits"]
-  retries?: AgentLoopParams["retries"]
-}
-
-export interface NodeGoddardLoopApi {
-  run: (
-    cwd?: string,
-    overrides?: NodeGoddardLoopRunOverrides,
-    handler?: AgentLoopHandler,
-  ) => Promise<void>
-}
-
 export class NodeGoddardSdk extends GoddardSdk {
   declare readonly agents: NodeGoddardAgentsApi
-  declare readonly loop: NodeGoddardLoopApi
+  declare readonly loop: {
+    run: typeof loop.runAgentLoop
+  }
 
   constructor(options: GoddardSdkOptions) {
     super(options)
@@ -48,6 +34,5 @@ export function createSdk(options: GoddardSdkOptions): NodeGoddardSdk {
   return new NodeGoddardSdk(options)
 }
 
-export * from "./agents.ts"
 export * from "./actions.ts"
-export * from "./loop.ts"
+export * from "./agents.ts"
