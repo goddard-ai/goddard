@@ -12,7 +12,8 @@
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
       "default": "./src/index.ts"
-    }
+    },
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "start": "node dist/server.mjs",
@@ -27,6 +28,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/storage": "workspace:^",
     "@hattip/adapter-cloudflare-workers": "^0.0.49",
     "@hattip/adapter-node": "^0.0.49",
     "@libsql/client": "^0.17.0",
@@ -39,7 +42,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
-    "@goddard-ai/schema": "workspace:^",
     "drizzle-kit": "1.0.0-beta.15-859cf75",
     "tsdown": "^0.21.0",
     "wrangler": "^4.71.0"
