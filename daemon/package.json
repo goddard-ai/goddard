@@ -23,7 +23,6 @@
     "@goddard-ai/storage": "workspace:*",
     "@xterm/headless": "^6.0.0",
     "cmd-ts": "^0.15.0",
-    "node-pty": "^1.1.0",
     "rouzer": "^1.4.0",
     "srvx": "^0.8.16"
   }
