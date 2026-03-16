@@ -11,7 +11,9 @@
     "core/schema",
     "core/storage",
     "core/config",
+    "core/tauri-plugin-ipc",
     "core/loop",
+    "core/ipc",
     "core/tree-build"
   ],
   "scripts": {

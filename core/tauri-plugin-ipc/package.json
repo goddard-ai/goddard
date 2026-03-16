@@ -1,0 +1,22 @@
+{
+  "name": "@goddard-ai/tauri-plugin-ipc",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "types": "./dist/index.d.mts",
+    "import": "./dist/index.mjs",
+    "default": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tree-build && tsdown",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@goddard-ai/ipc": "workspace:^",
+    "@tauri-apps/api": "^2.10.1"
+  }
+}
