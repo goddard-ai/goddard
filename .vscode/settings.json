@@ -1,8 +1,5 @@
 {
-  "rust-analyzer.linkedProjects": [
-    "app/src-tauri/Cargo.toml",
-    "core/tauri-plugin-ipc/Cargo.toml"
-  ],
+  "rust-analyzer.linkedProjects": ["app/src-tauri/Cargo.toml", "core/tauri-plugin-ipc/Cargo.toml"],
   "editor.formatOnSave": true,
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "oxc.enable.oxfmt": true,
@@ -10,6 +7,8 @@
     "source.organizeImports": "explicit",
     "source.fixAll.oxc": "explicit"
   },
+  "typescript.preferences.importModuleSpecifierEnding": "js",
+  "rewrap.wrappingColumn": 75,
   "[javascript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
@@ -25,6 +24,10 @@
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
-  "typescript.preferences.importModuleSpecifierEnding": "js",
-  "rewrap.wrappingColumn": 75
+  "[json]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  }
 }
