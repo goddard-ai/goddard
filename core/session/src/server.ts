@@ -7,14 +7,13 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { noop, once } from "radashi"
 import { serve } from "srvx"
-import manifest from "../package.json" assert { type: "json" }
 import { createAgentConnection, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "./acp.js"
 import { createWebSocketHandler } from "./node/websocket-server.js"
 import * as prompts from "./prompts/index.js"
 import { fetchRegistryAgent } from "./registry.js"
 
 /** The current version of `@goddard-ai/session` */
-const VERSION = manifest.version
+const VERSION = __VERSION__
 
 export function injectSystemPrompt(
   request: acp.PromptRequest,
