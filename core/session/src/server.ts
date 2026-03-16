@@ -6,13 +6,12 @@ import { spawn } from "node:child_process"
 import { Readable, Writable } from "node:stream"
 import { noop, once } from "radashi"
 import { serve } from "srvx"
-import manifest from "../package.json" assert { type: "json" }
 import { createAgentConnection, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "./acp.js"
 import { createWebSocketHandler } from "./node/websocket-server.js"
 import { fetchRegistryAgent } from "./registry.js"
 
 /** The current version of `@goddard-ai/session` */
-const VERSION = manifest.version
+declare const __VERSION__: string
 
 export function injectSystemPrompt(
   request: acp.PromptRequest,
@@ -155,7 +154,7 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
   try {
     const handshake = await agent.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
-      clientInfo: { name: "npm:@goddard-ai/session", version: VERSION },
+      clientInfo: { name: "npm:@goddard-ai/session", version: __VERSION__ },
     })
 
     const session = {
