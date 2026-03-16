@@ -11,6 +11,9 @@ The `spec/` folder contains the canonical source of truth and theory of mind for
 - You must strictly adhere to its values and not diverge from them.
 - If you sense a suggested change will stray from the spec, you must warn the user that a spec change might be needed.
 
+## Code Style Guidelines
+- **Avoid Single-Use Variables:** Do not declare variables that are only referenced once unless they significantly improve readability for complex expressions. Inline them directly into their usage.
+
 ## Git/Rebase Note
 - When continuing a rebase in non-interactive terminals, use `GIT_EDITOR=true git rebase --continue` to avoid hanging in an interactive editor.
 
