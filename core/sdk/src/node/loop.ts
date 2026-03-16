@@ -1,7 +1,8 @@
 import { createJiti } from "@mariozechner/jiti"
 import { join } from "node:path"
+import { readFile, mkdir, writeFile } from "node:fs/promises"
 import { createLoop, type AgentLoopHandler, type LoopRuntimeConfig } from "@goddard-ai/loop"
-import { LoopStorage, fileExists, getGlobalConfigPath } from "@goddard-ai/storage"
+import { LoopStorage, fileExists, getGlobalConfigPath, getLoopDir } from "@goddard-ai/storage"
 import type { NodeGoddardLoopRunOverrides } from "./index.ts"
 
 const DEFAULT_RUNTIME_CONFIG = {
@@ -20,14 +21,43 @@ export async function loadLoopConfig(
 ): Promise<{ config: LoopRuntimeConfig }> {
   const record = await LoopStorage.get(loopId)
   if (record) {
+    const loopDir = getLoopDir(loopId)
+    let fileConfig: Record<string, unknown> = {}
+    try {
+      const configJson = await readFile(join(loopDir, "config.json"), "utf8")
+      fileConfig = JSON.parse(configJson)
+    } catch {
+      // Ignore if missing or invalid
+    }
+
+    let systemPrompt = DEFAULT_RUNTIME_CONFIG.systemPrompt
+    const jiti = createJiti(loopDir)
+    try {
+      const promptModule = (await jiti.import(join(loopDir, "prompt.ts"))) as { nextPrompt?: () => unknown }
+      if (typeof promptModule.nextPrompt === "function") {
+        const computed = await promptModule.nextPrompt()
+        if (typeof computed === "string" && computed.trim().length > 0) {
+          systemPrompt = computed
+        }
+      }
+    } catch {
+      try {
+        const promptMd = await readFile(join(loopDir, "prompt.md"), "utf8")
+        if (promptMd.trim().length > 0) {
+          systemPrompt = promptMd
+        }
+      } catch {
+        // Ignore if both prompt.ts and prompt.md are missing
+      }
+    }
+
     return {
       config: {
-        agent: record.agent,
-        cwd: record.cwd,
-        systemPrompt: record.systemPrompt,
-        strategy: record.strategy ?? undefined,
-        mcpServers: record.mcpServers ?? [],
-      },
+        ...DEFAULT_RUNTIME_CONFIG,
+        cwd,
+        ...fileConfig,
+        systemPrompt,
+      } as LoopRuntimeConfig,
     }
   }
 
@@ -109,24 +139,16 @@ function getLocalConfigPath(cwd: string): string {
 }
 
 async function upsertStoredLoopConfig(loopId: string, config: LoopRuntimeConfig): Promise<void> {
-  const data = {
-    agent: config.agent,
-    systemPrompt: config.systemPrompt,
-    strategy: config.strategy ?? "",
-    displayName: loopId,
-    cwd: config.cwd,
-    mcpServers: config.mcpServers ?? [],
-    gitRemote: "origin",
-  }
+  const loopDir = getLoopDir(loopId)
+  await mkdir(loopDir, { recursive: true })
+
+  const { systemPrompt, cwd: _cwd, ...restConfig } = config
+  await writeFile(join(loopDir, "config.json"), JSON.stringify(restConfig, null, 2), "utf8")
+  await writeFile(join(loopDir, "prompt.md"), systemPrompt, "utf8")
 
   const existing = await LoopStorage.get(loopId)
-  if (existing) {
-    await LoopStorage.update(loopId, data)
-  } else {
-    await LoopStorage.create({
-      id: loopId,
-      ...data,
-    })
+  if (!existing) {
+    await LoopStorage.create({ id: loopId })
   }
 }
 

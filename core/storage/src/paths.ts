@@ -7,6 +7,14 @@ export function getGoddardGlobalDir(): string {
   return join(homedir(), ".goddard")
 }
 
+export function getLoopsDir(): string {
+  return join(getGoddardGlobalDir(), "loops")
+}
+
+export function getLoopDir(id: string): string {
+  return join(getLoopsDir(), id)
+}
+
 export function getGlobalConfigPath(): string {
   return join(getGoddardGlobalDir(), "config.ts")
 }
