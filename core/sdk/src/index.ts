@@ -1,31 +1,22 @@
-import { Models } from "@goddard-ai/config"
 import {
   type AuthSession,
   type CreatePrInput,
   type DeviceFlowComplete,
   type DeviceFlowSession,
   type DeviceFlowStart,
-  type GitHubWebhookInput,
-  type PiAgentConfig,
-  type PullRequestRecord,
-  type RepoEvent,
   type RepoRef,
   type StreamMessage,
-  type ThinkingLevel,
 } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
 import { createClient, type RouteRequest } from "rouzer"
 
-export const SDK_VERSION = "0.1.0"
-
-type FetchLike = typeof fetch
-type RouzerHttpClient = ReturnType<typeof createClient<typeof routes>>
+type BackendHttpClient = ReturnType<typeof createClient<typeof routes>>
 
 export type GoddardSdkOptions = {
-  baseUrl: string
+  backendUrl: string
   tokenStorage?: TokenStorage
-  fetchImpl?: FetchLike
+  fetch?: typeof globalThis.fetch
 }
 
 type StreamHandler = (event?: unknown) => void
@@ -71,60 +62,39 @@ export class StreamSubscription {
 }
 
 export class GoddardSdk {
-  readonly auth: {
-    startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>
-    completeDeviceFlow: (input: DeviceFlowComplete) => Promise<AuthSession>
-    login: (options: {
-      githubUsername?: string
-      onPrompt: (verificationUri: string, userCode: string) => void
-    }) => Promise<AuthSession>
-    whoami: () => Promise<AuthSession>
-    logout: () => Promise<void>
-  }
-
-  readonly pr: {
-    create: (input: CreatePrInput) => Promise<PullRequestRecord>
-    isManaged: (input: RepoRef & { prNumber: number }) => Promise<boolean>
-    reply: (input: RepoRef & { prNumber: number; body: string }) => Promise<{ success: boolean }>
-  }
-
-  readonly stream: {
-    subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>
-  }
-
-  readonly config: {
-
-  }
-
-  readonly #baseUrl: URL
   readonly #tokenStorage: TokenStorage
-  readonly #fetchImpl: FetchLike
-  readonly #rouzerClient: RouzerHttpClient
+  readonly #backend: BackendHttpClient
 
   constructor(options: GoddardSdkOptions) {
-    this.#baseUrl = new URL(options.baseUrl)
     this.#tokenStorage = options.tokenStorage ?? new InMemoryTokenStorage()
-    this.#fetchImpl = options.fetchImpl ?? fetch
-    this.#rouzerClient = createClient({
-      baseURL: this.#baseUrl.toString(),
-      fetch: this.#fetchImpl,
+    this.#backend = createClient({
+      baseURL: new URL(options.backendUrl).toString(),
+      fetch: options.fetch ?? fetch,
       routes: routes,
     })
+  }
 
-    this.auth = {
-      startDeviceFlow: async (input = {}) => {
+  get auth() {
+    return {
+      startDeviceFlow: async (input: DeviceFlowStart = {}) => {
         return this.#sendJson<DeviceFlowSession>(
-          this.#rouzerClient.request(routes.authDeviceStartRoute.POST({ body: input })),
+          this.#backend.request(routes.authDeviceStartRoute.POST({ body: input })),
         )
       },
-      completeDeviceFlow: async (input) => {
+      completeDeviceFlow: async (input: DeviceFlowComplete) => {
         const session = await this.#sendJson<AuthSession>(
-          this.#rouzerClient.request(routes.authDeviceCompleteRoute.POST({ body: input })),
+          this.#backend.request(routes.authDeviceCompleteRoute.POST({ body: input })),
         )
         await this.#tokenStorage.setToken(session.token)
         return session
       },
-      login: async ({ githubUsername, onPrompt }) => {
+      login: async ({
+        githubUsername,
+        onPrompt,
+      }: {
+        githubUsername: string
+        onPrompt: (verificationUri: string, userCode: string) => void
+      }) => {
         const start = await this.auth.startDeviceFlow({ githubUsername })
         onPrompt(start.verificationUri, start.userCode)
 
@@ -156,56 +126,46 @@ export class GoddardSdk {
       },
       whoami: async () => {
         const token = await this.#requireToken()
-        return this.#sendJson<AuthSession>(
-          this.#rouzerClient.request(
-            routes.authSessionRoute.GET({ headers: { authorization: `Bearer ${token}` } }),
-          ),
-        )
+        return this.#backend.authSessionRoute.GET({
+          headers: { authorization: `Bearer ${token}` },
+        })
       },
       logout: async () => {
         await this.#tokenStorage.clearToken()
       },
     }
+  }
 
-    this.pr = {
-      create: async (input) => {
+  get pr() {
+    return {
+      create: async (input: CreatePrInput) => {
         const token = await this.#requireToken()
-        return this.#sendJson<PullRequestRecord>(
-          this.#rouzerClient.request(
-            routes.prCreateRoute.POST({
-              headers: { authorization: `Bearer ${token}` },
-              body: input,
-            }),
-          ),
-        )
+        return this.#backend.prCreateRoute.POST({
+          headers: { authorization: `Bearer ${token}` },
+          body: input,
+        })
       },
-      isManaged: async ({ owner, repo, prNumber }) => {
+      isManaged: async ({ owner, repo, prNumber }: RepoRef & { prNumber: number }) => {
         const token = await this.#requireToken()
-        const result = await this.#sendJson<{ managed: boolean }>(
-          this.#rouzerClient.request(
-            routes.prManagedRoute.GET({
-              headers: { authorization: `Bearer ${token}` },
-              query: { owner, repo, prNumber },
-            }),
-          ),
-        )
+        const result = await this.#backend.prManagedRoute.GET({
+          headers: { authorization: `Bearer ${token}` },
+          query: { owner, repo, prNumber },
+        })
         return result.managed
       },
-      reply: async (input) => {
+      reply: async (input: { owner: string; repo: string; prNumber: number; body: string }) => {
         const token = await this.#requireToken()
-        return this.#sendJson<{ success: boolean }>(
-          this.#rouzerClient.request(
-            routes.prReplyRoute.POST({
-              headers: { authorization: `Bearer ${token}` },
-              body: input,
-            }),
-          ),
-        )
+        return this.#backend.prReplyRoute.POST({
+          headers: { authorization: `Bearer ${token}` },
+          body: input,
+        })
       },
     }
+  }
 
-    this.stream = {
-      subscribeToRepo: async ({ owner, repo }) => {
+  get stream() {
+    return {
+      subscribeToRepo: async ({ owner, repo }: RepoRef) => {
         const token = await this.#tokenStorage.getToken()
         if (!token) {
           throw new Error("Not authenticated. Run login first.")
@@ -215,10 +175,11 @@ export class GoddardSdk {
           headers: { authorization: `Bearer ${token}` },
           query: { owner, repo },
         })
-        const streamUrl = buildRouteUrl(this.#baseUrl, streamRequest)
+        const streamURL = buildRequestURL(this.#backend.config.baseURL, streamRequest)
         const abortController = new AbortController()
 
-        const response = await this.#fetchImpl(streamUrl, {
+        const fetch = this.#backend.config.fetch ?? globalThis.fetch
+        const response = await fetch(streamURL, {
           method: "GET",
           headers: {
             accept: "text/event-stream",
@@ -230,7 +191,6 @@ export class GoddardSdk {
         if (!response.ok) {
           throw new Error(`Stream request failed (${response.status}): ${await response.text()}`)
         }
-
         if (!response.body) {
           throw new Error("Stream response did not include a body")
         }
@@ -244,10 +204,6 @@ export class GoddardSdk {
 
         return subscription
       },
-    }
-
-    this.config = {
-
     }
   }
 
@@ -272,20 +228,8 @@ export class GoddardSdk {
   }
 }
 
-function buildRouteUrl(baseUrl: URL, request: RouteRequest): URL {
-  const pathname = request.path.href(request.args.path as Record<string, string> | undefined)
-  const url = new URL(pathname, baseUrl)
-  const query = request.args.query as Record<string, unknown> | undefined
-
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined) {
-        url.searchParams.set(key, String(value))
-      }
-    }
-  }
-
-  return url
+function buildRequestURL(baseUrl: string, request: RouteRequest): URL {
+  return new URL(request.path.href(request.args.path, request.args.query), baseUrl)
 }
 
 async function consumeSseResponse(
@@ -365,21 +309,3 @@ function parseSseData(chunk: string): string | null {
 
   return dataLines.length > 0 ? dataLines.join("\n") : null
 }
-
-export type {
-  AuthSession,
-  CreatePrInput,
-  DeviceFlowComplete,
-  DeviceFlowSession,
-  DeviceFlowStart, GitHubWebhookInput, PiAgentConfig,
-  PullRequestRecord,
-  RepoEvent,
-  RepoRef,
-  ThinkingLevel,
-  TokenStorage
-}
-
-export { LOOP_SYSTEM_PROMPT } from "@goddard-ai/loop"
-export type { GoddardLoopConfig } from "@goddard-ai/loop"
-export { PROPOSE_SYSTEM_PROMPT, SPEC_SYSTEM_PROMPT } from "./prompts.ts"
-export { InMemoryTokenStorage }

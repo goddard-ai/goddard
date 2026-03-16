@@ -1,9 +1,6 @@
-import { test, expect } from "vitest"
-import { promises as fs } from "node:fs"
-import * as path from "node:path"
-import * as os from "node:os"
-import { GoddardSdk, InMemoryTokenStorage } from "../src/index.ts"
-import { init as agentsInit } from "../src/node/index.ts"
+import { InMemoryTokenStorage } from "@goddard-ai/storage"
+import { expect, test } from "vitest"
+import { GoddardSdk } from "../src/index.ts"
 
 test("device flow stores token and whoami uses auth header", async () => {
   const storage = new InMemoryTokenStorage()
@@ -43,9 +40,9 @@ test("device flow stores token and whoami uses auth header", async () => {
   }
 
   const sdk = new GoddardSdk({
-    baseUrl: "http://127.0.0.1:8787",
+    backendUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
-    fetchImpl,
+    fetch: fetchImpl,
   })
 
   const start = await sdk.auth.startDeviceFlow()
@@ -87,9 +84,9 @@ test("pr create requires authentication", async () => {
   }
 
   const sdk = new GoddardSdk({
-    baseUrl: "http://127.0.0.1:8787",
+    backendUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
-    fetchImpl,
+    fetch: fetchImpl,
   })
 
   await expect(() =>
@@ -124,9 +121,9 @@ test("pr.isManaged returns managed status", async () => {
   }
 
   const sdk = new GoddardSdk({
-    baseUrl: "http://127.0.0.1:8787",
+    backendUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
-    fetchImpl,
+    fetch: fetchImpl,
   })
 
   const managed = await sdk.pr.isManaged({ owner: "org", repo: "repo", prNumber: 12 })
@@ -161,9 +158,9 @@ test("stream emits error event for malformed payloads", async () => {
   }
 
   const sdk = new GoddardSdk({
-    baseUrl: "http://127.0.0.1:8787",
+    backendUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
-    fetchImpl,
+    fetch: fetchImpl,
   })
 
   const sub = await sdk.stream.subscribeToRepo({ owner: "org", repo: "repo" })
@@ -188,18 +185,3 @@ function jsonResponse(status: number, payload: unknown): Response {
     },
   })
 }
-
-test("agents.init creates AGENTS.md with correct instructions", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-test-"))
-
-  try {
-    const { path: agentsPath } = await agentsInit(tempDir)
-    expect(agentsPath).toBe(path.join(tempDir, "AGENTS.md"))
-
-    const content = await fs.readFile(agentsPath, "utf-8")
-    expect(content).toMatch(/The `spec` Folder/)
-    expect(content).toMatch(/domain routing hub/)
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true })
-  }
-})

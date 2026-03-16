@@ -1,9 +1,10 @@
-import { join } from "node:path"
-import { readFile } from "node:fs/promises"
-import { runAgent, type SessionParams } from "@goddard-ai/session"
+import type { NewSessionParams, SessionParams } from "@goddard-ai/schema/session-server"
+import { runAgent } from "@goddard-ai/session"
 import { getGoddardGlobalDir } from "@goddard-ai/storage"
+import { existsSync } from "node:fs"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
-import type { NewSessionParams } from "@goddard-ai/session"
 
 export type ResolvedAgentAction = {
   prompt: string
@@ -59,7 +60,8 @@ async function loadFolderAction(path: string): Promise<ResolvedAgentAction> {
   try {
     promptAction = await loadMarkdownAction(promptPath)
   } catch (error) {
-    if (hasErrorCode(error, "ENOENT")) {
+    // Require a prompt.md file if the action directory exists
+    if (hasErrorCode(error, "ENOENT") && existsSync(path)) {
       throw new Error(`Action directory "${path}" must include a prompt.md file.`)
     }
     throw error

@@ -1,66 +1,14 @@
-import { afterEach, test, vi } from "vitest"
 import * as assert from "node:assert/strict"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
+import { afterEach, test, vi } from "vitest"
 
 vi.mock("@goddard-ai/session", () => ({
   runAgent: vi.fn(),
 }))
 
-vi.mock("yaml", () => ({
-  parse: (input: string) => {
-    const lines = input.trim().split(/\r?\n/)
-    const result: Record<string, any> = {}
-    let i = 0
-
-    while (i < lines.length) {
-      const line = lines[i]!
-      if (!line.trim()) {
-        i += 1
-        continue
-      }
-
-      const match = line.match(/^([^:]+):\s*(.*)$/)
-      if (!match) {
-        throw new Error(`Unsupported mock YAML line: ${line}`)
-      }
-
-      const key = match[1]!.trim()
-      const value = match[2]!
-
-      if (value === "") {
-        const nested: Record<string, any> = {}
-        let j = i + 1
-
-        while (j < lines.length) {
-          const child = lines[j]!.match(/^\s+([^:]+):\s*(.*)$/)
-          if (!child) {
-            break
-          }
-          nested[child[1]!.trim()] = child[2]!.trim()
-          j += 1
-        }
-
-        result[key] = nested
-        i = j
-        continue
-      }
-
-      if (value === "true") {
-        result[key] = true
-      } else if (value === "false") {
-        result[key] = false
-      } else {
-        result[key] = value.trim()
-      }
-      i += 1
-    }
-
-    return result
-  },
-}))
-
+import { dedent } from "radashi"
 import {
   buildActionSessionParams,
   resolveAction,
@@ -85,20 +33,21 @@ test("resolveAction strips frontmatter from markdown actions", async () => {
   await fs.mkdir(actionsDir, { recursive: true })
   await fs.writeFile(
     path.join(actionsDir, "review.md"),
-    `---
-oneShot: false
-agent:
-  type: binary
-  cmd: custom-agent
----
-Review the current diff carefully.
-`,
+    dedent`
+      ---
+      oneShot: false
+      agent:
+        type: binary
+        cmd: custom-agent
+      ---
+      Review the current diff carefully.
+    `,
     "utf-8",
   )
 
   const action = await resolveAction("review", tempDir)
 
-  assert.equal(action.prompt, "Review the current diff carefully.\n")
+  assert.equal(action.prompt, "Review the current diff carefully.")
   assert.deepEqual(action.config, {
     oneShot: false,
     agent: {
@@ -115,12 +64,13 @@ test("resolveAction loads folder actions and merges prompt frontmatter with conf
   await fs.mkdir(actionDir, { recursive: true })
   await fs.writeFile(
     path.join(actionDir, "prompt.md"),
-    `---
-oneShot: true
-systemPrompt: Start with the checklist.
----
-Ship the change.
-`,
+    dedent`
+      ---
+      oneShot: true
+      systemPrompt: "Start with the checklist."
+      ---
+      Ship the change.
+    `,
     "utf-8",
   )
   await fs.writeFile(
@@ -135,7 +85,7 @@ Ship the change.
 
   const action = await resolveAction("ship-it", tempDir)
 
-  assert.equal(action.prompt, "Ship the change.\n")
+  assert.equal(action.prompt, "Ship the change.")
   assert.deepEqual(action.config, {
     oneShot: false,
     systemPrompt: "Start with the checklist.",
