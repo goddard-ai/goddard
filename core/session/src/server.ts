@@ -13,7 +13,7 @@ import * as prompts from "./prompts/index.js"
 import { fetchRegistryAgent } from "./registry.js"
 
 /** The current version of `@goddard-ai/session` */
-const VERSION = __VERSION__
+declare const __VERSION__: string
 
 export function injectSystemPrompt(
   request: acp.PromptRequest,
@@ -173,7 +173,7 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
   try {
     const handshake = await agent.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
-      clientInfo: { name: "npm:@goddard-ai/session", version: VERSION },
+      clientInfo: { name: "npm:@goddard-ai/session", version: __VERSION__ },
     })
 
     const session = {
