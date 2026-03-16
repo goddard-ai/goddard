@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown"
 
 export default defineConfig({
-  entry: ["./src/index.ts", "./src/main.ts"],
+  entry: ["./src/index.ts", "./src/main.ts", "./src/bin/goddard-tool.ts"],
   format: "esm",
   target: "node18",
   clean: true,

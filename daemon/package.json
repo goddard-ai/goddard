@@ -4,7 +4,8 @@
   "private": true,
   "license": "AGPL-3.0",
   "bin": {
-    "goddard-daemon": "./dist/main.mjs"
+    "goddard-daemon": "./dist/main.mjs",
+    "goddard-tool": "./dist/bin/goddard-tool.mjs"
   },
   "type": "module",
   "scripts": {
@@ -16,11 +17,14 @@
     "build": "tree-build && tsdown"
   },
   "dependencies": {
-    "@goddard-ai/sdk": "workspace:*",
+    "@goddard-ai/backend": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/storage": "workspace:*",
     "@xterm/headless": "^6.0.0",
     "cmd-ts": "^0.15.0",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "rouzer": "^1.4.0",
+    "srvx": "^0.8.16"
   }
 }

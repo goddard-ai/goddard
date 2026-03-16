@@ -6,7 +6,13 @@ vi.mock("@goddard-ai/storage", () => ({
   },
 }))
 
+vi.mock("radashi", () => ({
+  noop: () => undefined,
+  once: <T extends (...args: any[]) => any>(fn: T) => fn,
+}))
+
 import {
+  buildAgentProcessEnv,
   injectSystemPrompt,
   sessionStatusFromAgentMessage,
   sessionStatusFromClientMessage,
@@ -73,8 +79,8 @@ describe("session state transitions", () => {
 })
 
 describe("system prompt injection", () => {
-  test("prepends system prompt to a session/prompt payload", () => {
-    const systemPrompt = '<system-prompt name="Goddard CLI">base</system-prompt>'
+  test("prepends a single required system prompt to a session/prompt payload", () => {
+    const systemPrompt = "Follow repository conventions."
     const request = {
       sessionId: "session-1",
       prompt: [{ type: "text", text: "Hello" }],
@@ -82,79 +88,11 @@ describe("system prompt injection", () => {
 
     const injected = injectSystemPrompt(request, systemPrompt)
 
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">',
+    expect((injected.prompt[0] as { text: string }).text).toBe(
+      '<system-prompt name="Goddard CLI">Follow repository conventions.</system-prompt>',
     )
     expect((injected.prompt[1] as { text: string }).text).toBe("Hello")
-  })
-
-  test("inserts appended system prompt after the default prompt", () => {
-    const request = {
-      sessionId: "session-1",
-      prompt: [{ type: "text", text: "Hello" }],
-    } as any
-
-    const injected = injectSystemPrompt(
-      request,
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-      "Follow internal policy",
-    )
-
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-    )
-    expect((injected.prompt[1] as { text: string }).text).toBe(
-      "<system-prompt>Follow internal policy</system-prompt>",
-    )
-    expect((injected.prompt[2] as { text: string }).text).toBe("Hello")
-  })
-
-  test("inserts multiple appended system prompts in order", () => {
-    const request = {
-      sessionId: "session-1",
-      prompt: [{ type: "text", text: "Hello" }],
-    } as any
-
-    const injected = injectSystemPrompt(
-      request,
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-      ["Follow internal policy", "Use repository conventions"],
-    )
-
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-    )
-    expect((injected.prompt[1] as { text: string }).text).toBe(
-      "<system-prompt>Follow internal policy</system-prompt>",
-    )
-    expect((injected.prompt[2] as { text: string }).text).toBe(
-      "<system-prompt>Use repository conventions</system-prompt>",
-    )
-    expect((injected.prompt[3] as { text: string }).text).toBe("Hello")
-  })
-
-  test("flattens nested appended system prompts and drops falsy values", () => {
-    const request = {
-      sessionId: "session-1",
-      prompt: [{ type: "text", text: "Hello" }],
-    } as any
-
-    const injected = injectSystemPrompt(
-      request,
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-      ["Follow internal policy", null, ["Use repository conventions", "", false]],
-    )
-
-    expect((injected.prompt[0] as { text: string }).text).toContain(
-      '<system-prompt name="Goddard CLI">base</system-prompt>',
-    )
-    expect((injected.prompt[1] as { text: string }).text).toBe(
-      "<system-prompt>Follow internal policy</system-prompt>",
-    )
-    expect((injected.prompt[2] as { text: string }).text).toBe(
-      "<system-prompt>Use repository conventions</system-prompt>",
-    )
-    expect((injected.prompt[3] as { text: string }).text).toBe("Hello")
+    expect(injected.prompt).toHaveLength(2)
   })
 })
 
@@ -165,6 +103,7 @@ describe("one-shot session behavior", () => {
         agent: "pi",
         cwd: "/tmp",
         mcpServers: [],
+        systemPrompt: "Do the work safely.",
         initialPrompt: "hello",
         oneShot: true,
       }),
@@ -175,6 +114,7 @@ describe("one-shot session behavior", () => {
         agent: "pi",
         cwd: "/tmp",
         mcpServers: [],
+        systemPrompt: "Do the work safely.",
         initialPrompt: "hello",
       }),
     ).toBe(false)
@@ -184,8 +124,25 @@ describe("one-shot session behavior", () => {
         agent: "pi",
         cwd: "/tmp",
         mcpServers: [],
+        systemPrompt: "Do the work safely.",
         sessionId: "existing-session",
       }),
     ).toBe(false)
   })
 })
+
+describe("agent process environment", () => {
+  test("preserves caller-provided PATH without using GODDARD_AGENT_BIN_DIR", () => {
+    const env = buildAgentProcessEnv("server-1", {
+      PATH: "/daemon/agent-bin:/usr/bin",
+      GODDARD_AGENT_BIN_DIR: "/should/not/be/used",
+      CUSTOM_VAR: "value",
+    })
+
+    expect(env.PATH).toBe("/daemon/agent-bin:/usr/bin")
+    expect(env.GODDARD_AGENT_BIN_DIR).toBe("/should/not/be/used")
+    expect(env.CUSTOM_VAR).toBe("value")
+    expect(env.GODDARD_SERVER_ID).toBe("server-1")
+  })
+})
+

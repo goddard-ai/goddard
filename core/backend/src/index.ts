@@ -1,5 +1,4 @@
 import { createServer as createNodeServer } from "@hattip/adapter-node"
-import type { Env } from "./env.ts"
 import { type RepoEvent } from "@goddard-ai/schema/backend"
 import { type BackendControlPlane } from "./api/control-plane.ts"
 import { createBackendRouter } from "./api/router.ts"
@@ -9,6 +8,7 @@ import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 export { TursoBackendControlPlane } from "./db/persistence.ts"
 export * from "./api/control-plane.ts"
+export * from "./client.ts"
 export * from "./github-app.ts"
 
 type StartServerOptions = {

@@ -1,4 +1,3 @@
-// ATTN: Always use `import * as prompts` when importing from here.
 export { default as BACKGROUND } from "./background.md?raw"
 export { default as BRANCH_REBASED } from "./branch-rebased.md?raw"
 export { default as BRANCH_UPDATED } from "./branch-updated.md?raw"

@@ -169,6 +169,7 @@ async function runDemo(options: DemoOptions) {
       agent: config.agent,
       cwd: config.cwd,
       mcpServers: [],
+      systemPrompt: "You are a demo session. Respond helpfully and concisely.",
     },
     {
       async requestPermission(params: any) {

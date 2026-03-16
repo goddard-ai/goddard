@@ -1,16 +1,14 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { SessionStatus } from "@goddard-ai/schema/db"
-import type { AgentDistribution, AppendSystemPrompt, SessionParams } from "@goddard-ai/schema/session-server"
+import type { AgentDistribution, SessionParams } from "@goddard-ai/schema/session-server"
 import { SessionStorage, SQLSessionUpdate } from "@goddard-ai/storage"
 import { spawn } from "node:child_process"
-import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { noop, once } from "radashi"
 import { serve } from "srvx"
 import manifest from "../package.json" assert { type: "json" }
 import { createAgentConnection, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "./acp.js"
 import { createWebSocketHandler } from "./node/websocket-server.js"
-import * as prompts from "./prompts/index.js"
 import { fetchRegistryAgent } from "./registry.js"
 
 /** The current version of `@goddard-ai/session` */
@@ -19,37 +17,14 @@ const VERSION = manifest.version
 export function injectSystemPrompt(
   request: acp.PromptRequest,
   systemPrompt: string,
-  appendSystemPrompt?: AppendSystemPrompt,
 ): acp.PromptRequest {
-  const injectedPrompt: acp.ContentBlock[] = [
-    { type: "text", text: `<system-prompt name="Goddard CLI">${systemPrompt}</system-prompt>` },
-  ]
-
-  const appendedPrompts = flattenAppendSystemPrompt(appendSystemPrompt)
-
-  for (const prompt of appendedPrompts) {
-    injectedPrompt.push({
-      type: "text",
-      text: `<system-prompt>${prompt}</system-prompt>`,
-    })
-  }
-
   return {
     ...request,
-    prompt: [...injectedPrompt, ...request.prompt],
+    prompt: [
+      { type: "text", text: `<system-prompt name="Goddard CLI">${systemPrompt}</system-prompt>` },
+      ...request.prompt,
+    ],
   }
-}
-
-function flattenAppendSystemPrompt(appendSystemPrompt?: AppendSystemPrompt): string[] {
-  if (!appendSystemPrompt) {
-    return []
-  }
-
-  if (Array.isArray(appendSystemPrompt)) {
-    return appendSystemPrompt.flatMap((prompt) => flattenAppendSystemPrompt(prompt))
-  }
-
-  return [appendSystemPrompt]
 }
 
 export function sessionStatusFromClientMessage(
@@ -90,6 +65,18 @@ export function shouldExitAfterInitialPrompt(
   return !isPropertyDefined(params, "sessionId") && params.oneShot === true
 }
 
+export function buildAgentProcessEnv(
+  serverId: string,
+  extraEnv?: Record<string, string>,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...(extraEnv ?? {}),
+    PATH: extraEnv?.PATH ?? process.env.PATH ?? "",
+    GODDARD_SERVER_ID: serverId,
+  }
+}
+
 /**
  * Resolve the agent executable and spawn the agent subprocess based on the
  * provided configuration. No messages are sent to the subprocess at this stage.
@@ -99,6 +86,7 @@ async function spawnAgentProcess(
   params: {
     agent: string | AgentDistribution
     sessionId?: string
+    env?: Record<string, string>
   },
 ) {
   let agent = params.agent
@@ -126,16 +114,9 @@ async function spawnAgentProcess(
     throw new Error("Unsupported agent distribution")
   }
 
-  const PATH = process.env.PATH || ""
-  const agentBinDir = join(import.meta.dirname, "../agent-bin")
-
   return spawn(cmd, args, {
     stdio: ["pipe", "pipe", "inherit"],
-    env: {
-      ...process.env,
-      PATH: `${agentBinDir}:${PATH}`,
-      GODDARD_SERVER_ID: serverId,
-    },
+    env: buildAgentProcessEnv(serverId, params.env),
   })
 }
 
@@ -205,12 +186,7 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
           sessionId: newSession.sessionId,
           prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
         },
-        renderPrompt(prompts.BACKGROUND, {
-          declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
-          report_blocker: prompts.CMD_REPORT_BLOCKER,
-          global_rules: prompts.GLOBAL_RULES,
-        }),
-        params.appendSystemPrompt,
+        params.systemPrompt,
       )
 
       history.push({
@@ -343,15 +319,7 @@ export async function serveAgent(serverId: string, params: SessionParams) {
           isAcpRequest<AcpPromptRequest>(message, acp.AGENT_METHODS.session_prompt)
         ) {
           session.isFirstPrompt = false
-          message.params = injectSystemPrompt(
-            message.params,
-            renderPrompt(prompts.BACKGROUND, {
-              declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
-              report_blocker: prompts.CMD_REPORT_BLOCKER,
-              global_rules: prompts.GLOBAL_RULES,
-            }),
-            "appendSystemPrompt" in params ? params.appendSystemPrompt : undefined,
-          )
+          message.params = injectSystemPrompt(message.params, params.systemPrompt)
         }
       }
 
@@ -418,23 +386,6 @@ export async function serveAgent(serverId: string, params: SessionParams) {
     serverAddress,
     sessionId: session.sessionId,
   }
-}
-
-function renderPrompt(prompt: string, variables: Record<string, string>) {
-  const usedVariables = new Set<string>()
-  const renderResult = prompt.replace(/\${(\w+)}/g, (_, key) => {
-    const value = variables[key]
-    if (typeof value !== "string") {
-      throw new Error(`Prompt variable "${key}" is not a string`)
-    }
-    usedVariables.add(key)
-    return value
-  })
-  if (usedVariables.size !== Object.keys(variables).length) {
-    const unusedVariables = Object.keys(variables).filter((key) => !usedVariables.has(key))
-    throw new Error(`Prompt variables were defined but never used: ${unusedVariables.join(", ")}`)
-  }
-  return renderResult
 }
 
 function isErrorSignal(signal: string | null): boolean {

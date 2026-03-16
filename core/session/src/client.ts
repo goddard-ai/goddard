@@ -87,6 +87,10 @@ async function startSessionServer(params: SessionParams) {
   const serverProcess = spawn(serverExecutablePath, [JSON.stringify(params)], {
     detached: true,
     stdio: ["ignore", "pipe", "inherit"],
+    env: {
+      ...process.env,
+      ...(params.env ?? {}),
+    },
   })
 
   const startupLog = await readSessionServerLog(serverProcess.stdout)
