@@ -22,8 +22,5 @@
     "cron-parser": "^5.5.0",
     "exit-hook": "^4.0.0",
     "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "tsdown": "^0.21.0"
   }
 }

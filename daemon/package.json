@@ -22,8 +22,5 @@
     "@xterm/headless": "^6.0.0",
     "cmd-ts": "^0.15.0",
     "node-pty": "^1.1.0"
-  },
-  "devDependencies": {
-    "tsdown": "^0.21.0"
   }
 }

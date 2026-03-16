@@ -35,7 +35,6 @@
   "devDependencies": {
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/storage": "workspace:^",
-    "drizzle-kit": "^0.31.9",
-    "tsdown": "^0.21.0"
+    "drizzle-kit": "^0.31.9"
   }
 }

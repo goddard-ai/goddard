@@ -41,7 +41,6 @@
     "@cloudflare/workers-types": "^4.20260307.1",
     "@goddard-ai/schema": "workspace:^",
     "drizzle-kit": "1.0.0-beta.15-859cf75",
-    "tsdown": "^0.21.0",
     "wrangler": "^4.71.0"
   }
 }
