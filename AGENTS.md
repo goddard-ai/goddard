@@ -5,6 +5,8 @@ When adding a feature that grants the user a new ability, it must be added to al
 - `sdk`
 - `app`
 
+Any capability our Tauri app has must also be supported in our core/sdk package.
+
 ## `spec/` Folder Purpose and Guidelines
 The `spec/` folder contains the canonical source of truth and theory of mind for the project.
 - You must **never** edit the spec (unless explicitly requested by the user).
