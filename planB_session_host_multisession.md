@@ -14,6 +14,7 @@ Extracting a reusable `SessionHost` isolates runtime/session orchestration from 
 ### Non-goals
 - No daemon IPC route implementation in this plan.
 - No storage schema migration in this plan.
+- No bespoke HTTP/WS server implementation in `core/session`; transport remains delegated to `@goddard-ai/ipc` (`core/ipc`, `./server`).
 
 ## Depends on
 - `plan0_contract_identity_freeze.md` merged
@@ -38,6 +39,7 @@ Refactor `core/session` from single-session server assumptions into a reusable i
    - status transitions (`active/done/cancelled`)
    - history capture
 5. Ensure shutdown idempotency and per-session isolation.
+6. Keep `SessionHost` transport-agnostic so daemon can wire it through `@goddard-ai/ipc` `./server` without a bespoke HTTP/WS stack.
 
 ## Tests
 - Existing session tests remain green.

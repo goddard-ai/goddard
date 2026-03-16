@@ -14,6 +14,7 @@ All storage and lookup paths use internal `sessions.id` as canonical identity, w
 ### Non-goals
 - No daemon WS routing changes here.
 - No multi-session host extraction here.
+- No bespoke HTTP/WS server work; transport changes standardize on `@goddard-ai/ipc` (`core/ipc`, `./server`) in downstream plans.
 
 ## Depends on
 - `plan0_contract_identity_freeze.md` merged
