@@ -27,7 +27,6 @@
     "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "@libsql/client": "^0.17.0",
-    "@mariozechner/jiti": "^2.6.5",
     "drizzle-orm": "^0.45.1",
     "rouzer": "^1.4.0",
     "yaml": "^2.8.2",
