@@ -1,4 +1,4 @@
-import type { RepoEvent } from "@goddard-ai/sdk"
+import type { RepoEvent } from "@goddard-ai/schema/backend"
 
 export type FeedbackEvent = Extract<RepoEvent, { type: "comment" | "review" }>
 

@@ -69,7 +69,7 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon context into 
 
   const runOneShotCalls: any[] = []
   const deps: RunDaemonDeps = {
-    createSdkClient: async () => ({
+    createBackendClient: async () => ({
       pr: {
         create: async () => ({
           number: 1,

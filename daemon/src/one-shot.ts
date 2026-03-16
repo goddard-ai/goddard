@@ -121,7 +121,9 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     })
     return 0
   } catch (error) {
-    console.error(`\n[ERROR] runAgent failed: ${error instanceof Error ? error.message : String(error)}`)
+    console.error(
+      `\n[ERROR] runAgent failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
     return 1
   }
 }

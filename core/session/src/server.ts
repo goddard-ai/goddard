@@ -77,7 +77,6 @@ export function buildAgentProcessEnv(
   }
 }
 
-
 /**
  * Resolve the agent executable and spawn the agent subprocess based on the
  * provided configuration. No messages are sent to the subprocess at this stage.

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { createSdk, type RepoEvent } from "@goddard-ai/sdk"
+import { createBackendClient, type BackendClient } from "@goddard-ai/backend/client"
+import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { FileTokenStorage } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
@@ -18,37 +19,9 @@ export type DaemonIo = {
   stderr: (line: string) => void
 }
 
-type StreamSubscription = {
-  on: (eventName: string, handler: (payload?: unknown) => void) => StreamSubscription
-  close: () => void | Promise<void>
-}
-
-type SdkClient = {
-  pr: {
-    create: (input: {
-      owner: string
-      repo: string
-      title: string
-      body?: string
-      head: string
-      base: string
-    }) => Promise<{ number: number; url: string }>
-    reply: (input: {
-      owner: string
-      repo: string
-      prNumber: number
-      body: string
-    }) => Promise<{ success: boolean }>
-    isManaged: (input: { owner: string; repo: string; prNumber: number }) => Promise<boolean>
-  }
-  stream: {
-    subscribeToRepo: (repo: { owner: string; repo: string }) => Promise<StreamSubscription>
-  }
-}
-
 export type RunDaemonDeps = {
-  createSdkClient?: (baseUrl: string) => Promise<SdkClient> | SdkClient
-  startIpcServer?: (sdk: SdkClient) => Promise<DaemonServer>
+  createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
+  startIpcServer?: (client: BackendClient) => Promise<DaemonServer>
   runOneShot?: (input: OneShotInput) => Promise<number> | number
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
   io?: DaemonIo
@@ -59,25 +32,22 @@ const defaultIo: DaemonIo = {
   stderr: (line) => process.stderr.write(`${line}\n`),
 }
 
-export async function runDaemon(
-  input: RunDaemonInput,
-  deps: RunDaemonDeps = {},
-): Promise<number> {
+export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {}): Promise<number> {
   const io = deps.io ?? defaultIo
   const baseUrl = input.baseUrl || process.env.GODDARD_BASE_URL || "http://127.0.0.1:8787"
-  const createSdkClient = deps.createSdkClient ?? defaultCreateSdkClient
-  const startIpcServer = deps.startIpcServer ?? ((sdk) => startDaemonServer(sdk))
+  const createBackendClientImpl = deps.createBackendClient ?? defaultCreateBackendClient
+  const startIpcServer = deps.startIpcServer ?? ((client) => startDaemonServer(client))
   const runOneShotImpl = deps.runOneShot ?? runOneShot
   const waitForShutdownImpl = deps.waitForShutdown ?? waitForShutdown
   let ipcServer: DaemonServer | undefined
 
   try {
-    const sdk = await createSdkClient(baseUrl)
+    const client = await createBackendClientImpl(baseUrl)
     const { owner, repo } = splitRepo(input.repo)
-    ipcServer = await startIpcServer(sdk)
+    ipcServer = await startIpcServer(client)
     const activeIpcServer = ipcServer
     const runningPrs = new Set<number>()
-    const subscription = await sdk.stream.subscribeToRepo({ owner, repo })
+    const subscription = await client.stream.subscribeToRepo({ owner, repo })
 
     io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`)
 
@@ -101,7 +71,7 @@ export async function runDaemon(
       const sessionToken = randomUUID()
 
       try {
-        const managed = await sdk.pr.isManaged({
+        const managed = await client.pr.isManaged({
           owner: event.owner,
           repo: event.repo,
           prNumber: event.prNumber,
@@ -161,6 +131,6 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
   })
 }
 
-async function defaultCreateSdkClient(baseUrl: string): Promise<SdkClient> {
-  return createSdk({ baseUrl, tokenStorage: new FileTokenStorage() }) as SdkClient
+async function defaultCreateBackendClient(baseUrl: string): Promise<BackendClient> {
+  return createBackendClient({ baseUrl, tokenStorage: new FileTokenStorage() })
 }
