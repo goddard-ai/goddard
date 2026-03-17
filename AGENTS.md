@@ -29,3 +29,6 @@ All commits must follow the Conventional Commits standard.
 
 ## Testing the App Package
 We do not want automated tests for our `app/` package, so do not write any.
+
+## `build:types` Script Guidance
+Do not add a `build:types` script to packages that are both private and only export source `*.ts` files.

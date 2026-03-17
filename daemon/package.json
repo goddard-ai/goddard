@@ -14,7 +14,7 @@
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "build": "tree-build && tsdown"
+    "build": "tsdown"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",

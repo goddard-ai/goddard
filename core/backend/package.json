@@ -18,6 +18,7 @@
   "scripts": {
     "start": "node dist/server.mjs",
     "build": "tsdown",
+    "build:types": "tsdown --no-minify --clean --unused",
     "dev": "wrangler dev",
     "deploy": "alchemy deploy",
     "db:generate": "drizzle-kit generate",

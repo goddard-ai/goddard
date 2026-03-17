@@ -16,7 +16,8 @@
     }
   },
   "scripts": {
-    "build": "tree-build && tsdown",
+    "build": "tsdown",
+    "build:types": "tsdown --no-minify --clean --unused",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",

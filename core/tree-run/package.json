@@ -1,0 +1,12 @@
+{
+  "name": "@goddard/tree-run",
+  "version": "0.1.0",
+  "description": "Workspace dependency script runner",
+  "bin": {
+    "tree-run": "main.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build step needed for tree-run'"
+  }
+}

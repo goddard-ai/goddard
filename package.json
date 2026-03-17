@@ -12,29 +12,33 @@
     "core/config",
     "core/tauri-plugin-ipc",
     "core/ipc",
-    "core/tree-build"
+    "core/tree-run"
   ],
   "scripts": {
     "prepare": "simple-git-hooks",
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
+    "build": "turbo run build",
+    "build:types": "turbo run build:types",
     "fmt": "pnpm -r run fmt",
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "turbo run typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
-    "@goddard/tree-build": "workspace:*",
+    "@goddard/tree-run": "workspace:*",
     "@types/node": "^25.3.5",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "radashi": "^12.7.2",
     "simple-git-hooks": "^2.13.1",
     "tsdown": "^0.21.0",
+    "turbo": "^2.5.8",
     "typescript": "^5.9.3",
     "unplugin-raw": "^0.6.4",
+    "unplugin-unused": "^0.5.7",
     "vitest": "^4.0.18"
   },
   "simple-git-hooks": {
@@ -43,6 +47,7 @@
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "onlyBuiltDependencies": [
+      "turbo",
       "better-sqlite3",
       "esbuild",
       "koffi",
