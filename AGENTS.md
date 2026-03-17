@@ -24,6 +24,8 @@ All commits must follow the Conventional Commits standard.
 - Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `build`, `perf`, `revert`
 - Use `!` after type/scope or include a `BREAKING CHANGE:` footer when introducing breaking changes
 - Keep the subject concise and imperative (e.g., `fix(daemon): pass GODDARD_AGENT_BIN_DIR to session server`)
+- Prefer atomic commits with a single clear purpose.
+- Split policy/docs changes from code or test behavior changes unless they are inseparable.
 - Every commit must include a full description in the commit body covering each meaningful change made by that commit
 - The body should use clear bullet points and explain what changed and why (not just restate the subject)
 
