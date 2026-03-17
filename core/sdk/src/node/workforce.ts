@@ -1,22 +1,40 @@
-import { createHash } from "node:crypto"
 import { execFile } from "node:child_process"
+import { createHash } from "node:crypto"
 import { watch as watchFs, type FSWatcher, type Stats } from "node:fs"
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
-import { runAgent, type RunAgentOptions } from "../daemon/session/client.ts"
 import type { AgentSession } from "../daemon/session/client-session.ts"
+import { runAgent, type RunAgentOptions } from "../daemon/session/client.ts"
 
 const execFileAsync = promisify(execFile)
 
+/** The name of the file within a workforce package's .goddard/ directory
+ * that acts as the primary "inbox" for incoming agent requests. */
 const REQUESTS_FILE = "requests.jsonl"
+
+/** The name of the file within a workforce package's .goddard/ directory
+ * where the agent records its own activity or internal feedback. */
 const RESPONSES_FILE = "responses.jsonl"
+
+/** A state file used to track the last processed byte offset and content
+ * hash for the watched JSONL files to ensure idempotent processing. */
 const PROCESSED_AT_FILE = "processed-at.json"
+
+/** The set of files within a .goddard/ directory that the workforce
+ * supervisor monitors for new appends. */
 const WATCHED_FILES = [REQUESTS_FILE, RESPONSES_FILE] as const
+
+/** Common directory names that should be skipped when recursively
+ * discovering packages to avoid performance issues and noise. */
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
+
+/** The duration to wait after a file change is detected before syncing
+ * state, allowing multiple rapid writes to be batched. */
 const WATCH_SYNC_DELAY_MS = 25
 
-// Package metadata discovered from nested package manifests under a repository root.
+// Package metadata discovered from nested package manifests under a
+// repository root.
 export type DiscoveredWorkforcePackage = {
   rootDir: string
   relativeDir: string
@@ -41,13 +59,16 @@ export interface WorkforceProcessedFileState {
   updatedAt: string
 }
 
-// Package-local runtime state stored in `.goddard/processed-at.json`.
+/** Package-local runtime state stored in `.goddard/processed-at.json`. */
 export interface WorkforceProcessedState {
+  /** Schema version for future-proofing the state object format. */
   version: 1
+
+  /** A map of file names to their respective last-processed offset and hash state. */
   files: Partial<Record<WorkforceWatchedFileName, WorkforceProcessedFileState>>
 }
 
-// File names supervised inside each workforce-enabled `.goddard` directory.
+/** File names supervised inside each workforce-enabled `.goddard` directory. */
 export type WorkforceWatchedFileName = (typeof WATCHED_FILES)[number]
 
 // Runtime event stream emitted by the workforce supervisor for host logging.
@@ -86,21 +107,39 @@ export type WorkforceWatchOptions = {
   onEvent?: (event: WorkforceRuntimeEvent) => void
 }
 
-// One append-derived prompt batch associated with a specific watched file.
+/** One append-derived prompt batch associated with a specific watched file. */
 interface WorkforcePromptBatch {
+  /** The name of the file (e.g., requests.jsonl) that triggered this batch. */
   fileName: WorkforceWatchedFileName
+
+  /** The full path to the file that was read. */
   filePath: string
+
+  /** The newly appended UTF-8 content read from the file. */
   content: string
 }
 
-// In-memory watcher runtime for a single package-scoped workforce session.
+/** In-memory watcher runtime for a single package-scoped workforce session. */
 interface WorkforcePackageRuntime {
+  /** The immutable discovery metadata for this package. */
   package: DiscoveredWorkforcePackage
+
+  /** The persistent AI session managing this package's domain. */
   session: AgentSession
+
+  /** The FS watcher instance monitoring changes in the .goddard/ directory. */
   watcher: FSWatcher
+
+  /** A timer handle for debouncing multiple rapid file changes. */
   syncTimer: NodeJS.Timeout | null
+
+  /** Whether the supervisor has stopped this runtime. */
   stopped: boolean
+
+  /** Whether an active prompt call is currently being awaited by this agent. */
   promptActive: boolean
+
+  /** A queue of prompt batches that are pending transmission to the agent. */
   pendingBatches: WorkforcePromptBatch[]
 }
 
@@ -541,13 +580,16 @@ async function startPackageRuntime(
   return runtime
 }
 
+/** A supervisor class that manages multiple workforce agents and their underlying filesystem watches. */
 export class WorkforceSupervisor {
+  /** A collection of active runtimes, one for each discovered workforce package. */
   readonly #runtimes: WorkforcePackageRuntime[]
 
   constructor(runtimes: WorkforcePackageRuntime[]) {
     this.#runtimes = runtimes
   }
 
+  /** Gracefully stops all agent sessions and filesystem watchers. */
   async stop(): Promise<void> {
     await Promise.all(
       this.#runtimes.map(async (runtime) => {
