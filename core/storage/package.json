@@ -26,7 +26,6 @@
   "devDependencies": {
     "@goddard-ai/schema": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.3.5",
-    "@types/uuid": "^11.0.0"
+    "@types/node": "^25.3.5"
   }
 }
