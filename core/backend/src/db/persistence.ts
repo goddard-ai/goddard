@@ -18,7 +18,7 @@ import {
   assertRepo,
   postPrCommentViaApp,
 } from "../api/control-plane.ts"
-import { randomUUID } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import type { Env } from "../env.ts"
 import { hashToInteger } from "../utils.ts"
 
@@ -30,8 +30,8 @@ export class TursoBackendControlPlane implements BackendControlPlane {
   }
 
   async startDeviceFlow(_input: DeviceFlowStart = {}): Promise<DeviceFlowSession> {
-    const deviceCode = `dev_${randomUUID()}`
-    const userCode = randomUUID().slice(0, 8).toUpperCase()
+    const deviceCode = `dev_${randomBytes(32).toString("hex")}`
+    const userCode = randomBytes(4).toString("hex").toUpperCase()
     const expiresIn = 900
 
     // In a real production app, we would store this in Turso or KV.
@@ -51,7 +51,7 @@ export class TursoBackendControlPlane implements BackendControlPlane {
       throw new HttpError(400, "githubUsername is required")
     }
 
-    const token = `tok_${randomUUID()}`
+    const token = `tok_${randomBytes(32).toString("hex")}`
     const githubUserId = hashToInteger(githubUsername)
     const expiresAt = Date.now() + 1000 * 60 * 60 * 24
 
