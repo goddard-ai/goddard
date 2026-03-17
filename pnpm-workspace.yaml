@@ -2,4 +2,4 @@ packages:
   - "app"
   - "core/*"
   - "daemon"
-  - "daemon/*"
+  - "daemon/client"
