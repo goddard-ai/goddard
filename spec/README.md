@@ -22,7 +22,7 @@ Goddard addresses:
 | 2 | Real-time | Repository events stream to desktop workspaces and SDK consumers with low latency. |
 | 3 | Delegated identity | `goddard[bot]` acts on behalf of authenticated developers. |
 | 4 | Autonomous control | Built-in orchestration runs `pi-coding-agent` with safety limits. |
-| 5 | Type safety | APIs and configuration are TypeScript-first with runtime validation. |
+| 5 | Type safety | APIs are TypeScript-first, while configuration remains machine-readable and validated at runtime. |
 | 6 | Operability | Desktop-managed local execution is first-class, while SDK-based hosts and external supervisors remain valid deployment options. |
 | 7 | Edge-native | Backend runs on Workers for global fan-out. |
 
