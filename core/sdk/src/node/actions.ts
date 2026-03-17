@@ -1,10 +1,10 @@
 import type { NewSessionParams, SessionParams } from "@goddard-ai/schema/session-server"
-import { runAgent } from "@goddard-ai/session"
 import { getGoddardGlobalDir } from "@goddard-ai/storage"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
+import { runAgent } from "../daemon/session/client.ts"
 
 export type AgentActionConfig = Omit<Partial<NewSessionParams>, "oneShot" | "initialPrompt">
 
@@ -117,10 +117,9 @@ async function resolveActionFromRoot(
 export function buildActionSessionParams(
   action: ResolvedAgentAction,
   overrides?: AgentActionConfig,
-): SessionParams {
+): SessionParams & { oneShot: true } {
   return {
     agent: DEFAULT_AGENT,
-    systemPrompt: "",
     cwd: process.cwd(),
     mcpServers: [],
     ...action.config,

@@ -9,6 +9,16 @@
       "import": "./dist/index.mjs",
       "default": "./src/index.ts"
     },
+    "./daemon": {
+      "types": "./dist/daemon/index.d.mts",
+      "import": "./dist/daemon/index.mjs",
+      "default": "./src/daemon/index.ts"
+    },
+    "./loop": {
+      "types": "./dist/loop/index.d.mts",
+      "import": "./dist/loop/index.mjs",
+      "default": "./src/loop/index.ts"
+    },
     "./node": {
       "types": "./dist/node/index.d.mts",
       "import": "./dist/node/index.mjs",
@@ -23,18 +33,22 @@
     "build": "tree-build && tsdown"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/config": "workspace:*",
-    "@goddard-ai/loop": "workspace:*",
-    "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/daemon-client": "workspace:*",
+    "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
+    "@goddard-ai/storage": "workspace:*",
+    "cron-parser": "^5.5.0",
+    "exit-hook": "^4.0.0",
     "@libsql/client": "^0.17.0",
     "drizzle-orm": "^0.45.1",
+    "radashi": "^12.7.2",
     "rouzer": "^1.5.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@goddard-ai/schema": "workspace:^",
-    "@goddard-ai/storage": "workspace:^",
     "drizzle-kit": "^0.31.9"
   }
 }

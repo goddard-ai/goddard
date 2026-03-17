@@ -5,14 +5,12 @@
   "workspaces": [
     "core/backend",
     "daemon",
+    "daemon/*",
     "core/sdk",
-    "core/session",
-    "core/session/*",
     "core/schema",
     "core/storage",
     "core/config",
     "core/tauri-plugin-ipc",
-    "core/loop",
     "core/ipc",
     "core/tree-build"
   ],

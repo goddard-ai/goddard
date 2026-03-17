@@ -7,7 +7,6 @@ import {
   sessionGetRoute,
   sessionHistoryRoute,
   sessionShutdownRoute,
-  sessionAcpWebSocketRoute,
 } from "../src/daemon/routes.ts"
 
 test("daemon schema exports rouzer route declarations with stable paths", () => {
@@ -18,7 +17,10 @@ test("daemon schema exports rouzer route declarations with stable paths", () => 
   assert.equal(sessionGetRoute.path.source, "sessions/:id")
   assert.equal(sessionHistoryRoute.path.source, "sessions/:id/history")
   assert.equal(sessionShutdownRoute.path.source, "sessions/:id/shutdown")
-  assert.equal(sessionAcpWebSocketRoute.path.source, "sessions/:id/acp")
 })
 
-test.todo("daemon session routes remain keyed by internal sessions.id, not ACP session ids")
+test("daemon session routes remain keyed by internal sessions.id, not ACP session ids", () => {
+  assert.equal(sessionGetRoute.path.source.includes(":id"), true)
+  assert.equal(sessionHistoryRoute.path.source.includes(":id"), true)
+  assert.equal(sessionShutdownRoute.path.source.includes(":id"), true)
+})

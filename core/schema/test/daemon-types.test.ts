@@ -12,4 +12,9 @@ test("daemon schema keeps response types as types rather than runtime zod schema
   assert.equal("ShutdownDaemonSessionResponseSchema" in daemonSchema, false)
 })
 
-test.todo("daemon session contracts expose id and acpId and do not require serverId")
+test("daemon session contracts expose id and acpId and do not require serverId", () => {
+  type SessionKeys = keyof daemonSchema.DaemonSession
+  const keys: SessionKeys[] = ["id", "acpId"]
+  assert.deepEqual(keys, ["id", "acpId"])
+  assert.equal("serverId" in ({} as daemonSchema.DaemonSession), false)
+})

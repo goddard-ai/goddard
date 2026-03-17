@@ -1,6 +1,6 @@
 import { InMemoryTokenStorage } from "@goddard-ai/storage"
 import { expect, test } from "vitest"
-import { GoddardSdk } from "../src/index.ts"
+import { GoddardSdk } from "../src/sdk.ts"
 
 test("device flow stores token and whoami uses auth header", async () => {
   const storage = new InMemoryTokenStorage()

@@ -15,8 +15,8 @@ export namespace SessionStorage {
     return result[0]
   }
 
-  export async function getByServerId(serverId: string) {
-    const result = await db.select().from(sessions).where(eq(sessions.serverId, serverId))
+  export async function getByAcpId(acpId: string) {
+    const result = await db.select().from(sessions).where(eq(sessions.acpId, acpId))
     return result[0]
   }
 

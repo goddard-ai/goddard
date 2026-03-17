@@ -17,12 +17,12 @@
     "build": "tree-build && tsdown"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/backend": "workspace:*",
+    "@goddard-ai/daemon-client": "workspace:*",
+    "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
-    "@goddard-ai/session": "workspace:*",
     "@goddard-ai/storage": "workspace:*",
-    "cmd-ts": "^0.15.0",
-    "rouzer": "^1.5.0",
-    "srvx": "^0.8.16"
+    "cmd-ts": "^0.15.0"
   }
 }

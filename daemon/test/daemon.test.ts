@@ -1,21 +1,9 @@
-import { afterEach, test, vi } from "vitest"
+import { afterEach, test } from "vitest"
 import * as assert from "node:assert/strict"
 import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
-
-const { createSessionPermissionsMock, revokeSessionPermissionsMock } = vi.hoisted(() => ({
-  createSessionPermissionsMock: vi.fn(async () => undefined),
-  revokeSessionPermissionsMock: vi.fn(async () => undefined),
-}))
-
-vi.mock("@goddard-ai/storage/session-permissions", () => ({
-  SessionPermissionsStorage: {
-    create: createSessionPermissionsMock,
-    revoke: revokeSessionPermissionsMock,
-  },
-}))
 
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {
@@ -28,9 +16,6 @@ import {
 const cleanup: Array<() => Promise<void>> = []
 
 afterEach(async () => {
-  createSessionPermissionsMock.mockClear()
-  revokeSessionPermissionsMock.mockClear()
-
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
@@ -63,7 +48,7 @@ test("daemon package ships a goddard wrapper in agent-bin", async () => {
   assert.equal(stat.isSymbolicLink() || stat.isFile(), true)
 })
 
-test("daemon run subscribes to repo, starts IPC, and passes daemon context into one-shot runs", async () => {
+test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-shot runs", async () => {
   const subscription = new MockStreamSubscription()
   let subCalls = 0
 
@@ -125,26 +110,11 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon context into 
   assert.equal(runOneShotCalls.length, 1)
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
   assert.equal(
-    runOneShotCalls[0].env?.GODDARD_DAEMON_URL,
+    runOneShotCalls[0].daemonUrl,
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
   )
-  assert.equal(typeof runOneShotCalls[0].env?.GODDARD_SESSION_TOKEN, "string")
   assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
   assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
-  assert.equal(createSessionPermissionsMock.mock.calls.length, 1)
-  assert.equal(revokeSessionPermissionsMock.mock.calls.length, 1)
-  assert.equal(
-    createSessionPermissionsMock.mock.calls[0]?.[0]?.allowedPrNumbers?.[0],
-    123,
-  )
-  assert.equal(
-    createSessionPermissionsMock.mock.calls[0]?.[0]?.token,
-    runOneShotCalls[0].env?.GODDARD_SESSION_TOKEN,
-  )
-  assert.equal(
-    revokeSessionPermissionsMock.mock.calls[0]?.[0],
-    createSessionPermissionsMock.mock.calls[0]?.[0]?.sessionId,
-  )
 })
 
 test("daemon URL round-trips the socket path", () => {

@@ -4,7 +4,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, test, vi } from "vitest"
 
-vi.mock("@goddard-ai/session", () => ({
+vi.mock("../src/daemon/index.ts", () => ({
   runAgent: vi.fn(),
 }))
 

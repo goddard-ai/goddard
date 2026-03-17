@@ -1,12 +1,16 @@
 import { beforeEach, expect, test, vi } from "vitest"
 
-const { runAgentMock, spawnSyncMock } = vi.hoisted(() => ({
-  runAgentMock: vi.fn(async () => null),
+const { createDaemonIpcClientMock, sendMock, spawnSyncMock } = vi.hoisted(() => ({
+  sendMock: vi.fn(async () => ({ session: { id: "session-1" } })),
+  createDaemonIpcClientMock: vi.fn(() => ({
+    send: sendMock,
+  })),
   spawnSyncMock: vi.fn(() => ({ status: 0 })),
 }))
 
-vi.mock("@goddard-ai/session", () => ({
-  runAgent: runAgentMock,
+vi.mock("@goddard-ai/daemon-client", () => ({
+  createDaemonIpcClient: createDaemonIpcClientMock,
+  readSocketPathFromDaemonUrl: vi.fn((value: string) => value),
 }))
 
 vi.mock("node:child_process", () => ({
@@ -16,11 +20,12 @@ vi.mock("node:child_process", () => ({
 import { runOneShot } from "../src/one-shot.ts"
 
 beforeEach(() => {
-  runAgentMock.mockClear()
+  sendMock.mockClear()
+  createDaemonIpcClientMock.mockClear()
   spawnSyncMock.mockClear()
 })
 
-test("runOneShot prepends daemon agent-bin to PATH before calling session runAgent", async () => {
+test("runOneShot creates a daemon-hosted one-shot session over IPC", async () => {
   const exitCode = await runOneShot({
     event: {
       type: "comment",
@@ -34,23 +39,24 @@ test("runOneShot prepends daemon agent-bin to PATH before calling session runAge
     },
     prompt: "reply to feedback",
     projectDir: "/tmp/project",
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
     env: {
       PATH: "/usr/bin:/bin",
-      GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-      GODDARD_SESSION_TOKEN: "tok_session",
     },
   })
 
   expect(exitCode).toBe(0)
-  expect(runAgentMock).toHaveBeenCalledTimes(1)
+  expect(createDaemonIpcClientMock).toHaveBeenCalledTimes(1)
+  expect(sendMock).toHaveBeenCalledTimes(1)
 
-  const params = runAgentMock.mock.calls[0]?.[0]
-  expect(params.env.GODDARD_DAEMON_URL).toBe("http://unix/?socketPath=%2Ftmp%2Fdaemon.sock")
-  expect(params.env.GODDARD_SESSION_TOKEN).toBe("tok_session")
+  const [name, params] = sendMock.mock.calls[0] ?? []
+  expect(name).toBe("sessionCreate")
+  expect(params.agent).toBe("pi")
+  expect(params.oneShot).toBe(true)
+  expect(params.initialPrompt).toBe("reply to feedback")
+  expect(params.metadata).toEqual({ repository: "acme/widgets", prNumber: 12 })
   expect(params.env.PATH).toContain("/usr/bin:/bin")
-  expect(params.env.PATH).toContain("/daemon/agent-bin")
-  expect(params.env.GODDARD_AGENT_BIN_DIR).toBeUndefined()
-  expect(params.prompts).toBeUndefined()
+  expect(params.env.PATH).toContain("agent-bin")
   expect(params.systemPrompt).toContain("goddard")
   expect(params.systemPrompt).toContain("submit-pr")
 })
