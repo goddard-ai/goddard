@@ -13,7 +13,15 @@
   --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.12);
 
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
 }
 
 * {
@@ -36,7 +44,11 @@
   box-sizing: border-box;
 }
 
-h1, h2, h3, h4, h5 {
+h1,
+h2,
+h3,
+h4,
+h5 {
   color: var(--text-primary);
   font-weight: 600;
   margin-top: 0;
