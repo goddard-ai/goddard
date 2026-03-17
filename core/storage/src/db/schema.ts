@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { SessionStatus } from "@goddard-ai/schema/db"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { uuidv7 } from "uuidv7"
 
 export const sessions = sqliteTable("sessions", {
   id: text().primaryKey(),
@@ -39,4 +40,15 @@ export const loops = sqliteTable("loops", {
   updatedAt: integer({ mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
+})
+
+export const artifacts = sqliteTable("artifacts", {
+  id: text()
+    .primaryKey()
+    .$defaultFn(() => uuidv7()),
+  sessionId: text()
+    .notNull()
+    .references(() => sessions.id),
+  type: text().notNull(),
+  metadata: text({ mode: "json" }).$type<Record<string, any>>(),
 })
