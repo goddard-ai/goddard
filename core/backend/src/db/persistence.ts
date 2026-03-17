@@ -192,29 +192,40 @@ export class TursoBackendControlPlane implements BackendControlPlane {
     assertRepo(event.owner, event.repo)
 
     const createdAt = new Date().toISOString()
-    const mapped: RepoEvent =
-      event.type === "issue_comment"
-        ? {
-            type: "comment",
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-            author: event.author,
-            body: event.body,
-            reactionAdded: "eyes",
-            createdAt,
-          }
-        : {
-            type: "review",
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-            author: event.author,
-            state: event.state,
-            body: event.body,
-            reactionAdded: "eyes",
-            createdAt,
-          }
+    let mapped: RepoEvent
+
+    if (event.type === "issue_comment") {
+      mapped = {
+        type: "comment",
+        owner: event.owner,
+        repo: event.repo,
+        prNumber: event.prNumber,
+        author: event.author,
+        body: event.body,
+        reactionAdded: "eyes",
+        createdAt,
+      }
+    } else if (event.type === "pull_request") {
+      mapped = {
+        type: "pr.closed",
+        owner: event.owner,
+        repo: event.repo,
+        prNumber: event.prNumber,
+        merged: event.merged,
+      }
+    } else {
+      mapped = {
+        type: "review",
+        owner: event.owner,
+        repo: event.repo,
+        prNumber: event.prNumber,
+        author: event.author,
+        state: event.state,
+        body: event.body,
+        reactionAdded: "eyes",
+        createdAt,
+      }
+    }
 
     return mapped
   }

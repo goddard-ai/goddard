@@ -53,7 +53,7 @@ function buildBackgroundSystemPrompt(): string {
   })
 }
 
-export async function runOneShot(input: OneShotInput): Promise<number> {
+export async function runOneShot(input: OneShotInput): Promise<string | null> {
   const branchName = `pr-${input.event.prNumber}`
   const agentsDir = `${input.projectDir}/.goddard-agents`
   const worktreeDir = `${agentsDir}/${branchName}-${Date.now()}`
@@ -86,11 +86,11 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       if (cloneResult.stderr) console.error(`Error output: ${cloneResult.stderr.trim()}`)
       if (cloneResult.error) console.error(`System error: ${cloneResult.error.message}`)
       console.error("Cannot proceed with one-shot pi session. Aborting.\n")
-      return 1
+      return null
     }
   } catch {
     console.error(`\n[ERROR] Exception thrown while creating agent workspace at ${worktreeDir}:`)
-    return 1
+    return null
   }
 
   try {
@@ -109,7 +109,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
   try {
     readSocketPathFromDaemonUrl(input.daemonUrl)
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
-    await client.send("sessionCreate", {
+    const session = await client.send("sessionCreate", {
       agent: "pi",
       cwd: worktreeDir,
       mcpServers: [],
@@ -122,11 +122,11 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       },
       env: buildOneShotEnv(input.env),
     })
-    return 0
+    return session.id
   } catch (error) {
     console.error(
       `\n[ERROR] one-shot session failed: ${error instanceof Error ? error.message : String(error)}`,
     )
-    return 1
+    return null
   }
 }
