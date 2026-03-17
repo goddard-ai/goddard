@@ -31,7 +31,9 @@ export namespace SessionStateStorage {
     const directory = getSessionStateDir()
     try {
       const entries = await readDirectory(directory)
-      const records = await Promise.all(entries.map((entry) => readStateFile(join(directory, entry))))
+      const records = await Promise.all(
+        entries.map((entry) => readStateFile(join(directory, entry))),
+      )
       return records.filter((record): record is SessionStateRecord => record !== null)
     } catch {
       return []

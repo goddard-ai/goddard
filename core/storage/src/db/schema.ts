@@ -20,7 +20,11 @@ export const sessions = sqliteTable("sessions", {
   blockedReason: text(),
   initiative: text(),
   lastAgentMessage: text(),
-  metadata: text({ mode: "json" }).$type<{ repository?: string; prNumber?: number; [key: string]: any }>(),
+  metadata: text({ mode: "json" }).$type<{
+    repository?: string
+    prNumber?: number
+    [key: string]: any
+  }>(),
 })
 
 export const loops = sqliteTable("loops", {

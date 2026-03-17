@@ -23,10 +23,7 @@ export const Models = {
 
 type ValueOf<T> = T[keyof T]
 
-export type Model =
-  | ValueOf<typeof Models.Anthropic>
-  | ValueOf<typeof Models.OpenAi>
-  | (string & {})
+export type Model = ValueOf<typeof Models.Anthropic> | ValueOf<typeof Models.OpenAi> | (string & {})
 
 // ---------------------------------------------------------------------------
 // Primitive schemas

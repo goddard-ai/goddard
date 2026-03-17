@@ -123,9 +123,7 @@ function defaultCreateClient(input: { socketPath: string }): DaemonIpcClient {
 }
 
 function hasFactoryOptions(
-  input:
-    | DaemonClientEnv
-    | { env?: DaemonClientEnv; createClient?: DaemonIpcClientFactory },
+  input: DaemonClientEnv | { env?: DaemonClientEnv; createClient?: DaemonIpcClientFactory },
 ): input is { env?: DaemonClientEnv; createClient?: DaemonIpcClientFactory } {
   return "createClient" in input || "env" in input
 }

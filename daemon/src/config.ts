@@ -25,13 +25,15 @@ export function resolveDaemonRuntimeConfig(
   input: DaemonRuntimeConfigInput = {},
 ): ResolvedDaemonRuntimeConfig {
   const env = input.env ?? process.env
-  const socketPath = input.socketPath ?? env.GODDARD_DAEMON_SOCKET_PATH ?? getDefaultDaemonSocketPath()
+  const socketPath =
+    input.socketPath ?? env.GODDARD_DAEMON_SOCKET_PATH ?? getDefaultDaemonSocketPath()
 
   return {
     baseUrl: input.baseUrl || env.GODDARD_BASE_URL || "http://127.0.0.1:8787",
     socketPath,
     daemonUrl: createDaemonUrl(socketPath),
-    agentBinDir: input.agentBinDir ?? env.GODDARD_AGENT_BIN_DIR ?? join(import.meta.dirname, "../agent-bin"),
+    agentBinDir:
+      input.agentBinDir ?? env.GODDARD_AGENT_BIN_DIR ?? join(import.meta.dirname, "../agent-bin"),
   }
 }
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-const { createDaemonIpcClientFromEnvMock, unsubscribeMock, sendMock, subscribeMock } =
-  vi.hoisted(() => {
+const { createDaemonIpcClientFromEnvMock, unsubscribeMock, sendMock, subscribeMock } = vi.hoisted(
+  () => {
     const sendMock = vi.fn()
     const unsubscribeMock = vi.fn()
     const subscribeMock = vi.fn(async () => unsubscribeMock)
@@ -17,7 +17,8 @@ const { createDaemonIpcClientFromEnvMock, unsubscribeMock, sendMock, subscribeMo
       clientMock,
       createDaemonIpcClientFromEnvMock: vi.fn(() => ({ client: clientMock })),
     }
-  })
+  },
+)
 
 vi.mock("@goddard-ai/daemon-client", () => ({
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,

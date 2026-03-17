@@ -457,7 +457,11 @@ export function createSessionManager(input: {
           })
         }
 
-        if (session.status === "active" || session.status === "blocked" || session.status === "idle") {
+        if (
+          session.status === "active" ||
+          session.status === "blocked" ||
+          session.status === "idle"
+        ) {
           await SessionStorage.update(session.id, {
             status: "error",
             errorMessage: "Session interrupted when the previous daemon exited unexpectedly.",
@@ -551,7 +555,9 @@ export function createSessionManager(input: {
       }
 
       active.subscription = connection.subscribe(async (message) => {
-        if (isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)) {
+        if (
+          isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
+        ) {
           active.lastPermissionRequest = message
         } else if ("id" in message && message.id != null) {
           const clientRequest = active.clientRequests.get(message.id)

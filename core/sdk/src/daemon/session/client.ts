@@ -82,7 +82,10 @@ function decodeStreamChunk(chunk: unknown, decoder: TextDecoder): string {
   throw new Error(`Unsupported ACP transport chunk: ${String(chunk)}`)
 }
 
-async function createMessageOutputTransport(client: DaemonIpcClient, id: string): Promise<{
+async function createMessageOutputTransport(
+  client: DaemonIpcClient,
+  id: string,
+): Promise<{
   readable: ReadableStream<Uint8Array>
   close: () => Promise<void>
 }> {
@@ -199,10 +202,7 @@ export async function runAgent(
           // no-op by default
         },
       },
-    acp.ndJsonStream(
-      agentInput,
-      agentOutput.readable,
-    ),
+    acp.ndJsonStream(agentInput, agentOutput.readable),
   )
 
   return new AgentSession(

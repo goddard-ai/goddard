@@ -47,7 +47,10 @@ describe("Worktree", () => {
     vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
       if (cmd === "wt" && args?.[0] === "--version")
         return { status: 1, stdout: "", error: undefined } as any
-      if (cmd === "cp" && (args?.[0] === "-cR" || args?.[0] === "--reflink=auto" || args?.[0] === "-R"))
+      if (
+        cmd === "cp" &&
+        (args?.[0] === "-cR" || args?.[0] === "--reflink=auto" || args?.[0] === "-R")
+      )
         return { status: 1, stdout: "", error: undefined } as any
       if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "add")
         return { status: 0, stdout: "", error: undefined } as any
@@ -67,17 +70,17 @@ describe("Worktree", () => {
     expect(childProcess.spawnSync).toHaveBeenCalledWith(
       "git",
       ["worktree", "add", "--detach", result.worktreeDir],
-      expect.objectContaining({ cwd: "/test/dir" })
+      expect.objectContaining({ cwd: "/test/dir" }),
     )
   })
 
   it("should fallback to basic cp if both copy-on-write cp and git worktree fail", () => {
-    let cpCallCount = 0;
+    let cpCallCount = 0
     vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
       if (cmd === "wt" && args?.[0] === "--version")
         return { status: 1, stdout: "", error: undefined } as any
       if (cmd === "cp") {
-        cpCallCount++;
+        cpCallCount++
         if (cpCallCount === 1) {
           return { status: 1, stdout: "", error: undefined } as any
         }
@@ -102,14 +105,14 @@ describe("Worktree", () => {
     expect(childProcess.spawnSync).toHaveBeenCalledWith(
       "git",
       ["worktree", "add", "--detach", result.worktreeDir],
-      expect.objectContaining({ cwd: "/test/dir" })
+      expect.objectContaining({ cwd: "/test/dir" }),
     )
 
     // Verify it fell back to basic cp
     expect(childProcess.spawnSync).toHaveBeenCalledWith(
       "cp",
       ["-R", "/test/dir/", result.worktreeDir],
-      expect.objectContaining({ encoding: "utf8" })
+      expect.objectContaining({ encoding: "utf8" }),
     )
   })
 

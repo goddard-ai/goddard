@@ -143,10 +143,7 @@ afterEach(async () => {
 test("app daemon session options create/connect/send/history/shutdown through the Tauri IPC bridge", async () => {
   const bridgeListeners = new Set<(event: { payload: unknown }) => void>()
   const subscriptions = new Map<string, () => Promise<void> | void>()
-  const clients = new Map<
-    string,
-    ReturnType<typeof createNodeClient<typeof daemonIpcSchema>>
-  >()
+  const clients = new Map<string, ReturnType<typeof createNodeClient<typeof daemonIpcSchema>>>()
   let nextSubscriptionId = 0
 
   vi.doMock("@tauri-apps/api/event", () => ({

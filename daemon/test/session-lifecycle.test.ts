@@ -440,7 +440,10 @@ test("abnormal agent exit invalidates reconnects and repeated shutdowns are harm
   assert.match(session.session.errorMessage ?? "", /Exited with code 7/i)
 
   const diagnostics = await client.send("sessionDiagnostics", { id: created.session.id })
-  assert.equal(diagnostics.events.some((event) => event.type === "agent_process_exit"), true)
+  assert.equal(
+    diagnostics.events.some((event) => event.type === "agent_process_exit"),
+    true,
+  )
 
   assert.equal((await client.send("sessionShutdown", { id: created.session.id })).success, false)
   assert.equal((await client.send("sessionShutdown", { id: created.session.id })).success, false)

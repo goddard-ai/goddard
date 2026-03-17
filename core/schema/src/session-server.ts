@@ -46,4 +46,3 @@ export type SessionParams =
         | { initialPrompt?: string | acp.ContentBlock[]; oneShot?: undefined }
         | { initialPrompt: string | acp.ContentBlock[]; oneShot: true }
       ))
-
