@@ -9,7 +9,7 @@ import type { SessionStatus } from "@goddard-ai/schema/db"
 import type { AgentDistribution } from "@goddard-ai/schema/session-server"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { SessionStorage, type SQLSessionUpdate } from "@goddard-ai/storage"
-import { randomUUID } from "node:crypto"
+import { randomUUID, randomBytes } from "node:crypto"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
@@ -329,7 +329,7 @@ export function createSessionManager(input: {
 
   async function createSession(params: CreateDaemonSessionRequest): Promise<DaemonSession> {
     const id = randomUUID()
-    const token = randomUUID()
+    const token = randomBytes(32).toString("hex")
     const scope = parseRepoScope(params.metadata)
 
     await SessionPermissionsStorage.create({
