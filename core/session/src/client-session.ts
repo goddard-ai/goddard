@@ -1,101 +1,49 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { SessionStorage } from "@goddard-ai/storage"
-import { ChildProcess } from "node:child_process"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { createNodeClient } from "@goddard-ai/ipc"
 
-type ClosableSocket = {
-  close: () => void
-}
-
-/**
- * Client-side handle for a running ACP agent session.
- */
 export class AgentSession {
-  /** Stable identifier for this ACP session instance. */
   public readonly sessionId: string
 
-  /** Active ACP transport used for prompt/cancel RPCs. */
+  private readonly acpSessionId: string
   private readonly acpClient: acp.ClientSideConnection
-
-  /** Base HTTP address for session-scoped endpoints (history/shutdown). */
-  private readonly serverAddress: string
-
-  /** Underlying websocket connection backing the ACP transport. */
-  private readonly ws: ClosableSocket
-
-  /** Spawned local ACP server process, when this session owns one. */
-  private readonly subprocess: ChildProcess | undefined
+  private readonly daemonClient: ReturnType<typeof createNodeClient<typeof daemonIpcSchema>>
+  private readonly closeStream: () => void
 
   constructor(
     sessionId: string,
+    acpSessionId: string,
     acpClient: acp.ClientSideConnection,
-    serverAddress: string,
-    ws: ClosableSocket,
-    subprocess: ChildProcess | undefined,
+    daemonClient: ReturnType<typeof createNodeClient<typeof daemonIpcSchema>>,
+    closeStream: () => void,
   ) {
     this.sessionId = sessionId
+    this.acpSessionId = acpSessionId
     this.acpClient = acpClient
-    this.serverAddress = serverAddress
-    this.ws = ws
-    this.subprocess = subprocess
+    this.daemonClient = daemonClient
+    this.closeStream = closeStream
   }
 
-  /**
-   * Sends a user prompt to the active session.
-   *
-   * Accepts either a plain-text string or pre-built ACP content blocks.
-   */
   async prompt(userPrompt: string | acp.ContentBlock[]) {
     return this.acpClient.prompt({
-      sessionId: this.sessionId,
+      sessionId: this.acpSessionId,
       prompt: typeof userPrompt === "string" ? [{ type: "text", text: userPrompt }] : userPrompt,
     })
   }
 
-  /** Requests cancellation of the currently running agent operation. */
   async cancel() {
-    return this.acpClient.cancel({ sessionId: this.sessionId })
+    return this.acpClient.cancel({ sessionId: this.acpSessionId })
   }
 
-  /**
-   * Fetches current conversation history from the local session server.
-   *
-   * Returns an empty array if history cannot be retrieved.
-   */
   async getHistory(): Promise<acp.AnyMessage[]> {
-    const res = await fetch(`${this.serverAddress}/history`)
-    if (res.ok) {
-      return res.json()
-    }
-    return []
+    const response = await this.daemonClient.send("sessionHistory", {
+      id: this.sessionId,
+    })
+    return response.history
   }
 
-  /**
-   * Fully terminates the session connection and attempts server shutdown.
-   *
-   * If shutdown is unreachable, this still kills the owned subprocess.
-   * If this client did not spawn the subprocess, it falls back to the
-   * persisted session server PID and sends SIGTERM directly.
-   */
   async stop() {
-    this.ws.close()
-    try {
-      await fetch(`${this.serverAddress}/shutdown`, { method: "POST" })
-    } catch {
-      // no-op
-    }
-
-    if (this.subprocess) {
-      this.subprocess.kill()
-      return
-    }
-
-    const session = await SessionStorage.get(this.sessionId)
-    if (typeof session?.serverPid === "number") {
-      try {
-        process.kill(session.serverPid, "SIGTERM")
-      } catch {
-        // no-op
-      }
-    }
+    this.closeStream()
+    await this.daemonClient.send("sessionShutdown", { id: this.sessionId }).catch(() => {})
   }
 }

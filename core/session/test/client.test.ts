@@ -1,56 +1,27 @@
-import { describe, expect, test, vi } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 
-const {
-  clientConnectionArgs,
-  mockReconnectSockets,
-  sessionStorageGet,
-  wsConstructor,
-} = vi.hoisted(() => ({
-  clientConnectionArgs: [] as any[],
-  mockReconnectSockets: [] as any[],
-  sessionStorageGet: vi.fn(async () => ({ serverAddress: "http://localhost:3001" })),
-  wsConstructor: class MockNodeWebSocket {},
-}))
-
-vi.mock("@goddard-ai/storage", () => ({
-  SessionStorage: {
-    get: sessionStorageGet,
-  },
-}))
-
-vi.mock("ws", () => ({
-  default: wsConstructor,
-}))
-
-vi.mock("reconnecting-websocket", () => ({
-  default: class MockReconnectingWebSocket {
-    url: string
-    options: Record<string, unknown>
-    listeners = new Map<string, Set<(event: any) => void>>()
-    close = vi.fn()
-    send = vi.fn()
-
-    constructor(url: string, _protocols: string[], options: Record<string, unknown>) {
-      this.url = url
-      this.options = options
-      mockReconnectSockets.push(this)
-      queueMicrotask(() => this.dispatch("open", { type: "open" }))
+const { createDaemonIpcClientMock, unsubscribeMock, sendMock, subscribeMock } = vi.hoisted(
+  () => {
+    const sendMock = vi.fn()
+    const unsubscribeMock = vi.fn()
+    const subscribeMock = vi.fn(async () => unsubscribeMock)
+    const clientMock = {
+      send: sendMock,
+      subscribe: subscribeMock,
     }
 
-    addEventListener(type: string, listener: (event: any) => void) {
-      const listeners = this.listeners.get(type) ?? new Set()
-      listeners.add(listener)
-      this.listeners.set(type, listeners)
-    }
-
-    removeEventListener(type: string, listener: (event: any) => void) {
-      this.listeners.get(type)?.delete(listener)
-    }
-
-    dispatch(type: string, event: any) {
-      this.listeners.get(type)?.forEach((listener) => listener(event))
+    return {
+      sendMock,
+      subscribeMock,
+      unsubscribeMock,
+      clientMock,
+      createDaemonIpcClientMock: vi.fn(() => ({ client: clientMock })),
     }
   },
+)
+
+vi.mock("../src/daemon-ipc.js", () => ({
+  createDaemonIpcClient: createDaemonIpcClientMock,
 }))
 
 vi.mock("@agentclientprotocol/sdk", () => ({
@@ -61,23 +32,90 @@ vi.mock("@agentclientprotocol/sdk", () => ({
   ClientSideConnection: class MockClientSideConnection {
     prompt = vi.fn()
     cancel = vi.fn()
-
-    constructor(...args: any[]) {
-      clientConnectionArgs.push(args)
-    }
   },
 }))
 
 describe("runAgent", () => {
-  test("uses reconnecting-websocket with the node ws constructor", async () => {
+  beforeEach(() => {
+    sendMock.mockReset()
+    subscribeMock.mockClear()
+    unsubscribeMock.mockClear()
+    createDaemonIpcClientMock.mockClear()
+  })
+
+  test("creates one-shot daemon sessions and returns null", async () => {
+    sendMock.mockResolvedValueOnce({
+      session: {
+        id: "daemon-session-1",
+        acpId: "acp-session-1",
+      },
+    })
+
     const { runAgent } = await import("../src/client.js")
 
-    await runAgent({ sessionId: "session-1", agentName: "demo-agent" } as any, {} as any)
+    await expect(
+      runAgent({
+        agent: "pi",
+        cwd: "/tmp/project",
+        mcpServers: [],
+        systemPrompt: "Follow the spec.",
+        initialPrompt: "Ship it",
+        oneShot: true,
+      }),
+    ).resolves.toBeNull()
 
-    expect(sessionStorageGet).toHaveBeenCalledWith("session-1")
-    expect(mockReconnectSockets).toHaveLength(1)
-    expect(mockReconnectSockets[0].url).toBe("ws://localhost:3001/acp")
-    expect(mockReconnectSockets[0].options.WebSocket).toBe(wsConstructor)
-    expect(clientConnectionArgs).toHaveLength(1)
+    expect(sendMock).toHaveBeenCalledWith("sessionCreate", {
+      agent: "pi",
+      cwd: "/tmp/project",
+      mcpServers: [],
+      systemPrompt: "Follow the spec.",
+      env: undefined,
+      metadata: undefined,
+      initialPrompt: "Ship it",
+      oneShot: true,
+    })
+    expect(subscribeMock).not.toHaveBeenCalled()
+  })
+
+  test("connects to daemon-hosted sessions and delegates history/shutdown over IPC", async () => {
+    sendMock
+      .mockResolvedValueOnce({
+        session: {
+          id: "daemon-session-2",
+          acpId: "acp-session-2",
+        },
+      })
+      .mockResolvedValueOnce({
+        id: "daemon-session-2",
+        acpId: "acp-session-2",
+        history: [{ jsonrpc: "2.0", method: "session/update", params: {} }],
+      })
+      .mockResolvedValueOnce({
+        id: "daemon-session-2",
+        success: true,
+      })
+
+    const { runAgent } = await import("../src/client.js")
+
+    const session = await runAgent({
+      sessionId: "daemon-session-2",
+      agent: "pi",
+      cwd: "/tmp/project",
+      mcpServers: [],
+      systemPrompt: "Follow the spec.",
+    })
+
+    expect(session?.sessionId).toBe("daemon-session-2")
+    await expect(session?.getHistory()).resolves.toEqual([
+      { jsonrpc: "2.0", method: "session/update", params: {} },
+    ])
+
+    await session?.stop()
+
+    expect(sendMock).toHaveBeenNthCalledWith(1, "sessionConnect", { id: "daemon-session-2" })
+    expect(sendMock).toHaveBeenNthCalledWith(2, "sessionHistory", { id: "daemon-session-2" })
+    expect(sendMock).toHaveBeenNthCalledWith(3, "sessionShutdown", { id: "daemon-session-2" })
+    expect(subscribeMock).toHaveBeenCalledTimes(1)
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -124,7 +124,7 @@ test("buildActionSessionParams lets action config override defaults", () => {
   })
 
   assert.equal(params.cwd, "/tmp/action-cwd")
-  assert.equal(params.oneShot, false)
+  assert.equal("oneShot" in params ? params.oneShot : undefined, undefined)
   assert.equal(
     params.systemPrompt,
     ["Follow the security checklist.", "Review the pull request."].join("\n\n"),

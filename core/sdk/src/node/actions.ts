@@ -12,7 +12,9 @@ export type ResolvedAgentAction = {
   path: string
 }
 
-export type RunAgentActionParams = Partial<NewSessionParams> & { initialPrompt: {} }
+export type RunAgentActionParams = Partial<NewSessionParams> & {
+  initialPrompt: NonNullable<NewSessionParams["initialPrompt"]>
+}
 
 const DEFAULT_AGENT = { type: "npx", package: "@mariozechner/pi-coding-agent" } as const
 
@@ -129,6 +131,7 @@ export function buildActionSessionParams(
 
   return {
     ...mergedConfig,
+    oneShot: mergedConfig.oneShot === true ? true : undefined,
     systemPrompt: [mergedConfig.systemPrompt, action.prompt].filter(Boolean).join("\n\n"),
   }
 }

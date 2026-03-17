@@ -1,7 +1,10 @@
+import * as acp from "@agentclientprotocol/sdk"
+import { createServer } from "@goddard-ai/ipc"
+import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
-import { serve } from "srvx"
-import { requireAuthorizedSession } from "./auth.ts"
-import { HttpError } from "./errors.ts"
+import { once } from "node:events"
+import { createSessionManager } from "../session/manager.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import {
   cleanupSocketPath,
@@ -13,15 +16,7 @@ import type {
   BackendPrClient,
   DaemonServer,
   DaemonServerDeps,
-  ReplyPrDaemonRequest,
-  SubmitPrDaemonRequest,
 } from "./types.ts"
-import {
-  optionalNumber,
-  optionalOptionalString,
-  optionalString,
-  requiredString,
-} from "./validation.ts"
 
 export async function startDaemonServer(
   client: BackendPrClient,
@@ -29,6 +24,7 @@ export async function startDaemonServer(
   deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
   const socketPath = options.socketPath ?? getDefaultDaemonSocketPath()
+  const daemonUrl = createDaemonUrl(socketPath)
   const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
   const getSessionByToken = deps.getSessionByToken ?? SessionPermissionsStorage.getByToken
@@ -36,101 +32,124 @@ export async function startDaemonServer(
 
   await prepareSocketPath(socketPath)
 
-  const server = serve({
-    manual: true,
-    silent: true,
-    fetch: async (request) => {
-      const url = new URL(request.url)
+  let sessionManager!: ReturnType<typeof createSessionManager>
 
-      try {
-        if (request.method === "GET" && url.pathname === "/health") {
-          return Response.json({ ok: true })
-        }
+  const ipcServer = createServer(socketPath, daemonIpcSchema, {
+    health: async () => ({ ok: true }),
+    prSubmit: async (payload) => {
+      const session = await getSessionByToken(payload.token)
+      if (!session) {
+        throw new Error("Invalid session token")
+      }
+      if (!session.owner || !session.repo) {
+        throw new Error("Session is not scoped to a repository")
+      }
 
-        if (request.method === "POST" && url.pathname === "/pr/submit") {
-          const session = await requireAuthorizedSession(request, getSessionByToken)
-          const body = (await request.json()) as Partial<SubmitPrDaemonRequest>
-          const resolvedInput = await resolveSubmitRequest({
-            cwd: requiredString(body.cwd, "cwd"),
-            title: requiredString(body.title, "title"),
-            body: optionalString(body.body, "body"),
-            head: optionalOptionalString(body.head, "head"),
-            base: optionalOptionalString(body.base, "base"),
-          })
+      const resolvedInput = await resolveSubmitRequest({
+        cwd: payload.cwd,
+        title: payload.title,
+        body: payload.body,
+        head: payload.head,
+        base: payload.base,
+      })
 
-          const pr = await client.pr.create({
-            ...resolvedInput,
-            owner: session.owner,
-            repo: session.repo,
-          })
-          await addAllowedPrToSession(session.sessionId, pr.number)
-          return Response.json({ number: pr.number, url: pr.url })
-        }
+      const pr = await client.pr.create({
+        ...resolvedInput,
+        owner: session.owner,
+        repo: session.repo,
+      })
+      await addAllowedPrToSession(session.sessionId, pr.number)
+      return { number: pr.number, url: pr.url }
+    },
+    prReply: async (payload) => {
+      const session = await getSessionByToken(payload.token)
+      if (!session) {
+        throw new Error("Invalid session token")
+      }
+      if (!session.owner || !session.repo) {
+        throw new Error("Session is not scoped to a repository")
+      }
 
-        if (request.method === "POST" && url.pathname === "/pr/reply") {
-          const session = await requireAuthorizedSession(request, getSessionByToken)
-          const body = (await request.json()) as Partial<ReplyPrDaemonRequest>
-          const resolvedInput = await resolveReplyRequest({
-            cwd: requiredString(body.cwd, "cwd"),
-            message: optionalString(body.message, "message"),
-            prNumber: optionalNumber(body.prNumber, "prNumber"),
-          })
+      const resolvedInput = await resolveReplyRequest({
+        cwd: payload.cwd,
+        message: payload.message,
+        prNumber: payload.prNumber,
+      })
 
-          if (!session.allowedPrNumbers.includes(resolvedInput.prNumber)) {
-            return Response.json(
-              { error: `PR #${resolvedInput.prNumber} is not allowed for this session` },
-              { status: 403 },
-            )
-          }
+      if (!session.allowedPrNumbers.includes(resolvedInput.prNumber)) {
+        throw new Error(`PR #${resolvedInput.prNumber} is not allowed for this session`)
+      }
 
-          const result = await client.pr.reply({
-            ...resolvedInput,
-            owner: session.owner,
-            repo: session.repo,
-          })
-          return Response.json(result)
-        }
-
-        return Response.json({ error: "Not Found" }, { status: 404 })
-      } catch (error) {
-        const statusCode = error instanceof HttpError ? error.statusCode : 400
-        const message = error instanceof Error ? error.message : String(error)
-        return Response.json({ error: message }, { status: statusCode })
+      return client.pr.reply({
+        ...resolvedInput,
+        owner: session.owner,
+        repo: session.repo,
+      })
+    },
+    sessionCreate: async (payload) => {
+      return {
+        session: await sessionManager.createSession(payload as CreateDaemonSessionRequest),
+      }
+    },
+    sessionGet: async ({ id }) => {
+      return {
+        session: await sessionManager.getSession(id),
+      }
+    },
+    sessionConnect: async ({ id }) => {
+      return {
+        session: await sessionManager.connectSession(id),
+      }
+    },
+    sessionHistory: async ({ id }) => {
+      return sessionManager.getHistory(id)
+    },
+    sessionShutdown: async ({ id }) => {
+      return {
+        id,
+        success: await sessionManager.shutdownSession(id),
+      }
+    },
+    sessionSend: async ({ id, message }) => {
+      await sessionManager.sendMessage(id, message as acp.AnyMessage)
+      return { accepted: true as const }
+    },
+    sessionResolveToken: async ({ token }) => {
+      return {
+        id: await sessionManager.resolveSessionIdByToken(token),
       }
     },
   })
 
-  const nodeServer = server.node?.server
-  if (!nodeServer) {
-    throw new Error("Daemon IPC server requires a Node.js runtime")
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => {
-      nodeServer.off("listening", onListening)
-      reject(error)
-    }
-    const onListening = () => {
-      nodeServer.off("error", onError)
-      resolve()
-    }
-
-    nodeServer.once("error", onError)
-    nodeServer.once("listening", onListening)
-    nodeServer.listen({ path: socketPath })
+  sessionManager = createSessionManager({
+    daemonUrl,
+    publish: (id, message) => {
+      ipcServer.publish("sessionMessage", { id, message })
+    },
   })
+
+  await once(ipcServer.server, "listening")
 
   let closed = false
 
   return {
-    daemonUrl: createDaemonUrl(socketPath),
+    daemonUrl,
     socketPath,
     close: async () => {
       if (closed) {
         return
       }
       closed = true
-      await server.close(true)
+      await sessionManager.close().catch(() => {})
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
       await cleanupSocketPath(socketPath)
     },
   }

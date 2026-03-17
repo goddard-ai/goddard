@@ -2,20 +2,12 @@
 import { SessionStorage } from "@goddard-ai/storage"
 import { command, option, run, string, subcommands } from "cmd-ts"
 import * as fs from "node:fs/promises"
-import { createDaemonRouteClientFromEnv } from "../client.ts"
+import { createDaemonIpcClientFromEnv } from "../client.ts"
 
 async function requireSessionId(): Promise<string> {
-  const serverId = process.env.GODDARD_SERVER_ID
-  if (!serverId) {
-    throw new Error("GODDARD_SERVER_ID is required")
-  }
-
-  const session = await SessionStorage.getByServerId(serverId)
-  if (!session) {
-    throw new Error(`No session found for GODDARD_SERVER_ID=${serverId}`)
-  }
-
-  return session.id
+  const { client, sessionToken } = createDaemonIpcClientFromEnv()
+  const result = await client.send("sessionResolveToken", { token: sessionToken })
+  return result.id
 }
 
 export async function declareInitiative(sessionId: string, title: string) {
@@ -42,14 +34,12 @@ export async function reportCompleted(sessionId: string) {
 }
 
 export async function submitPr(sessionId: string, title: string, body: string) {
-  const { client, sessionToken } = createDaemonRouteClientFromEnv()
-  const pr = await client.prSubmitRoute.POST({
-    headers: { authorization: `Bearer ${sessionToken}` },
-    body: {
-      cwd: process.cwd(),
-      title,
-      body,
-    },
+  const { client, sessionToken } = createDaemonIpcClientFromEnv()
+  const pr = await client.send("prSubmit", {
+    token: sessionToken,
+    cwd: process.cwd(),
+    title,
+    body,
   })
 
   await SessionStorage.update(sessionId, {
@@ -59,13 +49,11 @@ export async function submitPr(sessionId: string, title: string, body: string) {
 }
 
 export async function replyPr(sessionId: string, message: string) {
-  const { client, sessionToken } = createDaemonRouteClientFromEnv()
-  await client.prReplyRoute.POST({
-    headers: { authorization: `Bearer ${sessionToken}` },
-    body: {
-      cwd: process.cwd(),
-      message,
-    },
+  const { client, sessionToken } = createDaemonIpcClientFromEnv()
+  await client.send("prReply", {
+    token: sessionToken,
+    cwd: process.cwd(),
+    message,
   })
 
   await SessionStorage.update(sessionId, {

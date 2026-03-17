@@ -192,6 +192,9 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.15.0
         version: 0.15.0(zod@4.3.6)
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../ipc
       rouzer:
         specifier: ^1.5.0
         version: 1.5.0(zod@4.3.6)
@@ -244,28 +247,16 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.15.0
         version: 0.15.0(zod@4.3.6)
-      '@goddard-ai/storage':
+      '@goddard-ai/ipc':
         specifier: workspace:^
-        version: link:../storage
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
-      cmd-ts:
-        specifier: ^0.13.0
-        version: 0.13.0
-      reconnecting-websocket:
-        specifier: ^4.4.0
-        version: 4.4.0
-      srvx:
-        specifier: ^0.8.6
-        version: 0.8.16
-      ws:
-        specifier: ^8.19.0
-        version: 8.19.0
-    devDependencies:
+        version: link:../ipc
       '@goddard-ai/schema':
         specifier: workspace:^
         version: link:../schema
+      '@goddard-ai/storage':
+        specifier: workspace:^
+        version: link:../storage
+    devDependencies:
       '@types/node':
         specifier: ^25.3.5
         version: 25.3.5
@@ -325,15 +316,18 @@ importers:
 
   daemon:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.3.6)
       '@goddard-ai/backend':
         specifier: workspace:*
         version: link:../core/backend
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../core/ipc
       '@goddard-ai/schema':
         specifier: workspace:*
         version: link:../core/schema
-      '@goddard-ai/session':
-        specifier: workspace:*
-        version: link:../core/session
       '@goddard-ai/storage':
         specifier: workspace:*
         version: link:../core/storage
@@ -343,12 +337,6 @@ importers:
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0
-      rouzer:
-        specifier: ^1.5.0
-        version: 1.5.0(zod@4.3.6)
-      srvx:
-        specifier: ^0.8.16
-        version: 0.8.16
 
 packages:
 
@@ -2955,9 +2943,6 @@ packages:
   cliui@7.0.4:
     resolution: {integrity: sha512-OcRE68cOsVMXp1Yvonl/fzkQOyjLSu/8bhPDfQt0e0/Eb283TKP20Fs2MqoPsr9SwA595rRCA+QMzYc9nBP+JQ==}
 
-  cmd-ts@0.13.0:
-    resolution: {integrity: sha512-nsnxf6wNIM/JAS7T/x/1JmbEsjH0a8tezXqqpaL0O6+eV0/aDEnRxwjxpu0VzDdRcaC1ixGSbRlUuf/IU59I4g==}
-
   cmd-ts@0.15.0:
     resolution: {integrity: sha512-ASyAx+P6DNzNEZ6OYmvjjaLAQeI3L+4lm5rX2Jg8tondXdj06o9JTxi9mfC92KoVbrVFKhZ+j2TfBF8fcura6g==}
 
@@ -4240,9 +4225,6 @@ packages:
     resolution: {integrity: sha512-oIGGmcpTLwPga8Bn6/Z75SVaH1z5dUut2ibSyAMVhmUggWpmDn2dapB0n7f8nwaSiRtepAsfJyfXIO5DCVAODg==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
 
-  reconnecting-websocket@4.4.0:
-    resolution: {integrity: sha512-D2E33ceRPga0NvTDhJmphEgJ7FUYF0v4lr1ki0csq06OdlxKfugGzN0dSkxM/NfqCxYELK4KcaTOUOjTV6Dcng==}
-
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
     engines: {node: '>=0.10.0'}
@@ -4388,11 +4370,6 @@ packages:
 
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
-
-  srvx@0.8.16:
-    resolution: {integrity: sha512-hmcGW4CgroeSmzgF1Ihwgl+Ths0JqAJ7HwjP2X7e3JzY7u4IydLMcdnlqGQiQGUswz+PO9oh/KtCpOISIvs9QQ==}
-    engines: {node: '>=20.16.0'}
-    hasBin: true
 
   stack-trace@1.0.0-pre2:
     resolution: {integrity: sha512-2ztBJRek8IVofG9DBJqdy2N5kulaacX30Nz7xmkYF6ale9WBVmIy6mFBchvGX7Vx/MyjBhx+Rcxqrj+dbOnQ6A==}
@@ -7615,15 +7592,6 @@ snapshots:
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 
-  cmd-ts@0.13.0:
-    dependencies:
-      chalk: 4.1.2
-      debug: 4.4.3
-      didyoumean: 1.2.2
-      strip-ansi: 6.0.1
-    transitivePeerDependencies:
-      - supports-color
-
   cmd-ts@0.15.0:
     dependencies:
       chalk: 5.6.2
@@ -8697,8 +8665,6 @@ snapshots:
       process: 0.11.10
       string_decoder: 1.3.0
 
-  reconnecting-websocket@4.4.0: {}
-
   require-directory@2.1.1: {}
 
   require-from-string@2.0.2: {}
@@ -8887,8 +8853,6 @@ snapshots:
   source-map@0.7.6: {}
 
   sprintf-js@1.1.3: {}
-
-  srvx@0.8.16: {}
 
   stack-trace@1.0.0-pre2: {}
 

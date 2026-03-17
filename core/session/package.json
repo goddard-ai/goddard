@@ -25,15 +25,11 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
-    "@goddard-ai/storage": "workspace:^",
-    "@types/ws": "^8.18.1",
-    "cmd-ts": "^0.13.0",
-    "reconnecting-websocket": "^4.4.0",
-    "srvx": "^0.8.6",
-    "ws": "^8.19.0"
+    "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/storage": "workspace:^"
   },
   "devDependencies": {
-    "@goddard-ai/schema": "workspace:^",
     "@types/node": "^25.3.5"
   }
 }

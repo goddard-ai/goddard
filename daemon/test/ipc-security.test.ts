@@ -1,11 +1,11 @@
 import { afterEach, test } from "vitest"
 import * as assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
-import { request as httpRequest } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
+import { createDaemonIpcClient } from "../src/client.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 
@@ -15,25 +15,23 @@ afterEach(async () => {
   }
 })
 
-test("daemon submit endpoint requires a bearer session token", async () => {
+test("daemon submit request requires a valid session token", async () => {
   const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const response = await requestJson({
-    socketPath: daemon.socketPath,
-    path: "/pr/submit",
-    method: "POST",
-    body: {
-      cwd: process.cwd(),
-      title: "Ship daemon security",
-      body: "Done.",
-    },
-  })
-
-  assert.equal(response.statusCode, 401)
-  assert.match(response.body.error, /authorization/i)
+  await assert.rejects(
+    () =>
+      client.send("prSubmit", {
+        token: "",
+        cwd: process.cwd(),
+        title: "Ship daemon security",
+        body: "Done.",
+      }),
+    /invalid session token/i,
+  )
 })
 
-test("daemon submit endpoint enforces trusted repo context and records created PR access", async () => {
+test("daemon submit request enforces trusted repo context and records created PR access", async () => {
   const createCalls: Array<Record<string, unknown>> = []
   const recordedPrs: Array<{ sessionId: string; prNumber: number }> = []
 
@@ -74,19 +72,14 @@ test("daemon submit endpoint enforces trusted repo context and records created P
     }),
   })
 
-  const response = await requestJson({
-    socketPath: daemon.socketPath,
-    path: "/pr/submit",
-    method: "POST",
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await client.send("prSubmit", {
     token: "tok_session",
-    body: {
-      cwd: process.cwd(),
-      title: "Ship daemon security",
-      body: "Done.",
-    },
+    cwd: process.cwd(),
+    title: "Ship daemon security",
+    body: "Done.",
   })
 
-  assert.equal(response.statusCode, 200)
   assert.deepEqual(createCalls, [
     {
       owner: "trusted",
@@ -100,7 +93,7 @@ test("daemon submit endpoint enforces trusted repo context and records created P
   assert.deepEqual(recordedPrs, [{ sessionId: "session-42", prNumber: 42 }])
 })
 
-test("daemon reply endpoint rejects PRs outside the session allowlist", async () => {
+test("daemon reply request rejects PRs outside the session allowlist", async () => {
   const daemon = await startTestDaemon({
     auth: {
       getSessionByToken: async () => ({
@@ -119,19 +112,16 @@ test("daemon reply endpoint rejects PRs outside the session allowlist", async ()
     }),
   })
 
-  const response = await requestJson({
-    socketPath: daemon.socketPath,
-    path: "/pr/reply",
-    method: "POST",
-    token: "tok_session",
-    body: {
-      cwd: process.cwd(),
-      message: "Updated per review",
-    },
-  })
-
-  assert.equal(response.statusCode, 403)
-  assert.match(response.body.error, /allowed/i)
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await assert.rejects(
+    () =>
+      client.send("prReply", {
+        token: "tok_session",
+        cwd: process.cwd(),
+        message: "Updated per review",
+      }),
+    /not allowed/i,
+  )
 })
 
 type StartTestDaemonOptions = {
@@ -201,46 +191,4 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
   })
 
   return daemon
-}
-
-async function requestJson(input: {
-  socketPath: string
-  path: string
-  method: "POST"
-  body: Record<string, unknown>
-  token?: string
-}): Promise<{ statusCode: number; body: any }> {
-  const payload = JSON.stringify(input.body)
-
-  return new Promise((resolve, reject) => {
-    const request = httpRequest(
-      {
-        socketPath: input.socketPath,
-        path: input.path,
-        method: input.method,
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(payload),
-          ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
-        },
-      },
-      (response) => {
-        let raw = ""
-        response.setEncoding("utf8")
-        response.on("data", (chunk) => {
-          raw += chunk
-        })
-        response.on("end", () => {
-          resolve({
-            statusCode: response.statusCode ?? 0,
-            body: raw ? JSON.parse(raw) : {},
-          })
-        })
-      },
-    )
-
-    request.once("error", reject)
-    request.write(payload)
-    request.end()
-  })
 }

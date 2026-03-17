@@ -1,18 +1,20 @@
-import { runAgent } from "@goddard-ai/session"
+import { createNodeClient } from "@goddard-ai/ipc"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { spawnSync } from "node:child_process"
-import { join } from "node:path"
 import * as prompts from "./prompts/index.ts"
 import type { FeedbackEvent } from "./feedback.ts"
+import { readSocketPathFromDaemonUrl } from "./ipc/socket.ts"
 
 export type OneShotInput = {
   event: FeedbackEvent
   prompt: string
   projectDir: string
+  daemonUrl: string
   env?: Record<string, string>
 }
 
 function getDaemonAgentBinDir(): string {
-  return join(import.meta.dirname, "../agent-bin")
+  return `${import.meta.dirname}/../agent-bin`
 }
 
 function buildOneShotEnv(inputEnv?: Record<string, string>): Record<string, string> {
@@ -20,7 +22,7 @@ function buildOneShotEnv(inputEnv?: Record<string, string>): Record<string, stri
   const agentBinDir = getDaemonAgentBinDir()
 
   return {
-    ...(inputEnv ?? {}),
+    ...inputEnv,
     PATH: existingPath ? `${agentBinDir}:${existingPath}` : agentBinDir,
   }
 }
@@ -106,7 +108,8 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
   }
 
   try {
-    await runAgent({
+    const client = createNodeClient(readSocketPathFromDaemonUrl(input.daemonUrl), daemonIpcSchema)
+    await client.send("sessionCreate", {
       agent: "pi",
       cwd: worktreeDir,
       mcpServers: [],
@@ -122,7 +125,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     return 0
   } catch (error) {
     console.error(
-      `\n[ERROR] runAgent failed: ${error instanceof Error ? error.message : String(error)}`,
+      `\n[ERROR] one-shot session failed: ${error instanceof Error ? error.message : String(error)}`,
     )
     return 1
   }

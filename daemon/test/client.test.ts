@@ -3,7 +3,7 @@ import * as assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDaemonRouteClient } from "../src/client.ts"
+import { createDaemonIpcClient } from "../src/client.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 
 const cleanup: Array<() => Promise<void>> = []
@@ -14,7 +14,7 @@ afterEach(async () => {
   }
 })
 
-test("daemon route client can submit PR through the daemon route map", async () => {
+test("daemon IPC client can submit PR through the daemon request map", async () => {
   const createCalls: Array<Record<string, unknown>> = []
   const daemon = await startTestDaemon({
     sdk: {
@@ -50,14 +50,12 @@ test("daemon route client can submit PR through the daemon route map", async () 
     }),
   })
 
-  const client = createDaemonRouteClient({ daemonUrl: daemon.daemonUrl })
-  const result = await client.prSubmitRoute.POST({
-    headers: { authorization: "Bearer tok_session" },
-    body: {
-      cwd: process.cwd(),
-      title: "Ship daemon route client",
-      body: "Done",
-    },
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const result = await client.send("prSubmit", {
+    token: "tok_session",
+    cwd: process.cwd(),
+    title: "Ship daemon route client",
+    body: "Done",
   })
 
   assert.deepEqual(result, {
@@ -76,7 +74,7 @@ test("daemon route client can submit PR through the daemon route map", async () 
   ])
 })
 
-test("daemon route client can reply to allowed PRs through daemon route map", async () => {
+test("daemon IPC client can reply to allowed PRs through the daemon request map", async () => {
   const replyCalls: Array<Record<string, unknown>> = []
   const daemon = await startTestDaemon({
     sdk: {
@@ -104,13 +102,11 @@ test("daemon route client can reply to allowed PRs through daemon route map", as
     }),
   })
 
-  const client = createDaemonRouteClient({ daemonUrl: daemon.daemonUrl })
-  const result = await client.prReplyRoute.POST({
-    headers: { authorization: "Bearer tok_session" },
-    body: {
-      cwd: process.cwd(),
-      message: "Updated per review",
-    },
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const result = await client.send("prReply", {
+    token: "tok_session",
+    cwd: process.cwd(),
+    message: "Updated per review",
   })
 
   assert.deepEqual(result, { success: true })

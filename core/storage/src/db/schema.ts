@@ -4,6 +4,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const sessions = sqliteTable("sessions", {
   id: text().primaryKey(),
+  acpId: text().notNull().unique(),
   status: text({ enum: SessionStatus }).notNull().default("idle"),
   agentName: text().notNull(),
   cwd: text().notNull(),
@@ -18,9 +19,6 @@ export const sessions = sqliteTable("sessions", {
   blockedReason: text(),
   initiative: text(),
   lastAgentMessage: text(),
-  serverId: text().unique(),
-  serverAddress: text(),
-  serverPid: integer(),
   metadata: text({ mode: "json" }).$type<{ repository?: string; prNumber?: number; [key: string]: any }>(),
 })
 

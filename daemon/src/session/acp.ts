@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { Readable, Writable } from "node:stream"
 
-export type AnyRequest = acp.AnyMessage & { params: any }
+export type AnyRequest = acp.AnyMessage & { params: unknown }
 
 export function isAcpRequest<T extends AnyRequest>(
   message: { jsonrpc?: string },

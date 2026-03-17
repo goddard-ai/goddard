@@ -1,8 +1,6 @@
-import { randomUUID } from "node:crypto"
 import { createBackendClient, type BackendClient } from "@goddard-ai/backend/client"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { FileTokenStorage } from "@goddard-ai/storage"
-import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
@@ -67,8 +65,6 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
       }
 
       runningPrs.add(event.prNumber)
-      const sessionId = randomUUID()
-      const sessionToken = randomUUID()
 
       try {
         const managed = await client.pr.isManaged({
@@ -81,29 +77,17 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           return
         }
 
-        await SessionPermissionsStorage.create({
-          sessionId,
-          token: sessionToken,
-          owner: event.owner,
-          repo: event.repo,
-          allowedPrNumbers: [event.prNumber],
-        })
-
         io.stdout(`Launching one-shot pi session for ${event.type} on PR #${event.prNumber}...`)
         const exitCode = await runOneShotImpl({
           event,
           prompt,
           projectDir: input.projectDir,
-          env: {
-            GODDARD_DAEMON_URL: activeIpcServer.daemonUrl,
-            GODDARD_SESSION_TOKEN: sessionToken,
-          },
+          daemonUrl: activeIpcServer.daemonUrl,
         })
         io.stdout(`One-shot pi session finished for PR #${event.prNumber} (exit ${exitCode}).`)
       } catch (error) {
         io.stderr(error instanceof Error ? error.message : String(error))
       } finally {
-        await SessionPermissionsStorage.revoke(sessionId).catch(() => {})
         runningPrs.delete(event.prNumber)
       }
     })

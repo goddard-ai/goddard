@@ -97,18 +97,6 @@ export const sessionShutdownRoute = route("sessions/:id/shutdown", {
   },
 })
 
-/**
- * ACP transport attaches over websocket upgrades on this path.
- * Rouzer captures the path contract while runtime handles `Upgrade: websocket`.
- */
-export const sessionAcpWebSocketRoute = route("sessions/:id/acp", {
-  GET: {
-    path: z.object({
-      id: z.string(),
-    }),
-  },
-})
-
 export type {
   CreateDaemonSessionRequest,
   DaemonSessionPathParams,

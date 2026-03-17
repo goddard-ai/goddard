@@ -1,5 +1,4 @@
 import * as acp from "@agentclientprotocol/sdk"
-import * as z from "zod"
 import type { ACPAdapterName } from "./acp-adapters"
 
 export type {
@@ -48,22 +47,3 @@ export type SessionParams =
         | { initialPrompt: string | acp.ContentBlock[]; oneShot: true }
       ))
 
-export const SessionServerLog = z.union([
-  z.object({
-    success: z.literal(true),
-    serverAddress: z.string(),
-    serverId: z.string(),
-    sessionId: z.string(),
-  }),
-  z.object({
-    success: z.literal(true),
-    serverAddress: z.null(),
-    serverId: z.null(),
-    sessionId: z.string(),
-  }),
-  z.object({
-    success: z.literal(false),
-    error: z.string(),
-  }),
-])
-export type SessionServerLog = z.infer<typeof SessionServerLog>

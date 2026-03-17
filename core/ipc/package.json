@@ -5,13 +5,13 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs",
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
     "./*": {
-      "types": "./dist/*.d.mts",
-      "import": "./dist/*.mjs",
+      "types": "./src/*.ts",
+      "import": "./src/*.ts",
       "default": "./src/*.ts"
     }
   },

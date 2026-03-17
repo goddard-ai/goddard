@@ -3,42 +3,39 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-const {
-  createDaemonRouteClientFromEnvMock,
-  getByServerIdMock,
-  prReplyRoutePostMock,
-  prSubmitRoutePostMock,
-  updateMock,
-} = vi.hoisted(() => ({
-  getByServerIdMock: vi.fn(async () => ({ id: "session-7" })),
+const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(() => ({
   updateMock: vi.fn(async () => undefined),
-  prSubmitRoutePostMock: vi.fn(async () => ({
-    number: 12,
-    url: "https://github.com/acme/widgets/pull/12",
-  })),
-  prReplyRoutePostMock: vi.fn(async () => ({ success: true })),
-  createDaemonRouteClientFromEnvMock: vi.fn(() => ({
+  sendMock: vi.fn(async (name: string) => {
+    if (name === "sessionResolveToken") {
+      return { id: "session-7" }
+    }
+    if (name === "prSubmit") {
+      return {
+        number: 12,
+        url: "https://github.com/acme/widgets/pull/12",
+      }
+    }
+    if (name === "prReply") {
+      return { success: true }
+    }
+    return { ok: true }
+  }),
+  createDaemonIpcClientFromEnvMock: vi.fn(() => ({
     sessionToken: "tok_session",
     client: {
-      prSubmitRoute: {
-        POST: prSubmitRoutePostMock,
-      },
-      prReplyRoute: {
-        POST: prReplyRoutePostMock,
-      },
+      send: sendMock,
     },
   })),
 }))
 
 vi.mock("@goddard-ai/storage", () => ({
   SessionStorage: {
-    getByServerId: getByServerIdMock,
     update: updateMock,
   },
 }))
 
 vi.mock("../src/client.ts", () => ({
-  createDaemonRouteClientFromEnv: createDaemonRouteClientFromEnvMock,
+  createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
 }))
 
 import { declareInitiative, main, reportBlocker, reportCompleted } from "../src/bin/goddard-tool.ts"
@@ -55,16 +52,13 @@ describe("daemon goddard tool", () => {
 
     process.env = {
       ...previousEnv,
-      GODDARD_SERVER_ID: "server-7",
       GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
       GODDARD_SESSION_TOKEN: "tok_session",
     }
 
-    getByServerIdMock.mockClear()
     updateMock.mockClear()
-    prSubmitRoutePostMock.mockClear()
-    prReplyRoutePostMock.mockClear()
-    createDaemonRouteClientFromEnvMock.mockClear()
+    sendMock.mockClear()
+    createDaemonIpcClientFromEnvMock.mockClear()
   })
 
   afterEach(async () => {
@@ -73,10 +67,10 @@ describe("daemon goddard tool", () => {
   })
 
   test("declare initiative stores latest initiative", async () => {
-    await declareInitiative("session-1", "Ship websocket cancellation")
+    await declareInitiative("session-1", "Ship IPC token resolution")
 
     expect(updateMock).toHaveBeenCalledWith("session-1", {
-      initiative: "Ship websocket cancellation",
+      initiative: "Ship IPC token resolution",
       blockedReason: null,
       status: "active",
     })
@@ -101,28 +95,28 @@ describe("daemon goddard tool", () => {
     })
   })
 
-  test("resolves session id from GODDARD_SERVER_ID", async () => {
-    await main(["declare-initiative", "--title", "Ship server id lookup"])
+  test("resolves session id from GODDARD_SESSION_TOKEN via daemon", async () => {
+    await main(["declare-initiative", "--title", "Ship token lookup"])
 
-    expect(getByServerIdMock).toHaveBeenCalledWith("server-7")
+    expect(sendMock).toHaveBeenCalledWith("sessionResolveToken", {
+      token: "tok_session",
+    })
     expect(updateMock).toHaveBeenCalledWith("session-7", {
-      initiative: "Ship server id lookup",
+      initiative: "Ship token lookup",
       blockedReason: null,
       status: "active",
     })
   })
 
-  test("submit-pr uses daemon route client before updating session state", async () => {
+  test("submit-pr uses daemon IPC before updating session state", async () => {
     await main(["submit-pr", "--title", "Ship daemon IPC", "--body-file", emptyFile])
 
-    expect(createDaemonRouteClientFromEnvMock).toHaveBeenCalledTimes(1)
-    expect(prSubmitRoutePostMock).toHaveBeenCalledWith({
-      headers: { authorization: "Bearer tok_session" },
-      body: {
-        cwd: process.cwd(),
-        title: "Ship daemon IPC",
-        body: "",
-      },
+    expect(createDaemonIpcClientFromEnvMock).toHaveBeenCalledTimes(2)
+    expect(sendMock).toHaveBeenCalledWith("prSubmit", {
+      token: "tok_session",
+      cwd: process.cwd(),
+      title: "Ship daemon IPC",
+      body: "",
     })
     expect(updateMock).toHaveBeenCalledWith("session-7", {
       status: "done",
@@ -131,16 +125,14 @@ describe("daemon goddard tool", () => {
     })
   })
 
-  test("reply-pr uses daemon route client before updating session state", async () => {
+  test("reply-pr uses daemon IPC before updating session state", async () => {
     await main(["reply-pr", "--message-file", emptyFile])
 
-    expect(createDaemonRouteClientFromEnvMock).toHaveBeenCalledTimes(1)
-    expect(prReplyRoutePostMock).toHaveBeenCalledWith({
-      headers: { authorization: "Bearer tok_session" },
-      body: {
-        cwd: process.cwd(),
-        message: "",
-      },
+    expect(createDaemonIpcClientFromEnvMock).toHaveBeenCalledTimes(2)
+    expect(sendMock).toHaveBeenCalledWith("prReply", {
+      token: "tok_session",
+      cwd: process.cwd(),
+      message: "",
     })
     expect(updateMock).toHaveBeenCalledWith("session-7", {
       status: "done",
