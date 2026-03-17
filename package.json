@@ -12,7 +12,8 @@
     "core/config",
     "core/tauri-plugin-ipc",
     "core/ipc",
-    "core/tree-run"
+    "core/tree-run",
+    "workforce"
   ],
   "scripts": {
     "prepare": "simple-git-hooks",
