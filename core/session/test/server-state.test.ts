@@ -89,7 +89,7 @@ describe("system prompt injection", () => {
     const injected = injectSystemPrompt(request, systemPrompt)
 
     expect((injected.prompt[0] as { text: string }).text).toBe(
-      '<system-prompt name="Goddard CLI">Follow repository conventions.</system-prompt>',
+      "<system-prompt>Follow repository conventions.</system-prompt>",
     )
     expect((injected.prompt[1] as { text: string }).text).toBe("Hello")
     expect(injected.prompt).toHaveLength(2)
@@ -145,4 +145,3 @@ describe("agent process environment", () => {
     expect(env.GODDARD_SERVER_ID).toBe("server-1")
   })
 })
-

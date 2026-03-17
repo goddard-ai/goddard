@@ -20,7 +20,7 @@ export function injectSystemPrompt(
   return {
     ...request,
     prompt: [
-      { type: "text", text: `<system-prompt name="Goddard CLI">${systemPrompt}</system-prompt>` },
+      { type: "text", text: `<system-prompt>${systemPrompt}</system-prompt>` },
       ...request.prompt,
     ],
   }
@@ -70,7 +70,7 @@ export function buildAgentProcessEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    ...(extraEnv ?? {}),
+    ...extraEnv,
     PATH: extraEnv?.PATH ?? process.env.PATH ?? "",
     GODDARD_SERVER_ID: serverId,
   }
@@ -180,13 +180,12 @@ async function initializeSession(input: Writable, output: Readable, params: Sess
     const newSession = await agent.newSession(params)
     if (isPropertyDefined(params, "initialPrompt")) {
       const prompt = params.initialPrompt
-      const promptRequest = injectSystemPrompt(
-        {
-          sessionId: newSession.sessionId,
-          prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
-        },
-        params.systemPrompt,
-      )
+
+      let promptRequest: acp.PromptRequest = {
+        sessionId: newSession.sessionId,
+        prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
+      }
+      promptRequest = injectSystemPrompt(promptRequest, params.systemPrompt)
 
       history.push({
         jsonrpc: "2.0",
