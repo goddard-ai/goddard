@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest"
 
 const { createDaemonIpcClientMock, sendMock, spawnSyncMock } = vi.hoisted(() => ({
-  sendMock: vi.fn(async () => ({ session: { id: "session-1" } })),
+  sendMock: vi.fn(async () => ({ id: "session-1" })),
   createDaemonIpcClientMock: vi.fn(() => ({
     send: sendMock,
   })),
@@ -45,7 +45,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
     },
   })
 
-  expect(exitCode).toBe(0)
+  expect(exitCode).toBe("session-1")
   expect(createDaemonIpcClientMock).toHaveBeenCalledTimes(1)
   expect(sendMock).toHaveBeenCalledTimes(1)
 

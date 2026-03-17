@@ -74,10 +74,13 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
       daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
       socketPath: "/tmp/goddard-daemon-test.sock",
       close: async () => {},
+      sessionManager: {
+        shutdownSession: async () => true,
+      } as any,
     }),
     runOneShot: async (input) => {
       runOneShotCalls.push(input)
-      return 0
+      return "test-session-id"
     },
     waitForShutdown: async (close) => {
       const event = {
