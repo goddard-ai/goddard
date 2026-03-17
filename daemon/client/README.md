@@ -5,6 +5,7 @@ Low-level daemon connection helpers shared by Node, the app, and SDK composition
 Use this package when you need to:
 
 - Resolve `GODDARD_DAEMON_URL` and `GODDARD_SESSION_TOKEN`.
+- Derive `GODDARD_DAEMON_URL` from `GODDARD_DAEMON_SOCKET_PATH` when the launcher passes only a socket path.
 - Create a daemon IPC client with a host-specific transport factory.
 - Parse or construct the daemon URL format.
 

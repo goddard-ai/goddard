@@ -40,6 +40,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
     prompt: "reply to feedback",
     projectDir: "/tmp/project",
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
+    agentBinDir: "/tmp/goddard-agent-bin",
     env: {
       PATH: "/usr/bin:/bin",
     },
@@ -56,7 +57,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
   expect(params.initialPrompt).toBe("reply to feedback")
   expect(params.metadata).toEqual({ repository: "acme/widgets", prNumber: 12 })
   expect(params.env.PATH).toContain("/usr/bin:/bin")
-  expect(params.env.PATH).toContain("agent-bin")
+  expect(params.env.PATH).toContain("/tmp/goddard-agent-bin")
   expect(params.systemPrompt).toContain("goddard")
   expect(params.systemPrompt).toContain("submit-pr")
 })

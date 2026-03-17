@@ -9,7 +9,6 @@ import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.t
 import {
   cleanupSocketPath,
   createDaemonUrl,
-  getDefaultDaemonSocketPath,
   prepareSocketPath,
 } from "./socket.ts"
 import type {
@@ -17,13 +16,18 @@ import type {
   DaemonServer,
   DaemonServerDeps,
 } from "./types.ts"
+import { resolveDaemonRuntimeConfig } from "../config.ts"
 
 export async function startDaemonServer(
   client: BackendPrClient,
-  options: { socketPath?: string } = {},
+  options: { socketPath?: string; agentBinDir?: string } = {},
   deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
-  const socketPath = options.socketPath ?? getDefaultDaemonSocketPath()
+  const runtime = resolveDaemonRuntimeConfig({
+    socketPath: options.socketPath,
+    agentBinDir: options.agentBinDir,
+  })
+  const socketPath = runtime.socketPath
   const daemonUrl = createDaemonUrl(socketPath)
   const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
@@ -104,6 +108,9 @@ export async function startDaemonServer(
     sessionHistory: async ({ id }) => {
       return sessionManager.getHistory(id)
     },
+    sessionDiagnostics: async ({ id }) => {
+      return sessionManager.getDiagnostics(id)
+    },
     sessionShutdown: async ({ id }) => {
       return {
         id,
@@ -123,6 +130,7 @@ export async function startDaemonServer(
 
   sessionManager = createSessionManager({
     daemonUrl,
+    agentBinDir: runtime.agentBinDir,
     publish: (id, message) => {
       ipcServer.publish("sessionMessage", { id, message })
     },

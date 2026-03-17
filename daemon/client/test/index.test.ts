@@ -53,6 +53,20 @@ test("resolveDaemonConnectionFromEnv makes env-driven daemon settings explicit",
 
   assert.deepEqual(result, {
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
+    socketPath: "/tmp/daemon.sock",
+    sessionToken: "tok_session",
+  })
+})
+
+test("resolveDaemonConnectionFromEnv can derive the daemon URL from an explicit socket path", () => {
+  const result = resolveDaemonConnectionFromEnv({
+    GODDARD_DAEMON_SOCKET_PATH: "/tmp/custom-daemon.sock",
+    GODDARD_SESSION_TOKEN: "tok_session",
+  })
+
+  assert.deepEqual(result, {
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fcustom-daemon.sock",
+    socketPath: "/tmp/custom-daemon.sock",
     sessionToken: "tok_session",
   })
 })

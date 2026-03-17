@@ -39,6 +39,34 @@ vi.mock("@agentclientprotocol/sdk", () => ({
 }))
 
 describe("runAgent", () => {
+  function buildSession(id: string, acpId: string) {
+    return {
+      id,
+      acpId,
+      status: "active" as const,
+      agentName: "pi",
+      cwd: "/tmp/project",
+      metadata: null,
+      connection: {
+        mode: "live" as const,
+        reconnectable: true,
+        historyAvailable: true,
+        activeDaemonSession: true,
+      },
+      diagnostics: {
+        eventCount: 0,
+        historyLength: 0,
+        lastEventAt: null,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      errorMessage: null,
+      blockedReason: null,
+      initiative: null,
+      lastAgentMessage: null,
+    }
+  }
+
   beforeEach(() => {
     sendMock.mockReset()
     subscribeMock.mockClear()
@@ -48,10 +76,7 @@ describe("runAgent", () => {
 
   test("creates one-shot daemon sessions and returns null", async () => {
     sendMock.mockResolvedValueOnce({
-      session: {
-        id: "daemon-session-1",
-        acpId: "acp-session-1",
-      },
+      session: buildSession("daemon-session-1", "acp-session-1"),
     })
 
     const { runAgent } = await import("../../src/daemon/session/client.js")
@@ -83,14 +108,17 @@ describe("runAgent", () => {
   test("connects to daemon-hosted sessions and delegates history/shutdown over IPC", async () => {
     sendMock
       .mockResolvedValueOnce({
-        session: {
-          id: "daemon-session-2",
-          acpId: "acp-session-2",
-        },
+        session: buildSession("daemon-session-2", "acp-session-2"),
       })
       .mockResolvedValueOnce({
         id: "daemon-session-2",
         acpId: "acp-session-2",
+        connection: {
+          mode: "live" as const,
+          reconnectable: true,
+          historyAvailable: true,
+          activeDaemonSession: true,
+        },
         history: [{ jsonrpc: "2.0", method: "session/update", params: {} }],
       })
       .mockResolvedValueOnce({
@@ -124,10 +152,7 @@ describe("runAgent", () => {
 
   test("uses an explicitly injected daemon client when provided", async () => {
     sendMock.mockResolvedValueOnce({
-      session: {
-        id: "daemon-session-3",
-        acpId: "acp-session-3",
-      },
+      session: buildSession("daemon-session-3", "acp-session-3"),
     })
 
     const { runAgent } = await import("../../src/daemon/session/client.js")
@@ -154,5 +179,26 @@ describe("runAgent", () => {
     expect(session?.sessionId).toBe("daemon-session-3")
     expect(createDaemonIpcClientFromEnvMock).not.toHaveBeenCalled()
     expect(sendMock).toHaveBeenCalledWith("sessionConnect", { id: "daemon-session-3" })
+  })
+
+  test("can inspect daemon session connectivity before attempting reconnect", async () => {
+    sendMock.mockResolvedValueOnce({
+      session: {
+        ...buildSession("daemon-session-4", "acp-session-4"),
+        connection: {
+          mode: "history" as const,
+          reconnectable: false,
+          historyAvailable: true,
+          activeDaemonSession: false,
+        },
+      },
+    })
+
+    const { getDaemonSession } = await import("../../src/daemon/session/client.js")
+    const session = await getDaemonSession("daemon-session-4")
+
+    expect(session.connection.mode).toBe("history")
+    expect(session.connection.reconnectable).toBe(false)
+    expect(sendMock).toHaveBeenCalledWith("sessionGet", { id: "daemon-session-4" })
   })
 })

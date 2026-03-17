@@ -1,6 +1,7 @@
 import { createBackendClient, type BackendClient } from "@goddard-ai/backend/client"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { FileTokenStorage } from "@goddard-ai/storage"
+import { resolveDaemonRuntimeConfig } from "./config.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
@@ -10,6 +11,8 @@ export type RunDaemonInput = {
   repo: string
   projectDir: string
   baseUrl: string
+  socketPath?: string
+  agentBinDir?: string
 }
 
 export type DaemonIo = {
@@ -19,7 +22,10 @@ export type DaemonIo = {
 
 export type RunDaemonDeps = {
   createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
-  startIpcServer?: (client: BackendClient) => Promise<DaemonServer>
+  startIpcServer?: (
+    client: BackendClient,
+    options: { socketPath: string; agentBinDir: string },
+  ) => Promise<DaemonServer>
   runOneShot?: (input: OneShotInput) => Promise<number> | number
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
   io?: DaemonIo
@@ -32,17 +38,30 @@ const defaultIo: DaemonIo = {
 
 export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {}): Promise<number> {
   const io = deps.io ?? defaultIo
-  const baseUrl = input.baseUrl || process.env.GODDARD_BASE_URL || "http://127.0.0.1:8787"
+  const runtime = resolveDaemonRuntimeConfig({
+    baseUrl: input.baseUrl,
+    socketPath: input.socketPath,
+    agentBinDir: input.agentBinDir,
+  })
   const createBackendClientImpl = deps.createBackendClient ?? defaultCreateBackendClient
-  const startIpcServer = deps.startIpcServer ?? ((client) => startDaemonServer(client))
+  const startIpcServer =
+    deps.startIpcServer ??
+    ((client, options) =>
+      startDaemonServer(client, {
+        socketPath: options.socketPath,
+        agentBinDir: options.agentBinDir,
+      }))
   const runOneShotImpl = deps.runOneShot ?? runOneShot
   const waitForShutdownImpl = deps.waitForShutdown ?? waitForShutdown
   let ipcServer: DaemonServer | undefined
 
   try {
-    const client = await createBackendClientImpl(baseUrl)
+    const client = await createBackendClientImpl(runtime.baseUrl)
     const { owner, repo } = splitRepo(input.repo)
-    ipcServer = await startIpcServer(client)
+    ipcServer = await startIpcServer(client, {
+      socketPath: runtime.socketPath,
+      agentBinDir: runtime.agentBinDir,
+    })
     const activeIpcServer = ipcServer
     const runningPrs = new Set<number>()
     const subscription = await client.stream.subscribeToRepo({ owner, repo })
@@ -83,6 +102,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           prompt,
           projectDir: input.projectDir,
           daemonUrl: activeIpcServer.daemonUrl,
+          agentBinDir: runtime.agentBinDir,
         })
         io.stdout(`One-shot pi session finished for PR #${event.prNumber} (exit ${exitCode}).`)
       } catch (error) {

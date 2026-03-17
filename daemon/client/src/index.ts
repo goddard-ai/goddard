@@ -12,6 +12,7 @@ export type DaemonClientEnv = Record<string, string | undefined>
 // Resolved daemon connection settings derived from environment variables.
 export type ResolvedDaemonClientEnv = {
   daemonUrl: string
+  socketPath: string
   sessionToken: string
 }
 
@@ -35,14 +36,20 @@ export function getDefaultDaemonSocketPath(): string {
 }
 
 export function resolveDaemonUrl(env: DaemonClientEnv = process.env): string {
-  return env.GODDARD_DAEMON_URL ?? createDaemonUrl(getDefaultDaemonSocketPath())
+  if (env.GODDARD_DAEMON_URL) {
+    return env.GODDARD_DAEMON_URL
+  }
+
+  return createDaemonUrl(env.GODDARD_DAEMON_SOCKET_PATH ?? getDefaultDaemonSocketPath())
 }
 
 export function resolveDaemonConnectionFromEnv(
   env: DaemonClientEnv = process.env,
 ): ResolvedDaemonClientEnv {
+  const daemonUrl = resolveDaemonUrl(env)
   return {
-    daemonUrl: resolveDaemonUrl(env),
+    daemonUrl,
+    socketPath: readSocketPathFromDaemonUrl(daemonUrl),
     sessionToken: requiredEnv(env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN"),
   }
 }

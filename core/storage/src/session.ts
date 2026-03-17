@@ -10,6 +10,10 @@ export namespace SessionStorage {
     await db.insert(sessions).values(data)
   }
 
+  export async function list() {
+    return db.select().from(sessions)
+  }
+
   export async function get(id: string) {
     const result = await db.select().from(sessions).where(eq(sessions.id, id))
     return result[0]

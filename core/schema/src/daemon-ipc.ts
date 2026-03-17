@@ -3,6 +3,7 @@ import { z } from "zod"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
+  GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
   GetDaemonSessionResponse,
   ReplyPrDaemonResponse,
@@ -75,6 +76,10 @@ export const daemonIpcSchema = {
       sessionHistory: {
         payload: z.object({ id: z.string() }),
         response: $type<GetDaemonSessionHistoryResponse>(),
+      },
+      sessionDiagnostics: {
+        payload: z.object({ id: z.string() }),
+        response: $type<GetDaemonSessionDiagnosticsResponse>(),
       },
       sessionShutdown: {
         payload: z.object({ id: z.string() }),

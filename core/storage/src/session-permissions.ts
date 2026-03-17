@@ -36,6 +36,11 @@ export namespace SessionPermissionsStorage {
     return Object.values(data.sessions).find((record) => record.token === token) ?? null
   }
 
+  export async function list(): Promise<SessionPermissionsRecord[]> {
+    const data = await readPermissionsFile()
+    return Object.values(data.sessions)
+  }
+
   export async function addAllowedPr(sessionId: string, prNumber: number): Promise<void> {
     const data = await readPermissionsFile()
     const record = data.sessions[sessionId]

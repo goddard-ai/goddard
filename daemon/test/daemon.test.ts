@@ -53,6 +53,7 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
   let subCalls = 0
 
   const runOneShotCalls: any[] = []
+  const startIpcCalls: any[] = []
   const deps: RunDaemonDeps = {
     createBackendClient: async () => ({
       pr: {
@@ -70,11 +71,14 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
         },
       },
     }),
-    startIpcServer: async () => ({
-      daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
-      socketPath: "/tmp/goddard-daemon-test.sock",
-      close: async () => {},
-    }),
+    startIpcServer: async (_client, options) => {
+      startIpcCalls.push(options)
+      return {
+        daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
+        socketPath: "/tmp/goddard-daemon-test.sock",
+        close: async () => {},
+      }
+    },
     runOneShot: async (input) => {
       runOneShotCalls.push(input)
       return 0
@@ -101,18 +105,27 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
       repo: "test/repo",
       projectDir: process.cwd(),
       baseUrl: "",
+      socketPath: "/tmp/custom-daemon.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
     },
     deps,
   )
 
   assert.equal(exitCode, 0)
   assert.equal(subCalls, 1)
+  assert.deepEqual(startIpcCalls, [
+    {
+      socketPath: "/tmp/custom-daemon.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
+    },
+  ])
   assert.equal(runOneShotCalls.length, 1)
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
   assert.equal(
     runOneShotCalls[0].daemonUrl,
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
   )
+  assert.equal(runOneShotCalls[0].agentBinDir, "/tmp/custom-agent-bin")
   assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
   assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
 })

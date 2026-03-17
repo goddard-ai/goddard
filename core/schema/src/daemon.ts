@@ -40,6 +40,29 @@ export type DaemonSessionMetadata = {
   [key: string]: unknown
 }
 
+// Durable connectivity state exposed to app and SDK consumers.
+export type DaemonSessionConnection = {
+  mode: "live" | "history" | "none"
+  reconnectable: boolean
+  historyAvailable: boolean
+  activeDaemonSession: boolean
+}
+
+// Structured diagnostic event emitted by the daemon for session lifecycle debugging.
+export type DaemonDiagnosticEvent = {
+  type: string
+  at: string
+  sessionId: string
+  detail?: Record<string, unknown>
+}
+
+// Lightweight diagnostic summary exposed with every daemon session read.
+export type DaemonSessionDiagnostics = {
+  eventCount: number
+  historyLength: number
+  lastEventAt: string | null
+}
+
 export type DaemonSessionIdentity = {
   id: string
   acpId: string
@@ -61,6 +84,8 @@ export type DaemonSession = DaemonSessionIdentity & {
   agentName: string
   cwd: string
   metadata: DaemonSessionMetadata | null
+  connection: DaemonSessionConnection
+  diagnostics: DaemonSessionDiagnostics
   createdAt: string
   updatedAt: string
   errorMessage: string | null
@@ -82,7 +107,14 @@ export type GetDaemonSessionResponse = {
 }
 
 export type GetDaemonSessionHistoryResponse = DaemonSessionIdentity & {
+  connection: DaemonSessionConnection
   history: acp.AnyMessage[]
+}
+
+// Full session diagnostic payload returned on demand for debugging and tests.
+export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
+  connection: DaemonSessionConnection
+  events: DaemonDiagnosticEvent[]
 }
 
 export type ShutdownDaemonSessionResponse = {

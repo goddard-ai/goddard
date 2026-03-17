@@ -2,6 +2,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { spawnSync } from "node:child_process"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import * as prompts from "./prompts/index.ts"
+import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 
 export type OneShotInput = {
@@ -9,21 +10,15 @@ export type OneShotInput = {
   prompt: string
   projectDir: string
   daemonUrl: string
+  agentBinDir: string
   env?: Record<string, string>
 }
 
-function getDaemonAgentBinDir(): string {
-  return `${import.meta.dirname}/../agent-bin`
-}
-
-function buildOneShotEnv(inputEnv?: Record<string, string>): Record<string, string> {
-  const existingPath = inputEnv?.PATH ?? process.env.PATH ?? ""
-  const agentBinDir = getDaemonAgentBinDir()
-
-  return {
-    ...inputEnv,
-    PATH: existingPath ? `${agentBinDir}:${existingPath}` : agentBinDir,
-  }
+function buildOneShotEnv(
+  agentBinDir: string,
+  inputEnv?: Record<string, string>,
+): Record<string, string> {
+  return prependAgentBinToPath(agentBinDir, inputEnv)
 }
 
 function renderPrompt(template: string, variables: Record<string, string>): string {
@@ -120,7 +115,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
         repository: `${input.event.owner}/${input.event.repo}`,
         prNumber: input.event.prNumber,
       },
-      env: buildOneShotEnv(input.env),
+      env: buildOneShotEnv(input.agentBinDir, input.env),
     })
     return 0
   } catch (error) {

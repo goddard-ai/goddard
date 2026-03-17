@@ -9,8 +9,9 @@ import { createNodeClient } from "../../core/ipc/src/index.ts"
 import { createServer } from "../../core/ipc/src/server.ts"
 import { createDaemonUrl } from "../../core/schema/src/daemon-url.ts"
 
-const { permissionsBySessionId, permissionsByToken, sessions } = vi.hoisted(() => ({
+const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),
+  sessionStates: new Map<string, any>(),
   permissionsBySessionId: new Map<string, any>(),
   permissionsByToken: new Map<string, any>(),
 }))
@@ -29,6 +30,7 @@ vi.mock("@goddard-ai/storage", () => ({
         lastAgentMessage: null,
       })
     }),
+    list: vi.fn(async () => Array.from(sessions.values())),
     get: vi.fn(async (id: string) => sessions.get(id) ?? null),
     update: vi.fn(async (id: string, data: any) => {
       const existing = sessions.get(id)
@@ -40,6 +42,54 @@ vi.mock("@goddard-ai/storage", () => ({
         ...data,
         updatedAt: new Date(),
       })
+    }),
+  },
+  SessionStateStorage: {
+    create: vi.fn(async (record: any) => {
+      const now = new Date().toISOString()
+      const created = { ...record, createdAt: now, updatedAt: now }
+      sessionStates.set(record.sessionId, created)
+      return created
+    }),
+    list: vi.fn(async () => Array.from(sessionStates.values())),
+    get: vi.fn(async (sessionId: string) => sessionStates.get(sessionId) ?? null),
+    update: vi.fn(async (sessionId: string, data: any) => {
+      const existing = sessionStates.get(sessionId)
+      if (!existing) {
+        return null
+      }
+      const updated = { ...existing, ...data, updatedAt: new Date().toISOString() }
+      sessionStates.set(sessionId, updated)
+      return updated
+    }),
+    appendHistory: vi.fn(async (sessionId: string, message: any) => {
+      const existing = sessionStates.get(sessionId)
+      if (!existing) {
+        return null
+      }
+      const updated = {
+        ...existing,
+        history: [...existing.history, message],
+        updatedAt: new Date().toISOString(),
+      }
+      sessionStates.set(sessionId, updated)
+      return updated
+    }),
+    appendDiagnostic: vi.fn(async (sessionId: string, event: any) => {
+      const existing = sessionStates.get(sessionId)
+      if (!existing) {
+        return null
+      }
+      const updated = {
+        ...existing,
+        diagnostics: [...existing.diagnostics, event],
+        updatedAt: new Date().toISOString(),
+      }
+      sessionStates.set(sessionId, updated)
+      return updated
+    }),
+    remove: vi.fn(async (sessionId: string) => {
+      sessionStates.delete(sessionId)
     }),
   },
 }))
@@ -54,6 +104,7 @@ vi.mock("@goddard-ai/storage/session-permissions", () => ({
     }),
     get: vi.fn(async (sessionId: string) => permissionsBySessionId.get(sessionId) ?? null),
     getByToken: vi.fn(async (token: string) => permissionsByToken.get(token) ?? null),
+    list: vi.fn(async () => Array.from(permissionsBySessionId.values())),
     addAllowedPr: vi.fn(async (sessionId: string, prNumber: number) => {
       const existing = permissionsBySessionId.get(sessionId)
       if (!existing) {
@@ -80,6 +131,7 @@ afterEach(async () => {
   vi.resetModules()
   vi.clearAllMocks()
   sessions.clear()
+  sessionStates.clear()
   permissionsBySessionId.clear()
   permissionsByToken.clear()
 
@@ -233,6 +285,17 @@ async function startTestDaemon(): Promise<{
         agentName: "test-agent",
         cwd: process.cwd(),
         metadata: {},
+        connection: {
+          mode: "live" as const,
+          reconnectable: true,
+          historyAvailable: session.history.length > 0,
+          activeDaemonSession: true,
+        },
+        diagnostics: {
+          eventCount: 0,
+          historyLength: session.history.length,
+          lastEventAt: null,
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         errorMessage: null,
@@ -263,7 +326,30 @@ async function startTestDaemon(): Promise<{
       return {
         id,
         acpId: session.acpId,
+        connection: {
+          mode: "live" as const,
+          reconnectable: true,
+          historyAvailable: session.history.length > 0,
+          activeDaemonSession: true,
+        },
         history: [...session.history],
+      }
+    },
+    sessionDiagnostics: async ({ id }) => {
+      const session = sessionHistory.get(id)
+      if (!session) {
+        throw new Error("Session not found")
+      }
+      return {
+        id,
+        acpId: session.acpId,
+        connection: {
+          mode: "live" as const,
+          reconnectable: true,
+          historyAvailable: session.history.length > 0,
+          activeDaemonSession: true,
+        },
+        events: [],
       }
     },
     sessionShutdown: async ({ id }) => {

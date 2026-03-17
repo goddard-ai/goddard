@@ -7,12 +7,16 @@ const runCmd = command({
     repo: option({ type: string, long: "repo" }),
     projectDir: option({ type: string, long: "project-dir", defaultValue: () => process.cwd() }),
     baseUrl: option({ type: string, long: "base-url", defaultValue: () => "" }),
+    socketPath: option({ type: string, long: "socket-path", defaultValue: () => "" }),
+    agentBinDir: option({ type: string, long: "agent-bin-dir", defaultValue: () => "" }),
   },
   handler: async (args) => {
     return runDaemon({
       repo: args.repo,
       projectDir: args.projectDir,
       baseUrl: args.baseUrl,
+      socketPath: args.socketPath || undefined,
+      agentBinDir: args.agentBinDir || undefined,
     })
   },
 })

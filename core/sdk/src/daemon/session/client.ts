@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { AgentSession } from "./client-session.js"
 
@@ -11,6 +12,9 @@ export type RunAgentOptions = {
   createClient?: (input: { socketPath: string }) => DaemonIpcClient
   env?: Record<string, string | undefined>
 }
+
+// Read-only daemon session lookup options shared with runAgent.
+export type GetDaemonSessionOptions = RunAgentOptions
 
 function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
   return "sessionId" in params === false && params.oneShot === true
@@ -201,5 +205,21 @@ export async function runAgent(
     ),
   )
 
-  return new AgentSession(daemonSessionId, acpSessionId, acpClient, client, agentOutput.close)
+  return new AgentSession(
+    daemonSessionId,
+    acpSessionId,
+    connectedSession.session,
+    acpClient,
+    client,
+    agentOutput.close,
+  )
+}
+
+export async function getDaemonSession(
+  id: string,
+  options?: GetDaemonSessionOptions,
+): Promise<DaemonSession> {
+  const client = resolveDaemonClient(options)
+  const response = await client.send("sessionGet", { id })
+  return response.session
 }

@@ -1,19 +1,28 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type {
   CreateDaemonSessionRequest,
+  DaemonDiagnosticEvent,
   DaemonSession,
+  DaemonSessionConnection,
   DaemonSessionMetadata,
+  GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
 } from "@goddard-ai/schema/daemon"
 import type { SessionStatus } from "@goddard-ai/schema/db"
 import type { AgentDistribution } from "@goddard-ai/schema/session-server"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
-import { SessionStorage, type SQLSessionUpdate } from "@goddard-ai/storage"
+import {
+  SessionStateStorage,
+  SessionStorage,
+  type SessionConnectionMode,
+  type SessionDiagnosticEvent,
+  type SQLSessionUpdate,
+} from "@goddard-ai/storage"
 import { randomUUID, randomBytes } from "node:crypto"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
-import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { createAgentConnection, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "./acp.ts"
+import { prependAgentBinToPath } from "../config.ts"
 import { fetchRegistryAgent } from "./registry.ts"
 
 /** The current version of `@goddard-ai/daemon` */
@@ -34,10 +43,12 @@ type PermissionRequest = acp.AnyMessage & {
   params: acp.RequestPermissionRequest
 }
 
+// ACP request metadata tracked in memory so response messages can update session state.
 type PromptRequestMessage = acp.AnyMessage & {
   params: acp.PromptRequest
 }
 
+// Live daemon-owned session runtime that cannot survive process restarts.
 type ActiveSession = {
   id: string
   acpId: string
@@ -60,6 +71,7 @@ export type SessionManager = {
   connectSession: (id: string) => Promise<DaemonSession>
   getSession: (id: string) => Promise<DaemonSession>
   getHistory: (id: string) => Promise<GetDaemonSessionHistoryResponse>
+  getDiagnostics: (id: string) => Promise<GetDaemonSessionDiagnosticsResponse>
   sendMessage: (id: string, message: acp.AnyMessage) => Promise<void>
   shutdownSession: (id: string) => Promise<boolean>
   resolveSessionIdByToken: (token: string) => Promise<string>
@@ -130,10 +142,29 @@ function toIsoString(value: Date | number): string {
   return (value instanceof Date ? value : new Date(value)).toISOString()
 }
 
-function toDaemonSession(record: Awaited<ReturnType<typeof SessionStorage.get>>): DaemonSession {
+function toConnectionState(input: {
+  mode: SessionConnectionMode
+  activeDaemonSession: boolean
+  historyLength: number
+}): DaemonSessionConnection {
+  return {
+    mode: input.mode,
+    reconnectable: input.mode === "live" && input.activeDaemonSession,
+    historyAvailable: input.historyLength > 0,
+    activeDaemonSession: input.activeDaemonSession,
+  }
+}
+
+async function toDaemonSession(
+  record: Awaited<ReturnType<typeof SessionStorage.get>>,
+): Promise<DaemonSession> {
   if (!record) {
     throw new Error("Session not found")
   }
+
+  const state = await SessionStateStorage.get(record.id)
+  const diagnostics = state?.diagnostics ?? []
+  const historyLength = state?.history.length ?? 0
 
   return {
     id: record.id,
@@ -142,6 +173,16 @@ function toDaemonSession(record: Awaited<ReturnType<typeof SessionStorage.get>>)
     agentName: record.agentName,
     cwd: record.cwd,
     metadata: record.metadata,
+    connection: toConnectionState({
+      mode: state?.connectionMode ?? "none",
+      activeDaemonSession: state?.activeDaemonSession ?? false,
+      historyLength,
+    }),
+    diagnostics: {
+      eventCount: diagnostics.length,
+      historyLength,
+      lastEventAt: diagnostics.at(-1)?.at ?? null,
+    },
     createdAt: toIsoString(record.createdAt),
     updatedAt: toIsoString(record.updatedAt),
     errorMessage: record.errorMessage,
@@ -162,15 +203,12 @@ function agentNameFromInput(agent: string | AgentDistribution): string {
 function buildAgentProcessEnv(input: {
   daemonUrl: string
   token: string
+  agentBinDir: string
   env?: Record<string, string>
 }): NodeJS.ProcessEnv {
-  const agentBinDir = join(import.meta.dirname, "../../agent-bin")
-  const basePath = input.env?.PATH ?? process.env.PATH ?? ""
-
   return {
     ...process.env,
-    ...input.env,
-    PATH: basePath ? `${agentBinDir}:${basePath}` : agentBinDir,
+    ...prependAgentBinToPath(input.agentBinDir, input.env),
     GODDARD_DAEMON_URL: input.daemonUrl,
     GODDARD_SESSION_TOKEN: input.token,
   }
@@ -182,6 +220,7 @@ async function spawnAgentProcess(
   params: {
     agent: string | AgentDistribution
     cwd: string
+    agentBinDir: string
     env?: Record<string, string>
   },
 ): Promise<ChildProcessByStdio<Writable, Readable, null>> {
@@ -213,7 +252,12 @@ async function spawnAgentProcess(
   return spawn(cmd, args, {
     stdio: ["pipe", "pipe", "inherit"],
     cwd: params.cwd,
-    env: buildAgentProcessEnv({ daemonUrl, token, env: params.env }),
+    env: buildAgentProcessEnv({
+      daemonUrl,
+      token,
+      agentBinDir: params.agentBinDir,
+      env: params.env,
+    }),
   })
 }
 
@@ -311,12 +355,26 @@ function parseRepoScope(metadata?: DaemonSessionMetadata): {
   }
 }
 
+function createDiagnosticEvent(
+  sessionId: string,
+  type: string,
+  detail?: Record<string, unknown>,
+): SessionDiagnosticEvent {
+  return {
+    sessionId,
+    type,
+    at: new Date().toISOString(),
+    detail,
+  }
+}
+
 export function createSessionManager(input: {
   daemonUrl: string
+  agentBinDir: string
   publish: (id: string, message: acp.AnyMessage) => void
 }): SessionManager {
   const activeSessions = new Map<string, ActiveSession>()
-  const sessionHistory = new Map<string, { acpId: string; history: acp.AnyMessage[] }>()
+  const ready = reconcilePersistedSessions()
 
   async function updateSession(id: string, update: SQLSessionUpdate): Promise<void> {
     const active = activeSessions.get(id)
@@ -327,7 +385,99 @@ export function createSessionManager(input: {
     await SessionStorage.update(id, update)
   }
 
+  async function appendHistory(id: string, message: acp.AnyMessage): Promise<void> {
+    const active = activeSessions.get(id)
+    if (active) {
+      active.history.push(message)
+    }
+    await SessionStateStorage.appendHistory(id, message)
+  }
+
+  async function emitDiagnostic(
+    sessionId: string,
+    type: string,
+    detail?: Record<string, unknown>,
+  ): Promise<void> {
+    const event = createDiagnosticEvent(sessionId, type, detail)
+    process.stdout.write(`${JSON.stringify({ scope: "daemon", ...event })}\n`)
+    await SessionStateStorage.appendDiagnostic(sessionId, event)
+  }
+
+  async function setConnectionMode(
+    sessionId: string,
+    mode: SessionConnectionMode,
+    activeDaemonSession: boolean,
+  ): Promise<void> {
+    await SessionStateStorage.update(sessionId, {
+      connectionMode: mode,
+      activeDaemonSession,
+    })
+  }
+
+  async function reconcilePersistedSessions(): Promise<void> {
+    let persistedSessions: Awaited<ReturnType<typeof SessionStorage.list>>
+    let permissions: Awaited<ReturnType<typeof SessionPermissionsStorage.list>>
+
+    try {
+      ;[persistedSessions, permissions] = await Promise.all([
+        SessionStorage.list(),
+        SessionPermissionsStorage.list(),
+      ])
+    } catch (error) {
+      process.stderr.write(
+        `${JSON.stringify({
+          scope: "daemon",
+          type: "session_reconciliation_failed",
+          at: new Date().toISOString(),
+          detail: { message: error instanceof Error ? error.message : String(error) },
+        })}\n`,
+      )
+      return
+    }
+
+    const sessionIds = new Set(persistedSessions.map((session) => session.id))
+
+    await Promise.all(
+      permissions
+        .filter((permission) => !sessionIds.has(permission.sessionId))
+        .map((permission) => SessionPermissionsStorage.revoke(permission.sessionId)),
+    )
+
+    await Promise.all(
+      persistedSessions.map(async (session) => {
+        const state = await SessionStateStorage.get(session.id)
+        if (!state) {
+          await SessionStateStorage.create({
+            sessionId: session.id,
+            acpId: session.acpId,
+            connectionMode: "none",
+            history: [],
+            diagnostics: [],
+            activeDaemonSession: false,
+          })
+        }
+
+        if (session.status === "active" || session.status === "blocked" || session.status === "idle") {
+          await SessionStorage.update(session.id, {
+            status: "error",
+            errorMessage: "Session interrupted when the previous daemon exited unexpectedly.",
+          })
+          await setConnectionMode(session.id, "history", false)
+          await emitDiagnostic(session.id, "session_reconciled_after_restart", {
+            previousStatus: session.status,
+          })
+          await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+          return
+        }
+
+        await setConnectionMode(session.id, state?.history.length ? "history" : "none", false)
+        await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+      }),
+    )
+  }
+
   async function createSession(params: CreateDaemonSessionRequest): Promise<DaemonSession> {
+    await ready
     const id = randomUUID()
     const token = randomBytes(32).toString("hex")
     const scope = parseRepoScope(params.metadata)
@@ -344,14 +494,19 @@ export function createSessionManager(input: {
       const process = await spawnAgentProcess(input.daemonUrl, token, {
         agent: params.agent,
         cwd: params.cwd,
+        agentBinDir: input.agentBinDir,
         env: params.env,
       })
 
       const initialized = await initializeSession(process.stdin, process.stdout, params)
 
-      sessionHistory.set(id, {
+      await SessionStateStorage.create({
+        sessionId: id,
         acpId: initialized.acpId,
+        connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
         history: [...initialized.history],
+        diagnostics: [],
+        activeDaemonSession: !shouldExitAfterInitialPrompt(params),
       })
 
       await SessionStorage.create({
@@ -363,9 +518,16 @@ export function createSessionManager(input: {
         mcpServers: params.mcpServers,
         metadata: params.metadata ?? null,
       })
+      await emitDiagnostic(id, "session_created", {
+        status: initialized.status,
+        oneShot: params.oneShot === true,
+        agent: agentNameFromInput(params.agent),
+      })
 
       if (shouldExitAfterInitialPrompt(params)) {
         await updateSession(id, { status: "done" })
+        await setConnectionMode(id, "history", false)
+        await emitDiagnostic(id, "session_completed_one_shot")
         process.kill()
         await SessionPermissionsStorage.revoke(id).catch(() => {})
         return toDaemonSession(await SessionStorage.get(id))
@@ -381,7 +543,7 @@ export function createSessionManager(input: {
         writer,
         subscription: { close: async () => {} },
         status: initialized.status,
-        history: sessionHistory.get(id)?.history ?? [...initialized.history],
+        history: [...initialized.history],
         isFirstPrompt: initialized.isFirstPrompt,
         systemPrompt: params.systemPrompt,
         lastPermissionRequest: null,
@@ -402,7 +564,7 @@ export function createSessionManager(input: {
           }
         }
 
-        active.history.push(message)
+        await appendHistory(active.id, message)
         input.publish(active.id, message)
       })
 
@@ -423,6 +585,12 @@ export function createSessionManager(input: {
           nextUpdate.status = "cancelled"
         }
 
+        await setConnectionMode(active.id, active.history.length > 0 ? "history" : "none", false)
+        await emitDiagnostic(active.id, "agent_process_exit", {
+          code,
+          signal,
+          nextStatus: nextUpdate.status ?? active.status,
+        })
         if (Object.keys(nextUpdate).length > 0) {
           await updateSession(active.id, nextUpdate).catch(() => {})
         }
@@ -436,42 +604,57 @@ export function createSessionManager(input: {
       return toDaemonSession(await SessionStorage.get(id))
     } catch (error) {
       await SessionPermissionsStorage.revoke(id).catch(() => {})
+      await SessionStateStorage.remove(id).catch(() => {})
       throw error
     }
   }
 
   async function getSession(id: string): Promise<DaemonSession> {
+    await ready
     return toDaemonSession(await SessionStorage.get(id))
   }
 
   async function connectSession(id: string): Promise<DaemonSession> {
+    await ready
     if (!activeSessions.has(id)) {
-      throw new Error(`Session ${id} is not active`)
+      const session = await getSession(id)
+      throw new Error(
+        session.connection.historyAvailable
+          ? `Session ${id} is archived and no longer reconnectable`
+          : `Session ${id} is not reconnectable`,
+      )
     }
 
+    await emitDiagnostic(id, "session_connected")
     return getSession(id)
   }
 
   async function getHistory(id: string): Promise<GetDaemonSessionHistoryResponse> {
+    await ready
     const active = activeSessions.get(id)
-    if (!active) {
-      const session = await getSession(id)
-      const archived = sessionHistory.get(id)
-      return {
-        id: session.id,
-        acpId: session.acpId,
-        history: archived ? [...archived.history] : [],
-      }
-    }
-
+    const session = await getSession(id)
     return {
-      id: active.id,
-      acpId: active.acpId,
-      history: [...active.history],
+      id: session.id,
+      acpId: session.acpId,
+      connection: session.connection,
+      history: active ? [...active.history] : ((await SessionStateStorage.get(id))?.history ?? []),
+    }
+  }
+
+  async function getDiagnostics(id: string): Promise<GetDaemonSessionDiagnosticsResponse> {
+    await ready
+    const session = await getSession(id)
+    const state = await SessionStateStorage.get(id)
+    return {
+      id: session.id,
+      acpId: session.acpId,
+      connection: session.connection,
+      events: (state?.diagnostics ?? []) as DaemonDiagnosticEvent[],
     }
   }
 
   async function sendMessage(id: string, message: acp.AnyMessage): Promise<void> {
+    await ready
     const active = activeSessions.get(id)
     if (!active) {
       throw new Error(`Session ${id} is not active`)
@@ -502,22 +685,29 @@ export function createSessionManager(input: {
       active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
     }
 
-    active.history.push(message)
+    await appendHistory(active.id, message)
+    await emitDiagnostic(active.id, "session_message_sent", {
+      hasId: "id" in message && message.id != null,
+      method: "method" in message ? message.method : undefined,
+    })
     input.publish(active.id, message)
     await active.writer.write(message)
   }
 
   async function shutdownSession(id: string): Promise<boolean> {
+    await ready
     const active = activeSessions.get(id)
     if (!active) {
       return false
     }
 
+    await emitDiagnostic(id, "session_shutdown_requested")
     active.process.kill()
     return true
   }
 
   async function resolveSessionIdByToken(token: string): Promise<string> {
+    await ready
     const record = await SessionPermissionsStorage.getByToken(token)
     if (!record) {
       throw new Error("Invalid session token")
@@ -527,21 +717,22 @@ export function createSessionManager(input: {
   }
 
   async function close(): Promise<void> {
+    await ready
     for (const session of activeSessions.values()) {
+      await emitDiagnostic(session.id, "daemon_shutdown", { status: session.status })
       session.process.kill()
       await session.writer.close().catch(() => {})
       await session.subscription.close().catch(() => {})
       await SessionPermissionsStorage.revoke(session.id).catch(() => {})
     }
     activeSessions.clear()
-    sessionHistory.clear()
   }
-
   return {
     createSession,
     connectSession,
     getSession,
     getHistory,
+    getDiagnostics,
     sendMessage,
     shutdownSession,
     resolveSessionIdByToken,
