@@ -39,6 +39,7 @@ function createParams(
       agent: "pi-acp",
       cwd: process.cwd(),
       mcpServers: [],
+      systemPrompt: "default system prompt",
     },
     rateLimits: {
       cycleDelay: "0s",
