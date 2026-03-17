@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p . --noEmit",
+    "typecheck": "tree-run build:types && tsc -p . --noEmit",
     "tauri": "tauri"
   },
   "dependencies": {

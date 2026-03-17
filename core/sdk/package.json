@@ -28,7 +28,7 @@
   "scripts": {
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tree-run build:types && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "build": "tree-run build && tsdown",
     "build:types": "tsdown --no-minify --clean --unused"

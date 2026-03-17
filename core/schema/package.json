@@ -10,7 +10,7 @@
   "scripts": {
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tree-run build:types && tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
