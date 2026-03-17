@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "tree-build && tsc && vite build",
     "preview": "vite preview",
-    "lint": "tsc -p . --noEmit",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsc -p . --noEmit",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -28,7 +29,6 @@
   "devDependencies": {
     "@preact/preset-vite": "^2.10.3",
     "@tauri-apps/cli": "^2.10.1",
-    "prettier": "3.8.1",
     "vite": "^7.3.1"
   }
 }
