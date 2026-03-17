@@ -30,5 +30,12 @@ All commits must follow the Conventional Commits standard.
 ## Testing the App Package
 We do not want automated tests for our `app/` package, so do not write any.
 
+## Test Suite Expectations
+The test suite is maintained by AI agents and should stay lean.
+- Do not preserve a test just because it already exists.
+- If a test does not protect a meaningful contract, user-visible behavior, regression boundary, or shared mock drift check, remove it.
+- Prefer contract-level tests over implementation-detail tests.
+- When replacing a shallow or brittle test, remove the old test instead of keeping both unless both protect distinct behavior.
+
 ## `build:types` Script Guidance
 Do not add a `build:types` script to packages that are both private and only export source `*.ts` files.
