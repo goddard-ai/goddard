@@ -11,7 +11,7 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
-      "default": "./src/index.ts"
+      "source": "./src/index.ts"
     },
     "./client": "./src/client.ts"
   },

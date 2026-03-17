@@ -7,22 +7,22 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
-      "default": "./src/index.ts"
+      "source": "./src/index.ts"
     },
     "./daemon": {
       "types": "./dist/daemon/index.d.mts",
       "import": "./dist/daemon/index.mjs",
-      "default": "./src/daemon/index.ts"
+      "source": "./src/daemon/index.ts"
     },
     "./loop": {
       "types": "./dist/loop/index.d.mts",
       "import": "./dist/loop/index.mjs",
-      "default": "./src/loop/index.ts"
+      "source": "./src/loop/index.ts"
     },
     "./node": {
       "types": "./dist/node/index.d.mts",
       "import": "./dist/node/index.mjs",
-      "default": "./src/node/index.ts"
+      "source": "./src/node/index.ts"
     }
   },
   "scripts": {
@@ -39,10 +39,10 @@
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/storage": "workspace:*",
-    "cron-parser": "^5.5.0",
-    "exit-hook": "^4.0.0",
     "@libsql/client": "^0.17.0",
+    "cron-parser": "^5.5.0",
     "drizzle-orm": "^0.45.1",
+    "exit-hook": "^4.0.0",
     "radashi": "^12.7.2",
     "rouzer": "^1.5.0",
     "yaml": "^2.8.2",

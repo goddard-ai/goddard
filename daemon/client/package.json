@@ -7,7 +7,7 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "source": "./src/index.ts"
     }
   },
   "scripts": {
