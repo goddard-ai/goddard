@@ -110,23 +110,17 @@ test("buildActionSessionParams lets action config override defaults", () => {
   const action: ResolvedAgentAction = {
     prompt: "Review the pull request.",
     config: {
-      oneShot: false,
-      systemPrompt: "Follow the security checklist.",
       cwd: "/tmp/action-cwd",
+      systemPrompt: "Follow the security checklist.",
     },
     path: "/tmp/review.md",
   }
 
   const params = buildActionSessionParams(action, {
     cwd: "/tmp/caller-cwd",
-    initialPrompt: "Check the latest changes.",
     systemPrompt: "Start with repo conventions.",
   })
 
-  assert.equal(params.cwd, "/tmp/action-cwd")
-  assert.equal(params.oneShot, false)
-  assert.equal(
-    params.systemPrompt,
-    ["Follow the security checklist.", "Review the pull request."].join("\n\n"),
-  )
+  assert.equal(params.cwd, "/tmp/caller-cwd")
+  assert.equal(params.systemPrompt, "Start with repo conventions.")
 })

@@ -6,13 +6,13 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
 
+export type AgentActionConfig = Omit<Partial<NewSessionParams>, "oneShot" | "initialPrompt">
+
 export type ResolvedAgentAction = {
   prompt: string
-  config: Partial<NewSessionParams>
+  config: AgentActionConfig
   path: string
 }
-
-export type RunAgentActionParams = Partial<NewSessionParams> & { initialPrompt: {} }
 
 const DEFAULT_AGENT = { type: "npx", package: "@mariozechner/pi-coding-agent" } as const
 
@@ -116,20 +116,17 @@ async function resolveActionFromRoot(
 
 export function buildActionSessionParams(
   action: ResolvedAgentAction,
-  options: RunAgentActionParams,
+  overrides?: AgentActionConfig,
 ): SessionParams {
-  const mergedConfig = {
+  return {
     agent: DEFAULT_AGENT,
+    systemPrompt: "",
     cwd: process.cwd(),
     mcpServers: [],
-    oneShot: true,
-    ...options,
     ...action.config,
-  }
-
-  return {
-    ...mergedConfig,
-    systemPrompt: [mergedConfig.systemPrompt, action.prompt].filter(Boolean).join("\n\n"),
+    ...overrides,
+    oneShot: true as const,
+    initialPrompt: action.prompt,
   }
 }
 
@@ -152,7 +149,7 @@ export async function resolveAction(
   )
 }
 
-export async function runAgentAction(actionName: string, options: RunAgentActionParams) {
+export async function runAgentAction(actionName: string, options: AgentActionConfig) {
   const cwd = options.cwd ?? process.cwd()
   const action = await resolveAction(actionName, cwd)
   return runAgent(buildActionSessionParams(action, options))
