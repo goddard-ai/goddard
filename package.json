@@ -35,6 +35,7 @@
     "tsdown": "^0.21.0",
     "typescript": "^5.9.3",
     "unplugin-raw": "^0.6.4",
+    "unplugin-unused": "^0.5.7",
     "vitest": "^4.0.18"
   },
   "simple-git-hooks": {
