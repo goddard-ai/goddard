@@ -1,6 +1,8 @@
 import { command, option, optional, runSafely, string, subcommands } from "cmd-ts"
 import { runDaemon } from "./daemon.ts"
 
+declare const __VERSION__: string
+
 const app = subcommands({
   name: "goddard-daemon",
   version: __VERSION__,
