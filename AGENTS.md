@@ -13,6 +13,7 @@ The `spec/` folder contains the canonical source of truth and theory of mind for
 
 ## Code Style Guidelines
 - **Avoid Single-Use Variables:** Do not declare variables that are only referenced once unless they significantly improve readability for complex expressions. Inline them directly into their usage.
+- **Explain Types and Interfaces:** Every type alias or interface declared in TypeScript must have a `//` comment explaining why it's warranted. The goal is to reduce type bloat and help future maintainers understand the type's purpose, since types are often declared away from where they're actually used.
 
 ## Git/Rebase Note
 - When continuing a rebase in non-interactive terminals, use `GIT_EDITOR=true git rebase --continue` to avoid hanging in an interactive editor.
