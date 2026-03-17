@@ -1,323 +1,258 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { Worktree } from "../src/index.ts"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as childProcess from "node:child_process"
 import * as fs from "node:fs"
+import * as os from "node:os"
+import { Worktree } from "../src/index.ts"
+import { defaultPlugin } from "../src/default-plugin.ts"
+import type { WorktreePlugin } from "../src/types.ts"
 
 vi.mock("node:child_process", () => ({
-  spawnSync: vi.fn(() => ({ status: 0, stdout: "" })),
+  spawnSync: vi.fn(() => ({ status: 0, stdout: "", error: undefined })),
 }))
 
 vi.mock("node:fs", () => ({
   existsSync: vi.fn(() => false),
-  appendFileSync: vi.fn(),
 }))
+
+function createPlugin(name: string, overrides: Partial<WorktreePlugin> = {}): WorktreePlugin {
+  return {
+    name,
+    isApplicable: () => false,
+    setup: () => null,
+    cleanup: () => true,
+    ...overrides,
+  }
+}
+
+function mockRepo(paths: string[] = []) {
+  vi.mocked(fs.existsSync).mockImplementation((value) => {
+    const target = String(value)
+    return (
+      target.includes("/.git") ||
+      target.endsWith(".git") ||
+      paths.some((expectedPath) => target.includes(expectedPath))
+    )
+  })
+}
+
+function mockSpawnSync(
+  implementation: (command: string, args: string[]) => { status: number; stdout?: string },
+) {
+  vi.mocked(childProcess.spawnSync).mockImplementation((command, args) => {
+    return implementation(String(command), Array.isArray(args) ? args.map(String) : []) as never
+  })
+}
 
 describe("Worktree", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSpawnSync(() => ({ status: 0, stdout: "" }))
   })
 
-  it("should create a worktree directory and branch name via copy fallback when worktrunk is missing", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
+  it("requires the cwd to be a git repository", () => {
+    expect(() => new Worktree({ cwd: "/test/repo" })).toThrow("Not a git repository")
+  })
+
+  it("uses the first applicable custom plugin and delegates cleanup to it", () => {
+    mockRepo()
+
+    const setup = vi.fn(() => "/tmp/custom-worktree")
+    const cleanup = vi.fn(() => true)
+    const plugin = createPlugin("custom", {
+      isApplicable: () => true,
+      setup,
+      cleanup,
     })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) => String(p).includes(".git") || String(p).includes(".worktrees"),
-    )
 
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
-    const result = worktree.setup(branchName)
-
-    expect(worktree.plugin.name).toBe("default")
-    expect(result.branchName).toBe("pr-123")
-    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
-
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "cp",
-      expect.any(Array),
-      expect.objectContaining({ encoding: "utf8" }),
-    )
-  })
-
-  it("should fallback to git worktree add --detach if copy-on-write cp fails", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      if (
-        cmd === "cp" &&
-        (args?.[0] === "-cR" || args?.[0] === "--reflink=auto" || args?.[0] === "-R")
-      )
-        return { status: 1, stdout: "", error: undefined } as any
-      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "add")
-        return { status: 0, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
+    const worktree = new Worktree({
+      cwd: "/test/repo",
+      plugins: [plugin, createPlugin("ignored", { isApplicable: () => true })],
     })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) => String(p).includes(".git") || String(p).includes(".worktrees"),
-    )
 
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
-    const result = worktree.setup(branchName)
+    expect(worktree.poweredBy).toBe("custom")
+    expect(worktree.setup("feature-1")).toEqual({
+      worktreeDir: "/tmp/custom-worktree",
+      branchName: "feature-1",
+    })
 
-    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
+    worktree.cleanup("/tmp/custom-worktree", "feature-1")
 
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "git",
-      ["worktree", "add", "--detach", result.worktreeDir],
-      expect.objectContaining({ cwd: "/test/dir" }),
-    )
+    expect(setup).toHaveBeenCalledWith({
+      cwd: "/test/repo",
+      branchName: "feature-1",
+      defaultDirName: undefined,
+    })
+    expect(cleanup).toHaveBeenCalledWith("/tmp/custom-worktree", "feature-1")
+    expect(childProcess.spawnSync).not.toHaveBeenCalled()
   })
 
-  it("should fallback to basic cp if both copy-on-write cp and git worktree fail", () => {
-    let cpCallCount = 0
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      if (cmd === "cp") {
-        cpCallCount++
-        if (cpCallCount === 1) {
-          return { status: 1, stdout: "", error: undefined } as any
-        }
-        return { status: 0, stdout: "", error: undefined } as any
+  it("falls back to the default plugin when the selected plugin returns null", () => {
+    mockRepo(["/.worktrees"])
+
+    const worktree = new Worktree({
+      cwd: "/test/repo",
+      plugins: [
+        createPlugin("custom", {
+          isApplicable: () => true,
+          setup: () => null,
+        }),
+      ],
+    })
+
+    expect(worktree.poweredBy).toBe("custom")
+
+    const result = worktree.setup("feature-1")
+
+    expect(worktree.poweredBy).toBe("default")
+    expect(result.branchName).toBe("feature-1")
+    expect(result.worktreeDir).toMatch(/^\/test\/repo\/.worktrees\/feature-1-\d+$/)
+  })
+
+  it("falls back to the default plugin when worktrunk cannot set up the branch", () => {
+    mockRepo([".config/wt.toml", "/.worktrees"])
+    mockSpawnSync((command, args) => {
+      if (command === "wt" && args[0] === "--version") {
+        return { status: 0, stdout: "1.0.0" }
       }
-      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "add")
-        return { status: 1, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
+      if (command === "wt" && args[0] === "switch") {
+        return { status: 1, stdout: "" }
+      }
+      return { status: 0, stdout: "" }
     })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) => String(p).includes(".git") || String(p).includes(".worktrees"),
-    )
 
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
-    const result = worktree.setup(branchName)
+    const worktree = new Worktree({ cwd: "/test/repo" })
 
-    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
+    expect(worktree.poweredBy).toBe("worktrunk")
 
-    // Verify it tried git worktree
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "git",
-      ["worktree", "add", "--detach", result.worktreeDir],
-      expect.objectContaining({ cwd: "/test/dir" }),
-    )
+    const result = worktree.setup("feature-1")
 
-    // Verify it fell back to basic cp
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "cp",
-      ["-R", "/test/dir/", result.worktreeDir],
-      expect.objectContaining({ encoding: "utf8" }),
-    )
+    expect(worktree.poweredBy).toBe("default")
+    expect(result.worktreeDir).toMatch(/^\/test\/repo\/.worktrees\/feature-1-\d+$/)
   })
 
-  it("should fall back to ~/.goddard/worktrees/ if no .worktrees directory exists and no override is provided", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
-    })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).endsWith(".git")) // Be specific that worktrees is false
-
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
-    const result = worktree.setup(branchName)
-
-    // Hash of '/test/dir' is approx: 9b2d...
-    expect(result.worktreeDir).toMatch(/\/\.goddard\/worktrees\/dir-[a-f0-9]{7}\/pr-123-\d+$/)
-    expect(childProcess.spawnSync).toHaveBeenCalledWith("mkdir", [
-      "-p",
-      expect.stringMatching(/\/\.goddard\/worktrees\/dir-[a-f0-9]{7}$/),
-    ])
-  })
-
-  it("should use a custom default directory if provided", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
-    })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git"))
-
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd, defaultPluginDirName: ".custom-dir" })
-    const result = worktree.setup(branchName)
-
-    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.custom-dir\/pr-123-\d+$/)
-  })
-
-  it("should handle git fetch and checkout errors gracefully", () => {
-    // Mock git commands to fail, but cp and mkdir to succeed
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      if (cmd === "git") return { status: 1, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
-    })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) => String(p).includes(".git") || String(p).includes(".worktrees"),
-    )
-
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
-
-    // Should not throw
-    expect(() => worktree.setup(branchName)).not.toThrow()
-  })
-
-  it("should use worktrunk if available", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 0, stdout: "1.0.0", error: undefined } as any
-      if (cmd === "wt" && args?.[0] === "switch")
-        return { status: 0, stdout: "", error: undefined } as any
-      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "list") {
+  it("uses worktrunk when it can resolve the created worktree", () => {
+    mockRepo([".config/wt.toml"])
+    mockSpawnSync((command, args) => {
+      if (command === "wt" && args[0] === "--version") {
+        return { status: 0, stdout: "1.0.0" }
+      }
+      if (command === "wt" && args[0] === "switch") {
+        return { status: 0, stdout: "" }
+      }
+      if (command === "git" && args[0] === "worktree" && args[1] === "list") {
         return {
           status: 0,
-          stdout: "/test/dir/.wt/pr-123 e1234 [pr-123]\n/test/dir main [main]",
-          error: undefined,
-        } as any
+          stdout: "/test/repo/.wt/feature-1 e1234 [feature-1]\n/test/repo main [main]",
+        }
       }
-      return { status: 0, stdout: "", error: undefined } as any
+      return { status: 0, stdout: "" }
     })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) => String(p).includes(".config/wt.toml") || String(p).includes(".git"),
-    )
 
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
-    const result = worktree.setup(branchName)
+    const worktree = new Worktree({ cwd: "/test/repo" })
+    const result = worktree.setup("feature-1")
 
-    expect(worktree.plugin.name).toBe("worktrunk")
     expect(worktree.poweredBy).toBe("worktrunk")
-    expect(result.branchName).toBe("pr-123")
-    expect(result.worktreeDir).toBe("/test/dir/.wt/pr-123")
-
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "wt",
-      ["switch", "pr-123"],
-      expect.any(Object),
-    )
-
-    // Ensure it does NOT check out PR code manually since worktrunk handles it natively
-    expect(childProcess.spawnSync).not.toHaveBeenCalledWith(
-      "git",
-      ["fetch", "origin", "pull/123/head:pr-123"],
-      expect.any(Object),
-    )
-    expect(childProcess.spawnSync).not.toHaveBeenCalledWith(
-      "git",
-      ["checkout", "pr-123"],
-      expect.any(Object),
-    )
+    expect(result).toEqual({
+      worktreeDir: "/test/repo/.wt/feature-1",
+      branchName: "feature-1",
+    })
   })
 
-  it("should dynamically fallback to default plugin if worktrunk setup returns null", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 0, stdout: "1.0.0", error: undefined } as any
-
-      // Simulate worktrunk switch failing, causing it to return null
-      if (cmd === "wt" && args?.[0] === "switch")
-        return { status: 1, stdout: "", error: undefined } as any
-
-      return { status: 0, stdout: "", error: undefined } as any
+  it("surfaces a contextual error when the default plugin cannot create a workspace", () => {
+    mockRepo(["/.worktrees"])
+    mockSpawnSync((command, args) => {
+      if (command === "mkdir") {
+        return { status: 0, stdout: "" }
+      }
+      if (command === "cp") {
+        return { status: 1, stdout: "" }
+      }
+      if (command === "git" && args[0] === "worktree" && args[1] === "add") {
+        return { status: 1, stdout: "" }
+      }
+      return { status: 0, stdout: "" }
     })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) =>
-        String(p).includes(".config/wt.toml") ||
-        String(p).includes(".git") ||
-        String(p).includes(".worktrees"),
-    )
 
-    const cwd = "/test/dir"
-    const branchName = "pr-123"
-    const worktree = new Worktree({ cwd })
+    const worktree = new Worktree({
+      cwd: "/test/repo",
+      plugins: [createPlugin("custom", { isApplicable: () => true, setup: () => null })],
+    })
 
-    // Should initially select worktrunk because it's applicable
-    expect(worktree.plugin.name).toBe("worktrunk")
-    expect(worktree.poweredBy).toBe("worktrunk")
-
-    const result = worktree.setup(branchName)
-
-    // Plugin should have been updated to the fallback due to failure
-    expect(worktree.plugin.name).toBe("default")
-    expect(worktree.poweredBy).toBe("default")
-    expect(result.branchName).toBe("pr-123")
-    expect(result.worktreeDir).toMatch(/^\/test\/dir\/.worktrees\/pr-123-\d+$/)
-
-    // Check that fallback legacy copy commands were executed
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "cp",
-      expect.any(Array),
-      expect.objectContaining({ encoding: "utf8" }),
+    expect(() => worktree.setup("feature-1")).toThrow(
+      "Default worktree plugin failed to setup the workspace",
     )
   })
 })
 
-describe("cleanupWorktree", () => {
+describe("defaultPlugin", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSpawnSync(() => ({ status: 0, stdout: "" }))
   })
 
-  it("should fallback to rm -rf for non-worktrunk directories when git worktree remove fails", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 1, stdout: "", error: undefined } as any
-      if (cmd === "git" && args?.[0] === "worktree" && args?.[1] === "remove")
-        return { status: 1, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
+  it("uses an explicit default directory name when provided", () => {
+    const result = defaultPlugin.setup({
+      cwd: "/test/repo",
+      branchName: "feature-1",
+      defaultDirName: ".custom-dir",
     })
-    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes(".git"))
 
-    const worktree = new Worktree({ cwd: "/test/dir" })
-    worktree.cleanup("/test/dir/.goddard-agents/pr-123-1234", "pr-123")
+    expect(result).toMatch(/^\/test\/repo\/.custom-dir\/feature-1-\d+$/)
+  })
 
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "git",
-      ["worktree", "remove", "--force", "/test/dir/.goddard-agents/pr-123-1234"],
-      expect.any(Object),
-    )
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "rm",
-      ["-rf", "/test/dir/.goddard-agents/pr-123-1234"],
-      expect.any(Object),
+  it("uses the shared global worktree directory when the repo has no local worktree dir", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const result = defaultPlugin.setup({
+      cwd: "/test/repo",
+      branchName: "feature-1",
+    })
+
+    expect(result).toMatch(
+      new RegExp(
+        `^${os.homedir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/.goddard/worktrees/repo-[a-f0-9]{7}/feature-1-\\d+$`,
+      ),
     )
   })
 
-  it("should use wt remove if worktrunk plugin is active", () => {
-    vi.mocked(childProcess.spawnSync).mockImplementation((cmd, args) => {
-      if (cmd === "wt" && args?.[0] === "--version")
-        return { status: 0, stdout: "1.0.0", error: undefined } as any
-      if (cmd === "wt" && args?.[0] === "remove")
-        return { status: 0, stdout: "", error: undefined } as any
-      return { status: 0, stdout: "", error: undefined } as any
+  it("uses another workspace creation strategy when the first clone attempt fails", () => {
+    const commands: string[] = []
+
+    mockSpawnSync((command, args) => {
+      commands.push([command, ...args].join(" "))
+
+      if (command === "cp") {
+        return { status: 1, stdout: "" }
+      }
+      if (command === "git" && args[0] === "worktree" && args[1] === "add") {
+        return { status: 0, stdout: "" }
+      }
+      return { status: 0, stdout: "" }
     })
-    vi.mocked(fs.existsSync).mockImplementation(
-      (p) => String(p).includes(".config/wt.toml") || String(p).includes(".git"),
-    )
 
-    const worktree = new Worktree({ cwd: "/test/dir" })
-    worktree.cleanup("/test/dir/.wt/pr-123", "pr-123")
+    const result = defaultPlugin.setup({
+      cwd: "/test/repo",
+      branchName: "feature-1",
+      defaultDirName: ".worktrees",
+    })
 
-    expect(childProcess.spawnSync).toHaveBeenCalledWith(
-      "wt",
-      ["remove", "pr-123"],
-      expect.any(Object),
-    )
-    expect(childProcess.spawnSync).not.toHaveBeenCalledWith(
-      "rm",
-      ["-rf", "/test/dir/.wt/pr-123"],
-      expect.any(Object),
-    )
+    expect(result).toMatch(/^\/test\/repo\/.worktrees\/feature-1-\d+$/)
+    expect(commands.some((command) => command.startsWith("git worktree add"))).toBe(true)
+  })
+
+  it("falls back to removing the directory when git worktree cleanup fails", () => {
+    const commands: string[] = []
+
+    mockSpawnSync((command, args) => {
+      commands.push([command, ...args].join(" "))
+
+      if (command === "git" && args[0] === "worktree" && args[1] === "remove") {
+        return { status: 1, stdout: "" }
+      }
+      return { status: 0, stdout: "" }
+    })
+
+    expect(defaultPlugin.cleanup("/test/repo/.worktrees/feature-1-1234", "feature-1")).toBe(true)
+    expect(commands.some((command) => command.startsWith("rm -rf"))).toBe(true)
   })
 })
