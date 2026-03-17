@@ -3,6 +3,7 @@ import { runDaemon } from "./daemon.ts"
 
 const app = subcommands({
   name: "goddard-daemon",
+  version: __VERSION__,
   cmds: {
     run: command({
       name: "run",
