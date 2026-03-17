@@ -25,6 +25,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
+    "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "devDependencies": {
