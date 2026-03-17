@@ -12,7 +12,6 @@
     "noEmit": true,
     "outDir": "dist",
     "declaration": true,
-    "declarationMap": true,
-    "customConditions": ["source"]
+    "declarationMap": true
   }
 }
