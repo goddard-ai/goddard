@@ -21,8 +21,10 @@ export const Models = {
   },
 } as const
 
+// A helper for extracting the literal values from nested model groups.
 type ValueOf<T> = T[keyof T]
 
+// A model identifier accepted by persisted and runtime Goddard configuration.
 export type Model = ValueOf<typeof Models.Anthropic> | ValueOf<typeof Models.OpenAi> | (string & {})
 
 // ---------------------------------------------------------------------------
@@ -31,40 +33,166 @@ export type Model = ValueOf<typeof Models.Anthropic> | ValueOf<typeof Models.Ope
 
 const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"])
 
+// A persisted thinking level for an agent-backed session.
 export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
 
-// ---------------------------------------------------------------------------
-// Agent sub-schema
-// ---------------------------------------------------------------------------
+const stringRecordSchema = z.record(z.string(), z.string())
+const metadataSchema = z.record(z.string(), z.unknown())
 
-const agentSchema = z
+const agentDistributionSchema = z
   .object({
-    model: z.string().min(1) as z.ZodType<Model>,
-    projectDir: z.string().min(1),
-    thinkingLevel: thinkingLevelSchema.optional(),
-    agentDir: z.string().optional(),
+    type: z.enum(["binary", "npx", "uvx"]),
+    package: z.string().min(1).optional(),
+    cmd: z.string().min(1).optional(),
+    args: z.array(z.string()).optional(),
   })
   .passthrough()
 
-export type PiAgentConfig = z.infer<typeof agentSchema>
+const sessionAgentSchema = z.union([z.string().min(1), agentDistributionSchema])
 
-// ---------------------------------------------------------------------------
-// configSchema (top-level)
-// ---------------------------------------------------------------------------
+const sessionConfigSchema = z
+  .object({
+    agent: sessionAgentSchema.optional(),
+    cwd: z.string().min(1).optional(),
+    mcpServers: z.array(z.unknown()).optional(),
+    systemPrompt: z.string().min(1).optional(),
+    env: stringRecordSchema.optional(),
+    metadata: metadataSchema.optional(),
+  })
+  .passthrough()
 
-/**
- * File-based loop settings are no longer modeled here.
- * The config file remains a passthrough object so callers can continue using
- * `defineConfig`, while runtime loop settings are sourced elsewhere.
- */
-export const configSchema = z.object({}).passthrough()
+const loopRateLimitsSchema = z
+  .object({
+    cycleDelay: z.string().min(1).optional(),
+    maxOpsPerMinute: z.number().int().positive().optional(),
+    maxCyclesBeforePause: z.number().int().positive().optional(),
+  })
+  .passthrough()
 
-export type GoddardLoopConfig = z.infer<typeof configSchema>
+const loopRetriesSchema = z
+  .object({
+    maxAttempts: z.number().int().positive().optional(),
+    initialDelayMs: z.number().int().nonnegative().optional(),
+    maxDelayMs: z.number().int().nonnegative().optional(),
+    backoffFactor: z.number().positive().optional(),
+    jitterRatio: z.number().nonnegative().optional(),
+  })
+  .passthrough()
 
-// ---------------------------------------------------------------------------
-// defineConfig
-// ---------------------------------------------------------------------------
+export const actionConfigSchema = sessionConfigSchema
 
-export function defineConfig(config: GoddardLoopConfig): GoddardLoopConfig {
-  return config
+export const loopConfigSchema = z
+  .object({
+    session: sessionConfigSchema.optional(),
+    rateLimits: loopRateLimitsSchema.optional(),
+    retries: loopRetriesSchema.optional(),
+  })
+  .passthrough()
+
+export const rootConfigSchema = z
+  .object({
+    actions: actionConfigSchema.optional(),
+    loops: loopConfigSchema.optional(),
+  })
+  .passthrough()
+
+export const resolvedLoopRateLimitsSchema = z.object({
+  cycleDelay: z.string().min(1),
+  maxOpsPerMinute: z.number().int().positive(),
+  maxCyclesBeforePause: z.number().int().positive(),
+})
+
+export const resolvedLoopRetriesSchema = z.object({
+  maxAttempts: z.number().int().positive(),
+  initialDelayMs: z.number().int().nonnegative(),
+  maxDelayMs: z.number().int().nonnegative(),
+  backoffFactor: z.number().positive(),
+  jitterRatio: z.number().nonnegative(),
+})
+
+export const resolvedLoopConfigSchema = z.object({
+  session: sessionConfigSchema.extend({
+    agent: sessionAgentSchema,
+    cwd: z.string().min(1),
+    mcpServers: z.array(z.unknown()),
+  }),
+  rateLimits: resolvedLoopRateLimitsSchema,
+  retries: resolvedLoopRetriesSchema,
+})
+
+// A persisted action config document layered with root defaults before runtime overrides.
+export type GoddardActionConfigDocument = z.infer<typeof actionConfigSchema>
+
+// A persisted loop config document layered with root defaults before runtime overrides.
+export type GoddardLoopConfigDocument = z.infer<typeof loopConfigSchema>
+
+// A persisted root config document for shared action and loop defaults.
+export type GoddardRootConfigDocument = z.infer<typeof rootConfigSchema>
+
+// A resolved loop rate-limit block ready to be converted into runtime params.
+export type GoddardLoopRateLimitsConfig = z.infer<typeof resolvedLoopRateLimitsSchema>
+
+// A resolved loop retry block ready to be converted into runtime params.
+export type GoddardLoopRetriesConfig = z.infer<typeof resolvedLoopRetriesSchema>
+
+// A resolved loop config with all JSON-safe required fields present.
+export type ResolvedGoddardLoopConfigDocument = z.infer<typeof resolvedLoopConfigSchema>
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function mergeValue(baseValue: unknown, overrideValue: unknown): unknown {
+  if (overrideValue === undefined) {
+    return baseValue
+  }
+
+  if (Array.isArray(overrideValue)) {
+    return [...overrideValue]
+  }
+
+  if (!isPlainObject(overrideValue)) {
+    return overrideValue
+  }
+
+  const baseObject = isPlainObject(baseValue) ? baseValue : {}
+  const merged: Record<string, unknown> = { ...baseObject }
+
+  for (const [key, value] of Object.entries(overrideValue)) {
+    merged[key] = mergeValue(baseObject[key], value)
+  }
+
+  return merged
+}
+
+function mergeConfigLayers<T extends Record<string, unknown>>(layers: Array<T | undefined>): T {
+  let merged: Record<string, unknown> = {}
+
+  for (const layer of layers) {
+    if (!layer) {
+      continue
+    }
+
+    merged = mergeValue(merged, layer) as Record<string, unknown>
+  }
+
+  return merged as T
+}
+
+export function mergeRootConfigLayers(
+  ...layers: Array<GoddardRootConfigDocument | undefined>
+): GoddardRootConfigDocument {
+  return rootConfigSchema.parse(mergeConfigLayers<GoddardRootConfigDocument>(layers))
+}
+
+export function mergeActionConfigLayers(
+  ...layers: Array<GoddardActionConfigDocument | undefined>
+): GoddardActionConfigDocument {
+  return actionConfigSchema.parse(mergeConfigLayers<GoddardActionConfigDocument>(layers))
+}
+
+export function mergeLoopConfigLayers(
+  ...layers: Array<GoddardLoopConfigDocument | undefined>
+): GoddardLoopConfigDocument {
+  return loopConfigSchema.parse(mergeConfigLayers<GoddardLoopConfigDocument>(layers))
 }

@@ -35,6 +35,18 @@ Use `@goddard-ai/sdk/daemon` when you need to:
 - Node convenience path: omit options and rely on `GODDARD_DAEMON_URL` plus `GODDARD_SESSION_TOKEN` when the host process provides them.
 - App path: pass an explicit `daemonUrl` and injected `createClient` factory. Do not rely on Node defaults in the app.
 
+## Configuration Layout
+
+Node helpers resolve persisted config from JSON only:
+
+- Global defaults: `~/.goddard/config.json`
+- Local defaults: `<repo>/.goddard/config.json`
+- Prompt-only actions: `.goddard/actions/<name>.md`
+- Packaged actions: `.goddard/actions/<name>/prompt.md` + `.goddard/actions/<name>/config.json`
+- Packaged loops: `.goddard/loops/<name>/prompt.js` + `.goddard/loops/<name>/config.json`
+
+Persisted prompt frontmatter is not supported. Loop `nextPrompt` logic comes from `prompt.js`, not JSON.
+
 ## Examples
 
 Backend-only SDK usage:
@@ -133,6 +145,26 @@ const sdk = new GoddardSdk({
 await sdk.actions.run("review", {
   cwd: process.cwd(),
   systemPrompt: "Use the local review checklist.",
+})
+
+await sdk.loop.runNamed("triage", {
+  session: {
+    cwd: process.cwd(),
+  },
+})
+
+await sdk.loop.run({
+  promptModulePath: "/workspace/.goddard/loops/runtime-review/prompt.js",
+  session: {
+    agent: "pi",
+    cwd: process.cwd(),
+    mcpServers: [],
+  },
+  rateLimits: {
+    cycleDelay: "30s",
+    maxOpsPerMinute: 4,
+    maxCyclesBeforePause: 200,
+  },
 })
 ```
 

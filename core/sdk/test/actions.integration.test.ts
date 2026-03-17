@@ -4,7 +4,6 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { createRequire } from "node:module"
 import { afterEach, test, vi } from "vitest"
-import { dedent } from "radashi"
 import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
 import { runAgent } from "../src/daemon/session/client.ts"
 import { startDaemonServer, type DaemonServer } from "../../../daemon/src/ipc.ts"
@@ -16,83 +15,88 @@ const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = 
   permissionsByToken: new Map<string, any>(),
 }))
 
-vi.mock("@goddard-ai/storage", () => ({
-  SessionStorage: {
-    create: vi.fn(async (record: any) => {
-      const now = new Date()
-      sessions.set(record.id, {
-        ...record,
-        createdAt: now,
-        updatedAt: now,
-        errorMessage: null,
-        blockedReason: null,
-        initiative: null,
-        lastAgentMessage: null,
-      })
-    }),
-    list: vi.fn(async () => Array.from(sessions.values())),
-    get: vi.fn(async (id: string) => sessions.get(id) ?? null),
-    update: vi.fn(async (id: string, data: any) => {
-      const existing = sessions.get(id)
-      if (!existing || typeof existing !== "object" || existing === null) {
-        return
-      }
-      sessions.set(id, {
-        ...existing,
-        ...data,
-        updatedAt: new Date(),
-      })
-    }),
-  },
-  SessionStateStorage: {
-    create: vi.fn(async (record: any) => {
-      const now = new Date().toISOString()
-      const created = { ...record, createdAt: now, updatedAt: now }
-      sessionStates.set(record.sessionId, created)
-      return created
-    }),
-    list: vi.fn(async () => Array.from(sessionStates.values())),
-    get: vi.fn(async (sessionId: string) => sessionStates.get(sessionId) ?? null),
-    update: vi.fn(async (sessionId: string, data: any) => {
-      const existing = sessionStates.get(sessionId)
-      if (!existing) {
-        return null
-      }
-      const updated = { ...existing, ...data, updatedAt: new Date().toISOString() }
-      sessionStates.set(sessionId, updated)
-      return updated
-    }),
-    appendHistory: vi.fn(async (sessionId: string, message: any) => {
-      const existing = sessionStates.get(sessionId)
-      if (!existing) {
-        return null
-      }
-      const updated = {
-        ...existing,
-        history: [...existing.history, message],
-        updatedAt: new Date().toISOString(),
-      }
-      sessionStates.set(sessionId, updated)
-      return updated
-    }),
-    appendDiagnostic: vi.fn(async (sessionId: string, event: any) => {
-      const existing = sessionStates.get(sessionId)
-      if (!existing) {
-        return null
-      }
-      const updated = {
-        ...existing,
-        diagnostics: [...existing.diagnostics, event],
-        updatedAt: new Date().toISOString(),
-      }
-      sessionStates.set(sessionId, updated)
-      return updated
-    }),
-    remove: vi.fn(async (sessionId: string) => {
-      sessionStates.delete(sessionId)
-    }),
-  },
-}))
+vi.mock("@goddard-ai/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+
+  return {
+    ...actual,
+    SessionStorage: {
+      create: vi.fn(async (record: any) => {
+        const now = new Date()
+        sessions.set(record.id, {
+          ...record,
+          createdAt: now,
+          updatedAt: now,
+          errorMessage: null,
+          blockedReason: null,
+          initiative: null,
+          lastAgentMessage: null,
+        })
+      }),
+      list: vi.fn(async () => Array.from(sessions.values())),
+      get: vi.fn(async (id: string) => sessions.get(id) ?? null),
+      update: vi.fn(async (id: string, data: any) => {
+        const existing = sessions.get(id)
+        if (!existing || typeof existing !== "object" || existing === null) {
+          return
+        }
+        sessions.set(id, {
+          ...existing,
+          ...data,
+          updatedAt: new Date(),
+        })
+      }),
+    },
+    SessionStateStorage: {
+      create: vi.fn(async (record: any) => {
+        const now = new Date().toISOString()
+        const created = { ...record, createdAt: now, updatedAt: now }
+        sessionStates.set(record.sessionId, created)
+        return created
+      }),
+      list: vi.fn(async () => Array.from(sessionStates.values())),
+      get: vi.fn(async (sessionId: string) => sessionStates.get(sessionId) ?? null),
+      update: vi.fn(async (sessionId: string, data: any) => {
+        const existing = sessionStates.get(sessionId)
+        if (!existing) {
+          return null
+        }
+        const updated = { ...existing, ...data, updatedAt: new Date().toISOString() }
+        sessionStates.set(sessionId, updated)
+        return updated
+      }),
+      appendHistory: vi.fn(async (sessionId: string, message: any) => {
+        const existing = sessionStates.get(sessionId)
+        if (!existing) {
+          return null
+        }
+        const updated = {
+          ...existing,
+          history: [...existing.history, message],
+          updatedAt: new Date().toISOString(),
+        }
+        sessionStates.set(sessionId, updated)
+        return updated
+      }),
+      appendDiagnostic: vi.fn(async (sessionId: string, event: any) => {
+        const existing = sessionStates.get(sessionId)
+        if (!existing) {
+          return null
+        }
+        const updated = {
+          ...existing,
+          diagnostics: [...existing.diagnostics, event],
+          updatedAt: new Date().toISOString(),
+        }
+        sessionStates.set(sessionId, updated)
+        return updated
+      }),
+      remove: vi.fn(async (sessionId: string) => {
+        sessionStates.delete(sessionId)
+      }),
+    },
+  }
+})
 
 vi.mock("@goddard-ai/storage/session-permissions", () => ({
   SessionPermissionsStorage: {
@@ -152,12 +156,16 @@ test("resolved actions can run through the daemon-backed session client", async 
   await fs.mkdir(actionsDir, { recursive: true })
   await fs.writeFile(
     path.join(actionsDir, "review.md"),
-    dedent`
-      ---
-      systemPrompt: "Start with the action checklist."
-      ---
-      Review the current diff carefully.
-    `,
+    "Review the current diff carefully.\n",
+    "utf-8",
+  )
+  await fs.writeFile(
+    path.join(tempDir, ".goddard", "config.json"),
+    JSON.stringify({
+      actions: {
+        systemPrompt: "Start with the action checklist.",
+      },
+    }),
     "utf-8",
   )
 

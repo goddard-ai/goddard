@@ -8,11 +8,15 @@ export function getGoddardGlobalDir(): string {
 }
 
 export function getGlobalConfigPath(): string {
-  return join(getGoddardGlobalDir(), "config.ts")
+  return join(getGoddardGlobalDir(), "config.json")
 }
 
-export function getLocalConfigPath(): string {
-  return join(process.cwd(), ".goddard", "config.ts")
+export function getGoddardLocalDir(cwd: string = process.cwd()): string {
+  return join(cwd, ".goddard")
+}
+
+export function getLocalConfigPath(cwd: string = process.cwd()): string {
+  return join(getGoddardLocalDir(cwd), "config.json")
 }
 
 export function getDatabasePath(): string {
@@ -32,16 +36,6 @@ export async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-export async function resolveLoopConfigPath(): Promise<string | null> {
-  const localPath = getLocalConfigPath()
-  if (await fileExists(localPath)) {
-    return localPath
-  }
-
-  const globalPath = getGlobalConfigPath()
-  if (await fileExists(globalPath)) {
-    return globalPath
-  }
-
-  return null
+export function getConfigRootPaths(cwd: string = process.cwd()): string[] {
+  return [getGlobalConfigPath(), getLocalConfigPath(cwd)]
 }

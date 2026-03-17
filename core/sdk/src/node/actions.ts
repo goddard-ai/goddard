@@ -1,90 +1,79 @@
+import { mergeActionConfigLayers, type GoddardActionConfigDocument } from "@goddard-ai/config"
 import type { NewSessionParams, SessionParams } from "@goddard-ai/schema/session-server"
-import { getGoddardGlobalDir } from "@goddard-ai/storage"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { parse as parseYaml } from "yaml"
 import { runAgent } from "../daemon/session/client.ts"
+import { readActionConfig, readMergedRootConfig } from "./config.ts"
 
+// The runtime override shape accepted when invoking a named action.
 export type AgentActionConfig = Omit<Partial<NewSessionParams>, "oneShot" | "initialPrompt">
 
+// A resolved named action prompt and merged persisted config.
 export type ResolvedAgentAction = {
   prompt: string
-  config: AgentActionConfig
+  config: GoddardActionConfigDocument
   path: string
 }
 
 const DEFAULT_AGENT = { type: "npx", package: "@mariozechner/pi-coding-agent" } as const
 
-function hasErrorCode(error: unknown, code: string): error is { code: string } {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code
+function detectLegacyFrontmatter(content: string, path: string): void {
+  if (content.startsWith("---\n") || content.startsWith("---\r\n")) {
+    throw new Error(
+      `Prompt file "${path}" uses YAML frontmatter. Persisted action config must move into JSON.`,
+    )
+  }
 }
 
-function ensureConfigObject(value: unknown, path: string): Partial<NewSessionParams> {
-  if (value == null) {
+function ensureActionConfig(
+  value: GoddardActionConfigDocument | undefined,
+  path: string,
+): GoddardActionConfigDocument {
+  if (!value) {
     return {}
   }
 
-  if (typeof value !== "object" || Array.isArray(value)) {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`Action config at ${path} must be an object.`)
   }
 
-  return value as Partial<NewSessionParams>
+  return value
 }
 
-function parseMarkdownFrontmatter(content: string, path: string): ResolvedAgentAction {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
-  if (!match) {
-    return { prompt: content, config: {}, path }
-  }
+function toRuntimeActionConfig(config: GoddardActionConfigDocument): AgentActionConfig {
+  return config as AgentActionConfig
+}
 
-  const [, rawFrontmatter, prompt] = match
-  const parsed = parseYaml(rawFrontmatter)
+async function loadMarkdownPrompt(path: string): Promise<string> {
+  const content = await readFile(path, "utf-8")
+  detectLegacyFrontmatter(content, path)
+  return content
+}
 
+async function loadPromptOnlyAction(path: string): Promise<ResolvedAgentAction> {
   return {
-    prompt,
-    config: ensureConfigObject(parsed, path),
+    prompt: await loadMarkdownPrompt(path),
+    config: {},
     path,
   }
 }
 
-async function loadMarkdownAction(path: string): Promise<ResolvedAgentAction> {
-  const content = await readFile(path, "utf-8")
-  return parseMarkdownFrontmatter(content, path)
-}
-
-async function loadFolderAction(path: string): Promise<ResolvedAgentAction> {
+async function loadPackagedAction(path: string): Promise<ResolvedAgentAction> {
   const promptPath = join(path, "prompt.md")
-  let promptAction: ResolvedAgentAction
+  const configPath = join(path, "config.json")
 
-  try {
-    promptAction = await loadMarkdownAction(promptPath)
-  } catch (error) {
-    // Require a prompt.md file if the action directory exists
-    if (hasErrorCode(error, "ENOENT") && existsSync(path)) {
-      throw new Error(`Action directory "${path}" must include a prompt.md file.`)
-    }
-    throw error
+  if (!existsSync(promptPath)) {
+    throw new Error(`Action directory "${path}" must include a prompt.md file.`)
   }
 
-  const configPath = join(path, "config.json")
-  let config = promptAction.config
-
-  try {
-    const rawConfig = await readFile(configPath, "utf-8")
-    config = {
-      ...config,
-      ...ensureConfigObject(JSON.parse(rawConfig), configPath),
-    }
-  } catch (error) {
-    if (!hasErrorCode(error, "ENOENT")) {
-      throw error
-    }
+  if (!existsSync(configPath)) {
+    throw new Error(`Action directory "${path}" must include a config.json file.`)
   }
 
   return {
-    prompt: promptAction.prompt,
-    config,
+    prompt: await loadMarkdownPrompt(promptPath),
+    config: ensureActionConfig(await readActionConfig(configPath), configPath),
     path,
   }
 }
@@ -93,22 +82,23 @@ async function resolveActionFromRoot(
   actionName: string,
   goddardRoot: string,
 ): Promise<ResolvedAgentAction | null> {
-  const mdPath = join(goddardRoot, "actions", `${actionName}.md`)
-  try {
-    return await loadMarkdownAction(mdPath)
-  } catch (error) {
-    if (!hasErrorCode(error, "ENOENT")) {
-      throw error
-    }
+  const promptPath = join(goddardRoot, "actions", `${actionName}.md`)
+  const folderPath = join(goddardRoot, "actions", actionName)
+  const hasPromptFile = existsSync(promptPath)
+  const hasFolder = existsSync(folderPath)
+
+  if (hasPromptFile && hasFolder) {
+    throw new Error(
+      `Action "${actionName}" is ambiguous under "${goddardRoot}". Choose either a prompt file or a packaged directory.`,
+    )
   }
 
-  const folderPath = join(goddardRoot, "actions", actionName)
-  try {
-    return await loadFolderAction(folderPath)
-  } catch (error) {
-    if (!hasErrorCode(error, "ENOENT")) {
-      throw error
-    }
+  if (hasPromptFile) {
+    return loadPromptOnlyAction(promptPath)
+  }
+
+  if (hasFolder) {
+    return loadPackagedAction(folderPath)
   }
 
   return null
@@ -122,7 +112,7 @@ export function buildActionSessionParams(
     agent: DEFAULT_AGENT,
     cwd: process.cwd(),
     mcpServers: [],
-    ...action.config,
+    ...toRuntimeActionConfig(action.config),
     ...overrides,
     oneShot: true as const,
     initialPrompt: action.prompt,
@@ -133,19 +123,24 @@ export async function resolveAction(
   actionName: string,
   cwd: string = process.cwd(),
 ): Promise<ResolvedAgentAction> {
-  const localAction = await resolveActionFromRoot(actionName, join(cwd, ".goddard"))
-  if (localAction) {
-    return localAction
+  const { config, globalRoot, localRoot } = await readMergedRootConfig(cwd)
+  const localAction = await resolveActionFromRoot(actionName, localRoot)
+  const globalAction = localAction ? null : await resolveActionFromRoot(actionName, globalRoot)
+  const action = localAction ?? globalAction
+
+  if (!action) {
+    throw new Error(
+      `Action "${actionName}" not found in local or global configuration (.goddard/actions/<name>.md or .goddard/actions/<name>/prompt.md).`,
+    )
   }
 
-  const globalAction = await resolveActionFromRoot(actionName, getGoddardGlobalDir())
-  if (globalAction) {
-    return globalAction
+  return {
+    ...action,
+    config: mergeActionConfigLayers(
+      ensureActionConfig(config.actions, "root config"),
+      action.config,
+    ),
   }
-
-  throw new Error(
-    `Action "${actionName}" not found in local or global configuration (.goddard/actions/*.md or .goddard/actions/<action>/prompt.md).`,
-  )
 }
 
 export async function runAgentAction(actionName: string, options: AgentActionConfig) {

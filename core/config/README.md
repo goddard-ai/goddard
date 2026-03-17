@@ -1,69 +1,75 @@
 # `@goddard-ai/config`
 
-Canonical home for Goddard loop configuration — schemas, types, the `Models` constant, and the `defineConfig` helper.
+Canonical home for Goddard's persisted JSON configuration schemas, merge helpers, and shared model constants.
 
-All exported TypeScript types are derived from Zod schemas via `z.infer<>` so the runtime validation and the static type system stay in sync automatically.
+Persisted config is JSON-only:
+
+- Global defaults: `~/.goddard/config.json`
+- Local defaults: `<repo>/.goddard/config.json`
+- Packaged action defaults: `.goddard/actions/<name>/config.json`
+- Packaged loop defaults: `.goddard/loops/<name>/config.json`
 
 ## Exports
 
 ### `Models`
 
-Nested constant object of well-known model identifiers, organised by provider. Use it in your config file for autocomplete and typo-safety.
+Provider-grouped model identifiers for runtime or persisted config payloads.
 
-```typescript
+```ts
 import { Models } from "@goddard-ai/config"
 
-Models.Anthropic.ClaudeSonnet45 // "anthropic/claude-sonnet-4-5"
-Models.Anthropic.ClaudeSonnet46 // "anthropic/claude-sonnet-4-6"
-Models.Anthropic.ClaudeOpus46 // "anthropic/claude-opus-4-6"
-Models.OpenAi.O3Mini // "openai/o3-mini"
-Models.OpenAi.Gpt5Codex // "openai/gpt-5-codex"
-// …
+Models.Anthropic.ClaudeSonnet45
+Models.OpenAi.Gpt53Codex
 ```
 
-### `defineConfig`
+### Persisted document schemas
 
-Identity helper that types your config object as `GoddardLoopConfig` and enables IDE completions.
+Use these to validate JSON documents before loading them:
 
-```typescript
-import { Models, defineConfig } from "@goddard-ai/config"
+```ts
+import {
+  actionConfigSchema,
+  loopConfigSchema,
+  rootConfigSchema,
+} from "@goddard-ai/config"
 
-export default defineConfig({
-  agent: {
-    model: Models.Anthropic.ClaudeSonnet45,
-    projectDir: "./",
-    thinkingLevel: "low",
-  },
-  nextPrompt: () => "Make one safe improvement.",
-  rateLimits: {
-    cycleDelay: "30m",
-    maxOpsPerMinute: 120,
-    maxCyclesBeforePause: 100,
-  },
-  metrics: {
-    enableLogging: true,
-  },
-})
+const rootConfig = rootConfigSchema.parse(rawRootConfig)
+const actionConfig = actionConfigSchema.parse(rawActionConfig)
+const loopConfig = loopConfigSchema.parse(rawLoopConfig)
 ```
 
-### `configSchema`
+### Merge helpers
 
-Zod schema for the full `GoddardLoopConfig`. Use it to validate a config object at runtime before passing it to `createLoop`.
+Use these to apply deterministic `global -> local -> entity -> runtime` precedence:
 
-```typescript
-import { configSchema } from "@goddard-ai/config"
+```ts
+import {
+  mergeActionConfigLayers,
+  mergeLoopConfigLayers,
+  mergeRootConfigLayers,
+} from "@goddard-ai/config"
 
-const validated = configSchema.parse(rawConfig)
+const rootConfig = mergeRootConfigLayers(globalRoot, localRoot)
+const actionConfig = mergeActionConfigLayers(rootConfig.actions, entityConfig, runtimeOverrides)
+const loopConfig = mergeLoopConfigLayers(rootConfig.loops, entityConfig, runtimeOverrides)
 ```
 
 ## Exported types
 
-| Type                | Description                                                    |
-| ------------------- | -------------------------------------------------------------- |
-| `GoddardLoopConfig` | Top-level loop configuration                                   |
-| `PiAgentConfig`     | `agent` block — model, projectDir, thinkingLevel, …            |
-| `ThinkingLevel`     | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` |
-| `Model`             | Loose literal union of all known model strings (open-ended)    |
+| Type | Description |
+| --- | --- |
+| `GoddardRootConfigDocument` | Shared JSON document for root action and loop defaults |
+| `GoddardActionConfigDocument` | JSON-safe action defaults layered before runtime overrides |
+| `GoddardLoopConfigDocument` | JSON-safe loop defaults layered before runtime overrides |
+| `ResolvedGoddardLoopConfigDocument` | Fully required loop config after defaults and validation |
+| `ThinkingLevel` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` |
+| `Model` | Loose literal union of known model strings plus custom values |
+
+## Notes
+
+- Persisted loop config must remain JSON-safe. `nextPrompt` is not stored in JSON.
+- Runnable loop packages load `nextPrompt` from `prompt.js`.
+- Prompt frontmatter is not a supported config surface.
 
 ## License
 
