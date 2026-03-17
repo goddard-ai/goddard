@@ -19,7 +19,7 @@
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
     "fmt": "pnpm -r run fmt",
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "tree-run --leaves build:types && tree-run --leaves typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"

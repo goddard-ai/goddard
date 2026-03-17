@@ -10,7 +10,8 @@ When building a subpackage in a monorepo, you often need its local workspace dep
 1.  Walking the current package's installed workspace dependencies through `node_modules`.
 2.  Visiting that dependency tree depth-first so dependencies run before dependents.
 3.  Reusing the explicit script name you pass in for each dependency.
-4.  Short-circuiting nested invocations so packages can keep `tree-run` in their own scripts.
+4.  Optionally starting from workspace leaf packages with `--leaves`.
+5.  Short-circuiting nested invocations so packages can keep `tree-run` in their own scripts.
 
 ## Usage
 
@@ -35,6 +36,16 @@ Pass the script name you want to run on dependency packages:
 {
   "scripts": {
     "build:fast": "tree-run build:fast && tsdown --fast"
+  }
+}
+```
+
+From the workspace root, `--leaves` starts from packages that are not depended on by another workspace package and walks their dependency trees:
+
+```json
+{
+  "scripts": {
+    "typecheck": "tree-run --leaves build:types && tree-run --leaves typecheck"
   }
 }
 ```
