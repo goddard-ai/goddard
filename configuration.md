@@ -1,10 +1,10 @@
 # Configuration
 
 ## Goal
-Define a clear, user-facing configuration hierarchy for Goddard so individuals, repositories, named automation entities, and runtime callers can shape behavior without ambiguity about scope or precedence.
+Define a clear configuration model for Goddard in which persisted settings are always machine-readable and machine-writable, so humans and tools can safely inspect, generate, and update behavior across user, repository, entity, and runtime scopes.
 
 ## Hypothesis
-We believe that separating personal defaults, repository defaults, entity-level overrides, and runtime overrides will make Goddard easier to adopt across multiple repositories while preserving precise control for reusable automation and one-off execution.
+We believe that separating user defaults, repository defaults, entity-level defaults, and runtime overrides into a deterministic JSON-based model will make Goddard easier to automate, easier to maintain across repositories, and less ambiguous for both humans and machines.
 
 ## Primary Actors
 - Developer maintaining personal defaults across repositories
@@ -12,61 +12,58 @@ We believe that separating personal defaults, repository defaults, entity-level 
 - Author or maintainer of a Loop or Action definition
 - SDK consumer supplying execution-time overrides
 - Runtime host resolving configuration before work begins
+- Automated tools that need to read or update persisted configuration safely
 
 ## Configuration Hierarchy
 
 ### 1. Global Defaults
-- Provides the default configuration baseline for a user across repositories.
-- Lives under `~/.goddard/`.
-- Uses `~/.goddard/config.ts` as the user-level default entrypoint.
+- Provides the baseline configuration for an individual across repositories.
+- Is persisted as a user-scoped JSON document.
 - Establishes reusable defaults that should apply unless narrowed by repository, entity, or runtime intent.
 
 ### 2. Local Overrides
 - Overrides global defaults for a specific repository.
-- Lives under `${repositoryRoot}/.goddard/`.
-- Uses `${repositoryRoot}/.goddard/config.ts` as the repository-level default entrypoint.
+- Is persisted as a repository-scoped JSON document.
 - Captures shared team or project intent without requiring each developer to duplicate the same settings globally.
 
 ### 3. Entity Configuration
-- Overrides the inherited global and local defaults for a specific Loop or Action.
-- Is defined within the Loop or Action itself, such as through markdown frontmatter or package-scoped configuration files.
-- Exists so a reusable automation entity can carry its own intent without redefining the broader repository or user baseline.
+- Overrides inherited global and local defaults for a specific Loop or Action.
+- Is persisted as machine-readable JSON associated with that named entity.
+- Exists so a reusable automation entity can carry its own defaults without redefining the broader repository or user baseline.
 
 ### 4. Runtime Configuration
 - Overrides global, local, and entity configuration for a specific invocation.
-- Is supplied directly to SDK functions at execution time.
+- Is supplied directly by the calling runtime and remains ephemeral.
 - Exists to support contextual, temporary, or host-specific adjustments without mutating persisted defaults.
 
 ## Resolution Model
 - Precedence is deterministic: global configuration is the baseline, local configuration overrides global, entity configuration overrides the inherited global and local defaults for a specific Loop or Action, and runtime configuration is the final override.
-- Loops and Actions inherit their default configuration from the same global and local configuration modules used for broader Goddard behavior, then apply any entity-specific overrides before execution begins.
-- Persisted configuration defines durable defaults at the user, repository, and entity levels; runtime configuration defines the final invocation-specific intent.
+- Persisted configuration resolves from user, repository, and entity JSON sources before any runtime override is applied.
+- Loops and Actions inherit the same user and repository baseline used for broader Goddard behavior, then apply any entity-specific defaults before execution begins.
 - Configuration should resolve before execution begins so the active runtime operates against a stable view of intent.
 
 ## Configurable Entities
 
 ### Loops
 - Loops are named automation definitions that can be resolved from configuration roots and started at runtime.
-- A loop may be defined as `.goddard/loops/<name>.md` or as a directory-based loop package at `.goddard/loops/<name>/prompt.{md,ts}`.
-- Loop definitions inherit the resolved global and local defaults from `.goddard/config.ts` before applying any loop-specific configuration.
-- Markdown-based loop definitions may include YAML frontmatter for loop-specific configuration.
-- Directory-based loop packages may include a `config.json` file beside `prompt.{md,ts}` to express package-scoped defaults.
-- Runtime hosts may also supply in-memory, throwaway loop configurations for execution that does not need a persisted on-disk definition.
+- A loop may be represented as a prompt document or as a richer packaged definition.
+- If a loop carries persisted defaults, those defaults must live in machine-readable JSON associated with the loop rather than inside the prompt content itself.
+- Runtime hosts may also supply in-memory, throwaway loop configuration for execution that does not need a persisted on-disk definition.
 
 ### Actions
 - Actions are named, reusable one-shot execution definitions that can be resolved from configuration roots and invoked at runtime.
-- An action may be defined as `.goddard/actions/<name>.md` or as a directory-based action package at `.goddard/actions/<name>/prompt.{md,ts}`.
-- Action definitions inherit the resolved global and local defaults from `.goddard/config.ts` before applying any action-specific configuration.
-- Markdown-based action definitions may include YAML frontmatter for action-specific configuration.
-- Directory-based action packages may include a `config.json` file beside `prompt.{md,ts}` to express package-scoped defaults.
+- An action may be represented as a prompt document or as a richer packaged definition.
+- If an action carries persisted defaults, those defaults must live in machine-readable JSON associated with the action rather than inside the prompt content itself.
 - Actions are loaded by name at runtime.
 
 ## Constraints
+- All persisted configuration must be machine-readable and machine-writable.
+- Persisted configuration must be stored as JSON rather than executable source.
 - Repository-scoped configuration must be able to override user-scoped defaults without mutating the user-level source of truth.
 - Loop and Action definitions must inherit the shared user and repository baseline before applying their own overrides.
+- Prompt content must not double as a configuration transport; document metadata is not a supported configuration surface.
 - Runtime overrides must remain ephemeral and must not implicitly rewrite persisted configuration.
 - Named entities should be discoverable through the same configuration roots used for baseline defaults so repository intent stays co-located.
-- The configuration model must support both human-authored markdown definitions and richer package-style definitions.
 - Configuration behavior must remain aligned across SDK consumers and the desktop app; the app must not invent a parallel configuration model.
 
 ## Non-Goals
@@ -74,8 +71,10 @@ We believe that separating personal defaults, repository defaults, entity-level 
 - Specifying parser internals, merge algorithms, or validation library choices.
 - Documenting every possible configurable field for loops, actions, or runtime hosts in this file.
 - Treating temporary runtime overrides as durable repository or user preferences.
+- Using executable modules or document headers as alternative persisted configuration mechanisms.
 
 ## Decision Memory
 - Goddard needs a configuration model that works at four levels of intent: personal defaults, repository defaults, reusable entity defaults, and invocation-time overrides.
-- Named loops and actions are part of the product surface, not ad hoc files, so their discovery locations and packaging modes should be explicit at the specification level.
+- Persisted JSON keeps configuration accessible to both humans and automation without requiring code execution to inspect or update it.
+- Separating prompt content from configuration avoids ambiguous editing surfaces and makes automation safer.
 - Repository-local configuration is the collaboration boundary, entity configuration is the reusable automation boundary, and runtime input is the experimentation boundary.
