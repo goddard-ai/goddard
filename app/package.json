@@ -13,6 +13,9 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@goddard-ai/daemon-client": "workspace:^",
+    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/sdk": "workspace:^",
     "@goddard-ai/tauri-plugin-ipc": "workspace:^",
     "@preact/signals": "^2.8.1",
     "@tauri-apps/api": "^2.10.1",

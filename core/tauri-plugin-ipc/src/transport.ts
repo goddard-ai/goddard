@@ -1,4 +1,4 @@
-import { type IpcTransport } from "@goddard-ai/ipc/transport"
+import { type IpcTransport } from "@goddard-ai/ipc"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 

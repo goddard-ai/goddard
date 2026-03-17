@@ -41,6 +41,15 @@ importers:
 
   app:
     dependencies:
+      '@goddard-ai/daemon-client':
+        specifier: workspace:^
+        version: link:../daemon/client
+      '@goddard-ai/schema':
+        specifier: workspace:^
+        version: link:../core/schema
+      '@goddard-ai/sdk':
+        specifier: workspace:^
+        version: link:../core/sdk
       '@goddard-ai/tauri-plugin-ipc':
         specifier: workspace:^
         version: link:../core/tauri-plugin-ipc
@@ -160,35 +169,14 @@ importers:
         specifier: ^25.3.5
         version: 25.3.5
 
-  core/loop:
-    dependencies:
-      '@agentclientprotocol/sdk':
-        specifier: ^0.15.0
-        version: 0.15.0(zod@4.3.6)
-      '@goddard-ai/config':
-        specifier: workspace:*
-        version: link:../config
-      '@goddard-ai/schema':
-        specifier: workspace:*
-        version: link:../schema
-      '@goddard-ai/session':
-        specifier: workspace:*
-        version: link:../session
-      cron-parser:
-        specifier: ^5.5.0
-        version: 5.5.0
-      exit-hook:
-        specifier: ^4.0.0
-        version: 4.0.0
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
-
   core/schema:
     dependencies:
       '@agentclientprotocol/sdk':
         specifier: ^0.15.0
         version: 0.15.0(zod@4.3.6)
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../ipc
       rouzer:
         specifier: ^1.5.0
         version: 1.5.0(zod@4.3.6)
@@ -198,21 +186,39 @@ importers:
 
   core/sdk:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.3.6)
       '@goddard-ai/config':
         specifier: workspace:*
         version: link:../config
-      '@goddard-ai/loop':
+      '@goddard-ai/daemon-client':
         specifier: workspace:*
-        version: link:../loop
-      '@goddard-ai/session':
+        version: link:../../daemon/client
+      '@goddard-ai/ipc':
         specifier: workspace:*
-        version: link:../session
+        version: link:../ipc
+      '@goddard-ai/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@goddard-ai/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@libsql/client':
         specifier: ^0.17.0
         version: 0.17.0
+      cron-parser:
+        specifier: ^5.5.0
+        version: 5.5.0
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.1(@cloudflare/workers-types@4.20260307.1)(@libsql/client@0.17.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)
+      exit-hook:
+        specifier: ^4.0.0
+        version: 4.0.0
+      radashi:
+        specifier: ^12.7.2
+        version: 12.7.2
       rouzer:
         specifier: ^1.5.0
         version: 1.5.0(zod@4.3.6)
@@ -223,46 +229,9 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@goddard-ai/schema':
-        specifier: workspace:^
-        version: link:../schema
-      '@goddard-ai/storage':
-        specifier: workspace:^
-        version: link:../storage
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9
-
-  core/session:
-    dependencies:
-      '@agentclientprotocol/sdk':
-        specifier: ^0.15.0
-        version: 0.15.0(zod@4.3.6)
-      '@goddard-ai/storage':
-        specifier: workspace:^
-        version: link:../storage
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
-      cmd-ts:
-        specifier: ^0.13.0
-        version: 0.13.0
-      reconnecting-websocket:
-        specifier: ^4.4.0
-        version: 4.4.0
-      srvx:
-        specifier: ^0.8.6
-        version: 0.8.16
-      ws:
-        specifier: ^8.19.0
-        version: 8.19.0
-    devDependencies:
-      '@goddard-ai/schema':
-        specifier: workspace:^
-        version: link:../schema
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
 
   core/storage:
     dependencies:
@@ -319,27 +288,43 @@ importers:
 
   daemon:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.3.6)
       '@goddard-ai/backend':
         specifier: workspace:*
         version: link:../core/backend
+      '@goddard-ai/daemon-client':
+        specifier: workspace:*
+        version: link:client
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../core/ipc
       '@goddard-ai/schema':
         specifier: workspace:*
         version: link:../core/schema
-      '@goddard-ai/session':
-        specifier: workspace:*
-        version: link:../core/session
       '@goddard-ai/storage':
         specifier: workspace:*
         version: link:../core/storage
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0
-      rouzer:
-        specifier: ^1.5.0
-        version: 1.5.0(zod@4.3.6)
-      srvx:
-        specifier: ^0.8.16
-        version: 0.8.16
+
+  daemon/client:
+    dependencies:
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
+      '@goddard-ai/schema':
+        specifier: workspace:*
+        version: link:../../core/schema
+      '@goddard-ai/storage':
+        specifier: workspace:*
+        version: link:../../core/storage
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.5
+        version: 25.3.5
 
 packages:
 
@@ -2693,9 +2678,6 @@ packages:
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
 
-  cmd-ts@0.13.0:
-    resolution: {integrity: sha512-nsnxf6wNIM/JAS7T/x/1JmbEsjH0a8tezXqqpaL0O6+eV0/aDEnRxwjxpu0VzDdRcaC1ixGSbRlUuf/IU59I4g==}
-
   cmd-ts@0.15.0:
     resolution: {integrity: sha512-ASyAx+P6DNzNEZ6OYmvjjaLAQeI3L+4lm5rX2Jg8tondXdj06o9JTxi9mfC92KoVbrVFKhZ+j2TfBF8fcura6g==}
 
@@ -3489,7 +3471,6 @@ packages:
 
   libsql@0.5.22:
     resolution: {integrity: sha512-NscWthMQt7fpU8lqd7LXMvT9pi+KhhmTHAJWUB/Lj6MWa0MKFv0F2V4C6WKKpjCVZl0VwcDz4nOI3CyaT1DDiA==}
-    cpu: [x64, arm64, wasm32, arm]
     os: [darwin, linux, win32]
 
   lie@3.3.0:
@@ -3766,9 +3747,6 @@ packages:
     resolution: {integrity: sha512-oIGGmcpTLwPga8Bn6/Z75SVaH1z5dUut2ibSyAMVhmUggWpmDn2dapB0n7f8nwaSiRtepAsfJyfXIO5DCVAODg==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
 
-  reconnecting-websocket@4.4.0:
-    resolution: {integrity: sha512-D2E33ceRPga0NvTDhJmphEgJ7FUYF0v4lr1ki0csq06OdlxKfugGzN0dSkxM/NfqCxYELK4KcaTOUOjTV6Dcng==}
-
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
 
@@ -3886,11 +3864,6 @@ packages:
 
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
-
-  srvx@0.8.16:
-    resolution: {integrity: sha512-hmcGW4CgroeSmzgF1Ihwgl+Ths0JqAJ7HwjP2X7e3JzY7u4IydLMcdnlqGQiQGUswz+PO9oh/KtCpOISIvs9QQ==}
-    engines: {node: '>=20.16.0'}
-    hasBin: true
 
   stack-trace@1.0.0-pre2:
     resolution: {integrity: sha512-2ztBJRek8IVofG9DBJqdy2N5kulaacX30Nz7xmkYF6ale9WBVmIy6mFBchvGX7Vx/MyjBhx+Rcxqrj+dbOnQ6A==}
@@ -6700,15 +6673,6 @@ snapshots:
 
   chownr@1.1.4: {}
 
-  cmd-ts@0.13.0:
-    dependencies:
-      chalk: 4.1.2
-      debug: 4.4.3
-      didyoumean: 1.2.2
-      strip-ansi: 6.0.1
-    transitivePeerDependencies:
-      - supports-color
-
   cmd-ts@0.15.0:
     dependencies:
       chalk: 5.6.2
@@ -7548,8 +7512,6 @@ snapshots:
       process: 0.11.10
       string_decoder: 1.3.0
 
-  reconnecting-websocket@4.4.0: {}
-
   resolve-pkg-maps@1.0.0: {}
 
   retry@0.12.0: {}
@@ -7713,8 +7675,6 @@ snapshots:
   source-map@0.7.6: {}
 
   sprintf-js@1.1.3: {}
-
-  srvx@0.8.16: {}
 
   stack-trace@1.0.0-pre2: {}
 
