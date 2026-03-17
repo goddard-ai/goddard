@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { SessionStatus } from "@goddard-ai/schema/db"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
-import { uuidv7 } from "uuidv7"
+import { v7 as uuidv7 } from "uuid"
 
 export const sessions = sqliteTable("sessions", {
   id: text().primaryKey(),
