@@ -121,6 +121,13 @@ export const RepoEventSchema = z.discriminatedUnion("type", [
     author: z.string(),
     createdAt: z.string(),
   }),
+  z.object({
+    type: z.literal("pr.closed"),
+    owner: z.string(),
+    repo: z.string(),
+    prNumber: z.number(),
+    merged: z.boolean().optional(),
+  }),
 ])
 export type RepoEvent = z.infer<typeof RepoEventSchema>
 
@@ -146,6 +153,14 @@ export const GitHubWebhookInputSchema = z.discriminatedUnion("type", [
     author: z.string(),
     state: z.enum(["approved", "changes_requested", "commented"]),
     body: z.string(),
+  }),
+  z.object({
+    type: z.literal("pull_request"),
+    action: z.literal("closed"),
+    owner: z.string(),
+    repo: z.string(),
+    prNumber: z.number(),
+    merged: z.boolean().optional(),
   }),
 ])
 export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInputSchema>

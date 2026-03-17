@@ -135,6 +135,7 @@ export async function startDaemonServer(
   return {
     daemonUrl,
     socketPath,
+    sessionManager,
     close: async () => {
       if (closed) {
         return

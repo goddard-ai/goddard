@@ -26,7 +26,7 @@ export type RunDaemonDeps = {
     client: BackendClient,
     options: { socketPath: string; agentBinDir: string },
   ) => Promise<DaemonServer>
-  runOneShot?: (input: OneShotInput) => Promise<number> | number
+  runOneShot?: (input: OneShotInput) => Promise<string | null> | string | null
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
   io?: DaemonIo
 }
@@ -63,27 +63,54 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
       agentBinDir: runtime.agentBinDir,
     })
     const activeIpcServer = ipcServer
-    const runningPrs = new Set<number>()
+    const runningPrs = new Map<string, { cancel: () => void }>()
+    const activePrSessions = new Map<string, Set<string>>()
     const subscription = await client.stream.subscribeToRepo({ owner, repo })
 
     io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`)
 
     subscription.on("event", async (payload) => {
       const event = payload as RepoEvent
+
+      if (event.type === "pr.closed") {
+        const key = `${event.owner}/${event.repo}#${event.prNumber}`
+        const startingSession = runningPrs.get(key)
+        if (startingSession) {
+          startingSession.cancel()
+          runningPrs.delete(key)
+        }
+
+        const activeSessions = activePrSessions.get(key)
+        if (activeSessions) {
+          io.stdout(`PR #${event.prNumber} was closed. Terminating active sessions.`)
+          for (const sessionId of activeSessions) {
+            void activeIpcServer.sessionManager.shutdownSession(sessionId).catch(() => {})
+          }
+          activePrSessions.delete(key)
+        }
+        return
+      }
+
       if (!isFeedbackEvent(event)) {
         return
       }
 
       const prompt = buildPrompt(event)
+      const key = `${event.owner}/${event.repo}#${event.prNumber}`
 
-      if (runningPrs.has(event.prNumber)) {
+      if (runningPrs.has(key)) {
         io.stdout(
-          `Feedback received for PR #${event.prNumber}, but a session is already running. Ignoring for now.`,
+          `Feedback received for PR #${event.prNumber}, but a session is already starting up. Ignoring for now.`,
         )
         return
       }
 
-      runningPrs.add(event.prNumber)
+      let isCancelled = false
+      runningPrs.set(key, {
+        cancel: () => {
+          isCancelled = true
+        },
+      })
 
       try {
         const managed = await client.pr.isManaged({
@@ -91,24 +118,45 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           repo: event.repo,
           prNumber: event.prNumber,
         })
+        if (isCancelled) {
+          return
+        }
+
         if (!managed) {
           io.stdout(`Ignoring ${event.type} on unmanaged PR #${event.prNumber}.`)
           return
         }
 
         io.stdout(`Launching one-shot pi session for ${event.type} on PR #${event.prNumber}...`)
-        const exitCode = await runOneShotImpl({
+
+        if (isCancelled || !runningPrs.has(key)) {
+          io.stdout(`Launch aborted for PR #${event.prNumber} (was closed during setup).`)
+          return
+        }
+
+        const sessionId = await runOneShotImpl({
           event,
           prompt,
           projectDir: input.projectDir,
           daemonUrl: activeIpcServer.daemonUrl,
           agentBinDir: runtime.agentBinDir,
         })
-        io.stdout(`One-shot pi session finished for PR #${event.prNumber} (exit ${exitCode}).`)
+
+        if (sessionId) {
+          if (isCancelled || !runningPrs.has(key)) {
+            void activeIpcServer.sessionManager.shutdownSession(sessionId).catch(() => {})
+          } else {
+            const activeSessions = activePrSessions.get(key) ?? new Set<string>()
+            activeSessions.add(sessionId)
+            activePrSessions.set(key, activeSessions)
+          }
+        }
+
+        io.stdout(`One-shot pi session finished for PR #${event.prNumber} (session ${sessionId}).`)
       } catch (error) {
         io.stderr(error instanceof Error ? error.message : String(error))
       } finally {
-        runningPrs.delete(event.prNumber)
+        runningPrs.delete(key)
       }
     })
 

@@ -182,6 +182,32 @@ test("sse stream receives webhook events", async () => {
   }
 })
 
+test("webhook route accepts pull_request.closed events", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const event = await postJson(`${baseUrl}/webhooks/github`, {
+      type: "pull_request",
+      action: "closed",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      merged: true,
+    })
+
+    assert.deepEqual(event, {
+      type: "pr.closed",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      merged: true,
+    })
+  } finally {
+    await server.close()
+  }
+})
+
 async function readFirstSseEvent(response: Response): Promise<unknown> {
   if (!response.body) {
     throw new Error("Missing SSE response body")

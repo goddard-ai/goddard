@@ -54,6 +54,7 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
 
   const runOneShotCalls: any[] = []
   const startIpcCalls: any[] = []
+  const shutdownSessionCalls: string[] = []
   const deps: RunDaemonDeps = {
     createBackendClient: async () => ({
       pr: {
@@ -76,12 +77,18 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
       return {
         daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
         socketPath: "/tmp/goddard-daemon-test.sock",
+        sessionManager: {
+          shutdownSession: async (id) => {
+            shutdownSessionCalls.push(id)
+            return true
+          },
+        },
         close: async () => {},
       }
     },
     runOneShot: async (input) => {
       runOneShotCalls.push(input)
-      return 0
+      return "test-session-id"
     },
     waitForShutdown: async (close) => {
       const event = {
@@ -128,6 +135,160 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
   assert.equal(runOneShotCalls[0].agentBinDir, "/tmp/custom-agent-bin")
   assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
   assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
+  assert.deepEqual(shutdownSessionCalls, [])
+})
+
+test("daemon shuts down active sessions when a PR is closed", async () => {
+  const subscription = new MockStreamSubscription()
+  const shutdownSessionCalls: string[] = []
+  let runOneShotResolved = false
+
+  const deps: RunDaemonDeps = {
+    createBackendClient: async () => ({
+      pr: {
+        create: async () => ({
+          number: 1,
+          url: "https://github.com/acme/widgets/pull/1",
+        }),
+        reply: async () => ({ success: true }),
+        isManaged: async () => true,
+      },
+      stream: {
+        subscribeToRepo: async () => subscription,
+      },
+    }),
+    startIpcServer: async () => ({
+      daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
+      socketPath: "/tmp/goddard-daemon-test.sock",
+      sessionManager: {
+        shutdownSession: async (id) => {
+          shutdownSessionCalls.push(id)
+          return true
+        },
+      },
+      close: async () => {},
+    }),
+    runOneShot: async () => {
+      runOneShotResolved = true
+      return "test-session-id"
+    },
+    waitForShutdown: async (close) => {
+      subscription.emit("event", {
+        type: "comment" as const,
+        owner: "test",
+        repo: "repo",
+        prNumber: 123,
+        author: "alice",
+        body: "fix it",
+        reactionAdded: "eyes",
+        createdAt: new Date().toISOString(),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      subscription.emit("event", {
+        type: "pr.closed" as const,
+        owner: "test",
+        repo: "repo",
+        prNumber: 123,
+        merged: false,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await close()
+    },
+  }
+
+  const exitCode = await runDaemon(
+    {
+      repo: "test/repo",
+      projectDir: process.cwd(),
+      baseUrl: "",
+      socketPath: "/tmp/custom-daemon.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
+    },
+    deps,
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(runOneShotResolved, true)
+  assert.deepEqual(shutdownSessionCalls, ["test-session-id"])
+})
+
+test("daemon cancels startup when a PR is closed before the session launches", async () => {
+  const subscription = new MockStreamSubscription()
+  const shutdownSessionCalls: string[] = []
+  const managedResolvers: Array<() => void> = []
+  let runOneShotCalls = 0
+
+  const deps: RunDaemonDeps = {
+    createBackendClient: async () => ({
+      pr: {
+        create: async () => ({
+          number: 1,
+          url: "https://github.com/acme/widgets/pull/1",
+        }),
+        reply: async () => ({ success: true }),
+        isManaged: async () =>
+          new Promise<boolean>((resolve) => {
+            managedResolvers.push(() => resolve(true))
+          }),
+      },
+      stream: {
+        subscribeToRepo: async () => subscription,
+      },
+    }),
+    startIpcServer: async () => ({
+      daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
+      socketPath: "/tmp/goddard-daemon-test.sock",
+      sessionManager: {
+        shutdownSession: async (id) => {
+          shutdownSessionCalls.push(id)
+          return true
+        },
+      },
+      close: async () => {},
+    }),
+    runOneShot: async () => {
+      runOneShotCalls += 1
+      return "test-session-id"
+    },
+    waitForShutdown: async (close) => {
+      subscription.emit("event", {
+        type: "comment" as const,
+        owner: "test",
+        repo: "repo",
+        prNumber: 123,
+        author: "alice",
+        body: "fix it",
+        reactionAdded: "eyes",
+        createdAt: new Date().toISOString(),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      subscription.emit("event", {
+        type: "pr.closed" as const,
+        owner: "test",
+        repo: "repo",
+        prNumber: 123,
+        merged: false,
+      })
+      managedResolvers.forEach((resolve) => resolve())
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await close()
+    },
+  }
+
+  const exitCode = await runDaemon(
+    {
+      repo: "test/repo",
+      projectDir: process.cwd(),
+      baseUrl: "",
+      socketPath: "/tmp/custom-daemon.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
+    },
+    deps,
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(runOneShotCalls, 0)
+  assert.deepEqual(shutdownSessionCalls, [])
 })
 
 test("daemon URL round-trips the socket path", () => {
