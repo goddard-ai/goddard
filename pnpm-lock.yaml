@@ -11,9 +11,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260307.1
         version: 4.20260307.1
-      '@goddard/tree-build':
+      '@goddard/tree-run':
         specifier: workspace:*
-        version: link:core/tree-build
+        version: link:core/tree-run
       '@types/node':
         specifier: ^25.3.5
         version: 25.3.5
@@ -273,18 +273,7 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1
 
-  core/tree-build:
-    dependencies:
-      tsx:
-        specifier: ^4.0.0
-        version: 4.21.0
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.37
-      typescript:
-        specifier: ^5.0.0
-        version: 5.9.3
+  core/tree-run: {}
 
   core/worktree:
     devDependencies:
@@ -2420,9 +2409,6 @@ packages:
   '@types/mssql@9.1.9':
     resolution: {integrity: sha512-P0nCgw6vzY23UxZMnbI4N7fnLGANt4LI4yvxze1paPj+LuN28cFv5EI+QidP8udnId/BKhkcRhm/BleNsjK65A==}
 
-  '@types/node@20.19.37':
-    resolution: {integrity: sha512-8kzdPJ3FsNsVIurqBs7oodNnCEVbni9yUEkaHbgptDACOPW04jimGagZ51E6+lXUwJjgnBw+hyko/lkFWCldqw==}
-
   '@types/node@25.3.5':
     resolution: {integrity: sha512-oX8xrhvpiyRCQkG1MFchB09f+cXftgIXb3a7UUa4Y3wpmZPw5tyZGTLWhlESOLq1Rq6oDlc8npVU2/9xiCuXMA==}
 
@@ -4034,9 +4020,6 @@ packages:
 
   unconfig-core@7.5.0:
     resolution: {integrity: sha512-Su3FauozOGP44ZmKdHy2oE6LPjk51M/TRRjHv2HNCWiDvfvCoxC2lno6jevMA91MYAdCdwP05QnWdWpSbncX/w==}
-
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -6413,10 +6396,6 @@ snapshots:
       - '@azure/core-client'
       - supports-color
 
-  '@types/node@20.19.37':
-    dependencies:
-      undici-types: 6.21.0
-
   '@types/node@25.3.5':
     dependencies:
       undici-types: 7.18.2
@@ -7850,6 +7829,7 @@ snapshots:
       get-tsconfig: 4.13.6
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   tunnel-agent@0.6.0:
     dependencies:
@@ -7863,8 +7843,6 @@ snapshots:
     dependencies:
       '@quansync/fs': 1.0.0
       quansync: 1.0.0
-
-  undici-types@6.21.0: {}
 
   undici-types@7.18.2: {}
 

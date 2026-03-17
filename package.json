@@ -12,7 +12,7 @@
     "core/config",
     "core/tauri-plugin-ipc",
     "core/ipc",
-    "core/tree-build"
+    "core/tree-run"
   ],
   "scripts": {
     "prepare": "simple-git-hooks",
@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
-    "@goddard/tree-build": "workspace:*",
+    "@goddard/tree-run": "workspace:*",
     "@types/node": "^25.3.5",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",

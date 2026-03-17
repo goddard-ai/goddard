@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "build": "tree-build && tsdown",
+    "build": "tree-run build && tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",
