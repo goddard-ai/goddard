@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import type { SessionParams, SessionServerLog } from "@goddard-ai/schema/session-server"
-import { randomUUID } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import { serveAgent } from "../server.js"
 
 function log(message: SessionServerLog) {
@@ -9,7 +9,7 @@ function log(message: SessionServerLog) {
 
 export async function main(argv: string[]) {
   const agentParams = JSON.parse(argv[0]) as SessionParams
-  const serverId = randomUUID()
+  const serverId = randomBytes(16).toString("hex")
   const { serverAddress, sessionId } = await serveAgent(serverId, agentParams)
   if (serverAddress) {
     log({

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import type { Env } from "../env.ts"
 import type {
   AuthSession,
@@ -38,8 +38,8 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
     const githubUsername = input.githubUsername?.trim() || "developer"
-    const deviceCode = `dev_${randomUUID()}`
-    const userCode = randomUUID().slice(0, 8).toUpperCase()
+    const deviceCode = `dev_${randomBytes(32).toString("hex")}`
+    const userCode = randomBytes(4).toString("hex").toUpperCase()
     const createdAt = Date.now()
 
     this.#deviceSessions.set(deviceCode, {
@@ -75,7 +75,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
 
     const expiresAt = Date.now() + AUTH_SESSION_TTL_MS
     const session: SessionRecord = {
-      token: `tok_${randomUUID()}`,
+      token: `tok_${randomBytes(32).toString("hex")}`,
       githubUsername,
       githubUserId: hashToInteger(githubUsername),
       expiresAt,
