@@ -100,12 +100,15 @@ test("daemon run subscribes once, handles events across repositories, and passes
       return {
         daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
         socketPath: "/tmp/goddard-daemon-test.sock",
+        sessionManager: {
+          shutdownSession: async () => true,
+        },
         close: async () => {},
       }
     },
     runOneShot: async (input) => {
       runOneShotCalls.push(input)
-      return 0
+      return `session-${runOneShotCalls.length}`
     },
     waitForShutdown: async (close) => {
       subscription.emit("event", {
@@ -241,6 +244,9 @@ test("daemon run can start only the IPC server when stream is disabled", async (
           return {
             daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fipc-only.sock",
             socketPath: "/tmp/ipc-only.sock",
+            sessionManager: {
+              shutdownSession: async () => true,
+            },
             close: async () => {},
           }
         },
@@ -261,6 +267,199 @@ test("daemon run can start only the IPC server when stream is disabled", async (
   ])
   expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
   expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
+})
+
+test("daemon shuts down active sessions when a PR is closed", async () => {
+  const subscription = new MockStreamSubscription()
+  const shutdownSessionCalls: string[] = []
+  let runOneShotCalls = 0
+
+  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+    runDaemon(
+      {
+        baseUrl: "",
+        socketPath: "/tmp/closed-pr.sock",
+        agentBinDir: "/tmp/custom-agent-bin",
+        logMode: "json",
+      },
+      {
+        createBackendClient: async () => ({
+          auth: {
+            startDeviceFlow: async () => ({
+              deviceCode: "dev",
+              userCode: "code",
+              verificationUri: "https://github.com/login/device",
+              expiresIn: 900,
+              interval: 5,
+            }),
+            completeDeviceFlow: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            whoami: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            logout: async () => {},
+          },
+          pr: {
+            create: async () => ({
+              number: 1,
+              url: "https://github.com/acme/widgets/pull/1",
+            }),
+            reply: async () => ({ success: true }),
+            isManaged: async () => true,
+          },
+          stream: {
+            subscribe: async () => subscription,
+          },
+        }),
+        startIpcServer: async () => ({
+          daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fclosed-pr.sock",
+          socketPath: "/tmp/closed-pr.sock",
+          sessionManager: {
+            shutdownSession: async (id) => {
+              shutdownSessionCalls.push(id)
+              return true
+            },
+          },
+          close: async () => {},
+        }),
+        runOneShot: async () => {
+          runOneShotCalls += 1
+          return "session-1"
+        },
+        waitForShutdown: async (close) => {
+          subscription.emit("event", {
+            type: "comment" as const,
+            owner: "test",
+            repo: "repo",
+            prNumber: 123,
+            author: "alice",
+            body: "fix it",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          subscription.emit("event", {
+            type: "pr.closed" as const,
+            owner: "test",
+            repo: "repo",
+            prNumber: 123,
+            merged: false,
+          })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          await close()
+        },
+      },
+    ),
+  )
+
+  expect(exitCode).toBe(0)
+  expect(runOneShotCalls).toBe(1)
+  expect(shutdownSessionCalls).toEqual(["session-1"])
+  expect(logs.some((entry) => entry.event === "repo.pr_closed")).toBe(true)
+})
+
+test("daemon cancels startup when a PR closes before session launch", async () => {
+  const subscription = new MockStreamSubscription()
+  const managedResolvers: Array<() => void> = []
+  const shutdownSessionCalls: string[] = []
+  let runOneShotCalls = 0
+
+  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+    runDaemon(
+      {
+        baseUrl: "",
+        socketPath: "/tmp/cancelled-pr.sock",
+        agentBinDir: "/tmp/custom-agent-bin",
+        logMode: "json",
+      },
+      {
+        createBackendClient: async () => ({
+          auth: {
+            startDeviceFlow: async () => ({
+              deviceCode: "dev",
+              userCode: "code",
+              verificationUri: "https://github.com/login/device",
+              expiresIn: 900,
+              interval: 5,
+            }),
+            completeDeviceFlow: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            whoami: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            logout: async () => {},
+          },
+          pr: {
+            create: async () => ({
+              number: 1,
+              url: "https://github.com/acme/widgets/pull/1",
+            }),
+            reply: async () => ({ success: true }),
+            isManaged: async () =>
+              new Promise<boolean>((resolve) => {
+                managedResolvers.push(() => resolve(true))
+              }),
+          },
+          stream: {
+            subscribe: async () => subscription,
+          },
+        }),
+        startIpcServer: async () => ({
+          daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fcancelled-pr.sock",
+          socketPath: "/tmp/cancelled-pr.sock",
+          sessionManager: {
+            shutdownSession: async (id) => {
+              shutdownSessionCalls.push(id)
+              return true
+            },
+          },
+          close: async () => {},
+        }),
+        runOneShot: async () => {
+          runOneShotCalls += 1
+          return "session-1"
+        },
+        waitForShutdown: async (close) => {
+          subscription.emit("event", {
+            type: "comment" as const,
+            owner: "test",
+            repo: "repo",
+            prNumber: 456,
+            author: "alice",
+            body: "fix it",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          subscription.emit("event", {
+            type: "pr.closed" as const,
+            owner: "test",
+            repo: "repo",
+            prNumber: 456,
+            merged: false,
+          })
+          managedResolvers.forEach((resolve) => resolve())
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          await close()
+        },
+      },
+    ),
+  )
+
+  expect(exitCode).toBe(0)
+  expect(runOneShotCalls).toBe(0)
+  expect(shutdownSessionCalls).toEqual([])
+  expect(logs.some((entry) => entry.event === "one_shot.launch_aborted")).toBe(true)
 })
 
 test("daemon run can subscribe without IPC and ignores feedback that requires one-shot execution", async () => {
@@ -320,12 +519,15 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
           return {
             daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fnot-used.sock",
             socketPath: "/tmp/not-used.sock",
+            sessionManager: {
+              shutdownSession: async () => true,
+            },
             close: async () => {},
           }
         },
         runOneShot: async (input) => {
           runOneShotCalls.push(input)
-          return 0
+          return "session-not-used"
         },
         waitForShutdown: async (close) => {
           subscription.emit("event", {

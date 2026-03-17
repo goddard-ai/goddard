@@ -33,11 +33,20 @@ const repoPullRequestCreatedEvent = z.object({
   createdAt: z.string(),
 })
 
+const repoPullRequestClosedEvent = z.object({
+  type: z.literal("pr.closed"),
+  owner: z.string(),
+  repo: z.string(),
+  prNumber: z.number(),
+  merged: z.boolean().optional(),
+})
+
 /** Normalized repository activity event emitted by backend workflows. */
 export const RepoEvent = z.discriminatedUnion("type", [
   repoCommentEvent,
   repoReviewEvent,
   repoPullRequestCreatedEvent,
+  repoPullRequestClosedEvent,
 ])
 
 export type RepoEvent = z.infer<typeof RepoEvent>
@@ -68,10 +77,20 @@ const pullRequestReviewWebhook = z.object({
   body: z.string(),
 })
 
+const pullRequestClosedWebhook = z.object({
+  type: z.literal("pull_request"),
+  action: z.literal("closed"),
+  owner: z.string(),
+  repo: z.string(),
+  prNumber: z.number(),
+  merged: z.boolean().optional(),
+})
+
 /** Normalized GitHub webhook payload accepted by backend webhook handlers. */
 export const GitHubWebhookInput = z.discriminatedUnion("type", [
   issueCommentWebhook,
   pullRequestReviewWebhook,
+  pullRequestClosedWebhook,
 ])
 
 export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInput>

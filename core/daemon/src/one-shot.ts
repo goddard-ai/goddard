@@ -50,7 +50,7 @@ function buildBackgroundSystemPrompt(): string {
   })
 }
 
-export async function runOneShot(input: OneShotInput): Promise<number> {
+export async function runOneShot(input: OneShotInput): Promise<string | null> {
   const logger = createDaemonLogger()
   const projectDir =
     (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(input.event))
@@ -59,13 +59,13 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
     })
-    return 1
+    return null
   }
 
   try {
     readSocketPathFromDaemonUrl(input.daemonUrl)
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
-    await client.send("sessionCreate", {
+    const session = await client.send("sessionCreate", {
       agent: await resolveDefaultAgent(),
       cwd: projectDir,
       worktree: { enabled: true },
@@ -77,7 +77,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       prNumber: input.event.prNumber,
       env: buildOneShotEnv(input.agentBinDir, input.env),
     })
-    return 0
+    return session.session.id
   } catch (error) {
     logger.log("one_shot.session_create_failed", {
       repository: `${input.event.owner}/${input.event.repo}`,
@@ -86,7 +86,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       cwd: projectDir,
       errorMessage: error instanceof Error ? error.message : String(error),
     })
-    return 1
+    return null
   }
 }
 

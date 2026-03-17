@@ -35,7 +35,7 @@ export type RunDaemonDeps = {
     client: BackendClient,
     options: { socketPath: string; agentBinDir: string },
   ) => Promise<DaemonServer>
-  runOneShot?: (input: OneShotInput) => Promise<number> | number
+  runOneShot?: (input: OneShotInput) => Promise<string | null> | string | null
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
   io?: DaemonIo
 }
@@ -93,8 +93,8 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     }
 
     const activeIpcServer = ipcServer
-    // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
-    const runningPrs = new Set<string>()
+    const runningPrs = new Map<string, { cancel: () => void }>()
+    const activePrSessions = new Map<string, Set<string>>()
     const subscription = enableStream ? await client.stream.subscribe() : null
 
     if (subscription) {
@@ -110,6 +110,35 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
 
       subscription.on("event", async (payload) => {
         const event = payload as RepoEvent
+
+        if (event.type === "pr.closed") {
+          const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
+          const startingSession = runningPrs.get(requestKey)
+          if (startingSession) {
+            startingSession.cancel()
+            runningPrs.delete(requestKey)
+            logger.log("one_shot.launch_aborted", {
+              repository: `${event.owner}/${event.repo}`,
+              prNumber: event.prNumber,
+              reason: "pr_closed",
+            })
+          }
+
+          const activeSessions = activePrSessions.get(requestKey)
+          if (activeSessions && activeIpcServer) {
+            logger.log("repo.pr_closed", {
+              repository: `${event.owner}/${event.repo}`,
+              prNumber: event.prNumber,
+              activeSessionCount: activeSessions.size,
+            })
+            for (const sessionId of activeSessions) {
+              void activeIpcServer.sessionManager.shutdownSession(sessionId).catch(() => {})
+            }
+            activePrSessions.delete(requestKey)
+          }
+          return
+        }
+
         if (!isFeedbackEvent(event)) {
           return
         }
@@ -136,7 +165,12 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           return
         }
 
-        runningPrs.add(requestKey)
+        let isCancelled = false
+        runningPrs.set(requestKey, {
+          cancel: () => {
+            isCancelled = true
+          },
+        })
 
         try {
           const managed = await client.pr.isManaged({
@@ -144,6 +178,10 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
             repo: event.repo,
             prNumber: event.prNumber,
           })
+          if (isCancelled) {
+            return
+          }
+
           if (!managed) {
             logger.log("repo.feedback_ignored", {
               repository: `${event.owner}/${event.repo}`,
@@ -160,17 +198,39 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
             feedbackType: event.type,
             prompt: createPayloadPreview(prompt),
           })
-          const exitCode = await runOneShotImpl({
+
+          if (isCancelled || !runningPrs.has(requestKey)) {
+            logger.log("one_shot.launch_aborted", {
+              repository: `${event.owner}/${event.repo}`,
+              prNumber: event.prNumber,
+              feedbackType: event.type,
+              reason: "pr_closed_during_setup",
+            })
+            return
+          }
+
+          const sessionId = await runOneShotImpl({
             event,
             prompt,
             daemonUrl: activeIpcServer.daemonUrl,
             agentBinDir: runtime.agentBinDir,
           })
+
+          if (sessionId) {
+            if (isCancelled || !runningPrs.has(requestKey)) {
+              void activeIpcServer.sessionManager.shutdownSession(sessionId).catch(() => {})
+            } else {
+              const activeSessions = activePrSessions.get(requestKey) ?? new Set<string>()
+              activeSessions.add(sessionId)
+              activePrSessions.set(requestKey, activeSessions)
+            }
+          }
+
           logger.log("one_shot.finish", {
             repository: `${event.owner}/${event.repo}`,
             prNumber: event.prNumber,
             feedbackType: event.type,
-            exitCode,
+            sessionId,
           })
         } catch (error) {
           logger.log("one_shot.failed", {

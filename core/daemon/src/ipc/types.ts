@@ -45,6 +45,9 @@ export type BackendPrClient = {
 export type DaemonServer = {
   daemonUrl: string
   socketPath: string
+  sessionManager: {
+    shutdownSession: (id: string) => Promise<boolean>
+  }
   close: () => Promise<void>
 }
 
