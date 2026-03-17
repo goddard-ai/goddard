@@ -24,67 +24,6 @@
   color: inherit;
 }
 
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--surface-border);
-  border-top-color: var(--accent-color);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.toast {
-  position: fixed;
-  bottom: 2rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: var(--surface-color);
-  color: var(--text-primary);
-  padding: 0.75rem 1.5rem;
-  border-radius: 50px;
-  border: 1px solid var(--accent-color);
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
-  z-index: 2000;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  animation: slideUpFade 0.3s ease-out;
-}
-
-@keyframes slideUpFade {
-  from { bottom: 1rem; opacity: 0; }
-  to { bottom: 2rem; opacity: 1; }
-}
-
-.emptyState {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  background-color: var(--surface-color);
-  border: 1px dashed var(--surface-border);
-  border-radius: 16px;
-  text-align: center;
-  color: var(--text-secondary);
-}
-
-.emptyIcon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  opacity: 0.3;
-}
-
-.emptyState p {
-  margin-bottom: 1.5rem;
-  font-size: 1.1rem;
-}
-
 #root {
   width: 100%;
 }
