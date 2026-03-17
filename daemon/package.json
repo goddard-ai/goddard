@@ -12,9 +12,9 @@
     "daemon": "node dist/main.mjs",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tree-run build:types && tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "build": "tree-run build && tsdown"
+    "build": "tsdown"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",

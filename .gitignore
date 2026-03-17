@@ -1,5 +1,6 @@
 dist
 node_modules
+.turbo
 /roadmap
 *.py
 patch_*.js

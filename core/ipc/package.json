@@ -16,11 +16,11 @@
     }
   },
   "scripts": {
-    "build": "tree-run build && tsdown",
+    "build": "tsdown",
     "build:types": "tsdown --no-minify --clean --unused",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tree-run build:types && tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

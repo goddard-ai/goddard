@@ -17,9 +17,11 @@
   "scripts": {
     "prepare": "simple-git-hooks",
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
+    "build": "turbo run build",
+    "build:types": "turbo run build:types",
     "fmt": "pnpm -r run fmt",
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
-    "typecheck": "tree-run --leaves build:types && tree-run --leaves typecheck",
+    "typecheck": "turbo run typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
@@ -33,6 +35,7 @@
     "radashi": "^12.7.2",
     "simple-git-hooks": "^2.13.1",
     "tsdown": "^0.21.0",
+    "turbo": "^2.5.8",
     "typescript": "^5.9.3",
     "unplugin-raw": "^0.6.4",
     "unplugin-unused": "^0.5.7",
@@ -44,6 +47,7 @@
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "onlyBuiltDependencies": [
+      "turbo",
       "better-sqlite3",
       "esbuild",
       "koffi",

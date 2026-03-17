@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tree-run build && tsc && vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tree-run build:types && tsc -p . --noEmit",
+    "typecheck": "tsc -p . --noEmit",
     "tauri": "tauri"
   },
   "dependencies": {
