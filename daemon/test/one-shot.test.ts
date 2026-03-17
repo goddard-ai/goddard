@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 
 test("runOneShot creates a daemon-hosted one-shot session over IPC", async () => {
-  const exitCode = await runOneShot({
+  const sessionId = await runOneShot({
     event: {
       type: "comment",
       owner: "acme",
@@ -46,7 +46,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
     },
   })
 
-  expect(exitCode).toBe(0)
+  expect(sessionId).toBe("session-1")
   expect(createDaemonIpcClientMock).toHaveBeenCalledTimes(1)
   expect(sendMock).toHaveBeenCalledTimes(1)
 
