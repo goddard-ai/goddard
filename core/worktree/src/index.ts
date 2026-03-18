@@ -45,7 +45,7 @@ export class Worktree {
       let worktreeDir: string | null = null
       try {
         worktreeDir = this.plugin.setup(setupOptions)
-      } catch (err) {
+      } catch {
         // Suppress console output; default plugin handles fallback
       }
 

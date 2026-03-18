@@ -9,12 +9,14 @@ import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.t
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
 import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
 import { resolveDaemonRuntimeConfig } from "../config.ts"
+import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 
 export async function startDaemonServer(
   client: BackendPrClient,
   options: { socketPath?: string; agentBinDir?: string } = {},
   deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
+  const logger = createDaemonLogger()
   const runtime = resolveDaemonRuntimeConfig({
     socketPath: options.socketPath,
     agentBinDir: options.agentBinDir,
@@ -30,13 +32,62 @@ export async function startDaemonServer(
 
   let sessionManager!: ReturnType<typeof createSessionManager>
 
+  function withRequestLogging<TPayload, TResponse>(
+    requestName: string,
+    handler: (
+      payload: TPayload,
+      context: { setSessionId: (sessionId: string) => void },
+    ) => Promise<TResponse> | TResponse,
+  ) {
+    return async (payload: TPayload): Promise<TResponse> => {
+      const opId = logger.createOpId()
+      const startedAt = Date.now()
+      let sessionId = readSessionIdForLog(payload)
+
+      logger.log("ipc.request_received", {
+        opId,
+        requestName,
+        sessionId,
+        payload: createPayloadPreview(payload),
+      })
+
+      try {
+        const response = await handler(payload, {
+          setSessionId(nextSessionId) {
+            sessionId = nextSessionId
+          },
+        })
+
+        logger.log("ipc.response_sent", {
+          opId,
+          requestName,
+          sessionId: sessionId ?? readSessionIdForLog(response),
+          durationMs: Date.now() - startedAt,
+          response: createPayloadPreview(response),
+        })
+
+        return response
+      } catch (error) {
+        logger.log("ipc.request_failed", {
+          opId,
+          requestName,
+          sessionId,
+          durationMs: Date.now() - startedAt,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
+    }
+  }
+
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
-    health: async () => ({ ok: true }),
-    prSubmit: async (payload) => {
+    health: withRequestLogging("health", async () => ({ ok: true })),
+    prSubmit: withRequestLogging("prSubmit", async (payload, context) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new Error("Invalid session token")
       }
+      context.setSessionId(session.sessionId)
       if (!session.owner || !session.repo) {
         throw new Error("Session is not scoped to a repository")
       }
@@ -56,12 +107,13 @@ export async function startDaemonServer(
       })
       await addAllowedPrToSession(session.sessionId, pr.number)
       return { number: pr.number, url: pr.url }
-    },
-    prReply: async (payload) => {
+    }),
+    prReply: withRequestLogging("prReply", async (payload, context) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new Error("Invalid session token")
       }
+      context.setSessionId(session.sessionId)
       if (!session.owner || !session.repo) {
         throw new Error("Session is not scoped to a repository")
       }
@@ -81,43 +133,47 @@ export async function startDaemonServer(
         owner: session.owner,
         repo: session.repo,
       })
-    },
-    sessionCreate: async (payload) => {
-      return {
+    }),
+    sessionCreate: withRequestLogging("sessionCreate", async (payload, context) => {
+      const response = {
         session: await sessionManager.createSession(payload as CreateDaemonSessionRequest),
       }
-    },
-    sessionGet: async ({ id }) => {
+      context.setSessionId(response.session.id)
+      return response
+    }),
+    sessionGet: withRequestLogging("sessionGet", async ({ id }) => {
       return {
         session: await sessionManager.getSession(id),
       }
-    },
-    sessionConnect: async ({ id }) => {
+    }),
+    sessionConnect: withRequestLogging("sessionConnect", async ({ id }) => {
       return {
         session: await sessionManager.connectSession(id),
       }
-    },
-    sessionHistory: async ({ id }) => {
+    }),
+    sessionHistory: withRequestLogging("sessionHistory", async ({ id }) => {
       return sessionManager.getHistory(id)
-    },
-    sessionDiagnostics: async ({ id }) => {
+    }),
+    sessionDiagnostics: withRequestLogging("sessionDiagnostics", async ({ id }) => {
       return sessionManager.getDiagnostics(id)
-    },
-    sessionShutdown: async ({ id }) => {
+    }),
+    sessionShutdown: withRequestLogging("sessionShutdown", async ({ id }) => {
       return {
         id,
         success: await sessionManager.shutdownSession(id),
       }
-    },
-    sessionSend: async ({ id, message }) => {
+    }),
+    sessionSend: withRequestLogging("sessionSend", async ({ id, message }) => {
       await sessionManager.sendMessage(id, message as acp.AnyMessage)
       return { accepted: true as const }
-    },
-    sessionResolveToken: async ({ token }) => {
+    }),
+    sessionResolveToken: withRequestLogging("sessionResolveToken", async ({ token }, context) => {
+      const id = await sessionManager.resolveSessionIdByToken(token)
+      context.setSessionId(id)
       return {
-        id: await sessionManager.resolveSessionIdByToken(token),
+        id,
       }
-    },
+    }),
   })
 
   sessionManager = createSessionManager({
@@ -129,6 +185,10 @@ export async function startDaemonServer(
   })
 
   await once(ipcServer.server, "listening")
+  logger.log("ipc.server_listening", {
+    socketPath,
+    daemonUrl,
+  })
 
   let closed = false
 
@@ -140,6 +200,10 @@ export async function startDaemonServer(
         return
       }
       closed = true
+      logger.log("ipc.server_closing", {
+        socketPath,
+        daemonUrl,
+      })
       await sessionManager.close().catch(() => {})
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {
@@ -151,6 +215,10 @@ export async function startDaemonServer(
         })
       })
       await cleanupSocketPath(socketPath)
+      logger.log("ipc.server_closed", {
+        socketPath,
+        daemonUrl,
+      })
     },
   }
 }

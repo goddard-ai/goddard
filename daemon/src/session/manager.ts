@@ -21,9 +21,16 @@ import {
 import { randomUUID, randomBytes } from "node:crypto"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { Readable, Writable } from "node:stream"
-import { createAgentConnection, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "./acp.ts"
+import {
+  createAgentConnection,
+  createAgentMessageStream,
+  getAcpMessageResult,
+  isAcpRequest,
+  matchAcpRequest,
+} from "./acp.ts"
 import { prependAgentBinToPath } from "../config.ts"
 import { fetchRegistryAgent } from "./registry.ts"
+import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
@@ -35,6 +42,8 @@ function getPackageVersion(): string {
     return "0.0.0"
   }
 }
+
+const logger = createDaemonLogger()
 
 type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
 
@@ -265,6 +274,9 @@ async function initializeSession(
   input: Writable,
   output: Readable,
   params: CreateDaemonSessionRequest,
+  hooks: {
+    onMessageWrite?: (message: acp.AnyMessage) => void
+  } = {},
 ): Promise<{
   status: SessionStatus
   isFirstPrompt: boolean
@@ -272,10 +284,7 @@ async function initializeSession(
   acpId: string
 }> {
   const history: acp.AnyMessage[] = []
-  const stream = acp.ndJsonStream(
-    Writable.toWeb(input),
-    Readable.toWeb(output) as ReadableStream<Uint8Array>,
-  )
+  const stream = createAgentMessageStream(input, output)
 
   const agent = new acp.ClientSideConnection(
     () => ({
@@ -283,11 +292,12 @@ async function initializeSession(
         return { outcome: { outcome: "cancelled" } }
       },
       async sessionUpdate(params: any) {
-        history.push({
+        const message = {
           jsonrpc: "2.0",
           method: acp.CLIENT_METHODS.session_update,
           params,
-        } satisfies acp.AnyMessage)
+        } satisfies acp.AnyMessage
+        history.push(message)
       },
     }),
     stream,
@@ -320,6 +330,7 @@ async function initializeSession(
         method: acp.AGENT_METHODS.session_prompt,
         params: promptRequest,
       } satisfies acp.AnyMessage)
+      hooks.onMessageWrite?.(history.at(-1)!)
 
       const response = await agent.prompt(promptRequest)
       if (response.stopReason === "end_turn") {
@@ -368,6 +379,34 @@ function createDiagnosticEvent(
   }
 }
 
+function logAgentChunk(sessionId: string, acpId: string | undefined, chunk: Uint8Array): void {
+  if (chunk.byteLength === 0) {
+    return
+  }
+
+  logger.log("agent.chunk_read", {
+    sessionId,
+    acpId,
+    preview: createChunkPreview(chunk),
+  })
+}
+
+function logAgentMessage(
+  event: "agent.message_read" | "agent.message_write",
+  sessionId: string,
+  acpId: string | undefined,
+  message: acp.AnyMessage,
+): void {
+  logger.log(event, {
+    sessionId,
+    acpId,
+    direction: event === "agent.message_read" ? "read" : "write",
+    hasId: "id" in message && message.id != null,
+    method: "method" in message ? message.method : undefined,
+    message: createPayloadPreview(message),
+  })
+}
+
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
@@ -399,7 +438,7 @@ export function createSessionManager(input: {
     detail?: Record<string, unknown>,
   ): Promise<void> {
     const event = createDiagnosticEvent(sessionId, type, detail)
-    process.stdout.write(`${JSON.stringify({ scope: "daemon", ...event })}\n`)
+    logger.log(type, { sessionId, ...detail })
     await SessionStateStorage.appendDiagnostic(sessionId, event)
   }
 
@@ -424,14 +463,9 @@ export function createSessionManager(input: {
         SessionPermissionsStorage.list(),
       ])
     } catch (error) {
-      process.stderr.write(
-        `${JSON.stringify({
-          scope: "daemon",
-          type: "session_reconciliation_failed",
-          at: new Date().toISOString(),
-          detail: { message: error instanceof Error ? error.message : String(error) },
-        })}\n`,
-      )
+      logger.log("session_reconciliation_failed", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
       return
     }
 
@@ -485,6 +519,10 @@ export function createSessionManager(input: {
     const id = randomUUID()
     const token = randomBytes(32).toString("hex")
     const scope = parseRepoScope(params.metadata)
+    const sessionContext = {
+      sessionId: id,
+      acpId: undefined as string | undefined,
+    }
 
     await SessionPermissionsStorage.create({
       sessionId: id,
@@ -502,7 +540,17 @@ export function createSessionManager(input: {
         env: params.env,
       })
 
-      const initialized = await initializeSession(process.stdin, process.stdout, params)
+      const initialized = await initializeSession(process.stdin, process.stdout, params, {
+        onMessageWrite: (message) => {
+          logAgentMessage(
+            "agent.message_write",
+            sessionContext.sessionId,
+            sessionContext.acpId,
+            message,
+          )
+        },
+      })
+      sessionContext.acpId = initialized.acpId
 
       await SessionStateStorage.create({
         sessionId: id,
@@ -537,7 +585,18 @@ export function createSessionManager(input: {
         return toDaemonSession(await SessionStorage.get(id))
       }
 
-      const connection = createAgentConnection(process.stdin, process.stdout)
+      const connection = createAgentConnection(process.stdin, process.stdout, {
+        onChunk: (chunk) => {
+          logAgentChunk(sessionContext.sessionId, sessionContext.acpId, chunk)
+        },
+        onMessageError: (error) => {
+          logger.log("agent.message_handler_failed", {
+            sessionId: sessionContext.sessionId,
+            acpId: sessionContext.acpId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        },
+      })
       const writer = connection.getWriter()
       const active: ActiveSession = {
         id,
@@ -555,6 +614,7 @@ export function createSessionManager(input: {
       }
 
       active.subscription = connection.subscribe(async (message) => {
+        logAgentMessage("agent.message_read", active.id, active.acpId, message)
         if (
           isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
         ) {
@@ -691,6 +751,7 @@ export function createSessionManager(input: {
       active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
     }
 
+    logAgentMessage("agent.message_write", active.id, active.acpId, message)
     await appendHistory(active.id, message)
     await emitDiagnostic(active.id, "session_message_sent", {
       hasId: "id" in message && message.id != null,

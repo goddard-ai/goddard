@@ -1,4 +1,4 @@
-import { afterEach, test } from "vitest"
+import { afterEach, test, vi } from "vitest"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import * as assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -19,16 +19,30 @@ test("daemon submit request requires a valid session token", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  await assert.rejects(
-    () =>
-      client.send("prSubmit", {
-        token: "",
-        cwd: process.cwd(),
-        title: "Ship daemon security",
-        body: "Done.",
-      }),
-    /invalid session token/i,
-  )
+  const { logs } = await captureDaemonLogs(async () => {
+    await assert.rejects(
+      () =>
+        client.send("prSubmit", {
+          token: "",
+          cwd: process.cwd(),
+          title: "Ship daemon security",
+          body: "Done.",
+        }),
+      /invalid session token/i,
+    )
+  })
+
+  const received = logs.find((entry) => entry.event === "ipc.request_received")
+  const failed = logs.find((entry) => entry.event === "ipc.request_failed")
+  assert.equal(received?.requestName, "prSubmit")
+  assert.deepEqual(received?.payload, {
+    token: "[REDACTED]",
+    cwd: process.cwd(),
+    title: "Ship daemon security",
+    body: "Done.",
+  })
+  assert.equal(received?.opId, failed?.opId)
+  assert.equal(failed?.requestName, "prSubmit")
 })
 
 test("daemon submit request enforces trusted repo context and records created PR access", async () => {
@@ -73,11 +87,13 @@ test("daemon submit request enforces trusted repo context and records created PR
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("prSubmit", {
-    token: "tok_session",
-    cwd: process.cwd(),
-    title: "Ship daemon security",
-    body: "Done.",
+  const { logs } = await captureDaemonLogs(async () => {
+    await client.send("prSubmit", {
+      token: "tok_session",
+      cwd: process.cwd(),
+      title: "Ship daemon security",
+      body: "Done.",
+    })
   })
 
   assert.deepEqual(createCalls, [
@@ -91,6 +107,13 @@ test("daemon submit request enforces trusted repo context and records created PR
     },
   ])
   assert.deepEqual(recordedPrs, [{ sessionId: "session-42", prNumber: 42 }])
+
+  const received = logs.find((entry) => entry.event === "ipc.request_received")
+  const responded = logs.find((entry) => entry.event === "ipc.response_sent")
+  assert.equal(received?.requestName, "prSubmit")
+  assert.equal(responded?.requestName, "prSubmit")
+  assert.equal(received?.opId, responded?.opId)
+  assert.equal(responded?.sessionId, "session-42")
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
@@ -191,4 +214,28 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
   })
 
   return daemon
+}
+
+async function captureDaemonLogs(
+  action: () => Promise<void>,
+): Promise<{ logs: Array<Record<string, unknown>> }> {
+  const output: string[] = []
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"))
+    return true
+  }) as typeof process.stdout.write)
+
+  try {
+    await action()
+    return {
+      logs: output
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+    }
+  } finally {
+    stdout.mockRestore()
+  }
 }

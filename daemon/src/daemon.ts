@@ -4,6 +4,7 @@ import { FileTokenStorage } from "@goddard-ai/storage"
 import { resolveDaemonRuntimeConfig } from "./config.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
+import { createDaemonLogger, createPayloadPreview } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
 import { splitRepo } from "./utils.ts"
 
@@ -38,6 +39,7 @@ const defaultIo: DaemonIo = {
 
 export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {}): Promise<number> {
   const io = deps.io ?? defaultIo
+  const logger = createDaemonLogger(io.stdout)
   const runtime = resolveDaemonRuntimeConfig({
     baseUrl: input.baseUrl,
     socketPath: input.socketPath,
@@ -56,6 +58,14 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
   let ipcServer: DaemonServer | undefined
 
   try {
+    logger.log("daemon.startup", {
+      repository: input.repo,
+      projectDir: input.projectDir,
+      baseUrl: runtime.baseUrl,
+      socketPath: runtime.socketPath,
+      agentBinDir: runtime.agentBinDir,
+    })
+
     const client = await createBackendClientImpl(runtime.baseUrl)
     const { owner, repo } = splitRepo(input.repo)
     ipcServer = await startIpcServer(client, {
@@ -66,7 +76,11 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     const runningPrs = new Set<number>()
     const subscription = await client.stream.subscribeToRepo({ owner, repo })
 
-    io.stdout(`Daemon subscribed to ${owner}/${repo}. Waiting for PR feedback events...`)
+    logger.log("repo.subscription_started", {
+      repository: `${owner}/${repo}`,
+      daemonUrl: activeIpcServer.daemonUrl,
+      socketPath: activeIpcServer.socketPath,
+    })
 
     subscription.on("event", async (payload) => {
       const event = payload as RepoEvent
@@ -77,9 +91,11 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
       const prompt = buildPrompt(event)
 
       if (runningPrs.has(event.prNumber)) {
-        io.stdout(
-          `Feedback received for PR #${event.prNumber}, but a session is already running. Ignoring for now.`,
-        )
+        logger.log("repo.feedback_coalesced", {
+          repository: `${event.owner}/${event.repo}`,
+          prNumber: event.prNumber,
+          feedbackType: event.type,
+        })
         return
       }
 
@@ -92,11 +108,21 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           prNumber: event.prNumber,
         })
         if (!managed) {
-          io.stdout(`Ignoring ${event.type} on unmanaged PR #${event.prNumber}.`)
+          logger.log("repo.feedback_ignored", {
+            repository: `${event.owner}/${event.repo}`,
+            prNumber: event.prNumber,
+            feedbackType: event.type,
+            reason: "unmanaged_pr",
+          })
           return
         }
 
-        io.stdout(`Launching one-shot pi session for ${event.type} on PR #${event.prNumber}...`)
+        logger.log("one_shot.launch", {
+          repository: `${event.owner}/${event.repo}`,
+          prNumber: event.prNumber,
+          feedbackType: event.type,
+          prompt: createPayloadPreview(prompt),
+        })
         const exitCode = await runOneShotImpl({
           event,
           prompt,
@@ -104,9 +130,19 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           daemonUrl: activeIpcServer.daemonUrl,
           agentBinDir: runtime.agentBinDir,
         })
-        io.stdout(`One-shot pi session finished for PR #${event.prNumber} (exit ${exitCode}).`)
+        logger.log("one_shot.finish", {
+          repository: `${event.owner}/${event.repo}`,
+          prNumber: event.prNumber,
+          feedbackType: event.type,
+          exitCode,
+        })
       } catch (error) {
-        io.stderr(error instanceof Error ? error.message : String(error))
+        logger.log("one_shot.failed", {
+          repository: `${event.owner}/${event.repo}`,
+          prNumber: event.prNumber,
+          feedbackType: event.type,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
       } finally {
         runningPrs.delete(event.prNumber)
       }
@@ -115,9 +151,16 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     await waitForShutdownImpl(() =>
       Promise.all([Promise.resolve(subscription.close()), activeIpcServer.close()]).then(() => {}),
     )
+    logger.log("daemon.shutdown", {
+      repository: `${owner}/${repo}`,
+      socketPath: runtime.socketPath,
+    })
     return 0
   } catch (error) {
-    io.stderr(error instanceof Error ? error.message : String(error))
+    logger.log("daemon.run_failed", {
+      repository: input.repo,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
     return 1
   } finally {
     if (ipcServer) {

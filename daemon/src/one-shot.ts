@@ -4,6 +4,7 @@ import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import * as prompts from "./prompts/index.ts"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
+import { createDaemonLogger } from "./logging.ts"
 
 export type OneShotInput = {
   event: FeedbackEvent
@@ -49,6 +50,7 @@ function buildBackgroundSystemPrompt(): string {
 }
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
+  const logger = createDaemonLogger()
   const branchName = `pr-${input.event.prNumber}`
   const agentsDir = `${input.projectDir}/.goddard-agents`
   const worktreeDir = `${agentsDir}/${branchName}-${Date.now()}`
@@ -73,18 +75,24 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     }
 
     if (cloneResult.status !== 0) {
-      console.error(`\n[ERROR] Failed to create agent workspace at ${worktreeDir}`)
-      if (fallbackAttempted) {
-        console.error("Attempted APFS clone (cp -cR) and fallback copy (cp -R). Both failed.")
-      }
-      console.error(`Last attempted command: cp ${cpArgs.join(" ")}`)
-      if (cloneResult.stderr) console.error(`Error output: ${cloneResult.stderr.trim()}`)
-      if (cloneResult.error) console.error(`System error: ${cloneResult.error.message}`)
-      console.error("Cannot proceed with one-shot pi session. Aborting.\n")
+      logger.log("one_shot.workspace_prepare_failed", {
+        repository: `${input.event.owner}/${input.event.repo}`,
+        prNumber: input.event.prNumber,
+        worktreeDir,
+        attemptedCommand: `cp ${cpArgs.join(" ")}`,
+        fallbackAttempted,
+        stderr: cloneResult.stderr?.trim() || undefined,
+        errorMessage: cloneResult.error?.message,
+      })
       return 1
     }
-  } catch {
-    console.error(`\n[ERROR] Exception thrown while creating agent workspace at ${worktreeDir}:`)
+  } catch (error) {
+    logger.log("one_shot.workspace_prepare_failed", {
+      repository: `${input.event.owner}/${input.event.repo}`,
+      prNumber: input.event.prNumber,
+      worktreeDir,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
     return 1
   }
 
@@ -119,9 +127,13 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     })
     return 0
   } catch (error) {
-    console.error(
-      `\n[ERROR] one-shot session failed: ${error instanceof Error ? error.message : String(error)}`,
-    )
+    logger.log("one_shot.session_create_failed", {
+      repository: `${input.event.owner}/${input.event.repo}`,
+      prNumber: input.event.prNumber,
+      daemonUrl: input.daemonUrl,
+      worktreeDir,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
     return 1
   }
 }

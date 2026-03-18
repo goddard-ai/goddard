@@ -102,7 +102,7 @@ export const defaultPlugin: WorktreePlugin = {
     return worktreeDir
   },
 
-  cleanup(worktreeDir: string, branchName: string): boolean {
+  cleanup(worktreeDir: string, _branchName: string): boolean {
     try {
       // First try to clean up if it was a git worktree
       const wtResult = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {

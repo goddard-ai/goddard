@@ -285,6 +285,141 @@ test("multiple clients can observe the same live session stream independently", 
   assert.equal(clientBMessages.length > 0, true)
 })
 
+test("daemon logs agent message and chunk traffic without persisting high-volume events", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const longPrompt = "p".repeat(700)
+  const longReply = "r".repeat(700)
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const message = JSON.parse(line)
+
+      if (message.method === "initialize") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: { loadSession: false },
+          },
+        })
+        return
+      }
+
+      if (message.method === "session/new") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { sessionId: "agent-session-logging" },
+        })
+        return
+      }
+
+      if (message.method === "session/prompt") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            stopReason: "end_turn",
+            content: [{ type: "text", text: ${JSON.stringify(longReply)} }],
+          },
+        })
+      }
+    })
+  `)
+
+  const { logs, result } = await captureDaemonLogs(async () => {
+    const created = await client.send("sessionCreate", {
+      agent: {
+        type: "binary",
+        cmd: "node",
+        args: [agentPath],
+      },
+      cwd: process.cwd(),
+      mcpServers: [],
+      systemPrompt: "Keep responses short.",
+    })
+
+    await client.send("sessionSend", {
+      id: created.session.id,
+      message: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session/prompt",
+        params: {
+          sessionId: created.session.acpId,
+          prompt: [{ type: "text", text: longPrompt }],
+        },
+      },
+    })
+
+    await waitFor(async () => {
+      const session = await client.send("sessionGet", { id: created.session.id })
+      return session.session.status === "done"
+    })
+
+    return {
+      sessionId: created.session.id,
+      acpId: created.session.acpId,
+    }
+  })
+
+  const writeLog = logs.find(
+    (entry) =>
+      entry.event === "agent.message_write" &&
+      entry.sessionId === result.sessionId &&
+      entry.method === "session/prompt",
+  )
+  assert.ok(writeLog)
+  assert.equal(writeLog?.acpId, result.acpId)
+  assert.equal(writeLog?.hasId, true)
+  assert.deepEqual((writeLog.message as any).params.prompt[1].text, {
+    text: `${longPrompt.slice(0, 512)}...`,
+    byteLength: Buffer.byteLength(longPrompt),
+    truncated: true,
+  })
+
+  const readLog = logs.find(
+    (entry) => entry.event === "agent.message_read" && entry.sessionId === result.sessionId,
+  )
+  assert.ok(readLog)
+  assert.equal(readLog?.acpId, result.acpId)
+  assert.equal(readLog?.hasId, true)
+  assert.deepEqual((readLog.message as any).result.content[0].text, {
+    text: `${longReply.slice(0, 512)}...`,
+    byteLength: Buffer.byteLength(longReply),
+    truncated: true,
+  })
+
+  const chunkLog = logs.find(
+    (entry) =>
+      entry.event === "agent.chunk_read" &&
+      entry.sessionId === result.sessionId &&
+      (entry.preview as any)?.truncated === true,
+  )
+  assert.ok(chunkLog)
+  assert.equal(chunkLog?.acpId, result.acpId)
+  assert.equal(typeof (chunkLog.preview as any).text, "string")
+  assert.equal((chunkLog.preview as any).truncated, true)
+  assert.equal((chunkLog.preview as any).byteLength > 256, true)
+
+  const diagnostics = await client.send("sessionDiagnostics", { id: result.sessionId })
+  assert.equal(
+    diagnostics.events.some(
+      (event) => event.type === "agent.message_read" || event.type === "agent.chunk_read",
+    ),
+    false,
+  )
+})
+
 test("malformed runtime agent output is surfaced through diagnostics and archived state", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -496,4 +631,29 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 3_000) {
   }
 
   throw new Error("Timed out waiting for condition")
+}
+
+async function captureDaemonLogs<T>(
+  action: () => Promise<T>,
+): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
+  const output: string[] = []
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"))
+    return true
+  }) as typeof process.stdout.write)
+
+  try {
+    const result = await action()
+    return {
+      logs: output
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+      result,
+    }
+  } finally {
+    stdout.mockRestore()
+  }
 }

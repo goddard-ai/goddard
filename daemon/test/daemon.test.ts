@@ -1,4 +1,4 @@
-import { afterEach, test } from "vitest"
+import { afterEach, test, vi } from "vitest"
 import * as assert from "node:assert/strict"
 import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -100,15 +100,17 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
     },
   }
 
-  const exitCode = await runDaemon(
-    {
-      repo: "test/repo",
-      projectDir: process.cwd(),
-      baseUrl: "",
-      socketPath: "/tmp/custom-daemon.sock",
-      agentBinDir: "/tmp/custom-agent-bin",
-    },
-    deps,
+  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+    runDaemon(
+      {
+        repo: "test/repo",
+        projectDir: process.cwd(),
+        baseUrl: "",
+        socketPath: "/tmp/custom-daemon.sock",
+        agentBinDir: "/tmp/custom-agent-bin",
+      },
+      deps,
+    ),
   )
 
   assert.equal(exitCode, 0)
@@ -128,6 +130,34 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
   assert.equal(runOneShotCalls[0].agentBinDir, "/tmp/custom-agent-bin")
   assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
   assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
+
+  const startupLog = logs.find((entry) => entry.event === "daemon.startup")
+  assert.deepEqual(startupLog, {
+    scope: "daemon",
+    at: startupLog?.at,
+    event: "daemon.startup",
+    repository: "test/repo",
+    projectDir: process.cwd(),
+    baseUrl: "http://127.0.0.1:8787",
+    socketPath: "/tmp/custom-daemon.sock",
+    agentBinDir: "/tmp/custom-agent-bin",
+  })
+  assert.equal(
+    logs.some((entry) => entry.event === "repo.subscription_started"),
+    true,
+  )
+  assert.equal(
+    logs.some((entry) => entry.event === "one_shot.launch"),
+    true,
+  )
+  assert.equal(
+    logs.some((entry) => entry.event === "one_shot.finish"),
+    true,
+  )
+  assert.equal(
+    logs.some((entry) => entry.event === "daemon.shutdown"),
+    true,
+  )
 })
 
 test("daemon URL round-trips the socket path", () => {
@@ -191,4 +221,29 @@ function runGit(cwd: string, args: string[]): void {
     encoding: "utf-8",
   })
   assert.equal(result.status, 0, result.stderr)
+}
+
+async function captureDaemonLogs<T>(
+  action: () => Promise<T>,
+): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
+  const output: string[] = []
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"))
+    return true
+  }) as typeof process.stdout.write)
+
+  try {
+    const result = await action()
+    return {
+      logs: output
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+      result,
+    }
+  } finally {
+    stdout.mockRestore()
+  }
 }
