@@ -213,4 +213,24 @@ export class TursoBackendControlPlane implements BackendControlPlane {
 
     return mapped
   }
+
+  async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {
+    if (event.type === "pr.created") {
+      return event.author
+    }
+
+    const [match] = await this.#db
+      .select({ createdBy: schema.pullRequests.createdBy })
+      .from(schema.pullRequests)
+      .where(
+        and(
+          eq(schema.pullRequests.owner, event.owner),
+          eq(schema.pullRequests.repo, event.repo),
+          eq(schema.pullRequests.number, event.prNumber),
+        ),
+      )
+      .limit(1)
+
+    return match?.createdBy
+  }
 }

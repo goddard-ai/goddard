@@ -30,6 +30,7 @@ export interface BackendControlPlane {
     env?: any,
   ): Promise<void> | void
   handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent
+  resolveEventOwner?(event: RepoEvent): Promise<string | undefined> | string | undefined
   addStreamSocket?(streamKey: string, socket: unknown): void
   removeStreamSocket?(streamKey: string, socket: unknown): void
 }

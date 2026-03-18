@@ -1,16 +1,26 @@
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
+import { createClient } from "@libsql/client/web"
+import type { RepoEvent } from "@goddard-ai/schema/backend"
 import type { Env } from "./env.ts"
 import { createBackendRouter } from "./api/router.ts"
+import { TursoBackendControlPlane } from "./db/persistence.ts"
+import { createSseSession } from "./utils.ts"
 
 const router = createBackendRouter({
-  broadcastEvent: async (_env, _event) => {
-    // TODO: implement real-time fanout via Cloudflare Queues or similar.
-    // Each Worker invocation is isolated; without a shared-state layer
-    // (Queues, KV pub/sub) broadcast to a connected SSE client in another
-    // invocation is not possible in pure Workers.
+  broadcastEvent: async (env, event) => {
+    const githubUsername = await createWorkerControlPlane(env).resolveEventOwner?.(event)
+    if (!githubUsername) {
+      return
+    }
+
+    await getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ event }),
+    })
   },
-  handleUserStream: async (_env, _githubUsername, request) => {
-    return createSseStream(request)
+  handleUserStream: async (env, githubUsername, _request) => {
+    return getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/subscribe")
   },
 })
 
@@ -18,22 +28,69 @@ export default {
   fetch: adapter(router),
 } satisfies ExportedHandler<Env>
 
-function createSseStream(_request: Request): Response {
-  const encoder = new TextEncoder()
+export class UserStream {
+  readonly #sinks = new Set<ReturnType<typeof createSseSession>["sink"]>()
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(": connected\n\n"))
-    },
-    cancel() {},
-  })
+  fetch(request: Request): Promise<Response> | Response {
+    const url = new URL(request.url)
+    if (request.method === "POST" && url.pathname === "/publish") {
+      return this.#publish(request)
+    }
+    if (request.method === "GET" && url.pathname === "/subscribe") {
+      return this.#subscribe(request)
+    }
 
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-    },
-  })
+    return new Response("Not found", { status: 404 })
+  }
+
+  async #publish(request: Request): Promise<Response> {
+    const payload = (await request.json()) as { event: RepoEvent }
+    const frame = JSON.stringify({ event: payload.event })
+
+    for (const sink of this.#sinks) {
+      try {
+        sink.send(frame)
+      } catch {
+        this.#sinks.delete(sink)
+        sink.close?.()
+      }
+    }
+
+    return new Response(null, { status: 204 })
+  }
+
+  #subscribe(request: Request): Response {
+    const session = createSseSession(() => {
+      this.#sinks.delete(session.sink)
+    })
+
+    this.#sinks.add(session.sink)
+    request.signal.addEventListener(
+      "abort",
+      () => {
+        this.#sinks.delete(session.sink)
+        session.sink.close?.()
+      },
+      { once: true },
+    )
+
+    return session.response
+  }
+}
+
+function createWorkerControlPlane(env: Env): TursoBackendControlPlane {
+  return new TursoBackendControlPlane(
+    createClient({
+      url: env.TURSO_DB_URL,
+      authToken: env.TURSO_DB_AUTH_TOKEN,
+    }) as any,
+  )
+}
+
+function getUserStreamStub(env: Env, githubUsername: string) {
+  if (!env.USER_STREAM) {
+    throw new Error("USER_STREAM Durable Object binding is not configured")
+  }
+
+  return env.USER_STREAM.get(env.USER_STREAM.idFromName(githubUsername))
 }
