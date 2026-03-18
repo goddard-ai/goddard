@@ -9,7 +9,7 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
-} from "../backend.ts"
+} from "../backend.js"
 
 const bearerHeaderSchema = z.object({
   authorization: z.string(),
@@ -122,4 +122,4 @@ export type {
   DeviceFlowStart,
   GitHubWebhookInput,
   ReplyPrInput,
-} from "../backend.ts"
+} from "../backend.js"

@@ -9,7 +9,7 @@ import type {
   ReplyPrDaemonResponse,
   ShutdownDaemonSessionResponse,
   SubmitPrDaemonResponse,
-} from "./daemon.ts"
+} from "./daemon.js"
 
 const agentDistributionSchema = z.object({
   type: z.enum(["binary", "npx", "uvx"]),

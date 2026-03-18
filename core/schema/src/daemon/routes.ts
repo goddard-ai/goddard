@@ -8,7 +8,7 @@ import type {
   ReplyPrDaemonResponse,
   ShutdownDaemonSessionResponse,
   SubmitPrDaemonResponse,
-} from "../daemon.ts"
+} from "../daemon.js"
 
 export const healthRoute = route("health", {
   GET: {
@@ -102,4 +102,4 @@ export type {
   DaemonSessionPathParams,
   ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
-} from "../daemon.ts"
+} from "../daemon.js"

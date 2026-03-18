@@ -4,11 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./session-permissions": "./src/session-permissions.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "source": "./src/index.ts"
+    },
+    "./session-permissions": {
+      "types": "./src/session-permissions.ts",
+      "import": "./dist/session-permissions.js",
+      "source": "./src/session-permissions.ts"
+    }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsgo -p tsconfig.json --noCheck",
+    "build:types": "tsgo -p tsconfig.json --noCheck",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",

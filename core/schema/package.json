@@ -5,9 +5,15 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts"
+    "./*": {
+      "types": "./src/*.ts",
+      "import": "./dist/*.js",
+      "source": "./src/*.ts"
+    }
   },
   "scripts": {
+    "build": "tsgo -p tsconfig.json --noCheck",
+    "build:types": "tsgo -p tsconfig.json --noCheck",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsc -p tsconfig.json --noEmit",

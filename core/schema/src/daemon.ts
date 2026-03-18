@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import type { ACPAdapterName } from "./acp-adapters.ts"
-import type { SessionStatus } from "./db.ts"
-import type { AgentDistribution } from "./session-server.ts"
+import type { ACPAdapterName } from "./acp-adapters.js"
+import type { SessionStatus } from "./db.js"
+import type { AgentDistribution } from "./session-server.js"
 
 export type DaemonHealth = {
   ok: boolean
