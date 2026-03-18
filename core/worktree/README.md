@@ -25,3 +25,7 @@ console.log(`Worktree created at: ${worktreeDir}`);
 // Clean up when finished
 worktree.cleanup(worktreeDir, branchName);
 ```
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).

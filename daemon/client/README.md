@@ -23,3 +23,7 @@ const client = createDaemonIpcClient({
   createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
 })
 ```
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
