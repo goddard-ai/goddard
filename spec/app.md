@@ -58,5 +58,5 @@ All screens consume normalized, real-time domain records with stable identities:
 - Must handle streaming updates gracefully for high-churn views.
 
 ## Non-Goals
-- Reintroducing a parallel CLI or other terminal-first workflow surface.
+- Reintroducing a broad parallel CLI or other terminal-first primary workflow surface.
 - Implementing a full in-app code editor.

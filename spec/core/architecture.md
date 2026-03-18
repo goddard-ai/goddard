@@ -12,11 +12,12 @@
 | Distribution | `git-subrepo` to standalone repositories |
 
 ## Platform Components
-- **Control Plane** — worker-hosted authority for sessions, managed PR state, and repository event fan-out.
+- **Control Plane** — worker-hosted authority for sessions, managed pull request state, and repository event fan-out.
 - **GitHub Integration** — delegated GitHub identity and webhook-facing integration behavior.
 - **SDK** — framework-agnostic platform client for programmatic and embedded hosts.
 - **Desktop Workspace** — Tauri desktop app and primary human-facing surface.
-- **Background Runtime** — supervised local automation host for unattended PR-feedback reactions and loop execution when needed.
+- **Background Runtime** — supervised local automation host for unattended execution, including daemon-managed runtimes where appropriate.
+- **Operational CLI** — thin terminal control surface for initializing or controlling daemon-backed local automation without becoming a parallel primary UX.
 
 These components can be packaged independently and synchronized to standalone repositories when distribution needs require it.
 
@@ -34,12 +35,12 @@ Boundary:
 
 ### SDK
 Design rule: platform capabilities live here first.
-- Expose typed operations for authentication, PR creation, and stream subscription.
+- Expose typed operations for authentication, pull request creation, stream subscription, and daemon-backed local automation control.
 - Normalize stream frames into stable event contracts.
 - Accept injected `TokenStorage` to avoid environment lock-in.
 
 ### Desktop Workspace
-- Primary human-facing workspace for authentication, session steering, PR review, specs, tasks, and roadmap context.
+- Primary human-facing workspace for authentication, session steering, pull request review, specs, tasks, and roadmap context.
 - Use SDK contracts for pull request operations, stream subscription, and other platform interactions.
 - Host or supervise local background automation when unattended execution is enabled.
 
@@ -49,13 +50,22 @@ Boundary:
 
 ### Background Runtime
 - Subscribe to repository streams via SDK.
-- Filter for managed PR feedback events.
-- Launch local one-shot `pi` sessions with PR context.
+- Launch daemon-managed one-shot reactions for managed pull request feedback.
+- Host or cooperate with daemon-managed workforce orchestration for repository-scoped delegation.
 - Operate as background automation rather than a user-facing command surface.
-- Be hostable by the desktop workspace or another SDK-based local supervisor.
+- Be hostable by the desktop workspace or another supervised local process when needed.
+
+### Operational CLI
+- Initialize repository-local automation intent when a local filesystem touchpoint is required.
+- Start, inspect, and mutate daemon-backed local automation as a thin operator surface.
+- Reuse SDK and daemon contracts rather than reimplementing runtime ownership.
+
+Boundary:
+- Must not become the primary human-facing Goddard workspace.
+- Must not create a parallel platform contract outside the SDK and daemon authority model.
 
 ## Deployment Model
-The control plane runs on Cloudflare Workers. The primary human-facing local runtime is the Tauri desktop workspace. Unattended automation may be hosted by the desktop workspace or by another SDK-based supervisor when needed.
+The control plane runs on Cloudflare Workers. The primary human-facing local runtime is the Tauri desktop workspace. Unattended automation may be hosted by the desktop workspace or by another supervised local process when needed, with daemon-managed local runtimes available for supported automation domains.
 
 Production prerequisites:
 - Turso database.
