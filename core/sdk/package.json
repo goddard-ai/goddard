@@ -39,7 +39,7 @@
     "@goddard-ai/daemon-client": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/storage": "workspace:*",
-    "chokidar": "^4.0.3",
+    "chokidar": "^5.0.0",
     "cron-parser": "^5.5.0",
     "exit-hook": "^4.0.0",
     "radashi": "^12.7.2",
