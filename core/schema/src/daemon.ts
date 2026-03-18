@@ -2,6 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { ACPAdapterName } from "./acp-adapters.js"
 import type { SessionStatus } from "./db.js"
 import type { AgentDistribution } from "./session-server.js"
+import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.js"
 
 export type DaemonHealth = {
   ok: boolean
@@ -120,4 +121,110 @@ export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
 export type ShutdownDaemonSessionResponse = {
   id: string
   success: boolean
+}
+
+// Stable runtime states reported for daemon-managed workforce hosts.
+export type DaemonWorkforceRuntimeState = "running"
+
+// Workforce status summary exposed over daemon IPC.
+export type DaemonWorkforceStatus = WorkforceProjectionSummary & {
+  state: DaemonWorkforceRuntimeState
+  rootDir: string
+  configPath: string
+  ledgerPath: string
+}
+
+// One daemon-managed workforce runtime addressed by repository root.
+export type DaemonWorkforce = DaemonWorkforceStatus & {
+  config: WorkforceConfig
+}
+
+// Request payload used to start or reconnect to a daemon-owned workforce.
+export type StartDaemonWorkforceRequest = {
+  rootDir: string
+}
+
+// Request payload used to fetch one daemon-owned workforce by repository root.
+export type GetDaemonWorkforceRequest = {
+  rootDir: string
+}
+
+// Request payload used to stop one daemon-owned workforce by repository root.
+export type ShutdownDaemonWorkforceRequest = {
+  rootDir: string
+}
+
+// Request payload used to enqueue work for one target workforce agent.
+export type CreateDaemonWorkforceRequestRequest = {
+  rootDir: string
+  targetAgentId: string
+  input: string
+  token?: string
+}
+
+// Request payload used to add resume context to one workforce request.
+export type UpdateDaemonWorkforceRequest = {
+  rootDir: string
+  requestId: string
+  input: string
+  token?: string
+}
+
+// Request payload used to cancel one workforce request.
+export type CancelDaemonWorkforceRequest = {
+  rootDir: string
+  requestId: string
+  reason?: string
+  token?: string
+}
+
+// Request payload used to clear pending work in one agent scope or the whole runtime.
+export type TruncateDaemonWorkforceRequest = {
+  rootDir: string
+  agentId?: string
+  reason?: string
+  token?: string
+}
+
+// Request payload used by an active workforce agent to finish its current task.
+export type RespondDaemonWorkforceRequest = {
+  rootDir: string
+  requestId: string
+  output: string
+  token: string
+}
+
+// Request payload used by an active workforce agent to suspend its current task.
+export type SuspendDaemonWorkforceRequest = {
+  rootDir: string
+  requestId: string
+  reason: string
+  token: string
+}
+
+// Response payload returned when one workforce runtime is fetched.
+export type GetDaemonWorkforceResponse = {
+  workforce: DaemonWorkforce
+}
+
+// Response payload returned when one workforce runtime is started.
+export type StartDaemonWorkforceResponse = {
+  workforce: DaemonWorkforce
+}
+
+// Response payload returned when all running workforce runtimes are listed.
+export type ListDaemonWorkforcesResponse = {
+  workforces: DaemonWorkforceStatus[]
+}
+
+// Response payload returned after one workforce runtime is stopped.
+export type ShutdownDaemonWorkforceResponse = {
+  rootDir: string
+  success: boolean
+}
+
+// Response payload returned after one workforce request mutation.
+export type MutateDaemonWorkforceResponse = {
+  workforce: DaemonWorkforceStatus
+  requestId: string | null
 }

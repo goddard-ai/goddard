@@ -1,5 +1,6 @@
 import type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "@goddard-ai/schema/daemon"
 import type { SessionPermissionsRecord } from "@goddard-ai/storage/session-permissions"
+import type { WorkforceManager } from "../workforce/index.ts"
 
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest }
 
@@ -42,4 +43,7 @@ export type DaemonServerDeps = {
   resolveReplyRequest?: (input: ReplyPrDaemonRequest) => Promise<PrReplyInput>
   getSessionByToken?: (token: string) => Promise<AuthorizedSession | null>
   addAllowedPrToSession?: (sessionId: string, prNumber: number) => Promise<void>
+  createWorkforceManager?: (input: {
+    sessionManager: import("../session/index.ts").SessionManager
+  }) => WorkforceManager
 }

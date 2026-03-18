@@ -10,6 +10,8 @@ test("daemon schema keeps response types as types rather than runtime zod schema
   assert.equal("CreateDaemonSessionResponseSchema" in daemonSchema, false)
   assert.equal("GetDaemonSessionHistoryResponseSchema" in daemonSchema, false)
   assert.equal("ShutdownDaemonSessionResponseSchema" in daemonSchema, false)
+  assert.equal("DaemonWorkforceSchema" in daemonSchema, false)
+  assert.equal("StartDaemonWorkforceResponseSchema" in daemonSchema, false)
 })
 
 test("daemon session contracts expose id and acpId and do not require serverId", () => {

@@ -1,0 +1,45 @@
+import { beforeEach, describe, expect, test, vi } from "vitest"
+
+const { createDaemonIpcClientFromEnvMock, sendMock } = vi.hoisted(() => {
+  const sendMock = vi.fn()
+  return {
+    sendMock,
+    createDaemonIpcClientFromEnvMock: vi.fn(() => ({
+      client: {
+        send: sendMock,
+      },
+    })),
+  }
+})
+
+vi.mock("@goddard-ai/daemon-client", () => ({
+  createDaemonIpcClient: vi.fn(() => ({
+    send: sendMock,
+  })),
+  createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
+}))
+
+describe("daemon workforce client", () => {
+  beforeEach(() => {
+    sendMock.mockReset()
+    createDaemonIpcClientFromEnvMock.mockClear()
+  })
+
+  test("starts, lists, and shuts down daemon-managed workforces", async () => {
+    sendMock
+      .mockResolvedValueOnce({ workforce: { rootDir: "/repo" } })
+      .mockResolvedValueOnce({ workforces: [{ rootDir: "/repo" }] })
+      .mockResolvedValueOnce({ success: true })
+
+    const { startDaemonWorkforce, listDaemonWorkforces, shutdownDaemonWorkforce } =
+      await import("../../src/daemon/workforce.js")
+
+    await expect(startDaemonWorkforce("/repo")).resolves.toEqual({ rootDir: "/repo" })
+    await expect(listDaemonWorkforces()).resolves.toEqual([{ rootDir: "/repo" }])
+    await expect(shutdownDaemonWorkforce("/repo")).resolves.toBe(true)
+
+    expect(sendMock).toHaveBeenNthCalledWith(1, "workforceStart", { rootDir: "/repo" })
+    expect(sendMock).toHaveBeenNthCalledWith(2, "workforceList", {})
+    expect(sendMock).toHaveBeenNthCalledWith(3, "workforceShutdown", { rootDir: "/repo" })
+  })
+})

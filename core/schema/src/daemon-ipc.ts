@@ -3,11 +3,16 @@ import { z } from "zod"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
+  GetDaemonWorkforceResponse,
   GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
   GetDaemonSessionResponse,
+  ListDaemonWorkforcesResponse,
+  MutateDaemonWorkforceResponse,
   ReplyPrDaemonResponse,
+  ShutdownDaemonWorkforceResponse,
   ShutdownDaemonSessionResponse,
+  StartDaemonWorkforceResponse,
   SubmitPrDaemonResponse,
 } from "./daemon.js"
 
@@ -24,6 +29,8 @@ const daemonSessionMetadataSchema = z
     prNumber: z.number().int().optional(),
   })
   .catchall(z.unknown())
+
+const workforceTokenSchema = z.string().optional()
 
 export const daemonIpcSchema = {
   client: {
@@ -95,6 +102,82 @@ export const daemonIpcSchema = {
       sessionResolveToken: {
         payload: z.object({ token: z.string() }),
         response: $type<{ id: string }>(),
+      },
+      workforceStart: {
+        payload: z.object({
+          rootDir: z.string(),
+        }),
+        response: $type<StartDaemonWorkforceResponse>(),
+      },
+      workforceGet: {
+        payload: z.object({
+          rootDir: z.string(),
+        }),
+        response: $type<GetDaemonWorkforceResponse>(),
+      },
+      workforceList: {
+        payload: z.object({}),
+        response: $type<ListDaemonWorkforcesResponse>(),
+      },
+      workforceShutdown: {
+        payload: z.object({
+          rootDir: z.string(),
+        }),
+        response: $type<ShutdownDaemonWorkforceResponse>(),
+      },
+      workforceRequest: {
+        payload: z.object({
+          rootDir: z.string(),
+          targetAgentId: z.string(),
+          input: z.string(),
+          token: workforceTokenSchema,
+        }),
+        response: $type<MutateDaemonWorkforceResponse>(),
+      },
+      workforceUpdate: {
+        payload: z.object({
+          rootDir: z.string(),
+          requestId: z.string(),
+          input: z.string(),
+          token: workforceTokenSchema,
+        }),
+        response: $type<MutateDaemonWorkforceResponse>(),
+      },
+      workforceCancel: {
+        payload: z.object({
+          rootDir: z.string(),
+          requestId: z.string(),
+          reason: z.string().optional(),
+          token: workforceTokenSchema,
+        }),
+        response: $type<MutateDaemonWorkforceResponse>(),
+      },
+      workforceTruncate: {
+        payload: z.object({
+          rootDir: z.string(),
+          agentId: z.string().optional(),
+          reason: z.string().optional(),
+          token: workforceTokenSchema,
+        }),
+        response: $type<MutateDaemonWorkforceResponse>(),
+      },
+      workforceRespond: {
+        payload: z.object({
+          rootDir: z.string(),
+          requestId: z.string(),
+          output: z.string(),
+          token: z.string(),
+        }),
+        response: $type<MutateDaemonWorkforceResponse>(),
+      },
+      workforceSuspend: {
+        payload: z.object({
+          rootDir: z.string(),
+          requestId: z.string(),
+          reason: z.string(),
+          token: z.string(),
+        }),
+        response: $type<MutateDaemonWorkforceResponse>(),
       },
     },
   },

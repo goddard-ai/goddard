@@ -3,34 +3,48 @@ import { execFileSync } from "node:child_process"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { afterEach, beforeEach, test, vi } from "vitest"
+import { beforeEach, test, vi } from "vitest"
 
-const { promptMock, runAgentMock, stopMock } = vi.hoisted(() => ({
-  promptMock: vi.fn(),
-  stopMock: vi.fn(async () => {}),
-  runAgentMock: vi.fn(async ({ cwd }: { cwd: string }) => ({
-    sessionId: `session:${cwd}`,
-    prompt: promptMock,
-    stop: stopMock,
-  })),
+const {
+  cancelDaemonWorkforceRequestMock,
+  createDaemonWorkforceRequestMock,
+  getDaemonWorkforceMock,
+  listDaemonWorkforcesMock,
+  shutdownDaemonWorkforceMock,
+  startDaemonWorkforceMock,
+  truncateDaemonWorkforceMock,
+  updateDaemonWorkforceRequestMock,
+} = vi.hoisted(() => ({
+  cancelDaemonWorkforceRequestMock: vi.fn(),
+  createDaemonWorkforceRequestMock: vi.fn(),
+  getDaemonWorkforceMock: vi.fn(),
+  listDaemonWorkforcesMock: vi.fn(),
+  shutdownDaemonWorkforceMock: vi.fn(),
+  startDaemonWorkforceMock: vi.fn(),
+  truncateDaemonWorkforceMock: vi.fn(),
+  updateDaemonWorkforceRequestMock: vi.fn(),
 }))
 
-vi.mock("../src/daemon/session/client.ts", () => ({
-  runAgent: runAgentMock,
+vi.mock("../src/daemon/workforce.js", () => ({
+  cancelDaemonWorkforceRequest: cancelDaemonWorkforceRequestMock,
+  createDaemonWorkforceRequest: createDaemonWorkforceRequestMock,
+  getDaemonWorkforce: getDaemonWorkforceMock,
+  listDaemonWorkforces: listDaemonWorkforcesMock,
+  shutdownDaemonWorkforce: shutdownDaemonWorkforceMock,
+  startDaemonWorkforce: startDaemonWorkforceMock,
+  truncateDaemonWorkforce: truncateDaemonWorkforceMock,
+  updateDaemonWorkforceRequest: updateDaemonWorkforceRequestMock,
 }))
-
-const supervisors: Array<{ stop: () => Promise<void> }> = []
 
 beforeEach(() => {
-  promptMock.mockReset()
-  stopMock.mockClear()
-  runAgentMock.mockClear()
-})
-
-afterEach(async () => {
-  while (supervisors.length > 0) {
-    await supervisors.pop()?.stop()
-  }
+  cancelDaemonWorkforceRequestMock.mockReset()
+  createDaemonWorkforceRequestMock.mockReset()
+  getDaemonWorkforceMock.mockReset()
+  listDaemonWorkforcesMock.mockReset()
+  shutdownDaemonWorkforceMock.mockReset()
+  startDaemonWorkforceMock.mockReset()
+  truncateDaemonWorkforceMock.mockReset()
+  updateDaemonWorkforceRequestMock.mockReset()
 })
 
 test("resolveRepositoryRoot returns the nearest git root", async () => {
@@ -47,153 +61,89 @@ test("resolveRepositoryRoot returns the nearest git root", async () => {
   )
 })
 
-test("discoverWorkforceInitCandidates includes the repository root agent and skips initialized packages", async () => {
+test("discoverWorkforceInitCandidates returns nested packages under the repository root", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-candidates-"))
 
-  await fs.mkdir(path.join(rootDir, "packages", "ready", ".goddard"), { recursive: true })
-  await fs.mkdir(path.join(rootDir, "packages", "newcomer"), { recursive: true })
-  await fs.mkdir(path.join(rootDir, "dist", "ignored"), { recursive: true })
-  await fs.mkdir(path.join(rootDir, "node_modules", "ignored"), { recursive: true })
-
   await writePackageJson(rootDir, "@repo/root")
-  await writePackageJson(path.join(rootDir, "packages", "ready"), "@repo/ready")
-  await writePackageJson(path.join(rootDir, "packages", "newcomer"), "@repo/newcomer")
-  await writePackageJson(path.join(rootDir, "dist", "ignored"), "@repo/ignored-dist")
-  await writePackageJson(path.join(rootDir, "node_modules", "ignored"), "@repo/ignored-node")
-  await fs.writeFile(
-    path.join(rootDir, "packages", "ready", ".goddard", "requests.jsonl"),
-    "",
-    "utf-8",
-  )
+  await writePackageJson(path.join(rootDir, "packages", "ui"), "@repo/ui")
+  await writePackageJson(path.join(rootDir, "packages", "api"), "@repo/api")
+  await fs.mkdir(path.join(rootDir, "node_modules", "ignored"), { recursive: true })
 
   const { discoverWorkforceInitCandidates } = await import("../src/node/workforce.ts")
   const candidates = await discoverWorkforceInitCandidates(rootDir)
 
   assert.deepEqual(
     candidates.map((pkg) => `${pkg.name}:${pkg.relativeDir}`),
-    ["@repo/root:.", "@repo/newcomer:packages/newcomer"],
+    ["@repo/root:.", "@repo/api:packages/api", "@repo/ui:packages/ui"],
   )
 })
 
-test("initializeWorkforcePackages creates requests and responses idempotently", async () => {
+test("initializeWorkforce creates root config and ledger files", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-init-"))
-  const packageDir = path.join(rootDir, "packages", "alpha")
+  const uiDir = path.join(rootDir, "packages", "ui")
 
-  await fs.mkdir(packageDir, { recursive: true })
+  await writePackageJson(rootDir, "@repo/root")
+  await writePackageJson(uiDir, "@repo/ui")
 
-  const { initializeWorkforcePackages } = await import("../src/node/workforce.ts")
-  const first = await initializeWorkforcePackages([packageDir])
-  const second = await initializeWorkforcePackages([packageDir])
+  const { initializeWorkforce } = await import("../src/node/workforce.ts")
+  const initialized = await initializeWorkforce(rootDir, [rootDir, uiDir])
+  const config = JSON.parse(await fs.readFile(initialized.configPath, "utf-8")) as {
+    rootAgentId: string
+    agents: Array<{ id: string; cwd: string }>
+  }
 
-  assert.deepEqual(first[0].createdPaths.map((createdPath) => path.basename(createdPath)).sort(), [
-    "requests.jsonl",
-    "responses.jsonl",
-  ])
-  assert.deepEqual(second[0].createdPaths, [])
-  assert.equal(await fs.readFile(path.join(packageDir, ".goddard", "requests.jsonl"), "utf-8"), "")
-  assert.equal(await fs.readFile(path.join(packageDir, ".goddard", "responses.jsonl"), "utf-8"), "")
+  assert.equal(config.rootAgentId, "root")
+  assert.deepEqual(config.agents.map((agent) => agent.cwd).sort(), [".", "packages/ui"])
+  assert.equal(await fs.readFile(initialized.ledgerPath, "utf-8"), "")
 })
 
-test(
-  "watchWorkforce ignores backlog, then prompts and coalesces later appends",
-  { timeout: 15_000 },
-  async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-watch-"))
-    const packageDir = path.join(rootDir, "packages", "alpha")
-    const requestsPath = path.join(packageDir, ".goddard", "requests.jsonl")
-    const firstPrompt = { release: undefined as undefined | (() => void) }
+test("node workforce helpers delegate lifecycle and request mutations to daemon wrappers", async () => {
+  startDaemonWorkforceMock.mockResolvedValue({ rootDir: "/repo" })
+  getDaemonWorkforceMock.mockResolvedValue({ rootDir: "/repo" })
+  listDaemonWorkforcesMock.mockResolvedValue([{ rootDir: "/repo" }])
+  shutdownDaemonWorkforceMock.mockResolvedValue(true)
+  createDaemonWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
+  updateDaemonWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
+  cancelDaemonWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
+  truncateDaemonWorkforceMock.mockResolvedValue({ requestId: null })
 
-    await fs.mkdir(path.dirname(requestsPath), { recursive: true })
-    await writePackageJson(rootDir, "@repo/root")
-    await writePackageJson(packageDir, "@repo/alpha")
-    await fs.writeFile(requestsPath, '{"id":"backlog"}\n', "utf-8")
-    await fs.writeFile(path.join(packageDir, ".goddard", "responses.jsonl"), "", "utf-8")
+  const workforce = await import("../src/node/workforce.ts")
 
-    promptMock.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          firstPrompt.release = resolve
-        }),
-    )
-    promptMock.mockResolvedValue(undefined)
+  await workforce.startWorkforce("/repo", {
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
+  })
+  await workforce.getWorkforce("/repo")
+  await workforce.listWorkforces()
+  await workforce.stopWorkforce("/repo")
+  await workforce.createWorkforceRequest({
+    rootDir: "/repo",
+    targetAgentId: "api",
+    message: "Ship the change.",
+  })
+  await workforce.updateWorkforceRequest({
+    rootDir: "/repo",
+    requestId: "req-1",
+    message: "Resume with the new decision.",
+  })
+  await workforce.cancelWorkforceRequest({
+    rootDir: "/repo",
+    requestId: "req-1",
+    reason: "No longer needed.",
+  })
+  await workforce.truncateWorkforce({
+    rootDir: "/repo",
+    agentId: "api",
+    reason: "Reset the failed branch.",
+  })
 
-    const { watchWorkforce } = await import("../src/node/workforce.ts")
-    const supervisor = await watchWorkforce({ rootDir })
-    supervisors.push(supervisor)
-
-    await waitFor(() => pathExists(path.join(packageDir, ".goddard", "processed-at.json")))
-    assert.equal(promptMock.mock.calls.length, 0)
-
-    await fs.appendFile(requestsPath, '{"id":"first"}\n', "utf-8")
-    await waitFor(() => promptMock.mock.calls.length === 1)
-    assert.match(promptMock.mock.calls[0][0], /"id":"first"/)
-    assert.doesNotMatch(promptMock.mock.calls[0][0], /"id":"backlog"/)
-
-    await fs.appendFile(requestsPath, '{"id":"second"}\n', "utf-8")
-    await fs.appendFile(
-      path.join(packageDir, ".goddard", "responses.jsonl"),
-      '{"id":"third"}\n',
-      "utf-8",
-    )
-
-    await sleep(100)
-    assert.equal(promptMock.mock.calls.length, 1)
-
-    assert.ok(firstPrompt.release)
-    firstPrompt.release()
-    await waitFor(() => promptMock.mock.calls.length === 2)
-    assert.match(promptMock.mock.calls[1][0], /"id":"second"/)
-    assert.match(promptMock.mock.calls[1][0], /"id":"third"/)
-  },
-)
-
-test("watchWorkforce resumes from processed offsets and reseeds after rewrites", async () => {
-  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-resume-"))
-  const requestsPath = path.join(rootDir, ".goddard", "requests.jsonl")
-  const responsesPath = path.join(rootDir, ".goddard", "responses.jsonl")
-
-  await fs.mkdir(path.dirname(requestsPath), { recursive: true })
-  await writePackageJson(rootDir, "@repo/root")
-  await fs.writeFile(requestsPath, "", "utf-8")
-  await fs.writeFile(responsesPath, "", "utf-8")
-
-  promptMock.mockResolvedValue(undefined)
-
-  const { watchWorkforce } = await import("../src/node/workforce.ts")
-  const firstSupervisor = await watchWorkforce({ rootDir })
-  supervisors.push(firstSupervisor)
-
-  await fs.appendFile(requestsPath, '{"id":"one"}', "utf-8")
-  await sleep(100)
-  assert.equal(promptMock.mock.calls.length, 0)
-
-  await fs.appendFile(requestsPath, "\n", "utf-8")
-  await waitFor(() => promptMock.mock.calls.length === 1)
-  assert.match(promptMock.mock.calls[0][0], /"id":"one"/)
-
-  await firstSupervisor.stop()
-  supervisors.pop()
-  promptMock.mockClear()
-
-  const secondSupervisor = await watchWorkforce({ rootDir })
-  supervisors.push(secondSupervisor)
-  await sleep(100)
-  assert.equal(promptMock.mock.calls.length, 0)
-
-  await fs.appendFile(requestsPath, '{"id":"two"}\n', "utf-8")
-  await waitFor(() => promptMock.mock.calls.length === 1)
-  assert.match(promptMock.mock.calls[0][0], /"id":"two"/)
-  assert.doesNotMatch(promptMock.mock.calls[0][0], /"id":"one"/)
-
-  promptMock.mockClear()
-  await fs.writeFile(requestsPath, '{"id":"rewritten"}\n', "utf-8")
-  await sleep(150)
-  assert.equal(promptMock.mock.calls.length, 0)
-
-  await fs.appendFile(requestsPath, '{"id":"after-rewrite"}\n', "utf-8")
-  await waitFor(() => promptMock.mock.calls.length === 1)
-  assert.match(promptMock.mock.calls[0][0], /"id":"after-rewrite"/)
-  assert.doesNotMatch(promptMock.mock.calls[0][0], /"id":"rewritten"/)
+  assert.equal(startDaemonWorkforceMock.mock.calls.length, 1)
+  assert.equal(getDaemonWorkforceMock.mock.calls.length, 1)
+  assert.equal(listDaemonWorkforcesMock.mock.calls.length, 1)
+  assert.equal(shutdownDaemonWorkforceMock.mock.calls.length, 1)
+  assert.equal(createDaemonWorkforceRequestMock.mock.calls.length, 1)
+  assert.equal(updateDaemonWorkforceRequestMock.mock.calls.length, 1)
+  assert.equal(cancelDaemonWorkforceRequestMock.mock.calls.length, 1)
+  assert.equal(truncateDaemonWorkforceMock.mock.calls.length, 1)
 })
 
 async function writePackageJson(directory: string, name: string): Promise<void> {
@@ -207,30 +157,4 @@ async function writePackageJson(directory: string, name: string): Promise<void> 
 
 function runGit(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "pipe" })
-}
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.stat(targetPath)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number = 5_000) {
-  const startTime = Date.now()
-
-  while (Date.now() - startTime < timeoutMs) {
-    if (await predicate()) {
-      return
-    }
-    await sleep(25)
-  }
-
-  throw new Error("Timed out waiting for condition")
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms))
 }
