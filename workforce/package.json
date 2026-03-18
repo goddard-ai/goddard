@@ -1,0 +1,25 @@
+{
+  "name": "@goddard-ai/workforce",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "goddard-workforce": "./dist/main.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tree-run build && tsgo",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tree-run build:types && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "@goddard-ai/sdk": "workspace:*",
+    "cmd-ts": "^0.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5"
+  }
+}

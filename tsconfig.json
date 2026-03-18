@@ -21,6 +21,8 @@
     "core/storage/src/**/*.ts",
     "core/storage/test/**/*.ts",
     "core/config/src/**/*.ts",
-    "core/config/test/**/*.ts"
+    "core/config/test/**/*.ts",
+    "workforce/src/**/*.ts",
+    "workforce/test/**/*.ts"
   ]
 }

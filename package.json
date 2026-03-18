@@ -12,7 +12,8 @@
     "core/config",
     "core/tauri-plugin-ipc",
     "core/ipc",
-    "core/tree-run"
+    "core/tree-run",
+    "workforce"
   ],
   "scripts": {
     "prepare": "simple-git-hooks",
@@ -24,12 +25,14 @@
     "typecheck": "turbo run typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
+    "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
     "@goddard/tree-run": "workspace:*",
     "@types/node": "^25.3.5",
+    "@typescript/native-preview": "7.0.0-dev.20260317.1",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "radashi": "^12.7.2",
