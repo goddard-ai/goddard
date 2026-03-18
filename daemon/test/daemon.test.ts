@@ -42,10 +42,15 @@ class MockStreamSubscription {
   }
 }
 
-test("daemon package ships a goddard wrapper in agent-bin", async () => {
+test("daemon package ships agent-bin wrappers for goddard and workforce", async () => {
   const wrapperPath = new URL("../agent-bin/goddard", import.meta.url)
-  const stat = await lstat(wrapperPath)
-  assert.equal(stat.isSymbolicLink() || stat.isFile(), true)
+  const workforceWrapperPath = new URL("../agent-bin/workforce", import.meta.url)
+  const [goddardStat, workforceStat] = await Promise.all([
+    lstat(wrapperPath),
+    lstat(workforceWrapperPath),
+  ])
+  assert.equal(goddardStat.isSymbolicLink() || goddardStat.isFile(), true)
+  assert.equal(workforceStat.isSymbolicLink() || workforceStat.isFile(), true)
 })
 
 test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-shot runs", async () => {

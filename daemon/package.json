@@ -5,7 +5,8 @@
   "license": "AGPL-3.0",
   "bin": {
     "goddard-daemon": "./dist/main.mjs",
-    "goddard-tool": "./dist/bin/goddard-tool.mjs"
+    "goddard-tool": "./dist/bin/goddard-tool.mjs",
+    "workforce": "./dist/bin/workforce-tool.mjs"
   },
   "type": "module",
   "scripts": {
