@@ -1,23 +1,28 @@
-# CLI Surface Removal
-
-This node records that Goddard no longer ships or supports a CLI / `cmd` package as an active product surface.
+# Operational CLI Surfaces
 
 ## Goal
-Make the removal explicit so product intent stays centered on two supported surfaces: the SDK for programmatic integration and the Tauri desktop app for human-facing workflows.
+Define the narrow CLI role that remains valid in Goddard: thin, daemon-backed operational control for local automation without reviving a parallel terminal-first product experience.
+
+## Hypothesis
+We believe that preserving a small operator CLI surface for initialization, inspection, and control of daemon-backed runtimes will improve operability while keeping primary human workflows centered on the desktop app and primary programmatic workflows centered on the SDK.
 
 ## Constraints
-- Human-facing workflows belong in the desktop app.
+- Human-facing day-to-day workflows belong in the desktop app.
 - Programmatic and embedded workflows belong in SDK consumers.
-- No active product behavior should depend on terminal commands or a parallel command-routing architecture.
+- Approved CLI surfaces may initialize repository-local automation intent and control daemon-backed local runtimes.
+- CLI behavior must remain thin over SDK and daemon contracts rather than creating a parallel command-routing architecture.
+- CLI support must stay narrow enough that Goddard does not drift back into a terminal-first primary UX.
 
 ## Non-Goals
-- Reintroducing command-based authentication, PR creation, spec editing, proposal review, or loop control as supported product flows.
-- Treating terminal-first interaction as the primary UX for Goddard.
+- Reintroducing command-based authentication, pull request creation, spec editing, proposal review, or other broad product workflows as supported CLI flows
+- Treating terminal-first interaction as the primary Goddard experience
+- Reimplementing platform behavior outside the shared SDK and daemon authority model
 
 ## Decision Memory
-The CLI was removed when product focus narrowed to an SDK-first platform plus a Tauri desktop workspace. Future local automation hosts should build on the SDK rather than resurrect a separate command surface.
+The broad interactive CLI was removed when product focus narrowed to an SDK-first platform plus a Tauri desktop workspace. A narrow daemon-backed operational CLI remains valuable for automation bring-up, inspection, and control.
 
 ## Encapsulated Sub-Specs
 
 * `spec/cli/interactive.md`: Tombstone for removed interactive CLI workflows.
 * `spec/cli/loop.md`: Tombstone for removed autonomous loop CLI workflows.
+* `spec/cli/operational.md`: Supported narrow CLI behavior for daemon-backed operational control.

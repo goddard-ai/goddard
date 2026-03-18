@@ -4,7 +4,7 @@
 
 Goddard unifies local repository workflows with GitHub operations and extends that bridge to autonomous AI execution.
 
-> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can create PRs, observe repository events, and act from shared local context.
+> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can create pull requests, observe repository events, and act from shared local context.
 
 ## The Problem
 
@@ -12,7 +12,7 @@ Developer execution is fragmented across GitHub UI, IDEs, chat tools, and ad hoc
 
 Goddard addresses:
 1. **Workspace gap:** a unified local surface for GitHub operations and AI steering with minimal context switching.
-2. **Autonomous gap:** explicit runtimes for repeated cycles and one-shot PR-feedback reactions.
+2. **Autonomous gap:** explicit runtimes for repeated cycles, daemon-managed workforce delegation, and one-shot pull-request feedback reactions.
 
 ## Product Pillars
 
@@ -23,7 +23,7 @@ Goddard addresses:
 | 3 | Delegated identity | `goddard[bot]` acts on behalf of authenticated developers. |
 | 4 | Autonomous control | Built-in orchestration runs `pi-coding-agent` with safety limits. |
 | 5 | Type safety | APIs are TypeScript-first, while configuration remains machine-readable and validated at runtime. |
-| 6 | Operability | Desktop-managed local execution is first-class, while SDK-based hosts and external supervisors remain valid deployment options. |
+| 6 | Operability | Daemon-managed local execution is first-class, while desktop, SDK, and narrow operational CLI clients remain valid control surfaces. |
 | 7 | Edge-native | Backend runs on Workers for global fan-out. |
 
 ## Usage Modes
@@ -35,10 +35,14 @@ A developer or product integration uses `@goddard-ai/sdk` directly to authentica
 A human developer uses a unified, IDE-like desktop surface to monitor sessions, review pull requests, browse specs, and manage roadmap context without hopping across multiple tools.
 
 ### 3) Background Automation
-A local runtime hosted by the desktop app or another SDK consumer handles unattended execution:
+A local runtime hosted by the desktop app or another supervised local process handles unattended execution:
 - Loop mode for recurring `pi-coding-agent` cycles.
-- PR-feedback one-shot handling triggered by repository events.
+- Pull-request feedback one-shot handling triggered by repository events.
+- Repository-scoped workforce orchestration for delegated multi-agent work.
 - Configurable limits for cadence, operations, and tokens.
+
+### 4) Operational CLI
+A thin operator-focused CLI may initialize repository-local automation intent and inspect or control supported daemon-backed runtimes without becoming a parallel primary UX.
 
 All modes consume the same SDK and backend authority model.
 
@@ -46,7 +50,7 @@ All modes consume the same SDK and backend authority model.
 
 * `spec/configuration.md`: Configuration hierarchy, precedence, and named configurable entities.
 * `spec/core.md`: Core system runtime shared by SDK, app, and background automation.
-* `spec/daemon.md`: Background automation and daemon functionality.
+* `spec/daemon.md`: Daemon-managed background automation runtimes and their shared constraints.
 * `spec/app.md`: Desktop application UX and features.
-* `spec/cli.md`: Decommissioned CLI surface and removal notes.
+* `spec/cli.md`: Narrow operational CLI role and removed broad terminal workflows.
 * `spec/adr/`: Architecture decision records.

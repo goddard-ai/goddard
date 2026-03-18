@@ -4,11 +4,11 @@ This file captures conceptual end-to-end sequences only. Wire formats and API pa
 
 ## PR Creation (User-Initiated)
 
-1. Developer initiates PR creation from the desktop app or an SDK-powered host.
+1. Developer initiates pull request creation from the desktop app or an SDK-powered host.
 2. SDK validates intent and forwards request through platform contracts.
 3. Backend validates session and resolves GitHub identity.
-4. Backend creates PR via GitHub App delegation and records managed-PR metadata.
-5. Reviewer responds on GitHub (comment/review).
+4. Backend creates the pull request via GitHub App delegation and records managed-pull-request metadata.
+5. Reviewer responds on GitHub with a comment or review.
 6. Webhook event enters backend and is routed to repository stream state.
 7. Stream broadcast reaches subscribed clients.
 8. SDK normalizes the event; the desktop app or host updates UI and local state.
@@ -24,16 +24,27 @@ This file captures conceptual end-to-end sequences only. Wire formats and API pa
 
 ## Real-Time Event Subscription (Background Runtime)
 
-1. Desktop app or background runtime subscribes to repository stream via SDK.
-2. Backend validates session and attaches the subscriber connection to repo stream.
-3. GitHub webhook events are routed to that repo stream.
+1. Desktop app or background runtime subscribes to a repository stream via SDK.
+2. Backend validates session and attaches the subscriber connection to repository stream state.
+3. GitHub webhook events are routed to that repository stream.
 4. SDK emits typed feedback events.
 5. Subscriber updates workspace state or may launch one-shot `pi` execution.
+
+## Workforce Orchestration (Daemon-Owned)
+
+1. Operator initializes repository-local workforce intent and starts workforce control through an approved client.
+2. Daemon resolves the target repository workspace and reconstructs current workforce state from durable intent.
+3. Operator or agent appends new delegated work to the repository workforce.
+4. Daemon projects the new intent into current queue state and selects the next eligible work per agent.
+5. Daemon launches a fresh agent session for each newly handled request.
+6. Active agents respond, suspend, or delegate additional work through daemon-backed workforce controls.
+7. Daemon validates those changes, records them durably, and updates projected status.
+8. Operators and clients inspect current workforce status through the daemon.
 
 ## Autonomous Cycle (Loop)
 
 1. A supervising runtime enforces delay and throughput constraints.
-2. Strategy generates next prompt from cycle context.
-3. Runtime executes prompt through persistent `pi-coding-agent` session.
-4. Runtime computes per-cycle token delta and enforces hard cap.
+2. Strategy generates the next prompt from cycle context.
+3. Runtime executes the prompt through a persistent `pi-coding-agent` session.
+4. Runtime computes per-cycle token delta and enforces the hard cap.
 5. Runtime updates summary context and decides continue vs `DONE` termination.

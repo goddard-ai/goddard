@@ -1,51 +1,39 @@
-# PR Feedback One-Shot Daemon
+# Daemon-Managed Local Automation
 
 ## Goal
-
-Use real-time repository feedback to trigger focused, local one-shot `pi` sessions without requiring a human to monitor a live event feed.
+Provide a single local authority for Goddard's unattended automation runtimes so background work can be started, observed, recovered, and shut down consistently.
 
 ## Hypothesis
+We believe that centralizing runtime lifecycle inside a daemon will improve operability, recovery, and client consistency compared with splitting runtime ownership across multiple local tools.
 
-We believe that immediate, automated handling of managed-PR comments/reviews will reduce reviewer wait time and improve PR throughput.
+## Primary Actors
+- Operator controlling local automation behavior
+- Desktop workspace or another supervised local host
+- SDK and approved operational CLI clients
+- Automated agents running unattended work
+- External reviewers whose repository feedback may trigger local execution
 
-## Actors
-
-- **Local Runtime Host** — desktop app-managed background worker or another supervised local process with repository access.
-- **Reviewer** — submits PR comments or reviews on GitHub.
-- **Goddard GitHub App** — origin of managed PR metadata and webhook events.
-
-## State Model
-
-`Idle -> Subscribed -> EventReceived -> EligibilityChecked -> OneShotQueued -> OneShotRunning -> OneShotCompleted -> Idle`
-
-## Core Behavior
-
-1. Background runtime subscribes to repository stream events through SDK.
-2. On feedback events, runtime checks whether PR is Goddard-managed.
-3. Eligible events enqueue one one-shot task per PR.
-4. Task launches local `pi` with repository, PR number, and reviewer feedback context.
-5. Prompt contract requires the session to conclude by posting a PR-thread response.
-6. Runtime returns to subscribed mode and continues event processing.
+## Runtime Domains
+The daemon may host multiple distinct automation domains, including:
+- PR-feedback one-shot handling for managed pull requests
+- Repository-scoped workforce orchestration for multi-agent delegation
 
 ## Hard Constraints
-
-- Trigger only on PR comment/review feedback events.
-- Ignore non-managed PRs.
-- Avoid overlapping one-shot execution for the same PR.
-- Continue running until interrupted by host supervisor.
-
-## Failure Handling Expectations
-
-- Stream disconnects should trigger reconnect attempts with bounded backoff.
-- One-shot launch failures must be logged with PR context and must not crash the runtime.
-- If multiple events arrive while a PR task is active, the runtime should coalesce or queue by PR (never run concurrently for the same PR).
+- The daemon is the lifecycle authority for supported daemon-managed runtimes.
+- Client surfaces may control or observe daemon-managed runtimes, but they must not create parallel ownership of mutable runtime state.
+- Distinct daemon-managed runtimes may share local infrastructure, but they must not share mutable execution state in ways that blur their responsibilities.
+- Daemon shutdown must stop hosted runtimes cleanly.
+- The daemon remains a headless automation boundary rather than the primary human-facing workspace.
 
 ## Non-Goals
-
-- NON-GOAL: Implement long-running autonomous planning in this daemon.
-- NON-GOAL: Serve as the primary human-facing workspace or review UI.
-- NON-GOAL: Reintroduce a terminal-native GitHub review surface.
+- Replacing the desktop app as the primary human-facing surface
+- Replacing the SDK as the primary programmatic surface
+- Defining command syntax, payload shapes, or storage mechanics in this parent spec
 
 ## Decision Memory
+Background automation moved toward daemon-owned runtime management because unattended local work benefits from one lifecycle authority, consistent recovery rules, and shared control surfaces.
 
-Pivoted from a human-facing live stream viewer to daemon ownership because stream events are operational automation triggers, not primarily interactive output.
+## Encapsulated Sub-Specs
+
+* `spec/daemon/pr-feedback.md`: One-shot daemon behavior for managed pull request feedback.
+* `spec/daemon/workforce.md`: Daemon-owned repository workforce orchestration for delegated multi-agent work.
