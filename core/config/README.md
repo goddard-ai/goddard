@@ -52,7 +52,6 @@ const loopConfig = mergeLoopConfigLayers(rootConfig.loops, entityConfig, runtime
 | `GoddardLoopConfigDocument` | JSON-safe loop defaults layered before runtime overrides |
 | `ResolvedGoddardLoopConfigDocument` | Fully required loop config after defaults and validation |
 | `ThinkingLevel` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` |
-| `Model` | Loose literal union of known model strings plus custom values |
 
 ## Notes
 

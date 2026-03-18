@@ -2,7 +2,6 @@ import type {
   GoddardLoopConfigDocument,
   GoddardLoopRateLimitsConfig,
   GoddardLoopRetriesConfig,
-  Model,
   ThinkingLevel,
 } from "@goddard-ai/config"
 import {
@@ -16,6 +15,5 @@ export type {
   GoddardLoopConfigDocument,
   GoddardLoopRateLimitsConfig,
   GoddardLoopRetriesConfig,
-  Model,
   ThinkingLevel,
 }
