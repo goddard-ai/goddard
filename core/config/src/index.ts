@@ -1,20 +1,18 @@
 import { z } from "zod"
 
-const knownModelSchema = z.enum([
-  "anthropic/claude-3-7-sonnet-20250219",
-  "anthropic/claude-sonnet-4-5",
-  "anthropic/claude-sonnet-4-6",
-  "anthropic/claude-opus-4-6",
-  "openai/o3-mini",
-  "openai/o3-pro",
-  "openai/gpt-5-codex",
-  "openai/gpt-5.1-codex",
-  "openai/gpt-5.2-codex",
-  "openai/gpt-5.3-codex",
-])
-
 // A model identifier accepted by persisted and runtime Goddard configuration.
-export type Model = z.infer<typeof knownModelSchema> | (string & {})
+export type Model =
+  | "anthropic/claude-3-7-sonnet-20250219"
+  | "anthropic/claude-sonnet-4-5"
+  | "anthropic/claude-sonnet-4-6"
+  | "anthropic/claude-opus-4-6"
+  | "openai/o3-mini"
+  | "openai/o3-pro"
+  | "openai/gpt-5-codex"
+  | "openai/gpt-5.1-codex"
+  | "openai/gpt-5.2-codex"
+  | "openai/gpt-5.3-codex"
+  | (string & {})
 
 // ---------------------------------------------------------------------------
 // Primitive schemas
