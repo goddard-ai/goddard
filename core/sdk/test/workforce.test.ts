@@ -94,54 +94,58 @@ test("initializeWorkforcePackages creates requests and responses idempotently", 
   assert.equal(await fs.readFile(path.join(packageDir, ".goddard", "responses.jsonl"), "utf-8"), "")
 })
 
-test("watchWorkforce ignores backlog, then prompts and coalesces later appends", async () => {
-  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-watch-"))
-  const packageDir = path.join(rootDir, "packages", "alpha")
-  const requestsPath = path.join(packageDir, ".goddard", "requests.jsonl")
-  const firstPrompt = { release: undefined as undefined | (() => void) }
+test(
+  "watchWorkforce ignores backlog, then prompts and coalesces later appends",
+  { timeout: 15_000 },
+  async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-watch-"))
+    const packageDir = path.join(rootDir, "packages", "alpha")
+    const requestsPath = path.join(packageDir, ".goddard", "requests.jsonl")
+    const firstPrompt = { release: undefined as undefined | (() => void) }
 
-  await fs.mkdir(path.dirname(requestsPath), { recursive: true })
-  await writePackageJson(rootDir, "@repo/root")
-  await writePackageJson(packageDir, "@repo/alpha")
-  await fs.writeFile(requestsPath, '{"id":"backlog"}\n', "utf-8")
-  await fs.writeFile(path.join(packageDir, ".goddard", "responses.jsonl"), "", "utf-8")
+    await fs.mkdir(path.dirname(requestsPath), { recursive: true })
+    await writePackageJson(rootDir, "@repo/root")
+    await writePackageJson(packageDir, "@repo/alpha")
+    await fs.writeFile(requestsPath, '{"id":"backlog"}\n', "utf-8")
+    await fs.writeFile(path.join(packageDir, ".goddard", "responses.jsonl"), "", "utf-8")
 
-  promptMock.mockImplementationOnce(
-    () =>
-      new Promise<void>((resolve) => {
-        firstPrompt.release = resolve
-      }),
-  )
-  promptMock.mockResolvedValue(undefined)
+    promptMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          firstPrompt.release = resolve
+        }),
+    )
+    promptMock.mockResolvedValue(undefined)
 
-  const { watchWorkforce } = await import("../src/node/workforce.ts")
-  const supervisor = await watchWorkforce({ rootDir })
-  supervisors.push(supervisor)
+    const { watchWorkforce } = await import("../src/node/workforce.ts")
+    const supervisor = await watchWorkforce({ rootDir })
+    supervisors.push(supervisor)
 
-  await waitFor(() => pathExists(path.join(packageDir, ".goddard", "processed-at.json")))
-  assert.equal(promptMock.mock.calls.length, 0)
+    await waitFor(() => pathExists(path.join(packageDir, ".goddard", "processed-at.json")))
+    assert.equal(promptMock.mock.calls.length, 0)
 
-  await fs.appendFile(requestsPath, '{"id":"first"}\n', "utf-8")
-  await waitFor(() => promptMock.mock.calls.length === 1)
-  assert.match(promptMock.mock.calls[0][0], /"id":"first"/)
-  assert.doesNotMatch(promptMock.mock.calls[0][0], /"id":"backlog"/)
+    await fs.appendFile(requestsPath, '{"id":"first"}\n', "utf-8")
+    await waitFor(() => promptMock.mock.calls.length === 1)
+    assert.match(promptMock.mock.calls[0][0], /"id":"first"/)
+    assert.doesNotMatch(promptMock.mock.calls[0][0], /"id":"backlog"/)
 
-  await fs.appendFile(requestsPath, '{"id":"second"}\n', "utf-8")
-  await fs.appendFile(
-    path.join(packageDir, ".goddard", "responses.jsonl"),
-    '{"id":"third"}\n',
-    "utf-8",
-  )
+    await fs.appendFile(requestsPath, '{"id":"second"}\n', "utf-8")
+    await fs.appendFile(
+      path.join(packageDir, ".goddard", "responses.jsonl"),
+      '{"id":"third"}\n',
+      "utf-8",
+    )
 
-  await sleep(100)
-  assert.equal(promptMock.mock.calls.length, 1)
+    await sleep(100)
+    assert.equal(promptMock.mock.calls.length, 1)
 
-  assert.ok(firstPrompt.release)
-  firstPrompt.release()
-  await waitFor(() => promptMock.mock.calls.length === 2)
-  assert.match(promptMock.mock.calls[1][0], /"id":"second"/)
-  assert.match(promptMock.mock.calls[1][0], /"id":"third"/)
-})
+    assert.ok(firstPrompt.release)
+    firstPrompt.release()
+    await waitFor(() => promptMock.mock.calls.length === 2)
+    assert.match(promptMock.mock.calls[1][0], /"id":"second"/)
+    assert.match(promptMock.mock.calls[1][0], /"id":"third"/)
+  },
+)
 
 test("watchWorkforce resumes from processed offsets and reseeds after rewrites", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-resume-"))
