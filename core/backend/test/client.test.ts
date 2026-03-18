@@ -38,6 +38,30 @@ test("backend client creates PRs and checks managed status through rouzer route 
   }
 })
 
+test("backend client manages auth session state through token storage", async () => {
+  const controlPlane = new InMemoryBackendControlPlane()
+  const server = await startBackendServer(controlPlane, { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+  const tokenStorage = new InMemoryTokenStorage()
+
+  try {
+    const client = createBackendClient({ baseUrl, tokenStorage })
+    const start = await client.auth.startDeviceFlow({ githubUsername: "alec" })
+    const session = await client.auth.completeDeviceFlow({
+      deviceCode: start.deviceCode,
+      githubUsername: "alec",
+    })
+
+    assert.equal(await tokenStorage.getToken(), session.token)
+    assert.deepEqual(await client.auth.whoami(), session)
+
+    await client.auth.logout()
+    assert.equal(await tokenStorage.getToken(), null)
+  } finally {
+    await server.close()
+  }
+})
+
 test("backend client subscribes to repo stream via rouzer route response", async () => {
   const controlPlane = new InMemoryBackendControlPlane()
   const server = await startBackendServer(controlPlane, { port: 0 })
