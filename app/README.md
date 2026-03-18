@@ -8,4 +8,4 @@ This template should help get you started developing with Tauri, Preact and Type
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](./LICENSE).
+This project is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](./LICENSE-AGPLv3).

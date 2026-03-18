@@ -96,4 +96,4 @@ The workforce CLI requires a running Goddard daemon to manage the underlying AI 
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE).
+This project is licensed under the [MIT License](./LICENSE-MIT).

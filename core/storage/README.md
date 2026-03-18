@@ -4,4 +4,4 @@ This package provides file resolution and token storage capabilities for the God
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE).
+This project is licensed under the [MIT License](./LICENSE-MIT).
