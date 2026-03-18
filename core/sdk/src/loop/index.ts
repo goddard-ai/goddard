@@ -1,4 +1,4 @@
-export { Models, type Model } from "@goddard-ai/config"
+export type { Model } from "@goddard-ai/config"
 export type {
   AgentLoopHandler,
   AgentLoopParams,

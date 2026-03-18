@@ -1,6 +1,6 @@
 # `@goddard-ai/config`
 
-Canonical home for Goddard's persisted JSON configuration schemas, merge helpers, and shared model constants.
+Canonical home for Goddard's persisted JSON configuration schemas, merge helpers, and shared config types.
 
 Persisted config is JSON-only:
 
@@ -10,17 +10,6 @@ Persisted config is JSON-only:
 - Packaged loop defaults: `.goddard/loops/<name>/config.json`
 
 ## Exports
-
-### `Models`
-
-Provider-grouped model identifiers for runtime or persisted config payloads.
-
-```ts
-import { Models } from "@goddard-ai/config"
-
-Models.Anthropic.ClaudeSonnet45
-Models.OpenAi.Gpt53Codex
-```
 
 ### Persisted document schemas
 

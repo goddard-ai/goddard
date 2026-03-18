@@ -1,31 +1,20 @@
 import { z } from "zod"
 
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
-
-export const Models = {
-  Anthropic: {
-    Claude37Sonnet: "anthropic/claude-3-7-sonnet-20250219",
-    ClaudeSonnet45: "anthropic/claude-sonnet-4-5",
-    ClaudeSonnet46: "anthropic/claude-sonnet-4-6",
-    ClaudeOpus46: "anthropic/claude-opus-4-6",
-  },
-  OpenAi: {
-    O3Mini: "openai/o3-mini",
-    O3Pro: "openai/o3-pro",
-    Gpt5Codex: "openai/gpt-5-codex",
-    Gpt51Codex: "openai/gpt-5.1-codex",
-    Gpt52Codex: "openai/gpt-5.2-codex",
-    Gpt53Codex: "openai/gpt-5.3-codex",
-  },
-} as const
-
-// A helper for extracting the literal values from nested model groups.
-type ValueOf<T> = T[keyof T]
+const knownModelSchema = z.enum([
+  "anthropic/claude-3-7-sonnet-20250219",
+  "anthropic/claude-sonnet-4-5",
+  "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-opus-4-6",
+  "openai/o3-mini",
+  "openai/o3-pro",
+  "openai/gpt-5-codex",
+  "openai/gpt-5.1-codex",
+  "openai/gpt-5.2-codex",
+  "openai/gpt-5.3-codex",
+])
 
 // A model identifier accepted by persisted and runtime Goddard configuration.
-export type Model = ValueOf<typeof Models.Anthropic> | ValueOf<typeof Models.OpenAi> | (string & {})
+export type Model = z.infer<typeof knownModelSchema> | (string & {})
 
 // ---------------------------------------------------------------------------
 // Primitive schemas
