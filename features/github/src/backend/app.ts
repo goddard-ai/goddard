@@ -29,15 +29,16 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
   let app: App | undefined
 
   if (options.appId && options.privateKey && options.webhookSecret) {
-    app = new App({
+    const githubApp = new App({
       appId: options.appId,
       privateKey: options.privateKey,
       webhooks: {
         secret: options.webhookSecret,
       },
     })
+    app = githubApp
 
-    app.webhooks.onAny(async ({ id, name, payload }) => {
+    githubApp.webhooks.onAny(async ({ id, name, payload }) => {
       // Prevent infinite loops by ignoring events triggered by bot accounts.
       const sender = (payload as any).sender
       if (sender && sender.type === "Bot") {
@@ -63,7 +64,7 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
       }
     })
 
-    app.webhooks.on("issue_comment.created", async ({ octokit, payload }) => {
+    githubApp.webhooks.on("issue_comment.created", async ({ octokit, payload }) => {
       if (payload.comment.user?.type === "Bot") {
         return
       }
@@ -80,7 +81,7 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
       }
     })
 
-    app.webhooks.on("pull_request_review.submitted", async ({ octokit, payload }) => {
+    githubApp.webhooks.on("pull_request_review.submitted", async ({ octokit, payload }) => {
       if (payload.review.user?.type === "Bot") {
         return
       }
@@ -101,7 +102,7 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
       }
     })
 
-    app.webhooks.on("pull_request", async ({ payload }) => {
+    githubApp.webhooks.on("pull_request", async ({ payload }) => {
       console.log(
         `Received pull_request event: ${payload.action} for PR #${payload.pull_request.number}`,
       )

@@ -202,58 +202,6 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
   return new TursoBackendControlPlane(client as any)
 }
 
-function createBackendEventPublisher(
-  broadcastEvent: (env: Env, publication: BackendEventPublication) => Promise<void>,
-) {
-  return async (env: Env, publication: BackendEventPublication) => {
-    assertBackendEventPublication(publication)
-    await broadcastEvent(env, publication)
-  }
-}
-
-export async function authorizeBackendEventPublication(
-  principal: BackendPrincipal,
-  publication: BackendEventPublication,
-) {
-  assertBackendEventPublication(publication)
-  const source = backendEventSources[publication.source] as {
-    authorize: (input: {
-      readonly principal: BackendPrincipal
-      readonly event: RemoteRepoBackendEvent
-      readonly providers: typeof backendProviders
-    }) => boolean | Promise<boolean>
-  }
-  return source.authorize({
-    principal,
-    event: publication.event,
-    providers: backendProviders,
-  })
-}
-
-function assertBackendEventPublication(publication: BackendEventPublication) {
-  const source = backendEventSources[publication.source]
-  if (!source) {
-    throw new HttpError(500, `Unknown backend event source: ${publication.source}`)
-  }
-
-  if (!source.produces.includes(publication.event.name)) {
-    throw new HttpError(
-      500,
-      `Backend event source ${publication.source} cannot produce event: ${publication.event.name}`,
-    )
-  }
-
-  const definition = backendEvents[publication.event.name]
-  if (!definition) {
-    throw new HttpError(500, `Unknown backend event: ${publication.event.name}`)
-  }
-
-  const payload = definition.payload.safeParse(publication.event.payload)
-  if (!payload.success) {
-    throw new HttpError(500, `Invalid backend event payload: ${publication.event.name}`)
-  }
-}
-
 /** Provides a safe default when the worker host does not supply event broadcasting. */
 async function noopBroadcast(_env: Env, _publication: BackendEventPublication): Promise<void> {
   // No-op: the caller (e.g. worker.js) should provide a real implementation.
@@ -305,6 +253,58 @@ function hasStatusCode(error: unknown): error is { statusCode: number } {
     "statusCode" in error &&
     typeof (error as { statusCode: unknown }).statusCode === "number"
   )
+}
+
+function createBackendEventPublisher(
+  broadcastEvent: (env: Env, publication: BackendEventPublication) => Promise<void>,
+) {
+  return async (env: Env, publication: BackendEventPublication) => {
+    assertBackendEventPublication(publication)
+    await broadcastEvent(env, publication)
+  }
+}
+
+export async function authorizeBackendEventPublication(
+  principal: BackendPrincipal,
+  publication: BackendEventPublication,
+): Promise<boolean> {
+  assertBackendEventPublication(publication)
+  const source = backendEventSources[publication.source] as {
+    authorize: (input: {
+      readonly principal: BackendPrincipal
+      readonly event: RemoteRepoBackendEvent
+      readonly providers: typeof backendProviders
+    }) => boolean | Promise<boolean>
+  }
+  return source.authorize({
+    principal,
+    event: publication.event,
+    providers: backendProviders,
+  })
+}
+
+function assertBackendEventPublication(publication: BackendEventPublication) {
+  const source = backendEventSources[publication.source]
+  if (!source) {
+    throw new HttpError(500, `Unknown backend event source: ${publication.source}`)
+  }
+
+  if (!source.produces.includes(publication.event.name)) {
+    throw new HttpError(
+      500,
+      `Backend event source ${publication.source} cannot produce event: ${publication.event.name}`,
+    )
+  }
+
+  const definition = backendEvents[publication.event.name]
+  if (!definition) {
+    throw new HttpError(500, `Unknown backend event: ${publication.event.name}`)
+  }
+
+  const payload = definition.payload.safeParse(publication.event.payload)
+  if (!payload.success) {
+    throw new HttpError(500, `Invalid backend event payload: ${publication.event.name}`)
+  }
 }
 
 const router = createBackendRouter()

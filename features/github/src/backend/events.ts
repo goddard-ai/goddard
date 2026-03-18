@@ -2,6 +2,7 @@ import {
   createRemoteRepoBackendEvent,
   type RemoteRepoBackendEvent,
 } from "@goddard-ai/remote-repo/backend"
+import { Webhooks } from "@octokit/webhooks"
 import { z } from "zod"
 
 import type { GitHubEventProvenance } from "../schema.ts"
@@ -178,37 +179,25 @@ async function assertGitHubWebhookSignature(request: Request, webhookSecret: str
     throw new GitHubWebhookError(401, "Missing GitHub webhook signature")
   }
 
-  const expected = await signGitHubWebhookBody(webhookSecret, body)
-  if (!constantTimeEqual(signature, expected)) {
+  const verified = await getGitHubWebhooks(webhookSecret).verify(body, signature)
+  if (!verified) {
     throw new GitHubWebhookError(401, "Invalid GitHub webhook signature")
   }
 }
 
 export async function signGitHubWebhookBody(secret: string, body: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  )
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
-  const hex = [...new Uint8Array(signature)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-  return `sha256=${hex}`
+  return getGitHubWebhooks(secret).sign(body)
 }
 
-function constantTimeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) {
-    return false
+const webhooksBySecret = new Map<string, Webhooks>()
+
+function getGitHubWebhooks(secret: string): Webhooks {
+  const existing = webhooksBySecret.get(secret)
+  if (existing) {
+    return existing
   }
 
-  let difference = 0
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left.charCodeAt(index) ^ right.charCodeAt(index)
-  }
-
-  return difference === 0
+  const webhooks = new Webhooks({ secret })
+  webhooksBySecret.set(secret, webhooks)
+  return webhooks
 }

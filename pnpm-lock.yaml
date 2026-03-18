@@ -939,6 +939,9 @@ importers:
       '@goddard-ai/remote-repo':
         specifier: workspace:*
         version: link:../remote-repo
+      '@octokit/webhooks':
+        specifier: ^14.2.0
+        version: 14.2.0
       octokit:
         specifier: ^5.0.5
         version: 5.0.5
