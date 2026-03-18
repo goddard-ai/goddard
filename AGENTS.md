@@ -1,5 +1,9 @@
 # AI Agent Instructions
 
+## Pre-Alpha State
+
+This repository is currently in an unreleased, pre-alpha state. Because of this, backwards compatibility is not a concern. You can freely introduce breaking changes without needing to add legacy fallback logic or deprecation notices.
+
 ## Core/SDK and App Feature Parity
 
 When adding a feature that grants the user a new ability or capability within the Tauri `app`, it is strictly required that this same capability is also fully supported and implemented in the `core/sdk` package.
