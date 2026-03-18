@@ -54,3 +54,14 @@ export const artifacts = sqliteTable("artifacts", {
   type: text().notNull(),
   metadata: text({ mode: "json" }).$type<Record<string, any>>(),
 })
+
+export const sessionPermissions = sqliteTable("session_permissions", {
+  sessionId: text()
+    .primaryKey()
+    .references(() => sessions.id),
+  token: text().notNull().unique(),
+  owner: text().notNull(),
+  repo: text().notNull(),
+  allowedPrNumbers: text({ mode: "json" }).notNull().$type<number[]>(),
+  createdAt: text().notNull(),
+})
