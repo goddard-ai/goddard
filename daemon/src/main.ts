@@ -1,4 +1,4 @@
-import { command, option, optional, runSafely, string, subcommands } from "cmd-ts"
+import { command, option, optional, run, string, subcommands } from "cmd-ts"
 import { runDaemon } from "./daemon.ts"
 
 declare const __VERSION__: string
@@ -47,4 +47,4 @@ const app = subcommands({
   },
 })
 
-await runSafely(app, process.argv.slice(2))
+await run(app, process.argv.slice(2))
