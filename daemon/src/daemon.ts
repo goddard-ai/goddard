@@ -6,7 +6,6 @@ import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { createDaemonLogger, createPayloadPreview } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
-import { splitRepo } from "./utils.ts"
 
 export type RunDaemonInput = {
   repo: string
@@ -67,17 +66,16 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     })
 
     const client = await createBackendClientImpl(runtime.baseUrl)
-    const { owner, repo } = splitRepo(input.repo)
     ipcServer = await startIpcServer(client, {
       socketPath: runtime.socketPath,
       agentBinDir: runtime.agentBinDir,
     })
     const activeIpcServer = ipcServer
     const runningPrs = new Set<number>()
-    const subscription = await client.stream.subscribeToRepo({ owner, repo })
+    const subscription = await client.stream.subscribe()
 
     logger.log("repo.subscription_started", {
-      repository: `${owner}/${repo}`,
+      repository: input.repo,
       daemonUrl: activeIpcServer.daemonUrl,
       socketPath: activeIpcServer.socketPath,
     })
@@ -85,6 +83,9 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     subscription.on("event", async (payload) => {
       const event = payload as RepoEvent
       if (!isFeedbackEvent(event)) {
+        return
+      }
+      if (`${event.owner}/${event.repo}` !== input.repo) {
         return
       }
 
@@ -152,7 +153,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
       Promise.all([Promise.resolve(subscription.close()), activeIpcServer.close()]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      repository: `${owner}/${repo}`,
+      repository: input.repo,
       socketPath: runtime.socketPath,
     })
     return 0

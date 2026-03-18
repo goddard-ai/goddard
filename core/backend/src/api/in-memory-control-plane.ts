@@ -33,7 +33,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   #deviceSessions = new Map<string, DeviceSessionRecord>()
   #authSessions = new Map<string, SessionRecord>()
   #pullRequests: PullRequestRecord[] = []
-  #streamsByRepo = new Map<string, Set<StreamSink>>()
+  #streamsByUser = new Map<string, Set<StreamSink>>()
   #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
@@ -128,16 +128,6 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
 
     this.#pullRequests.push(record)
 
-    this.broadcast({
-      type: "pr.created",
-      owner: input.owner,
-      repo: input.repo,
-      prNumber: record.number,
-      title: record.title,
-      author: session.githubUsername,
-      createdAt: record.createdAt,
-    })
-
     return record
   }
 
@@ -208,35 +198,38 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
             createdAt,
           }
 
-    this.broadcast(mapped)
     return mapped
   }
 
-  addStreamSocket(repoKey: string, socket: unknown): void {
+  addStreamSocket(githubUsername: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByRepo.get(repoKey) ?? new Set<StreamSink>()
+    const room = this.#streamsByUser.get(githubUsername) ?? new Set<StreamSink>()
     room.add(socket)
-    this.#streamsByRepo.set(repoKey, room)
+    this.#streamsByUser.set(githubUsername, room)
   }
 
-  removeStreamSocket(repoKey: string, socket: unknown): void {
+  removeStreamSocket(githubUsername: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByRepo.get(repoKey)
+    const room = this.#streamsByUser.get(githubUsername)
     room?.delete(socket)
     if (room && room.size === 0) {
-      this.#streamsByRepo.delete(repoKey)
+      this.#streamsByUser.delete(githubUsername)
     }
   }
 
   broadcast(event: RepoEvent): void {
-    const repoKey = `${event.owner}/${event.repo}`
-    const sockets = this.#streamsByRepo.get(repoKey)
+    const githubUsername = this.resolveEventOwner(event)
+    if (!githubUsername) {
+      return
+    }
+
+    const sockets = this.#streamsByUser.get(githubUsername)
     if (!sockets) {
       return
     }
@@ -252,8 +245,21 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     }
 
     if (sockets.size === 0) {
-      this.#streamsByRepo.delete(repoKey)
+      this.#streamsByUser.delete(githubUsername)
     }
+  }
+
+  resolveEventOwner(event: RepoEvent): string | undefined {
+    if (event.type === "pr.created") {
+      return event.author
+    }
+
+    return this.#pullRequests.find(
+      (pullRequest) =>
+        pullRequest.owner === event.owner &&
+        pullRequest.repo === event.repo &&
+        pullRequest.number === event.prNumber,
+    )?.createdBy
   }
 }
 

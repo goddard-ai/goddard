@@ -8,14 +8,14 @@ import type { Env } from "../env.ts"
 
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastToRepo?: (env: Env, owner: string, repo: string, event: RepoEvent) => Promise<void>
-  handleRepoStream?: (env: Env, owner: string, repo: string, request: Request) => Promise<Response>
+  broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
+  handleUserStream?: (env: Env, githubUsername: string, request: Request) => Promise<Response>
 }
 
 export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane
-  const broadcastToRepo = dependencies.broadcastToRepo ?? noopBroadcast
-  const handleRepoStream = dependencies.handleRepoStream ?? defaultHandleRepoStream
+  const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
+  const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
 
   return createRouter<Env>({ debug: false }).use(routes, {
     authDeviceStartRoute: {
@@ -55,9 +55,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const token = readBearerToken(ctx.headers.authorization)
-          const pr = await controlPlane.createPr(token, ctx.body)
+          const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await broadcastToRepo(env, pr.owner, pr.repo, {
+          await broadcastEvent(env, {
             type: "pr.created",
             owner: pr.owner,
             repo: pr.repo,
@@ -112,7 +112,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const event = await controlPlane.handleGitHubWebhook(ctx.body)
-          await broadcastToRepo(env, event.owner, event.repo, event)
+          await broadcastEvent(env, event)
           return event
         } catch (error) {
           return toErrorResponse(error)
@@ -125,11 +125,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const token = readBearerToken(ctx.headers.authorization)
-          const { owner, repo } = ctx.query
-          assertRepo(owner, repo)
-          await controlPlane.getSession(token)
+          const session = await controlPlane.getSession(token)
 
-          return await handleRepoStream(env, owner, repo, ctx.request)
+          return await handleUserStream(env, session.githubUsername, ctx.request)
         } catch (error) {
           return toErrorResponse(error)
         }
@@ -149,17 +147,14 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
 
 async function noopBroadcast(
   _env: Env,
-  _owner: string,
-  _repo: string,
   _event: RepoEvent,
 ): Promise<void> {
   // No-op: the caller (e.g. worker.ts) should provide a real implementation.
 }
 
-async function defaultHandleRepoStream(
+async function defaultHandleUserStream(
   _env: Env,
-  _owner: string,
-  _repo: string,
+  _githubUsername: string,
   _request: Request,
 ): Promise<Response> {
   return new Response("SSE handler not configured", { status: 501 })

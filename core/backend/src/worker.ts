@@ -3,13 +3,13 @@ import type { Env } from "./env.ts"
 import { createBackendRouter } from "./api/router.ts"
 
 const router = createBackendRouter({
-  broadcastToRepo: async (_env, _owner, _repo, _event) => {
+  broadcastEvent: async (_env, _event) => {
     // TODO: implement real-time fanout via Cloudflare Queues or similar.
     // Each Worker invocation is isolated; without a shared-state layer
     // (Queues, KV pub/sub) broadcast to a connected SSE client in another
     // invocation is not possible in pure Workers.
   },
-  handleRepoStream: async (_env, _owner, _repo, request) => {
+  handleUserStream: async (_env, _githubUsername, request) => {
     return createSseStream(request)
   },
 })

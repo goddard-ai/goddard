@@ -70,13 +70,7 @@ test("backend auth and PR routes parse representative request contracts", () => 
 })
 
 test("backend stream and webhook routes parse representative contracts", () => {
-  assert.deepEqual(
-    repoStreamRoute.methods.GET?.query?.parse({ owner: "goddard-ai", repo: "sdk" }),
-    {
-      owner: "goddard-ai",
-      repo: "sdk",
-    },
-  )
+  assert.equal(repoStreamRoute.methods.GET?.query, undefined)
   assert.deepEqual(
     githubWebhookRoute.methods.POST?.body?.parse({
       type: "pull_request_review",

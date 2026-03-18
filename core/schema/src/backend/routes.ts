@@ -109,10 +109,6 @@ export const githubWebhookRoute = route("webhooks/github", {
 export const repoStreamRoute = route("stream", {
   GET: {
     headers: bearerHeaderSchema,
-    query: z.object({
-      owner: z.string(),
-      repo: z.string(),
-    }),
   },
 })
 

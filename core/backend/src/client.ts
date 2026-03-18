@@ -48,7 +48,7 @@ export type BackendClient = {
     reply: (input: RepoRef & { prNumber: number; body: string }) => Promise<{ success: boolean }>
   }
   stream: {
-    subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>
+    subscribe: () => Promise<StreamSubscription>
   }
 }
 
@@ -145,12 +145,11 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       },
     },
     stream: {
-      subscribeToRepo: async ({ owner, repo }) => {
+      subscribe: async () => {
         const token = await requireToken(tokenStorage)
         const abortController = new AbortController()
         const response = await rouzerClient.repoStreamRoute.GET({
           headers: { authorization: `Bearer ${token}` },
-          query: { owner, repo },
           signal: abortController.signal,
         })
 

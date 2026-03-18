@@ -62,7 +62,7 @@ test("backend client manages auth session state through token storage", async ()
   }
 })
 
-test("backend client subscribes to repo stream via rouzer route response", async () => {
+test("backend client subscribes to unified stream via rouzer route response", async () => {
   const controlPlane = new InMemoryBackendControlPlane()
   const server = await startBackendServer(controlPlane, { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
@@ -77,7 +77,7 @@ test("backend client subscribes to repo stream via rouzer route response", async
     await tokenStorage.setToken(session.token)
 
     const client = createBackendClient({ baseUrl, tokenStorage })
-    const subscription = await client.stream.subscribeToRepo({ owner: "goddard-ai", repo: "sdk" })
+    const subscription = await client.stream.subscribe()
 
     const eventPromise = new Promise<unknown>((resolve) => {
       subscription.on("event", resolve)

@@ -14,6 +14,7 @@ import type {
 import { eq, and, gt } from "drizzle-orm"
 import {
   type BackendControlPlane,
+  createPrViaApp,
   HttpError,
   assertRepo,
   postPrCommentViaApp,
@@ -100,7 +101,7 @@ export class TursoBackendControlPlane implements BackendControlPlane {
     }
   }
 
-  async createPr(token: string, input: CreatePrInput): Promise<PullRequestRecord> {
+  async createPr(token: string, input: CreatePrInput, env?: Env): Promise<PullRequestRecord> {
     const session = await this.getSession(token)
     assertRepo(input.owner, input.repo)
     if (!input.title.trim()) {
@@ -110,31 +111,25 @@ export class TursoBackendControlPlane implements BackendControlPlane {
     const now = new Date().toISOString()
     const body =
       `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
+    const createdPr = await createPrViaApp(env, input, body)
 
     const [inserted] = await this.#db
       .insert(schema.pullRequests)
       .values({
-        number: 0,
+        number: createdPr.number,
         owner: input.owner,
         repo: input.repo,
         title: input.title,
         body,
         head: input.head,
         base: input.base,
-        url: `https://github.com/${input.owner}/${input.repo}/pull/0`,
+        url: createdPr.url,
         createdBy: session.githubUsername,
-        createdAt: now,
+        createdAt: createdPr.createdAt || now,
       })
       .returning()
 
-    const finalNumber = inserted.id
-    const finalUrl = `https://github.com/${input.owner}/${input.repo}/pull/${finalNumber}`
-    await this.#db
-      .update(schema.pullRequests)
-      .set({ number: finalNumber, url: finalUrl })
-      .where(eq(schema.pullRequests.id, inserted.id))
-
-    return { ...inserted, number: finalNumber, url: finalUrl, body: inserted.body ?? "" }
+    return { ...inserted, body: inserted.body ?? "" }
   }
 
   async replyToPr(

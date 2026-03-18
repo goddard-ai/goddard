@@ -93,8 +93,8 @@ export class GoddardSdk {
 
   get stream() {
     return {
-      subscribeToRepo: async ({ owner, repo }: RepoRef) => {
-        return this.#backend.stream.subscribeToRepo({ owner, repo })
+      subscribe: async () => {
+        return this.#backend.stream.subscribe()
       },
     }
   }

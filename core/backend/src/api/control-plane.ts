@@ -13,7 +13,11 @@ export interface BackendControlPlane {
   startDeviceFlow(input?: DeviceFlowStart): Promise<DeviceFlowSession> | DeviceFlowSession
   completeDeviceFlow(input: DeviceFlowComplete): Promise<AuthSession> | AuthSession
   getSession(token: string): Promise<AuthSession> | AuthSession
-  createPr(token: string, input: CreatePrInput): Promise<PullRequestRecord> | PullRequestRecord
+  createPr(
+    token: string,
+    input: CreatePrInput,
+    env?: Env,
+  ): Promise<PullRequestRecord> | PullRequestRecord
   isManagedPr(
     owner: string,
     repo: string,
@@ -26,8 +30,8 @@ export interface BackendControlPlane {
     env?: any,
   ): Promise<void> | void
   handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent
-  addStreamSocket?(repoKey: string, socket: unknown): void
-  removeStreamSocket?(repoKey: string, socket: unknown): void
+  addStreamSocket?(streamKey: string, socket: unknown): void
+  removeStreamSocket?(streamKey: string, socket: unknown): void
 }
 
 export class HttpError extends Error {
@@ -86,5 +90,53 @@ export async function postPrCommentViaApp(
     })
   } catch (e: any) {
     throw new HttpError(500, `Failed to post comment to GitHub: ${e.message}`)
+  }
+}
+
+export async function createPrViaApp(
+  env: Env | undefined,
+  input: CreatePrInput,
+  body: string,
+): Promise<{ number: number; url: string; createdAt: string }> {
+  if (!env?.GITHUB_APP_ID || !env?.GITHUB_APP_PRIVATE_KEY) {
+    throw new HttpError(500, "GitHub App credentials are not configured on the backend")
+  }
+
+  const { App } = await import("octokit")
+  const app = new App({
+    appId: env.GITHUB_APP_ID,
+    privateKey: env.GITHUB_APP_PRIVATE_KEY,
+  })
+
+  let installationId: number
+  try {
+    const { data } = await app.octokit.request("GET /repos/{owner}/{repo}/installation", {
+      owner: input.owner,
+      repo: input.repo,
+    })
+    installationId = data.id
+  } catch {
+    throw new HttpError(500, `Failed to get GitHub App installation for ${input.owner}/${input.repo}`)
+  }
+
+  const octokit = await app.getInstallationOctokit(installationId)
+
+  try {
+    const { data } = await octokit.rest.pulls.create({
+      owner: input.owner,
+      repo: input.repo,
+      title: input.title,
+      body,
+      head: input.head,
+      base: input.base,
+    })
+
+    return {
+      number: data.number,
+      url: data.html_url,
+      createdAt: data.created_at,
+    }
+  } catch (e: any) {
+    throw new HttpError(500, `Failed to create pull request on GitHub: ${e.message}`)
   }
 }

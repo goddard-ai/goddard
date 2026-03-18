@@ -48,7 +48,7 @@ test("daemon package ships a goddard wrapper in agent-bin", async () => {
   assert.equal(stat.isSymbolicLink() || stat.isFile(), true)
 })
 
-test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-shot runs", async () => {
+test("daemon run subscribes to unified stream, filters to local repo, and passes daemon URL into one-shot runs", async () => {
   const subscription = new MockStreamSubscription()
   let subCalls = 0
 
@@ -56,6 +56,26 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
   const startIpcCalls: any[] = []
   const deps: RunDaemonDeps = {
     createBackendClient: async () => ({
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev",
+          userCode: "code",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok",
+          githubUsername: "alec",
+          githubUserId: 1,
+        }),
+        whoami: async () => ({
+          token: "tok",
+          githubUsername: "alec",
+          githubUserId: 1,
+        }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({
           number: 1,
@@ -65,7 +85,7 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
         isManaged: async () => true,
       },
       stream: {
-        subscribeToRepo: async () => {
+        subscribe: async () => {
           subCalls += 1
           return subscription
         },
@@ -84,6 +104,16 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
       return 0
     },
     waitForShutdown: async (close) => {
+      subscription.emit("event", {
+        type: "comment" as const,
+        owner: "other",
+        repo: "repo",
+        prNumber: 999,
+        author: "alice",
+        body: "ignore this",
+        reactionAdded: "eyes",
+        createdAt: new Date().toISOString(),
+      })
       const event = {
         type: "comment" as const,
         owner: "test",
