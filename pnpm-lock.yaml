@@ -198,6 +198,9 @@ importers:
       '@goddard-ai/storage':
         specifier: workspace:^
         version: link:../storage
+      '@goddard-ai/tree-kill':
+        specifier: workspace:^
+        version: link:../tree-kill
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0
@@ -322,6 +325,12 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.10.1
         version: 2.10.1
+
+  core/tree-kill:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.5.0
+        version: 25.5.0
 
   core/worktree:
     devDependencies:
@@ -6562,7 +6571,7 @@ snapshots:
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
-      '@types/node': 25.3.5
+      '@types/node': 25.5.0
 
   '@types/chai@5.2.3':
     dependencies:
@@ -6598,7 +6607,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.3.5
+      '@types/node': 25.5.0
 
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260317.1':
     optional: true

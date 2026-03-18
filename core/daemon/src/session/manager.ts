@@ -24,6 +24,7 @@ import {
   type SQLSessionUpdate,
 } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
+import treeKill from "@goddard-ai/tree-kill"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
@@ -779,7 +780,7 @@ export function createSessionManager(input: {
         await updateSession(id, { status: "done" }, { reason: "one_shot_completed" })
         await setConnectionMode(id, "history", false)
         await emitDiagnostic(id, "session_completed_one_shot")
-        process.kill()
+        await treeKill(process)
         await SessionPermissionsStorage.revoke(id).catch(() => {})
         return toDaemonSession(await SessionStorage.get(id))
       }
@@ -1034,7 +1035,7 @@ export function createSessionManager(input: {
     }
 
     await emitDiagnostic(id, "session_shutdown_requested")
-    active.process.kill()
+    await treeKill(active.process)
     return true
   }
 
@@ -1052,7 +1053,7 @@ export function createSessionManager(input: {
     await ready
     for (const session of activeSessions.values()) {
       await emitDiagnostic(session.id, "daemon_shutdown", { status: session.status })
-      session.process.kill()
+      await treeKill(session.process)
       await session.writer.close().catch(() => {})
       await session.subscription.close().catch(() => {})
       await SessionPermissionsStorage.revoke(session.id).catch(() => {})

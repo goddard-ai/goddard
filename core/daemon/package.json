@@ -32,6 +32,7 @@
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/storage": "workspace:^",
+    "@goddard-ai/tree-kill": "workspace:^",
     "cmd-ts": "^0.15.0",
     "cron-parser": "^5.5.0",
     "kleur": "^4.1.5",
