@@ -12,7 +12,6 @@
     "core/config",
     "core/tauri-plugin-ipc",
     "core/ipc",
-    "core/tree-run",
     "workforce"
   ],
   "scripts": {
@@ -30,7 +29,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
-    "@goddard/tree-run": "workspace:*",
     "@types/node": "^25.3.5",
     "@typescript/native-preview": "7.0.0-dev.20260317.1",
     "oxfmt": "^0.36.0",
