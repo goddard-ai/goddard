@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import { watch as watchFs, type FSWatcher, type Stats } from "node:fs"
+import type { Stats } from "node:fs"
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
+import { watch as watchFiles, type FSWatcher } from "chokidar"
 import type { AgentSession } from "../daemon/session/client-session.ts"
 import { runAgent, type RunAgentOptions } from "../daemon/session/client.ts"
 
@@ -633,6 +634,13 @@ function schedulePackageSync(
 }
 
 /**
+ * Determines whether a watcher callback path points at one of the JSONL inbox files.
+ */
+function isWorkforceInboxPath(changedPath: string): boolean {
+  return WATCHED_FILES.some((fileName) => basename(changedPath) === fileName)
+}
+
+/**
  * Starts an AI agent session and filesystem watcher for a specific workforce package.
  */
 async function startPackageRuntime(
@@ -662,17 +670,31 @@ async function startPackageRuntime(
     sessionId: session.sessionId,
   })
 
+  const watcher = watchFiles(pkg.goddardDir, {
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: WATCH_SYNC_DELAY_MS,
+      pollInterval: 10,
+    },
+  })
+
   const runtime: WorkforcePackageRuntime = {
     package: pkg,
     session,
-    watcher: watchFs(pkg.goddardDir, () => {
-      schedulePackageSync(runtime, options.onEvent)
-    }),
+    watcher,
     syncTimer: null,
     stopped: false,
     promptActive: false,
     pendingBatches: [],
   }
+
+  runtime.watcher.on("all", (_eventName, changedPath) => {
+    if (typeof changedPath !== "string" || !isWorkforceInboxPath(changedPath)) {
+      return
+    }
+
+    schedulePackageSync(runtime, options.onEvent)
+  })
 
   runtime.watcher.on("error", (error) => {
     emitEvent(options.onEvent, {
@@ -713,7 +735,7 @@ export class WorkforceSupervisor {
           runtime.syncTimer = null
         }
 
-        runtime.watcher.close()
+        await runtime.watcher.close().catch(() => {})
         await runtime.session.stop().catch(() => {})
       }),
     )
