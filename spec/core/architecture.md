@@ -12,7 +12,7 @@
 | Distribution | `git-subrepo` to standalone repositories |
 
 ## Platform Components
-- **Control Plane** — worker-hosted authority for sessions, managed PR state, and repository event fan-out.
+- **Control Plane** — worker-hosted authority for sessions, managed PR state, and user-scoped event fan-out.
 - **GitHub Integration** — delegated GitHub identity and webhook-facing integration behavior.
 - **SDK** — framework-agnostic platform client for programmatic and embedded hosts.
 - **Desktop Workspace** — Tauri desktop app and primary human-facing surface.
@@ -26,11 +26,12 @@ These components can be packaged independently and synchronized to standalone re
 - Session validation on protected requests.
 - Webhook ingest and routing for pull request and review feedback events.
 - Managed reaction behavior via GitHub App identity.
-- Per-repository event fan-out over SSE.
+- User-scoped event fan-out over SSE for managed PR ownership.
 
 Boundary:
 - Production persistence is Turso-backed.
 - Local in-memory mode is development-only convenience.
+- Real-time delivery follows authenticated managed-PR ownership rather than repository-scoped subscription state.
 
 ### SDK
 Design rule: platform capabilities live here first.
@@ -40,7 +41,7 @@ Design rule: platform capabilities live here first.
 
 ### Desktop Workspace
 - Primary human-facing workspace for authentication, session steering, PR review, specs, tasks, and roadmap context.
-- Use SDK contracts for pull request operations, stream subscription, and other platform interactions.
+- Use SDK contracts for pull request operations, managed-PR stream subscription, and other platform interactions.
 - Host or supervise local background automation when unattended execution is enabled.
 
 Boundary:
@@ -48,7 +49,7 @@ Boundary:
 - Must not fork platform behavior away from SDK contracts.
 
 ### Background Runtime
-- Subscribe to repository streams via SDK.
+- Subscribe to authenticated managed-PR streams via SDK.
 - Filter for managed PR feedback events.
 - Launch local one-shot `pi` sessions with PR context.
 - Operate as background automation rather than a user-facing command surface.
