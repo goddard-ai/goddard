@@ -4,15 +4,15 @@ import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
 import type { AgentDistribution } from "@goddard-ai/schema/session-server"
 import type { WorkforceConfig } from "@goddard-ai/schema/workforce"
-import {
-  cancelDaemonWorkforceRequest,
-  createDaemonWorkforceRequest,
-  getDaemonWorkforce,
-  listDaemonWorkforces,
-  shutdownDaemonWorkforce,
-  startDaemonWorkforce,
-  truncateDaemonWorkforce,
-  updateDaemonWorkforceRequest,
+export {
+  cancelDaemonWorkforceRequest as cancelWorkforceRequest,
+  createDaemonWorkforceRequest as createWorkforceRequest,
+  getDaemonWorkforce as getWorkforce,
+  listDaemonWorkforces as listWorkforces,
+  shutdownDaemonWorkforce as stopWorkforce,
+  startDaemonWorkforce as startWorkforce,
+  truncateDaemonWorkforce as truncateWorkforce,
+  updateDaemonWorkforceRequest as updateWorkforceRequest,
   type WorkforceClientOptions,
 } from "../daemon/workforce.js"
 
@@ -205,64 +205,4 @@ export async function initializeWorkforce(
     ledgerPath,
     createdPaths,
   }
-}
-
-export async function startWorkforce(rootDir: string, options?: WorkforceClientOptions) {
-  return startDaemonWorkforce(rootDir, options)
-}
-
-export async function getWorkforce(rootDir: string, options?: WorkforceClientOptions) {
-  return getDaemonWorkforce(rootDir, options)
-}
-
-export async function listWorkforces(options?: WorkforceClientOptions) {
-  return listDaemonWorkforces(options)
-}
-
-export async function stopWorkforce(rootDir: string, options?: WorkforceClientOptions) {
-  return shutdownDaemonWorkforce(rootDir, options)
-}
-
-export async function createWorkforceRequest(
-  input: {
-    rootDir: string
-    targetAgentId: string
-    message: string
-  },
-  options?: WorkforceClientOptions,
-) {
-  return createDaemonWorkforceRequest(input, options)
-}
-
-export async function updateWorkforceRequest(
-  input: {
-    rootDir: string
-    requestId: string
-    message: string
-  },
-  options?: WorkforceClientOptions,
-) {
-  return updateDaemonWorkforceRequest(input, options)
-}
-
-export async function cancelWorkforceRequest(
-  input: {
-    rootDir: string
-    requestId: string
-    reason?: string
-  },
-  options?: WorkforceClientOptions,
-) {
-  return cancelDaemonWorkforceRequest(input, options)
-}
-
-export async function truncateWorkforce(
-  input: {
-    rootDir: string
-    agentId?: string
-    reason?: string
-  },
-  options?: WorkforceClientOptions,
-) {
-  return truncateDaemonWorkforce(input, options)
 }
