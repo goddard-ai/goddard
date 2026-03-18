@@ -165,3 +165,29 @@ test("watch parses args and forwards daemon options into the SDK watcher", async
   assert.equal(typeof (firstWatchCall[0] as { onEvent: unknown }).onEvent, "function")
   assert.equal(stopMock.mock.calls.length, 1)
 })
+
+test("prints help when no subcommand is provided", async () => {
+  const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
+  const processExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
+
+  const { main } = await import("../src/main.ts")
+  await main([])
+
+  assert.ok(
+    consoleLog.mock.calls.some((call) => call[0].includes("goddard-workforce <subcommand>")),
+  )
+  assert.equal(processExit.mock.calls[0]?.[0], 1)
+})
+
+test("prints help when an invalid subcommand is provided", async () => {
+  const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
+  const processExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
+
+  const { main } = await import("../src/main.ts")
+  await main(["invalid"])
+
+  assert.ok(
+    consoleLog.mock.calls.some((call) => call[0].includes("goddard-workforce <subcommand>")),
+  )
+  assert.equal(processExit.mock.calls[0]?.[0], 1)
+})

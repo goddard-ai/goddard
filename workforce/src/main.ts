@@ -167,7 +167,15 @@ export async function main(argv: string[]) {
     },
   })
 
-  await runSafely(app, argv)
+  const result = await runSafely(app, argv)
+  if (result._tag === "error") {
+    const helpResult = await runSafely(app, ["--help"])
+    if (helpResult._tag === "error" && helpResult.error.config) {
+      const { message } = helpResult.error.config
+      console.log(message)
+    }
+    process.exit(1)
+  }
 }
 
 if (import.meta.main) {
