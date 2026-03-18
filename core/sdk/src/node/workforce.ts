@@ -9,32 +9,46 @@ import { runAgent, type RunAgentOptions } from "../daemon/session/client.ts"
 
 const execFileAsync = promisify(execFile)
 
-/** The name of the file within a workforce package's .goddard/ directory
- * that acts as the primary "inbox" for incoming agent requests. */
+/**
+ * The name of the file within a workforce package's .goddard/ directory
+ * that acts as the primary "inbox" for incoming agent requests.
+ */
 const REQUESTS_FILE = "requests.jsonl"
 
-/** The name of the file within a workforce package's .goddard/ directory
- * where the agent records its own activity or internal feedback. */
+/**
+ * The name of the file within a workforce package's .goddard/ directory
+ * where the agent records its own activity or internal feedback.
+ */
 const RESPONSES_FILE = "responses.jsonl"
 
-/** A state file used to track the last processed byte offset and content
- * hash for the watched JSONL files to ensure idempotent processing. */
+/**
+ * A state file used to track the last processed byte offset and content
+ * hash for the watched JSONL files to ensure idempotent processing.
+ */
 const PROCESSED_AT_FILE = "processed-at.json"
 
-/** The set of files within a .goddard/ directory that the workforce
- * supervisor monitors for new appends. */
+/**
+ * The set of files within a .goddard/ directory that the workforce
+ * supervisor monitors for new appends.
+ */
 const WATCHED_FILES = [REQUESTS_FILE, RESPONSES_FILE] as const
 
-/** Common directory names that should be skipped when recursively
- * discovering packages to avoid performance issues and noise. */
+/**
+ * Common directory names that should be skipped when recursively
+ * discovering packages to avoid performance issues and noise.
+ */
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
 
-/** The duration to wait after a file change is detected before syncing
- * state, allowing multiple rapid writes to be batched. */
+/**
+ * The duration to wait after a file change is detected before syncing
+ * state, allowing multiple rapid writes to be batched.
+ */
 const WATCH_SYNC_DELAY_MS = 25
 
-// Package metadata discovered from nested package manifests under a
-// repository root.
+/**
+ * Package metadata discovered from nested package manifests under a
+ * repository root.
+ */
 export type DiscoveredWorkforcePackage = {
   rootDir: string
   relativeDir: string
@@ -45,33 +59,46 @@ export type DiscoveredWorkforcePackage = {
   responsesPath: string
 }
 
-// Result metadata returned after initializing a package's workforce files.
+/**
+ * Result metadata returned after initializing a package's workforce files.
+ */
 export type InitializedWorkforcePackage = {
   packageDir: string
   goddardDir: string
   createdPaths: string[]
 }
 
-// Persisted append-tracking state for one watched JSONL file.
+/**
+ * Persisted append-tracking state for one watched JSONL file.
+ */
 export interface WorkforceProcessedFileState {
   offset: number
   prefixHash: string
   updatedAt: string
 }
 
-/** Package-local runtime state stored in `.goddard/processed-at.json`. */
+/**
+ * Package-local runtime state stored in `.goddard/processed-at.json`.
+ */
 export interface WorkforceProcessedState {
   /** Schema version for future-proofing the state object format. */
   version: 1
 
-  /** A map of file names to their respective last-processed offset and hash state. */
+  /**
+   * A map of file names to their respective last-processed offset and
+   * hash state.
+   */
   files: Partial<Record<WorkforceWatchedFileName, WorkforceProcessedFileState>>
 }
 
-/** File names supervised inside each workforce-enabled `.goddard` directory. */
+/**
+ * File names supervised inside each workforce-enabled `.goddard` directory.
+ */
 export type WorkforceWatchedFileName = (typeof WATCHED_FILES)[number]
 
-// Runtime event stream emitted by the workforce supervisor for host logging.
+/**
+ * Runtime event stream emitted by the workforce supervisor for host logging.
+ */
 export type WorkforceRuntimeEvent =
   | {
       type: "package-discovered"
@@ -100,14 +127,18 @@ export type WorkforceRuntimeEvent =
       error: Error
     }
 
-// Options accepted by the Node-only workforce watcher runtime.
+/**
+ * Options accepted by the Node-only workforce watcher runtime.
+ */
 export type WorkforceWatchOptions = {
   rootDir: string
   daemon?: RunAgentOptions
   onEvent?: (event: WorkforceRuntimeEvent) => void
 }
 
-/** One append-derived prompt batch associated with a specific watched file. */
+/**
+ * One append-derived prompt batch associated with a specific watched file.
+ */
 interface WorkforcePromptBatch {
   /** The name of the file (e.g., requests.jsonl) that triggered this batch. */
   fileName: WorkforceWatchedFileName
@@ -119,7 +150,9 @@ interface WorkforcePromptBatch {
   content: string
 }
 
-/** In-memory watcher runtime for a single package-scoped workforce session. */
+/**
+ * In-memory watcher runtime for a single package-scoped workforce session.
+ */
 interface WorkforcePackageRuntime {
   /** The immutable discovery metadata for this package. */
   package: DiscoveredWorkforcePackage
@@ -136,13 +169,19 @@ interface WorkforcePackageRuntime {
   /** Whether the supervisor has stopped this runtime. */
   stopped: boolean
 
-  /** Whether an active prompt call is currently being awaited by this agent. */
+  /**
+   * Whether an active prompt call is currently being awaited by this
+   * agent.
+   */
   promptActive: boolean
 
   /** A queue of prompt batches that are pending transmission to the agent. */
   pendingBatches: WorkforcePromptBatch[]
 }
 
+/**
+ * Emits a runtime event to the provided event handler, if one is defined.
+ */
 function emitEvent(onEvent: WorkforceWatchOptions["onEvent"], event: WorkforceRuntimeEvent): void {
   try {
     onEvent?.(event)
@@ -151,6 +190,10 @@ function emitEvent(onEvent: WorkforceWatchOptions["onEvent"], event: WorkforceRu
   }
 }
 
+/**
+ * Attempts to extract the package name from a package.json manifest, falling
+ * back to the directory name if the manifest is missing or invalid.
+ */
 async function resolvePackageName(manifestPath: string, packageDir: string): Promise<string> {
   try {
     const parsed = JSON.parse(await readFile(manifestPath, "utf-8")) as { name?: string }
@@ -164,6 +207,9 @@ async function resolvePackageName(manifestPath: string, packageDir: string): Pro
   return basename(packageDir)
 }
 
+/**
+ * Recursively walks a directory and invokes a visitor function for each discovered directory.
+ */
 async function walkDirectory(
   directory: string,
   visitor: (entryPath: string) => Promise<void>,
@@ -185,6 +231,9 @@ async function walkDirectory(
   }
 }
 
+/**
+ * Discovers all directories containing a package.json file under a given root.
+ */
 async function discoverNestedPackageDirs(rootDir: string): Promise<string[]> {
   const resolvedRootDir = resolve(rootDir)
   const packageDirs: string[] = []
@@ -213,6 +262,9 @@ async function discoverNestedPackageDirs(rootDir: string): Promise<string[]> {
   return packageDirs.sort()
 }
 
+/**
+ * Converts a raw package directory path into a DiscoveredWorkforcePackage object.
+ */
 async function toDiscoveredPackage(
   rootDir: string,
   packageDir: string,
@@ -228,10 +280,16 @@ async function toDiscoveredPackage(
   }
 }
 
+/**
+ * Constructs the absolute path to the processed-at.json state file for a package.
+ */
 function buildProcessedStatePath(pkg: DiscoveredWorkforcePackage): string {
   return join(pkg.goddardDir, PROCESSED_AT_FILE)
 }
 
+/**
+ * Reads and validates the persisted workforce processing state for a package.
+ */
 async function readProcessedState(
   pkg: DiscoveredWorkforcePackage,
 ): Promise<WorkforceProcessedState | null> {
@@ -250,6 +308,9 @@ async function readProcessedState(
   }
 }
 
+/**
+ * Serializes and writes the workforce processing state to disk.
+ */
 async function writeProcessedState(
   pkg: DiscoveredWorkforcePackage,
   state: WorkforceProcessedState,
@@ -258,10 +319,16 @@ async function writeProcessedState(
   await writeFile(buildProcessedStatePath(pkg), `${JSON.stringify(state, null, 2)}\n`, "utf-8")
 }
 
+/**
+ * Computes a SHA-256 hash for the given string content.
+ */
 function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex")
 }
 
+/**
+ * Finds the byte offset of the last complete line (ending in newline) in the string.
+ */
 function findLastCompleteOffset(content: string): number {
   if (!content) {
     return 0
@@ -279,6 +346,9 @@ function findLastCompleteOffset(content: string): number {
   return Buffer.byteLength(content.slice(0, lastNewlineIndex + 1))
 }
 
+/**
+ * Reads a specific byte prefix from a file and returns it as a UTF-8 string.
+ */
 async function readUtf8Prefix(path: string, offset: number): Promise<string> {
   if (offset <= 0) {
     return ""
@@ -287,6 +357,9 @@ async function readUtf8Prefix(path: string, offset: number): Promise<string> {
   return (await readFile(path)).subarray(0, offset).toString("utf-8")
 }
 
+/**
+ * Creates a new file state entry based on the current file content up to a given offset.
+ */
 async function createProgressEntry(
   path: string,
   offset: number,
@@ -300,11 +373,17 @@ async function createProgressEntry(
   }
 }
 
+/**
+ * Scans an existing file and builds a starting progress entry for all currently complete lines.
+ */
 async function buildSeedEntry(path: string): Promise<WorkforceProcessedFileState> {
   const content = await readFile(path, "utf-8")
   return createProgressEntry(path, findLastCompleteOffset(content))
 }
 
+/**
+ * Ensures a package has a valid processed state for a specific file, initializing it if necessary.
+ */
 async function ensureProgressState(
   pkg: DiscoveredWorkforcePackage,
   fileName: WorkforceWatchedFileName,
@@ -330,6 +409,9 @@ async function ensureProgressState(
   return state
 }
 
+/**
+ * Synchronizes the file state when a file is detected to have been rewritten or truncated.
+ */
 async function syncFileStateForRewrite(
   path: string,
   stats: Stats,
@@ -345,6 +427,9 @@ async function syncFileStateForRewrite(
   return buildSeedEntry(path)
 }
 
+/**
+ * Checks for newly appended content in a watched file and returns it as a prompt batch.
+ */
 async function readNewBatch(
   pkg: DiscoveredWorkforcePackage,
   fileName: WorkforceWatchedFileName,
@@ -399,10 +484,16 @@ async function readNewBatch(
   return { fileName, filePath, content }
 }
 
+/**
+ * Counts the number of non-empty lines in a block of JSONL content.
+ */
 function countJsonlLines(content: string): number {
   return content.split("\n").filter((line) => line.length > 0).length
 }
 
+/**
+ * Constructs a human-readable prompt from a set of appended workforce file batches.
+ */
 function buildBatchPrompt(
   pkg: DiscoveredWorkforcePackage,
   batches: WorkforcePromptBatch[],
@@ -424,6 +515,9 @@ function buildBatchPrompt(
   ].join("\n")
 }
 
+/**
+ * Generates the system prompt for a workforce agent based on whether it is a root or lead agent.
+ */
 function buildWorkforceSystemPrompt(pkg: DiscoveredWorkforcePackage): string {
   if (pkg.relativeDir === ".") {
     return [
@@ -442,6 +536,9 @@ function buildWorkforceSystemPrompt(pkg: DiscoveredWorkforcePackage): string {
   ].join("\n")
 }
 
+/**
+ * Processes queued batches for a package session, ensuring only one prompt is active at a time.
+ */
 async function drainPackageQueue(
   runtime: WorkforcePackageRuntime,
   onEvent: WorkforceWatchOptions["onEvent"],
@@ -486,6 +583,9 @@ async function drainPackageQueue(
   }
 }
 
+/**
+ * Synchronizes a package's watched files with the current processing state.
+ */
 async function syncPackageFiles(
   runtime: WorkforcePackageRuntime,
   onEvent: WorkforceWatchOptions["onEvent"],
@@ -515,6 +615,9 @@ async function syncPackageFiles(
   }
 }
 
+/**
+ * Schedules a package synchronization, debouncing multiple rapid changes.
+ */
 function schedulePackageSync(
   runtime: WorkforcePackageRuntime,
   onEvent: WorkforceWatchOptions["onEvent"],
@@ -529,6 +632,9 @@ function schedulePackageSync(
   }, WATCH_SYNC_DELAY_MS)
 }
 
+/**
+ * Starts an AI agent session and filesystem watcher for a specific workforce package.
+ */
 async function startPackageRuntime(
   pkg: DiscoveredWorkforcePackage,
   options: WorkforceWatchOptions,
@@ -580,16 +686,24 @@ async function startPackageRuntime(
   return runtime
 }
 
-/** A supervisor class that manages multiple workforce agents and their underlying filesystem watches. */
+/**
+ * A supervisor class that manages multiple workforce agents and their
+ * underlying filesystem watches.
+ */
 export class WorkforceSupervisor {
-  /** A collection of active runtimes, one for each discovered workforce package. */
+  /**
+   * A collection of active runtimes, one for each discovered workforce
+   * package.
+   */
   readonly #runtimes: WorkforcePackageRuntime[]
 
   constructor(runtimes: WorkforcePackageRuntime[]) {
     this.#runtimes = runtimes
   }
 
-  /** Gracefully stops all agent sessions and filesystem watchers. */
+  /**
+   * Gracefully stops all agent sessions and filesystem watchers.
+   */
   async stop(): Promise<void> {
     await Promise.all(
       this.#runtimes.map(async (runtime) => {
@@ -606,6 +720,9 @@ export class WorkforceSupervisor {
   }
 }
 
+/**
+ * Resolves the absolute path to the root of the git repository.
+ */
 export async function resolveRepositoryRoot(startDir: string): Promise<string> {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
@@ -621,6 +738,10 @@ export async function resolveRepositoryRoot(startDir: string): Promise<string> {
   }
 }
 
+/**
+ * Discovers all workforce-enabled packages (those with a .goddard/ directory)
+ * under a root.
+ */
 export async function discoverWorkforcePackages(
   rootDir: string,
 ): Promise<DiscoveredWorkforcePackage[]> {
@@ -646,6 +767,10 @@ export async function discoverWorkforcePackages(
   return discovered
 }
 
+/**
+ * Identifies packages under a root that are candidates for workforce
+ * initialization.
+ */
 export async function discoverWorkforceInitCandidates(
   rootDir: string,
 ): Promise<DiscoveredWorkforcePackage[]> {
@@ -671,6 +796,10 @@ export async function discoverWorkforceInitCandidates(
   return candidates
 }
 
+/**
+ * Initializes workforce directories and files for the specified package
+ * directories.
+ */
 export async function initializeWorkforcePackages(
   packageDirs: string[],
 ): Promise<InitializedWorkforcePackage[]> {
@@ -706,6 +835,9 @@ export async function initializeWorkforcePackages(
   return initialized
 }
 
+/**
+ * Scans for workforce packages and starts a supervisor to monitor them.
+ */
 export async function watchWorkforce(options: WorkforceWatchOptions): Promise<WorkforceSupervisor> {
   const runtimes: WorkforcePackageRuntime[] = []
 

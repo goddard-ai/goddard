@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import type { ACPAdapterName } from "./acp-adapters"
+import type { ACPAdapterName } from "./acp-adapters.js"
 
 export type {
   /**

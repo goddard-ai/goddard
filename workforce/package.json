@@ -4,11 +4,11 @@
   "private": true,
   "license": "MIT",
   "bin": {
-    "goddard-workforce": "./dist/main.mjs"
+    "goddard-workforce": "./dist/main.js"
   },
   "type": "module",
   "scripts": {
-    "build": "tree-run build && tsdown",
+    "build": "tree-run build && tsgo",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tree-run build:types && tsc -p tsconfig.json --noEmit",
