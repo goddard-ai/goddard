@@ -32,7 +32,7 @@ The core logic resides in `@goddard-ai/sdk/node/workforce.ts`, which manages sta
 *   **`WorkforceSupervisor`**: Manages a collection of `WorkforcePackageRuntime` instances.
 *   **`WorkforcePackageRuntime`**: Encapsulates the state for a single package, including:
     *   An `AgentSession` connected to the Goddard daemon.
-    *   An FS watcher (`node:fs.watch`) monitoring the `.goddard/` directory.
+    *   A `chokidar` watcher monitoring the `.goddard/` directory.
     *   A prompt queue for handling concurrent file updates.
 
 #### Inbox Protocol
