@@ -6,6 +6,7 @@ import {
   prCreateRoute,
   prManagedRoute,
   githubWebhookRoute,
+  githubWebhookEventRoute,
   repoStreamRoute,
 } from "../src/backend/routes.ts"
 
@@ -16,6 +17,7 @@ test("backend routes keep their stable public paths", () => {
   assert.equal(prCreateRoute.path.source, "pr/create")
   assert.equal(prManagedRoute.path.source, "pr/managed")
   assert.equal(githubWebhookRoute.path.source, "webhooks/github")
+  assert.equal(githubWebhookEventRoute.path.source, "webhooks/github/events")
   assert.equal(repoStreamRoute.path.source, "stream")
 })
 
@@ -78,7 +80,19 @@ test("backend stream and webhook routes parse representative contracts", () => {
     },
   )
   assert.deepEqual(
-    githubWebhookRoute.methods.POST?.body?.parse({
+    githubWebhookRoute.methods.POST?.headers?.parse({
+      "x-github-delivery": "delivery-1",
+      "x-github-event": "pull_request_review",
+      "x-hub-signature-256": "sha256=signature",
+    }),
+    {
+      "x-github-delivery": "delivery-1",
+      "x-github-event": "pull_request_review",
+      "x-hub-signature-256": "sha256=signature",
+    },
+  )
+  assert.deepEqual(
+    githubWebhookEventRoute.methods.POST?.body?.parse({
       type: "pull_request_review",
       owner: "goddard-ai",
       repo: "sdk",

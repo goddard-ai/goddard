@@ -5,6 +5,7 @@ import { createRouter } from "rouzer"
 import { TursoBackendControlPlane } from "../db/persistence.ts"
 import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.ts"
 import type { Env } from "../env.ts"
+import { handleGitHubWebhookRequest } from "../github-webhooks.ts"
 
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
@@ -111,6 +112,22 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
+          return await handleGitHubWebhookRequest({
+            env,
+            request: ctx.request,
+            handleWebhookEvent: (input) => controlPlane.handleGitHubWebhook(input),
+            broadcastEvent: (event) => broadcastToRepo(env, event.owner, event.repo, event),
+          })
+        } catch (error) {
+          return toErrorResponse(error)
+        }
+      },
+    },
+    githubWebhookEventRoute: {
+      POST: async (ctx) => {
+        try {
+          const env = readEnv(ctx)
+          const controlPlane = createControlPlane(env)
           const event = await controlPlane.handleGitHubWebhook(ctx.body)
           await broadcastToRepo(env, event.owner, event.repo, event)
           return event
@@ -171,6 +188,7 @@ function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
     TURSO_DB_AUTH_TOKEN: ctx.env("TURSO_DB_AUTH_TOKEN"),
     GITHUB_APP_ID: ctx.env("GITHUB_APP_ID"),
     GITHUB_APP_PRIVATE_KEY: ctx.env("GITHUB_APP_PRIVATE_KEY"),
+    GITHUB_WEBHOOK_SECRET: ctx.env("GITHUB_WEBHOOK_SECRET"),
   }
 }
 

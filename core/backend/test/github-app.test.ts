@@ -16,7 +16,7 @@ test("GoddardGitHubApp initialization", () => {
 test("github-app forwards webhooks to backend and returns handled event", async () => {
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input)
-    assert.ok(url.endsWith("/webhooks/github"))
+    assert.ok(url.endsWith("/webhooks/github/events"))
 
     const body = JSON.parse(String(init?.body))
     assert.equal(body.type, "issue_comment")

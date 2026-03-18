@@ -165,7 +165,7 @@ test("sse stream receives webhook events", async () => {
     assert.equal(streamResponse.status, 200)
     const eventPromise = readFirstSseEvent(streamResponse)
 
-    await postJson(`${baseUrl}/webhooks/github`, {
+    await postJson(`${baseUrl}/webhooks/github/events`, {
       type: "issue_comment",
       owner: "goddard-ai",
       repo: "sdk",

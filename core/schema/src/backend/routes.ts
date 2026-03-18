@@ -7,12 +7,19 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
   GitHubWebhookInput,
+  GitHubWebhookReceipt,
   PullRequestRecord,
   RepoEvent,
 } from "../backend.js"
 
 const bearerHeaderSchema = z.object({
   authorization: z.string(),
+})
+
+const githubWebhookHeaderSchema = z.object({
+  "x-github-delivery": z.string(),
+  "x-github-event": z.string(),
+  "x-hub-signature-256": z.string(),
 })
 
 export const authDeviceStartRoute = route("auth/device/start", {
@@ -83,6 +90,13 @@ export const prManagedRoute = route("pr/managed", {
 
 export const githubWebhookRoute = route("webhooks/github", {
   POST: {
+    headers: githubWebhookHeaderSchema,
+    response: $type<GitHubWebhookReceipt>(),
+  },
+})
+
+export const githubWebhookEventRoute = route("webhooks/github/events", {
+  POST: {
     body: z.union([
       z.object({
         type: z.literal("issue_comment"),
@@ -121,5 +135,6 @@ export type {
   DeviceFlowComplete,
   DeviceFlowStart,
   GitHubWebhookInput,
+  GitHubWebhookReceipt,
   ReplyPrInput,
 } from "../backend.js"
