@@ -149,3 +149,14 @@ export const GitHubWebhookInputSchema = z.discriminatedUnion("type", [
   }),
 ])
 export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInputSchema>
+
+export const GitHubWebhookReceiptSchema = z.discriminatedUnion("handled", [
+  z.object({
+    handled: z.literal(false),
+  }),
+  z.object({
+    handled: z.literal(true),
+    event: RepoEventSchema,
+  }),
+])
+export type GitHubWebhookReceipt = z.infer<typeof GitHubWebhookReceiptSchema>

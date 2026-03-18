@@ -5,3 +5,4 @@ compatibility_date = "2024-03-01"
 [vars]
 # TURSO_DB_URL = "libsql://..."
 # TURSO_DB_AUTH_TOKEN = "..."
+# GITHUB_WEBHOOK_SECRET = "..."
