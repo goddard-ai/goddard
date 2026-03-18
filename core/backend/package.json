@@ -18,7 +18,7 @@
   "scripts": {
     "start": "node dist/server.mjs",
     "build": "tsdown",
-    "build:types": "tsdown --no-minify --clean --unused",
+    "build:types": "tsdown --no-minify --clean --unused --log-level error",
     "dev": "wrangler dev",
     "deploy": "alchemy deploy",
     "db:generate": "drizzle-kit generate",

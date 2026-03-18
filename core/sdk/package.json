@@ -31,7 +31,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "build": "tsdown",
-    "build:types": "tsdown --no-minify --clean --unused"
+    "build:types": "tsdown --no-minify --clean --unused --log-level error"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
