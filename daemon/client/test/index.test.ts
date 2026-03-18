@@ -28,7 +28,6 @@ test("createDaemonIpcClientFromEnv passes the resolved socket path to the inject
   const result = createDaemonIpcClientFromEnv({
     env: {
       GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-      GODDARD_SESSION_TOKEN: "tok_session",
     },
     createClient: ({ socketPath }) => {
       calls.push({ socketPath })
@@ -37,7 +36,6 @@ test("createDaemonIpcClientFromEnv passes the resolved socket path to the inject
   })
 
   assert.equal(result.daemonUrl, "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock")
-  assert.equal(result.sessionToken, "tok_session")
   assert.deepEqual(result.client, {
     kind: "custom",
     socketPath: "/tmp/daemon.sock",
@@ -48,25 +46,21 @@ test("createDaemonIpcClientFromEnv passes the resolved socket path to the inject
 test("resolveDaemonConnectionFromEnv makes env-driven daemon settings explicit", () => {
   const result = resolveDaemonConnectionFromEnv({
     GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-    GODDARD_SESSION_TOKEN: "tok_session",
   })
 
   assert.deepEqual(result, {
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
     socketPath: "/tmp/daemon.sock",
-    sessionToken: "tok_session",
   })
 })
 
 test("resolveDaemonConnectionFromEnv can derive the daemon URL from an explicit socket path", () => {
   const result = resolveDaemonConnectionFromEnv({
     GODDARD_DAEMON_SOCKET_PATH: "/tmp/custom-daemon.sock",
-    GODDARD_SESSION_TOKEN: "tok_session",
   })
 
   assert.deepEqual(result, {
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fcustom-daemon.sock",
     socketPath: "/tmp/custom-daemon.sock",
-    sessionToken: "tok_session",
   })
 })

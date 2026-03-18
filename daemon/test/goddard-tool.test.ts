@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(() => ({
   updateMock: vi.fn(async () => undefined),
@@ -21,7 +21,6 @@ const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(()
     return { ok: true }
   }),
   createDaemonIpcClientFromEnvMock: vi.fn(() => ({
-    sessionToken: "tok_session",
     client: {
       send: sendMock,
     },

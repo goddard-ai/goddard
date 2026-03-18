@@ -13,7 +13,6 @@ export type DaemonClientEnv = Record<string, string | undefined>
 export type ResolvedDaemonClientEnv = {
   daemonUrl: string
   socketPath: string
-  sessionToken: string
 }
 
 // Socket metadata passed to environment-specific IPC client factories.
@@ -21,7 +20,10 @@ export type DaemonIpcClientFactoryInput = {
   socketPath: string
 }
 
+// IPC client type produced by the default Node transport.
 export type DaemonIpcClient = ReturnType<typeof createNodeClient<typeof daemonIpcSchema>>
+
+// Injectable factory for hosts that provide a custom IPC transport.
 export type DaemonIpcClientFactory<TClient = DaemonIpcClient> = (
   input: DaemonIpcClientFactoryInput,
 ) => TClient
@@ -50,7 +52,6 @@ export function resolveDaemonConnectionFromEnv(
   return {
     daemonUrl,
     socketPath: readSocketPathFromDaemonUrl(daemonUrl),
-    sessionToken: requiredEnv(env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN"),
   }
 }
 
@@ -74,7 +75,6 @@ export function createDaemonIpcClient(options: {
 
 export function createDaemonIpcClientFromEnv(env?: DaemonClientEnv): {
   daemonUrl: string
-  sessionToken: string
   client: DaemonIpcClient
 }
 
@@ -83,7 +83,6 @@ export function createDaemonIpcClientFromEnv<TClient>(options: {
   createClient?: DaemonIpcClientFactory<TClient>
 }): {
   daemonUrl: string
-  sessionToken: string
   client: TClient
 }
 
@@ -93,11 +92,10 @@ export function createDaemonIpcClientFromEnv(
     | { env?: DaemonClientEnv; createClient?: DaemonIpcClientFactory } = process.env,
 ): {
   daemonUrl: string
-  sessionToken: string
   client: DaemonIpcClient
 } {
   const env = hasFactoryOptions(input) ? (input.env ?? process.env) : input
-  const { daemonUrl, sessionToken } = resolveDaemonConnectionFromEnv(env)
+  const { daemonUrl } = resolveDaemonConnectionFromEnv(env)
   const client = createDaemonIpcClient({
     daemonUrl,
     createClient: hasFactoryOptions(input) ? input.createClient : undefined,
@@ -105,17 +103,8 @@ export function createDaemonIpcClientFromEnv(
 
   return {
     daemonUrl,
-    sessionToken,
     client,
   }
-}
-
-function requiredEnv(value: string | undefined, name: string): string {
-  if (!value) {
-    throw new Error(`${name} is required`)
-  }
-
-  return value
 }
 
 function defaultCreateClient(input: { socketPath: string }): DaemonIpcClient {

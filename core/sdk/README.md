@@ -32,7 +32,7 @@ Use `@goddard-ai/sdk/daemon` when you need to:
 
 `@goddard-ai/sdk/daemon` and `@goddard-ai/sdk/loop` accept explicit `RunAgentOptions`/daemon options for non-Node hosts.
 
-- Node convenience path: omit options and rely on `GODDARD_DAEMON_URL` plus `GODDARD_SESSION_TOKEN` when the host process provides them.
+- Node convenience path: omit options and rely on `GODDARD_DAEMON_URL` when the host process provides it.
 - App path: pass an explicit `daemonUrl` and injected `createClient` factory. Do not rely on Node defaults in the app.
 
 ## Examples

@@ -5,7 +5,8 @@ import { command, option, run, string, subcommands } from "cmd-ts"
 import * as fs from "node:fs/promises"
 
 async function requireSessionId(): Promise<string> {
-  const { client, sessionToken } = createDaemonIpcClientFromEnv()
+  const { client } = createDaemonIpcClientFromEnv()
+  const sessionToken = requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
   const result = await client.send("sessionResolveToken", { token: sessionToken })
   return result.id
 }
@@ -34,7 +35,8 @@ export async function reportCompleted(sessionId: string) {
 }
 
 export async function submitPr(sessionId: string, title: string, body: string) {
-  const { client, sessionToken } = createDaemonIpcClientFromEnv()
+  const { client } = createDaemonIpcClientFromEnv()
+  const sessionToken = requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
   const pr = await client.send("prSubmit", {
     token: sessionToken,
     cwd: process.cwd(),
@@ -49,7 +51,8 @@ export async function submitPr(sessionId: string, title: string, body: string) {
 }
 
 export async function replyPr(sessionId: string, message: string) {
-  const { client, sessionToken } = createDaemonIpcClientFromEnv()
+  const { client } = createDaemonIpcClientFromEnv()
+  const sessionToken = requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
   await client.send("prReply", {
     token: sessionToken,
     cwd: process.cwd(),
@@ -158,4 +161,12 @@ if (import.meta.main) {
     console.error(error)
     process.exit(1)
   })
+}
+
+function requiredEnv(value: string | undefined, name: string): string {
+  if (!value) {
+    throw new Error(`${name} is required`)
+  }
+
+  return value
 }
