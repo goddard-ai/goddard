@@ -93,3 +93,7 @@ The `drainPackageQueue` function ensures that if new requests arrive while the a
 
 ### Daemon Dependency
 The workforce CLI requires a running Goddard daemon to manage the underlying AI sessions.
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
