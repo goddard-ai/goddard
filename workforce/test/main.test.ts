@@ -1,30 +1,42 @@
 import * as assert from "node:assert/strict"
-import { afterEach, beforeEach, test, vi } from "vitest"
+import { beforeEach, test, vi } from "vitest"
 
 const cancelledSelection = Symbol("cancelled-selection")
 
 const {
   cancelMock,
+  cancelWorkforceRequestMock,
+  createWorkforceRequestMock,
   discoverWorkforceInitCandidatesMock,
-  initializeWorkforcePackagesMock,
+  getWorkforceMock,
+  initializeWorkforceMock,
   introMock,
   isCancelMock,
+  listWorkforcesMock,
   multiselectMock,
   outroMock,
   resolveRepositoryRootMock,
-  stopMock,
-  watchWorkforceMock,
+  startWorkforceMock,
+  stopWorkforceMock,
+  truncateWorkforceMock,
+  updateWorkforceRequestMock,
 } = vi.hoisted(() => ({
   cancelMock: vi.fn(),
+  cancelWorkforceRequestMock: vi.fn(),
+  createWorkforceRequestMock: vi.fn(),
   discoverWorkforceInitCandidatesMock: vi.fn(),
-  initializeWorkforcePackagesMock: vi.fn(),
+  getWorkforceMock: vi.fn(),
+  initializeWorkforceMock: vi.fn(),
   introMock: vi.fn(),
   isCancelMock: vi.fn((value: unknown) => value === cancelledSelection),
+  listWorkforcesMock: vi.fn(),
   multiselectMock: vi.fn(),
   outroMock: vi.fn(),
   resolveRepositoryRootMock: vi.fn(),
-  stopMock: vi.fn(async () => {}),
-  watchWorkforceMock: vi.fn(async () => ({ stop: stopMock })),
+  startWorkforceMock: vi.fn(),
+  stopWorkforceMock: vi.fn(),
+  truncateWorkforceMock: vi.fn(),
+  updateWorkforceRequestMock: vi.fn(),
 }))
 
 vi.mock("@clack/prompts", () => ({
@@ -36,28 +48,36 @@ vi.mock("@clack/prompts", () => ({
 }))
 
 vi.mock("@goddard-ai/sdk/node", () => ({
+  cancelWorkforceRequest: cancelWorkforceRequestMock,
+  createWorkforceRequest: createWorkforceRequestMock,
   discoverWorkforceInitCandidates: discoverWorkforceInitCandidatesMock,
-  initializeWorkforcePackages: initializeWorkforcePackagesMock,
+  getWorkforce: getWorkforceMock,
+  initializeWorkforce: initializeWorkforceMock,
+  listWorkforces: listWorkforcesMock,
   resolveRepositoryRoot: resolveRepositoryRootMock,
-  watchWorkforce: watchWorkforceMock,
+  startWorkforce: startWorkforceMock,
+  stopWorkforce: stopWorkforceMock,
+  truncateWorkforce: truncateWorkforceMock,
+  updateWorkforceRequest: updateWorkforceRequestMock,
 }))
 
 beforeEach(() => {
   cancelMock.mockReset()
+  cancelWorkforceRequestMock.mockReset()
+  createWorkforceRequestMock.mockReset()
   discoverWorkforceInitCandidatesMock.mockReset()
-  initializeWorkforcePackagesMock.mockReset()
+  getWorkforceMock.mockReset()
+  initializeWorkforceMock.mockReset()
   introMock.mockReset()
   isCancelMock.mockClear()
+  listWorkforcesMock.mockReset()
   multiselectMock.mockReset()
   outroMock.mockReset()
   resolveRepositoryRootMock.mockReset()
-  stopMock.mockClear()
-  watchWorkforceMock.mockReset()
-  watchWorkforceMock.mockResolvedValue({ stop: stopMock })
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
+  startWorkforceMock.mockReset()
+  stopWorkforceMock.mockReset()
+  truncateWorkforceMock.mockReset()
+  updateWorkforceRequestMock.mockReset()
 })
 
 test("init exits cleanly when there are no workforce candidates", async () => {
@@ -70,7 +90,7 @@ test("init exits cleanly when there are no workforce candidates", async () => {
 
   assert.equal(consoleLog.mock.calls[0]?.[0], "No workforce candidates found under /repo.")
   assert.equal(multiselectMock.mock.calls.length, 0)
-  assert.equal(initializeWorkforcePackagesMock.mock.calls.length, 0)
+  assert.equal(initializeWorkforceMock.mock.calls.length, 0)
 })
 
 test("init cancels without creating files when the prompt is cancelled", async () => {
@@ -81,9 +101,6 @@ test("init cancels without creating files when the prompt is cancelled", async (
       relativeDir: ".",
       manifestPath: "/repo/package.json",
       name: "@repo/root",
-      goddardDir: "/repo/.goddard",
-      requestsPath: "/repo/.goddard/requests.jsonl",
-      responsesPath: "/repo/.goddard/responses.jsonl",
     },
   ])
   multiselectMock.mockResolvedValue(cancelledSelection)
@@ -92,10 +109,10 @@ test("init cancels without creating files when the prompt is cancelled", async (
   await main(["init", "--root", "/repo"])
 
   assert.equal(cancelMock.mock.calls.length, 1)
-  assert.equal(initializeWorkforcePackagesMock.mock.calls.length, 0)
+  assert.equal(initializeWorkforceMock.mock.calls.length, 0)
 })
 
-test("init maps selected package roots into workforce initialization", async () => {
+test("init maps selected packages into workforce initialization", async () => {
   resolveRepositoryRootMock.mockResolvedValue("/repo")
   discoverWorkforceInitCandidatesMock.mockResolvedValue([
     {
@@ -103,91 +120,72 @@ test("init maps selected package roots into workforce initialization", async () 
       relativeDir: ".",
       manifestPath: "/repo/package.json",
       name: "@repo/root",
-      goddardDir: "/repo/.goddard",
-      requestsPath: "/repo/.goddard/requests.jsonl",
-      responsesPath: "/repo/.goddard/responses.jsonl",
     },
     {
       rootDir: "/repo/packages/ui",
       relativeDir: "packages/ui",
       manifestPath: "/repo/packages/ui/package.json",
       name: "@repo/ui",
-      goddardDir: "/repo/packages/ui/.goddard",
-      requestsPath: "/repo/packages/ui/.goddard/requests.jsonl",
-      responsesPath: "/repo/packages/ui/.goddard/responses.jsonl",
     },
   ])
   multiselectMock.mockResolvedValue(["/repo", "/repo/packages/ui"])
-  initializeWorkforcePackagesMock.mockResolvedValue([
-    {
-      packageDir: "/repo",
-      goddardDir: "/repo/.goddard",
-      createdPaths: ["/repo/.goddard/requests.jsonl"],
-    },
-    {
-      packageDir: "/repo/packages/ui",
-      goddardDir: "/repo/packages/ui/.goddard",
-      createdPaths: ["/repo/packages/ui/.goddard/requests.jsonl"],
-    },
-  ])
+  initializeWorkforceMock.mockResolvedValue({
+    configPath: "/repo/.goddard/workforce.json",
+  })
 
   const { main } = await import("../src/main.ts")
   await main(["init", "--root", "/repo"])
 
-  assert.deepEqual(initializeWorkforcePackagesMock.mock.calls[0][0], ["/repo", "/repo/packages/ui"])
+  assert.deepEqual(initializeWorkforceMock.mock.calls[0]?.[0], "/repo")
+  assert.deepEqual(initializeWorkforceMock.mock.calls[0]?.[1], ["/repo", "/repo/packages/ui"])
   assert.equal(outroMock.mock.calls.length, 1)
 })
 
-test("watch parses args and forwards daemon options into the SDK watcher", async () => {
+test("start and stop commands forward lifecycle control to the daemon-backed SDK helpers", async () => {
   resolveRepositoryRootMock.mockResolvedValue("/repo")
+  startWorkforceMock.mockResolvedValue({ rootDir: "/repo" })
+  stopWorkforceMock.mockResolvedValue(true)
 
+  const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
   const { main } = await import("../src/main.ts")
-  const runPromise = main([
-    "watch",
-    "--root",
-    "/repo/packages/app",
-    "--daemon-url",
-    "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-  ])
 
-  setTimeout(() => {
-    process.emit("SIGINT")
-  }, 20)
+  await main(["start", "--root", "/repo/packages/app"])
+  await main(["stop", "--root", "/repo/packages/app"])
 
-  await runPromise
-
-  const firstWatchCall = watchWorkforceMock.mock.calls[0] as unknown as [unknown] | undefined
-  assert.ok(firstWatchCall)
-  assert.equal((firstWatchCall[0] as { rootDir: string }).rootDir, "/repo")
-  assert.deepEqual((firstWatchCall[0] as { daemon?: { daemonUrl: string } }).daemon, {
-    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-  })
-  assert.equal(typeof (firstWatchCall[0] as { onEvent: unknown }).onEvent, "function")
-  assert.equal(stopMock.mock.calls.length, 1)
+  assert.equal(startWorkforceMock.mock.calls.length, 1)
+  assert.equal(stopWorkforceMock.mock.calls.length, 1)
+  assert.equal(consoleLog.mock.calls.length, 2)
 })
 
-test("prints help when no subcommand is provided", async () => {
+test("status and list print daemon-backed workforce state", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  getWorkforceMock.mockResolvedValue({ rootDir: "/repo", activeRequestCount: 0 })
+  listWorkforcesMock.mockResolvedValue([{ rootDir: "/repo", activeRequestCount: 0 }])
   const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
-  const processExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
 
   const { main } = await import("../src/main.ts")
-  await main([])
+  await main(["status", "--root", "/repo"])
+  await main(["list"])
 
-  assert.ok(
-    consoleLog.mock.calls.some((call) => call[0].includes("goddard-workforce <subcommand>")),
-  )
-  assert.equal(processExit.mock.calls[0]?.[0], 1)
+  assert.equal(getWorkforceMock.mock.calls.length, 1)
+  assert.equal(listWorkforcesMock.mock.calls.length, 1)
+  assert.equal(consoleLog.mock.calls.length, 2)
 })
 
-test("prints help when an invalid subcommand is provided", async () => {
+test("request, update, and truncate commands call the matching SDK helpers", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  createWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
+  updateWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
+  truncateWorkforceMock.mockResolvedValue({ requestId: null })
   const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
-  const processExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
 
   const { main } = await import("../src/main.ts")
-  await main(["invalid"])
+  await main(["request", "--root", "/repo", "--target-agent-id", "api", "--message", "Ship it."])
+  await main(["update", "--root", "/repo", "--request-id", "req-1", "--message", "Resume it."])
+  await main(["truncate", "--root", "/repo", "--agent-id", "api", "--reason", "Reset queue."])
 
-  assert.ok(
-    consoleLog.mock.calls.some((call) => call[0].includes("goddard-workforce <subcommand>")),
-  )
-  assert.equal(processExit.mock.calls[0]?.[0], 1)
+  assert.equal(createWorkforceRequestMock.mock.calls.length, 1)
+  assert.equal(updateWorkforceRequestMock.mock.calls.length, 1)
+  assert.equal(truncateWorkforceMock.mock.calls.length, 1)
+  assert.equal(consoleLog.mock.calls.length, 3)
 })

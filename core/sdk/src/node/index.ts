@@ -28,10 +28,16 @@ export class GoddardSdk extends BaseGoddardSdk {
   get workforce() {
     return {
       resolveRepositoryRoot: workforce.resolveRepositoryRoot,
-      discoverPackages: workforce.discoverWorkforcePackages,
       discoverInitCandidates: workforce.discoverWorkforceInitCandidates,
-      initializePackages: workforce.initializeWorkforcePackages,
-      watch: workforce.watchWorkforce,
+      initialize: workforce.initializeWorkforce,
+      start: workforce.startWorkforce,
+      get: workforce.getWorkforce,
+      list: workforce.listWorkforces,
+      stop: workforce.stopWorkforce,
+      request: workforce.createWorkforceRequest,
+      update: workforce.updateWorkforceRequest,
+      cancel: workforce.cancelWorkforceRequest,
+      truncate: workforce.truncateWorkforce,
     }
   }
 }

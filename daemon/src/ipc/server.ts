@@ -2,9 +2,11 @@ import * as acp from "@agentclientprotocol/sdk"
 import { createServer } from "@goddard-ai/ipc"
 import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { SessionStorage } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { once } from "node:events"
 import { createSessionManager } from "../session/manager.ts"
+import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
 import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
@@ -31,6 +33,49 @@ export async function startDaemonServer(
   await prepareSocketPath(socketPath)
 
   let sessionManager!: ReturnType<typeof createSessionManager>
+  let workforceManager!: ReturnType<typeof createWorkforceManager>
+
+  async function resolveWorkforceActor(
+    token: string | undefined,
+    context: { setSessionId: (sessionId: string) => void },
+  ): Promise<WorkforceActorContext> {
+    if (!token) {
+      return {
+        sessionId: null,
+        agentId: null,
+        requestId: null,
+      }
+    }
+
+    const session = await getSessionByToken(token)
+    if (!session) {
+      throw new Error("Invalid session token")
+    }
+
+    context.setSessionId(session.sessionId)
+
+    const sessionRecord = await SessionStorage.get(session.sessionId)
+    const metadata =
+      sessionRecord && typeof sessionRecord.metadata === "object" && sessionRecord.metadata !== null
+        ? (sessionRecord.metadata as {
+            workforce?: {
+              agentId?: string
+              requestId?: string
+            }
+          })
+        : null
+
+    if (!metadata?.workforce || typeof metadata.workforce.agentId !== "string") {
+      throw new Error("Session is not attached to a workforce request")
+    }
+
+    return {
+      sessionId: session.sessionId,
+      agentId: metadata.workforce.agentId,
+      requestId:
+        typeof metadata.workforce.requestId === "string" ? metadata.workforce.requestId : null,
+    }
+  }
 
   function withRequestLogging<TPayload, TResponse>(
     requestName: string,
@@ -39,20 +84,21 @@ export async function startDaemonServer(
       context: { setSessionId: (sessionId: string) => void },
     ) => Promise<TResponse> | TResponse,
   ) {
-    return async (payload: TPayload): Promise<TResponse> => {
+    return async (payload: unknown): Promise<TResponse> => {
+      const typedPayload = payload as TPayload
       const opId = logger.createOpId()
       const startedAt = Date.now()
-      let sessionId = readSessionIdForLog(payload)
+      let sessionId = readSessionIdForLog(typedPayload)
 
       logger.log("ipc.request_received", {
         opId,
         requestName,
         sessionId,
-        payload: createPayloadPreview(payload),
+        payload: createPayloadPreview(typedPayload),
       })
 
       try {
-        const response = await handler(payload, {
+        const response = await handler(typedPayload, {
           setSessionId(nextSessionId) {
             sessionId = nextSessionId
           },
@@ -81,8 +127,18 @@ export async function startDaemonServer(
   }
 
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
-    health: withRequestLogging("health", async () => ({ ok: true })),
-    prSubmit: withRequestLogging("prSubmit", async (payload, context) => {
+    health: withRequestLogging<{}, { ok: true }>("health", async () => ({ ok: true })),
+    prSubmit: withRequestLogging<
+      {
+        token: string
+        cwd: string
+        title: string
+        body: string
+        head?: string
+        base?: string
+      },
+      { number: number; url: string }
+    >("prSubmit", async (payload, context) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new Error("Invalid session token")
@@ -108,7 +164,15 @@ export async function startDaemonServer(
       await addAllowedPrToSession(session.sessionId, pr.number)
       return { number: pr.number, url: pr.url }
     }),
-    prReply: withRequestLogging("prReply", async (payload, context) => {
+    prReply: withRequestLogging<
+      {
+        token: string
+        cwd: string
+        message: string
+        prNumber?: number
+      },
+      { success: boolean }
+    >("prReply", async (payload, context) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new Error("Invalid session token")
@@ -134,45 +198,192 @@ export async function startDaemonServer(
         repo: session.repo,
       })
     }),
-    sessionCreate: withRequestLogging("sessionCreate", async (payload, context) => {
+    sessionCreate: withRequestLogging<
+      CreateDaemonSessionRequest,
+      { session: Awaited<ReturnType<typeof sessionManager.createSession>> }
+    >("sessionCreate", async (payload, context) => {
       const response = {
         session: await sessionManager.createSession(payload as CreateDaemonSessionRequest),
       }
       context.setSessionId(response.session.id)
       return response
     }),
-    sessionGet: withRequestLogging("sessionGet", async ({ id }) => {
+    sessionGet: withRequestLogging<
+      { id: string },
+      { session: Awaited<ReturnType<typeof sessionManager.getSession>> }
+    >("sessionGet", async ({ id }) => {
       return {
         session: await sessionManager.getSession(id),
       }
     }),
-    sessionConnect: withRequestLogging("sessionConnect", async ({ id }) => {
+    sessionConnect: withRequestLogging<
+      { id: string },
+      { session: Awaited<ReturnType<typeof sessionManager.connectSession>> }
+    >("sessionConnect", async ({ id }) => {
       return {
         session: await sessionManager.connectSession(id),
       }
     }),
-    sessionHistory: withRequestLogging("sessionHistory", async ({ id }) => {
+    sessionHistory: withRequestLogging<
+      { id: string },
+      Awaited<ReturnType<typeof sessionManager.getHistory>>
+    >("sessionHistory", async ({ id }) => {
       return sessionManager.getHistory(id)
     }),
-    sessionDiagnostics: withRequestLogging("sessionDiagnostics", async ({ id }) => {
+    sessionDiagnostics: withRequestLogging<
+      { id: string },
+      Awaited<ReturnType<typeof sessionManager.getDiagnostics>>
+    >("sessionDiagnostics", async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     }),
-    sessionShutdown: withRequestLogging("sessionShutdown", async ({ id }) => {
+    sessionShutdown: withRequestLogging<{ id: string }, { id: string; success: boolean }>(
+      "sessionShutdown",
+      async ({ id }) => {
+        return {
+          id,
+          success: await sessionManager.shutdownSession(id),
+        }
+      },
+    ),
+    sessionSend: withRequestLogging<{ id: string; message: unknown }, { accepted: true }>(
+      "sessionSend",
+      async ({ id, message }) => {
+        await sessionManager.sendMessage(id, message as acp.AnyMessage)
+        return { accepted: true as const }
+      },
+    ),
+    sessionResolveToken: withRequestLogging<{ token: string }, { id: string }>(
+      "sessionResolveToken",
+      async ({ token }, context) => {
+        const id = await sessionManager.resolveSessionIdByToken(token)
+        context.setSessionId(id)
+        return {
+          id,
+        }
+      },
+    ),
+    workforceStart: withRequestLogging<
+      { rootDir: string },
+      { workforce: Awaited<ReturnType<typeof workforceManager.startWorkforce>> }
+    >("workforceStart", async ({ rootDir }) => {
       return {
-        id,
-        success: await sessionManager.shutdownSession(id),
+        workforce: await workforceManager.startWorkforce(rootDir),
       }
     }),
-    sessionSend: withRequestLogging("sessionSend", async ({ id, message }) => {
-      await sessionManager.sendMessage(id, message as acp.AnyMessage)
-      return { accepted: true as const }
-    }),
-    sessionResolveToken: withRequestLogging("sessionResolveToken", async ({ token }, context) => {
-      const id = await sessionManager.resolveSessionIdByToken(token)
-      context.setSessionId(id)
+    workforceGet: withRequestLogging<
+      { rootDir: string },
+      { workforce: Awaited<ReturnType<typeof workforceManager.getWorkforce>> }
+    >("workforceGet", async ({ rootDir }) => {
       return {
-        id,
+        workforce: await workforceManager.getWorkforce(rootDir),
       }
+    }),
+    workforceList: withRequestLogging<
+      {},
+      { workforces: Awaited<ReturnType<typeof workforceManager.listWorkforces>> }
+    >("workforceList", async () => {
+      return {
+        workforces: await workforceManager.listWorkforces(),
+      }
+    }),
+    workforceShutdown: withRequestLogging<
+      { rootDir: string },
+      { rootDir: string; success: boolean }
+    >("workforceShutdown", async ({ rootDir }) => {
+      return {
+        rootDir,
+        success: await workforceManager.shutdownWorkforce(rootDir),
+      }
+    }),
+    workforceRequest: withRequestLogging<
+      { rootDir: string; targetAgentId: string; input: string; token?: string },
+      Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
+    >("workforceRequest", async (payload, context) => {
+      const actor = await resolveWorkforceActor(payload.token, context)
+      return workforceManager.appendWorkforceEvent(
+        payload.rootDir,
+        {
+          type: "request",
+          targetAgentId: payload.targetAgentId,
+          input: payload.input,
+        },
+        actor,
+      )
+    }),
+    workforceUpdate: withRequestLogging<
+      { rootDir: string; requestId: string; input: string; token?: string },
+      Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
+    >("workforceUpdate", async (payload, context) => {
+      const actor = await resolveWorkforceActor(payload.token, context)
+      return workforceManager.appendWorkforceEvent(
+        payload.rootDir,
+        {
+          type: "update",
+          requestId: payload.requestId,
+          input: payload.input,
+        },
+        actor,
+      )
+    }),
+    workforceCancel: withRequestLogging<
+      { rootDir: string; requestId: string; reason?: string; token?: string },
+      Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
+    >("workforceCancel", async (payload, context) => {
+      const actor = await resolveWorkforceActor(payload.token, context)
+      return workforceManager.appendWorkforceEvent(
+        payload.rootDir,
+        {
+          type: "cancel",
+          requestId: payload.requestId,
+          reason: payload.reason ?? null,
+        },
+        actor,
+      )
+    }),
+    workforceTruncate: withRequestLogging<
+      { rootDir: string; agentId?: string; reason?: string; token?: string },
+      Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
+    >("workforceTruncate", async (payload, context) => {
+      const actor = await resolveWorkforceActor(payload.token, context)
+      return workforceManager.appendWorkforceEvent(
+        payload.rootDir,
+        {
+          type: "truncate",
+          agentId: payload.agentId ?? null,
+          reason: payload.reason ?? null,
+        },
+        actor,
+      )
+    }),
+    workforceRespond: withRequestLogging<
+      { rootDir: string; requestId: string; output: string; token: string },
+      Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
+    >("workforceRespond", async (payload, context) => {
+      const actor = await resolveWorkforceActor(payload.token, context)
+      return workforceManager.appendWorkforceEvent(
+        payload.rootDir,
+        {
+          type: "respond",
+          requestId: payload.requestId,
+          output: payload.output,
+        },
+        actor,
+      )
+    }),
+    workforceSuspend: withRequestLogging<
+      { rootDir: string; requestId: string; reason: string; token: string },
+      Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
+    >("workforceSuspend", async (payload, context) => {
+      const actor = await resolveWorkforceActor(payload.token, context)
+      return workforceManager.appendWorkforceEvent(
+        payload.rootDir,
+        {
+          type: "suspend",
+          requestId: payload.requestId,
+          reason: payload.reason,
+        },
+        actor,
+      )
     }),
   })
 
@@ -182,6 +393,9 @@ export async function startDaemonServer(
     publish: (id, message) => {
       ipcServer.publish("sessionMessage", { id, message })
     },
+  })
+  workforceManager = (deps.createWorkforceManager ?? ((input) => createWorkforceManager(input)))({
+    sessionManager,
   })
 
   await once(ipcServer.server, "listening")
@@ -204,6 +418,7 @@ export async function startDaemonServer(
         socketPath,
         daemonUrl,
       })
+      await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {

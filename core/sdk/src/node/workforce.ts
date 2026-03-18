@@ -1,200 +1,42 @@
 import { execFile } from "node:child_process"
-import { createHash } from "node:crypto"
-import type { Stats } from "node:fs"
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
-import { watch as watchFiles, type FSWatcher } from "chokidar"
-import type { AgentSession } from "../daemon/session/client-session.ts"
-import { runAgent, type RunAgentOptions } from "../daemon/session/client.ts"
+import type { AgentDistribution } from "@goddard-ai/schema/session-server"
+import type { WorkforceConfig } from "@goddard-ai/schema/workforce"
+import {
+  cancelDaemonWorkforceRequest,
+  createDaemonWorkforceRequest,
+  getDaemonWorkforce,
+  listDaemonWorkforces,
+  shutdownDaemonWorkforce,
+  startDaemonWorkforce,
+  truncateDaemonWorkforce,
+  updateDaemonWorkforceRequest,
+  type WorkforceClientOptions,
+} from "../daemon/workforce.js"
 
 const execFileAsync = promisify(execFile)
 
-/**
- * The name of the file within a workforce package's .goddard/ directory
- * that acts as the primary "inbox" for incoming agent requests.
- */
-const REQUESTS_FILE = "requests.jsonl"
-
-/**
- * The name of the file within a workforce package's .goddard/ directory
- * where the agent records its own activity or internal feedback.
- */
-const RESPONSES_FILE = "responses.jsonl"
-
-/**
- * A state file used to track the last processed byte offset and content
- * hash for the watched JSONL files to ensure idempotent processing.
- */
-const PROCESSED_AT_FILE = "processed-at.json"
-
-/**
- * The set of files within a .goddard/ directory that the workforce
- * supervisor monitors for new appends.
- */
-const WATCHED_FILES = [REQUESTS_FILE, RESPONSES_FILE] as const
-
-/**
- * Common directory names that should be skipped when recursively
- * discovering packages to avoid performance issues and noise.
- */
+// Common directory names skipped during workspace package discovery.
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
 
-/**
- * The duration to wait after a file change is detected before syncing
- * state, allowing multiple rapid writes to be batched.
- */
-const WATCH_SYNC_DELAY_MS = 25
-
-/**
- * Package metadata discovered from nested package manifests under a
- * repository root.
- */
+// Package metadata discovered from nested package manifests under a repository root.
 export type DiscoveredWorkforcePackage = {
   rootDir: string
   relativeDir: string
   manifestPath: string
   name: string
-  goddardDir: string
-  requestsPath: string
-  responsesPath: string
 }
 
-/**
- * Result metadata returned after initializing a package's workforce files.
- */
-export type InitializedWorkforcePackage = {
-  packageDir: string
-  goddardDir: string
+// Result metadata returned after initializing repository workforce files.
+export type InitializedWorkforce = {
+  rootDir: string
+  configPath: string
+  ledgerPath: string
   createdPaths: string[]
 }
 
-/**
- * Persisted append-tracking state for one watched JSONL file.
- */
-export interface WorkforceProcessedFileState {
-  offset: number
-  prefixHash: string
-  updatedAt: string
-}
-
-/**
- * Package-local runtime state stored in `.goddard/processed-at.json`.
- */
-export interface WorkforceProcessedState {
-  /** Schema version for future-proofing the state object format. */
-  version: 1
-
-  /**
-   * A map of file names to their respective last-processed offset and
-   * hash state.
-   */
-  files: Partial<Record<WorkforceWatchedFileName, WorkforceProcessedFileState>>
-}
-
-/**
- * File names supervised inside each workforce-enabled `.goddard` directory.
- */
-export type WorkforceWatchedFileName = (typeof WATCHED_FILES)[number]
-
-/**
- * Runtime event stream emitted by the workforce supervisor for host logging.
- */
-export type WorkforceRuntimeEvent =
-  | {
-      type: "package-discovered"
-      package: DiscoveredWorkforcePackage
-    }
-  | {
-      type: "session-started"
-      package: DiscoveredWorkforcePackage
-      sessionId: string
-    }
-  | {
-      type: "batch-prompted"
-      package: DiscoveredWorkforcePackage
-      batchCount: number
-      lineCount: number
-    }
-  | {
-      type: "batch-queued"
-      package: DiscoveredWorkforcePackage
-      batchCount: number
-      lineCount: number
-    }
-  | {
-      type: "runtime-error"
-      package: DiscoveredWorkforcePackage
-      error: Error
-    }
-
-/**
- * Options accepted by the Node-only workforce watcher runtime.
- */
-export type WorkforceWatchOptions = {
-  rootDir: string
-  daemon?: RunAgentOptions
-  onEvent?: (event: WorkforceRuntimeEvent) => void
-}
-
-/**
- * One append-derived prompt batch associated with a specific watched file.
- */
-interface WorkforcePromptBatch {
-  /** The name of the file (e.g., requests.jsonl) that triggered this batch. */
-  fileName: WorkforceWatchedFileName
-
-  /** The full path to the file that was read. */
-  filePath: string
-
-  /** The newly appended UTF-8 content read from the file. */
-  content: string
-}
-
-/**
- * In-memory watcher runtime for a single package-scoped workforce session.
- */
-interface WorkforcePackageRuntime {
-  /** The immutable discovery metadata for this package. */
-  package: DiscoveredWorkforcePackage
-
-  /** The persistent AI session managing this package's domain. */
-  session: AgentSession
-
-  /** The FS watcher instance monitoring changes in the .goddard/ directory. */
-  watcher: FSWatcher
-
-  /** A timer handle for debouncing multiple rapid file changes. */
-  syncTimer: NodeJS.Timeout | null
-
-  /** Whether the supervisor has stopped this runtime. */
-  stopped: boolean
-
-  /**
-   * Whether an active prompt call is currently being awaited by this
-   * agent.
-   */
-  promptActive: boolean
-
-  /** A queue of prompt batches that are pending transmission to the agent. */
-  pendingBatches: WorkforcePromptBatch[]
-}
-
-/**
- * Emits a runtime event to the provided event handler, if one is defined.
- */
-function emitEvent(onEvent: WorkforceWatchOptions["onEvent"], event: WorkforceRuntimeEvent): void {
-  try {
-    onEvent?.(event)
-  } catch (error) {
-    console.error(error)
-  }
-}
-
-/**
- * Attempts to extract the package name from a package.json manifest, falling
- * back to the directory name if the manifest is missing or invalid.
- */
 async function resolvePackageName(manifestPath: string, packageDir: string): Promise<string> {
   try {
     const parsed = JSON.parse(await readFile(manifestPath, "utf-8")) as { name?: string }
@@ -208,9 +50,6 @@ async function resolvePackageName(manifestPath: string, packageDir: string): Pro
   return basename(packageDir)
 }
 
-/**
- * Recursively walks a directory and invokes a visitor function for each discovered directory.
- */
 async function walkDirectory(
   directory: string,
   visitor: (entryPath: string) => Promise<void>,
@@ -218,11 +57,7 @@ async function walkDirectory(
   const entries = await readdir(directory, { withFileTypes: true })
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue
-    }
-
-    if (IGNORED_DIRECTORY_NAMES.has(entry.name)) {
+    if (!entry.isDirectory() || IGNORED_DIRECTORY_NAMES.has(entry.name)) {
       continue
     }
 
@@ -232,9 +67,6 @@ async function walkDirectory(
   }
 }
 
-/**
- * Discovers all directories containing a package.json file under a given root.
- */
 async function discoverNestedPackageDirs(rootDir: string): Promise<string[]> {
   const resolvedRootDir = resolve(rootDir)
   const packageDirs: string[] = []
@@ -249,9 +81,8 @@ async function discoverNestedPackageDirs(rootDir: string): Promise<string[]> {
   }
 
   await walkDirectory(resolvedRootDir, async (entryPath) => {
-    const manifestPath = join(entryPath, "package.json")
     try {
-      const manifestStats = await stat(manifestPath)
+      const manifestStats = await stat(join(entryPath, "package.json"))
       if (manifestStats.isFile()) {
         packageDirs.push(entryPath)
       }
@@ -263,9 +94,6 @@ async function discoverNestedPackageDirs(rootDir: string): Promise<string[]> {
   return packageDirs.sort()
 }
 
-/**
- * Converts a raw package directory path into a DiscoveredWorkforcePackage object.
- */
 async function toDiscoveredPackage(
   rootDir: string,
   packageDir: string,
@@ -275,476 +103,47 @@ async function toDiscoveredPackage(
     relativeDir: relative(rootDir, packageDir) || ".",
     manifestPath: join(packageDir, "package.json"),
     name: await resolvePackageName(join(packageDir, "package.json"), packageDir),
-    goddardDir: join(packageDir, ".goddard"),
-    requestsPath: join(packageDir, ".goddard", REQUESTS_FILE),
-    responsesPath: join(packageDir, ".goddard", RESPONSES_FILE),
   }
 }
 
-/**
- * Constructs the absolute path to the processed-at.json state file for a package.
- */
-function buildProcessedStatePath(pkg: DiscoveredWorkforcePackage): string {
-  return join(pkg.goddardDir, PROCESSED_AT_FILE)
+function sanitizeAgentId(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
 }
 
-/**
- * Reads and validates the persisted workforce processing state for a package.
- */
-async function readProcessedState(
-  pkg: DiscoveredWorkforcePackage,
-): Promise<WorkforceProcessedState | null> {
-  try {
-    const parsed = JSON.parse(
-      await readFile(buildProcessedStatePath(pkg), "utf-8"),
-    ) as WorkforceProcessedState
-
-    if (parsed.version !== 1 || typeof parsed.files !== "object" || parsed.files === null) {
-      return null
-    }
-
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-/**
- * Serializes and writes the workforce processing state to disk.
- */
-async function writeProcessedState(
-  pkg: DiscoveredWorkforcePackage,
-  state: WorkforceProcessedState,
-): Promise<void> {
-  await mkdir(pkg.goddardDir, { recursive: true })
-  await writeFile(buildProcessedStatePath(pkg), `${JSON.stringify(state, null, 2)}\n`, "utf-8")
-}
-
-/**
- * Computes a SHA-256 hash for the given string content.
- */
-function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex")
-}
-
-/**
- * Finds the byte offset of the last complete line (ending in newline) in the string.
- */
-function findLastCompleteOffset(content: string): number {
-  if (!content) {
-    return 0
-  }
-
-  if (content.endsWith("\n")) {
-    return Buffer.byteLength(content)
-  }
-
-  const lastNewlineIndex = content.lastIndexOf("\n")
-  if (lastNewlineIndex === -1) {
-    return 0
-  }
-
-  return Buffer.byteLength(content.slice(0, lastNewlineIndex + 1))
-}
-
-/**
- * Reads a specific byte prefix from a file and returns it as a UTF-8 string.
- */
-async function readUtf8Prefix(path: string, offset: number): Promise<string> {
-  if (offset <= 0) {
-    return ""
-  }
-
-  return (await readFile(path)).subarray(0, offset).toString("utf-8")
-}
-
-/**
- * Creates a new file state entry based on the current file content up to a given offset.
- */
-async function createProgressEntry(
-  path: string,
-  offset: number,
-): Promise<WorkforceProcessedFileState> {
-  const prefix = await readUtf8Prefix(path, offset)
+function buildWorkforceConfig(
+  packages: DiscoveredWorkforcePackage[],
+  defaultAgent: string | AgentDistribution = "pi",
+): WorkforceConfig {
+  const domainAgents = packages
+    .filter((pkg) => pkg.relativeDir !== ".")
+    .map((pkg) => ({
+      id: sanitizeAgentId(pkg.name || pkg.relativeDir),
+      name: pkg.name,
+      role: "domain" as const,
+      cwd: pkg.relativeDir,
+      owns: [pkg.relativeDir],
+    }))
 
   return {
-    offset,
-    prefixHash: hashContent(prefix),
-    updatedAt: new Date().toISOString(),
+    version: 1,
+    defaultAgent,
+    rootAgentId: "root",
+    agents: [
+      {
+        id: "root",
+        name: "@repo/root",
+        role: "root",
+        cwd: ".",
+        owns: ["."],
+      },
+      ...domainAgents,
+    ],
   }
 }
 
-/**
- * Scans an existing file and builds a starting progress entry for all currently complete lines.
- */
-async function buildSeedEntry(path: string): Promise<WorkforceProcessedFileState> {
-  const content = await readFile(path, "utf-8")
-  return createProgressEntry(path, findLastCompleteOffset(content))
-}
-
-/**
- * Ensures a package has a valid processed state for a specific file, initializing it if necessary.
- */
-async function ensureProgressState(
-  pkg: DiscoveredWorkforcePackage,
-  fileName: WorkforceWatchedFileName,
-  filePath: string,
-  currentState: WorkforceProcessedState | null,
-): Promise<WorkforceProcessedState> {
-  const state = currentState ?? { version: 1, files: {} }
-  if (state.files[fileName]) {
-    return state
-  }
-
-  try {
-    state.files[fileName] = await buildSeedEntry(filePath)
-  } catch {
-    state.files[fileName] = {
-      offset: 0,
-      prefixHash: hashContent(""),
-      updatedAt: new Date().toISOString(),
-    }
-  }
-
-  await writeProcessedState(pkg, state)
-  return state
-}
-
-/**
- * Synchronizes the file state when a file is detected to have been rewritten or truncated.
- */
-async function syncFileStateForRewrite(
-  path: string,
-  stats: Stats,
-): Promise<WorkforceProcessedFileState> {
-  if (stats.size === 0) {
-    return {
-      offset: 0,
-      prefixHash: hashContent(""),
-      updatedAt: new Date().toISOString(),
-    }
-  }
-
-  return buildSeedEntry(path)
-}
-
-/**
- * Checks for newly appended content in a watched file and returns it as a prompt batch.
- */
-async function readNewBatch(
-  pkg: DiscoveredWorkforcePackage,
-  fileName: WorkforceWatchedFileName,
-  currentState: WorkforceProcessedState,
-): Promise<WorkforcePromptBatch | null> {
-  const filePath = join(pkg.goddardDir, fileName)
-  let fileStats: Stats
-
-  try {
-    fileStats = await stat(filePath)
-  } catch {
-    return null
-  }
-
-  let fileState = currentState.files[fileName]
-  if (!fileState) {
-    currentState.files[fileName] = await syncFileStateForRewrite(filePath, fileStats)
-    await writeProcessedState(pkg, currentState)
-    return null
-  }
-
-  if (fileStats.size < fileState.offset) {
-    currentState.files[fileName] = await syncFileStateForRewrite(filePath, fileStats)
-    await writeProcessedState(pkg, currentState)
-    return null
-  }
-
-  const persistedPrefix = await readUtf8Prefix(filePath, fileState.offset)
-  if (hashContent(persistedPrefix) !== fileState.prefixHash) {
-    currentState.files[fileName] = await syncFileStateForRewrite(filePath, fileStats)
-    await writeProcessedState(pkg, currentState)
-    return null
-  }
-
-  if (fileStats.size <= fileState.offset) {
-    return null
-  }
-
-  const appendedContent = (await readFile(filePath)).subarray(fileState.offset).toString("utf-8")
-  const completeOffset = findLastCompleteOffset(appendedContent)
-  if (completeOffset === 0) {
-    return null
-  }
-
-  const content = appendedContent.slice(0, completeOffset)
-  currentState.files[fileName] = await createProgressEntry(
-    filePath,
-    fileState.offset + Buffer.byteLength(content),
-  )
-  await writeProcessedState(pkg, currentState)
-
-  return { fileName, filePath, content }
-}
-
-/**
- * Counts the number of non-empty lines in a block of JSONL content.
- */
-function countJsonlLines(content: string): number {
-  return content.split("\n").filter((line) => line.length > 0).length
-}
-
-/**
- * Constructs a human-readable prompt from a set of appended workforce file batches.
- */
-function buildBatchPrompt(
-  pkg: DiscoveredWorkforcePackage,
-  batches: WorkforcePromptBatch[],
-): string {
-  return [
-    `Workforce activity detected for package "${pkg.name}".`,
-    `Package path: ${pkg.relativeDir}`,
-    "",
-    "Process the newly appended JSONL records for this package-scoped domain.",
-    ...batches.flatMap((batch, index) => [
-      "",
-      `Batch ${index + 1}`,
-      `Source: ${batch.fileName}`,
-      `File: ${relative(pkg.rootDir, batch.filePath)}`,
-      "```jsonl",
-      batch.content.replace(/\n$/, ""),
-      "```",
-    ]),
-  ].join("\n")
-}
-
-/**
- * Generates the system prompt for a workforce agent based on whether it is a root or lead agent.
- */
-function buildWorkforceSystemPrompt(pkg: DiscoveredWorkforcePackage): string {
-  if (pkg.relativeDir === ".") {
-    return [
-      "You are the workforce root agent for this repository.",
-      "You own the project-wide view, break work down, and route requests to package agents by appending to their .goddard/requests.jsonl files.",
-      "Use the repository root as your domain unless delegating to subpackages.",
-      "Treat .goddard/requests.jsonl and .goddard/responses.jsonl as asynchronous inbox files.",
-    ].join("\n")
-  }
-
-  return [
-    "You are the workforce lead agent for this package.",
-    `Own only the code inside ${pkg.relativeDir}.`,
-    "Treat .goddard/requests.jsonl and .goddard/responses.jsonl as asynchronous inbox files.",
-    "Act on new appended records for this package-scoped domain and preserve clear boundaries with other packages.",
-  ].join("\n")
-}
-
-/**
- * Processes queued batches for a package session, ensuring only one prompt is active at a time.
- */
-async function drainPackageQueue(
-  runtime: WorkforcePackageRuntime,
-  onEvent: WorkforceWatchOptions["onEvent"],
-): Promise<void> {
-  if (runtime.stopped || runtime.promptActive || runtime.pendingBatches.length === 0) {
-    return
-  }
-
-  runtime.promptActive = true
-  const queuedBatches = runtime.pendingBatches.splice(0)
-
-  try {
-    await runtime.session.prompt(buildBatchPrompt(runtime.package, queuedBatches))
-    emitEvent(onEvent, {
-      type: "batch-prompted",
-      package: runtime.package,
-      batchCount: queuedBatches.length,
-      lineCount: queuedBatches.reduce((count, batch) => count + countJsonlLines(batch.content), 0),
-    })
-  } catch (error) {
-    runtime.pendingBatches = [...queuedBatches, ...runtime.pendingBatches]
-    emitEvent(onEvent, {
-      type: "runtime-error",
-      package: runtime.package,
-      error: error instanceof Error ? error : new Error(String(error)),
-    })
-  } finally {
-    runtime.promptActive = false
-  }
-
-  if (!runtime.stopped && runtime.pendingBatches.length > 0) {
-    emitEvent(onEvent, {
-      type: "batch-queued",
-      package: runtime.package,
-      batchCount: runtime.pendingBatches.length,
-      lineCount: runtime.pendingBatches.reduce(
-        (count, batch) => count + countJsonlLines(batch.content),
-        0,
-      ),
-    })
-    void drainPackageQueue(runtime, onEvent)
-  }
-}
-
-/**
- * Synchronizes a package's watched files with the current processing state.
- */
-async function syncPackageFiles(
-  runtime: WorkforcePackageRuntime,
-  onEvent: WorkforceWatchOptions["onEvent"],
-): Promise<void> {
-  if (runtime.stopped) {
-    return
-  }
-
-  let currentState = await readProcessedState(runtime.package)
-
-  for (const fileName of WATCHED_FILES) {
-    currentState = await ensureProgressState(
-      runtime.package,
-      fileName,
-      join(runtime.package.goddardDir, fileName),
-      currentState,
-    )
-
-    const batch = await readNewBatch(runtime.package, fileName, currentState)
-    if (batch?.content) {
-      runtime.pendingBatches.push(batch)
-    }
-  }
-
-  if (runtime.pendingBatches.length > 0) {
-    void drainPackageQueue(runtime, onEvent)
-  }
-}
-
-/**
- * Schedules a package synchronization, debouncing multiple rapid changes.
- */
-function schedulePackageSync(
-  runtime: WorkforcePackageRuntime,
-  onEvent: WorkforceWatchOptions["onEvent"],
-): void {
-  if (runtime.stopped || runtime.syncTimer) {
-    return
-  }
-
-  runtime.syncTimer = setTimeout(() => {
-    runtime.syncTimer = null
-    void syncPackageFiles(runtime, onEvent)
-  }, WATCH_SYNC_DELAY_MS)
-}
-
-/**
- * Determines whether a watcher callback path points at one of the JSONL inbox files.
- */
-function isWorkforceInboxPath(changedPath: string): boolean {
-  return WATCHED_FILES.some((fileName) => basename(changedPath) === fileName)
-}
-
-/**
- * Starts an AI agent session and filesystem watcher for a specific workforce package.
- */
-async function startPackageRuntime(
-  pkg: DiscoveredWorkforcePackage,
-  options: WorkforceWatchOptions,
-): Promise<WorkforcePackageRuntime> {
-  emitEvent(options.onEvent, { type: "package-discovered", package: pkg })
-
-  const session = await runAgent(
-    {
-      agent: "pi",
-      cwd: pkg.rootDir,
-      mcpServers: [],
-      systemPrompt: buildWorkforceSystemPrompt(pkg),
-    },
-    undefined,
-    options.daemon,
-  )
-
-  if (!session) {
-    throw new Error(`Persistent workforce sessions must not resolve to null for ${pkg.relativeDir}`)
-  }
-
-  emitEvent(options.onEvent, {
-    type: "session-started",
-    package: pkg,
-    sessionId: session.sessionId,
-  })
-
-  const watcher = watchFiles(pkg.goddardDir, {
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: WATCH_SYNC_DELAY_MS,
-      pollInterval: 10,
-    },
-  })
-
-  const runtime: WorkforcePackageRuntime = {
-    package: pkg,
-    session,
-    watcher,
-    syncTimer: null,
-    stopped: false,
-    promptActive: false,
-    pendingBatches: [],
-  }
-
-  runtime.watcher.on("all", (_eventName, changedPath) => {
-    if (typeof changedPath !== "string" || !isWorkforceInboxPath(changedPath)) {
-      return
-    }
-
-    schedulePackageSync(runtime, options.onEvent)
-  })
-
-  runtime.watcher.on("error", (error) => {
-    emitEvent(options.onEvent, {
-      type: "runtime-error",
-      package: pkg,
-      error: error instanceof Error ? error : new Error(String(error)),
-    })
-  })
-
-  await syncPackageFiles(runtime, options.onEvent)
-  return runtime
-}
-
-/**
- * A supervisor class that manages multiple workforce agents and their
- * underlying filesystem watches.
- */
-export class WorkforceSupervisor {
-  /**
-   * A collection of active runtimes, one for each discovered workforce
-   * package.
-   */
-  readonly #runtimes: WorkforcePackageRuntime[]
-
-  constructor(runtimes: WorkforcePackageRuntime[]) {
-    this.#runtimes = runtimes
-  }
-
-  /**
-   * Gracefully stops all agent sessions and filesystem watchers.
-   */
-  async stop(): Promise<void> {
-    await Promise.all(
-      this.#runtimes.map(async (runtime) => {
-        runtime.stopped = true
-        if (runtime.syncTimer) {
-          clearTimeout(runtime.syncTimer)
-          runtime.syncTimer = null
-        }
-
-        await runtime.watcher.close().catch(() => {})
-        await runtime.session.stop().catch(() => {})
-      }),
-    )
-  }
-}
-
-/**
- * Resolves the absolute path to the root of the git repository.
- */
 export async function resolveRepositoryRoot(startDir: string): Promise<string> {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
@@ -760,117 +159,110 @@ export async function resolveRepositoryRoot(startDir: string): Promise<string> {
   }
 }
 
-/**
- * Discovers all workforce-enabled packages (those with a .goddard/ directory)
- * under a root.
- */
-export async function discoverWorkforcePackages(
-  rootDir: string,
-): Promise<DiscoveredWorkforcePackage[]> {
-  const packages = await Promise.all(
-    (await discoverNestedPackageDirs(rootDir)).map(async (packageDir) =>
-      toDiscoveredPackage(rootDir, packageDir),
-    ),
-  )
-
-  const discovered: DiscoveredWorkforcePackage[] = []
-
-  for (const pkg of packages) {
-    try {
-      const goddardStats = await stat(pkg.goddardDir)
-      if (goddardStats.isDirectory()) {
-        discovered.push(pkg)
-      }
-    } catch {
-      // Ignore packages without workforce state.
-    }
-  }
-
-  return discovered
-}
-
-/**
- * Identifies packages under a root that are candidates for workforce
- * initialization.
- */
 export async function discoverWorkforceInitCandidates(
   rootDir: string,
 ): Promise<DiscoveredWorkforcePackage[]> {
-  const packages = await Promise.all(
-    (await discoverNestedPackageDirs(rootDir)).map(async (packageDir) =>
+  return Promise.all(
+    (await discoverNestedPackageDirs(rootDir)).map((packageDir) =>
       toDiscoveredPackage(rootDir, packageDir),
     ),
   )
-
-  const candidates: DiscoveredWorkforcePackage[] = []
-
-  for (const pkg of packages) {
-    try {
-      const requestsStats = await stat(pkg.requestsPath)
-      if (requestsStats.isFile()) {
-        continue
-      }
-    } catch {
-      candidates.push(pkg)
-    }
-  }
-
-  return candidates
 }
 
-/**
- * Initializes workforce directories and files for the specified package
- * directories.
- */
-export async function initializeWorkforcePackages(
+export async function initializeWorkforce(
+  rootDir: string,
   packageDirs: string[],
-): Promise<InitializedWorkforcePackage[]> {
-  const initialized: InitializedWorkforcePackage[] = []
+): Promise<InitializedWorkforce> {
+  const repositoryRoot = resolve(rootDir)
+  const packages = await Promise.all(
+    packageDirs.map((packageDir) => toDiscoveredPackage(repositoryRoot, packageDir)),
+  )
+  const goddardDir = join(repositoryRoot, ".goddard")
+  const configPath = join(goddardDir, "workforce.json")
+  const ledgerPath = join(goddardDir, "ledger.jsonl")
+  const createdPaths: string[] = []
 
-  for (const packageDir of packageDirs) {
-    const goddardDir = join(packageDir, ".goddard")
-    const createdPaths: string[] = []
+  await mkdir(goddardDir, { recursive: true })
 
-    await mkdir(goddardDir, { recursive: true })
-
-    for (const fileName of WATCHED_FILES) {
-      const filePath = join(goddardDir, fileName)
-      try {
-        const existing = await stat(filePath)
-        if (!existing.isFile()) {
-          await writeFile(filePath, "", "utf-8")
-          createdPaths.push(filePath)
-        }
-      } catch {
-        await writeFile(filePath, "", "utf-8")
-        createdPaths.push(filePath)
-      }
-    }
-
-    initialized.push({
-      packageDir,
-      goddardDir,
-      createdPaths,
-    })
-  }
-
-  return initialized
-}
-
-/**
- * Scans for workforce packages and starts a supervisor to monitor them.
- */
-export async function watchWorkforce(options: WorkforceWatchOptions): Promise<WorkforceSupervisor> {
-  const runtimes: WorkforcePackageRuntime[] = []
+  const config = buildWorkforceConfig(packages)
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8")
+  createdPaths.push(configPath)
 
   try {
-    for (const pkg of await discoverWorkforcePackages(options.rootDir)) {
-      runtimes.push(await startPackageRuntime(pkg, options))
+    const existing = await stat(ledgerPath)
+    if (existing.isFile() === false) {
+      await writeFile(ledgerPath, "", "utf-8")
+      createdPaths.push(ledgerPath)
     }
-  } catch (error) {
-    await Promise.all(runtimes.map(async (runtime) => runtime.session.stop().catch(() => {})))
-    throw error
+  } catch {
+    await writeFile(ledgerPath, "", "utf-8")
+    createdPaths.push(ledgerPath)
   }
 
-  return new WorkforceSupervisor(runtimes)
+  return {
+    rootDir: repositoryRoot,
+    configPath,
+    ledgerPath,
+    createdPaths,
+  }
+}
+
+export async function startWorkforce(rootDir: string, options?: WorkforceClientOptions) {
+  return startDaemonWorkforce(rootDir, options)
+}
+
+export async function getWorkforce(rootDir: string, options?: WorkforceClientOptions) {
+  return getDaemonWorkforce(rootDir, options)
+}
+
+export async function listWorkforces(options?: WorkforceClientOptions) {
+  return listDaemonWorkforces(options)
+}
+
+export async function stopWorkforce(rootDir: string, options?: WorkforceClientOptions) {
+  return shutdownDaemonWorkforce(rootDir, options)
+}
+
+export async function createWorkforceRequest(
+  input: {
+    rootDir: string
+    targetAgentId: string
+    message: string
+  },
+  options?: WorkforceClientOptions,
+) {
+  return createDaemonWorkforceRequest(input, options)
+}
+
+export async function updateWorkforceRequest(
+  input: {
+    rootDir: string
+    requestId: string
+    message: string
+  },
+  options?: WorkforceClientOptions,
+) {
+  return updateDaemonWorkforceRequest(input, options)
+}
+
+export async function cancelWorkforceRequest(
+  input: {
+    rootDir: string
+    requestId: string
+    reason?: string
+  },
+  options?: WorkforceClientOptions,
+) {
+  return cancelDaemonWorkforceRequest(input, options)
+}
+
+export async function truncateWorkforce(
+  input: {
+    rootDir: string
+    agentId?: string
+    reason?: string
+  },
+  options?: WorkforceClientOptions,
+) {
+  return truncateDaemonWorkforce(input, options)
 }
