@@ -4,7 +4,12 @@ import { FileTokenStorage } from "@goddard-ai/storage"
 import { resolveDaemonRuntimeConfig } from "./config.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
-import { createDaemonLogger, createPayloadPreview } from "./logging.ts"
+import {
+  configureDaemonLogging,
+  createDaemonLogger,
+  createPayloadPreview,
+  type DaemonLogMode,
+} from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
 
 /** Input used to start the long-running daemon process. */
@@ -15,6 +20,7 @@ export type RunDaemonInput = {
   agentBinDir?: string
   enableIpc?: boolean
   enableStream?: boolean
+  logMode?: DaemonLogMode
 }
 
 /** Output sinks used by the daemon for structured log lines. */
@@ -43,7 +49,11 @@ const defaultIo: DaemonIo = {
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
 export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {}): Promise<number> {
   const io = deps.io ?? defaultIo
-  const logger = createDaemonLogger(io.stdout)
+  const restoreLogging = configureDaemonLogging({
+    writeLine: io.stdout,
+    mode: input.logMode ?? "json",
+  })
+  const logger = createDaemonLogger()
   const enableIpc = input.enableIpc ?? true
   const enableStream = input.enableStream ?? true
   const runtime = resolveDaemonRuntimeConfig({
@@ -89,12 +99,15 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     const subscription = enableStream ? await client.stream.subscribe() : null
 
     if (subscription) {
-      logger.log("repo.subscription_started", (activeIpcServer
+      logger.log(
+        "repo.subscription_started",
+        activeIpcServer
           ? {
               daemonUrl: activeIpcServer.daemonUrl,
               socketPath: activeIpcServer.socketPath,
             }
-          : {}))
+          : {},
+      )
 
       subscription.on("event", async (payload) => {
         const event = payload as RepoEvent
@@ -193,6 +206,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
     }
+    restoreLogging()
   }
 }
 

@@ -1,4 +1,14 @@
-import { command, oneOf, option, optional, restPositionals, run, string, subcommands } from "cmd-ts"
+import {
+  command,
+  flag,
+  oneOf,
+  option,
+  optional,
+  restPositionals,
+  run,
+  string,
+  subcommands,
+} from "cmd-ts"
 import { runDaemon } from "./daemon.ts"
 
 declare const __VERSION__: string
@@ -18,6 +28,18 @@ function resolveRunFeatureFlags(features: readonly (typeof daemonRunFeatures)[nu
     enableIpc: enabled.has("ipc"),
     enableStream: enabled.has("stream"),
   }
+}
+
+function resolveLogMode(options: { pretty: boolean; verbose: boolean }) {
+  if (options.verbose) {
+    return "verbose" as const
+  }
+
+  if (options.pretty) {
+    return "pretty" as const
+  }
+
+  return "json" as const
 }
 
 const app = subcommands({
@@ -51,6 +73,14 @@ const app = subcommands({
           long: "agent-bin-dir",
           description: "Directory containing agent executables used by daemon-managed sessions",
         }),
+        pretty: flag({
+          long: "pretty",
+          description: "Render concise colored daemon logs for interactive terminal use",
+        }),
+        verbose: flag({
+          long: "verbose",
+          description: "Render full daemon log payloads in a readable multiline terminal format",
+        }),
         features: restPositionals({
           type: oneOf(daemonRunFeatures),
           displayName: "feature",
@@ -67,6 +97,7 @@ const app = subcommands({
           agentBinDir: args.agentBinDir,
           enableIpc: featureFlags.enableIpc,
           enableStream: featureFlags.enableStream,
+          logMode: resolveLogMode(args),
         })
         process.exit(exitCode)
       },

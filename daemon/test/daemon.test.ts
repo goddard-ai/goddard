@@ -374,6 +374,82 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   )
 })
 
+test("daemon run supports concise pretty terminal logs", async () => {
+  const lines: string[] = []
+
+  const exitCode = await runDaemon(
+    {
+      projectDir: process.cwd(),
+      baseUrl: "",
+      enableIpc: false,
+      enableStream: false,
+      logMode: "pretty",
+    },
+    {
+      io: {
+        stdout(line) {
+          lines.push(line)
+        },
+        stderr() {},
+      },
+    },
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(
+    lines.some((line) => line.includes("daemon.startup")),
+    true,
+  )
+  assert.equal(
+    lines.some((line) => line.includes("daemon.no_features_enabled")),
+    true,
+  )
+  assert.equal(
+    lines.every((line) => line.trim().startsWith("{")),
+    false,
+  )
+})
+
+test("daemon run supports verbose terminal logs with expanded fields", async () => {
+  const lines: string[] = []
+
+  const exitCode = await runDaemon(
+    {
+      projectDir: process.cwd(),
+      baseUrl: "",
+      enableIpc: false,
+      enableStream: false,
+      logMode: "verbose",
+    },
+    {
+      io: {
+        stdout(line) {
+          lines.push(line)
+        },
+        stderr() {},
+      },
+    },
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(
+    lines.some((line) => line.includes("daemon.startup")),
+    true,
+  )
+  assert.equal(
+    lines.some((line) => line.includes("projectDir:")),
+    true,
+  )
+  assert.equal(
+    lines.some((line) => line.includes("baseUrl:")),
+    true,
+  )
+  assert.equal(
+    lines.every((line) => line.trim().startsWith("{")),
+    false,
+  )
+})
+
 test("daemon URL round-trips the socket path", () => {
   const socketPath = "/tmp/goddard-daemon.sock"
   const daemonUrl = createDaemonUrl(socketPath)

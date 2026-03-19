@@ -1,4 +1,6 @@
+import kleur from "kleur"
 import { randomUUID } from "node:crypto"
+import { inspect } from "node:util"
 
 const defaultWriteLine = (line: string) => {
   process.stdout.write(`${line}\n`)
@@ -9,6 +11,9 @@ const envSecretFragments = ["TOKEN", "SECRET", "KEY", "AUTH"]
 
 // Function that writes a single serialized daemon log line.
 export type DaemonLogWriter = (line: string) => void
+
+// Supported terminal output modes for daemon logs.
+export type DaemonLogMode = "json" | "pretty" | "verbose"
 
 // Structured preview emitted when long text must be truncated for logs.
 export type DaemonTextPreview = {
@@ -23,17 +28,45 @@ export type DaemonSanitizeOptions = {
   parentKey?: string
 }
 
+// Structured log entry emitted by the daemon logger.
+type DaemonLogEntry = {
+  scope: "daemon"
+  at: string
+  event: string
+} & Record<string, unknown>
+
+let daemonLogMode: DaemonLogMode = "json"
+let daemonLogWriter: DaemonLogWriter = defaultWriteLine
+
+/** Configures the shared daemon log writer and output mode for the current process. */
+export function configureDaemonLogging(options: {
+  writeLine?: DaemonLogWriter
+  mode?: DaemonLogMode
+}): () => void {
+  const previousMode = daemonLogMode
+  const previousWriter = daemonLogWriter
+
+  daemonLogMode = options.mode ?? daemonLogMode
+  daemonLogWriter = options.writeLine ?? daemonLogWriter
+
+  return () => {
+    daemonLogMode = previousMode
+    daemonLogWriter = previousWriter
+  }
+}
+
+/** Creates a daemon logger that follows the current global output mode. */
 export function createDaemonLogger(writeLine: DaemonLogWriter = defaultWriteLine) {
   return {
     log(event: string, fields: Record<string, unknown> = {}) {
-      writeLine(
-        JSON.stringify({
-          scope: "daemon",
-          at: new Date().toISOString(),
-          event,
-          ...fields,
-        }),
-      )
+      const entry: DaemonLogEntry = {
+        scope: "daemon",
+        at: new Date().toISOString(),
+        event,
+        ...fields,
+      }
+      const resolvedWriter = writeLine === defaultWriteLine ? daemonLogWriter : writeLine
+      resolvedWriter(formatDaemonLogEntry(entry, daemonLogMode))
     },
     createOpId() {
       return randomUUID()
@@ -80,6 +113,90 @@ export function readSessionIdForLog(value: unknown): string | undefined {
   }
 
   return undefined
+}
+
+function formatDaemonLogEntry(entry: DaemonLogEntry, mode: DaemonLogMode): string {
+  if (mode === "pretty") {
+    return formatPrettyDaemonLogEntry(entry)
+  }
+
+  if (mode === "verbose") {
+    return formatVerboseDaemonLogEntry(entry)
+  }
+
+  return JSON.stringify(entry)
+}
+
+function formatPrettyDaemonLogEntry(entry: DaemonLogEntry): string {
+  const fields = Object.entries(entry).filter(([key]) => isMetadataField(key) === false)
+  const inlineFields = fields
+    .map(([key, value]) => formatInlineField(key, value))
+    .filter((value) => value !== null)
+
+  return [kleur.dim(formatTimestamp(entry.at)), kleur.cyan(entry.event), ...inlineFields].join(" ")
+}
+
+function formatVerboseDaemonLogEntry(entry: DaemonLogEntry): string {
+  const fields = Object.entries(entry).filter(([key]) => isMetadataField(key) === false)
+  if (fields.length === 0) {
+    return `${kleur.dim(formatTimestamp(entry.at))} ${kleur.bold().cyan(entry.event)}`
+  }
+
+  return [
+    `${kleur.dim(formatTimestamp(entry.at))} ${kleur.bold().cyan(entry.event)}`,
+    ...fields.map(([key, value]) => `${kleur.gray(`  ${key}:`)} ${formatVerboseValue(value)}`),
+  ].join("\n")
+}
+
+function formatTimestamp(value: string): string {
+  return value.replace("T", " ").replace("Z", " UTC")
+}
+
+function isMetadataField(key: string): boolean {
+  return key === "scope" || key === "at" || key === "event"
+}
+
+function formatInlineField(key: string, value: unknown): string | null {
+  if (value === undefined) {
+    return null
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return `${kleur.gray(`${key}=`)}${String(value)}`
+  }
+
+  if (value === null) {
+    return `${kleur.gray(`${key}=`)}null`
+  }
+
+  return `${kleur.gray(`${key}=`)}${truncateInlineValue(value)}`
+}
+
+function truncateInlineValue(value: unknown): string {
+  const serialized = inspect(value, {
+    depth: 2,
+    colors: false,
+    compact: true,
+    breakLength: 120,
+  })
+  return serialized.length <= 96 ? serialized : `${serialized.slice(0, 93)}...`
+}
+
+function formatVerboseValue(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+
+  if (value === null || value === undefined) {
+    return String(value)
+  }
+
+  return inspect(value, {
+    depth: 6,
+    colors: false,
+    compact: false,
+    breakLength: 100,
+  }).replace(/\n/g, "\n    ")
 }
 
 function sanitizeValue(
