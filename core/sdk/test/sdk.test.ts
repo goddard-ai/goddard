@@ -139,7 +139,7 @@ test("stream emits error event for malformed payloads", async () => {
 
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input)
-    if (url.includes("/stream?")) {
+    if (url.endsWith("/stream")) {
       const stream = new ReadableStream<Uint8Array>({
         start(ctrl) {
           controller = ctrl
@@ -163,7 +163,7 @@ test("stream emits error event for malformed payloads", async () => {
     fetch: fetchImpl,
   })
 
-  const sub = await sdk.stream.subscribeToRepo({ owner: "org", repo: "repo" })
+  const sub = await sdk.stream.subscribe()
 
   let errorMessage = ""
   sub.on("error", (error) => {

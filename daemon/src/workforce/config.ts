@@ -59,7 +59,7 @@ export async function readWorkforceConfig(rootDir: string): Promise<WorkforceCon
     throw new Error(`Workforce config at ${paths.configPath} must include the root agent`)
   }
 
-  return parsed as WorkforceConfig
+  return parsed as unknown as WorkforceConfig
 }
 
 export async function ensureWorkforceFiles(rootDir: string): Promise<void> {

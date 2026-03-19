@@ -6,7 +6,7 @@
 
 | Import | Owns | Does not own |
 | --- | --- | --- |
-| `@goddard-ai/sdk` | Backend HTTP API access, auth, PR operations, repo stream subscription | Daemon session lifecycle, runtime loop helpers |
+| `@goddard-ai/sdk` | Backend HTTP API access, auth, PR operations, unified stream subscription | Daemon session lifecycle, runtime loop helpers |
 | `@goddard-ai/sdk/daemon` | Daemon-backed agent sessions (`runAgent`, `AgentSession`) | Low-level daemon URL parsing and IPC transport factories |
 | `@goddard-ai/sdk/loop` | Loop/runtime orchestration on top of daemon sessions | Backend HTTP API access, host-specific IPC wiring |
 | `@goddard-ai/sdk/node` | Node composition helpers and env-driven conveniences | Cross-environment transport ownership |
