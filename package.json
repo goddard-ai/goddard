@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "prepare": "simple-git-hooks",
+    "prepare": "husky",
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
     "build": "turbo run build",
     "fmt": "pnpm -r run fmt",
@@ -20,19 +20,16 @@
     "@goddard-ai/workforce": "workspace:^",
     "@types/node": "^25.3.5",
     "@typescript/native-preview": "7.0.0-dev.20260317.1",
+    "husky": "^9.1.7",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "radashi": "^12.7.2",
-    "simple-git-hooks": "^2.13.1",
     "tsdown": "^0.21.0",
     "turbo": "^2.5.8",
     "typescript": "^5.9.3",
     "unplugin-raw": "^0.6.4",
     "unplugin-unused": "^0.5.7",
     "vitest": "^4.0.18"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "pnpm run precommit:staged-fix"
   },
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
