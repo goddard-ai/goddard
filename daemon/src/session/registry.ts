@@ -10,7 +10,7 @@ export interface RegistryAgent {
 
 export async function fetchRegistryAgent(agentName: string): Promise<RegistryAgent | null> {
   try {
-    const url = `https://raw.githubusercontent.com/agentclientprotocol/registry/main/agents/${agentName}/agent.json`
+    const url = `https://raw.githubusercontent.com/agentclientprotocol/registry/main/${agentName}/agent.json`
     const res = await fetch(url)
     if (!res.ok) {
       return null
