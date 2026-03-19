@@ -55,5 +55,14 @@ function ensureSchema(client: Database.Database): void {
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS session_permissions (
+      sessionId TEXT PRIMARY KEY REFERENCES sessions(id),
+      token TEXT NOT NULL UNIQUE,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      allowedPrNumbers TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
   `)
 }
