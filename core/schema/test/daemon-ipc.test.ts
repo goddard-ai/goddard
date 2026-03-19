@@ -4,6 +4,43 @@ import { daemonIpcSchema } from "../src/daemon-ipc.ts"
 
 test("daemon IPC parses workforce lifecycle and mutation payloads", () => {
   assert.deepEqual(
+    daemonIpcSchema.client.requests.sessionCreate.payload.parse({
+      agent: {
+        id: "node-agent",
+        name: "Node Agent",
+        version: "1.0.0",
+        description: "Local node-based ACP test agent.",
+        distribution: {
+          npx: {
+            package: "@example/node-agent",
+            args: ["agent.mjs"],
+          },
+        },
+      },
+      cwd: "/repo",
+      mcpServers: [],
+      systemPrompt: "Follow the spec.",
+    }),
+    {
+      agent: {
+        id: "node-agent",
+        name: "Node Agent",
+        version: "1.0.0",
+        description: "Local node-based ACP test agent.",
+        distribution: {
+          npx: {
+            package: "@example/node-agent",
+            args: ["agent.mjs"],
+          },
+        },
+      },
+      cwd: "/repo",
+      mcpServers: [],
+      systemPrompt: "Follow the spec.",
+    },
+  )
+
+  assert.deepEqual(
     daemonIpcSchema.client.requests.workforceStart.payload.parse({
       rootDir: "/repo",
     }),

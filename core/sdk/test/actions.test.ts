@@ -37,8 +37,15 @@ test("resolveAction strips frontmatter from markdown actions", async () => {
       ---
       oneShot: false
       agent:
-        type: binary
-        cmd: custom-agent
+        id: custom-agent
+        name: Custom Agent
+        version: 1.0.0
+        description: Review agent
+        distribution:
+          binary:
+            darwin-aarch64:
+              archive: https://example.com/custom-agent.tar.gz
+              cmd: custom-agent
       ---
       Review the current diff carefully.
     `,
@@ -51,8 +58,18 @@ test("resolveAction strips frontmatter from markdown actions", async () => {
   assert.deepEqual(action.config, {
     oneShot: false,
     agent: {
-      type: "binary",
-      cmd: "custom-agent",
+      id: "custom-agent",
+      name: "Custom Agent",
+      version: "1.0.0",
+      description: "Review agent",
+      distribution: {
+        binary: {
+          "darwin-aarch64": {
+            archive: "https://example.com/custom-agent.tar.gz",
+            cmd: "custom-agent",
+          },
+        },
+      },
     },
   })
 })

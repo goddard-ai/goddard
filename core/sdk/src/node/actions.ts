@@ -14,7 +14,17 @@ export type ResolvedAgentAction = {
   path: string
 }
 
-const DEFAULT_AGENT = { type: "npx", package: "@mariozechner/pi-coding-agent" } as const
+const DEFAULT_AGENT = {
+  id: "pi-coding-agent",
+  name: "PI Coding Agent",
+  version: "0.0.0",
+  description: "Default PI coding agent distribution.",
+  distribution: {
+    npx: {
+      package: "@mariozechner/pi-coding-agent",
+    },
+  },
+} as const
 
 function hasErrorCode(error: unknown, code: string): error is { code: string } {
   return typeof error === "object" && error !== null && "code" in error && error.code === code

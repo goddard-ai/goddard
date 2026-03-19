@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createRequire } from "node:module"
+import { configureDaemonLogging } from "../src/logging.ts"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, any>(),
@@ -138,6 +139,49 @@ afterEach(async () => {
   }
 })
 
+function createNodeAgent(agentPath: string) {
+  return {
+    id: "node-agent",
+    name: "Node Agent",
+    version: "1.0.0",
+    description: "Local node-based ACP test agent.",
+    distribution: {
+      binary: {
+        "darwin-aarch64": {
+          archive: "https://example.com/node-agent-darwin-aarch64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "darwin-x86_64": {
+          archive: "https://example.com/node-agent-darwin-x86_64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "linux-aarch64": {
+          archive: "https://example.com/node-agent-linux-aarch64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "linux-x86_64": {
+          archive: "https://example.com/node-agent-linux-x86_64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "windows-aarch64": {
+          archive: "https://example.com/node-agent-windows-aarch64.zip",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "windows-x86_64": {
+          archive: "https://example.com/node-agent-windows-x86_64.zip",
+          cmd: "node",
+          args: [agentPath],
+        },
+      },
+    },
+  }
+}
+
 test("daemon revokes session tokens when agent processes exit", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -146,11 +190,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
   const created = await client.send("sessionCreate", {
-    agent: {
-      type: "binary",
-      cmd: "node",
-      args: [exampleAgentPath],
-    },
+    agent: createNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
@@ -239,11 +279,7 @@ test("multiple clients can observe the same live session stream independently", 
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
   const created = await clientA.send("sessionCreate", {
-    agent: {
-      type: "binary",
-      cmd: "node",
-      args: [exampleAgentPath],
-    },
+    agent: createNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
@@ -338,11 +374,7 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
 
   const { logs, result } = await captureDaemonLogs(async () => {
     const created = await client.send("sessionCreate", {
-      agent: {
-        type: "binary",
-        cmd: "node",
-        args: [agentPath],
-      },
+      agent: createNodeAgent(agentPath),
       cwd: process.cwd(),
       mcpServers: [],
       systemPrompt: "Keep responses short.",
@@ -464,11 +496,7 @@ test("malformed runtime agent output is surfaced through diagnostics and archive
   `)
 
   const created = await client.send("sessionCreate", {
-    agent: {
-      type: "binary",
-      cmd: "node",
-      args: [agentPath],
-    },
+    agent: createNodeAgent(agentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
@@ -541,11 +569,7 @@ test("abnormal agent exit invalidates reconnects and repeated shutdowns are harm
   `)
 
   const created = await client.send("sessionCreate", {
-    agent: {
-      type: "binary",
-      cmd: "node",
-      args: [agentPath],
-    },
+    agent: createNodeAgent(agentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
@@ -637,6 +661,7 @@ async function captureDaemonLogs<T>(
   action: () => Promise<T>,
 ): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
   const output: string[] = []
+  const restoreLogging = configureDaemonLogging({ mode: "json" })
   const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
   ) => {
@@ -655,5 +680,6 @@ async function captureDaemonLogs<T>(
     }
   } finally {
     stdout.mockRestore()
+    restoreLogging()
   }
 }

@@ -55,9 +55,16 @@ test("daemon session routes parse representative creation and path contracts", (
   assert.deepEqual(
     sessionCreateRoute.methods.POST?.body?.parse({
       agent: {
-        type: "binary",
-        cmd: "node",
-        args: ["agent.mjs"],
+        id: "node-agent",
+        name: "Node Agent",
+        version: "1.0.0",
+        description: "Local node-based ACP test agent.",
+        distribution: {
+          npx: {
+            package: "@example/node-agent",
+            args: ["agent.mjs"],
+          },
+        },
       },
       cwd: "/tmp/project",
       mcpServers: [],
@@ -69,9 +76,16 @@ test("daemon session routes parse representative creation and path contracts", (
     }),
     {
       agent: {
-        type: "binary",
-        cmd: "node",
-        args: ["agent.mjs"],
+        id: "node-agent",
+        name: "Node Agent",
+        version: "1.0.0",
+        description: "Local node-based ACP test agent.",
+        distribution: {
+          npx: {
+            package: "@example/node-agent",
+            args: ["agent.mjs"],
+          },
+        },
       },
       cwd: "/tmp/project",
       mcpServers: [],

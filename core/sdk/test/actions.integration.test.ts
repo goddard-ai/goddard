@@ -166,9 +166,44 @@ test("resolved actions can run through the daemon-backed session client", async 
     buildActionSessionParams(action, {
       cwd: tempDir,
       agent: {
-        type: "binary",
-        cmd: "node",
-        args: [exampleAgentPath],
+        id: "node-agent",
+        name: "Node Agent",
+        version: "1.0.0",
+        description: "Local node-based ACP test agent.",
+        distribution: {
+          binary: {
+            "darwin-aarch64": {
+              archive: "https://example.com/node-agent-darwin-aarch64.tar.gz",
+              cmd: "node",
+              args: [exampleAgentPath],
+            },
+            "darwin-x86_64": {
+              archive: "https://example.com/node-agent-darwin-x86_64.tar.gz",
+              cmd: "node",
+              args: [exampleAgentPath],
+            },
+            "linux-aarch64": {
+              archive: "https://example.com/node-agent-linux-aarch64.tar.gz",
+              cmd: "node",
+              args: [exampleAgentPath],
+            },
+            "linux-x86_64": {
+              archive: "https://example.com/node-agent-linux-x86_64.tar.gz",
+              cmd: "node",
+              args: [exampleAgentPath],
+            },
+            "windows-aarch64": {
+              archive: "https://example.com/node-agent-windows-aarch64.zip",
+              cmd: "node",
+              args: [exampleAgentPath],
+            },
+            "windows-x86_64": {
+              archive: "https://example.com/node-agent-windows-x86_64.zip",
+              cmd: "node",
+              args: [exampleAgentPath],
+            },
+          },
+        },
       },
       mcpServers: [],
       systemPrompt: "Keep responses short.",
