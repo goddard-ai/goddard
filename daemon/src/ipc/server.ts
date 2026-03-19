@@ -126,6 +126,8 @@ export async function startDaemonServer(
     }
   }
 
+  // Keep app/src/daemon-session.test.ts in sync with this handler list.
+  // When new daemon IPC methods are added here, update the app test stub as well.
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
     health: withRequestLogging<{}, { ok: true }>("health", async () => ({ ok: true })),
     prSubmit: withRequestLogging<
@@ -296,7 +298,13 @@ export async function startDaemonServer(
       }
     }),
     workforceRequest: withRequestLogging<
-      { rootDir: string; targetAgentId: string; input: string; token?: string },
+      {
+        rootDir: string
+        targetAgentId: string
+        input: string
+        intent?: "default" | "create"
+        token?: string
+      },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceRequest", async (payload, context) => {
       const actor = await resolveWorkforceActor(payload.token, context)
@@ -306,6 +314,7 @@ export async function startDaemonServer(
           type: "request",
           targetAgentId: payload.targetAgentId,
           input: payload.input,
+          intent: payload.intent,
         },
         actor,
       )

@@ -17,12 +17,14 @@ test("daemon IPC parses workforce lifecycle and mutation payloads", () => {
       rootDir: "/repo",
       targetAgentId: "api",
       input: "Ship it.",
+      intent: "create",
       token: "tok_1",
     }),
     {
       rootDir: "/repo",
       targetAgentId: "api",
       input: "Ship it.",
+      intent: "create",
       token: "tok_1",
     },
   )

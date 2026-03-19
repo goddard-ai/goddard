@@ -3,6 +3,9 @@ import type { AgentDistribution } from "./session-server.js"
 // Supported workforce agent roles within one repository-owned runtime.
 export type WorkforceAgentRole = "root" | "domain"
 
+// Supported request intents that can specialize one workforce request lifecycle.
+export type WorkforceRequestIntent = "default" | "create"
+
 // Stable lifecycle states for one workforce request after replay.
 export type WorkforceRequestStatus =
   | "queued"
@@ -43,6 +46,7 @@ export interface WorkforceRequestEvent extends WorkforceEventBase {
   requestId: string
   toAgentId: string
   fromAgentId: string | null
+  intent: WorkforceRequestIntent
   input: string
 }
 
@@ -116,6 +120,7 @@ export interface WorkforceRequestRecord {
   id: string
   toAgentId: string
   fromAgentId: string | null
+  intent: WorkforceRequestIntent
   input: string
   updates: string[]
   status: WorkforceRequestStatus
