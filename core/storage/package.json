@@ -6,26 +6,26 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./dist/index.js",
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
       "source": "./src/index.ts"
     },
     "./session-permissions": {
-      "types": "./src/session-permissions.ts",
-      "import": "./dist/session-permissions.js",
+      "types": "./dist/session-permissions.d.mts",
+      "import": "./dist/session-permissions.mjs",
       "source": "./src/session-permissions.ts"
     },
     "./managed-pr-locations": {
-      "types": "./src/managed-pr-locations.ts",
-      "import": "./dist/managed-pr-locations.js",
+      "types": "./dist/managed-pr-locations.d.mts",
+      "import": "./dist/managed-pr-locations.mjs",
       "source": "./src/managed-pr-locations.ts"
     }
   },
   "scripts": {
-    "build": "tsgo -p tsconfig.json --noCheck",
+    "build": "tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsgo -p tsconfig.json --noEmit",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run --passWithNoTests",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
@@ -33,13 +33,13 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
     "better-sqlite3": "^12.6.2",
-    "drizzle-kit": "1.0.0-beta.16-ea816b6",
     "drizzle-orm": "1.0.0-beta.16-ea816b6",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@goddard-ai/schema": "workspace:^",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.3.5"
+    "@types/node": "^25.3.5",
+    "drizzle-kit": "1.0.0-beta.16-ea816b6"
   }
 }

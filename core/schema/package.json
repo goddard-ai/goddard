@@ -6,16 +6,16 @@
   "type": "module",
   "exports": {
     "./*": {
-      "types": "./src/*.ts",
-      "import": "./dist/*.js",
+      "types": "./dist/*.d.mts",
+      "import": "./dist/*.mjs",
       "source": "./src/*.ts"
     }
   },
   "scripts": {
-    "build": "tsgo -p tsconfig.json --noCheck",
+    "build": "tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsgo -p tsconfig.json --noEmit",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run"
   },
   "dependencies": {

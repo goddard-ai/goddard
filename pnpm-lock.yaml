@@ -281,9 +281,6 @@ importers:
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
-      drizzle-kit:
-        specifier: 1.0.0-beta.16-ea816b6
-        version: 1.0.0-beta.16-ea816b6
       drizzle-orm:
         specifier: 1.0.0-beta.16-ea816b6
         version: 1.0.0-beta.16-ea816b6(@cloudflare/workers-types@4.20260307.1)(@libsql/client@0.17.0)(@sinclair/typebox@0.34.48)(@types/better-sqlite3@7.6.13)(@types/mssql@9.1.9(@azure/core-client@1.10.1))(better-sqlite3@12.6.2)(mssql@11.0.1(@azure/core-client@1.10.1))(zod@4.3.6)
@@ -300,6 +297,9 @@ importers:
       '@types/node':
         specifier: ^25.3.5
         version: 25.3.5
+      drizzle-kit:
+        specifier: 1.0.0-beta.16-ea816b6
+        version: 1.0.0-beta.16-ea816b6
 
   core/tauri-plugin-ipc:
     dependencies:
