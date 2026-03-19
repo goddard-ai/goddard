@@ -1,0 +1,25 @@
+import { z } from "zod"
+import { DaemonSessionIdParams } from "../common/params.js"
+import { AgentDistribution } from "../session-server/agent-distribution.js"
+import { DaemonSessionMetadata } from "./session-metadata.js"
+
+const initialPrompt = z.union([z.string(), z.array(z.unknown())])
+
+/** Request payload used to create one daemon-managed session. */
+export const CreateDaemonSessionRequest = z.object({
+  agent: z.union([z.string(), AgentDistribution]),
+  cwd: z.string(),
+  mcpServers: z.array(z.unknown()),
+  systemPrompt: z.string(),
+  env: z.record(z.string(), z.string()).optional(),
+  metadata: DaemonSessionMetadata.optional(),
+  initialPrompt: initialPrompt.optional(),
+  oneShot: z.boolean().optional(),
+})
+
+export type CreateDaemonSessionRequest = z.infer<typeof CreateDaemonSessionRequest>
+
+/** Path and payload params used to address one daemon-managed session. */
+export const DaemonSessionPathParams = DaemonSessionIdParams
+
+export type DaemonSessionPathParams = z.infer<typeof DaemonSessionPathParams>

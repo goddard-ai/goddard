@@ -1,86 +1,36 @@
 import { $type } from "@goddard-ai/ipc"
 import { z } from "zod"
-import { agentBinaryPlatforms } from "./session-server.js"
+import { DaemonSessionIdParams } from "./common/params.js"
+import { CreateDaemonSessionRequest } from "./daemon/sessions.js"
+import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
-  GetDaemonWorkforceResponse,
   GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
   GetDaemonSessionResponse,
+  GetDaemonWorkforceResponse,
   ListDaemonWorkforcesResponse,
   MutateDaemonWorkforceResponse,
   ReplyPrDaemonResponse,
-  ShutdownDaemonWorkforceResponse,
   ShutdownDaemonSessionResponse,
+  ShutdownDaemonWorkforceResponse,
   StartDaemonWorkforceResponse,
   SubmitPrDaemonResponse,
 } from "./daemon.js"
+import {
+  CancelDaemonWorkforceRequest,
+  CreateDaemonWorkforceRequestRequest,
+  GetDaemonWorkforceRequest,
+  RespondDaemonWorkforceRequest,
+  ShutdownDaemonWorkforceRequest,
+  StartDaemonWorkforceRequest,
+  SuspendDaemonWorkforceRequest,
+  TruncateDaemonWorkforceRequest,
+  UpdateDaemonWorkforceRequest,
+} from "./workforce/requests.js"
 
-const agentBinaryTargetSchema = z
-  .object({
-    archive: z.string().url(),
-    cmd: z.string(),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
-  })
-  .strict()
-
-const agentBinaryDistributionSchema = z
-  .object(
-    Object.fromEntries(
-      agentBinaryPlatforms.map((platform) => [platform, agentBinaryTargetSchema.optional()]),
-    ) as Record<
-      (typeof agentBinaryPlatforms)[number],
-      z.ZodOptional<typeof agentBinaryTargetSchema>
-    >,
-  )
-  .strict()
-  .refine((value) => Object.values(value).some((target) => target !== undefined), {
-    message: "binary distributions must declare at least one supported platform",
-  })
-
-const agentPackageDistributionSchema = z
-  .object({
-    package: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
-  })
-  .strict()
-
-const agentDistributionSchema = z
-  .object({
-    id: z.string().regex(/^[a-z][a-z0-9-]*$/),
-    name: z.string().min(1),
-    version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+/),
-    description: z.string().min(1),
-    repository: z.string().url().optional(),
-    authors: z.array(z.string()).optional(),
-    license: z.string().optional(),
-    icon: z.string().optional(),
-    distribution: z
-      .object({
-        binary: agentBinaryDistributionSchema.optional(),
-        npx: agentPackageDistributionSchema.optional(),
-        uvx: agentPackageDistributionSchema.optional(),
-      })
-      .strict()
-      .refine((value) => Object.values(value).some((entry) => entry !== undefined), {
-        message: "distribution must declare at least one install method",
-      }),
-  })
-  .strict()
-
-const daemonSessionMetadataSchema = z
-  .object({
-    repository: z.string().optional(),
-    prNumber: z.number().int().optional(),
-  })
-  .catchall(z.unknown())
-
-const workforceTokenSchema = z.string().optional()
-const workforceRequestIntentSchema = z.enum(["default", "create"]).optional()
-
+/** IPC contract map shared by the daemon client and server. */
 export const daemonIpcSchema = {
   client: {
     requests: {
@@ -89,56 +39,39 @@ export const daemonIpcSchema = {
         response: $type<DaemonHealth>(),
       },
       prSubmit: {
-        payload: z.object({
+        payload: SubmitPrDaemonRequest.extend({
           token: z.string(),
-          cwd: z.string(),
-          title: z.string(),
-          body: z.string(),
-          head: z.string().optional(),
-          base: z.string().optional(),
         }),
         response: $type<SubmitPrDaemonResponse>(),
       },
       prReply: {
-        payload: z.object({
+        payload: ReplyPrDaemonRequest.extend({
           token: z.string(),
-          cwd: z.string(),
-          message: z.string(),
-          prNumber: z.number().int().optional(),
         }),
         response: $type<ReplyPrDaemonResponse>(),
       },
       sessionCreate: {
-        payload: z.object({
-          agent: z.union([z.string(), agentDistributionSchema]),
-          cwd: z.string(),
-          mcpServers: z.array(z.unknown()),
-          systemPrompt: z.string(),
-          env: z.record(z.string(), z.string()).optional(),
-          metadata: daemonSessionMetadataSchema.optional(),
-          initialPrompt: z.union([z.string(), z.array(z.unknown())]).optional(),
-          oneShot: z.boolean().optional(),
-        }),
+        payload: CreateDaemonSessionRequest,
         response: $type<CreateDaemonSessionResponse>(),
       },
       sessionGet: {
-        payload: z.object({ id: z.string() }),
+        payload: DaemonSessionIdParams,
         response: $type<GetDaemonSessionResponse>(),
       },
       sessionConnect: {
-        payload: z.object({ id: z.string() }),
+        payload: DaemonSessionIdParams,
         response: $type<GetDaemonSessionResponse>(),
       },
       sessionHistory: {
-        payload: z.object({ id: z.string() }),
+        payload: DaemonSessionIdParams,
         response: $type<GetDaemonSessionHistoryResponse>(),
       },
       sessionDiagnostics: {
-        payload: z.object({ id: z.string() }),
+        payload: DaemonSessionIdParams,
         response: $type<GetDaemonSessionDiagnosticsResponse>(),
       },
       sessionShutdown: {
-        payload: z.object({ id: z.string() }),
+        payload: DaemonSessionIdParams,
         response: $type<ShutdownDaemonSessionResponse>(),
       },
       sessionSend: {
@@ -153,15 +86,11 @@ export const daemonIpcSchema = {
         response: $type<{ id: string }>(),
       },
       workforceStart: {
-        payload: z.object({
-          rootDir: z.string(),
-        }),
+        payload: StartDaemonWorkforceRequest,
         response: $type<StartDaemonWorkforceResponse>(),
       },
       workforceGet: {
-        payload: z.object({
-          rootDir: z.string(),
-        }),
+        payload: GetDaemonWorkforceRequest,
         response: $type<GetDaemonWorkforceResponse>(),
       },
       workforceList: {
@@ -169,64 +98,31 @@ export const daemonIpcSchema = {
         response: $type<ListDaemonWorkforcesResponse>(),
       },
       workforceShutdown: {
-        payload: z.object({
-          rootDir: z.string(),
-        }),
+        payload: ShutdownDaemonWorkforceRequest,
         response: $type<ShutdownDaemonWorkforceResponse>(),
       },
       workforceRequest: {
-        payload: z.object({
-          rootDir: z.string(),
-          targetAgentId: z.string(),
-          input: z.string(),
-          intent: workforceRequestIntentSchema,
-          token: workforceTokenSchema,
-        }),
+        payload: CreateDaemonWorkforceRequestRequest,
         response: $type<MutateDaemonWorkforceResponse>(),
       },
       workforceUpdate: {
-        payload: z.object({
-          rootDir: z.string(),
-          requestId: z.string(),
-          input: z.string(),
-          token: workforceTokenSchema,
-        }),
+        payload: UpdateDaemonWorkforceRequest,
         response: $type<MutateDaemonWorkforceResponse>(),
       },
       workforceCancel: {
-        payload: z.object({
-          rootDir: z.string(),
-          requestId: z.string(),
-          reason: z.string().optional(),
-          token: workforceTokenSchema,
-        }),
+        payload: CancelDaemonWorkforceRequest,
         response: $type<MutateDaemonWorkforceResponse>(),
       },
       workforceTruncate: {
-        payload: z.object({
-          rootDir: z.string(),
-          agentId: z.string().optional(),
-          reason: z.string().optional(),
-          token: workforceTokenSchema,
-        }),
+        payload: TruncateDaemonWorkforceRequest,
         response: $type<MutateDaemonWorkforceResponse>(),
       },
       workforceRespond: {
-        payload: z.object({
-          rootDir: z.string(),
-          requestId: z.string(),
-          output: z.string(),
-          token: z.string(),
-        }),
+        payload: RespondDaemonWorkforceRequest,
         response: $type<MutateDaemonWorkforceResponse>(),
       },
       workforceSuspend: {
-        payload: z.object({
-          rootDir: z.string(),
-          requestId: z.string(),
-          reason: z.string(),
-          token: z.string(),
-        }),
+        payload: SuspendDaemonWorkforceRequest,
         response: $type<MutateDaemonWorkforceResponse>(),
       },
     },

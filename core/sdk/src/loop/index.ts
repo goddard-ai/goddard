@@ -11,8 +11,12 @@ export type {
   GoddardLoopConfigDocument,
   GoddardLoopRateLimitsConfig,
   GoddardLoopRetriesConfig,
+  Model,
+  PiAgentConfig,
+  ThinkingLevel,
 } from "./types.js"
 export {
+  GoddardLoopConfig,
   loopConfigSchema,
   resolvedLoopRateLimitsSchema,
   resolvedLoopRetriesSchema,

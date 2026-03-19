@@ -5,10 +5,10 @@ This package contains shared communication types and their Zod validation schema
 ## Usage
 
 ```typescript
-import { CreatePrInputSchema, type CreatePrInput } from "@goddard-ai/schema/backend"
+import { CreatePrInput } from "@goddard-ai/schema/backend"
 
 // Validate payload
-const input = CreatePrInputSchema.parse(payload)
+const input = CreatePrInput.parse(payload)
 ```
 
 ## License
