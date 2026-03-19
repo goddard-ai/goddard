@@ -30,16 +30,16 @@ function resolveRunFeatureFlags(features: readonly (typeof daemonRunFeatures)[nu
   }
 }
 
-function resolveLogMode(options: { pretty: boolean; verbose: boolean }) {
+function resolveLogMode(options: { json: boolean; verbose: boolean }) {
   if (options.verbose) {
     return "verbose" as const
   }
 
-  if (options.pretty) {
-    return "pretty" as const
+  if (options.json) {
+    return "json" as const
   }
 
-  return "json" as const
+  return "pretty" as const
 }
 
 const app = subcommands({
@@ -51,12 +51,6 @@ const app = subcommands({
       name: "run",
       description: "Start the daemon runtime and background services",
       args: {
-        projectDir: option({
-          type: string,
-          long: "project-dir",
-          defaultValue: () => process.cwd(),
-          description: "Local project directory used by daemon-managed runtimes",
-        }),
         baseUrl: option({
           type: string,
           long: "base-url",
@@ -73,13 +67,13 @@ const app = subcommands({
           long: "agent-bin-dir",
           description: "Directory containing agent executables used by daemon-managed sessions",
         }),
-        pretty: flag({
-          long: "pretty",
-          description: "Render concise colored daemon logs for interactive terminal use",
+        json: flag({
+          long: "json",
+          description: "Render raw structured daemon logs as JSON lines",
         }),
         verbose: flag({
           long: "verbose",
-          description: "Render full daemon log payloads in a readable multiline terminal format",
+          description: "Render full daemon log payloads in an expanded human-readable format",
         }),
         features: restPositionals({
           type: oneOf(daemonRunFeatures),
@@ -91,7 +85,6 @@ const app = subcommands({
       handler: async (args) => {
         const featureFlags = resolveRunFeatureFlags(args.features)
         const exitCode = await runDaemon({
-          projectDir: args.projectDir,
           baseUrl: args.baseUrl,
           socketPath: args.socketPath,
           agentBinDir: args.agentBinDir,

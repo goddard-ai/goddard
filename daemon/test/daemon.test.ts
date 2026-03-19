@@ -138,10 +138,10 @@ test("daemon run subscribes once, handles events across repositories, and passes
   const { logs, result: exitCode } = await captureDaemonLogs(async () =>
     runDaemon(
       {
-        projectDir: process.cwd(),
         baseUrl: "",
         socketPath: "/tmp/custom-daemon.sock",
         agentBinDir: "/tmp/custom-agent-bin",
+        logMode: "json",
       },
       deps,
     ),
@@ -174,7 +174,6 @@ test("daemon run subscribes once, handles events across repositories, and passes
     scope: "daemon",
     at: startupLog?.at,
     event: "daemon.startup",
-    projectDir: process.cwd(),
     baseUrl: "http://127.0.0.1:8787",
     socketPath: "/tmp/custom-daemon.sock",
     agentBinDir: "/tmp/custom-agent-bin",
@@ -204,12 +203,12 @@ test("daemon run can start only the IPC server when stream is disabled", async (
   const { logs, result: exitCode } = await captureDaemonLogs(async () =>
     runDaemon(
       {
-        projectDir: process.cwd(),
         baseUrl: "",
         socketPath: "/tmp/ipc-only.sock",
         agentBinDir: "/tmp/custom-agent-bin",
         enableIpc: true,
         enableStream: false,
+        logMode: "json",
       },
       {
         createBackendClient: async () => ({
@@ -290,10 +289,10 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   const { logs, result: exitCode } = await captureDaemonLogs(async () =>
     runDaemon(
       {
-        projectDir: process.cwd(),
         baseUrl: "",
         enableIpc: false,
         enableStream: true,
+        logMode: "json",
       },
       {
         createBackendClient: async () => ({
@@ -374,16 +373,14 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   )
 })
 
-test("daemon run supports concise pretty terminal logs", async () => {
+test("daemon run defaults to concise pretty terminal logs", async () => {
   const lines: string[] = []
 
   const exitCode = await runDaemon(
     {
-      projectDir: process.cwd(),
       baseUrl: "",
       enableIpc: false,
       enableStream: false,
-      logMode: "pretty",
     },
     {
       io: {
@@ -410,12 +407,46 @@ test("daemon run supports concise pretty terminal logs", async () => {
   )
 })
 
+test("daemon run supports raw json terminal logs when requested", async () => {
+  const lines: string[] = []
+
+  const exitCode = await runDaemon(
+    {
+      baseUrl: "",
+      enableIpc: false,
+      enableStream: false,
+      logMode: "json",
+    },
+    {
+      io: {
+        stdout(line) {
+          lines.push(line)
+        },
+        stderr() {},
+      },
+    },
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(
+    lines.some((line) => line.includes('"event":"daemon.startup"')),
+    true,
+  )
+  assert.equal(
+    lines.some((line) => line.includes('"event":"daemon.no_features_enabled"')),
+    true,
+  )
+  assert.equal(
+    lines.every((line) => line.trim().startsWith("{")),
+    true,
+  )
+})
+
 test("daemon run supports verbose terminal logs with expanded fields", async () => {
   const lines: string[] = []
 
   const exitCode = await runDaemon(
     {
-      projectDir: process.cwd(),
       baseUrl: "",
       enableIpc: false,
       enableStream: false,
@@ -434,10 +465,6 @@ test("daemon run supports verbose terminal logs with expanded fields", async () 
   assert.equal(exitCode, 0)
   assert.equal(
     lines.some((line) => line.includes("daemon.startup")),
-    true,
-  )
-  assert.equal(
-    lines.some((line) => line.includes("projectDir:")),
     true,
   )
   assert.equal(

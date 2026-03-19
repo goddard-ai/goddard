@@ -35,7 +35,7 @@ type DaemonLogEntry = {
   event: string
 } & Record<string, unknown>
 
-let daemonLogMode: DaemonLogMode = "json"
+let daemonLogMode: DaemonLogMode = "pretty"
 let daemonLogWriter: DaemonLogWriter = defaultWriteLine
 
 /** Configures the shared daemon log writer and output mode for the current process. */
