@@ -178,7 +178,7 @@ test("status and list print daemon-backed workforce state", async () => {
   assert.match(String(consoleLog.mock.calls[1]?.[0]), /"activeRequestCount": 0/)
 })
 
-test("request, update, and truncate commands call the matching SDK helpers", async () => {
+test("request defaults to the root agent and update/truncate call the matching SDK helpers", async () => {
   resolveRepositoryRootMock.mockResolvedValue("/repo")
   createWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
   updateWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
@@ -186,16 +186,36 @@ test("request, update, and truncate commands call the matching SDK helpers", asy
   const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
 
   const { main } = await import("../src/main.ts")
-  await main(["request", "--root", "/repo", "--target-agent-id", "api", "--message", "Ship it."])
+  await main(["request", "--root", "/repo", "--message", "Ship it."])
   await main(["update", "--root", "/repo", "--request-id", "req-1", "--message", "Resume it."])
   await main(["truncate", "--root", "/repo", "--agent-id", "api", "--reason", "Reset queue."])
 
   assert.equal(createWorkforceRequestMock.mock.calls.length, 1)
   assert.equal(updateWorkforceRequestMock.mock.calls.length, 1)
   assert.equal(truncateWorkforceMock.mock.calls.length, 1)
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "root",
+    message: "Ship it.",
+  })
   assert.match(String(consoleLog.mock.calls[0]?.[0]), /Queued workforce request req-1\./)
   assert.match(String(consoleLog.mock.calls[1]?.[0]), /Updated workforce request req-1\./)
   assert.match(String(consoleLog.mock.calls[2]?.[0]), /Truncated workforce queue for \/repo\./)
+})
+
+test("request accepts -t as a short alias for --target-agent-id", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  createWorkforceRequestMock.mockResolvedValue({ requestId: "req-2" })
+  vi.spyOn(console, "log").mockImplementation(() => {})
+
+  const { main } = await import("../src/main.ts")
+  await main(["request", "--root", "/repo", "-t", "api", "--message", "Ship it."])
+
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "api",
+    message: "Ship it.",
+  })
 })
 
 test("create routes a create-intent request to the root workforce agent", async () => {
@@ -233,10 +253,15 @@ test("help output includes command and arg descriptions", async () => {
 
   const { main } = await import("../src/main.ts")
   await main(["--help"])
+  await main(["request", "--help"])
   await main(["create", "--help"])
 
   const helpOutput = consoleLog.mock.calls.map((call) => String(call[0])).join("\n")
   assert.match(helpOutput, /Manage daemon-owned workforce runtimes and requests/)
+  assert.match(helpOutput, /Queue a new workforce request for a target agent/)
+  assert.match(helpOutput, /--target-agent-id/)
+  assert.match(helpOutput, /-t/)
+  assert.match(helpOutput, /defaults to root/)
   assert.match(
     helpOutput,
     /Ask the root agent to scaffold a new project or add packages for a feature/,
@@ -248,5 +273,5 @@ test("help output includes command and arg descriptions", async () => {
     helpOutput,
     /Feature request that may require creating a new project or new workspace packages/,
   )
-  assert.equal(processExit.mock.calls.length, 2)
+  assert.equal(processExit.mock.calls.length, 3)
 })

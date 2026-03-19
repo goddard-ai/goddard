@@ -246,7 +246,10 @@ export async function main(argv: string[]) {
           targetAgentId: option({
             type: string,
             long: "target-agent-id",
-            description: "Target workforce agent id that should receive the request",
+            short: "t",
+            defaultValue: () => "root",
+            description:
+              "Target workforce agent id that should receive the request; defaults to root",
           }),
           message: option({
             type: string,
