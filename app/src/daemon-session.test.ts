@@ -518,7 +518,7 @@ async function startTestDaemon(): Promise<{
 
   cleanup.push(async () => {
     await new Promise<void>((resolve, reject) => {
-      ipcServer.server.close((error) => {
+      ipcServer.server.close((error: any) => {
         if (error) {
           reject(error)
           return
@@ -533,7 +533,7 @@ async function startTestDaemon(): Promise<{
     daemonUrl: createDaemonUrl(socketPath),
     close: async () => {
       await new Promise<void>((resolve, reject) => {
-        ipcServer.server.close((error) => {
+        ipcServer.server.close((error: any) => {
           if (error) {
             reject(error)
             return
