@@ -9,7 +9,7 @@
     "build": "turbo run build",
     "fmt": "pnpm -r run fmt",
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck --output-logs=errors-only",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
