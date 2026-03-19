@@ -55,7 +55,3 @@ The test suite is maintained by AI agents and should stay lean.
 - In Vitest test files, use the `expect` API for assertions instead of `assert` imports from either Vitest or Node.
 - Avoid assertions against informal constants or incidental content fragments. Exact checks for real contract strings, such as error messages or stable literals, are acceptable.
 - When replacing a shallow or brittle test, remove the old test instead of keeping both unless both protect distinct behavior.
-
-## `build:types` Script Guidance
-
-Do not add a `build:types` script to packages that are both private and only export source `*.ts` files.
