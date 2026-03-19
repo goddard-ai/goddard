@@ -1,5 +1,4 @@
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
-import type { SessionManager } from "../session/index.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"
 import {
   WorkforceRuntime,
