@@ -11,7 +11,7 @@ export default defineConfig({
   outDir: "dist",
   sourcemap: isDebug,
   dts: {
-    eager: true,
+    tsgo: true,
   },
   plugins: [unpluginRaw()],
   deps: {

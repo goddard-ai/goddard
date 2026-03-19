@@ -12,7 +12,9 @@ export default defineConfig({
   clean: true,
   outDir: "dist",
   sourcemap: isDebug,
-  dts: true,
+  dts: {
+    tsgo: true,
+  },
   plugins: [unpluginRaw()],
   define: {
     __VERSION__: JSON.stringify(pkg.version),
