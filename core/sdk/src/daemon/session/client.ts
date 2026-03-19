@@ -1,19 +1,16 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
+import { resolveDaemonClient, type DaemonClientOptions } from "../client.js"
 import { AgentSession } from "./client-session.js"
 
-// Configuration used to connect SDK session helpers to a daemon IPC client.
-export type RunAgentOptions = {
-  client?: DaemonIpcClient
-  daemonUrl?: string
-  createClient?: (input: { socketPath: string }) => DaemonIpcClient
-  env?: Record<string, string | undefined>
-}
+/** Backward-compatible options for SDK helpers that create or attach daemon sessions. */
+// Shared daemon client resolution options used by session helpers.
+export type RunAgentOptions = DaemonClientOptions
 
-// Read-only daemon session lookup options shared with runAgent.
+/** Read-only daemon session lookup options shared with `runAgent`. */
+// Shared daemon client resolution options used by session lookup helpers.
 export type GetDaemonSessionOptions = RunAgentOptions
 
 function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
@@ -125,42 +122,28 @@ async function createMessageOutputTransport(
   }
 }
 
-function resolveDaemonClient(options?: RunAgentOptions): DaemonIpcClient {
-  if (options?.client) {
-    return options.client
-  }
-
-  if (options?.daemonUrl) {
-    return createDaemonIpcClient({
-      daemonUrl: options.daemonUrl,
-      createClient: options.createClient,
-    })
-  }
-
-  return createDaemonIpcClientFromEnv({
-    env: options?.env,
-    createClient: options?.createClient,
-  }).client
-}
-
+/** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams & { oneShot: true },
   handler?: acp.Client,
   options?: RunAgentOptions,
 ): Promise<null>
 
+/** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams & { oneShot?: undefined },
   handler?: acp.Client,
   options?: RunAgentOptions,
 ): Promise<AgentSession>
 
+/** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams,
   handler?: acp.Client,
   options?: RunAgentOptions,
 ): Promise<AgentSession | null>
 
+/** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams,
   handler?: acp.Client,
@@ -215,6 +198,7 @@ export async function runAgent(
   )
 }
 
+/** Returns the current daemon-side session record for the given session id. */
 export async function getDaemonSession(
   id: string,
   options?: GetDaemonSessionOptions,

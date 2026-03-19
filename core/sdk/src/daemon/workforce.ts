@@ -1,30 +1,12 @@
-import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client"
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
 import type { WorkforceRequestIntent } from "@goddard-ai/schema/workforce"
-import type { RunAgentOptions } from "./session/client.js"
+import { resolveDaemonClient, type DaemonClientOptions } from "./client.js"
 
-// Configuration used to connect workforce helpers to a daemon IPC client.
-export type WorkforceClientOptions = RunAgentOptions
+/** Shared daemon connection options for workforce lifecycle helpers. */
+// Shared daemon client resolution options used by workforce helpers.
+export type WorkforceClientOptions = DaemonClientOptions
 
-function resolveDaemonClient(options?: WorkforceClientOptions): DaemonIpcClient {
-  if (options?.client) {
-    return options.client
-  }
-
-  if (options?.daemonUrl) {
-    return createDaemonIpcClient({
-      daemonUrl: options.daemonUrl,
-      createClient: options.createClient,
-    })
-  }
-
-  return createDaemonIpcClientFromEnv({
-    env: options?.env,
-    createClient: options?.createClient,
-  }).client
-}
-
+/** Starts or reuses the daemon-managed workforce runtime for a repository root. */
 export async function startDaemonWorkforce(
   rootDir: string,
   options?: WorkforceClientOptions,
@@ -34,6 +16,7 @@ export async function startDaemonWorkforce(
   return response.workforce
 }
 
+/** Returns the daemon-managed workforce state for a repository root. */
 export async function getDaemonWorkforce(
   rootDir: string,
   options?: WorkforceClientOptions,
@@ -43,6 +26,7 @@ export async function getDaemonWorkforce(
   return response.workforce
 }
 
+/** Lists all workforce runtimes currently known to the daemon. */
 export async function listDaemonWorkforces(
   options?: WorkforceClientOptions,
 ): Promise<DaemonWorkforceStatus[]> {
@@ -51,6 +35,7 @@ export async function listDaemonWorkforces(
   return response.workforces
 }
 
+/** Shuts down the daemon-managed workforce runtime for a repository root. */
 export async function shutdownDaemonWorkforce(
   rootDir: string,
   options?: WorkforceClientOptions,
@@ -60,6 +45,7 @@ export async function shutdownDaemonWorkforce(
   return response.success
 }
 
+/** Creates a new daemon-managed workforce request. */
 export async function createDaemonWorkforceRequest(
   input: {
     rootDir: string
@@ -78,6 +64,7 @@ export async function createDaemonWorkforceRequest(
   })
 }
 
+/** Updates an existing daemon-managed workforce request. */
 export async function updateDaemonWorkforceRequest(
   input: {
     rootDir: string
@@ -94,6 +81,7 @@ export async function updateDaemonWorkforceRequest(
   })
 }
 
+/** Cancels an existing daemon-managed workforce request. */
 export async function cancelDaemonWorkforceRequest(
   input: {
     rootDir: string
@@ -106,6 +94,7 @@ export async function cancelDaemonWorkforceRequest(
   return client.send("workforceCancel", input)
 }
 
+/** Truncates pending workforce work for a repository root or specific agent. */
 export async function truncateDaemonWorkforce(
   input: {
     rootDir: string
