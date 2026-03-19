@@ -1,8 +1,8 @@
 {
   "name": "@goddard-ai/storage",
-  "license": "MIT",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -14,6 +14,11 @@
       "types": "./src/session-permissions.ts",
       "import": "./dist/session-permissions.js",
       "source": "./src/session-permissions.ts"
+    },
+    "./managed-pr-locations": {
+      "types": "./src/managed-pr-locations.ts",
+      "import": "./dist/managed-pr-locations.js",
+      "source": "./src/managed-pr-locations.ts"
     }
   },
   "scripts": {

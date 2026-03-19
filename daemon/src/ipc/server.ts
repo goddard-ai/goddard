@@ -3,6 +3,7 @@ import { createServer } from "@goddard-ai/ipc"
 import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { SessionStorage } from "@goddard-ai/storage"
+import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { once } from "node:events"
 import { createSessionManager } from "../session/manager.ts"
@@ -29,6 +30,7 @@ export async function startDaemonServer(
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
   const getSessionByToken = deps.getSessionByToken ?? SessionPermissionsStorage.getByToken
   const addAllowedPrToSession = deps.addAllowedPrToSession ?? SessionPermissionsStorage.addAllowedPr
+  const recordManagedPrLocation = deps.recordManagedPrLocation ?? ManagedPrLocationStorage.upsert
 
   await prepareSocketPath(socketPath)
 
@@ -164,6 +166,12 @@ export async function startDaemonServer(
         repo: session.repo,
       })
       await addAllowedPrToSession(session.sessionId, pr.number)
+      await recordManagedPrLocation({
+        owner: session.owner,
+        repo: session.repo,
+        prNumber: pr.number,
+        cwd: payload.cwd,
+      })
       return { number: pr.number, url: pr.url }
     }),
     prReply: withRequestLogging<
@@ -194,11 +202,18 @@ export async function startDaemonServer(
         throw new Error(`PR #${resolvedInput.prNumber} is not allowed for this session`)
       }
 
-      return client.pr.reply({
+      const response = await client.pr.reply({
         ...resolvedInput,
         owner: session.owner,
         repo: session.repo,
       })
+      await recordManagedPrLocation({
+        owner: session.owner,
+        repo: session.repo,
+        prNumber: resolvedInput.prNumber,
+        cwd: payload.cwd,
+      })
+      return response
     }),
     sessionCreate: withRequestLogging<
       CreateDaemonSessionRequest,
