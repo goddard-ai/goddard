@@ -6,17 +6,20 @@ const BIN_PATH = join(__dirname, "../dist/main.mjs")
 
 test("goddard-daemon prints help when --help is passed", () => {
   const result = spawnSync("node", [BIN_PATH, "--help"], { encoding: "utf-8" })
-  expect(result.stdout).toContain("goddard-daemon")
-  expect(result.stdout).toContain("run")
+  const output = `${result.stdout}${result.stderr}`
+  expect(output).toContain("goddard-daemon")
+  expect(output).toContain("run")
   expect(result.status).toBe(0)
 })
 
 test("goddard-daemon run prints help when --help is passed", () => {
   const result = spawnSync("node", [BIN_PATH, "run", "--help"], { encoding: "utf-8" })
-  expect(result.stdout).toContain("run")
-  expect(result.stdout).toContain("--project-dir")
-  expect(result.stdout).not.toContain("--repo")
-  expect(result.stdout).toContain("--pretty")
-  expect(result.stdout).toContain("--verbose")
+  const output = `${result.stdout}${result.stderr}`
+  expect(output).toContain("run")
+  expect(output).toContain("--base-url")
+  expect(output).not.toContain("--repo")
+  expect(output).not.toContain("--project-dir")
+  expect(output).toContain("--json")
+  expect(output).toContain("--verbose")
   expect(result.status).toBe(0)
 })

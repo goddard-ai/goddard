@@ -14,7 +14,6 @@ import { runOneShot, type OneShotInput } from "./one-shot.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
-  projectDir: string
   baseUrl: string
   socketPath?: string
   agentBinDir?: string
@@ -51,7 +50,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
   const io = deps.io ?? defaultIo
   const restoreLogging = configureDaemonLogging({
     writeLine: io.stdout,
-    mode: input.logMode ?? "json",
+    mode: input.logMode ?? "pretty",
   })
   const logger = createDaemonLogger()
   const enableIpc = input.enableIpc ?? true
@@ -75,7 +74,6 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
 
   try {
     logger.log("daemon.startup", {
-      projectDir: input.projectDir,
       baseUrl: runtime.baseUrl,
       socketPath: runtime.socketPath,
       agentBinDir: runtime.agentBinDir,
@@ -164,7 +162,6 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           const exitCode = await runOneShotImpl({
             event,
             prompt,
-            projectDir: input.projectDir,
             daemonUrl: activeIpcServer.daemonUrl,
             agentBinDir: runtime.agentBinDir,
           })
