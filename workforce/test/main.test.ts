@@ -1,5 +1,5 @@
 import * as assert from "node:assert/strict"
-import { beforeEach, test, vi } from "vitest"
+import { afterEach, beforeEach, test, vi } from "vitest"
 
 const cancelledSelection = Symbol("cancelled-selection")
 
@@ -80,6 +80,10 @@ beforeEach(() => {
   updateWorkforceRequestMock.mockReset()
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 test("init exits cleanly when there are no workforce candidates", async () => {
   resolveRepositoryRootMock.mockResolvedValue("/repo")
   discoverWorkforceInitCandidatesMock.mockResolvedValue([])
@@ -154,7 +158,8 @@ test("start and stop commands forward lifecycle control to the daemon-backed SDK
 
   assert.equal(startWorkforceMock.mock.calls.length, 1)
   assert.equal(stopWorkforceMock.mock.calls.length, 1)
-  assert.equal(consoleLog.mock.calls.length, 2)
+  assert.match(String(consoleLog.mock.calls[0]?.[0]), /Started workforce for \/repo\./)
+  assert.match(String(consoleLog.mock.calls[1]?.[0]), /Stopped workforce for \/repo\./)
 })
 
 test("status and list print daemon-backed workforce state", async () => {
@@ -169,7 +174,8 @@ test("status and list print daemon-backed workforce state", async () => {
 
   assert.equal(getWorkforceMock.mock.calls.length, 1)
   assert.equal(listWorkforcesMock.mock.calls.length, 1)
-  assert.equal(consoleLog.mock.calls.length, 2)
+  assert.match(String(consoleLog.mock.calls[0]?.[0]), /"rootDir": "\/repo"/)
+  assert.match(String(consoleLog.mock.calls[1]?.[0]), /"activeRequestCount": 0/)
 })
 
 test("request, update, and truncate commands call the matching SDK helpers", async () => {
@@ -187,5 +193,60 @@ test("request, update, and truncate commands call the matching SDK helpers", asy
   assert.equal(createWorkforceRequestMock.mock.calls.length, 1)
   assert.equal(updateWorkforceRequestMock.mock.calls.length, 1)
   assert.equal(truncateWorkforceMock.mock.calls.length, 1)
-  assert.equal(consoleLog.mock.calls.length, 3)
+  assert.match(String(consoleLog.mock.calls[0]?.[0]), /Queued workforce request req-1\./)
+  assert.match(String(consoleLog.mock.calls[1]?.[0]), /Updated workforce request req-1\./)
+  assert.match(String(consoleLog.mock.calls[2]?.[0]), /Truncated workforce queue for \/repo\./)
+})
+
+test("create routes a create-intent request to the root workforce agent", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  getWorkforceMock.mockResolvedValue({
+    config: {
+      rootAgentId: "root",
+    },
+  })
+  createWorkforceRequestMock.mockResolvedValue({ requestId: "req-create-1" })
+  const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
+
+  const { main } = await import("../src/main.ts")
+  await main([
+    "create",
+    "--root",
+    "/repo",
+    "--message",
+    "Build a worker package for scheduled jobs.",
+  ])
+
+  assert.equal(getWorkforceMock.mock.calls.length, 1)
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "root",
+    message: "Build a worker package for scheduled jobs.",
+    intent: "create",
+  })
+  assert.equal(String(consoleLog.mock.calls[0]?.[0]), "Queued create request req-create-1.")
+})
+
+test("help output includes command and arg descriptions", async () => {
+  const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
+  const processExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
+
+  const { main } = await import("../src/main.ts")
+  await main(["--help"])
+  await main(["create", "--help"])
+
+  const helpOutput = consoleLog.mock.calls.map((call) => String(call[0])).join("\n")
+  assert.match(helpOutput, /Manage daemon-owned workforce runtimes and requests/)
+  assert.match(
+    helpOutput,
+    /Ask the root agent to scaffold a new project or add packages for a feature/,
+  )
+  assert.match(helpOutput, /--root/)
+  assert.match(helpOutput, /Repository root or any path inside the repository/)
+  assert.match(helpOutput, /--message/)
+  assert.match(
+    helpOutput,
+    /Feature request that may require creating a new project or new workspace packages/,
+  )
+  assert.equal(processExit.mock.calls.length, 2)
 })
