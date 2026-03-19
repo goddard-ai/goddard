@@ -9,7 +9,6 @@ import { runOneShot, type OneShotInput } from "./one-shot.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
-  repo: string
   projectDir: string
   baseUrl: string
   socketPath?: string
@@ -66,7 +65,6 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
 
   try {
     logger.log("daemon.startup", {
-      repository: input.repo,
       projectDir: input.projectDir,
       baseUrl: runtime.baseUrl,
       socketPath: runtime.socketPath,
@@ -74,9 +72,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     })
 
     if (enableIpc === false && enableStream === false) {
-      logger.log("daemon.no_features_enabled", {
-        repository: input.repo,
-      })
+      logger.log("daemon.no_features_enabled", {})
       return 0
     }
 
@@ -89,26 +85,20 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     }
 
     const activeIpcServer = ipcServer
-    const runningPrs = new Set<number>()
+    const runningPrs = new Set<string>()
     const subscription = enableStream ? await client.stream.subscribe() : null
 
     if (subscription) {
-      logger.log("repo.subscription_started", {
-        repository: input.repo,
-        ...(activeIpcServer
+      logger.log("repo.subscription_started", (activeIpcServer
           ? {
               daemonUrl: activeIpcServer.daemonUrl,
               socketPath: activeIpcServer.socketPath,
             }
-          : {}),
-      })
+          : {}))
 
       subscription.on("event", async (payload) => {
         const event = payload as RepoEvent
         if (!isFeedbackEvent(event)) {
-          return
-        }
-        if (`${event.owner}/${event.repo}` !== input.repo) {
           return
         }
 
@@ -123,8 +113,9 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
         }
 
         const prompt = buildPrompt(event)
+        const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
 
-        if (runningPrs.has(event.prNumber)) {
+        if (runningPrs.has(requestKey)) {
           logger.log("repo.feedback_coalesced", {
             repository: `${event.owner}/${event.repo}`,
             prNumber: event.prNumber,
@@ -133,7 +124,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           return
         }
 
-        runningPrs.add(event.prNumber)
+        runningPrs.add(requestKey)
 
         try {
           const managed = await client.pr.isManaged({
@@ -178,7 +169,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
             errorMessage: error instanceof Error ? error.message : String(error),
           })
         } finally {
-          runningPrs.delete(event.prNumber)
+          runningPrs.delete(requestKey)
         }
       })
     }
@@ -190,13 +181,11 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
       ]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      repository: input.repo,
       socketPath: runtime.socketPath,
     })
     return 0
   } catch (error) {
     logger.log("daemon.run_failed", {
-      repository: input.repo,
       errorMessage: error instanceof Error ? error.message : String(error),
     })
     return 1

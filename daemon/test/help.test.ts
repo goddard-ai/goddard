@@ -14,6 +14,7 @@ test("goddard-daemon prints help when --help is passed", () => {
 test("goddard-daemon run prints help when --help is passed", () => {
   const result = spawnSync("node", [BIN_PATH, "run", "--help"], { encoding: "utf-8" })
   expect(result.stdout).toContain("run")
-  expect(result.stdout).toContain("--repo")
+  expect(result.stdout).toContain("--project-dir")
+  expect(result.stdout).not.toContain("--repo")
   expect(result.status).toBe(0)
 })

@@ -53,7 +53,7 @@ test("daemon package ships agent-bin wrappers for goddard and workforce", async 
   assert.equal(workforceStat.isSymbolicLink() || workforceStat.isFile(), true)
 })
 
-test("daemon run subscribes to unified stream, filters to the local repo, and passes daemon URL into one-shot runs", async () => {
+test("daemon run subscribes once, handles events across repositories, and passes daemon URL into one-shot runs", async () => {
   const subscription = new MockStreamSubscription()
   let subCalls = 0
 
@@ -113,9 +113,9 @@ test("daemon run subscribes to unified stream, filters to the local repo, and pa
         type: "comment" as const,
         owner: "other",
         repo: "repo",
-        prNumber: 999,
+        prNumber: 123,
         author: "alice",
-        body: "ignore this",
+        body: "handle this too",
         reactionAdded: "eyes",
         createdAt: new Date().toISOString(),
       })
@@ -138,7 +138,6 @@ test("daemon run subscribes to unified stream, filters to the local repo, and pa
   const { logs, result: exitCode } = await captureDaemonLogs(async () =>
     runDaemon(
       {
-        repo: "test/repo",
         projectDir: process.cwd(),
         baseUrl: "",
         socketPath: "/tmp/custom-daemon.sock",
@@ -156,7 +155,11 @@ test("daemon run subscribes to unified stream, filters to the local repo, and pa
       agentBinDir: "/tmp/custom-agent-bin",
     },
   ])
-  assert.equal(runOneShotCalls.length, 1)
+  assert.equal(runOneShotCalls.length, 2)
+  assert.deepEqual(
+    runOneShotCalls.map((call) => `${call.event.owner}/${call.event.repo}#${call.event.prNumber}`),
+    ["other/repo#123", "test/repo#123"],
+  )
   assert.equal(runOneShotCalls[0].event.prNumber, 123)
   assert.equal(
     runOneShotCalls[0].daemonUrl,
@@ -171,7 +174,6 @@ test("daemon run subscribes to unified stream, filters to the local repo, and pa
     scope: "daemon",
     at: startupLog?.at,
     event: "daemon.startup",
-    repository: "test/repo",
     projectDir: process.cwd(),
     baseUrl: "http://127.0.0.1:8787",
     socketPath: "/tmp/custom-daemon.sock",
@@ -202,7 +204,6 @@ test("daemon run can start only the IPC server when stream is disabled", async (
   const { logs, result: exitCode } = await captureDaemonLogs(async () =>
     runDaemon(
       {
-        repo: "test/repo",
         projectDir: process.cwd(),
         baseUrl: "",
         socketPath: "/tmp/ipc-only.sock",
@@ -289,7 +290,6 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   const { logs, result: exitCode } = await captureDaemonLogs(async () =>
     runDaemon(
       {
-        repo: "test/repo",
         projectDir: process.cwd(),
         baseUrl: "",
         enableIpc: false,
