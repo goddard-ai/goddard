@@ -1,5 +1,6 @@
 import type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "@goddard-ai/schema/daemon"
 import type { SessionPermissionsRecord } from "@goddard-ai/storage/session-permissions"
+import type { ManagedPrLocationRecord } from "@goddard-ai/storage/managed-pr-locations"
 import type { WorkforceManager } from "../workforce/index.ts"
 
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest }
@@ -43,6 +44,9 @@ export type DaemonServerDeps = {
   resolveReplyRequest?: (input: ReplyPrDaemonRequest) => Promise<PrReplyInput>
   getSessionByToken?: (token: string) => Promise<AuthorizedSession | null>
   addAllowedPrToSession?: (sessionId: string, prNumber: number) => Promise<void>
+  recordManagedPrLocation?: (
+    record: Omit<ManagedPrLocationRecord, "updatedAt">,
+  ) => Promise<ManagedPrLocationRecord>
   createWorkforceManager?: (input: {
     sessionManager: import("../session/index.ts").SessionManager
   }) => WorkforceManager

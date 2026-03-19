@@ -1,16 +1,16 @@
+import type { AgentDistribution } from "@goddard-ai/schema/session-server"
+import type { WorkforceConfig } from "@goddard-ai/schema/workforce"
 import { execFile } from "node:child_process"
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
-import type { AgentDistribution } from "@goddard-ai/schema/session-server"
-import type { WorkforceConfig } from "@goddard-ai/schema/workforce"
 export {
   cancelDaemonWorkforceRequest as cancelWorkforceRequest,
   createDaemonWorkforceRequest as createWorkforceRequest,
   getDaemonWorkforce as getWorkforce,
   listDaemonWorkforces as listWorkforces,
-  shutdownDaemonWorkforce as stopWorkforce,
   startDaemonWorkforce as startWorkforce,
+  shutdownDaemonWorkforce as stopWorkforce,
   truncateDaemonWorkforce as truncateWorkforce,
   updateDaemonWorkforceRequest as updateWorkforceRequest,
   type WorkforceClientOptions,
@@ -115,7 +115,7 @@ function sanitizeAgentId(value: string): string {
 
 function buildWorkforceConfig(
   packages: DiscoveredWorkforcePackage[],
-  defaultAgent: string | AgentDistribution = "pi",
+  defaultAgent: string | AgentDistribution = "pi-acp",
 ): WorkforceConfig {
   const domainAgents = packages
     .filter((pkg) => pkg.relativeDir !== ".")

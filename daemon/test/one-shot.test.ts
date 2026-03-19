@@ -38,9 +38,9 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
       createdAt: new Date().toISOString(),
     },
     prompt: "reply to feedback",
-    projectDir: "/tmp/project",
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
     agentBinDir: "/tmp/goddard-agent-bin",
+    resolveProjectDir: async () => "/tmp/project",
     env: {
       PATH: "/usr/bin:/bin",
     },

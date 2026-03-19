@@ -1,4 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { spawnSync } from "node:child_process"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import * as prompts from "./prompts/index.ts"
@@ -9,10 +10,10 @@ import { createDaemonLogger } from "./logging.ts"
 export type OneShotInput = {
   event: FeedbackEvent
   prompt: string
-  projectDir: string
   daemonUrl: string
   agentBinDir: string
   env?: Record<string, string>
+  resolveProjectDir?: (event: FeedbackEvent) => Promise<string | null> | string | null
 }
 
 function buildOneShotEnv(
@@ -51,18 +52,28 @@ function buildBackgroundSystemPrompt(): string {
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
   const logger = createDaemonLogger()
+  const projectDir =
+    (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(input.event))
+  if (!projectDir) {
+    logger.log("one_shot.repository_lookup_failed", {
+      repository: `${input.event.owner}/${input.event.repo}`,
+      prNumber: input.event.prNumber,
+    })
+    return 1
+  }
+
   const branchName = `pr-${input.event.prNumber}`
-  const agentsDir = `${input.projectDir}/.goddard-agents`
+  const agentsDir = `${projectDir}/.goddard-agents`
   const worktreeDir = `${agentsDir}/${branchName}-${Date.now()}`
 
   spawnSync("mkdir", ["-p", agentsDir])
 
   try {
-    let cpArgs = ["-R", `${input.projectDir}/`, worktreeDir]
+    let cpArgs = ["-R", `${projectDir}/`, worktreeDir]
     if (process.platform === "darwin") {
-      cpArgs = ["-cR", `${input.projectDir}/`, worktreeDir]
+      cpArgs = ["-cR", `${projectDir}/`, worktreeDir]
     } else if (process.platform === "linux") {
-      cpArgs = ["--reflink=auto", "-R", `${input.projectDir}/`, worktreeDir]
+      cpArgs = ["--reflink=auto", "-R", `${projectDir}/`, worktreeDir]
     }
 
     let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
@@ -70,7 +81,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
 
     if (cloneResult.status !== 0 && process.platform === "darwin") {
       fallbackAttempted = true
-      cpArgs = ["-R", `${input.projectDir}/`, worktreeDir]
+      cpArgs = ["-R", `${projectDir}/`, worktreeDir]
       cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
     }
 
@@ -136,4 +147,8 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     })
     return 1
   }
+}
+
+async function resolveProjectDir(event: FeedbackEvent): Promise<string | null> {
+  return (await ManagedPrLocationStorage.get(event.owner, event.repo, event.prNumber))?.cwd ?? null
 }

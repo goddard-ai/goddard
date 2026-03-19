@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
+import { configureDaemonLogging } from "../src/logging.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 
@@ -48,6 +49,12 @@ test("daemon submit request requires a valid session token", async () => {
 test("daemon submit request enforces trusted repo context and records created PR access", async () => {
   const createCalls: Array<Record<string, unknown>> = []
   const recordedPrs: Array<{ sessionId: string; prNumber: number }> = []
+  const recordedLocations: Array<{
+    owner: string
+    repo: string
+    prNumber: number
+    cwd: string
+  }> = []
 
   const daemon = await startTestDaemon({
     sdk: {
@@ -75,6 +82,13 @@ test("daemon submit request enforces trusted repo context and records created PR
       addAllowedPr: async (sessionId, prNumber) => {
         recordedPrs.push({ sessionId, prNumber })
       },
+    },
+    recordManagedPrLocation: async (record) => {
+      recordedLocations.push(record)
+      return {
+        ...record,
+        updatedAt: new Date().toISOString(),
+      }
     },
     resolveSubmitRequest: async () => ({
       owner: "evil",
@@ -107,6 +121,14 @@ test("daemon submit request enforces trusted repo context and records created PR
     },
   ])
   assert.deepEqual(recordedPrs, [{ sessionId: "session-42", prNumber: 42 }])
+  assert.deepEqual(recordedLocations, [
+    {
+      owner: "trusted",
+      repo: "widgets",
+      prNumber: 42,
+      cwd: process.cwd(),
+    },
+  ])
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
   const responded = logs.find((entry) => entry.event === "ipc.response_sent")
@@ -147,6 +169,56 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
   )
 })
 
+test("daemon reply request records managed PR checkout locations", async () => {
+  const recordedLocations: Array<{
+    owner: string
+    repo: string
+    prNumber: number
+    cwd: string
+  }> = []
+
+  const daemon = await startTestDaemon({
+    auth: {
+      getSessionByToken: async () => ({
+        sessionId: "session-12",
+        owner: "trusted",
+        repo: "widgets",
+        allowedPrNumbers: [12],
+      }),
+      addAllowedPr: async () => undefined,
+    },
+    recordManagedPrLocation: async (record) => {
+      recordedLocations.push(record)
+      return {
+        ...record,
+        updatedAt: new Date().toISOString(),
+      }
+    },
+    resolveReplyRequest: async () => ({
+      owner: "evil",
+      repo: "fork",
+      prNumber: 12,
+      body: "Updated per review",
+    }),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await client.send("prReply", {
+    token: "tok_session",
+    cwd: process.cwd(),
+    message: "Updated per review",
+  })
+
+  assert.deepEqual(recordedLocations, [
+    {
+      owner: "trusted",
+      repo: "widgets",
+      prNumber: 12,
+      cwd: process.cwd(),
+    },
+  ])
+})
+
 type StartTestDaemonOptions = {
   sdk?: {
     pr?: {
@@ -163,6 +235,18 @@ type StartTestDaemonOptions = {
     } | null>
     addAllowedPr?: (sessionId: string, prNumber: number) => Promise<void>
   }
+  recordManagedPrLocation?: (record: {
+    owner: string
+    repo: string
+    prNumber: number
+    cwd: string
+  }) => Promise<{
+    owner: string
+    repo: string
+    prNumber: number
+    cwd: string
+    updatedAt: string
+  }>
   resolveSubmitRequest?: (input: any) => Promise<any>
   resolveReplyRequest?: (input: any) => Promise<any>
 }
@@ -205,6 +289,7 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
         })),
       getSessionByToken: options.auth?.getSessionByToken,
       addAllowedPrToSession: options.auth?.addAllowedPr,
+      recordManagedPrLocation: options.recordManagedPrLocation,
     },
   )
 
@@ -220,6 +305,7 @@ async function captureDaemonLogs(
   action: () => Promise<void>,
 ): Promise<{ logs: Array<Record<string, unknown>> }> {
   const output: string[] = []
+  const restoreLogging = configureDaemonLogging({ mode: "json" })
   const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
   ) => {
@@ -237,5 +323,6 @@ async function captureDaemonLogs(
     }
   } finally {
     stdout.mockRestore()
+    restoreLogging()
   }
 }
