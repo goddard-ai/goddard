@@ -263,6 +263,7 @@ async function startTestDaemon(): Promise<{
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-app-daemon-"))
   const socketPath = join(socketDir, "daemon.sock")
   let nextSessionId = 0
+  const workforceRoots = new Set<string>()
   const sessionHistory = new Map<
     string,
     { acpId: string; history: GetDaemonSessionHistoryResponse["history"] }
@@ -303,6 +304,43 @@ async function startTestDaemon(): Promise<{
     }
   }
 
+  function getWorkforceStatus(rootDir: string) {
+    return {
+      state: "running" as const,
+      rootDir,
+      configPath: `${rootDir}/.goddard/workforce.json`,
+      ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+      suspendedRequestCount: 0,
+      failedRequestCount: 0,
+    }
+  }
+
+  function getWorkforceResponse(rootDir: string) {
+    return {
+      workforce: {
+        ...getWorkforceStatus(rootDir),
+        config: {
+          version: 1 as const,
+          defaultAgent: "pi",
+          rootAgentId: "root",
+          agents: [
+            {
+              id: "root",
+              name: "@repo/root",
+              role: "root" as const,
+              cwd: ".",
+              owns: ["."],
+            },
+          ],
+        },
+      },
+    }
+  }
+
+  // Keep this test-local IPC handler list in sync with daemonIpcSchema and daemon/src/ipc/server.ts.
+  // When new daemon IPC methods are added, stub them here too or the app bridge tests will drift.
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
     health: async () => ({ ok: true }),
     prSubmit: async () => ({ number: 1, url: "https://github.com/example/repo/pull/1" }),
@@ -376,6 +414,67 @@ async function startTestDaemon(): Promise<{
       return { accepted: true as const }
     },
     sessionResolveToken: async () => ({ id: "daemon-session-0" }),
+    workforceStart: async ({ rootDir }) => {
+      workforceRoots.add(rootDir)
+      return getWorkforceResponse(rootDir)
+    },
+    workforceGet: async ({ rootDir }) => {
+      workforceRoots.add(rootDir)
+      return getWorkforceResponse(rootDir)
+    },
+    workforceList: async () => ({
+      workforces: Array.from(workforceRoots)
+        .sort()
+        .map((rootDir) => getWorkforceStatus(rootDir)),
+    }),
+    workforceShutdown: async ({ rootDir }) => {
+      return {
+        rootDir,
+        success: workforceRoots.delete(rootDir),
+      }
+    },
+    workforceRequest: async ({ rootDir }) => {
+      workforceRoots.add(rootDir)
+      return {
+        workforce: getWorkforceStatus(rootDir),
+        requestId: "test-workforce-request",
+      }
+    },
+    workforceUpdate: async ({ rootDir, requestId }) => {
+      workforceRoots.add(rootDir)
+      return {
+        workforce: getWorkforceStatus(rootDir),
+        requestId,
+      }
+    },
+    workforceCancel: async ({ rootDir, requestId }) => {
+      workforceRoots.add(rootDir)
+      return {
+        workforce: getWorkforceStatus(rootDir),
+        requestId,
+      }
+    },
+    workforceTruncate: async ({ rootDir }) => {
+      workforceRoots.add(rootDir)
+      return {
+        workforce: getWorkforceStatus(rootDir),
+        requestId: null,
+      }
+    },
+    workforceRespond: async ({ rootDir, requestId }) => {
+      workforceRoots.add(rootDir)
+      return {
+        workforce: getWorkforceStatus(rootDir),
+        requestId,
+      }
+    },
+    workforceSuspend: async ({ rootDir, requestId }) => {
+      workforceRoots.add(rootDir)
+      return {
+        workforce: getWorkforceStatus(rootDir),
+        requestId,
+      }
+    },
   })
 
   cleanup.push(async () => {
