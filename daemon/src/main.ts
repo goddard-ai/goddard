@@ -1,7 +1,24 @@
-import { command, option, optional, run, string, subcommands } from "cmd-ts"
+import { command, oneOf, option, optional, restPositionals, run, string, subcommands } from "cmd-ts"
 import { runDaemon } from "./daemon.ts"
 
 declare const __VERSION__: string
+
+const daemonRunFeatures = ["ipc", "stream"] as const
+
+function resolveRunFeatureFlags(features: readonly (typeof daemonRunFeatures)[number][]) {
+  if (features.length === 0) {
+    return {
+      enableIpc: true,
+      enableStream: true,
+    }
+  }
+
+  const enabled = new Set(features)
+  return {
+    enableIpc: enabled.has("ipc"),
+    enableStream: enabled.has("stream"),
+  }
+}
 
 const app = subcommands({
   name: "goddard-daemon",
@@ -16,7 +33,7 @@ const app = subcommands({
           type: string,
           long: "project-dir",
           defaultValue: () => process.cwd(),
-          description: "Local directory of the project",
+          description: "Local project directory used by daemon-managed runtimes",
         }),
         baseUrl: option({
           type: string,
@@ -27,20 +44,29 @@ const app = subcommands({
         socketPath: option({
           type: optional(string),
           long: "socket-path",
-          description: "Path to the Unix socket for IPC",
+          description: "Unix socket path for daemon IPC control",
         }),
         agentBinDir: option({
           type: optional(string),
           long: "agent-bin-dir",
-          description: "Directory containing agent binaries",
+          description: "Directory containing agent executables used by daemon-managed sessions",
+        }),
+        features: restPositionals({
+          type: oneOf(daemonRunFeatures),
+          displayName: "feature",
+          description:
+            "Optional runtime features to enable. Supported values: ipc and stream; omit all features to enable everything",
         }),
       },
       handler: async (args) => {
+        const featureFlags = resolveRunFeatureFlags(args.features)
         const exitCode = await runDaemon({
           projectDir: args.projectDir,
           baseUrl: args.baseUrl,
           socketPath: args.socketPath,
           agentBinDir: args.agentBinDir,
+          enableIpc: featureFlags.enableIpc,
+          enableStream: featureFlags.enableStream,
         })
         process.exit(exitCode)
       },
