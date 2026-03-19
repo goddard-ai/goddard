@@ -1,75 +1,41 @@
+import { DaemonSessionMetadata } from "@goddard-ai/schema/daemon/session-metadata"
+import type { GoddardLoopConfig } from "@goddard-ai/schema/config"
+import { AgentDistribution } from "@goddard-ai/schema/session-server"
 import { z } from "zod"
 
-const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"])
+export type { GoddardLoopConfig, PiAgentConfig, ThinkingLevel } from "@goddard-ai/schema/config"
 
-/** A persisted thinking level for an agent-backed session. */
-export type ThinkingLevel = z.infer<typeof thinkingLevelSchema>
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/** Canonical model identifiers exposed by the loop configuration package. */
+export const Models = {
+  Anthropic: {
+    Claude37Sonnet: "anthropic/claude-3-7-sonnet-20250219",
+    ClaudeSonnet45: "anthropic/claude-sonnet-4-5",
+    ClaudeSonnet46: "anthropic/claude-sonnet-4-6",
+    ClaudeOpus46: "anthropic/claude-opus-4-6",
+  },
+  OpenAi: {
+    O3Mini: "openai/o3-mini",
+    O3Pro: "openai/o3-pro",
+    Gpt5Codex: "openai/gpt-5-codex",
+    Gpt51Codex: "openai/gpt-5.1-codex",
+    Gpt52Codex: "openai/gpt-5.2-codex",
+    Gpt53Codex: "openai/gpt-5.3-codex",
+  },
+} as const
+
+/** Extracts the union of property values from one object type. */
+type ValueOf<T> = T[keyof T]
+
+/** Supported model identifiers accepted by loop-facing configuration APIs. */
+export type Model = ValueOf<typeof Models.Anthropic> | ValueOf<typeof Models.OpenAi> | (string & {})
 
 const stringRecordSchema = z.record(z.string(), z.string())
 
-const metadataSchema = z
-  .object({
-    repository: z.string().optional(),
-    prNumber: z.number().int().optional(),
-  })
-  .catchall(z.unknown())
-
-const agentBinaryTargetSchema = z
-  .object({
-    archive: z.string().url(),
-    cmd: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: stringRecordSchema.optional(),
-  })
-  .strict()
-
-const agentBinaryDistributionSchema = z
-  .object({
-    "darwin-aarch64": agentBinaryTargetSchema.optional(),
-    "darwin-x86_64": agentBinaryTargetSchema.optional(),
-    "linux-aarch64": agentBinaryTargetSchema.optional(),
-    "linux-x86_64": agentBinaryTargetSchema.optional(),
-    "windows-aarch64": agentBinaryTargetSchema.optional(),
-    "windows-x86_64": agentBinaryTargetSchema.optional(),
-  })
-  .strict()
-  .refine((value) => Object.values(value).some((target) => target !== undefined), {
-    message: "binary distributions must declare at least one supported platform",
-  })
-
-const agentPackageDistributionSchema = z
-  .object({
-    package: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: stringRecordSchema.optional(),
-  })
-  .strict()
-
-const sessionAgentSchema = z.union([
-  z.string().min(1),
-  z
-    .object({
-      id: z.string().regex(/^[a-z][a-z0-9-]*$/),
-      name: z.string().min(1),
-      version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+/),
-      description: z.string().min(1),
-      repository: z.string().url().optional(),
-      authors: z.array(z.string()).optional(),
-      license: z.string().optional(),
-      icon: z.string().optional(),
-      distribution: z
-        .object({
-          binary: agentBinaryDistributionSchema.optional(),
-          npx: agentPackageDistributionSchema.optional(),
-          uvx: agentPackageDistributionSchema.optional(),
-        })
-        .strict()
-        .refine((value) => Object.values(value).some((entry) => entry !== undefined), {
-          message: "distribution must declare at least one install method",
-        }),
-    })
-    .strict(),
-])
+const sessionAgentSchema = z.union([z.string().min(1), AgentDistribution])
 
 const sessionConfigSchema = z
   .object({
@@ -78,7 +44,7 @@ const sessionConfigSchema = z
     mcpServers: z.array(z.unknown()).optional(),
     systemPrompt: z.string().min(1).optional(),
     env: stringRecordSchema.optional(),
-    metadata: metadataSchema.optional(),
+    metadata: DaemonSessionMetadata.optional(),
   })
   .passthrough()
 
@@ -225,4 +191,9 @@ export function mergeLoopConfigLayers(
   ...layers: Array<GoddardLoopConfigDocument | undefined>
 ): GoddardLoopConfigDocument {
   return loopConfigSchema.parse(mergeConfigLayers<GoddardLoopConfigDocument>(layers))
+}
+
+/** Returns loop configuration unchanged so callers can author typed config files. */
+export function defineConfig(config: GoddardLoopConfig): GoddardLoopConfig {
+  return config
 }

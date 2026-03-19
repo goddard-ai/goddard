@@ -22,7 +22,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/ipc": "workspace:^",
-    "rouzer": "^1.5.1",
+    "rouzer": "^2.0.0",
     "zod": "^4.3.6"
   }
 }

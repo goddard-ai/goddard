@@ -1,48 +1,41 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import type { ACPAdapterName } from "./acp-adapters.js"
 import type { SessionStatus } from "./db.js"
-import type { AgentDistribution } from "./session-server.js"
-import type {
-  WorkforceConfig,
-  WorkforceProjectionSummary,
-  WorkforceRequestIntent,
-} from "./workforce.js"
+import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.js"
 
+export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
+export type { CreateDaemonSessionRequest, DaemonSessionPathParams } from "./daemon/sessions.js"
+export type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
+export type {
+  CancelDaemonWorkforceRequest,
+  CreateDaemonWorkforceRequestRequest,
+  GetDaemonWorkforceRequest,
+  RespondDaemonWorkforceRequest,
+  ShutdownDaemonWorkforceRequest,
+  StartDaemonWorkforceRequest,
+  SuspendDaemonWorkforceRequest,
+  TruncateDaemonWorkforceRequest,
+  UpdateDaemonWorkforceRequest,
+} from "./workforce/requests.js"
+
+/** Minimal daemon liveness payload returned by health probes. */
 export type DaemonHealth = {
   ok: boolean
 }
 
-export type SubmitPrDaemonRequest = {
-  cwd: string
-  title: string
-  body: string
-  head?: string
-  base?: string
-}
-
+/** Response payload returned after one pull request submission. */
 export type SubmitPrDaemonResponse = {
   number: number
   url: string
 }
 
-export type ReplyPrDaemonRequest = {
-  cwd: string
-  message: string
-  prNumber?: number
-}
-
+/** Response payload returned after one pull request reply. */
 export type ReplyPrDaemonResponse = {
   success: boolean
 }
 
+/** Runtime environment variables injected into one daemon-managed session. */
 export type DaemonSessionRuntimeEnv = {
   GODDARD_SESSION_TOKEN: string
-}
-
-export type DaemonSessionMetadata = {
-  repository?: string
-  prNumber?: number
-  [key: string]: unknown
 }
 
 /** Durable connectivity state exposed to app and SDK consumers. */
@@ -68,27 +61,18 @@ export type DaemonSessionDiagnostics = {
   lastEventAt: string | null
 }
 
+/** Stable identity values used to address one daemon-managed session. */
 export type DaemonSessionIdentity = {
   id: string
   acpId: string
 }
 
-export type CreateDaemonSessionRequest = {
-  agent: ACPAdapterName | AgentDistribution
-  cwd: string
-  mcpServers: acp.McpServer[]
-  systemPrompt: string
-  env?: Record<string, string>
-  metadata?: DaemonSessionMetadata
-  initialPrompt?: string | acp.ContentBlock[]
-  oneShot?: boolean
-}
-
+/** Full daemon-managed session record exposed to app and SDK consumers. */
 export type DaemonSession = DaemonSessionIdentity & {
   status: SessionStatus
   agentName: string
   cwd: string
-  metadata: DaemonSessionMetadata | null
+  metadata: import("./daemon/session-metadata.js").DaemonSessionMetadata | null
   connection: DaemonSessionConnection
   diagnostics: DaemonSessionDiagnostics
   createdAt: string
@@ -99,18 +83,17 @@ export type DaemonSession = DaemonSessionIdentity & {
   lastAgentMessage: string | null
 }
 
+/** Response payload returned after one daemon-managed session is created. */
 export type CreateDaemonSessionResponse = {
   session: DaemonSession
 }
 
-export type DaemonSessionPathParams = {
-  id: string
-}
-
+/** Response payload returned after one daemon-managed session is fetched. */
 export type GetDaemonSessionResponse = {
   session: DaemonSession
 }
 
+/** Response payload returned after one daemon-managed session history fetch. */
 export type GetDaemonSessionHistoryResponse = DaemonSessionIdentity & {
   connection: DaemonSessionConnection
   history: acp.AnyMessage[]
@@ -122,6 +105,7 @@ export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
   events: DaemonDiagnosticEvent[]
 }
 
+/** Response payload returned after one daemon-managed session shutdown request. */
 export type ShutdownDaemonSessionResponse = {
   id: string
   success: boolean
@@ -141,70 +125,6 @@ export type DaemonWorkforceStatus = WorkforceProjectionSummary & {
 /** One daemon-managed workforce runtime addressed by repository root. */
 export type DaemonWorkforce = DaemonWorkforceStatus & {
   config: WorkforceConfig
-}
-
-/** Request payload used to start or reconnect to a daemon-owned workforce. */
-export type StartDaemonWorkforceRequest = {
-  rootDir: string
-}
-
-/** Request payload used to fetch one daemon-owned workforce by repository root. */
-export type GetDaemonWorkforceRequest = {
-  rootDir: string
-}
-
-/** Request payload used to stop one daemon-owned workforce by repository root. */
-export type ShutdownDaemonWorkforceRequest = {
-  rootDir: string
-}
-
-/** Request payload used to enqueue work for one target workforce agent. */
-export type CreateDaemonWorkforceRequestRequest = {
-  rootDir: string
-  targetAgentId: string
-  input: string
-  intent?: WorkforceRequestIntent
-  token?: string
-}
-
-/** Request payload used to add resume context to one workforce request. */
-export type UpdateDaemonWorkforceRequest = {
-  rootDir: string
-  requestId: string
-  input: string
-  token?: string
-}
-
-/** Request payload used to cancel one workforce request. */
-export type CancelDaemonWorkforceRequest = {
-  rootDir: string
-  requestId: string
-  reason?: string
-  token?: string
-}
-
-/** Request payload used to clear pending work in one agent scope or the whole runtime. */
-export type TruncateDaemonWorkforceRequest = {
-  rootDir: string
-  agentId?: string
-  reason?: string
-  token?: string
-}
-
-/** Request payload used by an active workforce agent to finish its current task. */
-export type RespondDaemonWorkforceRequest = {
-  rootDir: string
-  requestId: string
-  output: string
-  token: string
-}
-
-/** Request payload used by an active workforce agent to suspend its current task. */
-export type SuspendDaemonWorkforceRequest = {
-  rootDir: string
-  requestId: string
-  reason: string
-  token: string
 }
 
 /** Response payload returned when one workforce runtime is fetched. */

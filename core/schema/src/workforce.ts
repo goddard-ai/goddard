@@ -1,10 +1,9 @@
 import type { AgentDistribution } from "./session-server.js"
 
+export type { WorkforceRequestIntent } from "./workforce/requests.js"
+
 /** Supported workforce agent roles within one repository-owned runtime. */
 export type WorkforceAgentRole = "root" | "domain"
-
-/** Supported request intents that can specialize one workforce request lifecycle. */
-export type WorkforceRequestIntent = "default" | "create"
 
 /** Stable lifecycle states for one workforce request after replay. */
 export type WorkforceRequestStatus =
@@ -46,7 +45,7 @@ export interface WorkforceRequestEvent extends WorkforceEventBase {
   requestId: string
   toAgentId: string
   fromAgentId: string | null
-  intent: WorkforceRequestIntent
+  intent: import("./workforce/requests.js").WorkforceRequestIntent
   input: string
 }
 
@@ -120,7 +119,7 @@ export interface WorkforceRequestRecord {
   id: string
   toAgentId: string
   fromAgentId: string | null
-  intent: WorkforceRequestIntent
+  intent: import("./workforce/requests.js").WorkforceRequestIntent
   input: string
   updates: string[]
   status: WorkforceRequestStatus
