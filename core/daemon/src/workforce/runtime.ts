@@ -7,7 +7,6 @@ import type {
   WorkforceRequestIntent,
   WorkforceRequestRecord,
 } from "@goddard-ai/schema/workforce"
-
 import { v7 as uuidv7 } from "uuid"
 import { join } from "node:path"
 import { concat, dedent } from "radashi"
