@@ -15,6 +15,7 @@ const bearerHeaderSchema = z.object({
   authorization: z.string(),
 })
 
+/** Starts the GitHub device flow for a pending user session. */
 export const authDeviceStartRoute = route("auth/device/start", {
   POST: {
     body: z.object({
@@ -24,6 +25,7 @@ export const authDeviceStartRoute = route("auth/device/start", {
   },
 })
 
+/** Completes the GitHub device flow and returns an authenticated backend session. */
 export const authDeviceCompleteRoute = route("auth/device/complete", {
   POST: {
     body: z.object({
@@ -34,6 +36,7 @@ export const authDeviceCompleteRoute = route("auth/device/complete", {
   },
 })
 
+/** Reads the current authenticated backend session. */
 export const authSessionRoute = route("auth/session", {
   GET: {
     headers: bearerHeaderSchema,
@@ -41,6 +44,7 @@ export const authSessionRoute = route("auth/session", {
   },
 })
 
+/** Creates a managed pull request through the backend. */
 export const prCreateRoute = route("pr/create", {
   POST: {
     headers: bearerHeaderSchema,
@@ -56,6 +60,7 @@ export const prCreateRoute = route("pr/create", {
   },
 })
 
+/** Posts a managed pull-request reply through the backend. */
 export const prReplyRoute = route("pr/reply", {
   POST: {
     headers: bearerHeaderSchema,
@@ -69,6 +74,7 @@ export const prReplyRoute = route("pr/reply", {
   },
 })
 
+/** Reports whether a pull request is managed by the authenticated user. */
 export const prManagedRoute = route("pr/managed", {
   GET: {
     headers: bearerHeaderSchema,
@@ -81,6 +87,7 @@ export const prManagedRoute = route("pr/managed", {
   },
 })
 
+/** Receives normalized GitHub webhook payloads for managed PR feedback. */
 export const githubWebhookRoute = route("webhooks/github", {
   POST: {
     body: z.union([
@@ -106,13 +113,10 @@ export const githubWebhookRoute = route("webhooks/github", {
   },
 })
 
+/** Opens the authenticated user-scoped feedback stream. */
 export const repoStreamRoute = route("stream", {
   GET: {
     headers: bearerHeaderSchema,
-    query: z.object({
-      owner: z.string(),
-      repo: z.string(),
-    }),
   },
 })
 

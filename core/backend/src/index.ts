@@ -11,16 +11,19 @@ export * from "./api/control-plane.ts"
 export * from "./client.ts"
 export * from "./github-app.ts"
 
+// Optional host and port overrides for the local Node backend server.
 type StartServerOptions = {
   port?: number
   host?: string
 }
 
+/** Handle returned by the local Node backend server. */
 export type BackendServer = {
   port: number
   close: () => Promise<void>
 }
 
+/** Starts the local Node backend server with an in-memory or injected control plane. */
 export async function startBackendServer(
   controlPlane: BackendControlPlane = new InMemoryBackendControlPlane(),
   options: StartServerOptions = {},
@@ -30,20 +33,19 @@ export async function startBackendServer(
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    broadcastToRepo: async (_env, _owner, _repo, event) => {
+    broadcastEvent: async (_env, event) => {
       broadcastToInMemoryStreams(controlPlane, event)
     },
-    handleRepoStream: async (_env, owner, repo, request) => {
-      const repoKey = `${owner}/${repo}`
+    handleUserStream: async (_env, githubUsername, request) => {
       const sseSession = createSseSession(() => {
-        controlPlane.removeStreamSocket?.(repoKey, sseSession.sink)
+        controlPlane.removeStreamSocket?.(githubUsername, sseSession.sink)
       })
 
-      controlPlane.addStreamSocket?.(repoKey, sseSession.sink)
+      controlPlane.addStreamSocket?.(githubUsername, sseSession.sink)
       request.signal.addEventListener(
         "abort",
         () => {
-          controlPlane.removeStreamSocket?.(repoKey, sseSession.sink)
+          controlPlane.removeStreamSocket?.(githubUsername, sseSession.sink)
           sseSession.sink.close?.()
         },
         { once: true },

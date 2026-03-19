@@ -6,16 +6,18 @@ import { TursoBackendControlPlane } from "../db/persistence.ts"
 import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.ts"
 import type { Env } from "../env.ts"
 
+// Test seams and runtime adapters injected into the backend router.
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastToRepo?: (env: Env, owner: string, repo: string, event: RepoEvent) => Promise<void>
-  handleRepoStream?: (env: Env, owner: string, repo: string, request: Request) => Promise<Response>
+  broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
+  handleUserStream?: (env: Env, githubUsername: string, request: Request) => Promise<Response>
 }
 
+/** Creates the backend HTTP router over the current control-plane implementation. */
 export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane
-  const broadcastToRepo = dependencies.broadcastToRepo ?? noopBroadcast
-  const handleRepoStream = dependencies.handleRepoStream ?? defaultHandleRepoStream
+  const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
+  const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
 
   return createRouter<Env>({ debug: false }).use(routes, {
     authDeviceStartRoute: {
@@ -55,9 +57,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const token = readBearerToken(ctx.headers.authorization)
-          const pr = await controlPlane.createPr(token, ctx.body)
+          const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await broadcastToRepo(env, pr.owner, pr.repo, {
+          await broadcastEvent(env, {
             type: "pr.created",
             owner: pr.owner,
             repo: pr.repo,
@@ -112,7 +114,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const event = await controlPlane.handleGitHubWebhook(ctx.body)
-          await broadcastToRepo(env, event.owner, event.repo, event)
+          await broadcastEvent(env, event)
           return event
         } catch (error) {
           return toErrorResponse(error)
@@ -125,11 +127,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const token = readBearerToken(ctx.headers.authorization)
-          const { owner, repo } = ctx.query
-          assertRepo(owner, repo)
-          await controlPlane.getSession(token)
+          const session = await controlPlane.getSession(token)
 
-          return await handleRepoStream(env, owner, repo, ctx.request)
+          return await handleUserStream(env, session.githubUsername, ctx.request)
         } catch (error) {
           return toErrorResponse(error)
         }
@@ -147,19 +147,13 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
   return new TursoBackendControlPlane(client as any)
 }
 
-async function noopBroadcast(
-  _env: Env,
-  _owner: string,
-  _repo: string,
-  _event: RepoEvent,
-): Promise<void> {
+async function noopBroadcast(_env: Env, _event: RepoEvent): Promise<void> {
   // No-op: the caller (e.g. worker.ts) should provide a real implementation.
 }
 
-async function defaultHandleRepoStream(
+async function defaultHandleUserStream(
   _env: Env,
-  _owner: string,
-  _repo: string,
+  _githubUsername: string,
   _request: Request,
 ): Promise<Response> {
   return new Response("SSE handler not configured", { status: 501 })
@@ -171,6 +165,7 @@ function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
     TURSO_DB_AUTH_TOKEN: ctx.env("TURSO_DB_AUTH_TOKEN"),
     GITHUB_APP_ID: ctx.env("GITHUB_APP_ID"),
     GITHUB_APP_PRIVATE_KEY: ctx.env("GITHUB_APP_PRIVATE_KEY"),
+    USER_STREAM: ctx.env("USER_STREAM"),
   }
 }
 

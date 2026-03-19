@@ -1,5 +1,9 @@
 import type {
+  AuthSession,
   CreatePrInput,
+  DeviceFlowComplete,
+  DeviceFlowSession,
+  DeviceFlowStart,
   PullRequestRecord,
   RepoRef,
   StreamMessage,
@@ -8,16 +12,20 @@ import * as routes from "@goddard-ai/schema/backend/routes"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
 import { createClient } from "rouzer"
 
+// Fetch implementation used by the backend client.
 type FetchLike = typeof fetch
 
+// Listener shape for stream event subscriptions.
 type StreamHandler = (event?: unknown) => void
 
+// Constructor options for the backend client.
 type BackendClientOptions = {
   baseUrl: string
   tokenStorage?: TokenStorage
   fetchImpl?: FetchLike
 }
 
+/** Disposable SSE subscription returned by the backend client. */
 export type StreamSubscription = {
   on: (eventName: string, handler: StreamHandler) => StreamSubscription
   off: (eventName: string, handler: StreamHandler) => StreamSubscription
@@ -26,14 +34,21 @@ export type StreamSubscription = {
   isClosed: () => boolean
 }
 
+/** Public backend client surface shared by the daemon and SDK. */
 export type BackendClient = {
+  auth: {
+    startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>
+    completeDeviceFlow: (input: DeviceFlowComplete) => Promise<AuthSession>
+    whoami: () => Promise<AuthSession>
+    logout: () => Promise<void>
+  }
   pr: {
     create: (input: CreatePrInput) => Promise<PullRequestRecord>
     isManaged: (input: RepoRef & { prNumber: number }) => Promise<boolean>
     reply: (input: RepoRef & { prNumber: number; body: string }) => Promise<{ success: boolean }>
   }
   stream: {
-    subscribeToRepo: (repo: RepoRef) => Promise<StreamSubscription>
+    subscribe: () => Promise<StreamSubscription>
   }
 }
 
@@ -77,6 +92,7 @@ class BackendStreamSubscription implements StreamSubscription {
   }
 }
 
+/** Creates a backend client that owns auth, PR, and stream HTTP behavior. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
   const tokenStorage = options.tokenStorage ?? new InMemoryTokenStorage()
   const rouzerClient = createClient({
@@ -86,6 +102,25 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
   })
 
   return {
+    auth: {
+      startDeviceFlow: async (input = {}) => {
+        return rouzerClient.authDeviceStartRoute.POST({ body: input })
+      },
+      completeDeviceFlow: async (input) => {
+        const session = await rouzerClient.authDeviceCompleteRoute.POST({ body: input })
+        await tokenStorage.setToken(session.token)
+        return session
+      },
+      whoami: async () => {
+        const token = await requireToken(tokenStorage)
+        return rouzerClient.authSessionRoute.GET({
+          headers: { authorization: `Bearer ${token}` },
+        })
+      },
+      logout: async () => {
+        await tokenStorage.clearToken()
+      },
+    },
     pr: {
       create: async (input) => {
         const token = await requireToken(tokenStorage)
@@ -111,12 +146,11 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       },
     },
     stream: {
-      subscribeToRepo: async ({ owner, repo }) => {
+      subscribe: async () => {
         const token = await requireToken(tokenStorage)
         const abortController = new AbortController()
         const response = await rouzerClient.repoStreamRoute.GET({
           headers: { authorization: `Bearer ${token}` },
-          query: { owner, repo },
           signal: abortController.signal,
         })
 
