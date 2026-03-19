@@ -8,6 +8,7 @@ const initialPrompt = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateDaemonSessionRequest = z.object({
+  id: z.string().optional(),
   agent: z.union([z.string(), AgentDistribution]),
   cwd: z.string(),
   mcpServers: z.array(z.custom<acp.McpServer>()),

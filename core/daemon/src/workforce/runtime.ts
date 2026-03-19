@@ -35,6 +35,7 @@ export interface WorkforceSessionRunInput {
   config: WorkforceConfig
   request: WorkforceRequestRecord
   recentActivity: WorkforceLedgerEvent[]
+  sessionId: string
 }
 
 /** Session runner abstraction used by tests and the real daemon session bridge. */
@@ -154,6 +155,7 @@ async function defaultRunWorkforceSession(
   }
 
   await deps.sessionManager.createSession({
+    id: input.sessionId,
     agent: agentDistribution,
     cwd: input.agent.cwd === "." ? input.rootDir : join(input.rootDir, input.agent.cwd),
     mcpServers: [],
@@ -464,6 +466,7 @@ export class WorkforceRuntime {
     const agent = assertAgentExists(this.#config, agentId)
     const request = assertRequestExists(this.#projection, requestId)
     const attempt = request.attemptCount + 1
+    const sessionId = randomUUID()
 
     await this.appendEvent({
       id: randomUUID(),
@@ -472,7 +475,7 @@ export class WorkforceRuntime {
       requestId,
       agentId,
       attempt,
-      sessionId: null,
+      sessionId,
     })
 
     try {
@@ -484,6 +487,7 @@ export class WorkforceRuntime {
         config: this.#config,
         request: assertRequestExists(this.#projection, requestId),
         recentActivity: buildRecentActivity(this.#events, request),
+        sessionId,
       })
     } catch (error) {
       await this.handleAttemptFailure(requestId, agentId, attempt, error)

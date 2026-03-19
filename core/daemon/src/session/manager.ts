@@ -575,7 +575,7 @@ export function createSessionManager(input: {
 
   async function createSession(params: CreateDaemonSessionRequest): Promise<DaemonSession> {
     await ready
-    const id = randomUUID()
+    const id = params.id ?? randomUUID()
     const token = randomBytes(32).toString("hex")
     const scope = parseRepoScope(params.metadata)
     const sessionContext = {
