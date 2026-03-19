@@ -160,6 +160,9 @@ importers:
       '@goddard-ai/schema':
         specifier: workspace:^
         version: link:../schema
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^25.3.5
