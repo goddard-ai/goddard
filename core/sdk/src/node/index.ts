@@ -20,7 +20,7 @@ export class GoddardSdk extends BaseGoddardSdk {
   get loop() {
     return {
       resolve: loops.resolveLoop,
-      run: loops.runRuntimeDefinedLoop,
+      run: loops.runAdHocLoop,
       runNamed: loops.runNamedLoop,
     }
   }

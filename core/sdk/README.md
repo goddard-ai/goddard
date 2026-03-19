@@ -154,7 +154,7 @@ await sdk.loop.runNamed("triage", {
 })
 
 await sdk.loop.run({
-  promptModulePath: "/workspace/.goddard/loops/runtime-review/prompt.js",
+  promptModulePath: "/workspace/.goddard/loops/ad-hoc-review/prompt.js",
   session: {
     agent: "pi",
     cwd: process.cwd(),

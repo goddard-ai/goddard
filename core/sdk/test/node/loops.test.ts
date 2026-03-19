@@ -36,7 +36,7 @@ vi.mock("../../src/loop/run-agent-loop.ts", () => ({
   runAgentLoop: mockedLoop.runAgentLoop,
 }))
 
-import { buildLoopParams, resolveLoop, runRuntimeDefinedLoop } from "../../src/node/loops.ts"
+import { buildLoopParams, resolveLoop, runAdHocLoop } from "../../src/node/loops.ts"
 
 const originalHome = process.env.HOME
 
@@ -157,17 +157,17 @@ test("resolveLoop rejects prompt.md-only loop packages", async () => {
   await assert.rejects(resolveLoop("review", tempDir), /must not contain prompt\.md/)
 })
 
-test("runRuntimeDefinedLoop imports promptModulePath and forwards resolved params", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-runtime-"))
+test("runAdHocLoop imports promptModulePath and forwards resolved params", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-ad-hoc-"))
   const promptModulePath = path.join(tempDir, "prompt.js")
 
   await fs.writeFile(
     promptModulePath,
-    'export function nextPrompt() { return "Continue the runtime task." }\n',
+    'export function nextPrompt() { return "Continue the ad hoc task." }\n',
     "utf-8",
   )
 
-  await runRuntimeDefinedLoop({
+  await runAdHocLoop({
     promptModulePath,
     session: {
       agent: "pi-acp",
@@ -185,7 +185,7 @@ test("runRuntimeDefinedLoop imports promptModulePath and forwards resolved param
   const firstCall = mockedLoop.runAgentLoop.mock.calls[0]
   assert.ok(firstCall)
   const [params] = firstCall as unknown as [Awaited<ReturnType<typeof buildLoopParams>>]
-  assert.equal(params.nextPrompt(), "Continue the runtime task.")
+  assert.equal(params.nextPrompt(), "Continue the ad hoc task.")
   assert.equal(params.retries.maxAttempts, 1)
   assert.equal(mockedExitHooks.callbacks.length, 1)
 

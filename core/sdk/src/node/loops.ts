@@ -20,7 +20,7 @@ import { join, resolve } from "node:path"
 // The JSON-safe retry fields that may be persisted or layered from runtime overrides.
 type PersistedLoopRetryConfig = Omit<AgentLoopRetryConfig, "retryableErrors">
 
-// Runtime overrides accepted when starting a named or runtime-defined loop.
+// Runtime overrides accepted when starting a named or ad hoc loop.
 export type AgentLoopRuntimeOverrides = {
   session?: Partial<AgentLoopParams["session"]>
   rateLimits?: Partial<AgentLoopParams["rateLimits"]>
@@ -36,8 +36,8 @@ export type ResolvedAgentLoop = {
   promptModulePath: string
 }
 
-// The input contract for runtime-defined loops that supply a prompt module directly.
-export type RuntimeDefinedLoopInput = AgentLoopRuntimeOverrides & {
+// The input contract for ad hoc loops that supply a prompt module directly.
+export type AdHocLoopInput = AgentLoopRuntimeOverrides & {
   promptModulePath: string
 }
 
@@ -201,8 +201,8 @@ export async function runNamedLoop(
   return runAgentLoop(await buildLoopParams(loop, overrides), handler, options)
 }
 
-export async function runRuntimeDefinedLoop(
-  input: RuntimeDefinedLoopInput,
+export async function runAdHocLoop(
+  input: AdHocLoopInput,
   handler?: AgentLoopHandler,
   options?: RunAgentOptions,
 ): Promise<AgentSession> {
