@@ -1,6 +1,6 @@
 # `@goddard-ai/config`
 
-Canonical home for Goddard's persisted JSON configuration schemas, merge helpers, and loop authoring helpers.
+Canonical home for Goddard's persisted JSON configuration schemas and merge helpers.
 
 Persisted config is JSON-only:
 
@@ -43,24 +43,6 @@ const actionConfig = mergeActionConfigLayers(rootConfig.actions, entityConfig, r
 const loopConfig = mergeLoopConfigLayers(rootConfig.loops, entityConfig, runtimeOverrides)
 ```
 
-### Loop authoring helpers
-
-Use these when authoring executable loop config in TypeScript rather than persisted JSON:
-
-```ts
-import { Models, defineConfig } from "@goddard-ai/config"
-
-export default defineConfig({
-  agent: {
-    model: Models.Anthropic.ClaudeSonnet46,
-    projectDir: "./",
-    thinkingLevel: "low",
-  },
-})
-```
-
-The Zod-backed runtime contracts for `defineConfig` live in `@goddard-ai/schema/config`.
-
 ## Exported types
 
 | Type | Description |
@@ -70,8 +52,6 @@ The Zod-backed runtime contracts for `defineConfig` live in `@goddard-ai/schema/
 | `GoddardLoopConfigDocument` | JSON-safe loop defaults layered before runtime overrides |
 | `ResolvedGoddardLoopConfigDocument` | Fully required loop config after defaults and validation |
 | `Model` | Known loop model identifiers plus open-ended provider strings |
-| `PiAgentConfig` | Runtime agent config contract used by executable loop configs |
-| `ThinkingLevel` | Runtime reasoning depth contract for agent-backed loops |
 
 ## Notes
 
