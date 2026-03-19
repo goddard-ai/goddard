@@ -7,20 +7,20 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs",
       "source": "./src/index.ts",
+      "import": "./dist/index.mjs",
       "default": "./src/index.ts"
     },
     "./session-permissions": {
       "types": "./dist/session-permissions.d.mts",
-      "import": "./dist/session-permissions.mjs",
       "source": "./src/session-permissions.ts",
+      "import": "./dist/session-permissions.mjs",
       "default": "./src/session-permissions.ts"
     },
     "./managed-pr-locations": {
       "types": "./dist/managed-pr-locations.d.mts",
-      "import": "./dist/managed-pr-locations.mjs",
       "source": "./src/managed-pr-locations.ts",
+      "import": "./dist/managed-pr-locations.mjs",
       "default": "./src/managed-pr-locations.ts"
     }
   },

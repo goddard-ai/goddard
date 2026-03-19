@@ -1,15 +1,16 @@
+import * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
 import { DaemonSessionIdParams } from "../common/params.js"
 import { AgentDistribution } from "../session-server/agent-distribution.js"
 import { DaemonSessionMetadata } from "./session-metadata.js"
 
-const initialPrompt = z.union([z.string(), z.array(z.unknown())])
+const initialPrompt = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateDaemonSessionRequest = z.object({
   agent: z.union([z.string(), AgentDistribution]),
   cwd: z.string(),
-  mcpServers: z.array(z.unknown()),
+  mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string(),
   env: z.record(z.string(), z.string()).optional(),
   metadata: DaemonSessionMetadata.optional(),

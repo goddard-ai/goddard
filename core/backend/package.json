@@ -10,8 +10,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs",
       "source": "./src/index.ts",
+      "import": "./dist/index.mjs",
       "default": "./src/index.ts"
     },
     "./client": {
