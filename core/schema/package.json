@@ -8,7 +8,8 @@
     "./*": {
       "types": "./dist/*.d.mts",
       "import": "./dist/*.mjs",
-      "source": "./src/*.ts"
+      "source": "./src/*.ts",
+      "default": "./src/*.ts"
     }
   },
   "scripts": {

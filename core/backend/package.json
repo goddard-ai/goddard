@@ -11,9 +11,13 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
-      "source": "./src/index.ts"
+      "source": "./src/index.ts",
+      "default": "./src/index.ts"
     },
-    "./client": "./src/client.ts"
+    "./client": {
+      "source": "./src/client.ts",
+      "default": "./src/client.ts"
+    }
   },
   "scripts": {
     "start": "node dist/server.mjs",

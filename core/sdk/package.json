@@ -7,22 +7,26 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
-      "source": "./src/index.ts"
+      "source": "./src/index.ts",
+      "default": "./src/index.ts"
     },
     "./daemon": {
       "types": "./dist/daemon/index.d.mts",
       "import": "./dist/daemon/index.mjs",
-      "source": "./src/daemon/index.ts"
+      "source": "./src/daemon/index.ts",
+      "default": "./src/daemon/index.ts"
     },
     "./loop": {
       "types": "./dist/loop/index.d.mts",
       "import": "./dist/loop/index.mjs",
-      "source": "./src/loop/index.ts"
+      "source": "./src/loop/index.ts",
+      "default": "./src/loop/index.ts"
     },
     "./node": {
       "types": "./dist/node/index.d.mts",
       "import": "./dist/node/index.mjs",
-      "source": "./src/node/index.ts"
+      "source": "./src/node/index.ts",
+      "default": "./src/node/index.ts"
     }
   },
   "scripts": {
