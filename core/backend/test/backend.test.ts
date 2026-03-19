@@ -56,7 +56,6 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    // alec creates a PR
     const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
     const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
@@ -69,7 +68,6 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       alecSession.token,
     )
 
-    // alec sees her own PR as managed
     const managedResponse = await fetch(
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
@@ -77,7 +75,6 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     assert.equal(managedResponse.status, 200)
     assert.deepEqual(await managedResponse.json(), { managed: true })
 
-    // alec sees non-existent PR as unmanaged
     const unmanagedResponse = await fetch(
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=9`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
@@ -85,7 +82,6 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     assert.equal(unmanagedResponse.status, 200)
     assert.deepEqual(await unmanagedResponse.json(), { managed: false })
 
-    // a different user cannot see alec's PR as managed (V2 ownership check)
     const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: bobFlow.deviceCode,
@@ -144,7 +140,7 @@ test("invalid JSON body returns 400", async () => {
   }
 })
 
-test("sse stream receives webhook events", async () => {
+test("sse stream receives webhook events for a managed PR", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
@@ -155,7 +151,19 @@ test("sse stream receives webhook events", async () => {
       githubUsername: "alec",
     })
 
-    const streamResponse = await fetch(`${baseUrl}/stream?owner=goddard-ai&repo=sdk`, {
+    await postJson(
+      `${baseUrl}/pr/create`,
+      {
+        owner: "goddard-ai",
+        repo: "sdk",
+        title: "Add CLI",
+        head: "feat/cli",
+        base: "main",
+      },
+      session.token,
+    )
+
+    const streamResponse = await fetch(`${baseUrl}/stream`, {
       headers: {
         accept: "text/event-stream",
         authorization: `Bearer ${session.token}`,
@@ -182,7 +190,109 @@ test("sse stream receives webhook events", async () => {
   }
 })
 
-async function readFirstSseEvent(response: Response): Promise<unknown> {
+test("unified stream only emits events for managed PRs owned by the authenticated user", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const alecFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: alecFlow.deviceCode,
+      githubUsername: "alec",
+    })
+    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
+    const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: bobFlow.deviceCode,
+      githubUsername: "bob",
+    })
+
+    await postJson(
+      `${baseUrl}/pr/create`,
+      {
+        owner: "goddard-ai",
+        repo: "sdk",
+        title: "Alec PR",
+        head: "feat/alec",
+        base: "main",
+      },
+      alecSession.token,
+    )
+    await postJson(
+      `${baseUrl}/pr/create`,
+      {
+        owner: "goddard-ai",
+        repo: "daemon",
+        title: "Bob PR",
+        head: "feat/bob",
+        base: "main",
+      },
+      bobSession.token,
+    )
+
+    const alecStream = await fetch(`${baseUrl}/stream`, {
+      headers: {
+        accept: "text/event-stream",
+        authorization: `Bearer ${alecSession.token}`,
+      },
+    })
+    const bobStream = await fetch(`${baseUrl}/stream`, {
+      headers: {
+        accept: "text/event-stream",
+        authorization: `Bearer ${bobSession.token}`,
+      },
+    })
+
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      author: "teammate",
+      body: "looks good",
+    })
+
+    const alecEvent = (await readFirstSseEvent(alecStream)) as { event: { prNumber: number } }
+    assert.equal(alecEvent.event.prNumber, 1)
+    await assertNoSseEvent(bobStream, 100)
+  } finally {
+    await server.close()
+  }
+})
+
+test("unified stream ignores webhook events for unmanaged PRs", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const session = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: flow.deviceCode,
+      githubUsername: "alec",
+    })
+
+    const streamResponse = await fetch(`${baseUrl}/stream`, {
+      headers: {
+        accept: "text/event-stream",
+        authorization: `Bearer ${session.token}`,
+      },
+    })
+
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 99,
+      author: "teammate",
+      body: "looks good",
+    })
+
+    await assertNoSseEvent(streamResponse, 100)
+  } finally {
+    await server.close()
+  }
+})
+
+async function readFirstSseEvent(response: Response, timeoutMs = 1000): Promise<unknown> {
   if (!response.body) {
     throw new Error("Missing SSE response body")
   }
@@ -192,7 +302,7 @@ async function readFirstSseEvent(response: Response): Promise<unknown> {
   let buffer = ""
 
   while (true) {
-    const { value, done } = await reader.read()
+    const { value, done } = await readWithTimeout(reader, timeoutMs)
     if (done) {
       break
     }
@@ -219,6 +329,43 @@ async function readFirstSseEvent(response: Response): Promise<unknown> {
   }
 
   throw new Error("SSE stream ended before emitting data")
+}
+
+async function assertNoSseEvent(response: Response, timeoutMs: number): Promise<void> {
+  try {
+    await readFirstSseEvent(response, timeoutMs)
+  } catch (error) {
+    assert.match(
+      String(error),
+      /(Timed out waiting for SSE event|SSE stream ended before emitting data)/,
+    )
+    return
+  }
+
+  assert.fail(`Expected no SSE event within ${timeoutMs}ms`)
+}
+
+async function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          void reader.cancel().catch(() => {})
+          reject(new Error(`Timed out waiting for SSE event after ${timeoutMs}ms`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  }
 }
 
 async function postJson(url: string, payload: unknown, token?: string): Promise<any> {

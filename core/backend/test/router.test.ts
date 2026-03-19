@@ -15,6 +15,7 @@ const stubControlPlane: BackendControlPlane = {
   isManagedPr: notUsed,
   replyToPr: notUsed,
   handleGitHubWebhook: notUsed,
+  resolveEventOwner: notUsed,
 }
 
 test("createBackendRouter handles auth device start via rouzer route map", async () => {
@@ -51,9 +52,8 @@ test("createBackendRouter handles auth device start via rouzer route map", async
   assert.equal(payload.deviceCode, "dev_1")
 })
 
-test("createBackendRouter delegates stream route to injected handleRepoStream", async () => {
-  let capturedOwner = ""
-  let capturedRepo = ""
+test("createBackendRouter delegates stream route to injected handleUserStream", async () => {
+  let capturedGithubUsername = ""
 
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
@@ -65,16 +65,15 @@ test("createBackendRouter delegates stream route to injected handleRepoStream", 
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    handleRepoStream: async (_env, owner, repo, _request) => {
-      capturedOwner = owner
-      capturedRepo = repo
+    handleUserStream: async (_env, githubUsername, _request) => {
+      capturedGithubUsername = githubUsername
       return new Response("stream-ok", { status: 200 })
     },
   })
 
   const response = await router(
     createContext(
-      new Request("https://example.test/stream?owner=goddard-ai&repo=sdk", {
+      new Request("https://example.test/stream", {
         headers: { authorization: "Bearer tok_1" },
       }),
     ) as any,
@@ -82,8 +81,7 @@ test("createBackendRouter delegates stream route to injected handleRepoStream", 
 
   assert.equal(response.status, 200)
   assert.equal(await response.text(), "stream-ok")
-  assert.equal(capturedOwner, "goddard-ai")
-  assert.equal(capturedRepo, "sdk")
+  assert.equal(capturedGithubUsername, "alec")
 })
 
 test("createBackendRouter serializes HttpError responses", async () => {

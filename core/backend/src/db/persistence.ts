@@ -14,6 +14,7 @@ import type {
 import { eq, and, gt } from "drizzle-orm"
 import {
   type BackendControlPlane,
+  createPrViaApp,
   HttpError,
   assertRepo,
   postPrCommentViaApp,
@@ -22,6 +23,7 @@ import { randomBytes } from "node:crypto"
 import type { Env } from "../env.ts"
 import { hashToInteger } from "../utils.ts"
 
+/** Turso-backed backend control plane used by the real backend worker. */
 export class TursoBackendControlPlane implements BackendControlPlane {
   readonly #db: ReturnType<typeof drizzle<typeof schema>>
 
@@ -100,7 +102,7 @@ export class TursoBackendControlPlane implements BackendControlPlane {
     }
   }
 
-  async createPr(token: string, input: CreatePrInput): Promise<PullRequestRecord> {
+  async createPr(token: string, input: CreatePrInput, env?: Env): Promise<PullRequestRecord> {
     const session = await this.getSession(token)
     assertRepo(input.owner, input.repo)
     if (!input.title.trim()) {
@@ -110,31 +112,25 @@ export class TursoBackendControlPlane implements BackendControlPlane {
     const now = new Date().toISOString()
     const body =
       `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
+    const createdPr = await createPrViaApp(env, input, body)
 
     const [inserted] = await this.#db
       .insert(schema.pullRequests)
       .values({
-        number: 0,
+        number: createdPr.number,
         owner: input.owner,
         repo: input.repo,
         title: input.title,
         body,
         head: input.head,
         base: input.base,
-        url: `https://github.com/${input.owner}/${input.repo}/pull/0`,
+        url: createdPr.url,
         createdBy: session.githubUsername,
-        createdAt: now,
+        createdAt: createdPr.createdAt || now,
       })
       .returning()
 
-    const finalNumber = inserted.id
-    const finalUrl = `https://github.com/${input.owner}/${input.repo}/pull/${finalNumber}`
-    await this.#db
-      .update(schema.pullRequests)
-      .set({ number: finalNumber, url: finalUrl })
-      .where(eq(schema.pullRequests.id, inserted.id))
-
-    return { ...inserted, number: finalNumber, url: finalUrl, body: inserted.body ?? "" }
+    return { ...inserted, body: inserted.body ?? "" }
   }
 
   async replyToPr(
@@ -217,5 +213,25 @@ export class TursoBackendControlPlane implements BackendControlPlane {
           }
 
     return mapped
+  }
+
+  async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {
+    if (event.type === "pr.created") {
+      return event.author
+    }
+
+    const [match] = await this.#db
+      .select({ createdBy: schema.pullRequests.createdBy })
+      .from(schema.pullRequests)
+      .where(
+        and(
+          eq(schema.pullRequests.owner, event.owner),
+          eq(schema.pullRequests.repo, event.repo),
+          eq(schema.pullRequests.number, event.prNumber),
+        ),
+      )
+      .limit(1)
+
+    return match?.createdBy
   }
 }

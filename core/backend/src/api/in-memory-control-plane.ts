@@ -18,8 +18,13 @@ import {
 } from "./control-plane.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"
 
+/** Stored auth session with an in-memory expiration timestamp. */
 export type SessionRecord = AuthSession & { expiresAt: number }
+
+/** Stored device-code session awaiting completion. */
 export type DeviceSessionRecord = { githubUsername: string; createdAt: number; expiresAt: number }
+
+/** Minimal sink interface used by local SSE fanout. */
 export type StreamSink = {
   send: (payload: string) => void
   close?: () => void
@@ -29,11 +34,12 @@ const DEVICE_FLOW_EXPIRES_IN_SECONDS = 900
 const DEVICE_FLOW_INTERVAL_SECONDS = 5
 const AUTH_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 
+/** In-memory backend control plane used by local servers and tests. */
 export class InMemoryBackendControlPlane implements BackendControlPlane {
   #deviceSessions = new Map<string, DeviceSessionRecord>()
   #authSessions = new Map<string, SessionRecord>()
   #pullRequests: PullRequestRecord[] = []
-  #streamsByRepo = new Map<string, Set<StreamSink>>()
+  #streamsByUser = new Map<string, Set<StreamSink>>()
   #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
@@ -127,17 +133,6 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     }
 
     this.#pullRequests.push(record)
-
-    this.broadcast({
-      type: "pr.created",
-      owner: input.owner,
-      repo: input.repo,
-      prNumber: record.number,
-      title: record.title,
-      author: session.githubUsername,
-      createdAt: record.createdAt,
-    })
-
     return record
   }
 
@@ -208,35 +203,38 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
             createdAt,
           }
 
-    this.broadcast(mapped)
     return mapped
   }
 
-  addStreamSocket(repoKey: string, socket: unknown): void {
+  addStreamSocket(githubUsername: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByRepo.get(repoKey) ?? new Set<StreamSink>()
+    const room = this.#streamsByUser.get(githubUsername) ?? new Set<StreamSink>()
     room.add(socket)
-    this.#streamsByRepo.set(repoKey, room)
+    this.#streamsByUser.set(githubUsername, room)
   }
 
-  removeStreamSocket(repoKey: string, socket: unknown): void {
+  removeStreamSocket(githubUsername: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByRepo.get(repoKey)
+    const room = this.#streamsByUser.get(githubUsername)
     room?.delete(socket)
     if (room && room.size === 0) {
-      this.#streamsByRepo.delete(repoKey)
+      this.#streamsByUser.delete(githubUsername)
     }
   }
 
   broadcast(event: RepoEvent): void {
-    const repoKey = `${event.owner}/${event.repo}`
-    const sockets = this.#streamsByRepo.get(repoKey)
+    const githubUsername = this.resolveEventOwner(event)
+    if (!githubUsername) {
+      return
+    }
+
+    const sockets = this.#streamsByUser.get(githubUsername)
     if (!sockets) {
       return
     }
@@ -252,11 +250,25 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     }
 
     if (sockets.size === 0) {
-      this.#streamsByRepo.delete(repoKey)
+      this.#streamsByUser.delete(githubUsername)
     }
+  }
+
+  resolveEventOwner(event: RepoEvent): string | undefined {
+    if (event.type === "pr.created") {
+      return event.author
+    }
+
+    return this.#pullRequests.find(
+      (pullRequest) =>
+        pullRequest.owner === event.owner &&
+        pullRequest.repo === event.repo &&
+        pullRequest.number === event.prNumber,
+    )?.createdBy
   }
 }
 
+/** Returns whether a value supports the minimal send/close contract used by SSE fanout. */
 export function isStreamSink(value: unknown): value is StreamSink {
   return (
     !!value &&

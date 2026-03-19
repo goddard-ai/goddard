@@ -3,15 +3,15 @@ import { Worker, DurableObjectNamespace } from "alchemy/cloudflare"
 
 const app = await alchemy("goddard-backend")
 
-const repoStream = DurableObjectNamespace("REPO_STREAM", {
-  className: "RepoStream",
+const userStream = DurableObjectNamespace("USER_STREAM", {
+  className: "UserStream",
 })
 
 export const worker = await Worker("api", {
   entrypoint: "./src/worker.ts",
   url: true,
   bindings: {
-    REPO_STREAM: repoStream,
+    USER_STREAM: userStream,
   },
 })
 
