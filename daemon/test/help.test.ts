@@ -16,5 +16,7 @@ test("goddard-daemon run prints help when --help is passed", () => {
   expect(result.stdout).toContain("run")
   expect(result.stdout).toContain("--project-dir")
   expect(result.stdout).not.toContain("--repo")
+  expect(result.stdout).toContain("--pretty")
+  expect(result.stdout).toContain("--verbose")
   expect(result.status).toBe(0)
 })
