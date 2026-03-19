@@ -1,5 +1,6 @@
 import { $type } from "@goddard-ai/ipc"
 import { z } from "zod"
+import { agentBinaryPlatforms } from "./session-server.js"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
@@ -16,12 +17,59 @@ import type {
   SubmitPrDaemonResponse,
 } from "./daemon.js"
 
-const agentDistributionSchema = z.object({
-  type: z.enum(["binary", "npx", "uvx"]),
-  package: z.string().optional(),
-  cmd: z.string().optional(),
-  args: z.array(z.string()).optional(),
-})
+const agentBinaryTargetSchema = z
+  .object({
+    archive: z.string().url(),
+    cmd: z.string(),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .strict()
+
+const agentBinaryDistributionSchema = z
+  .object(
+    Object.fromEntries(
+      agentBinaryPlatforms.map((platform) => [platform, agentBinaryTargetSchema.optional()]),
+    ) as Record<
+      (typeof agentBinaryPlatforms)[number],
+      z.ZodOptional<typeof agentBinaryTargetSchema>
+    >,
+  )
+  .strict()
+  .refine((value) => Object.values(value).some((target) => target !== undefined), {
+    message: "binary distributions must declare at least one supported platform",
+  })
+
+const agentPackageDistributionSchema = z
+  .object({
+    package: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .strict()
+
+const agentDistributionSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+    name: z.string().min(1),
+    version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+/),
+    description: z.string().min(1),
+    repository: z.string().url().optional(),
+    authors: z.array(z.string()).optional(),
+    license: z.string().optional(),
+    icon: z.string().optional(),
+    distribution: z
+      .object({
+        binary: agentBinaryDistributionSchema.optional(),
+        npx: agentPackageDistributionSchema.optional(),
+        uvx: agentPackageDistributionSchema.optional(),
+      })
+      .strict()
+      .refine((value) => Object.values(value).some((entry) => entry !== undefined), {
+        message: "distribution must declare at least one install method",
+      }),
+  })
+  .strict()
 
 const daemonSessionMetadataSchema = z
   .object({

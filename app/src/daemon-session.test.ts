@@ -1,9 +1,9 @@
+import type { GetDaemonSessionHistoryResponse } from "@goddard-ai/schema/daemon"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import * as assert from "node:assert/strict"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { GetDaemonSessionHistoryResponse } from "@goddard-ai/schema/daemon"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { afterEach, test, vi } from "vitest"
 import { createNodeClient } from "../../core/ipc/src/index.ts"
 import { createServer } from "../../core/ipc/src/server.ts"
@@ -15,6 +15,49 @@ const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = 
   permissionsBySessionId: new Map<string, any>(),
   permissionsByToken: new Map<string, any>(),
 }))
+
+function createNodeAgent(agentPath: string) {
+  return {
+    id: "node-agent",
+    name: "Node Agent",
+    version: "1.0.0",
+    description: "Local node-based ACP test agent.",
+    distribution: {
+      binary: {
+        "darwin-aarch64": {
+          archive: "https://example.com/node-agent-darwin-aarch64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "darwin-x86_64": {
+          archive: "https://example.com/node-agent-darwin-x86_64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "linux-aarch64": {
+          archive: "https://example.com/node-agent-linux-aarch64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "linux-x86_64": {
+          archive: "https://example.com/node-agent-linux-x86_64.tar.gz",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "windows-aarch64": {
+          archive: "https://example.com/node-agent-windows-aarch64.zip",
+          cmd: "node",
+          args: [agentPath],
+        },
+        "windows-x86_64": {
+          archive: "https://example.com/node-agent-windows-x86_64.zip",
+          cmd: "node",
+          args: [agentPath],
+        },
+      },
+    },
+  }
+}
 
 vi.mock("@goddard-ai/storage", () => ({
   SessionStorage: {
@@ -210,11 +253,7 @@ test("app daemon session options create/connect/send/history/shutdown through th
   const client = createAppDaemonIpcClient(daemon.daemonUrl)
 
   const created = await client.send("sessionCreate", {
-    agent: {
-      type: "binary",
-      cmd: "node",
-      args: [await createPromptAgent()],
-    },
+    agent: createNodeAgent(await createPromptAgent()),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
@@ -323,7 +362,7 @@ async function startTestDaemon(): Promise<{
         ...getWorkforceStatus(rootDir),
         config: {
           version: 1 as const,
-          defaultAgent: "pi",
+          defaultAgent: "pi-acp",
           rootAgentId: "root",
           agents: [
             {

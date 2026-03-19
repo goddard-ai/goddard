@@ -142,9 +142,44 @@ test("sdk daemon session client runs against a real daemon server", async () => 
   const created = await runAgent(
     {
       agent: {
-        type: "binary",
-        cmd: "node",
-        args: [agentPath],
+        id: "node-agent",
+        name: "Node Agent",
+        version: "1.0.0",
+        description: "Local node-based ACP test agent.",
+        distribution: {
+          binary: {
+            "darwin-aarch64": {
+              archive: "https://example.com/node-agent-darwin-aarch64.tar.gz",
+              cmd: "node",
+              args: [agentPath],
+            },
+            "darwin-x86_64": {
+              archive: "https://example.com/node-agent-darwin-x86_64.tar.gz",
+              cmd: "node",
+              args: [agentPath],
+            },
+            "linux-aarch64": {
+              archive: "https://example.com/node-agent-linux-aarch64.tar.gz",
+              cmd: "node",
+              args: [agentPath],
+            },
+            "linux-x86_64": {
+              archive: "https://example.com/node-agent-linux-x86_64.tar.gz",
+              cmd: "node",
+              args: [agentPath],
+            },
+            "windows-aarch64": {
+              archive: "https://example.com/node-agent-windows-aarch64.zip",
+              cmd: "node",
+              args: [agentPath],
+            },
+            "windows-x86_64": {
+              archive: "https://example.com/node-agent-windows-x86_64.zip",
+              cmd: "node",
+              args: [agentPath],
+            },
+          },
+        },
       },
       cwd: process.cwd(),
       mcpServers: [],
