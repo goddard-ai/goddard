@@ -16,5 +16,7 @@ export default defineConfig({
   clean: true,
   outDir: "dist",
   sourcemap: isDebug,
-  dts: true,
+  dts: {
+    tsgo: true,
+  },
 })
