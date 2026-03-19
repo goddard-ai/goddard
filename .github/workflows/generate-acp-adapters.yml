@@ -1,0 +1,46 @@
+name: Generate ACP Adapters
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Run nightly at midnight UTC
+  workflow_dispatch: # Allow manual runs
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run generation script
+        run: node core/schema/scripts/generate-acp-adapters.js
+
+      - name: Setup Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes
+        run: |
+          git add core/schema/src/acp-adapters.ts
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: auto-generate ACP adapters"
+            git push
+          fi
