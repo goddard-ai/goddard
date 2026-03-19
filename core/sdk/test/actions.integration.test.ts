@@ -1,10 +1,10 @@
+import { startDaemonServer, type DaemonServer } from "@goddard-ai/daemon/ipc"
 import * as fs from "node:fs/promises"
 import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
 import { dedent } from "radashi"
 import { afterEach, assert, test, vi } from "vitest"
-import { startDaemonServer, type DaemonServer } from "../../../daemon/src/ipc.ts"
 import { runAgent } from "../src/daemon/session/client.ts"
 import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
 
