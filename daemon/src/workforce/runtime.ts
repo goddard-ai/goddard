@@ -21,14 +21,14 @@ import {
 } from "./ledger.ts"
 import { buildWorkforcePaths } from "./paths.ts"
 
-// Optional authenticated agent context derived from the calling daemon session.
+/** Optional authenticated agent context derived from the calling daemon session. */
 export interface WorkforceActorContext {
   sessionId: string | null
   agentId: string | null
   requestId: string | null
 }
 
-// Input delivered to the daemon-owned session runner for one handled request.
+/** Input delivered to the daemon-owned session runner for one handled request. */
 export interface WorkforceSessionRunInput {
   rootDir: string
   agent: WorkforceAgentConfig
@@ -37,10 +37,10 @@ export interface WorkforceSessionRunInput {
   recentActivity: WorkforceLedgerEvent[]
 }
 
-// Session runner abstraction used by tests and the real daemon session bridge.
+/** Session runner abstraction used by tests and the real daemon session bridge. */
 export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promise<void>
 
-// Mutable runtime dependencies shared by one workload host.
+/** Mutable runtime dependencies shared by one workload host. */
 export interface WorkforceRuntimeDeps {
   sessionManager: SessionManager
   runSession?: WorkforceSessionRunner
@@ -196,7 +196,7 @@ function isTerminalRequest(request: WorkforceRequestRecord): boolean {
   )
 }
 
-// A daemon-managed repo-local workforce runtime and its active queue state.
+/** A daemon-managed repo-local workforce runtime and its active queue state. */
 export class WorkforceRuntime {
   readonly #config: WorkforceConfig
   readonly #deps: WorkforceRuntimeDeps

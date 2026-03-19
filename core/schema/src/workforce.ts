@@ -1,12 +1,12 @@
 import type { AgentDistribution } from "./session-server.js"
 
-// Supported workforce agent roles within one repository-owned runtime.
+/** Supported workforce agent roles within one repository-owned runtime. */
 export type WorkforceAgentRole = "root" | "domain"
 
-// Supported request intents that can specialize one workforce request lifecycle.
+/** Supported request intents that can specialize one workforce request lifecycle. */
 export type WorkforceRequestIntent = "default" | "create"
 
-// Stable lifecycle states for one workforce request after replay.
+/** Stable lifecycle states for one workforce request after replay. */
 export type WorkforceRequestStatus =
   | "queued"
   | "active"
@@ -15,7 +15,7 @@ export type WorkforceRequestStatus =
   | "cancelled"
   | "errored"
 
-// One configured workforce agent and the repository paths it owns.
+/** One configured workforce agent and the repository paths it owns. */
 export interface WorkforceAgentConfig {
   id: string
   name: string
@@ -25,7 +25,7 @@ export interface WorkforceAgentConfig {
   agent?: string | AgentDistribution
 }
 
-// Repository-local workforce configuration stored in `.goddard/workforce.json`.
+/** Repository-local workforce configuration stored in `.goddard/workforce.json`. */
 export interface WorkforceConfig {
   version: 1
   defaultAgent: string | AgentDistribution
@@ -33,14 +33,14 @@ export interface WorkforceConfig {
   agents: WorkforceAgentConfig[]
 }
 
-// Shared metadata carried by every append-only workforce ledger event.
+/** Shared metadata carried by every append-only workforce ledger event. */
 export interface WorkforceEventBase {
   id: string
   at: string
   type: "request" | "handle" | "response" | "suspend" | "cancel" | "update" | "error" | "truncate"
 }
 
-// A new unit of work routed to one owning workforce agent.
+/** A new unit of work routed to one owning workforce agent. */
 export interface WorkforceRequestEvent extends WorkforceEventBase {
   type: "request"
   requestId: string
@@ -50,7 +50,7 @@ export interface WorkforceRequestEvent extends WorkforceEventBase {
   input: string
 }
 
-// A handle attempt recorded before the daemon launches a fresh agent session.
+/** A handle attempt recorded before the daemon launches a fresh agent session. */
 export interface WorkforceHandleEvent extends WorkforceEventBase {
   type: "handle"
   requestId: string
@@ -59,7 +59,7 @@ export interface WorkforceHandleEvent extends WorkforceEventBase {
   sessionId: string | null
 }
 
-// A successful response that finishes the current request.
+/** A successful response that finishes the current request. */
 export interface WorkforceResponseEvent extends WorkforceEventBase {
   type: "response"
   requestId: string
@@ -67,7 +67,7 @@ export interface WorkforceResponseEvent extends WorkforceEventBase {
   output: string
 }
 
-// A suspended request that requires a later update before it can resume.
+/** A suspended request that requires a later update before it can resume. */
 export interface WorkforceSuspendEvent extends WorkforceEventBase {
   type: "suspend"
   requestId: string
@@ -75,21 +75,21 @@ export interface WorkforceSuspendEvent extends WorkforceEventBase {
   reason: string
 }
 
-// A request cancellation initiated by an operator or workflow policy.
+/** A request cancellation initiated by an operator or workflow policy. */
 export interface WorkforceCancelEvent extends WorkforceEventBase {
   type: "cancel"
   requestId: string
   reason: string | null
 }
 
-// A request update that appends context and resumes suspended work.
+/** A request update that appends context and resumes suspended work. */
 export interface WorkforceUpdateEvent extends WorkforceEventBase {
   type: "update"
   requestId: string
   input: string
 }
 
-// A fatal request failure recorded after retry budget exhaustion.
+/** A fatal request failure recorded after retry budget exhaustion. */
 export interface WorkforceErrorEvent extends WorkforceEventBase {
   type: "error"
   requestId: string
@@ -97,14 +97,14 @@ export interface WorkforceErrorEvent extends WorkforceEventBase {
   message: string
 }
 
-// A scope-wide signpost that clears pending work without mutating completed history.
+/** A scope-wide signpost that clears pending work without mutating completed history. */
 export interface WorkforceTruncateEvent extends WorkforceEventBase {
   type: "truncate"
   agentId: string | null
   reason: string | null
 }
 
-// The complete append-only ledger union for workforce runtime replay.
+/** The complete append-only ledger union for workforce runtime replay. */
 export type WorkforceLedgerEvent =
   | WorkforceRequestEvent
   | WorkforceHandleEvent
@@ -115,7 +115,7 @@ export type WorkforceLedgerEvent =
   | WorkforceErrorEvent
   | WorkforceTruncateEvent
 
-// The replayed state for one logical workforce request.
+/** The replayed state for one logical workforce request. */
 export interface WorkforceRequestRecord {
   id: string
   toAgentId: string
@@ -134,7 +134,7 @@ export interface WorkforceRequestRecord {
   cancelledReason: string | null
 }
 
-// Aggregate queue counts exposed to daemon and SDK clients.
+/** Aggregate queue counts exposed to daemon and SDK clients. */
 export interface WorkforceProjectionSummary {
   activeRequestCount: number
   queuedRequestCount: number
@@ -142,7 +142,7 @@ export interface WorkforceProjectionSummary {
   failedRequestCount: number
 }
 
-// The replayed projection used by the runtime to drive queues and summaries.
+/** The replayed projection used by the runtime to drive queues and summaries. */
 export interface WorkforceProjection {
   requests: Record<string, WorkforceRequestRecord>
   queues: Record<string, string[]>

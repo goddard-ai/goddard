@@ -6,24 +6,24 @@ import * as path from "node:path"
 
 const ipcPrefix = process.platform === "win32" ? "//./pipe/" : ""
 
-// Environment variables consumed by daemon client convenience helpers.
+/** Environment variables consumed by daemon client convenience helpers. */
 export type DaemonClientEnv = Record<string, string | undefined>
 
-// Resolved daemon connection settings derived from environment variables.
+/** Resolved daemon connection settings derived from environment variables. */
 export type ResolvedDaemonClientEnv = {
   daemonUrl: string
   socketPath: string
 }
 
-// Socket metadata passed to environment-specific IPC client factories.
+/** Socket metadata passed to environment-specific IPC client factories. */
 export type DaemonIpcClientFactoryInput = {
   socketPath: string
 }
 
-// IPC client type produced by the default Node transport.
+/** IPC client type produced by the default Node transport. */
 export type DaemonIpcClient = ReturnType<typeof createNodeClient<typeof daemonIpcSchema>>
 
-// Injectable factory for hosts that provide a custom IPC transport.
+/** Injectable factory for hosts that provide a custom IPC transport. */
 export type DaemonIpcClientFactory<TClient = DaemonIpcClient> = (
   input: DaemonIpcClientFactoryInput,
 ) => TClient

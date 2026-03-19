@@ -9,20 +9,20 @@ const defaultWriteLine = (line: string) => {
 const secretKeys = new Set(["token", "authorization", "goddard_session_token"])
 const envSecretFragments = ["TOKEN", "SECRET", "KEY", "AUTH"]
 
-// Function that writes a single serialized daemon log line.
+/** Function that writes a single serialized daemon log line. */
 export type DaemonLogWriter = (line: string) => void
 
-// Supported terminal output modes for daemon logs.
+/** Supported terminal output modes for daemon logs. */
 export type DaemonLogMode = "json" | "pretty" | "verbose"
 
-// Structured preview emitted when long text must be truncated for logs.
+/** Structured preview emitted when long text must be truncated for logs. */
 export type DaemonTextPreview = {
   text: string
   byteLength: number
   truncated: boolean
 }
 
-// Sanitization settings used for payload and message previews.
+/** Sanitization settings used for payload and message previews. */
 export type DaemonSanitizeOptions = {
   maxStringLength?: number
   parentKey?: string

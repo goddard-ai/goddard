@@ -3,10 +3,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getGoddardGlobalDir } from "./paths.js"
 
-// Durable connectivity summary for a daemon session across daemon restarts.
+/** Durable connectivity summary for a daemon session across daemon restarts. */
 export type SessionConnectionMode = "live" | "history" | "none"
 
-// Structured session diagnostic event persisted for postmortem inspection.
+/** Structured session diagnostic event persisted for postmortem inspection. */
 export type SessionDiagnosticEvent = {
   type: string
   at: string
@@ -14,7 +14,7 @@ export type SessionDiagnosticEvent = {
   detail?: Record<string, unknown>
 }
 
-// Durable daemon-owned session state that supplements the SQL session row.
+/** Durable daemon-owned session state that supplements the SQL session row. */
 export type SessionStateRecord = {
   sessionId: string
   acpId: string

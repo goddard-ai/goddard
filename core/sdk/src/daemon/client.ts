@@ -6,7 +6,6 @@ import type {
 import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client"
 
 /** Shared connection options for SDK helpers that talk to the daemon over IPC. */
-// Options used by SDK daemon helpers to resolve an IPC client.
 export type DaemonClientOptions = {
   client?: DaemonIpcClient
   daemonUrl?: string

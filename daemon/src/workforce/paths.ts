@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises"
 import { join, resolve } from "node:path"
 
-// Canonical filesystem paths used by one daemon-managed workforce runtime.
+/** Canonical filesystem paths used by one daemon-managed workforce runtime. */
 export interface WorkforcePaths {
   rootDir: string
   goddardDir: string

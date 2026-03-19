@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile)
 // Common directory names skipped during workspace package discovery.
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
 
-// Package metadata discovered from nested package manifests under a repository root.
+/** Package metadata discovered from nested package manifests under a repository root. */
 export type DiscoveredWorkforcePackage = {
   rootDir: string
   relativeDir: string
@@ -29,7 +29,7 @@ export type DiscoveredWorkforcePackage = {
   name: string
 }
 
-// Result metadata returned after initializing repository workforce files.
+/** Result metadata returned after initializing repository workforce files. */
 export type InitializedWorkforce = {
   rootDir: string
   configPath: string

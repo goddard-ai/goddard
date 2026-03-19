@@ -5,7 +5,7 @@ import { createDaemonLogger } from "../logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
 
-// Optional callbacks used to observe raw agent stream traffic.
+/** Optional callbacks used to observe raw agent stream traffic. */
 export type AgentStreamHooks = {
   onChunk?: (chunk: Uint8Array) => void
   onMessageError?: (error: unknown) => void

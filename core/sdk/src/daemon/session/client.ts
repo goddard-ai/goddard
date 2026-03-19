@@ -6,11 +6,9 @@ import { resolveDaemonClient, type DaemonClientOptions } from "../client.js"
 import { AgentSession } from "./client-session.js"
 
 /** Backward-compatible options for SDK helpers that create or attach daemon sessions. */
-// Shared daemon client resolution options used by session helpers.
 export type RunAgentOptions = DaemonClientOptions
 
 /** Read-only daemon session lookup options shared with `runAgent`. */
-// Shared daemon client resolution options used by session lookup helpers.
 export type GetDaemonSessionOptions = RunAgentOptions
 
 function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
