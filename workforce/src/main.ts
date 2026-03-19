@@ -105,6 +105,29 @@ export async function runRequestCommand(args: {
   console.log(`Queued workforce request ${response.requestId ?? "unknown"}.`)
 }
 
+export async function runCreateCommand(args: {
+  root: string
+  message: string
+  daemonUrl?: string
+}): Promise<void> {
+  const repositoryRoot = await resolveRepositoryRoot(args.root)
+  const workforce = await getWorkforce(repositoryRoot, {
+    daemonUrl: args.daemonUrl,
+  })
+  const response = await createWorkforceRequest(
+    {
+      rootDir: repositoryRoot,
+      targetAgentId: workforce.config.rootAgentId,
+      message: args.message,
+      intent: "create",
+    },
+    {
+      daemonUrl: args.daemonUrl,
+    },
+  )
+  console.log(`Queued create request ${response.requestId ?? "unknown"}.`)
+}
+
 export async function runUpdateCommand(args: {
   root: string
   requestId: string
@@ -177,102 +200,137 @@ export async function main(argv: string[]) {
   const daemonUrl = option({
     type: optional(string),
     long: "daemon-url",
+    description: "Daemon IPC URL to use instead of the environment default",
   })
   const root = option({
     type: string,
     long: "root",
     defaultValue: () => process.cwd(),
+    description: "Repository root or any path inside the repository",
   })
 
   const app = subcommands({
     name: "goddard-workforce",
+    description: "Manage daemon-owned workforce runtimes and requests",
     cmds: {
       init: command({
         name: "init",
+        description: "Create repo-local workforce config and ledger files",
         args: { root },
         handler: runInitCommand,
       }),
       start: command({
         name: "start",
+        description: "Start a workforce runtime for one repository",
         args: { root, daemonUrl },
         handler: runStartCommand,
       }),
       status: command({
         name: "status",
+        description: "Show status for one workforce runtime",
         args: { root, daemonUrl },
         handler: runStatusCommand,
       }),
       list: command({
         name: "list",
+        description: "List running workforce runtimes known to the daemon",
         args: { daemonUrl },
         handler: runListCommand,
       }),
       request: command({
         name: "request",
+        description: "Queue a new workforce request for a target agent",
         args: {
           root,
           daemonUrl,
           targetAgentId: option({
             type: string,
             long: "target-agent-id",
+            description: "Target workforce agent id that should receive the request",
           }),
           message: option({
             type: string,
             long: "message",
+            description: "Request payload to send to the target workforce agent",
           }),
         },
         handler: runRequestCommand,
       }),
+      create: command({
+        name: "create",
+        description: "Ask the root agent to scaffold a new project or add packages for a feature",
+        args: {
+          root,
+          daemonUrl,
+          message: option({
+            type: string,
+            long: "message",
+            description:
+              "Feature request that may require creating a new project or new workspace packages",
+          }),
+        },
+        handler: runCreateCommand,
+      }),
       update: command({
         name: "update",
+        description: "Append updated input to an existing workforce request",
         args: {
           root,
           daemonUrl,
           requestId: option({
             type: string,
             long: "request-id",
+            description: "Existing workforce request id to update",
           }),
           message: option({
             type: string,
             long: "message",
+            description: "Updated request payload to append",
           }),
         },
         handler: runUpdateCommand,
       }),
       cancel: command({
         name: "cancel",
+        description: "Cancel an existing workforce request",
         args: {
           root,
           daemonUrl,
           requestId: option({
             type: string,
             long: "request-id",
+            description: "Existing workforce request id to cancel",
           }),
           reason: option({
             type: optional(string),
             long: "reason",
+            description: "Optional reason explaining why the request is being cancelled",
           }),
         },
         handler: runCancelCommand,
       }),
       truncate: command({
         name: "truncate",
+        description: "Clear pending work for a workforce scope",
         args: {
           root,
           daemonUrl,
           agentId: option({
             type: optional(string),
             long: "agent-id",
+            description: "Optional workforce agent id whose pending work should be truncated",
           }),
           reason: option({
             type: optional(string),
             long: "reason",
+            description: "Optional reason explaining why pending work is being truncated",
           }),
         },
         handler: runTruncateCommand,
       }),
       stop: command({
         name: "stop",
+        description: "Stop a running workforce runtime for one repository",
         args: { root, daemonUrl },
         handler: runStopCommand,
       }),
@@ -281,9 +339,13 @@ export async function main(argv: string[]) {
 
   const result = await runSafely(app, argv)
   if (result._tag === "error") {
-    const helpResult = await runSafely(app, ["--help"])
-    if (helpResult._tag === "error" && helpResult.error.config) {
-      console.log(helpResult.error.config.message)
+    if (result.error.config) {
+      console.log(result.error.config.message)
+    } else {
+      const helpResult = await runSafely(app, ["--help"])
+      if (helpResult._tag === "error" && helpResult.error.config) {
+        console.log(helpResult.error.config.message)
+      }
     }
     process.exit(1)
   }

@@ -22,6 +22,7 @@ The `spec/` folder contains the canonical source of truth and theory of mind for
 
 - **Avoid Single-Use Variables:** Do not declare variables that are only referenced once unless they significantly improve readability for complex expressions. Inline them directly into their usage.
 - **Explain Types and Interfaces:** Every TypeScript type alias or interface must include a `//` comment explaining its purpose. This reduces type bloat and helps future maintainers understand types that are often declared far from their usage.
+- **Describe Module Exports:** Every exported module declaration must include a human-readable `/** ... */` description comment. Do not add JSDoc tag boilerplate like `@param` or `@returns`.
 
 ## Git/Rebase Note
 
@@ -51,6 +52,7 @@ The test suite is maintained by AI agents and should stay lean.
 - Do not preserve a test just because it already exists.
 - If a test does not protect a meaningful contract, user-visible behavior, regression boundary, or shared mock drift check, remove it.
 - Prefer contract-level tests over implementation-detail tests.
+- Avoid assertions against informal constants or incidental content fragments. Exact checks for real contract strings, such as error messages or stable literals, are acceptable.
 - When replacing a shallow or brittle test, remove the old test instead of keeping both unless both protect distinct behavior.
 
 ## `build:types` Script Guidance
