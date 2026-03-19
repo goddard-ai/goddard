@@ -12,7 +12,7 @@
 | Distribution | `git-subrepo` to standalone repositories |
 
 ## Platform Components
-- **Control Plane** — worker-hosted authority for sessions, managed pull request state, and repository event fan-out.
+- **Control Plane** — worker-hosted authority for sessions, managed pull request state, and user-scoped event fan-out.
 - **GitHub Integration** — delegated GitHub identity and webhook-facing integration behavior.
 - **SDK** — framework-agnostic platform client for programmatic and embedded hosts.
 - **Desktop Workspace** — Tauri desktop app and primary human-facing surface.
@@ -27,21 +27,22 @@ These components can be packaged independently and synchronized to standalone re
 - Session validation on protected requests.
 - Webhook ingest and routing for pull request and review feedback events.
 - Managed reaction behavior via GitHub App identity.
-- Per-repository event fan-out over SSE.
+- User-scoped event fan-out over SSE for managed pull request ownership.
 
 Boundary:
 - Production persistence is Turso-backed.
 - Local in-memory mode is development-only convenience.
+- Real-time delivery follows authenticated managed pull request ownership rather than repository-scoped subscription state.
 
 ### SDK
 Design rule: platform capabilities live here first.
-- Expose typed operations for authentication, pull request creation, stream subscription, and daemon-backed local automation control.
+- Expose typed operations for authentication, pull request creation, managed pull request stream subscription, and daemon-backed local automation control.
 - Normalize stream frames into stable event contracts.
 - Accept injected `TokenStorage` to avoid environment lock-in.
 
 ### Desktop Workspace
 - Primary human-facing workspace for authentication, session steering, pull request review, specs, tasks, and roadmap context.
-- Use SDK contracts for pull request operations, stream subscription, and other platform interactions.
+- Use SDK contracts for pull request operations, managed pull request stream subscription, and other platform interactions.
 - Host or supervise local background automation when unattended execution is enabled.
 
 Boundary:
@@ -49,7 +50,7 @@ Boundary:
 - Must not fork platform behavior away from SDK contracts.
 
 ### Background Runtime
-- Subscribe to repository streams via SDK.
+- Subscribe to authenticated managed pull request streams via SDK.
 - Launch daemon-managed one-shot reactions for managed pull request feedback.
 - Host or cooperate with daemon-managed workforce orchestration for repository-scoped delegation.
 - Operate as background automation rather than a user-facing command surface.

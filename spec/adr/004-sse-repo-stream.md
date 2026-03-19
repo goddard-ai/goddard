@@ -1,27 +1,30 @@
-# ADR-004: Repository Stream Transport Uses SSE
+# ADR-004: Managed Pull Request Event Delivery Uses User-Scoped SSE Streams
 
 ## Status
 ACTIVE
 
 ## Context
 
-The original real-time stream transport used WebSockets. In practice, the stream path is server-to-client only: webhook and PR events are published by the backend and consumed by CLI clients. There is no requirement for bidirectional messaging over the same connection.
+The original stream model attached subscribers to repositories. That model no longer matched the product boundary for automation: managed pull request feedback belongs to the authenticated Goddard user who initiated the managed pull request, and a single daemon process may need feedback from many repositories at once.
 
-Running interactive CLI consumers on Node also required extra WebSocket runtime handling and upgrade-specific server plumbing in local development.
+GitHub author identity is also not a reliable routing boundary. The backend already owns the managed pull request lifecycle, so it is the authoritative place to remember which Goddard user initiated a managed pull request and should receive its later feedback events.
 
 ## Decision
 
-Repository event streaming uses **Server-Sent Events (SSE)** over standard HTTP (`text/event-stream`) instead of WebSocket upgrades.
+Managed pull request event delivery uses authenticated, user-scoped **Server-Sent Events (SSE)** streams.
+
+Each subscriber opens one long-lived stream for the current Goddard user. The backend routes pull request creation events and later webhook feedback by managed pull request ownership. Repository membership alone does not determine delivery, and GitHub author identity does not override Goddard ownership.
 
 ## Rationale
 
-- **Matches traffic shape:** The stream is one-way (server → client), which is SSE’s native model.
-- **Simpler infrastructure path:** SSE removes explicit HTTP upgrade handling in local Node adapters.
-- **Client portability:** SSE can be consumed with plain `fetch` stream parsing in the SDK, avoiding dependence on runtime WebSocket globals.
-- **Durable Object compatibility:** Per-repo fan-out remains anchored in Durable Objects with the same isolation model.
+- **Matches the automation actor:** Background automation is owned by an authenticated developer, not by a repository subscription list.
+- **Reduces client coordination:** SDK consumers and daemons maintain one stream instead of tracking repository-by-repository subscriptions.
+- **Preserves isolation:** User-scoped routing prevents managed pull request feedback from leaking between Goddard users.
+- **Keeps the transport simple:** The stream remains one-way server-to-client traffic, so SSE continues to fit the delivery model.
 
 ## Consequences
 
-- SDK stream subscriptions now open a long-lived HTTP request and parse SSE frames.
-- Backend stream endpoints return `text/event-stream` responses and no longer rely on WebSocket `101` upgrades.
-- Existing consumers that directly depended on WebSocket semantics must migrate to the SDK stream API or SSE parsing.
+- The backend must persist managed pull request ownership when a pull request is created so later feedback can be routed correctly.
+- SDK, desktop, and daemon consumers subscribe once per authenticated user session rather than once per repository.
+- Unmanaged pull requests are not delivered on the managed stream.
+- Delivery guarantees apply to managed pull requests whose ownership was recorded under this routing model; older records outside that guarantee boundary are not promised stream delivery.
