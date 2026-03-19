@@ -3,7 +3,6 @@ import type { WorkforceRequestIntent } from "@goddard-ai/schema/workforce"
 import { resolveDaemonClient, type DaemonClientOptions } from "./client.js"
 
 /** Shared daemon connection options for workforce lifecycle helpers. */
-// Shared daemon client resolution options used by workforce helpers.
 export type WorkforceClientOptions = DaemonClientOptions
 
 /** Starts or reuses the daemon-managed workforce runtime for a repository root. */

@@ -2,10 +2,10 @@ import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { getDefaultDaemonSocketPath } from "./ipc/socket.ts"
 import { join } from "node:path"
 
-// Environment variables recognized by the daemon runtime.
+/** Environment variables recognized by the daemon runtime. */
 export type DaemonRuntimeEnv = Record<string, string | undefined>
 
-// Explicit daemon launch settings accepted from CLI or tests before env/default resolution.
+/** Explicit daemon launch settings accepted from CLI or tests before env/default resolution. */
 export type DaemonRuntimeConfigInput = {
   baseUrl?: string
   socketPath?: string
@@ -13,7 +13,7 @@ export type DaemonRuntimeConfigInput = {
   env?: DaemonRuntimeEnv
 }
 
-// Fully resolved daemon runtime contract shared across the daemon entry points.
+/** Fully resolved daemon runtime contract shared across the daemon entry points. */
 export type ResolvedDaemonRuntimeConfig = {
   baseUrl: string
   socketPath: string

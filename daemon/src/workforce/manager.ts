@@ -7,7 +7,7 @@ import {
   type WorkforceRuntimeDeps,
 } from "./runtime.ts"
 
-// Supported daemon-side workforce mutations routed over IPC or agent tools.
+/** Supported daemon-side workforce mutations routed over IPC or agent tools. */
 export type WorkforceManagerMutation =
   | {
       type: "request"
@@ -41,12 +41,12 @@ export type WorkforceManagerMutation =
       reason: string
     }
 
-// Optional lifecycle dependencies used to build new runtime instances.
+/** Optional lifecycle dependencies used to build new runtime instances. */
 export interface WorkforceManagerDeps extends WorkforceRuntimeDeps {
   createRuntime?: (rootDir: string, deps: WorkforceRuntimeDeps) => Promise<WorkforceRuntime>
 }
 
-// Daemon-owned runtime registry keyed by normalized repository root.
+/** Daemon-owned runtime registry keyed by normalized repository root. */
 export interface WorkforceManager {
   startWorkforce: (rootDir: string) => Promise<DaemonWorkforce>
   getWorkforce: (rootDir: string) => Promise<DaemonWorkforce>

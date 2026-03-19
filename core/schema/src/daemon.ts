@@ -45,7 +45,7 @@ export type DaemonSessionMetadata = {
   [key: string]: unknown
 }
 
-// Durable connectivity state exposed to app and SDK consumers.
+/** Durable connectivity state exposed to app and SDK consumers. */
 export type DaemonSessionConnection = {
   mode: "live" | "history" | "none"
   reconnectable: boolean
@@ -53,7 +53,7 @@ export type DaemonSessionConnection = {
   activeDaemonSession: boolean
 }
 
-// Structured diagnostic event emitted by the daemon for session lifecycle debugging.
+/** Structured diagnostic event emitted by the daemon for session lifecycle debugging. */
 export type DaemonDiagnosticEvent = {
   type: string
   at: string
@@ -61,7 +61,7 @@ export type DaemonDiagnosticEvent = {
   detail?: Record<string, unknown>
 }
 
-// Lightweight diagnostic summary exposed with every daemon session read.
+/** Lightweight diagnostic summary exposed with every daemon session read. */
 export type DaemonSessionDiagnostics = {
   eventCount: number
   historyLength: number
@@ -116,21 +116,16 @@ export type GetDaemonSessionHistoryResponse = DaemonSessionIdentity & {
   history: acp.AnyMessage[]
 }
 
-// Full session diagnostic payload returned on demand for debugging and tests.
+/** Full session diagnostic payload returned on demand for debugging and tests. */
 export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
   connection: DaemonSessionConnection
   events: DaemonDiagnosticEvent[]
 }
 
-export type ShutdownDaemonSessionResponse = {
-  id: string
-  success: boolean
-}
-
-// Stable runtime states reported for daemon-managed workforce hosts.
+/** Stable runtime states reported for daemon-managed workforce hosts. */
 export type DaemonWorkforceRuntimeState = "running"
 
-// Workforce status summary exposed over daemon IPC.
+/** Workforce status summary exposed over daemon IPC. */
 export type DaemonWorkforceStatus = WorkforceProjectionSummary & {
   state: DaemonWorkforceRuntimeState
   rootDir: string
@@ -138,27 +133,27 @@ export type DaemonWorkforceStatus = WorkforceProjectionSummary & {
   ledgerPath: string
 }
 
-// One daemon-managed workforce runtime addressed by repository root.
+/** One daemon-managed workforce runtime addressed by repository root. */
 export type DaemonWorkforce = DaemonWorkforceStatus & {
   config: WorkforceConfig
 }
 
-// Request payload used to start or reconnect to a daemon-owned workforce.
+/** Request payload used to start or reconnect to a daemon-owned workforce. */
 export type StartDaemonWorkforceRequest = {
   rootDir: string
 }
 
-// Request payload used to fetch one daemon-owned workforce by repository root.
+/** Request payload used to fetch one daemon-owned workforce by repository root. */
 export type GetDaemonWorkforceRequest = {
   rootDir: string
 }
 
-// Request payload used to stop one daemon-owned workforce by repository root.
+/** Request payload used to stop one daemon-owned workforce by repository root. */
 export type ShutdownDaemonWorkforceRequest = {
   rootDir: string
 }
 
-// Request payload used to enqueue work for one target workforce agent.
+/** Request payload used to enqueue work for one target workforce agent. */
 export type CreateDaemonWorkforceRequestRequest = {
   rootDir: string
   targetAgentId: string
@@ -167,7 +162,7 @@ export type CreateDaemonWorkforceRequestRequest = {
   token?: string
 }
 
-// Request payload used to add resume context to one workforce request.
+/** Request payload used to add resume context to one workforce request. */
 export type UpdateDaemonWorkforceRequest = {
   rootDir: string
   requestId: string
@@ -175,7 +170,7 @@ export type UpdateDaemonWorkforceRequest = {
   token?: string
 }
 
-// Request payload used to cancel one workforce request.
+/** Request payload used to cancel one workforce request. */
 export type CancelDaemonWorkforceRequest = {
   rootDir: string
   requestId: string
@@ -183,7 +178,7 @@ export type CancelDaemonWorkforceRequest = {
   token?: string
 }
 
-// Request payload used to clear pending work in one agent scope or the whole runtime.
+/** Request payload used to clear pending work in one agent scope or the whole runtime. */
 export type TruncateDaemonWorkforceRequest = {
   rootDir: string
   agentId?: string
@@ -191,7 +186,7 @@ export type TruncateDaemonWorkforceRequest = {
   token?: string
 }
 
-// Request payload used by an active workforce agent to finish its current task.
+/** Request payload used by an active workforce agent to finish its current task. */
 export type RespondDaemonWorkforceRequest = {
   rootDir: string
   requestId: string
@@ -199,7 +194,7 @@ export type RespondDaemonWorkforceRequest = {
   token: string
 }
 
-// Request payload used by an active workforce agent to suspend its current task.
+/** Request payload used by an active workforce agent to suspend its current task. */
 export type SuspendDaemonWorkforceRequest = {
   rootDir: string
   requestId: string
@@ -207,28 +202,28 @@ export type SuspendDaemonWorkforceRequest = {
   token: string
 }
 
-// Response payload returned when one workforce runtime is fetched.
+/** Response payload returned when one workforce runtime is fetched. */
 export type GetDaemonWorkforceResponse = {
   workforce: DaemonWorkforce
 }
 
-// Response payload returned when one workforce runtime is started.
+/** Response payload returned when one workforce runtime is started. */
 export type StartDaemonWorkforceResponse = {
   workforce: DaemonWorkforce
 }
 
-// Response payload returned when all running workforce runtimes are listed.
+/** Response payload returned when all running workforce runtimes are listed. */
 export type ListDaemonWorkforcesResponse = {
   workforces: DaemonWorkforceStatus[]
 }
 
-// Response payload returned after one workforce runtime is stopped.
+/** Response payload returned after one workforce runtime is stopped. */
 export type ShutdownDaemonWorkforceResponse = {
   rootDir: string
   success: boolean
 }
 
-// Response payload returned after one workforce request mutation.
+/** Response payload returned after one workforce request mutation. */
 export type MutateDaemonWorkforceResponse = {
   workforce: DaemonWorkforceStatus
   requestId: string | null

@@ -19,14 +19,13 @@ export const agentBinaryPlatforms = [
   "windows-x86_64",
 ] as const
 
-// Supported platform keys for ACP binary distributions.
+/** Supported platform keys for ACP binary distributions. */
 export type AgentBinaryPlatform = (typeof agentBinaryPlatforms)[number]
 
-// Environment variables declared by an ACP distribution target.
+/** Environment variables declared by an ACP distribution target. */
 export type AgentDistributionEnv = Record<string, string>
 
 /** Binary execution target metadata for one supported platform. */
-// Launch metadata for one ACP binary distribution target.
 export interface AgentBinaryTarget {
   archive: string
   cmd: string
@@ -34,11 +33,10 @@ export interface AgentBinaryTarget {
   env?: AgentDistributionEnv
 }
 
-// Platform-indexed ACP binary targets.
+/** Platform-indexed ACP binary targets. */
 export type AgentBinaryDistribution = Partial<Record<AgentBinaryPlatform, AgentBinaryTarget>>
 
-/** Shared package-runner distribution shape for `npx` and `uvx`. */
-// Launch metadata for ACP package-based distributions.
+/** Launch metadata for ACP package-based distributions. */
 export interface AgentPackageDistribution {
   package: string
   args?: string[]
@@ -46,15 +44,13 @@ export interface AgentPackageDistribution {
 }
 
 /** Supported ACP distribution methods for one agent entry. */
-// Installation and launch methods published for an ACP agent.
 export interface AgentInstallationMethods {
   binary?: AgentBinaryDistribution
   npx?: AgentPackageDistribution
   uvx?: AgentPackageDistribution
 }
 
-/** ACP agent registry entry metadata plus its supported distribution methods. */
-// Structured ACP agent entry accepted by session creation APIs.
+/** Structured ACP agent entry accepted by session creation APIs. */
 export interface AgentDistribution {
   id: string
   name: string
