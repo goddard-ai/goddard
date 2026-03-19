@@ -10,7 +10,7 @@ function run(label, command, args) {
 
 run("TypeScript: core/sdk workforce surface", "pnpm", [
   "exec",
-  "tsc",
+  "tsgo",
   "-p",
   "core/sdk/tsconfig.json",
   "--noEmit",
@@ -18,7 +18,7 @@ run("TypeScript: core/sdk workforce surface", "pnpm", [
 
 run("TypeScript: workforce CLI", "pnpm", [
   "exec",
-  "tsc",
+  "tsgo",
   "-p",
   "workforce/tsconfig.json",
   "--noEmit",

@@ -1,7 +1,7 @@
 {
   "name": "@goddard-ai/config",
-  "license": "MIT",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -12,10 +12,9 @@
   },
   "scripts": {
     "build": "tsdown",
-    "build:types": "tsdown --no-minify --clean --unused --log-level error",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

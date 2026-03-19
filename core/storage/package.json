@@ -23,10 +23,9 @@
   },
   "scripts": {
     "build": "tsgo -p tsconfig.json --noCheck",
-    "build:types": "tsgo -p tsconfig.json --noCheck",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsgo -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"

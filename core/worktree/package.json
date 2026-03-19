@@ -1,7 +1,7 @@
 {
   "name": "@goddard-ai/worktree",
-  "license": "MIT",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -14,7 +14,7 @@
     "build": "tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {

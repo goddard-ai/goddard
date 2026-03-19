@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsgo && vite build",
     "preview": "vite preview",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p . --noEmit",
+    "typecheck": "tsgo -p . --noEmit",
     "tauri": "tauri"
   },
   "dependencies": {

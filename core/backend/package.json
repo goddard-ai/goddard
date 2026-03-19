@@ -18,14 +18,13 @@
   "scripts": {
     "start": "node dist/server.mjs",
     "build": "tsdown",
-    "build:types": "tsdown --no-minify --clean --unused --log-level error",
     "dev": "wrangler dev",
     "deploy": "alchemy deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run"
   },
   "dependencies": {

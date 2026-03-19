@@ -17,10 +17,9 @@
   },
   "scripts": {
     "build": "tsdown",
-    "build:types": "tsdown --no-minify --clean --unused --log-level error",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run"
   },
   "dependencies": {

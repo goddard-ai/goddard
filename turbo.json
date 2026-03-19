@@ -5,12 +5,9 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
-    "build:types": {
-      "dependsOn": ["^build:types"],
-      "outputs": ["dist/**"]
-    },
     "typecheck": {
-      "dependsOn": ["build:types", "^build:types"],
+      "dependsOn": ["^typecheck"],
+      "inputs": ["**/*.ts", "**/tsconfig.json", "**/tsdown.config.ts", "tsconfig.base.json"],
       "outputs": []
     }
   }

@@ -11,12 +11,11 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "daemon": "node dist/main.mjs",
+    "build": "tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "build": "tsdown"
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",

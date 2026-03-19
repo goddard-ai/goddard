@@ -7,7 +7,6 @@
     "prepare": "simple-git-hooks",
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
     "build": "turbo run build",
-    "build:types": "turbo run build:types",
     "fmt": "pnpm -r run fmt",
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
     "typecheck": "turbo run typecheck",

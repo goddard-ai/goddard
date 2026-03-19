@@ -26,12 +26,11 @@
     }
   },
   "scripts": {
+    "build": "tsdown",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "build": "tsdown",
-    "build:types": "tsdown --no-minify --clean --unused --log-level error"
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
