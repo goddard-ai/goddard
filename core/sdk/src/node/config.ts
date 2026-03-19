@@ -1,12 +1,12 @@
+import { mergeRootConfigLayers } from "@goddard-ai/config"
 import {
-  actionConfigSchema,
-  loopConfigSchema,
-  mergeRootConfigLayers,
-  rootConfigSchema,
+  ActionConfig,
+  LoopConfig,
+  RootConfig,
   type GoddardActionConfigDocument,
   type GoddardLoopConfigDocument,
   type GoddardRootConfigDocument,
-} from "@goddard-ai/config"
+} from "@goddard-ai/schema/config"
 import {
   getGlobalConfigPath,
   getGoddardGlobalDir,
@@ -71,8 +71,8 @@ export async function readMergedRootConfig(
     globalRoot,
     localRoot,
     config: mergeRootConfigLayers(
-      await readJsonConfig(getGlobalConfigPath(), rootConfigSchema, "Global config"),
-      await readJsonConfig(getLocalConfigPath(cwd), rootConfigSchema, "Local config"),
+      await readJsonConfig(getGlobalConfigPath(), RootConfig, "Global config"),
+      await readJsonConfig(getLocalConfigPath(cwd), RootConfig, "Local config"),
     ),
   }
 }
@@ -81,10 +81,10 @@ export async function readMergedRootConfig(
 export async function readActionConfig(
   path: string,
 ): Promise<GoddardActionConfigDocument | undefined> {
-  return readJsonConfig(path, actionConfigSchema, "Action config")
+  return readJsonConfig(path, ActionConfig, "Action config")
 }
 
 /** Reads and validates a packaged loop config document. */
 export async function readLoopConfig(path: string): Promise<GoddardLoopConfigDocument | undefined> {
-  return readJsonConfig(path, loopConfigSchema, "Loop config")
+  return readJsonConfig(path, LoopConfig, "Loop config")
 }

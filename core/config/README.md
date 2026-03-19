@@ -1,6 +1,6 @@
 # `@goddard-ai/config`
 
-Canonical home for Goddard's persisted JSON configuration schemas and merge helpers.
+Canonical home for Goddard's model constants and persisted-config merge helpers.
 
 Persisted config is JSON-only:
 
@@ -17,14 +17,14 @@ Use these to validate JSON documents before loading them:
 
 ```ts
 import {
-  actionConfigSchema,
-  loopConfigSchema,
-  rootConfigSchema,
-} from "@goddard-ai/config"
+  ActionConfig,
+  LoopConfig,
+  RootConfig,
+} from "@goddard-ai/schema/config"
 
-const rootConfig = rootConfigSchema.parse(rawRootConfig)
-const actionConfig = actionConfigSchema.parse(rawActionConfig)
-const loopConfig = loopConfigSchema.parse(rawLoopConfig)
+const rootConfig = RootConfig.parse(rawRootConfig)
+const actionConfig = ActionConfig.parse(rawActionConfig)
+const loopConfig = LoopConfig.parse(rawLoopConfig)
 ```
 
 ### Merge helpers
@@ -42,16 +42,6 @@ const rootConfig = mergeRootConfigLayers(globalRoot, localRoot)
 const actionConfig = mergeActionConfigLayers(rootConfig.actions, entityConfig, runtimeOverrides)
 const loopConfig = mergeLoopConfigLayers(rootConfig.loops, entityConfig, runtimeOverrides)
 ```
-
-## Exported types
-
-| Type | Description |
-| --- | --- |
-| `GoddardRootConfigDocument` | Shared JSON document for root action and loop defaults |
-| `GoddardActionConfigDocument` | JSON-safe action defaults layered before runtime overrides |
-| `GoddardLoopConfigDocument` | JSON-safe loop defaults layered before runtime overrides |
-| `ResolvedGoddardLoopConfigDocument` | Fully required loop config after defaults and validation |
-| `Model` | Known loop model identifiers plus open-ended provider strings |
 
 ## Notes
 

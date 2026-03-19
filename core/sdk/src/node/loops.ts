@@ -1,9 +1,9 @@
+import { mergeLoopConfigLayers } from "@goddard-ai/config"
 import {
-  mergeLoopConfigLayers,
-  resolvedLoopConfigSchema,
+  ResolvedLoopConfig,
   type GoddardLoopConfigDocument,
   type ResolvedGoddardLoopConfigDocument,
-} from "@goddard-ai/config"
+} from "@goddard-ai/schema/config"
 import type {
   AgentLoopHandler,
   AgentLoopParams,
@@ -89,7 +89,7 @@ async function importNextPrompt(promptModulePath: string): Promise<() => string>
 }
 
 function resolveLoopConfig(config: GoddardLoopConfigDocument): ResolvedGoddardLoopConfigDocument {
-  return resolvedLoopConfigSchema.parse({
+  return ResolvedLoopConfig.parse({
     session: config.session,
     rateLimits: config.rateLimits,
     retries: {
