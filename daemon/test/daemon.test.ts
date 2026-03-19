@@ -53,7 +53,7 @@ test("daemon package ships agent-bin wrappers for goddard and workforce", async 
   assert.equal(workforceStat.isSymbolicLink() || workforceStat.isFile(), true)
 })
 
-test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-shot runs", async () => {
+test("daemon run subscribes to unified stream, filters to the local repo, and passes daemon URL into one-shot runs", async () => {
   const subscription = new MockStreamSubscription()
   let subCalls = 0
 
@@ -61,6 +61,26 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
   const startIpcCalls: any[] = []
   const deps: RunDaemonDeps = {
     createBackendClient: async () => ({
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev",
+          userCode: "code",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok",
+          githubUsername: "alec",
+          githubUserId: 1,
+        }),
+        whoami: async () => ({
+          token: "tok",
+          githubUsername: "alec",
+          githubUserId: 1,
+        }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({
           number: 1,
@@ -70,7 +90,7 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
         isManaged: async () => true,
       },
       stream: {
-        subscribeToRepo: async () => {
+        subscribe: async () => {
           subCalls += 1
           return subscription
         },
@@ -89,6 +109,16 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
       return 0
     },
     waitForShutdown: async (close) => {
+      subscription.emit("event", {
+        type: "comment" as const,
+        owner: "other",
+        repo: "repo",
+        prNumber: 999,
+        author: "alice",
+        body: "ignore this",
+        reactionAdded: "eyes",
+        createdAt: new Date().toISOString(),
+      })
       const event = {
         type: "comment" as const,
         owner: "test",
@@ -161,6 +191,185 @@ test("daemon run subscribes to repo, starts IPC, and passes daemon URL into one-
   )
   assert.equal(
     logs.some((entry) => entry.event === "daemon.shutdown"),
+    true,
+  )
+})
+
+test("daemon run can start only the IPC server when stream is disabled", async () => {
+  let subCalls = 0
+  const startIpcCalls: Array<{ socketPath: string; agentBinDir: string }> = []
+
+  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+    runDaemon(
+      {
+        repo: "test/repo",
+        projectDir: process.cwd(),
+        baseUrl: "",
+        socketPath: "/tmp/ipc-only.sock",
+        agentBinDir: "/tmp/custom-agent-bin",
+        enableIpc: true,
+        enableStream: false,
+      },
+      {
+        createBackendClient: async () => ({
+          auth: {
+            startDeviceFlow: async () => ({
+              deviceCode: "dev",
+              userCode: "code",
+              verificationUri: "https://github.com/login/device",
+              expiresIn: 900,
+              interval: 5,
+            }),
+            completeDeviceFlow: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            whoami: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            logout: async () => {},
+          },
+          pr: {
+            create: async () => ({
+              number: 1,
+              url: "https://github.com/acme/widgets/pull/1",
+            }),
+            reply: async () => ({ success: true }),
+            isManaged: async () => true,
+          },
+          stream: {
+            subscribe: async () => {
+              subCalls += 1
+              return new MockStreamSubscription()
+            },
+          },
+        }),
+        startIpcServer: async (_client, options) => {
+          startIpcCalls.push(options)
+          return {
+            daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fipc-only.sock",
+            socketPath: "/tmp/ipc-only.sock",
+            close: async () => {},
+          }
+        },
+        waitForShutdown: async (close) => {
+          await close()
+        },
+      },
+    ),
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(subCalls, 0)
+  assert.deepEqual(startIpcCalls, [
+    {
+      socketPath: "/tmp/ipc-only.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
+    },
+  ])
+  assert.equal(
+    logs.some((entry) => entry.event === "repo.subscription_started"),
+    false,
+  )
+  assert.equal(
+    logs.some((entry) => entry.event === "daemon.shutdown"),
+    true,
+  )
+})
+
+test("daemon run can subscribe without IPC and ignores feedback that requires one-shot execution", async () => {
+  const subscription = new MockStreamSubscription()
+  let subCalls = 0
+  const runOneShotCalls: any[] = []
+  const startIpcCalls: any[] = []
+
+  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+    runDaemon(
+      {
+        repo: "test/repo",
+        projectDir: process.cwd(),
+        baseUrl: "",
+        enableIpc: false,
+        enableStream: true,
+      },
+      {
+        createBackendClient: async () => ({
+          auth: {
+            startDeviceFlow: async () => ({
+              deviceCode: "dev",
+              userCode: "code",
+              verificationUri: "https://github.com/login/device",
+              expiresIn: 900,
+              interval: 5,
+            }),
+            completeDeviceFlow: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            whoami: async () => ({
+              token: "tok",
+              githubUsername: "alec",
+              githubUserId: 1,
+            }),
+            logout: async () => {},
+          },
+          pr: {
+            create: async () => ({
+              number: 1,
+              url: "https://github.com/acme/widgets/pull/1",
+            }),
+            reply: async () => ({ success: true }),
+            isManaged: async () => true,
+          },
+          stream: {
+            subscribe: async () => {
+              subCalls += 1
+              return subscription
+            },
+          },
+        }),
+        startIpcServer: async (_client, options) => {
+          startIpcCalls.push(options)
+          return {
+            daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fnot-used.sock",
+            socketPath: "/tmp/not-used.sock",
+            close: async () => {},
+          }
+        },
+        runOneShot: async (input) => {
+          runOneShotCalls.push(input)
+          return 0
+        },
+        waitForShutdown: async (close) => {
+          subscription.emit("event", {
+            type: "comment" as const,
+            owner: "test",
+            repo: "repo",
+            prNumber: 456,
+            author: "alice",
+            body: "fix it",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          await close()
+        },
+      },
+    ),
+  )
+
+  assert.equal(exitCode, 0)
+  assert.equal(subCalls, 1)
+  assert.deepEqual(startIpcCalls, [])
+  assert.deepEqual(runOneShotCalls, [])
+  assert.equal(
+    logs.some(
+      (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
+    ),
     true,
   )
 })

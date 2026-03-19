@@ -6,21 +6,25 @@ import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { createDaemonLogger, createPayloadPreview } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
-import { splitRepo } from "./utils.ts"
 
+/** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
   repo: string
   projectDir: string
   baseUrl: string
   socketPath?: string
   agentBinDir?: string
+  enableIpc?: boolean
+  enableStream?: boolean
 }
 
+/** Output sinks used by the daemon for structured log lines. */
 export type DaemonIo = {
   stdout: (line: string) => void
   stderr: (line: string) => void
 }
 
+/** Optional test seams and runtime overrides for daemon startup. */
 export type RunDaemonDeps = {
   createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
   startIpcServer?: (
@@ -37,9 +41,12 @@ const defaultIo: DaemonIo = {
   stderr: (line) => process.stderr.write(`${line}\n`),
 }
 
+/** Starts the daemon with the requested runtime features and waits for shutdown. */
 export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {}): Promise<number> {
   const io = deps.io ?? defaultIo
   const logger = createDaemonLogger(io.stdout)
+  const enableIpc = input.enableIpc ?? true
+  const enableStream = input.enableStream ?? true
   const runtime = resolveDaemonRuntimeConfig({
     baseUrl: input.baseUrl,
     socketPath: input.socketPath,
@@ -66,93 +73,124 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
       agentBinDir: runtime.agentBinDir,
     })
 
+    if (enableIpc === false && enableStream === false) {
+      logger.log("daemon.no_features_enabled", {
+        repository: input.repo,
+      })
+      return 0
+    }
+
     const client = await createBackendClientImpl(runtime.baseUrl)
-    const { owner, repo } = splitRepo(input.repo)
-    ipcServer = await startIpcServer(client, {
-      socketPath: runtime.socketPath,
-      agentBinDir: runtime.agentBinDir,
-    })
+    if (enableIpc) {
+      ipcServer = await startIpcServer(client, {
+        socketPath: runtime.socketPath,
+        agentBinDir: runtime.agentBinDir,
+      })
+    }
+
     const activeIpcServer = ipcServer
     const runningPrs = new Set<number>()
-    const subscription = await client.stream.subscribeToRepo({ owner, repo })
+    const subscription = enableStream ? await client.stream.subscribe() : null
 
-    logger.log("repo.subscription_started", {
-      repository: `${owner}/${repo}`,
-      daemonUrl: activeIpcServer.daemonUrl,
-      socketPath: activeIpcServer.socketPath,
-    })
+    if (subscription) {
+      logger.log("repo.subscription_started", {
+        repository: input.repo,
+        ...(activeIpcServer
+          ? {
+              daemonUrl: activeIpcServer.daemonUrl,
+              socketPath: activeIpcServer.socketPath,
+            }
+          : {}),
+      })
 
-    subscription.on("event", async (payload) => {
-      const event = payload as RepoEvent
-      if (!isFeedbackEvent(event)) {
-        return
-      }
+      subscription.on("event", async (payload) => {
+        const event = payload as RepoEvent
+        if (!isFeedbackEvent(event)) {
+          return
+        }
+        if (`${event.owner}/${event.repo}` !== input.repo) {
+          return
+        }
 
-      const prompt = buildPrompt(event)
-
-      if (runningPrs.has(event.prNumber)) {
-        logger.log("repo.feedback_coalesced", {
-          repository: `${event.owner}/${event.repo}`,
-          prNumber: event.prNumber,
-          feedbackType: event.type,
-        })
-        return
-      }
-
-      runningPrs.add(event.prNumber)
-
-      try {
-        const managed = await client.pr.isManaged({
-          owner: event.owner,
-          repo: event.repo,
-          prNumber: event.prNumber,
-        })
-        if (!managed) {
+        if (!activeIpcServer) {
           logger.log("repo.feedback_ignored", {
             repository: `${event.owner}/${event.repo}`,
             prNumber: event.prNumber,
             feedbackType: event.type,
-            reason: "unmanaged_pr",
+            reason: "ipc_disabled",
           })
           return
         }
 
-        logger.log("one_shot.launch", {
-          repository: `${event.owner}/${event.repo}`,
-          prNumber: event.prNumber,
-          feedbackType: event.type,
-          prompt: createPayloadPreview(prompt),
-        })
-        const exitCode = await runOneShotImpl({
-          event,
-          prompt,
-          projectDir: input.projectDir,
-          daemonUrl: activeIpcServer.daemonUrl,
-          agentBinDir: runtime.agentBinDir,
-        })
-        logger.log("one_shot.finish", {
-          repository: `${event.owner}/${event.repo}`,
-          prNumber: event.prNumber,
-          feedbackType: event.type,
-          exitCode,
-        })
-      } catch (error) {
-        logger.log("one_shot.failed", {
-          repository: `${event.owner}/${event.repo}`,
-          prNumber: event.prNumber,
-          feedbackType: event.type,
-          errorMessage: error instanceof Error ? error.message : String(error),
-        })
-      } finally {
-        runningPrs.delete(event.prNumber)
-      }
-    })
+        const prompt = buildPrompt(event)
+
+        if (runningPrs.has(event.prNumber)) {
+          logger.log("repo.feedback_coalesced", {
+            repository: `${event.owner}/${event.repo}`,
+            prNumber: event.prNumber,
+            feedbackType: event.type,
+          })
+          return
+        }
+
+        runningPrs.add(event.prNumber)
+
+        try {
+          const managed = await client.pr.isManaged({
+            owner: event.owner,
+            repo: event.repo,
+            prNumber: event.prNumber,
+          })
+          if (!managed) {
+            logger.log("repo.feedback_ignored", {
+              repository: `${event.owner}/${event.repo}`,
+              prNumber: event.prNumber,
+              feedbackType: event.type,
+              reason: "unmanaged_pr",
+            })
+            return
+          }
+
+          logger.log("one_shot.launch", {
+            repository: `${event.owner}/${event.repo}`,
+            prNumber: event.prNumber,
+            feedbackType: event.type,
+            prompt: createPayloadPreview(prompt),
+          })
+          const exitCode = await runOneShotImpl({
+            event,
+            prompt,
+            projectDir: input.projectDir,
+            daemonUrl: activeIpcServer.daemonUrl,
+            agentBinDir: runtime.agentBinDir,
+          })
+          logger.log("one_shot.finish", {
+            repository: `${event.owner}/${event.repo}`,
+            prNumber: event.prNumber,
+            feedbackType: event.type,
+            exitCode,
+          })
+        } catch (error) {
+          logger.log("one_shot.failed", {
+            repository: `${event.owner}/${event.repo}`,
+            prNumber: event.prNumber,
+            feedbackType: event.type,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        } finally {
+          runningPrs.delete(event.prNumber)
+        }
+      })
+    }
 
     await waitForShutdownImpl(() =>
-      Promise.all([Promise.resolve(subscription.close()), activeIpcServer.close()]).then(() => {}),
+      Promise.all([
+        subscription ? Promise.resolve(subscription.close()) : Promise.resolve(),
+        activeIpcServer ? activeIpcServer.close() : Promise.resolve(),
+      ]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      repository: `${owner}/${repo}`,
+      repository: input.repo,
       socketPath: runtime.socketPath,
     })
     return 0
@@ -169,6 +207,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
   }
 }
 
+/** Waits for SIGINT and then closes the active daemon resources. */
 export async function waitForShutdown(close: () => void | Promise<void>): Promise<void> {
   await new Promise<void>((resolve) => {
     process.once("SIGINT", () => {

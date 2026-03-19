@@ -161,7 +161,7 @@ export async function readWorkforceLedger(rootDir: string): Promise<WorkforceLed
       if (isRecord(parsed) === false || typeof parsed.type !== "string") {
         throw new Error(`Invalid workforce ledger event at line ${index + 1}`)
       }
-      return parsed as WorkforceLedgerEvent
+      return parsed as unknown as WorkforceLedgerEvent
     })
 }
 
