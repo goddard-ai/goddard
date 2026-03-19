@@ -42,4 +42,32 @@ describe("daemon workforce client", () => {
     expect(sendMock).toHaveBeenNthCalledWith(2, "workforceList", {})
     expect(sendMock).toHaveBeenNthCalledWith(3, "workforceShutdown", { rootDir: "/repo" })
   })
+
+  test("forwards create-intent workforce requests to daemon IPC", async () => {
+    sendMock.mockResolvedValueOnce({
+      workforce: { rootDir: "/repo" },
+      requestId: "req-create-1",
+    })
+
+    const { createDaemonWorkforceRequest } = await import("../../src/daemon/workforce.js")
+
+    await expect(
+      createDaemonWorkforceRequest({
+        rootDir: "/repo",
+        targetAgentId: "root",
+        message: "Create a new worker package.",
+        intent: "create",
+      }),
+    ).resolves.toEqual({
+      workforce: { rootDir: "/repo" },
+      requestId: "req-create-1",
+    })
+
+    expect(sendMock).toHaveBeenNthCalledWith(1, "workforceRequest", {
+      rootDir: "/repo",
+      targetAgentId: "root",
+      input: "Create a new worker package.",
+      intent: "create",
+    })
+  })
 })

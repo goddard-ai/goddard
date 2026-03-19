@@ -6,6 +6,7 @@ import { afterEach, test } from "vitest"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { startDaemonServer } from "../src/ipc.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
+import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 import { WorkforceRuntime } from "../src/workforce/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
@@ -153,7 +154,7 @@ test("workforce manager reuses one runtime per normalized repository root", asyn
   await manager.startWorkforce(tempRoot)
   await manager.startWorkforce(tempRoot)
 
-  assert.deepEqual(created, [tempRoot])
+  assert.deepEqual(created, [await normalizeWorkforceRootDir(tempRoot)])
 })
 
 test("workforce runtime records responses, suspensions, and poison-pill errors in the ledger", async () => {
@@ -248,6 +249,109 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
   assert.match(ledger, /"type":"suspend"/)
   assert.match(ledger, /"type":"error"/)
   assert.equal(callCount >= 5, true)
+})
+
+test("create-intent requests target the root agent and specialize the root session prompt", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-create-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+          {
+            id: "lib",
+            name: "@repo/lib",
+            role: "domain",
+            cwd: "packages/lib",
+            owns: ["packages/lib"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  let runtime!: WorkforceRuntime
+  let capturedSystemPrompt = ""
+  let capturedInitialPrompt = ""
+
+  runtime = await WorkforceRuntime.start(rootDir, {
+    sessionManager: {
+      createSession: async (input) => {
+        capturedSystemPrompt = input.systemPrompt
+        capturedInitialPrompt =
+          typeof input.initialPrompt === "string"
+            ? input.initialPrompt
+            : JSON.stringify(input.initialPrompt)
+
+        const metadata =
+          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
+            ? (input.metadata.workforce as { requestId: string; agentId: string })
+            : null
+
+        if (!metadata) {
+          throw new Error("Missing workforce metadata")
+        }
+
+        await runtime.respond({
+          requestId: metadata.requestId,
+          output: "created",
+          actor: {
+            sessionId: "session-1",
+            agentId: metadata.agentId,
+            requestId: metadata.requestId,
+          },
+        })
+
+        return {} as never
+      },
+    } as never,
+  })
+
+  await assert.rejects(
+    () =>
+      runtime.createRequest({
+        targetAgentId: "lib",
+        payload: "Create a new package for scheduling jobs.",
+        intent: "create",
+        actor: { sessionId: null, agentId: null, requestId: null },
+      }),
+    new Error("Create requests must target the root workforce agent"),
+  )
+
+  await runtime.createRequest({
+    targetAgentId: "root",
+    payload: "Create a new package for scheduling jobs.",
+    intent: "create",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
+  await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
+
+  const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
+
+  assert.match(ledger, /"intent":"create"/)
+  assert.match(capturedSystemPrompt, /This request is a create request\./)
+  assert.match(
+    capturedSystemPrompt,
+    /You are being asked to create a new project from scratch or add new packages to the existing workspace when the requested feature needs them\./,
+  )
+  assert.match(capturedInitialPrompt, /Request intent: create/)
 })
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number = 5_000) {

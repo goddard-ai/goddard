@@ -2,7 +2,11 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { ACPAdapterName } from "./acp-adapters.js"
 import type { SessionStatus } from "./db.js"
 import type { AgentDistribution } from "./session-server.js"
-import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.js"
+import type {
+  WorkforceConfig,
+  WorkforceProjectionSummary,
+  WorkforceRequestIntent,
+} from "./workforce.js"
 
 export type DaemonHealth = {
   ok: boolean
@@ -159,6 +163,7 @@ export type CreateDaemonWorkforceRequestRequest = {
   rootDir: string
   targetAgentId: string
   input: string
+  intent?: WorkforceRequestIntent
   token?: string
 }
 

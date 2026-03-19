@@ -18,6 +18,7 @@ function createRequestRecord(
     id: event.requestId,
     toAgentId: event.toAgentId,
     fromAgentId: event.fromAgentId,
+    intent: event.intent,
     input: event.input,
     updates: [],
     status: "queued",

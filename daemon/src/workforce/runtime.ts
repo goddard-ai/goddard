@@ -4,6 +4,7 @@ import type {
   WorkforceConfig,
   WorkforceLedgerEvent,
   WorkforceProjection,
+  WorkforceRequestIntent,
   WorkforceRequestRecord,
 } from "@goddard-ai/schema/workforce"
 import { randomUUID } from "node:crypto"
@@ -85,6 +86,7 @@ function buildSystemPrompt(
   rootDir: string,
   config: WorkforceConfig,
   agent: WorkforceAgentConfig,
+  request: WorkforceRequestRecord,
 ): string {
   const agentScope = agent.owns.join(", ")
   const rootRelativeCwd = agent.cwd === "." ? "." : agent.cwd
@@ -97,7 +99,26 @@ function buildSystemPrompt(
     `Root agent id: ${config.rootAgentId}`,
     "You must not directly modify code outside your owned paths.",
     "Use the workforce executable to request delegated work, report a response, or suspend for escalation.",
+    ...buildIntentSpecificSystemPrompt(config, agent, request.intent),
   ].join("\n")
+}
+
+function buildIntentSpecificSystemPrompt(
+  config: WorkforceConfig,
+  agent: WorkforceAgentConfig,
+  intent: WorkforceRequestIntent,
+): string[] {
+  if (intent !== "create" || agent.id !== config.rootAgentId) {
+    return []
+  }
+
+  return [
+    "This request is a create request.",
+    "You are being asked to create a new project from scratch or add new packages to the existing workspace when the requested feature needs them.",
+    "Review the current workspace structure, packages, and ownership boundaries before deciding what to create.",
+    "Do not assume new packages are required; first determine whether the requested feature fits the existing workspace.",
+    "If new packages are appropriate, define them intentionally and delegate follow-up implementation work through the workforce.",
+  ]
 }
 
 function buildInitialPrompt(
@@ -109,6 +130,7 @@ function buildInitialPrompt(
     `Repository root: ${rootDir}`,
     `Current request id: ${request.id}`,
     request.fromAgentId ? `Sender agent id: ${request.fromAgentId}` : "Sender agent id: operator",
+    `Request intent: ${request.intent}`,
     "",
     "Recent activity:",
     formatRecentActivity(recentActivity),
@@ -135,7 +157,7 @@ async function defaultRunWorkforceSession(
     agent: agentDistribution,
     cwd: input.agent.cwd === "." ? input.rootDir : join(input.rootDir, input.agent.cwd),
     mcpServers: [],
-    systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent),
+    systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
     metadata,
     oneShot: true,
     initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
@@ -245,9 +267,16 @@ export class WorkforceRuntime {
   async createRequest(input: {
     targetAgentId: string
     payload: string
+    intent?: WorkforceRequestIntent
     actor: WorkforceActorContext
   }): Promise<string> {
     assertAgentExists(this.#config, input.targetAgentId)
+    if (
+      (input.intent ?? "default") === "create" &&
+      input.targetAgentId !== this.#config.rootAgentId
+    ) {
+      throw new Error("Create requests must target the root workforce agent")
+    }
 
     const requestId = randomUUID()
     await this.appendEvent({
@@ -257,6 +286,7 @@ export class WorkforceRuntime {
       requestId,
       toAgentId: input.targetAgentId,
       fromAgentId: input.actor.agentId,
+      intent: input.intent ?? "default",
       input: input.payload,
     })
 

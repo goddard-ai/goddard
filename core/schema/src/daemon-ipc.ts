@@ -31,6 +31,7 @@ const daemonSessionMetadataSchema = z
   .catchall(z.unknown())
 
 const workforceTokenSchema = z.string().optional()
+const workforceRequestIntentSchema = z.enum(["default", "create"]).optional()
 
 export const daemonIpcSchema = {
   client: {
@@ -130,6 +131,7 @@ export const daemonIpcSchema = {
           rootDir: z.string(),
           targetAgentId: z.string(),
           input: z.string(),
+          intent: workforceRequestIntentSchema,
           token: workforceTokenSchema,
         }),
         response: $type<MutateDaemonWorkforceResponse>(),

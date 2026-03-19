@@ -13,6 +13,7 @@ export type WorkforceManagerMutation =
       type: "request"
       targetAgentId: string
       input: string
+      intent?: "default" | "create"
     }
   | {
       type: "update"
@@ -133,6 +134,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
           requestId = await runtime.createRequest({
             targetAgentId: mutation.targetAgentId,
             payload: mutation.input,
+            intent: mutation.intent,
             actor,
           })
           break

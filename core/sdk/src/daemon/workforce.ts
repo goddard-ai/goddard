@@ -1,6 +1,7 @@
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client"
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
+import type { WorkforceRequestIntent } from "@goddard-ai/schema/workforce"
 import type { RunAgentOptions } from "./session/client.js"
 
 // Configuration used to connect workforce helpers to a daemon IPC client.
@@ -64,6 +65,7 @@ export async function createDaemonWorkforceRequest(
     rootDir: string
     targetAgentId: string
     message: string
+    intent?: WorkforceRequestIntent
   },
   options?: WorkforceClientOptions,
 ): Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }> {
@@ -72,6 +74,7 @@ export async function createDaemonWorkforceRequest(
     rootDir: input.rootDir,
     targetAgentId: input.targetAgentId,
     input: input.message,
+    intent: input.intent,
   })
 }
 
