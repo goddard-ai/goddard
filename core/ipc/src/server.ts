@@ -1,9 +1,5 @@
 import { existsSync, unlinkSync } from "node:fs"
-import {
-  createServer as createHttpServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http"
+import * as http from "node:http"
 import {
   type AppSchema,
   type ReqName,
@@ -19,19 +15,19 @@ export type Handlers<S extends AppSchema> = {
 
 type StreamClient = {
   name: string
-  res: ServerResponse
+  res: http.ServerResponse
 }
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function sendJson(res: ServerResponse, statusCode: number, body: unknown) {
+function sendJson(res: http.ServerResponse, statusCode: number, body: unknown) {
   res.writeHead(statusCode, { "Content-Type": "application/json" })
   res.end(JSON.stringify(body))
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: http.IncomingMessage): Promise<string> {
   let body = ""
   for await (const chunk of req) {
     body += chunk
@@ -71,7 +67,7 @@ export function createServer<S extends AppSchema>(
     }
   }
 
-  const server = createHttpServer((req, res) => {
+  const server: http.Server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost")
 
     if (req.method === "POST" && url.pathname === "/") {
