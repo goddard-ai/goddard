@@ -2,7 +2,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, assert, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
@@ -20,29 +20,27 @@ test("daemon submit request requires a valid session token", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
   const { logs } = await captureDaemonLogs(async () => {
-    await assert.rejects(
-      () =>
-        client.send("prSubmit", {
-          token: "",
-          cwd: process.cwd(),
-          title: "Ship daemon security",
-          body: "Done.",
-        }),
-      /invalid session token/i,
-    )
+    await expect(
+      client.send("prSubmit", {
+        token: "",
+        cwd: process.cwd(),
+        title: "Ship daemon security",
+        body: "Done.",
+      }),
+    ).rejects.toThrow(/invalid session token/i)
   })
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
   const failed = logs.find((entry) => entry.event === "ipc.request_failed")
-  assert.equal(received?.requestName, "prSubmit")
-  assert.deepEqual(received?.payload, {
+  expect(received?.requestName).toBe("prSubmit")
+  expect(received?.payload).toEqual({
     token: "[REDACTED]",
     cwd: process.cwd(),
     title: "Ship daemon security",
     body: "Done.",
   })
-  assert.equal(received?.opId, failed?.opId)
-  assert.equal(failed?.requestName, "prSubmit")
+  expect(received?.opId).toBe(failed?.opId)
+  expect(failed?.requestName).toBe("prSubmit")
 })
 
 test("daemon submit request enforces trusted repo context and records created PR access", async () => {
@@ -70,7 +68,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     },
     auth: {
       getSessionByToken: async (token) => {
-        assert.equal(token, "tok_session")
+        expect(token).toBe("tok_session")
         return {
           sessionId: "session-42",
           owner: "trusted",
@@ -109,7 +107,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     })
   })
 
-  assert.deepEqual(createCalls, [
+  expect(createCalls).toEqual([
     {
       owner: "trusted",
       repo: "widgets",
@@ -119,8 +117,8 @@ test("daemon submit request enforces trusted repo context and records created PR
       base: "main",
     },
   ])
-  assert.deepEqual(recordedPrs, [{ sessionId: "session-42", prNumber: 42 }])
-  assert.deepEqual(recordedLocations, [
+  expect(recordedPrs).toEqual([{ sessionId: "session-42", prNumber: 42 }])
+  expect(recordedLocations).toEqual([
     {
       owner: "trusted",
       repo: "widgets",
@@ -131,10 +129,10 @@ test("daemon submit request enforces trusted repo context and records created PR
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
   const responded = logs.find((entry) => entry.event === "ipc.response_sent")
-  assert.equal(received?.requestName, "prSubmit")
-  assert.equal(responded?.requestName, "prSubmit")
-  assert.equal(received?.opId, responded?.opId)
-  assert.equal(responded?.sessionId, "session-42")
+  expect(received?.requestName).toBe("prSubmit")
+  expect(responded?.requestName).toBe("prSubmit")
+  expect(received?.opId).toBe(responded?.opId)
+  expect(responded?.sessionId).toBe("session-42")
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
@@ -157,15 +155,13 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await assert.rejects(
-    () =>
-      client.send("prReply", {
-        token: "tok_session",
-        cwd: process.cwd(),
-        message: "Updated per review",
-      }),
-    /not allowed/i,
-  )
+  await expect(
+    client.send("prReply", {
+      token: "tok_session",
+      cwd: process.cwd(),
+      message: "Updated per review",
+    }),
+  ).rejects.toThrow(/not allowed/i)
 })
 
 test("daemon reply request records managed PR checkout locations", async () => {
@@ -208,7 +204,7 @@ test("daemon reply request records managed PR checkout locations", async () => {
     message: "Updated per review",
   })
 
-  assert.deepEqual(recordedLocations, [
+  expect(recordedLocations).toEqual([
     {
       owner: "trusted",
       repo: "widgets",

@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, assert, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 
 const cleanup: Array<() => Promise<void>> = []
 
@@ -78,22 +78,20 @@ test("real storage reconciliation marks interrupted sessions as archived history
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const session = await client.send("sessionGet", { id: sessionId })
-  assert.equal(session.session.status, "error")
-  assert.equal(session.session.connection.mode, "history")
-  assert.equal(session.session.connection.reconnectable, false)
-  assert.match(session.session.errorMessage ?? "", /previous daemon exited unexpectedly/i)
+  expect(session.session.status).toBe("error")
+  expect(session.session.connection.mode).toBe("history")
+  expect(session.session.connection.reconnectable).toBe(false)
+  expect(session.session.errorMessage ?? "").toMatch(/previous daemon exited unexpectedly/i)
 
   const history = await client.send("sessionHistory", { id: sessionId })
-  assert.equal(history.history.length, 1)
+  expect(history.history).toHaveLength(1)
 
   const diagnostics = await client.send("sessionDiagnostics", { id: sessionId })
-  assert.equal(
+  expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
-    true,
-  )
+  ).toBe(true)
 
-  await assert.rejects(
-    () => client.send("sessionResolveToken", { token: "real-token-1" }),
+  await expect(client.send("sessionResolveToken", { token: "real-token-1" })).rejects.toThrow(
     /invalid session token/i,
   )
 })

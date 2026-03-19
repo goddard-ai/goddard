@@ -52,6 +52,7 @@ The test suite is maintained by AI agents and should stay lean.
 - Do not preserve a test just because it already exists.
 - If a test does not protect a meaningful contract, user-visible behavior, regression boundary, or shared mock drift check, remove it.
 - Prefer contract-level tests over implementation-detail tests.
+- In Vitest test files, use the `expect` API for assertions instead of `assert` imports from either Vitest or Node.
 - Avoid assertions against informal constants or incidental content fragments. Exact checks for real contract strings, such as error messages or stable literals, are acceptable.
 - When replacing a shallow or brittle test, remove the old test instead of keeping both unless both protect distinct behavior.
 

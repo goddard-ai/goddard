@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, assert, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {
@@ -48,8 +48,8 @@ test("daemon package ships agent-bin wrappers for goddard and workforce", async 
     lstat(wrapperPath),
     lstat(workforceWrapperPath),
   ])
-  assert.equal(goddardStat.isSymbolicLink() || goddardStat.isFile(), true)
-  assert.equal(workforceStat.isSymbolicLink() || workforceStat.isFile(), true)
+  expect(goddardStat.isSymbolicLink() || goddardStat.isFile()).toBe(true)
+  expect(workforceStat.isSymbolicLink() || workforceStat.isFile()).toBe(true)
 })
 
 test("daemon run subscribes once, handles events across repositories, and passes daemon URL into one-shot runs", async () => {
@@ -146,30 +146,28 @@ test("daemon run subscribes once, handles events across repositories, and passes
     ),
   )
 
-  assert.equal(exitCode, 0)
-  assert.equal(subCalls, 1)
-  assert.deepEqual(startIpcCalls, [
+  expect(exitCode).toBe(0)
+  expect(subCalls).toBe(1)
+  expect(startIpcCalls).toEqual([
     {
       socketPath: "/tmp/custom-daemon.sock",
       agentBinDir: "/tmp/custom-agent-bin",
     },
   ])
-  assert.equal(runOneShotCalls.length, 2)
-  assert.deepEqual(
+  expect(runOneShotCalls).toHaveLength(2)
+  expect(
     runOneShotCalls.map((call) => `${call.event.owner}/${call.event.repo}#${call.event.prNumber}`),
-    ["other/repo#123", "test/repo#123"],
-  )
-  assert.equal(runOneShotCalls[0].event.prNumber, 123)
-  assert.equal(
-    runOneShotCalls[0].daemonUrl,
+  ).toEqual(["other/repo#123", "test/repo#123"])
+  expect(runOneShotCalls[0].event.prNumber).toBe(123)
+  expect(runOneShotCalls[0].daemonUrl).toBe(
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
   )
-  assert.equal(runOneShotCalls[0].agentBinDir, "/tmp/custom-agent-bin")
-  assert.match(runOneShotCalls[0].prompt, /goddard reply-pr --message-file/)
-  assert.doesNotMatch(runOneShotCalls[0].prompt, /goddard pr reply --body/)
+  expect(runOneShotCalls[0].agentBinDir).toBe("/tmp/custom-agent-bin")
+  expect(runOneShotCalls[0].prompt).toMatch(/goddard reply-pr --message-file/)
+  expect(runOneShotCalls[0].prompt).not.toMatch(/goddard pr reply --body/)
 
   const startupLog = logs.find((entry) => entry.event === "daemon.startup")
-  assert.deepEqual(startupLog, {
+  expect(startupLog).toEqual({
     scope: "daemon",
     at: startupLog?.at,
     event: "daemon.startup",
@@ -177,22 +175,10 @@ test("daemon run subscribes once, handles events across repositories, and passes
     socketPath: "/tmp/custom-daemon.sock",
     agentBinDir: "/tmp/custom-agent-bin",
   })
-  assert.equal(
-    logs.some((entry) => entry.event === "repo.subscription_started"),
-    true,
-  )
-  assert.equal(
-    logs.some((entry) => entry.event === "one_shot.launch"),
-    true,
-  )
-  assert.equal(
-    logs.some((entry) => entry.event === "one_shot.finish"),
-    true,
-  )
-  assert.equal(
-    logs.some((entry) => entry.event === "daemon.shutdown"),
-    true,
-  )
+  expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(true)
+  expect(logs.some((entry) => entry.event === "one_shot.launch")).toBe(true)
+  expect(logs.some((entry) => entry.event === "one_shot.finish")).toBe(true)
+  expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
 })
 
 test("daemon run can start only the IPC server when stream is disabled", async () => {
@@ -261,22 +247,16 @@ test("daemon run can start only the IPC server when stream is disabled", async (
     ),
   )
 
-  assert.equal(exitCode, 0)
-  assert.equal(subCalls, 0)
-  assert.deepEqual(startIpcCalls, [
+  expect(exitCode).toBe(0)
+  expect(subCalls).toBe(0)
+  expect(startIpcCalls).toEqual([
     {
       socketPath: "/tmp/ipc-only.sock",
       agentBinDir: "/tmp/custom-agent-bin",
     },
   ])
-  assert.equal(
-    logs.some((entry) => entry.event === "repo.subscription_started"),
-    false,
-  )
-  assert.equal(
-    logs.some((entry) => entry.event === "daemon.shutdown"),
-    true,
-  )
+  expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
+  expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
 })
 
 test("daemon run can subscribe without IPC and ignores feedback that requires one-shot execution", async () => {
@@ -360,16 +340,15 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
     ),
   )
 
-  assert.equal(exitCode, 0)
-  assert.equal(subCalls, 1)
-  assert.deepEqual(startIpcCalls, [])
-  assert.deepEqual(runOneShotCalls, [])
-  assert.equal(
+  expect(exitCode).toBe(0)
+  expect(subCalls).toBe(1)
+  expect(startIpcCalls).toEqual([])
+  expect(runOneShotCalls).toEqual([])
+  expect(
     logs.some(
       (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
     ),
-    true,
-  )
+  ).toBe(true)
 })
 
 test("daemon run defaults to concise pretty terminal logs", async () => {
@@ -391,19 +370,10 @@ test("daemon run defaults to concise pretty terminal logs", async () => {
     },
   )
 
-  assert.equal(exitCode, 0)
-  assert.equal(
-    lines.some((line) => line.includes("daemon.startup")),
-    true,
-  )
-  assert.equal(
-    lines.some((line) => line.includes("daemon.no_features_enabled")),
-    true,
-  )
-  assert.equal(
-    lines.every((line) => line.trim().startsWith("{")),
-    false,
-  )
+  expect(exitCode).toBe(0)
+  expect(lines.some((line) => line.includes("daemon.startup"))).toBe(true)
+  expect(lines.some((line) => line.includes("daemon.no_features_enabled"))).toBe(true)
+  expect(lines.every((line) => line.trim().startsWith("{"))).toBe(false)
 })
 
 test("daemon run supports raw json terminal logs when requested", async () => {
@@ -426,19 +396,10 @@ test("daemon run supports raw json terminal logs when requested", async () => {
     },
   )
 
-  assert.equal(exitCode, 0)
-  assert.equal(
-    lines.some((line) => line.includes('"event":"daemon.startup"')),
-    true,
-  )
-  assert.equal(
-    lines.some((line) => line.includes('"event":"daemon.no_features_enabled"')),
-    true,
-  )
-  assert.equal(
-    lines.every((line) => line.trim().startsWith("{")),
-    true,
-  )
+  expect(exitCode).toBe(0)
+  expect(lines.some((line) => line.includes('"event":"daemon.startup"'))).toBe(true)
+  expect(lines.some((line) => line.includes('"event":"daemon.no_features_enabled"'))).toBe(true)
+  expect(lines.every((line) => line.trim().startsWith("{"))).toBe(true)
 })
 
 test("daemon run supports verbose terminal logs with expanded fields", async () => {
@@ -461,27 +422,18 @@ test("daemon run supports verbose terminal logs with expanded fields", async () 
     },
   )
 
-  assert.equal(exitCode, 0)
-  assert.equal(
-    lines.some((line) => line.includes("daemon.startup")),
-    true,
-  )
-  assert.equal(
-    lines.some((line) => line.includes("baseUrl:")),
-    true,
-  )
-  assert.equal(
-    lines.every((line) => line.trim().startsWith("{")),
-    false,
-  )
+  expect(exitCode).toBe(0)
+  expect(lines.some((line) => line.includes("daemon.startup"))).toBe(true)
+  expect(lines.some((line) => line.includes("baseUrl:"))).toBe(true)
+  expect(lines.every((line) => line.trim().startsWith("{"))).toBe(false)
 })
 
 test("daemon URL round-trips the socket path", () => {
   const socketPath = "/tmp/goddard-daemon.sock"
   const daemonUrl = createDaemonUrl(socketPath)
 
-  assert.equal(daemonUrl, "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock")
-  assert.equal(readSocketPathFromDaemonUrl(daemonUrl), socketPath)
+  expect(daemonUrl).toBe("http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock")
+  expect(readSocketPathFromDaemonUrl(daemonUrl)).toBe(socketPath)
 })
 
 test("daemon resolves PR context from git metadata", async () => {
@@ -509,7 +461,7 @@ test("daemon resolves PR context from git metadata", async () => {
     title: "Implement IPC routing",
     body: "Done.",
   })
-  assert.deepEqual(submit, {
+  expect(submit).toEqual({
     owner: "acme",
     repo: "widgets",
     title: "Implement IPC routing",
@@ -523,7 +475,7 @@ test("daemon resolves PR context from git metadata", async () => {
     cwd: repoDir,
     message: "Updated per review",
   })
-  assert.deepEqual(reply, {
+  expect(reply).toEqual({
     owner: "acme",
     repo: "widgets",
     prNumber: 12,
@@ -536,7 +488,7 @@ function runGit(cwd: string, args: string[]): void {
     cwd,
     encoding: "utf-8",
   })
-  assert.equal(result.status, 0, result.stderr)
+  expect(result.status).toBe(0)
 }
 
 async function captureDaemonLogs<T>(

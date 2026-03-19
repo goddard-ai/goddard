@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, assert, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 import { configureDaemonLogging } from "../src/logging.ts"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
@@ -196,8 +196,8 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   })
 
   const permissions = await SessionPermissionsStorage.get(created.session.id)
-  assert.ok(permissions)
-  assert.equal(typeof permissions.token, "string")
+  expect(permissions).toBeTruthy()
+  expect(typeof permissions.token).toBe("string")
 
   await client.send("sessionShutdown", { id: created.session.id })
 
@@ -205,7 +205,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
     return (await SessionPermissionsStorage.getByToken(permissions.token)) === null
   })
 
-  assert.equal(await SessionPermissionsStorage.getByToken(permissions.token), null)
+  expect(await SessionPermissionsStorage.getByToken(permissions.token)).toBeNull()
 })
 
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {
@@ -249,23 +249,21 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
   const session = await client.send("sessionGet", { id: sessionId })
-  assert.equal(session.session.status, "error")
-  assert.equal(session.session.connection.mode, "history")
-  assert.equal(session.session.connection.reconnectable, false)
-  assert.match(session.session.errorMessage ?? "", /previous daemon exited unexpectedly/i)
+  expect(session.session.status).toBe("error")
+  expect(session.session.connection.mode).toBe("history")
+  expect(session.session.connection.reconnectable).toBe(false)
+  expect(session.session.errorMessage ?? "").toMatch(/previous daemon exited unexpectedly/i)
 
   const history = await client.send("sessionHistory", { id: sessionId })
-  assert.equal(history.connection.mode, "history")
-  assert.equal(history.history.length, 1)
+  expect(history.connection.mode).toBe("history")
+  expect(history.history).toHaveLength(1)
 
   const diagnostics = await client.send("sessionDiagnostics", { id: sessionId })
-  assert.equal(
+  expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
-    true,
-  )
-  await assert.rejects(() => client.send("sessionConnect", { id: sessionId }), /archived/i)
-  await assert.rejects(
-    () => client.send("sessionResolveToken", { token: "tok-restart-1" }),
+  ).toBe(true)
+  await expect(client.send("sessionConnect", { id: sessionId })).rejects.toThrow(/archived/i)
+  await expect(client.send("sessionResolveToken", { token: "tok-restart-1" })).rejects.toThrow(
     /invalid session token/i,
   )
 })
@@ -316,8 +314,8 @@ test("multiple clients can observe the same live session stream independently", 
 
   await Promise.resolve(unsubscribeA()).catch(() => {})
   await Promise.resolve(unsubscribeB()).catch(() => {})
-  assert.equal(clientAMessages.length > 0, true)
-  assert.equal(clientBMessages.length > 0, true)
+  expect(clientAMessages.length > 0).toBe(true)
+  expect(clientBMessages.length > 0).toBe(true)
 })
 
 test("daemon logs agent message and chunk traffic without persisting high-volume events", async () => {
@@ -409,10 +407,10 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
       entry.sessionId === result.sessionId &&
       entry.method === "session/prompt",
   )
-  assert.ok(writeLog)
-  assert.equal(writeLog?.acpId, result.acpId)
-  assert.equal(writeLog?.hasId, true)
-  assert.deepEqual((writeLog.message as any).params.prompt[1].text, {
+  expect(writeLog).toBeTruthy()
+  expect(writeLog?.acpId).toBe(result.acpId)
+  expect(writeLog?.hasId).toBe(true)
+  expect((writeLog!.message as any).params.prompt[1].text).toEqual({
     text: `${longPrompt.slice(0, 512)}...`,
     byteLength: Buffer.byteLength(longPrompt),
     truncated: true,
@@ -421,10 +419,10 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
   const readLog = logs.find(
     (entry) => entry.event === "agent.message_read" && entry.sessionId === result.sessionId,
   )
-  assert.ok(readLog)
-  assert.equal(readLog?.acpId, result.acpId)
-  assert.equal(readLog?.hasId, true)
-  assert.deepEqual((readLog.message as any).result.content[0].text, {
+  expect(readLog).toBeTruthy()
+  expect(readLog?.acpId).toBe(result.acpId)
+  expect(readLog?.hasId).toBe(true)
+  expect((readLog!.message as any).result.content[0].text).toEqual({
     text: `${longReply.slice(0, 512)}...`,
     byteLength: Buffer.byteLength(longReply),
     truncated: true,
@@ -436,19 +434,18 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
       entry.sessionId === result.sessionId &&
       (entry.preview as any)?.truncated === true,
   )
-  assert.ok(chunkLog)
-  assert.equal(chunkLog?.acpId, result.acpId)
-  assert.equal(typeof (chunkLog.preview as any).text, "string")
-  assert.equal((chunkLog.preview as any).truncated, true)
-  assert.equal((chunkLog.preview as any).byteLength > 256, true)
+  expect(chunkLog).toBeTruthy()
+  expect(chunkLog?.acpId).toBe(result.acpId)
+  expect(typeof (chunkLog!.preview as any).text).toBe("string")
+  expect((chunkLog!.preview as any).truncated).toBe(true)
+  expect((chunkLog!.preview as any).byteLength > 256).toBe(true)
 
   const diagnostics = await client.send("sessionDiagnostics", { id: result.sessionId })
-  assert.equal(
+  expect(
     diagnostics.events.some(
       (event) => event.type === "agent.message_read" || event.type === "agent.chunk_read",
     ),
-    false,
-  )
+  ).toBe(false)
 })
 
 test("malformed runtime agent output is surfaced through diagnostics and archived state", async () => {
@@ -520,9 +517,9 @@ test("malformed runtime agent output is surfaced through diagnostics and archive
   })
 
   const session = await client.send("sessionGet", { id: created.session.id })
-  assert.equal(session.session.connection.mode, "history")
-  assert.match(session.session.errorMessage ?? "", /Exited with code 9/i)
-  assert.equal(await SessionPermissionsStorage.get(created.session.id), null)
+  expect(session.session.connection.mode).toBe("history")
+  expect(session.session.errorMessage ?? "").toMatch(/Exited with code 9/i)
+  expect(await SessionPermissionsStorage.get(created.session.id)).toBeNull()
 })
 
 test("abnormal agent exit invalidates reconnects and repeated shutdowns are harmless", async () => {
@@ -593,18 +590,15 @@ test("abnormal agent exit invalidates reconnects and repeated shutdowns are harm
   })
 
   const session = await client.send("sessionGet", { id: created.session.id })
-  assert.equal(session.session.connection.mode, "history")
-  assert.equal(session.session.connection.reconnectable, false)
-  assert.match(session.session.errorMessage ?? "", /Exited with code 7/i)
+  expect(session.session.connection.mode).toBe("history")
+  expect(session.session.connection.reconnectable).toBe(false)
+  expect(session.session.errorMessage ?? "").toMatch(/Exited with code 7/i)
 
   const diagnostics = await client.send("sessionDiagnostics", { id: created.session.id })
-  assert.equal(
-    diagnostics.events.some((event) => event.type === "agent_process_exit"),
-    true,
-  )
+  expect(diagnostics.events.some((event) => event.type === "agent_process_exit")).toBe(true)
 
-  assert.equal((await client.send("sessionShutdown", { id: created.session.id })).success, false)
-  assert.equal((await client.send("sessionShutdown", { id: created.session.id })).success, false)
+  expect((await client.send("sessionShutdown", { id: created.session.id })).success).toBe(false)
+  expect((await client.send("sessionShutdown", { id: created.session.id })).success).toBe(false)
 })
 
 async function startTestDaemon(): Promise<DaemonServer> {

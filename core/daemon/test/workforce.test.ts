@@ -2,7 +2,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, assert, test } from "vitest"
+import { afterEach, expect, test } from "vitest"
 import { startDaemonServer } from "../src/ipc.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
@@ -17,6 +17,7 @@ afterEach(async () => {
 })
 
 test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
+  const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-ipc-"))
   const daemon = await startDaemonServer(
     {
       pr: {
@@ -24,7 +25,9 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
         reply: async () => ({ success: true }),
       },
     },
-    {},
+    {
+      socketPath: join(socketDir, "daemon.sock"),
+    },
     {
       createWorkforceManager: () => ({
         startWorkforce: async (rootDir: string) => ({
@@ -89,7 +92,10 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
       }),
     },
   )
-  cleanup.push(() => daemon.close())
+  cleanup.push(async () => {
+    await daemon.close()
+    await rm(socketDir, { recursive: true, force: true })
+  })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const started = await client.send("workforceStart", { rootDir: "/repo" })
@@ -102,11 +108,11 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   })
   const stopped = await client.send("workforceShutdown", { rootDir: "/repo" })
 
-  assert.equal(started.workforce.rootDir, "/repo")
-  assert.equal(fetched.workforce.rootDir, "/repo")
-  assert.equal(listed.workforces.length, 1)
-  assert.equal(requested.requestId, "req-1")
-  assert.equal(stopped.success, true)
+  expect(started.workforce.rootDir).toBe("/repo")
+  expect(fetched.workforce.rootDir).toBe("/repo")
+  expect(listed.workforces).toHaveLength(1)
+  expect(requested.requestId).toBe("req-1")
+  expect(stopped.success).toBe(true)
 })
 
 test("workforce manager reuses one runtime per normalized repository root", async () => {
@@ -153,7 +159,7 @@ test("workforce manager reuses one runtime per normalized repository root", asyn
   await manager.startWorkforce(tempRoot)
   await manager.startWorkforce(tempRoot)
 
-  assert.deepEqual(created, [await normalizeWorkforceRootDir(tempRoot)])
+  expect(created).toEqual([await normalizeWorkforceRootDir(tempRoot)])
 })
 
 test("workforce runtime records responses, suspensions, and poison-pill errors in the ledger", async () => {
@@ -244,10 +250,10 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
 
   const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
 
-  assert.match(ledger, /"type":"response"/)
-  assert.match(ledger, /"type":"suspend"/)
-  assert.match(ledger, /"type":"error"/)
-  assert.equal(callCount >= 5, true)
+  expect(ledger).toMatch(/"type":"response"/)
+  expect(ledger).toMatch(/"type":"suspend"/)
+  expect(ledger).toMatch(/"type":"error"/)
+  expect(callCount).toBeGreaterThanOrEqual(5)
 })
 
 test("create-intent requests target the root agent and specialize the root session prompt", async () => {
@@ -322,16 +328,14 @@ test("create-intent requests target the root agent and specialize the root sessi
     } as never,
   })
 
-  await assert.rejects(
-    () =>
-      runtime.createRequest({
-        targetAgentId: "lib",
-        payload: "Create a new package for scheduling jobs.",
-        intent: "create",
-        actor: { sessionId: null, agentId: null, requestId: null },
-      }),
-    new Error("Create requests must target the root workforce agent"),
-  )
+  await expect(
+    runtime.createRequest({
+      targetAgentId: "lib",
+      payload: "Create a new package for scheduling jobs.",
+      intent: "create",
+      actor: { sessionId: null, agentId: null, requestId: null },
+    }),
+  ).rejects.toThrow("Create requests must target the root workforce agent")
 
   await runtime.createRequest({
     targetAgentId: "root",
@@ -344,13 +348,12 @@ test("create-intent requests target the root agent and specialize the root sessi
 
   const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
 
-  assert.match(ledger, /"intent":"create"/)
-  assert.match(capturedSystemPrompt, /This request is a create request\./)
-  assert.match(
-    capturedSystemPrompt,
+  expect(ledger).toMatch(/"intent":"create"/)
+  expect(capturedSystemPrompt).toMatch(/This request is a create request\./)
+  expect(capturedSystemPrompt).toMatch(
     /You are being asked to create a new project from scratch or add new packages to the existing workspace when the requested feature needs them\./,
   )
-  assert.match(capturedInitialPrompt, /Request intent: create/)
+  expect(capturedInitialPrompt).toMatch(/Request intent: create/)
 })
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number = 5_000) {
