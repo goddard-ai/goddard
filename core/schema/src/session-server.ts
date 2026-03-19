@@ -1,14 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { ACPAdapterName } from "./acp-adapters.js"
 
-export type {
-  /**
-   * The namespace for Agent Client Protocol (ACP) types. Re-exported from
-   * `@agentclientprotocol/sdk`.
-   */
-  acp,
-}
-
 /** Supported platform keys for ACP binary distributions. */
 export const agentBinaryPlatforms = [
   "darwin-aarch64",

@@ -1,9 +1,8 @@
-import * as assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { beforeEach, test, vi } from "vitest"
+import { assert, beforeEach, test, vi } from "vitest"
 
 const {
   cancelDaemonWorkforceRequestMock,

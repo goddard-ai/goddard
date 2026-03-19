@@ -1,9 +1,8 @@
-import { afterEach, test, vi } from "vitest"
-import * as assert from "node:assert/strict"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createRequire } from "node:module"
+import { afterEach, assert, test, vi } from "vitest"
 import { configureDaemonLogging } from "../src/logging.ts"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({

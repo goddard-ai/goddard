@@ -35,19 +35,18 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
-    "@goddard-ai/backend": "workspace:*",
-    "@goddard-ai/config": "workspace:*",
-    "@goddard-ai/daemon-client": "workspace:*",
-    "@goddard-ai/schema": "workspace:*",
-    "@goddard-ai/storage": "workspace:*",
-    "chokidar": "^5.0.0",
+    "@goddard-ai/backend": "workspace:^",
+    "@goddard-ai/config": "workspace:^",
+    "@goddard-ai/daemon-client": "workspace:^",
+    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/storage": "workspace:^",
     "cron-parser": "^5.5.0",
     "exit-hook": "^4.0.0",
-    "radashi": "^12.7.2",
-    "rouzer": "^1.5.0",
     "yaml": "^2.8.2"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.9"
+    "@goddard-ai/daemon": "workspace:^",
+    "drizzle-kit": "^0.31.9",
+    "radashi": "^12.7.2"
   }
 }

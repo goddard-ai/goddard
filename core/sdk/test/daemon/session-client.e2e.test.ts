@@ -1,10 +1,9 @@
-import * as assert from "node:assert/strict"
+import { startDaemonServer, type DaemonServer } from "@goddard-ai/daemon/ipc"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, test, vi } from "vitest"
-import { runAgent } from "../../src/daemon/session/client.ts"
-import { startDaemonServer, type DaemonServer } from "../../../../daemon/src/ipc.ts"
+import { afterEach, assert, test, vi } from "vitest"
+import { runAgent } from "../../src/daemon/session/client.js"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),

@@ -1,13 +1,12 @@
-import * as assert from "node:assert/strict"
 import * as fs from "node:fs/promises"
+import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
-import { createRequire } from "node:module"
-import { afterEach, test, vi } from "vitest"
 import { dedent } from "radashi"
-import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
-import { runAgent } from "../src/daemon/session/client.ts"
+import { afterEach, assert, test, vi } from "vitest"
 import { startDaemonServer, type DaemonServer } from "../../../daemon/src/ipc.ts"
+import { runAgent } from "../src/daemon/session/client.ts"
+import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),

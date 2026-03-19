@@ -1,8 +1,7 @@
-import * as assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, test, vi } from "vitest"
+import { afterEach, assert, test, vi } from "vitest"
 
 const cleanup: Array<() => Promise<void>> = []
 

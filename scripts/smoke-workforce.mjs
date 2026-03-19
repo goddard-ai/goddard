@@ -29,7 +29,7 @@ run("Vitest: workforce smoke suites", "pnpm", [
   "vitest",
   "run",
   "core/sdk/test/workforce.test.ts",
-  "daemon/test/workforce.test.ts",
+  "core/daemon/test/workforce.test.ts",
   "workforce/test/main.test.ts",
 ])
 

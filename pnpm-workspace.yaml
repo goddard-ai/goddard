@@ -1,6 +1,5 @@
 packages:
   - "app"
   - "core/*"
-  - "daemon"
-  - "daemon/client"
+  - "core/daemon/client"
   - "workforce"

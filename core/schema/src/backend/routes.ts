@@ -1,15 +1,6 @@
 import { $type, route } from "rouzer"
 import * as z from "zod/mini"
-import type {
-  AuthSession,
-  CreatePrInput,
-  DeviceFlowComplete,
-  DeviceFlowSession,
-  DeviceFlowStart,
-  GitHubWebhookInput,
-  PullRequestRecord,
-  RepoEvent,
-} from "../backend.js"
+import type { AuthSession, DeviceFlowSession, PullRequestRecord, RepoEvent } from "../backend.js"
 
 const bearerHeaderSchema = z.object({
   authorization: z.string(),

@@ -1,8 +1,7 @@
-import * as assert from "node:assert/strict"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { afterEach, test, vi } from "vitest"
+import { afterEach, assert, test, vi } from "vitest"
 
 vi.mock("../src/daemon/index.ts", () => ({
   runAgent: vi.fn(),

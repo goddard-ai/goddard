@@ -1,6 +1,5 @@
-import { test } from "vitest"
-import * as assert from "node:assert/strict"
 import { InMemoryTokenStorage } from "@goddard-ai/storage"
+import { assert, test } from "vitest"
 import { createBackendClient } from "../src/client.ts"
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
 

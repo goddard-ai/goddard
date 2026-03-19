@@ -1,9 +1,8 @@
-import { afterEach, test } from "vitest"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
-import * as assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { afterEach, assert, test } from "vitest"
 import { startDaemonServer, type DaemonServer } from "../../../../daemon/src/ipc.ts"
 
 const cleanup: Array<() => Promise<void>> = []

@@ -9,7 +9,7 @@ on:
     paths:
       - "app/**"
       - "core/**"
-      - "daemon/**"
+      - "workforce/**"
 
 # Ensure only one sync runs at a time to prevent git conflicts on the .gitrepo files
 concurrency:
@@ -52,7 +52,7 @@ jobs:
           # If one subrepo has no changes, don't fail the whole job
           git subrepo push app || true
           git subrepo push core || true
-          git subrepo push daemon || true
+          git subrepo push workforce || true
 
       - name: Push .gitrepo updates to monorepo
         run: |

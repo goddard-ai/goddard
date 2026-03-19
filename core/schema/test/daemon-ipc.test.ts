@@ -1,5 +1,4 @@
-import * as assert from "node:assert/strict"
-import { test } from "vitest"
+import { assert, test } from "vitest"
 import { daemonIpcSchema } from "../src/daemon-ipc.ts"
 
 test("daemon IPC parses workforce lifecycle and mutation payloads", () => {

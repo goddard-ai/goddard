@@ -122,6 +122,11 @@ export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
   events: DaemonDiagnosticEvent[]
 }
 
+export type ShutdownDaemonSessionResponse = {
+  id: string
+  success: boolean
+}
+
 /** Stable runtime states reported for daemon-managed workforce hosts. */
 export type DaemonWorkforceRuntimeState = "running"
 

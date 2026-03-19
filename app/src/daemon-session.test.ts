@@ -1,13 +1,12 @@
+import { createNodeClient } from "@goddard-ai/ipc"
+import { createServer } from "@goddard-ai/ipc/server"
 import type { GetDaemonSessionHistoryResponse } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-import * as assert from "node:assert/strict"
+import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, test, vi } from "vitest"
-import { createNodeClient } from "../../core/ipc/src/index.ts"
-import { createServer } from "../../core/ipc/src/server.ts"
-import { createDaemonUrl } from "../../core/schema/src/daemon-url.ts"
+import { afterEach, assert, test, vi } from "vitest"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),
@@ -378,8 +377,9 @@ async function startTestDaemon(): Promise<{
     }
   }
 
-  // Keep this test-local IPC handler list in sync with daemonIpcSchema and daemon/src/ipc/server.ts.
-  // When new daemon IPC methods are added, stub them here too or the app bridge tests will drift.
+  // Keep this test-local IPC handler list in sync with daemonIpcSchema and
+  // core/daemon/src/ipc/server.ts. When new daemon IPC methods are added,
+  // stub them here too or the app bridge tests will drift.
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
     health: async () => ({ ok: true }),
     prSubmit: async () => ({ number: 1, url: "https://github.com/example/repo/pull/1" }),

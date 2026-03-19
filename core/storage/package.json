@@ -39,7 +39,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@goddard-ai/schema": "workspace:*",
+    "@goddard-ai/schema": "workspace:^",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.5"
   }

@@ -1,5 +1,4 @@
-import * as assert from "node:assert/strict"
-import { afterEach, beforeEach, test, vi } from "vitest"
+import { afterEach, assert, beforeEach, test, vi } from "vitest"
 
 const cancelledSelection = Symbol("cancelled-selection")
 

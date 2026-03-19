@@ -1,9 +1,8 @@
-import { afterEach, test, vi } from "vitest"
-import * as assert from "node:assert/strict"
-import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
+import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { spawnSync } from "node:child_process"
+import { afterEach, assert, test, vi } from "vitest"
 
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {
