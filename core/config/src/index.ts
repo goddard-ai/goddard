@@ -1,9 +1,6 @@
 import { DaemonSessionMetadata } from "@goddard-ai/schema/daemon/session-metadata"
-import type { GoddardLoopConfig } from "@goddard-ai/schema/config"
 import { AgentDistribution } from "@goddard-ai/schema/session-server"
 import { z } from "zod"
-
-export type { GoddardLoopConfig, PiAgentConfig, ThinkingLevel } from "@goddard-ai/schema/config"
 
 // ---------------------------------------------------------------------------
 // Models
@@ -191,9 +188,4 @@ export function mergeLoopConfigLayers(
   ...layers: Array<GoddardLoopConfigDocument | undefined>
 ): GoddardLoopConfigDocument {
   return loopConfigSchema.parse(mergeConfigLayers<GoddardLoopConfigDocument>(layers))
-}
-
-/** Returns loop configuration unchanged so callers can author typed config files. */
-export function defineConfig(config: GoddardLoopConfig): GoddardLoopConfig {
-  return config
 }

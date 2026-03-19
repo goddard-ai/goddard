@@ -1,4 +1,3 @@
-export { PiAgentConfig, ThinkingLevel } from "./common/agent-config.js"
 export { RepoRef, type RepoPrRef } from "./common/repository.js"
 export {
   AuthSession,
