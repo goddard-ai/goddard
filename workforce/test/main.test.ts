@@ -218,6 +218,27 @@ test("request accepts -t as a short alias for --target-agent-id", async () => {
   })
 })
 
+test("request accepts the message positionally and lets --message override it", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  createWorkforceRequestMock.mockResolvedValue({ requestId: "req-2" })
+  vi.spyOn(console, "log").mockImplementation(() => {})
+
+  const { main } = await import("../src/main.ts")
+  await main(["request", "--root", "/repo", "Ship it."])
+  await main(["request", "--root", "/repo", "--message", "Option wins.", "Positional loses."])
+
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "root",
+    message: "Ship it.",
+  })
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[1]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "root",
+    message: "Option wins.",
+  })
+})
+
 test("create routes a create-intent request to the root workforce agent", async () => {
   resolveRepositoryRootMock.mockResolvedValue("/repo")
   getWorkforceMock.mockResolvedValue({
@@ -247,6 +268,64 @@ test("create routes a create-intent request to the root workforce agent", async 
   assert.equal(String(consoleLog.mock.calls[0]?.[0]), "Queued create request req-create-1.")
 })
 
+test("create accepts the message positionally and lets --message override it", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  getWorkforceMock.mockResolvedValue({
+    config: {
+      rootAgentId: "root",
+    },
+  })
+  createWorkforceRequestMock.mockResolvedValue({ requestId: "req-create-2" })
+  vi.spyOn(console, "log").mockImplementation(() => {})
+
+  const { main } = await import("../src/main.ts")
+  await main(["create", "--root", "/repo", "Build a worker package."])
+  await main(["create", "--root", "/repo", "--message", "Option wins.", "Positional loses."])
+
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "root",
+    message: "Build a worker package.",
+    intent: "create",
+  })
+  assert.deepEqual(createWorkforceRequestMock.mock.calls[1]?.[0], {
+    rootDir: "/repo",
+    targetAgentId: "root",
+    message: "Option wins.",
+    intent: "create",
+  })
+})
+
+test("update accepts the message positionally and lets --message override it", async () => {
+  resolveRepositoryRootMock.mockResolvedValue("/repo")
+  updateWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
+  vi.spyOn(console, "log").mockImplementation(() => {})
+
+  const { main } = await import("../src/main.ts")
+  await main(["update", "--root", "/repo", "--request-id", "req-1", "Resume it."])
+  await main([
+    "update",
+    "--root",
+    "/repo",
+    "--request-id",
+    "req-1",
+    "--message",
+    "Option wins.",
+    "Positional loses.",
+  ])
+
+  assert.deepEqual(updateWorkforceRequestMock.mock.calls[0]?.[0], {
+    rootDir: "/repo",
+    requestId: "req-1",
+    message: "Resume it.",
+  })
+  assert.deepEqual(updateWorkforceRequestMock.mock.calls[1]?.[0], {
+    rootDir: "/repo",
+    requestId: "req-1",
+    message: "Option wins.",
+  })
+})
+
 test("help output includes command and arg descriptions", async () => {
   const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
   const processExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
@@ -255,6 +334,7 @@ test("help output includes command and arg descriptions", async () => {
   await main(["--help"])
   await main(["request", "--help"])
   await main(["create", "--help"])
+  await main(["update", "--help"])
 
   const helpOutput = consoleLog.mock.calls.map((call) => String(call[0])).join("\n")
   assert.match(helpOutput, /Manage daemon-owned workforce runtimes and requests/)
@@ -269,9 +349,11 @@ test("help output includes command and arg descriptions", async () => {
   assert.match(helpOutput, /--root/)
   assert.match(helpOutput, /Repository root or any path inside the repository/)
   assert.match(helpOutput, /--message/)
+  assert.match(helpOutput, /\[message\]/)
+  assert.match(helpOutput, /overrides the positional message/)
   assert.match(
     helpOutput,
     /Feature request that may require creating a new project or new workspace packages/,
   )
-  assert.equal(processExit.mock.calls.length, 3)
+  assert.equal(processExit.mock.calls.length, 4)
 })

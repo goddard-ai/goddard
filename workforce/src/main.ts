@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts"
-import { command, option, optional, runSafely, string, subcommands } from "cmd-ts"
+import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 import {
   cancelWorkforceRequest,
   createWorkforceRequest,
@@ -20,6 +20,15 @@ function formatPackageLabel(pkg: DiscoveredWorkforcePackage): string {
   return pkg.relativeDir === "."
     ? `${pkg.name} (repository root)`
     : `${pkg.name} (${pkg.relativeDir})`
+}
+
+function resolveCommandMessage(input: { message?: string; positionalMessage?: string }): string {
+  const message = input.message ?? input.positionalMessage
+  if (message) {
+    return message
+  }
+
+  throw new Error("A message is required. Pass --message or provide it positionally.")
 }
 
 export async function promptForWorkforcePackages(
@@ -88,7 +97,8 @@ export async function runListCommand(args: { daemonUrl?: string }): Promise<void
 export async function runRequestCommand(args: {
   root: string
   targetAgentId: string
-  message: string
+  message?: string
+  positionalMessage?: string
   daemonUrl?: string
 }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
@@ -96,7 +106,7 @@ export async function runRequestCommand(args: {
     {
       rootDir: repositoryRoot,
       targetAgentId: args.targetAgentId,
-      message: args.message,
+      message: resolveCommandMessage(args),
     },
     {
       daemonUrl: args.daemonUrl,
@@ -107,7 +117,8 @@ export async function runRequestCommand(args: {
 
 export async function runCreateCommand(args: {
   root: string
-  message: string
+  message?: string
+  positionalMessage?: string
   daemonUrl?: string
 }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
@@ -118,7 +129,7 @@ export async function runCreateCommand(args: {
     {
       rootDir: repositoryRoot,
       targetAgentId: workforce.config.rootAgentId,
-      message: args.message,
+      message: resolveCommandMessage(args),
       intent: "create",
     },
     {
@@ -131,7 +142,8 @@ export async function runCreateCommand(args: {
 export async function runUpdateCommand(args: {
   root: string
   requestId: string
-  message: string
+  message?: string
+  positionalMessage?: string
   daemonUrl?: string
 }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
@@ -139,7 +151,7 @@ export async function runUpdateCommand(args: {
     {
       rootDir: repositoryRoot,
       requestId: args.requestId,
-      message: args.message,
+      message: resolveCommandMessage(args),
     },
     {
       daemonUrl: args.daemonUrl,
@@ -252,8 +264,14 @@ export async function main(argv: string[]) {
               "Target workforce agent id that should receive the request; defaults to root",
           }),
           message: option({
-            type: string,
+            type: optional(string),
             long: "message",
+            description:
+              "Request payload to send to the target workforce agent; overrides the positional message when both are provided",
+          }),
+          positionalMessage: positional({
+            type: optional(string),
+            displayName: "message",
             description: "Request payload to send to the target workforce agent",
           }),
         },
@@ -266,8 +284,14 @@ export async function main(argv: string[]) {
           root,
           daemonUrl,
           message: option({
-            type: string,
+            type: optional(string),
             long: "message",
+            description:
+              "Feature request that may require creating a new project or new workspace packages; overrides the positional message when both are provided",
+          }),
+          positionalMessage: positional({
+            type: optional(string),
+            displayName: "message",
             description:
               "Feature request that may require creating a new project or new workspace packages",
           }),
@@ -286,8 +310,14 @@ export async function main(argv: string[]) {
             description: "Existing workforce request id to update",
           }),
           message: option({
-            type: string,
+            type: optional(string),
             long: "message",
+            description:
+              "Updated request payload to append; overrides the positional message when both are provided",
+          }),
+          positionalMessage: positional({
+            type: optional(string),
+            displayName: "message",
             description: "Updated request payload to append",
           }),
         },
