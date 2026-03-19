@@ -11,7 +11,7 @@ We believe that centralizing runtime lifecycle inside a daemon will improve oper
 - Desktop workspace or another supervised local host
 - SDK and approved operational CLI clients
 - Automated agents running unattended work
-- External reviewers whose repository feedback may trigger local execution
+- External reviewers whose managed pull request feedback may trigger local execution
 
 ## Runtime Domains
 The daemon may host multiple distinct automation domains, including:

@@ -5,13 +5,14 @@ This file captures conceptual end-to-end sequences only. Wire formats and API pa
 ## PR Creation (User-Initiated)
 
 1. Developer initiates pull request creation from the desktop app or an SDK-powered host.
-2. SDK validates intent and forwards request through platform contracts.
-3. Backend validates session and resolves GitHub identity.
-4. Backend creates the pull request via GitHub App delegation and records managed-pull-request metadata.
-5. Reviewer responds on GitHub with a comment or review.
-6. Webhook event enters backend and is routed to repository stream state.
-7. Stream broadcast reaches subscribed clients.
-8. SDK normalizes the event; the desktop app or host updates UI and local state.
+2. SDK validates intent and forwards the request through platform contracts.
+3. Backend validates the session, resolves GitHub identity, and records which Goddard user owns the managed pull request.
+4. Backend creates the pull request through delegated GitHub authority and persists enough managed pull request identity to pair later feedback with the owning Goddard user.
+5. Reviewer responds on GitHub with comments or review feedback.
+6. Webhook event enters the backend.
+7. Backend determines whether the referenced pull request is managed and, if so, which Goddard user owns it.
+8. Event delivery is routed onto that user's authenticated stream.
+9. SDK normalizes the event; the desktop app or host updates UI and local state.
 
 ## Authentication (Lazy Device Flow)
 
@@ -24,11 +25,12 @@ This file captures conceptual end-to-end sequences only. Wire formats and API pa
 
 ## Real-Time Event Subscription (Background Runtime)
 
-1. Desktop app or background runtime subscribes to a repository stream via SDK.
-2. Backend validates session and attaches the subscriber connection to repository stream state.
-3. GitHub webhook events are routed to that repository stream.
-4. SDK emits typed feedback events.
-5. Subscriber updates workspace state or may launch one-shot `pi` execution.
+1. Desktop app or background runtime subscribes to an authenticated managed pull request event stream via SDK.
+2. Backend validates the session and attaches the subscriber connection to the current Goddard user's stream.
+3. Managed pull request events owned by that user may arrive from multiple repositories over the same stream.
+4. Unmanaged pull request events and events owned by other Goddard users are not delivered on that stream.
+5. SDK emits typed feedback events.
+6. Subscriber updates workspace state or may launch one-shot `pi` execution.
 
 ## Workforce Orchestration (Daemon-Owned)
 

@@ -4,7 +4,7 @@
 
 Goddard unifies local repository workflows with GitHub operations and extends that bridge to autonomous AI execution.
 
-> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can create pull requests, observe repository events, and act from shared local context.
+> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can create pull requests, observe managed pull request events, and act from shared local context.
 
 ## The Problem
 
@@ -19,7 +19,7 @@ Goddard addresses:
 | # | Pillar | Meaning |
 |---|--------|---------|
 | 1 | SDK-first | Capabilities live in `@goddard-ai/sdk`; consumers stay thin. |
-| 2 | Real-time | Repository events stream to desktop workspaces and SDK consumers with low latency. |
+| 2 | Real-time | Managed pull request events stream to desktop workspaces and SDK consumers with low latency. |
 | 3 | Delegated identity | `goddard[bot]` acts on behalf of authenticated developers. |
 | 4 | Autonomous control | Built-in orchestration runs `pi-coding-agent` with safety limits. |
 | 5 | Type safety | APIs are TypeScript-first, while configuration remains machine-readable and validated at runtime. |
@@ -29,7 +29,7 @@ Goddard addresses:
 ## Usage Modes
 
 ### 1) SDK Integrations
-A developer or product integration uses `@goddard-ai/sdk` directly to authenticate, create pull requests, subscribe to repository events, and embed Goddard capabilities into custom hosts.
+A developer or product integration uses `@goddard-ai/sdk` directly to authenticate, create pull requests, subscribe to managed pull request events, and embed Goddard capabilities into custom hosts.
 
 ### 2) Desktop Workspace
 A human developer uses a unified, IDE-like desktop surface to monitor sessions, review pull requests, browse specs, and manage roadmap context without hopping across multiple tools.
@@ -37,7 +37,7 @@ A human developer uses a unified, IDE-like desktop surface to monitor sessions, 
 ### 3) Background Automation
 A local runtime hosted by the desktop app or another supervised local process handles unattended execution:
 - Loop mode for recurring `pi-coding-agent` cycles.
-- Pull-request feedback one-shot handling triggered by repository events.
+- Pull-request feedback one-shot handling triggered by managed pull request events.
 - Repository-scoped workforce orchestration for delegated multi-agent work.
 - Configurable limits for cadence, operations, and tokens.
 
