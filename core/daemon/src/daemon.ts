@@ -1,4 +1,4 @@
-import { createBackendClient, type BackendClient } from "@goddard-ai/backend/client"
+import { createBackendClient, type BackendClient } from "@goddard-ai/backend-client"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { FileTokenStorage } from "@goddard-ai/storage"
 import { resolveDaemonRuntimeConfig } from "./config.js"

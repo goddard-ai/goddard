@@ -1,0 +1,30 @@
+{
+  "name": "@goddard-ai/backend-client",
+  "version": "0.1.0",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/storage": "workspace:^",
+    "rouzer": "^2.0.0"
+  }
+}

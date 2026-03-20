@@ -2,6 +2,8 @@
 
 The Goddard Backend is an edge-based service built using Cloudflare Workers, Turso (SQLite at the Edge), and Drizzle ORM. It manages the Goddard platform's persistent state (such as tracking Pi sessions and pull request feedback), streams server-sent events to connected local daemons, and processes webhooks from the Goddard GitHub App.
 
+Use `@goddard-ai/backend-client` when you need the low-level HTTP client for backend auth, pull request operations, or repo stream subscriptions.
+
 ## Related Docs
 
 - [Backend Glossary](./glossary.md)

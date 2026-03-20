@@ -7,7 +7,6 @@ import { createSseSession } from "./utils.js"
 
 export * from "./api/control-plane.js"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.js"
-export * from "./client.js"
 export { TursoBackendControlPlane } from "./db/persistence.js"
 export * from "./github-app.js"
 
