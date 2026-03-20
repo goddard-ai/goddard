@@ -1,6 +1,6 @@
+import { InMemoryBackendControlPlane, startBackendServer } from "@goddard-ai/backend"
 import { InMemoryTokenStorage } from "@goddard-ai/storage"
 import { expect, test } from "vitest"
-import { InMemoryBackendControlPlane, startBackendServer } from "../../src/index.ts"
 import { createBackendClient } from "../src/index.ts"
 
 test("backend client creates PRs and checks managed status through rouzer route helpers", async () => {

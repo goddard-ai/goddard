@@ -26,5 +26,8 @@
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/storage": "workspace:^",
     "rouzer": "^2.0.0"
+  },
+  "devDependencies": {
+    "@goddard-ai/backend": "workspace:^"
   }
 }
