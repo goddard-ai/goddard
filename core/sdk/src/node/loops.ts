@@ -5,28 +5,26 @@ import {
   type ResolvedGoddardLoopConfigDocument,
 } from "@goddard-ai/schema/config"
 import type {
-  AgentLoopHandler,
-  AgentLoopParams,
-  AgentLoopRetryConfig,
-} from "@goddard-ai/schema/loop"
-import exitHook from "exit-hook"
+  DaemonLoop,
+  DaemonLoopStatus,
+  StartDaemonLoopRequest,
+} from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
-import type { AgentSession } from "../daemon/session/client-session.js"
-import { type RunAgentOptions } from "../daemon/session/client.js"
-import { runAgentLoop } from "../loop/run-agent-loop.js"
 import { readLoopConfig, readMergedRootConfig } from "./config.js"
+import {
+  type LoopClientOptions,
+  getDaemonLoop,
+  listDaemonLoops,
+  shutdownDaemonLoop,
+  startDaemonLoop,
+} from "../daemon/loops.js"
 
-/** The JSON-safe retry fields that may be persisted or layered from runtime overrides. */
-type PersistedLoopRetryConfig = Omit<AgentLoopRetryConfig, "retryableErrors">
-
-/** Runtime overrides accepted when starting a named or ad hoc loop. */
+/** Runtime overrides accepted when starting one packaged daemon-owned loop. */
 export type AgentLoopRuntimeOverrides = {
-  session?: Partial<AgentLoopParams["session"]>
-  rateLimits?: Partial<AgentLoopParams["rateLimits"]>
-  retries?: Partial<PersistedLoopRetryConfig> & {
-    retryableErrors?: AgentLoopRetryConfig["retryableErrors"]
-  }
+  session?: Partial<StartDaemonLoopRequest["session"]>
+  rateLimits?: Partial<StartDaemonLoopRequest["rateLimits"]>
+  retries?: Partial<StartDaemonLoopRequest["retries"]>
 }
 
 /** A resolved named loop package with merged persisted config and a prompt module path. */
@@ -36,14 +34,8 @@ export type ResolvedAgentLoop = {
   promptModulePath: string
 }
 
-/** The input contract for ad hoc loops that supply a prompt module directly. */
-export type AdHocLoopInput = AgentLoopRuntimeOverrides & {
-  promptModulePath: string
-}
-
-const defaultRetryableErrors: AgentLoopRetryConfig["retryableErrors"] = () => false
-
-const DEFAULT_LOOP_RETRIES: PersistedLoopRetryConfig = {
+/** Default retry config applied when persisted loop config omits explicit values. */
+const DEFAULT_LOOP_RETRIES: StartDaemonLoopRequest["retries"] = {
   maxAttempts: 1,
   initialDelayMs: 500,
   maxDelayMs: 5_000,
@@ -51,43 +43,22 @@ const DEFAULT_LOOP_RETRIES: PersistedLoopRetryConfig = {
   jitterRatio: 0.2,
 }
 
-function isCallable(value: unknown): value is () => string {
-  return typeof value === "function"
-}
-
-function splitLoopOverrides(overrides: AgentLoopRuntimeOverrides | undefined): {
-  persistedLayer: GoddardLoopConfigDocument | undefined
-  retryableErrors: AgentLoopRetryConfig["retryableErrors"] | undefined
-} {
+/** Splits caller overrides into the persisted loop config layers accepted by the resolver. */
+function toPersistedLoopOverrides(
+  overrides: AgentLoopRuntimeOverrides | undefined,
+): GoddardLoopConfigDocument | undefined {
   if (!overrides) {
-    return {
-      persistedLayer: undefined,
-      retryableErrors: undefined,
-    }
+    return undefined
   }
-
-  const { retries, ...rest } = overrides
-  const { retryableErrors, ...persistedRetries } = retries ?? {}
 
   return {
-    persistedLayer: {
-      session: rest.session as GoddardLoopConfigDocument["session"],
-      rateLimits: rest.rateLimits as GoddardLoopConfigDocument["rateLimits"],
-      retries: retries ? persistedRetries : undefined,
-    },
-    retryableErrors,
+    session: overrides.session as GoddardLoopConfigDocument["session"],
+    rateLimits: overrides.rateLimits as GoddardLoopConfigDocument["rateLimits"],
+    retries: overrides.retries as GoddardLoopConfigDocument["retries"],
   }
 }
 
-async function importNextPrompt(promptModulePath: string): Promise<() => string> {
-  const promptModule = await import(promptModulePath)
-  if (!("nextPrompt" in promptModule) || !isCallable(promptModule.nextPrompt)) {
-    throw new Error(`Loop prompt module "${promptModulePath}" must export a callable nextPrompt.`)
-  }
-
-  return promptModule.nextPrompt
-}
-
+/** Resolves one merged loop config document into the fully required runtime contract. */
 function resolveLoopConfig(config: GoddardLoopConfigDocument): ResolvedGoddardLoopConfigDocument {
   return ResolvedLoopConfig.parse({
     session: config.session,
@@ -99,12 +70,7 @@ function resolveLoopConfig(config: GoddardLoopConfigDocument): ResolvedGoddardLo
   })
 }
 
-function toRuntimeLoopSession(
-  session: ResolvedGoddardLoopConfigDocument["session"],
-): AgentLoopParams["session"] {
-  return session as AgentLoopParams["session"]
-}
-
+/** Loads one packaged loop from disk and verifies the required prompt/config files exist. */
 async function loadPackagedLoop(path: string): Promise<ResolvedAgentLoop> {
   const promptFilePath = join(path, "prompt.js")
   const promptMarkdownPath = join(path, "prompt.md")
@@ -131,6 +97,7 @@ async function loadPackagedLoop(path: string): Promise<ResolvedAgentLoop> {
   }
 }
 
+/** Resolves one named loop package from a specific global or local Goddard root. */
 async function resolveLoopFromRoot(
   loopName: string,
   goddardRoot: string,
@@ -173,68 +140,59 @@ export async function resolveLoop(
   }
 }
 
-/** Builds runtime loop params from a resolved loop package plus overrides. */
-export async function buildLoopParams(
+/** Builds the daemon start payload for one resolved packaged loop and caller overrides. */
+export function buildLoopStartRequest(
+  loopName: string,
+  rootDir: string,
   loop: ResolvedAgentLoop,
   overrides?: AgentLoopRuntimeOverrides,
-): Promise<AgentLoopParams> {
-  const { persistedLayer, retryableErrors } = splitLoopOverrides(overrides)
-  const resolvedConfig = resolveLoopConfig(mergeLoopConfigLayers(loop.config, persistedLayer))
+): StartDaemonLoopRequest {
+  const resolvedConfig = resolveLoopConfig(
+    mergeLoopConfigLayers(loop.config, toPersistedLoopOverrides(overrides)),
+  )
 
   return {
-    nextPrompt: await importNextPrompt(loop.promptModulePath),
-    session: toRuntimeLoopSession(resolvedConfig.session),
+    rootDir: resolve(rootDir),
+    loopName,
+    promptModulePath: resolve(loop.promptModulePath),
+    session: resolvedConfig.session as StartDaemonLoopRequest["session"],
     rateLimits: resolvedConfig.rateLimits,
-    retries: {
-      ...resolvedConfig.retries,
-      retryableErrors: retryableErrors ?? defaultRetryableErrors,
-    },
+    retries: resolvedConfig.retries,
   }
 }
 
-/** Resolves and runs a named loop package. */
-export async function runNamedLoop(
+/** Resolves a named packaged loop and starts it as a daemon-owned runtime. */
+export async function startNamedLoop(
   loopName: string,
   overrides?: AgentLoopRuntimeOverrides,
-  handler?: AgentLoopHandler,
-  options?: RunAgentOptions,
-): Promise<AgentSession> {
-  const cwd = overrides?.session?.cwd ?? process.cwd()
-  return runAgentLoop(
-    await buildLoopParams(await resolveLoop(loopName, cwd), overrides),
-    handler,
+  options?: LoopClientOptions,
+): Promise<DaemonLoop> {
+  const rootDir = overrides?.session?.cwd ?? process.cwd()
+  return startDaemonLoop(
+    buildLoopStartRequest(loopName, rootDir, await resolveLoop(loopName, rootDir), overrides),
     options,
   )
 }
 
-/** Runs an ad hoc loop from an explicit prompt module path. */
-export async function runAdHocLoop(
-  input: AdHocLoopInput,
-  handler?: AgentLoopHandler,
-  options?: RunAgentOptions,
-): Promise<AgentSession> {
-  const { promptModulePath: rawPromptModulePath, ...overrides } = input
-  const promptModulePath = resolve(rawPromptModulePath)
-  const { persistedLayer, retryableErrors } = splitLoopOverrides(overrides)
-  const resolvedConfig = resolveLoopConfig(persistedLayer ?? {})
+/** Fetches one daemon-owned loop runtime for the given repository root and loop name. */
+export async function getLoop(
+  rootDir: string,
+  loopName: string,
+  options?: LoopClientOptions,
+): Promise<DaemonLoop> {
+  return getDaemonLoop(resolve(rootDir), loopName, options)
+}
 
-  const session = await runAgentLoop(
-    {
-      nextPrompt: await importNextPrompt(promptModulePath),
-      session: toRuntimeLoopSession(resolvedConfig.session),
-      rateLimits: resolvedConfig.rateLimits,
-      retries: {
-        ...resolvedConfig.retries,
-        retryableErrors: retryableErrors ?? defaultRetryableErrors,
-      },
-    },
-    handler,
-    options,
-  )
+/** Lists all daemon-owned loop runtimes currently running in the daemon. */
+export async function listLoops(options?: LoopClientOptions): Promise<DaemonLoopStatus[]> {
+  return listDaemonLoops(options)
+}
 
-  exitHook(() => {
-    void session.stop()
-  })
-
-  return session
+/** Stops one daemon-owned loop runtime for the given repository root and loop name. */
+export async function stopLoop(
+  rootDir: string,
+  loopName: string,
+  options?: LoopClientOptions,
+): Promise<boolean> {
+  return shutdownDaemonLoop(resolve(rootDir), loopName, options)
 }
