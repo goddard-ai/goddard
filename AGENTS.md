@@ -23,6 +23,7 @@ The `spec/` folder contains the canonical source of truth and theory of mind for
 - **Avoid Single-Use Variables:** Do not declare variables that are only referenced once unless they significantly improve readability for complex expressions. Inline them directly into their usage.
 - **Describe Module Exports:** Every exported module declaration must include a human-readable `/** ... */` description comment. Do not add JSDoc tag boilerplate like `@param` or `@returns`.
 - **Explain Types and Interfaces:** Every TypeScript type alias or interface (whether exported or internal) must include a human-readable `/** ... */` description comment.
+- **Function Descriptions:** Non-trivial, top-level functions must have a `/** ... */` description (without JSDoc metadata). This description should explain the non-obvious "what" and, ideally, the "why" behind the function. Do not document the "how" (as implementation details drift) or the obvious "what". If there is nothing substantively useful to add for a developer, skip the `/** ... */` block and optionally leave a `//` comment explaining why.
 
 ## Git/Rebase Note
 
