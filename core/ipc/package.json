@@ -5,16 +5,24 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
-      "default": "./src/index.ts"
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      }
     },
     "./*": {
-      "types": "./dist/*.d.mts",
-      "source": "./src/*.ts",
-      "import": "./dist/*.mjs",
-      "default": "./src/*.ts"
+      "types": {
+        "source": "./src/*.ts",
+        "default": "./dist/*.d.mts"
+      },
+      "import": {
+        "source": "./src/*.ts",
+        "default": "./dist/*.mjs"
+      }
     }
   },
   "scripts": {

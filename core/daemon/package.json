@@ -8,7 +8,16 @@
   },
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts"
+    "./*": {
+      "types": {
+        "source": "./src/*.ts",
+        "default": "./dist/*.d.mts"
+      },
+      "import": {
+        "source": "./src/*.ts",
+        "default": "./dist/*.mjs"
+      }
+    }
   },
   "scripts": {
     "build": "tsdown",

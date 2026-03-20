@@ -6,22 +6,34 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
-      "default": "./src/index.ts"
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      }
     },
     "./session-permissions": {
-      "types": "./dist/session-permissions.d.mts",
-      "source": "./src/session-permissions.ts",
-      "import": "./dist/session-permissions.mjs",
-      "default": "./src/session-permissions.ts"
+      "types": {
+        "source": "./src/session-permissions.ts",
+        "default": "./dist/session-permissions.d.mts"
+      },
+      "import": {
+        "source": "./src/session-permissions.ts",
+        "default": "./dist/session-permissions.mjs"
+      }
     },
     "./managed-pr-locations": {
-      "types": "./dist/managed-pr-locations.d.mts",
-      "source": "./src/managed-pr-locations.ts",
-      "import": "./dist/managed-pr-locations.mjs",
-      "default": "./src/managed-pr-locations.ts"
+      "types": {
+        "source": "./src/managed-pr-locations.ts",
+        "default": "./dist/managed-pr-locations.d.mts"
+      },
+      "import": {
+        "source": "./src/managed-pr-locations.ts",
+        "default": "./dist/managed-pr-locations.mjs"
+      }
     }
   },
   "scripts": {

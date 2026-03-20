@@ -5,28 +5,44 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
-      "default": "./src/index.ts"
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      }
     },
     "./daemon": {
-      "types": "./dist/daemon/index.d.mts",
-      "source": "./src/daemon/index.ts",
-      "import": "./dist/daemon/index.mjs",
-      "default": "./src/daemon/index.ts"
+      "types": {
+        "source": "./src/daemon/index.ts",
+        "default": "./dist/daemon/index.d.mts"
+      },
+      "import": {
+        "source": "./src/daemon/index.ts",
+        "default": "./dist/daemon/index.mjs"
+      }
     },
     "./loop": {
-      "types": "./dist/loop/index.d.mts",
-      "source": "./src/loop/index.ts",
-      "import": "./dist/loop/index.mjs",
-      "default": "./src/loop/index.ts"
+      "types": {
+        "source": "./src/loop/index.ts",
+        "default": "./dist/loop/index.d.mts"
+      },
+      "import": {
+        "source": "./src/loop/index.ts",
+        "default": "./dist/loop/index.mjs"
+      }
     },
     "./node": {
-      "types": "./dist/node/index.d.mts",
-      "source": "./src/node/index.ts",
-      "import": "./dist/node/index.mjs",
-      "default": "./src/node/index.ts"
+      "types": {
+        "source": "./src/node/index.ts",
+        "default": "./dist/node/index.d.mts"
+      },
+      "import": {
+        "source": "./src/node/index.ts",
+        "default": "./dist/node/index.mjs"
+      }
     }
   },
   "scripts": {

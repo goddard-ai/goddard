@@ -5,10 +5,14 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "source": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      }
     }
   },
   "scripts": {

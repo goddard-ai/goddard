@@ -6,10 +6,14 @@
   "type": "module",
   "exports": {
     "./*": {
-      "types": "./dist/*.d.mts",
-      "source": "./src/*.ts",
-      "import": "./dist/*.mjs",
-      "default": "./src/*.ts"
+      "types": {
+        "source": "./src/*.ts",
+        "default": "./dist/*.d.mts"
+      },
+      "import": {
+        "source": "./src/*.ts",
+        "default": "./dist/*.mjs"
+      }
     }
   },
   "scripts": {

@@ -9,14 +9,24 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
-      "default": "./src/index.ts"
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      }
     },
     "./client": {
-      "source": "./src/client.ts",
-      "default": "./src/client.ts"
+      "types": {
+        "source": "./src/client.ts",
+        "default": "./dist/client.d.mts"
+      },
+      "import": {
+        "source": "./src/client.ts",
+        "default": "./dist/client.mjs"
+      }
     }
   },
   "scripts": {
