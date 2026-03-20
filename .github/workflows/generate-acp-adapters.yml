@@ -30,6 +30,9 @@ jobs:
       - name: Run generation script
         run: node core/schema/scripts/generate-acp-adapters.js
 
+      - name: Format generated files
+        run: pnpm run fmt
+
       - name: Setup Git Identity
         run: |
           git config --global user.name "github-actions[bot]"
