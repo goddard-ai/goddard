@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { Readable, Writable } from "node:stream"
 import { TransformStream } from "node:stream/web"
-import { createDaemonLogger } from "../logging.ts"
+import { createDaemonLogger } from "../logging.js"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
 

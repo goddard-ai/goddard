@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import * as fs from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getGoddardGlobalDir } from "./paths.js"
 
@@ -31,7 +31,7 @@ export namespace SessionStateStorage {
   export async function list(): Promise<SessionStateRecord[]> {
     const directory = getSessionStateDir()
     try {
-      const entries = await readDirectory(directory)
+      const entries = await fs.readdir(directory)
       const records = await Promise.all(
         entries.map((entry) => readStateFile(join(directory, entry))),
       )
@@ -99,14 +99,8 @@ export namespace SessionStateStorage {
   }
 
   export async function remove(sessionId: string): Promise<void> {
-    await rm(getSessionStatePath(sessionId), { force: true }).catch(() => {})
+    await fs.rm(getSessionStatePath(sessionId), { force: true }).catch(() => {})
   }
-}
-
-/** Lists persisted session-state file names from the daemon's storage directory. */
-async function readDirectory(path: string): Promise<string[]> {
-  const { readdir } = await import("node:fs/promises")
-  return readdir(path)
 }
 
 /** Returns the directory used for durable session-state files. */
@@ -122,7 +116,7 @@ function getSessionStatePath(sessionId: string): string {
 /** Reads and parses one persisted session-state record when it exists. */
 async function readStateFile(path: string): Promise<SessionStateRecord | null> {
   try {
-    const raw = await readFile(path, "utf-8")
+    const raw = await fs.readFile(path, "utf-8")
     return JSON.parse(raw) as SessionStateRecord
   } catch {
     return null
@@ -132,6 +126,6 @@ async function readStateFile(path: string): Promise<SessionStateRecord | null> {
 /** Writes one complete session-state snapshot back to durable storage. */
 async function writeStateFile(record: SessionStateRecord): Promise<void> {
   const path = getSessionStatePath(record.sessionId)
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, `${JSON.stringify(record, null, 2)}\n`, "utf-8")
+  await fs.mkdir(dirname(path), { recursive: true })
+  await fs.writeFile(path, `${JSON.stringify(record, null, 2)}\n`, "utf-8")
 }

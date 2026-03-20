@@ -10,9 +10,9 @@ import type {
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { concat, dedent } from "radashi"
-import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.ts"
-import type { SessionManager } from "../session/index.ts"
-import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
+import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.js"
+import type { SessionManager } from "../session/index.js"
+import { ensureWorkforceFiles, readWorkforceConfig } from "./config.js"
 import {
   appendWorkforceLedgerEvent,
   applyWorkforceEvent,
@@ -20,8 +20,8 @@ import {
   readWorkforceLedger,
   replayWorkforceProjection,
   summarizeWorkforceProjection,
-} from "./ledger.ts"
-import { buildWorkforcePaths } from "./paths.ts"
+} from "./ledger.js"
+import { buildWorkforcePaths } from "./paths.js"
 
 const logger = createDaemonLogger()
 

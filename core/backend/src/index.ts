@@ -1,15 +1,15 @@
-import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { type RepoEvent } from "@goddard-ai/schema/backend"
-import { type BackendControlPlane } from "./api/control-plane.ts"
-import { createBackendRouter } from "./api/router.ts"
-import { createSseSession } from "./utils.ts"
-import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
+import { createServer as createNodeServer } from "@hattip/adapter-node"
+import { type BackendControlPlane } from "./api/control-plane.js"
+import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.js"
+import { createBackendRouter } from "./api/router.js"
+import { createSseSession } from "./utils.js"
 
-export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
-export { TursoBackendControlPlane } from "./db/persistence.ts"
-export * from "./api/control-plane.ts"
-export * from "./client.ts"
-export * from "./github-app.ts"
+export * from "./api/control-plane.js"
+export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.js"
+export * from "./client.js"
+export { TursoBackendControlPlane } from "./db/persistence.js"
+export * from "./github-app.js"
 
 // Optional host and port overrides for the local Node backend server.
 type StartServerOptions = {

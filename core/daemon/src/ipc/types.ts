@@ -1,8 +1,8 @@
 import type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "@goddard-ai/schema/daemon"
 import type { ManagedPrLocationRecord } from "@goddard-ai/storage/managed-pr-locations"
 import type { SessionPermissionsRecord } from "@goddard-ai/storage/session-permissions"
-import type { SessionManager } from "../session/index.ts"
-import type { WorkforceManager } from "../workforce/index.ts"
+import type { SessionManager } from "../session/index.js"
+import type { WorkforceManager } from "../workforce/index.js"
 
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest }
 

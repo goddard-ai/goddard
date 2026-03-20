@@ -1,10 +1,10 @@
+import type { RepoEvent } from "@goddard-ai/schema/backend"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createClient } from "@libsql/client/web"
-import type { RepoEvent } from "@goddard-ai/schema/backend"
-import type { Env } from "./env.ts"
-import { createBackendRouter } from "./api/router.ts"
-import { TursoBackendControlPlane } from "./db/persistence.ts"
-import { createSseSession } from "./utils.ts"
+import { createBackendRouter } from "./api/router.js"
+import { TursoBackendControlPlane } from "./db/persistence.js"
+import type { Env } from "./env.js"
+import { createSseSession } from "./utils.js"
 
 const router = createBackendRouter({
   broadcastEvent: async (env, event) => {

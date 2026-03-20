@@ -1,6 +1,6 @@
-import { InMemoryBackendControlPlane, startBackendServer } from "./index.ts"
-import { TursoBackendControlPlane } from "./db/persistence.ts"
 import { createClient } from "@libsql/client"
+import { TursoBackendControlPlane } from "./db/persistence.js"
+import { InMemoryBackendControlPlane, startBackendServer } from "./index.js"
 
 const port = Number(process.env.PORT ?? "8787")
 const dbUrl = process.env.DATABASE_URL

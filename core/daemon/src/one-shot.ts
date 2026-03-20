@@ -1,11 +1,11 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { spawnSync } from "node:child_process"
-import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import * as prompts from "./prompts/index.ts"
-import { prependAgentBinToPath } from "./config.ts"
-import type { FeedbackEvent } from "./feedback.ts"
-import { createDaemonLogger } from "./logging.ts"
+import { prependAgentBinToPath } from "./config.js"
+import type { FeedbackEvent } from "./feedback.js"
+import { createDaemonLogger } from "./logging.js"
+import * as prompts from "./prompts/index.js"
 
 export type OneShotInput = {
   event: FeedbackEvent

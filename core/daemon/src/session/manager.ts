@@ -27,16 +27,16 @@ import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissio
 import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
-import { prependAgentBinToPath } from "../config.ts"
-import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
+import { prependAgentBinToPath } from "../config.js"
+import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.js"
 import {
   createAgentConnection,
   createAgentMessageStream,
   getAcpMessageResult,
   isAcpRequest,
   matchAcpRequest,
-} from "./acp.ts"
-import { fetchRegistryAgent } from "./registry.ts"
+} from "./acp.js"
+import { fetchRegistryAgent } from "./registry.js"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string

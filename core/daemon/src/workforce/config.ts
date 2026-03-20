@@ -1,6 +1,6 @@
 import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { buildWorkforcePaths } from "./paths.ts"
+import { buildWorkforcePaths } from "./paths.js"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && Array.isArray(value) === false

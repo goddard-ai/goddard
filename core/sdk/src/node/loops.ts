@@ -12,10 +12,10 @@ import type {
 import exitHook from "exit-hook"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
-import type { AgentSession } from "../daemon/session/client-session.ts"
-import { type RunAgentOptions } from "../daemon/session/client.ts"
-import { runAgentLoop } from "../loop/run-agent-loop.ts"
-import { readLoopConfig, readMergedRootConfig } from "./config.ts"
+import type { AgentSession } from "../daemon/session/client-session.js"
+import { type RunAgentOptions } from "../daemon/session/client.js"
+import { runAgentLoop } from "../loop/run-agent-loop.js"
+import { readLoopConfig, readMergedRootConfig } from "./config.js"
 
 /** The JSON-safe retry fields that may be persisted or layered from runtime overrides. */
 type PersistedLoopRetryConfig = Omit<AgentLoopRetryConfig, "retryableErrors">

@@ -1,16 +1,16 @@
 import { createBackendClient, type BackendClient } from "@goddard-ai/backend/client"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { FileTokenStorage } from "@goddard-ai/storage"
-import { resolveDaemonRuntimeConfig } from "./config.ts"
-import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
-import { startDaemonServer, type DaemonServer } from "./ipc.ts"
+import { resolveDaemonRuntimeConfig } from "./config.js"
+import { buildPrompt, isFeedbackEvent } from "./feedback.js"
+import { startDaemonServer, type DaemonServer } from "./ipc.js"
 import {
   configureDaemonLogging,
   createDaemonLogger,
   createPayloadPreview,
   type DaemonLogMode,
-} from "./logging.ts"
-import { runOneShot, type OneShotInput } from "./one-shot.ts"
+} from "./logging.js"
+import { runOneShot, type OneShotInput } from "./one-shot.js"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {

@@ -1,6 +1,3 @@
-import { type Client } from "@libsql/client"
-import { drizzle } from "drizzle-orm/libsql"
-import * as schema from "./schema.ts"
 import type {
   AuthSession,
   CreatePrInput,
@@ -11,17 +8,20 @@ import type {
   PullRequestRecord,
   RepoEvent,
 } from "@goddard-ai/schema/backend"
-import { eq, and, gt } from "drizzle-orm"
+import { type Client } from "@libsql/client"
+import { and, eq, gt } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/libsql"
+import { randomBytes } from "node:crypto"
 import {
+  assertRepo,
   type BackendControlPlane,
   createPrViaApp,
   HttpError,
-  assertRepo,
   postPrCommentViaApp,
-} from "../api/control-plane.ts"
-import { randomBytes } from "node:crypto"
-import type { Env } from "../env.ts"
-import { hashToInteger } from "../utils.ts"
+} from "../api/control-plane.js"
+import type { Env } from "../env.js"
+import { hashToInteger } from "../utils.js"
+import * as schema from "./schema.js"
 
 /** Turso-backed backend control plane used by the real backend worker. */
 export class TursoBackendControlPlane implements BackendControlPlane {

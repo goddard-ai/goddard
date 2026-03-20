@@ -6,13 +6,13 @@ import { SessionStorage } from "@goddard-ai/storage"
 import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { once } from "node:events"
-import { createSessionManager } from "../session/manager.ts"
-import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
-import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
-import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
-import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
-import { resolveDaemonRuntimeConfig } from "../config.ts"
-import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
+import { resolveDaemonRuntimeConfig } from "../config.js"
+import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.js"
+import { createSessionManager } from "../session/manager.js"
+import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.js"
+import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.js"
+import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.js"
+import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.js"
 
 export async function startDaemonServer(
   client: BackendPrClient,
@@ -128,7 +128,7 @@ export async function startDaemonServer(
     }
   }
 
-  // Keep app/src/daemon-session.test.ts in sync with this handler list.
+  // Keep app/src/daemon-session.test.js in sync with this handler list.
   // When new daemon IPC methods are added here, update the app test stub as well.
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
     health: withRequestLogging<{}, { ok: true }>("health", async () => ({ ok: true })),

@@ -1,10 +1,10 @@
-import { GoddardSdk as BaseGoddardSdk } from "../sdk.ts"
-import * as actions from "./actions.ts"
-import * as agents from "./agents.ts"
-import * as loops from "./loops.ts"
-import * as workforce from "./workforce.ts"
+import { GoddardSdk as BaseGoddardSdk } from "../sdk.js"
+import * as actions from "./actions.js"
+import * as agents from "./agents.js"
+import * as loops from "./loops.js"
+import * as workforce from "./workforce.js"
 export { FileTokenStorage } from "@goddard-ai/storage"
-export * from "./workforce.ts"
+export * from "./workforce.js"
 
 export class GoddardSdk extends BaseGoddardSdk {
   get agents() {

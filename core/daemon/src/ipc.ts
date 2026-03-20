@@ -1,15 +1,15 @@
-export { startDaemonServer } from "./ipc/server.ts"
+export { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./ipc/git.js"
+export { startDaemonServer } from "./ipc/server.js"
 export {
   createDaemonUrl,
-  readSocketPathFromDaemonUrl,
   getDefaultDaemonSocketPath,
-} from "./ipc/socket.ts"
-export { resolveSubmitRequestFromGit, resolveReplyRequestFromGit } from "./ipc/git.ts"
+  readSocketPathFromDaemonUrl,
+} from "./ipc/socket.js"
 export type {
-  DaemonServer,
+  AuthorizedSession,
   BackendPrClient,
+  DaemonServer,
+  DaemonServerDeps,
   ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
-  DaemonServerDeps,
-  AuthorizedSession,
-} from "./ipc/types.ts"
+} from "./ipc/types.js"

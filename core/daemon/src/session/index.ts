@@ -1,1 +1,1 @@
-export * from "./manager.ts"
+export * from "./manager.js"

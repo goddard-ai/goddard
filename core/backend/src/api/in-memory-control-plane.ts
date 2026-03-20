@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto"
-import type { Env } from "../env.ts"
 import type {
   AuthSession,
   CreatePrInput,
@@ -10,13 +8,15 @@ import type {
   PullRequestRecord,
   RepoEvent,
 } from "@goddard-ai/schema/backend"
+import { randomBytes } from "node:crypto"
+import type { Env } from "../env.js"
+import { hashToInteger, toPublicSession } from "../utils.js"
 import {
   type BackendControlPlane,
   HttpError,
   assertRepo,
   postPrCommentViaApp,
-} from "./control-plane.ts"
-import { hashToInteger, toPublicSession } from "../utils.ts"
+} from "./control-plane.js"
 
 /** Stored auth session with an in-memory expiration timestamp. */
 export type SessionRecord = AuthSession & { expiresAt: number }

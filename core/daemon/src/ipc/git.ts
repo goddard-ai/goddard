@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process"
-import { splitRepo } from "../utils.ts"
+import { splitRepo } from "../utils.js"
 import type {
   PrCreateInput,
   PrReplyInput,
   ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
-} from "./types.ts"
+} from "./types.js"
 
 export async function resolveSubmitRequestFromGit(
   input: SubmitPrDaemonRequest,

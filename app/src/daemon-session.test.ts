@@ -7,6 +7,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, assert, test, vi } from "vitest"
+import { createAppDaemonIpcClient } from "./daemon-session.js"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),
@@ -247,7 +248,6 @@ test("app daemon session options create/connect/send/history/shutdown through th
     }),
   }))
 
-  const { createAppDaemonIpcClient } = await import("./daemon-session.ts")
   const daemon = await startTestDaemon()
   const client = createAppDaemonIpcClient(daemon.daemonUrl)
 

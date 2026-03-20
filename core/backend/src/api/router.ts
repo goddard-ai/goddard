@@ -1,10 +1,10 @@
-import { createClient } from "@libsql/client/web"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
+import { createClient } from "@libsql/client/web"
 import { createRouter } from "rouzer"
-import { TursoBackendControlPlane } from "../db/persistence.ts"
-import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.ts"
-import type { Env } from "../env.ts"
+import { TursoBackendControlPlane } from "../db/persistence.js"
+import type { Env } from "../env.js"
+import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.js"
 
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
@@ -150,7 +150,7 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
 
 /** Provides a safe default when the worker host does not supply event broadcasting. */
 async function noopBroadcast(_env: Env, _event: RepoEvent): Promise<void> {
-  // No-op: the caller (e.g. worker.ts) should provide a real implementation.
+  // No-op: the caller (e.g. worker.js) should provide a real implementation.
 }
 
 /** Returns a clear placeholder response when server-sent events are not wired in. */
