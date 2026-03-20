@@ -257,6 +257,104 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
   expect(callCount).toBeGreaterThanOrEqual(5)
 })
 
+test("domain agents can update and cancel requests they originally sent", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-domain-manage-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+          {
+            id: "api",
+            name: "@repo/api",
+            role: "domain",
+            cwd: "packages/api",
+            owns: ["packages/api"],
+          },
+          {
+            id: "ui",
+            name: "@repo/ui",
+            role: "domain",
+            cwd: "packages/ui",
+            owns: ["packages/ui"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  const runtime = await WorkforceRuntime.start(rootDir, {
+    sessionManager: {} as never,
+    runSession: async () => {},
+  })
+
+  const requestId = await runtime.createRequest({
+    targetAgentId: "ui",
+    payload: "Implement the dialog.",
+    actor: {
+      sessionId: "session-api",
+      agentId: "api",
+      requestId: "req-api-parent",
+    },
+  })
+
+  await runtime.updateRequest({
+    requestId,
+    payload: "Use the shared modal primitives.",
+    actor: {
+      sessionId: "session-api",
+      agentId: "api",
+      requestId: "req-api-parent",
+    },
+  })
+
+  await expect(
+    runtime.cancelRequest({
+      requestId,
+      reason: "Wrong owner for this work.",
+      actor: {
+        sessionId: "session-root",
+        agentId: "ui",
+        requestId: "req-ui-parent",
+      },
+    }),
+  ).rejects.toThrow(
+    "Only the root agent, the original sending agent, or an operator can cancel workforce requests",
+  )
+
+  await runtime.cancelRequest({
+    requestId,
+    reason: "Wrong owner for this work.",
+    actor: {
+      sessionId: "session-api",
+      agentId: "api",
+      requestId: "req-api-parent",
+    },
+  })
+
+  const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
+
+  expect(ledger).toMatch(new RegExp(`"requestId":"${requestId}"`))
+  expect(ledger).toMatch(/"type":"update"/)
+  expect(ledger).toMatch(/"type":"cancel"/)
+})
+
 test("create-intent requests target the root agent and specialize the root session prompt", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-create-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
@@ -350,11 +448,110 @@ test("create-intent requests target the root agent and specialize the root sessi
   const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
 
   expect(ledger).toMatch(/"intent":"create"/)
+  expect(capturedSystemPrompt).toMatch(
+    /`workforce update --request-id <request-id> --input-file <path>`/,
+  )
+  expect(capturedSystemPrompt).toMatch(
+    /`workforce cancel --request-id <request-id> \[--reason-file <path>\]`/,
+  )
+  expect(capturedSystemPrompt).toMatch(
+    /`workforce truncate \[--agent-id <agent-id>\] \[--reason-file <path>\]`/,
+  )
+  expect(capturedSystemPrompt).toMatch(/`workforce respond --output-file <path>`/)
+  expect(capturedSystemPrompt).toMatch(/`workforce suspend --reason-file <path>`/)
   expect(capturedSystemPrompt).toMatch(/This request is a create request\./)
   expect(capturedSystemPrompt).toMatch(
     /You are being asked to create a new project from scratch or add new packages to the existing workspace when the requested feature needs them\./,
   )
   expect(capturedInitialPrompt).toMatch(/Request intent: create/)
+})
+
+test("domain-agent sessions advertise sender-owned update and cancel commands", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-domain-prompt-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+          {
+            id: "api",
+            name: "@repo/api",
+            role: "domain",
+            cwd: "packages/api",
+            owns: ["packages/api"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  let runtime!: WorkforceRuntime
+  let capturedSystemPrompt = ""
+
+  runtime = await WorkforceRuntime.start(rootDir, {
+    sessionManager: {
+      createSession: async (input) => {
+        capturedSystemPrompt = input.systemPrompt
+
+        const metadata =
+          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
+            ? (input.metadata.workforce as { requestId: string; agentId: string })
+            : null
+
+        if (!metadata) {
+          throw new Error("Missing workforce metadata")
+        }
+
+        await runtime.respond({
+          requestId: metadata.requestId,
+          output: "done",
+          actor: {
+            sessionId: "session-1",
+            agentId: metadata.agentId,
+            requestId: metadata.requestId,
+          },
+        })
+
+        return {} as never
+      },
+    } as never,
+  })
+
+  await runtime.createRequest({
+    targetAgentId: "api",
+    payload: "Implement the endpoint.",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
+  await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
+
+  expect(capturedSystemPrompt).toMatch(
+    /`workforce update --request-id <request-id> --input-file <path>`/,
+  )
+  expect(capturedSystemPrompt).toMatch(
+    /`workforce cancel --request-id <request-id> \[--reason-file <path>\]`/,
+  )
+  expect(capturedSystemPrompt).toMatch(/Append context to a request you originally sent\./)
+  expect(capturedSystemPrompt).toMatch(/Cancel a request you originally sent\./)
+  expect(capturedSystemPrompt).toMatch(/`workforce respond --output-file <path>`/)
+  expect(capturedSystemPrompt).toMatch(/`workforce suspend --reason-file <path>`/)
+  expect(capturedSystemPrompt).not.toMatch(/`workforce truncate/)
 })
 
 test("workforce runtime logs request-to-session correlation for launched sessions", async () => {
@@ -433,8 +630,7 @@ test("workforce runtime logs request-to-session correlation for launched session
 
   const completedLog = logs.find(
     (entry) =>
-      entry.event === "workforce.session_launch_completed" &&
-      entry.sessionId === "daemon-session-1",
+      entry.event === "workforce.session_completed" && entry.sessionId === "daemon-session-1",
   )
   expect(completedLog).toBeTruthy()
   expect(completedLog?.acpId).toBe("acp-session-1")

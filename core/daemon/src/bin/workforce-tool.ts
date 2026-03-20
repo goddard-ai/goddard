@@ -188,12 +188,6 @@ export async function main(argv: string[]) {
         name: "respond",
         description: "Respond to the current workforce request.",
         args: {
-          requestId: option({
-            type: string,
-            long: "request-id",
-            description: "The target workforce request id.",
-            defaultValue: () => process.env.GODDARD_WORKFORCE_REQUEST_ID ?? "",
-          }),
           outputFile: option({
             type: string,
             long: "output-file",
@@ -201,7 +195,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          const requestId = requireWorkforceRequestId(args.requestId || undefined)
+          const requestId = requireWorkforceRequestId()
           await workforceRespond(requestId, await fs.readFile(args.outputFile, "utf-8"))
           console.log(`Workforce request responded: ${requestId}`)
         },
@@ -210,12 +204,6 @@ export async function main(argv: string[]) {
         name: "suspend",
         description: "Suspend the current workforce request.",
         args: {
-          requestId: option({
-            type: string,
-            long: "request-id",
-            description: "The target workforce request id.",
-            defaultValue: () => process.env.GODDARD_WORKFORCE_REQUEST_ID ?? "",
-          }),
           reasonFile: option({
             type: string,
             long: "reason-file",
@@ -223,7 +211,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          const requestId = requireWorkforceRequestId(args.requestId || undefined)
+          const requestId = requireWorkforceRequestId()
           await workforceSuspend(requestId, await fs.readFile(args.reasonFile, "utf-8"))
           console.log(`Workforce request suspended: ${requestId}`)
         },

@@ -9,7 +9,7 @@ import type {
 } from "@goddard-ai/schema/workforce"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { concat } from "radashi"
+import { concat, dedent } from "radashi"
 import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.ts"
 import type { SessionManager } from "../session/index.ts"
 import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
@@ -78,21 +78,75 @@ function formatRequestContext(request: WorkforceRequestRecord): string {
   return [request.input, ...request.updates].filter((entry) => entry.trim().length > 0).join("\n\n")
 }
 
+function buildRootAgentSystemPrompt(): string {
+  return dedent`
+    Rules,
+    - Never modify code outside your owned paths.
+    - Run all \`workforce\` commands in the terminal.
+    - If a payload is long or multiline, write it to a file and pass the file path.
+    - End every active request with either \`workforce respond\` or \`workforce suspend\`.
+
+    Available commands
+    \`workforce request --target-agent-id <agent-id> --input-file <path>\`
+      - Queue new work for another agent.
+    \`workforce update --request-id <request-id> --input-file <path>\`
+      - Append context to an existing request and re-queue it.
+    \`workforce cancel --request-id <request-id> [--reason-file <path>]\`
+      - Cancel an existing request.
+    \`workforce truncate [--agent-id <agent-id>] [--reason-file <path>]\`
+      - Cancel pending queued or suspended work for one agent or the whole workforce.
+    \`workforce respond --output-file <path>\`
+      - Complete the current request.
+    \`workforce suspend --reason-file <path>\`
+      - Suspend the current request with a clear reason.
+
+    Guidance
+    - Coordinate repo-wide work and delegate when ownership is clear.
+  `
+}
+
+function buildDomainAgentSystemPrompt(): string {
+  return dedent`
+    Rules
+    - Never modify code outside your owned paths.
+    - Run all \`workforce\` commands in the terminal.
+    - If a payload is long or multiline, write it to a file and pass the file path.
+    - End every active request with either \`workforce respond\` or \`workforce suspend\`.
+
+    Available commands
+    \`workforce request --target-agent-id <agent-id> --input-file <path>\`
+      - Queue new work for another agent.
+    \`workforce update --request-id <request-id> --input-file <path>\`
+      - Append context to a request you originally sent.
+    \`workforce cancel --request-id <request-id> [--reason-file <path>]\`
+      - Cancel a request you originally sent.
+    \`workforce respond --output-file <path>\`
+      - Complete the current request.
+    \`workforce suspend --reason-file <path>\`
+      - Suspend the current request with a clear reason.
+
+    Guidance
+    - Work only inside your owned paths.
+    - If blocked by missing authority, missing context, or out-of-scope work, use \`workforce suspend\`.
+  `
+}
+
 function buildSystemPrompt(
   rootDir: string,
   config: WorkforceConfig,
   agent: WorkforceAgentConfig,
   request: WorkforceRequestRecord,
 ): string {
-  const agentScope = agent.owns.join(", ")
+  const workingDirectory = agent.cwd === "." ? "." : agent.cwd
 
   return [
-    `You are the workforce ${agent.role} agent "${agent.name}" (id: ${agent.id}).`,
+    `You are the Goddard Workforce ${agent.role} agent "${agent.name}" (${agent.id}).`,
     `Repository root: ${rootDir}`,
-    `Owned paths: ${agentScope}`,
+    `Working directory: ${workingDirectory}`,
+    `Owned paths: ${agent.owns.join(", ")}`,
     `Root agent id: ${config.rootAgentId}`,
-    "You must not directly modify code outside your owned paths.",
-    "Use the `workforce` executable to request delegated work, report a response, or suspend for escalation.",
+    "",
+    agent.role === "root" ? buildRootAgentSystemPrompt() : buildDomainAgentSystemPrompt(),
     ...buildIntentSpecificSystemPrompt(config, agent, request.intent),
   ].join("\n")
 }
@@ -123,7 +177,8 @@ function buildInitialPrompt(
   return concat(
     `Repository root: ${rootDir}`,
     `Current request id: ${request.id}`,
-    `Sender agent id: ${request.fromAgentId ?? "(null)"}`,
+    `Sender agent id: ${request.fromAgentId ?? "operator"}`,
+    `Request intent: ${request.intent}`,
     recentActivity.length > 0
       ? ["", "Recent activity:", recentActivity.map((event) => JSON.stringify(event)).join("\n")]
       : null,
@@ -237,6 +292,18 @@ function isTerminalRequest(request: WorkforceRequestRecord): boolean {
   return (
     request.status === "completed" || request.status === "cancelled" || request.status === "errored"
   )
+}
+
+function canManageRequest(
+  config: WorkforceConfig,
+  request: WorkforceRequestRecord,
+  actor: WorkforceActorContext,
+): boolean {
+  if (actor.agentId === null) {
+    return true
+  }
+
+  return actor.agentId === config.rootAgentId || actor.agentId === request.fromAgentId
 }
 
 /** A daemon-managed repo-local workforce runtime and its active queue state. */
@@ -372,8 +439,10 @@ export class WorkforceRuntime {
   }): Promise<void> {
     const request = assertRequestExists(this.#projection, input.requestId)
     const previousStatus = request.status
-    if (input.actor.agentId && input.actor.agentId !== this.#config.rootAgentId) {
-      throw new Error("Only the root agent or an operator can update workforce requests")
+    if (!canManageRequest(this.#config, request, input.actor)) {
+      throw new Error(
+        "Only the root agent, the original sending agent, or an operator can update workforce requests",
+      )
     }
     if (isTerminalRequest(request)) {
       throw new Error(`Cannot update terminal workforce request ${input.requestId}`)
@@ -405,8 +474,10 @@ export class WorkforceRuntime {
   }): Promise<void> {
     const request = assertRequestExists(this.#projection, input.requestId)
     const previousStatus = request.status
-    if (input.actor.agentId && input.actor.agentId !== this.#config.rootAgentId) {
-      throw new Error("Only the root agent or an operator can cancel workforce requests")
+    if (!canManageRequest(this.#config, request, input.actor)) {
+      throw new Error(
+        "Only the root agent, the original sending agent, or an operator can cancel workforce requests",
+      )
     }
     if (isTerminalRequest(request)) {
       throw new Error(`Cannot cancel terminal workforce request ${input.requestId}`)
