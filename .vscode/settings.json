@@ -30,5 +30,8 @@
   },
   "[jsonc]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "files.readonlyInclude": {
+    "core/schema/src/acp-adapters.ts": true
   }
 }
