@@ -355,6 +355,99 @@ test("domain agents can update and cancel requests they originally sent", async 
   expect(ledger).toMatch(/"type":"cancel"/)
 })
 
+test("buildSystemPrompt warns agents about off-limits paths owned by other agents", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-limits-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+          {
+            id: "lib",
+            name: "@repo/lib",
+            role: "domain",
+            cwd: "packages/lib",
+            owns: ["packages/lib"],
+          },
+          {
+            id: "foo",
+            name: "@repo/foo",
+            role: "domain",
+            cwd: "packages/foo",
+            owns: ["packages/foo"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  let runtime!: WorkforceRuntime
+  const systemPrompts: Record<string, string> = {}
+
+  runtime = await WorkforceRuntime.start(rootDir, {
+    sessionManager: {
+      createSession: async (input) => {
+        const metadata =
+          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
+            ? (input.metadata.workforce as { requestId: string; agentId: string })
+            : null
+
+        if (!metadata) {
+          throw new Error("Missing workforce metadata")
+        }
+
+        systemPrompts[metadata.agentId] = input.systemPrompt
+
+        await runtime.respond({
+          requestId: metadata.requestId,
+          output: "ok",
+          actor: {
+            sessionId: "session-1",
+            agentId: metadata.agentId,
+            requestId: metadata.requestId,
+          },
+        })
+
+        return {} as never
+      },
+    } as never,
+  })
+
+  await runtime.createRequest({
+    targetAgentId: "root",
+    payload: "Do root work.",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
+  await runtime.createRequest({
+    targetAgentId: "lib",
+    payload: "Do lib work.",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
+  await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
+
+  expect(systemPrompts["root"]).toContain("packages/foo")
+  expect(systemPrompts["root"]).toContain("packages/lib")
+  expect(systemPrompts["lib"]).not.toContain("packages/foo")
+})
+
 test("create-intent requests target the root agent and specialize the root session prompt", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-create-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
@@ -391,17 +484,24 @@ test("create-intent requests target the root agent and specialize the root sessi
   await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
 
   let runtime!: WorkforceRuntime
-  let capturedSystemPrompt = ""
-  let capturedInitialPrompt = ""
+  let defaultSystemPrompt = ""
+  let createSystemPrompt = ""
+  let createInitialPrompt = ""
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
       createSession: async (input) => {
-        capturedSystemPrompt = input.systemPrompt
-        capturedInitialPrompt =
+        const initialPrompt =
           typeof input.initialPrompt === "string"
             ? input.initialPrompt
             : JSON.stringify(input.initialPrompt)
+
+        if (initialPrompt.includes("Request intent: create")) {
+          createSystemPrompt = input.systemPrompt
+          createInitialPrompt = initialPrompt
+        } else {
+          defaultSystemPrompt = input.systemPrompt
+        }
 
         const metadata =
           input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
@@ -427,6 +527,12 @@ test("create-intent requests target the root agent and specialize the root sessi
     } as never,
   })
 
+  await runtime.createRequest({
+    targetAgentId: "root",
+    payload: "Review the existing workspace boundaries.",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
   await expect(
     runtime.createRequest({
       targetAgentId: "lib",
@@ -448,22 +554,19 @@ test("create-intent requests target the root agent and specialize the root sessi
   const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
 
   expect(ledger).toMatch(/"intent":"create"/)
-  expect(capturedSystemPrompt).toMatch(
-    /`workforce update --request-id <request-id> --input-file <path>`/,
+  expect(listAdvertisedWorkforceCommands(createSystemPrompt)).toEqual(
+    listAdvertisedWorkforceCommands(defaultSystemPrompt),
   )
-  expect(capturedSystemPrompt).toMatch(
-    /`workforce cancel --request-id <request-id> \[--reason-file <path>\]`/,
-  )
-  expect(capturedSystemPrompt).toMatch(
-    /`workforce truncate \[--agent-id <agent-id>\] \[--reason-file <path>\]`/,
-  )
-  expect(capturedSystemPrompt).toMatch(/`workforce respond --output-file <path>`/)
-  expect(capturedSystemPrompt).toMatch(/`workforce suspend --reason-file <path>`/)
-  expect(capturedSystemPrompt).toMatch(/This request is a create request\./)
-  expect(capturedSystemPrompt).toMatch(
-    /You are being asked to create a new project from scratch or add new packages to the existing workspace when the requested feature needs them\./,
-  )
-  expect(capturedInitialPrompt).toMatch(/Request intent: create/)
+  expect(listAdvertisedWorkforceCommands(createSystemPrompt)).toEqual([
+    "workforce cancel --request-id <request-id> [--reason-file <path>]",
+    "workforce request --target-agent-id <agent-id> --input-file <path>",
+    "workforce respond --output-file <path>",
+    "workforce suspend --reason-file <path>",
+    "workforce truncate [--agent-id <agent-id>] [--reason-file <path>]",
+    "workforce update --request-id <request-id> --input-file <path>",
+  ])
+  expect(createSystemPrompt).not.toBe(defaultSystemPrompt)
+  expect(createInitialPrompt).toContain("Request intent: create")
 })
 
 test("domain-agent sessions advertise sender-owned update and cancel commands", async () => {
@@ -541,17 +644,13 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
 
-  expect(capturedSystemPrompt).toMatch(
-    /`workforce update --request-id <request-id> --input-file <path>`/,
-  )
-  expect(capturedSystemPrompt).toMatch(
-    /`workforce cancel --request-id <request-id> \[--reason-file <path>\]`/,
-  )
-  expect(capturedSystemPrompt).toMatch(/Append context to a request you originally sent\./)
-  expect(capturedSystemPrompt).toMatch(/Cancel a request you originally sent\./)
-  expect(capturedSystemPrompt).toMatch(/`workforce respond --output-file <path>`/)
-  expect(capturedSystemPrompt).toMatch(/`workforce suspend --reason-file <path>`/)
-  expect(capturedSystemPrompt).not.toMatch(/`workforce truncate/)
+  expect(listAdvertisedWorkforceCommands(capturedSystemPrompt)).toEqual([
+    "workforce cancel --request-id <request-id> [--reason-file <path>]",
+    "workforce request --target-agent-id <agent-id> --input-file <path>",
+    "workforce respond --output-file <path>",
+    "workforce suspend --reason-file <path>",
+    "workforce update --request-id <request-id> --input-file <path>",
+  ])
 })
 
 test("workforce runtime logs request-to-session correlation for launched sessions", async () => {
@@ -649,6 +748,20 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: n
   }
 
   throw new Error("Timed out waiting for workforce condition")
+}
+
+function listAdvertisedWorkforceCommands(prompt: string): string[] {
+  return Array.from(
+    new Set(
+      prompt
+        .split("\n")
+        .map((line) => line.trim())
+        .flatMap((line) => {
+          const match = line.match(/^`(workforce [^`]+)`$/)
+          return match ? [match[1]] : []
+        }),
+    ),
+  ).sort()
 }
 
 async function captureDaemonLogs<T>(
