@@ -11,7 +11,7 @@ export type ManagedPrLocationRecord = {
   updatedAt: string
 }
 
-// JSON file shape used to persist managed PR checkout lookups.
+/** JSON file shape used to persist managed pull-request checkout lookups. */
 type ManagedPrLocationsFile = {
   locations: Record<string, ManagedPrLocationRecord>
 }
@@ -41,10 +41,12 @@ export namespace ManagedPrLocationStorage {
   }
 }
 
+/** Builds the stable storage key for one managed pull-request checkout entry. */
 function getLocationKey(owner: string, repo: string, prNumber: number): string {
   return `${owner}/${repo}#${prNumber}`
 }
 
+/** Reads the managed pull-request location index, defaulting to an empty store. */
 async function readLocationsFile(): Promise<ManagedPrLocationsFile> {
   try {
     const raw = await readFile(getManagedPrLocationsPath(), "utf-8")
@@ -57,6 +59,7 @@ async function readLocationsFile(): Promise<ManagedPrLocationsFile> {
   }
 }
 
+/** Persists the managed pull-request location index back to local storage. */
 async function writeLocationsFile(data: ManagedPrLocationsFile): Promise<void> {
   const path = getManagedPrLocationsPath()
   await mkdir(dirname(path), { recursive: true })

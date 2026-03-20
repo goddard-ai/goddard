@@ -1,11 +1,13 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { SessionParams } from "./session-server.js"
 
+/** Session configuration allowed for loop-managed daemon sessions. */
 export type AgentLoopSessionParams = Omit<
   Extract<SessionParams, { oneShot?: undefined }>,
   "initialPrompt"
 >
 
+/** Pacing limits enforced around repeated loop cycles. */
 export interface AgentLoopRateLimits {
   /** Minimum pause between completed loop cycles. */
   cycleDelay: string
@@ -15,6 +17,7 @@ export interface AgentLoopRateLimits {
   maxCyclesBeforePause: number
 }
 
+/** Retry policy applied when one loop cycle fails to deliver its prompt. */
 export interface AgentLoopRetryConfig {
   /** Maximum number of prompt attempts for a single cycle. */
   maxAttempts: number
@@ -33,6 +36,7 @@ export interface AgentLoopRetryConfig {
   ) => boolean
 }
 
+/** Full configuration for one repeated daemon-backed agent loop. */
 export interface AgentLoopParams {
   /** Function that produces the next prompt to send to the agent. */
   nextPrompt: () => string
@@ -44,4 +48,5 @@ export interface AgentLoopParams {
   retries: AgentLoopRetryConfig
 }
 
+/** ACP client hooks that can observe or respond to loop-driven session activity. */
 export type AgentLoopHandler = acp.Client

@@ -1,0 +1,22 @@
+# Storage Glossary
+
+- Scope:
+  - This glossary covers storage-owned persistence concepts.
+- `Session Row`
+  - The SQL-backed durable record for the primary facts about one daemon session.
+  - Why: so session identity and user-facing status survive beyond one daemon lifetime.
+- `Session State Record`
+  - The file-backed durable supplement to a session row.
+  - Why: so large or frequently changing session details such as history and diagnostics can be stored outside the main SQL record.
+- `Session Permission`
+  - The durable authorization record that ties access to a specific daemon session.
+  - Why: so session access can be granted and revoked independently of the session's conversational history.
+- `Managed PR Location`
+  - The stored mapping from a managed pull request to a local checkout directory.
+  - Why: so automated daemon work can find the right repository copy when it needs to act on a pull request.
+- `Token Record`
+  - Durable credential material stored for later authenticated use.
+  - Why: so tools can preserve necessary local authorization state across runs.
+- `Goddard Global Directory`
+  - The local root used for package-managed persistence.
+  - Why: so storage-backed features share one predictable on-disk home.

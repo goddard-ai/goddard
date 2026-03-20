@@ -1,0 +1,32 @@
+# Daemon Glossary
+
+- Scope:
+  - This glossary covers daemon-owned runtime concepts.
+  - Shared data-model terms belong in [`core/schema/glossary.md`](../schema/glossary.md).
+- `Daemon Process`
+  - The long-running local runtime that owns agent-facing execution.
+  - Why: so background automation, interactive sessions, and local orchestration all have one trusted process boundary.
+- `Daemon Server`
+  - The daemon's control surface exposed to local clients.
+  - Why: so apps, SDKs, and tools can create or inspect daemon-managed work without directly embedding daemon internals.
+- `Session Manager`
+  - The daemon subsystem that owns session lifecycle operations.
+  - Why: so creation, connection, message forwarding, shutdown, and session reconciliation are coordinated in one place.
+- `Live Session Runtime`
+  - The in-memory execution state for a session that is still actively running.
+  - Why: because some session behavior only makes sense while the daemon still owns live execution.
+- `History-Only Session`
+  - A session whose live execution is gone but whose stored record remains available.
+  - Why: so completed or interrupted work can still be inspected after interaction ends.
+- `Session Reconciliation`
+  - The daemon's startup-time repair of persisted session truth after a prior daemon lifetime ended.
+  - Why: because daemon restarts break live execution, but persisted session records still need honest status and connectivity information.
+- `One-Shot Run`
+  - A daemon-triggered session intended to finish after a single initial prompt.
+  - Why: so the daemon can perform background automation without treating every task as an interactive conversation.
+- `Background Prompt`
+  - The daemon-owned instruction frame used for automated, non-interactive work.
+  - Why: so background sessions follow a different operating context from foreground user-driven sessions.
+- `Workforce Runtime`
+  - The daemon-owned coordinator for repository-local multi-agent work.
+  - Why: so delegated requests, ownership boundaries, and queue progression can be managed consistently inside one repository context.

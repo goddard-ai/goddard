@@ -50,6 +50,7 @@ export interface WorkforceRuntimeDeps {
   runSession?: WorkforceSessionRunner
 }
 
+/** Collects the most relevant recent ledger activity for the agent about to handle a request. */
 function buildRecentActivity(
   events: WorkforceLedgerEvent[],
   request: WorkforceRequestRecord,
@@ -74,10 +75,12 @@ function buildRecentActivity(
     .slice(-limit)
 }
 
+/** Joins the original request and later updates into the active task context. */
 function formatRequestContext(request: WorkforceRequestRecord): string {
   return [request.input, ...request.updates].filter((entry) => entry.trim().length > 0).join("\n\n")
 }
 
+/** Defines the extra authority granted to the repo-wide coordinating workforce agent. */
 function buildRootAgentSystemPrompt() {
   const rootCommands = dedent`
     \`workforce truncate [--agent-id <agent-id>] [--reason-file <path>]\`
@@ -92,6 +95,7 @@ function buildRootAgentSystemPrompt() {
   }
 }
 
+/** Defines the narrower guidance used for workforce agents with scoped ownership. */
 function buildDomainAgentSystemPrompt() {
   const domainGuidance = dedent`
     - Work only inside your owned paths.
@@ -103,6 +107,7 @@ function buildDomainAgentSystemPrompt() {
   }
 }
 
+/** Builds the per-request system prompt that encodes role, ownership, and delegation rules. */
 function buildSystemPrompt(
   rootDir: string,
   config: WorkforceConfig,
@@ -187,6 +192,7 @@ function buildSystemPrompt(
   ].join("\n")
 }
 
+/** Adds stricter design guidance when a request may expand project surface area. */
 function buildIntentSpecificSystemPrompt(
   config: WorkforceConfig,
   agent: WorkforceAgentConfig,
@@ -208,6 +214,7 @@ function buildIntentSpecificSystemPrompt(
   ]
 }
 
+/** Builds the user-facing request payload that starts one workforce handling attempt. */
 function buildInitialPrompt(
   rootDir: string,
   request: WorkforceRequestRecord,
@@ -227,6 +234,7 @@ function buildInitialPrompt(
   ).join("\n")
 }
 
+/** Narrows projection summary data to the fields commonly attached to daemon logs. */
 function buildWorkforceSummaryFields(
   summary: WorkforceProjection["summary"],
 ): Record<string, number> {
@@ -238,6 +246,7 @@ function buildWorkforceSummaryFields(
   }
 }
 
+/** Converts optional actor identity into log-friendly fields without null noise. */
 function buildWorkforceActorLogContext(
   actor: WorkforceActorContext,
 ): Record<string, string | undefined> {
@@ -248,6 +257,7 @@ function buildWorkforceActorLogContext(
   }
 }
 
+/** Includes large free-form text in logs only when verbose daemon logging is enabled. */
 function buildVerboseTextField(field: string, value: string): Record<string, unknown> {
   if (isVerboseDaemonLogging() === false) {
     return {}
@@ -258,6 +268,7 @@ function buildVerboseTextField(field: string, value: string): Record<string, unk
   }
 }
 
+/** Launches one daemon session for a workforce request using the runtime's ownership rules. */
 async function defaultRunWorkforceSession(
   deps: WorkforceRuntimeDeps,
   input: WorkforceSessionRunInput,
@@ -306,6 +317,7 @@ async function defaultRunWorkforceSession(
   })
 }
 
+/** Fails fast when a requested workforce request id is no longer known to the runtime. */
 function assertRequestExists(
   projection: WorkforceProjection,
   requestId: string,
@@ -318,6 +330,7 @@ function assertRequestExists(
   return request
 }
 
+/** Resolves one configured workforce agent or throws when the id is outside the topology. */
 function assertAgentExists(config: WorkforceConfig, agentId: string): WorkforceAgentConfig {
   const agent = config.agents.find((entry) => entry.id === agentId)
   if (!agent) {
@@ -327,12 +340,14 @@ function assertAgentExists(config: WorkforceConfig, agentId: string): WorkforceA
   return agent
 }
 
+/** Treats finished, cancelled, and failed requests as immutable for later mutations. */
 function isTerminalRequest(request: WorkforceRequestRecord): boolean {
   return (
     request.status === "completed" || request.status === "cancelled" || request.status === "errored"
   )
 }
 
+/** Restricts request updates and cancellations to the root agent, original sender, or operator. */
 function canManageRequest(
   config: WorkforceConfig,
   request: WorkforceRequestRecord,
@@ -372,6 +387,7 @@ export class WorkforceRuntime {
     this.#paths = buildWorkforcePaths(input.rootDir)
   }
 
+  /** Rehydrates one repository workforce and resumes draining any queued requests. */
   static async start(rootDir: string, deps: WorkforceRuntimeDeps): Promise<WorkforceRuntime> {
     await ensureWorkforceFiles(rootDir)
     const [config, projection, events] = await Promise.all([

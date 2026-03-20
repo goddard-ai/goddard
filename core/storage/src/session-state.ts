@@ -26,6 +26,7 @@ export type SessionStateRecord = {
   updatedAt: string
 }
 
+/** File-backed storage for daemon session history, diagnostics, and connection state. */
 export namespace SessionStateStorage {
   export async function list(): Promise<SessionStateRecord[]> {
     const directory = getSessionStateDir()
@@ -102,19 +103,23 @@ export namespace SessionStateStorage {
   }
 }
 
+/** Lists persisted session-state file names from the daemon's storage directory. */
 async function readDirectory(path: string): Promise<string[]> {
   const { readdir } = await import("node:fs/promises")
   return readdir(path)
 }
 
+/** Returns the directory used for durable session-state files. */
 function getSessionStateDir(): string {
   return join(getGoddardGlobalDir(), "session-state")
 }
 
+/** Maps one daemon session id to its persisted state file path. */
 function getSessionStatePath(sessionId: string): string {
   return join(getSessionStateDir(), `${sessionId}.json`)
 }
 
+/** Reads and parses one persisted session-state record when it exists. */
 async function readStateFile(path: string): Promise<SessionStateRecord | null> {
   try {
     const raw = await readFile(path, "utf-8")
@@ -124,6 +129,7 @@ async function readStateFile(path: string): Promise<SessionStateRecord | null> {
   }
 }
 
+/** Writes one complete session-state snapshot back to durable storage. */
 async function writeStateFile(record: SessionStateRecord): Promise<void> {
   const path = getSessionStatePath(record.sessionId)
   await mkdir(dirname(path), { recursive: true })

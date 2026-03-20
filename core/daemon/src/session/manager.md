@@ -1,0 +1,107 @@
+# Session Manager Domain Concepts
+
+- Scope:
+  - This document explains the domain concepts that appear in [`core/daemon/src/session/manager.ts`](./manager.ts).
+  - It focuses on what each concept means and why it exists, not on implementation details.
+- `Daemon Session`
+  - The unit of work the daemon creates and supervises for an agent run.
+  - Why: so a single agent conversation or task can have stable identity, status, history, diagnostics, and access control.
+- `Session Manager`
+  - The daemon boundary responsible for the session lifecycle.
+  - Why: so creation, connection, messaging, history lookup, diagnostics lookup, and shutdown all live behind one interface.
+- `ACP`
+  - The protocol used to exchange structured messages between the daemon side and the agent side.
+  - Why: so sessions are driven by a stable message model instead of ad hoc process conventions.
+- `Agent`
+  - The external execution target that performs the conversational or task-oriented work for a session.
+  - Why: because the daemon coordinates sessions but is not itself the worker.
+- `Agent Distribution`
+  - The way an agent is identified and made runnable.
+  - Why: so the daemon can support multiple sourcing and launch models without changing session meaning.
+- `Binary Target`
+  - The platform-specific executable shape of an agent distribution.
+  - Why: so the same logical agent can run correctly across operating systems and architectures.
+- `Registry Agent`
+  - An agent referenced by a stable identifier instead of a fully inlined runnable specification.
+  - Why: so callers can ask for known agents by name while the daemon resolves the runnable details.
+- `Session Identity`
+  - The daemon-owned stable identity of a session.
+  - Why: so history, diagnostics, permissions, and reconnect behavior all refer to the same session over time.
+- `ACP Session Identity`
+  - The protocol-level identity of the session on the ACP side.
+  - Why: because the daemon and ACP each need their own durable identity within their own boundary.
+- `Session Token`
+  - The secret used to prove that a caller is allowed to act on a given session.
+  - Why: so session access can be scoped narrowly instead of granting broad daemon authority.
+- `Session Status`
+  - The lifecycle state of the work, such as `active`, `done`, `cancelled`, `blocked`, `idle`, or `error`.
+  - Why: so users and the daemon can reason clearly about whether work is ongoing, complete, waiting, or failed.
+- `Active Session`
+  - The live, daemon-owned form of a session while work is still underway.
+  - Why: because some session state only makes sense during live execution, such as continued real-time interaction.
+- `Persisted Session`
+  - The durable record of a session after its important facts have been stored.
+  - Why: so sessions remain inspectable after daemon restarts or after live execution ends.
+- `Session History`
+  - The ordered record of ACP messages associated with a session.
+  - Why: so clients can reconstruct what happened in the session even after live connectivity is gone.
+- `Session Diagnostics`
+  - Structured lifecycle events about the session rather than the conversation content itself.
+  - Why: so operators and clients can inspect creation, status changes, shutdown, reconciliation, and failures without parsing full history.
+- `Connection Mode`
+  - The current access mode for a session.
+  - Why: so clients can distinguish live reconnectable sessions from history-only or unavailable ones.
+- `Reconnectable Session`
+  - A session whose live execution is still available for continued interaction.
+  - Why: so clients know whether they can resume active use or must fall back to inspection-only access.
+- `History-Only Session`
+  - A session whose live execution is gone but whose stored conversation record remains available.
+  - Why: so completed or interrupted work can still be reviewed after interaction ends.
+- `One-Shot Session`
+  - A session intended to complete after its initial prompt instead of staying open for ongoing interaction.
+  - Why: so the daemon can support single-turn task execution without treating every run as an ongoing conversation.
+- `Initial Prompt`
+  - The first user-provided request used to start session work.
+  - Why: so a session can begin with task intent immediately instead of requiring a second message.
+- `System Prompt`
+  - The daemon-supplied instruction layer attached to the first prompt sent into the session.
+  - Why: so the daemon can enforce the behavioral frame expected for all sessions.
+- `First Prompt`
+  - The special prompt boundary where the daemon injects its governing instruction layer.
+  - Why: so the system prompt is applied exactly once instead of wrapping later messages repeatedly.
+- `Permission Request`
+  - The agent asking whether a sensitive or restricted action may proceed.
+  - Why: so the agent can pause for explicit authorization instead of silently assuming authority.
+- `Client Request`
+  - A protocol message initiated from the daemon side toward the agent side.
+  - Why: so the daemon can track what it asked the agent to do and interpret later responses in context.
+- `Prompt Response`
+  - The agent's protocol-level answer to a prompt request.
+  - Why: so the daemon can distinguish completed turns from work that is still underway.
+- `Session Cancellation`
+  - The explicit signal that active session work should stop before normal completion.
+  - Why: so callers can end work intentionally instead of waiting for the agent runtime to finish on its own.
+- `Repository Scope`
+  - The repository ownership context attached to a session, including optional pull request limits.
+  - Why: so session permissions can be constrained to the repository context the session is meant to operate within.
+- `Allowed Pull Request Numbers`
+  - The specific pull requests a session is permitted to act on when pull-request scoping is present.
+  - Why: so session authority can be narrowed from an entire repository to a specific work item.
+- `Session Metadata`
+  - Structured context attached to a session that describes the surrounding work environment.
+  - Why: so business context such as repository identity or workforce linkage can travel with the session without going into prompt text.
+- `Workforce Metadata`
+  - The part of session metadata that identifies a broader orchestrated work request and the participating agent.
+  - Why: so session events can be tied back to multi-agent workflows.
+- `Session Reconciliation`
+  - The act of bringing stored session records back into a consistent state after daemon startup.
+  - Why: because live execution does not survive daemon restarts, but session records still need truthful status and connection information afterward.
+- `Archived Session`
+  - A session that can no longer be reconnected to as a live run.
+  - Why: so the system can preserve work history without implying the underlying execution is still available.
+- `Daemon Shutdown`
+  - The end of the daemon's own lifetime, independent of any one session's task outcome.
+  - Why: because active sessions may need different cleanup semantics when the daemon stops than when a single task completes normally.
+- `Agent Process Exit`
+  - The end of the agent runtime associated with a session.
+  - Why: so the daemon can interpret whether the session ended cleanly, was interrupted, or failed unexpectedly.

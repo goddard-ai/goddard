@@ -2,6 +2,12 @@
 
 The Goddard Daemon is a local background process that executes autonomous coding tasks. It spawns 'one-shot pi sessions' in response to events (such as pull request feedback or merged proposals) streamed from the backend.
 
+## Related Docs
+
+- [Daemon Glossary](./glossary.md)
+- [Session Manager Domain Concepts](./src/session/manager.md)
+- [Workforce Runtime Domain Concepts](./src/workforce/runtime.md)
+
 ## Launch Contract
 
 The daemon now resolves its runtime configuration from one explicit contract:

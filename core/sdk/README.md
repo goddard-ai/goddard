@@ -2,6 +2,11 @@
 
 `@goddard-ai/sdk` is the stable integration surface for Goddard platform capabilities.
 
+## Related Docs
+
+- [SDK Glossary](./glossary.md)
+- [Agent Loop Domain Concepts](./src/loop/run-agent-loop.md)
+
 ## Package Surfaces
 
 | Import | Owns | Does not own |

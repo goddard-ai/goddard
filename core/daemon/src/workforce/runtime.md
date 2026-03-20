@@ -1,0 +1,56 @@
+# Workforce Runtime Domain Concepts
+
+- Scope:
+  - This document explains the domain concepts that appear in [`core/daemon/src/workforce/runtime.ts`](./runtime.ts).
+  - It focuses on the workforce model itself and avoids repeating broader daemon-session concepts.
+- `Workforce Runtime`
+  - The daemon-owned coordinator for one repository's active workforce.
+  - Why: so agent roles, delegated requests, and queue progression can be managed as one coherent local system.
+- `Workforce Configuration`
+  - The repository-local definition of which agents exist, what roles they play, and which paths they own.
+  - Why: so delegation and path authority are explicit instead of improvised at runtime.
+- `Root Agent`
+  - The workforce agent with repo-wide coordination authority.
+  - Why: so one agent can make delegation and scope decisions that would be unsafe for narrower agents to assume.
+- `Domain Agent`
+  - A workforce agent with limited ownership over a subset of repository work.
+  - Why: so delegated work stays inside explicit authority boundaries.
+- `Owned Paths`
+  - The repository paths a workforce agent is allowed to change.
+  - Why: so the workforce model can enforce clear authorship and reduce conflicting edits.
+- `Workforce Request`
+  - One unit of delegated work assigned to an owning agent.
+  - Why: so the runtime can track a task's lifecycle independently from any one session attempt.
+- `Actor Context`
+  - The identity context for whoever initiated a workforce mutation.
+  - Why: so the runtime can enforce which requests an operator, root agent, or requesting agent is allowed to change.
+- `Request Intent`
+  - The requester's declared expectation about the shape of the work.
+  - Why: so the runtime can apply stricter judgment to create-oriented requests than to routine implementation work.
+- `Recent Activity`
+  - The most relevant prior workforce history attached to a request when it is handled.
+  - Why: so an agent gets nearby context without being burdened with the full workforce history.
+- `Workforce Ledger`
+  - The append-only history of workforce events.
+  - Why: so the runtime has a durable factual record of what happened, independent of current in-memory state.
+- `Workforce Projection`
+  - The current reconstructed state of requests, queues, and summary counts.
+  - Why: so the runtime can schedule and authorize from present state without losing historical traceability.
+- `Queue`
+  - The ordered list of pending request work for one workforce agent.
+  - Why: so each agent's work advances predictably according to ownership and request order.
+- `Handle Attempt`
+  - One effort to execute a workforce request.
+  - Why: because a request may need multiple tries before it succeeds, suspends, or fails terminally.
+- `Response`
+  - The successful completion signal for an active workforce request.
+  - Why: so the runtime can distinguish finished work from merely attempted work.
+- `Suspension`
+  - The explicit decision to stop active work on a request until more context arrives.
+  - Why: so blocked work can pause honestly instead of pretending to be complete or silently failing.
+- `Cancellation`
+  - The explicit withdrawal of a request before normal completion.
+  - Why: so operators or authorized agents can stop irrelevant work cleanly.
+- `Truncation`
+  - The clearing of queued or suspended work for one agent scope or an entire workforce scope.
+  - Why: so backlog cleanup can happen intentionally without rewriting completed history.

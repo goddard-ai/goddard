@@ -1,0 +1,26 @@
+# Backend Glossary
+
+- Scope:
+  - This glossary covers backend-owned concepts.
+  - Shared data-model terms belong in [`core/schema/glossary.md`](../schema/glossary.md).
+- `Control Plane`
+  - The backend boundary that owns authenticated business operations.
+  - Why: so routing, persistence, and external integrations can depend on one stable backend contract.
+- `Device Flow`
+  - The backend login mechanism that lets a user authenticate through an out-of-band verification step.
+  - Why: so authentication can succeed even when the current client cannot complete a browser-based login directly.
+- `Managed Pull Request`
+  - A pull request the backend recognizes as belonging to Goddard's operating scope.
+  - Why: so automated replies and daemon work are constrained to pull requests the platform is responsible for.
+- `Repo Stream`
+  - The backend's user-scoped event feed for repository activity.
+  - Why: so local daemons can react to relevant repository changes without polling.
+- `Repo Event Broadcast`
+  - The backend act of publishing a repository event to interested local consumers.
+  - Why: so one backend-side state change can drive downstream automation promptly.
+- `GitHub App Installation`
+  - The repository-level authority the backend uses to act on GitHub resources.
+  - Why: so pull request creation and replies happen under explicit app-managed permissions rather than user tokens.
+- `Webhook Translation`
+  - The conversion of raw GitHub webhook input into the backend's domain event model.
+  - Why: so the rest of the system can react to stable backend events instead of vendor-specific webhook payloads.

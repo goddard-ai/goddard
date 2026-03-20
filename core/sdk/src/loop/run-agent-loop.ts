@@ -5,6 +5,7 @@ import type { AgentSession } from "../daemon/session/client-session.js"
 import { runAgent, type RunAgentOptions } from "../daemon/session/client.js"
 import { RateLimiter } from "./rate-limiter.js"
 
+/** Starts a daemon-backed loop that keeps prompting the same session under retry and pacing rules. */
 export async function runAgentLoop(
   { nextPrompt, session: sessionParams, rateLimits, retries }: AgentLoopParams,
   handler?: AgentLoopHandler,

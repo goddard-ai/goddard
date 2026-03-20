@@ -1,0 +1,41 @@
+# Schema Glossary
+
+- Scope:
+  - This glossary defines shared data-model concepts that appear across Goddard packages.
+  - It focuses on nouns represented in schema types, not on runtime behavior owned by other packages.
+- `Agent Distribution`
+  - Describes how a logical agent can be resolved into something runnable.
+  - Why: so callers can refer to agents consistently even when the actual launch shape differs by environment or platform.
+- `Daemon URL`
+  - The connection locator for a running daemon instance.
+  - Why: so SDKs, apps, and tools can refer to one daemon endpoint without baking transport details into every call site.
+- `Daemon Session`
+  - The durable identity for one daemon-managed agent interaction.
+  - Why: so creation, connection, history, diagnostics, and access control all refer to the same unit of work.
+- `Session Metadata`
+  - Structured context attached to a daemon session.
+  - Why: so work context such as repository identity or workforce ownership can travel with the session without being embedded in prompt text.
+- `Repo Event`
+  - A backend-originated description of a meaningful repository change.
+  - Why: so the backend and daemon can communicate about pull-request-related activity using a stable shared contract.
+- `Device Flow Session`
+  - The temporary authentication state created while a user is completing device-based login.
+  - Why: so login can progress through an explicit pending state before an authenticated session is issued.
+- `Auth Session`
+  - The authenticated backend identity granted to a user after login succeeds.
+  - Why: so backend operations can be authorized without re-running the login flow for every request.
+- `Workforce Request`
+  - One unit of delegated work inside a repository-local workforce.
+  - Why: so multi-agent collaboration can reason about ownership, state transitions, and outcomes at the task level.
+- `Workforce Request Intent`
+  - The requester's declared expectation about the shape of the work.
+  - Why: so the runtime can distinguish routine execution from requests that may change package boundaries or introduce new project surface area.
+- `Workforce Ledger Event`
+  - An append-only fact about how a workforce request or queue changed.
+  - Why: so workforce state can be reconstructed from durable history instead of depending on mutable in-memory state.
+- `Workforce Projection`
+  - The reconstructed current state derived from workforce ledger events.
+  - Why: so consumers can work with the present state of requests and queues without replaying history themselves.
+- `Agent Loop`
+  - A repeated prompting workflow built on top of a daemon-backed session.
+  - Why: so long-running agent behavior can be described as a stable contract with pacing and retry semantics.

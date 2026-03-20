@@ -1,0 +1,35 @@
+# SDK Glossary
+
+- Scope:
+  - This glossary defines SDK-owned integration concepts.
+  - Shared data-model terms belong in [`core/schema/glossary.md`](../schema/glossary.md).
+- `SDK Surface`
+  - One import boundary within `@goddard-ai/sdk` with a distinct ownership model.
+  - Why: so consumers can choose the right level of abstraction instead of pulling backend, daemon, loop, and node concerns in all at once.
+- `Backend Surface`
+  - The SDK API for authenticated platform and pull-request operations.
+  - Why: so callers can work with remote Goddard services without directly managing HTTP contracts.
+- `Daemon Surface`
+  - The SDK API for daemon-managed agent sessions and workforce interactions.
+  - Why: so consumers can use daemon capabilities through stable client abstractions instead of raw IPC messages.
+- `Loop Surface`
+  - The SDK API for repeated prompting workflows built on daemon sessions.
+  - Why: so long-running agent behavior can be reused as a contract instead of reimplemented ad hoc by each caller.
+- `Node Surface`
+  - The SDK layer that adds Node-specific convenience over the more general SDK contracts.
+  - Why: so environment resolution and local configuration helpers do not leak into cross-environment APIs.
+- `Daemon-Backed Session`
+  - An agent interaction whose lifecycle is owned by the daemon but consumed through the SDK.
+  - Why: so callers can work with durable daemon sessions through a higher-level client abstraction.
+- `Agent Session`
+  - The SDK object that represents one usable daemon-backed conversation.
+  - Why: so prompting, history access, and shutdown can be exposed as coherent client operations.
+- `Loop Runtime`
+  - The SDK-owned execution of repeated agent cycles over one session.
+  - Why: so pacing, retries, and cleanup are handled consistently across loop consumers.
+- `Retry Policy`
+  - The caller-defined rule set that decides whether a failed loop cycle should be retried.
+  - Why: so recovery behavior can be adapted to the caller's tolerance for transient failures.
+- `Rate-Limit Policy`
+  - The caller-defined pacing contract for loop execution.
+  - Why: so long-running automation can stay within intentional operational limits rather than prompting continuously.

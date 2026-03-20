@@ -104,6 +104,7 @@ export async function createPrViaApp(
   }
 }
 
+/** Resolves the GitHub App installation that grants backend authority for one repository. */
 async function createInstallationOctokit(env: Env | undefined, owner: string, repo: string) {
   if (!env?.GITHUB_APP_ID || !env?.GITHUB_APP_PRIVATE_KEY) {
     throw new HttpError(500, "GitHub App credentials are not configured on the backend")

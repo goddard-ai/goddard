@@ -6,7 +6,7 @@ import { TursoBackendControlPlane } from "../db/persistence.ts"
 import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.ts"
 import type { Env } from "../env.ts"
 
-// Test seams and runtime adapters injected into the backend router.
+/** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
   broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
@@ -138,6 +138,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   })
 }
 
+/** Builds the default Turso-backed control-plane implementation for one request environment. */
 function createTursoControlPlane(env: Env): BackendControlPlane {
   const client = createClient({
     url: env.TURSO_DB_URL,
@@ -147,10 +148,12 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
   return new TursoBackendControlPlane(client as any)
 }
 
+/** Provides a safe default when the worker host does not supply event broadcasting. */
 async function noopBroadcast(_env: Env, _event: RepoEvent): Promise<void> {
   // No-op: the caller (e.g. worker.ts) should provide a real implementation.
 }
 
+/** Returns a clear placeholder response when server-sent events are not wired in. */
 async function defaultHandleUserStream(
   _env: Env,
   _githubUsername: string,
@@ -159,6 +162,7 @@ async function defaultHandleUserStream(
   return new Response("SSE handler not configured", { status: 501 })
 }
 
+/** Rehydrates the worker environment values used by the backend control plane. */
 function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
   return {
     TURSO_DB_URL: ctx.env("TURSO_DB_URL"),
@@ -169,6 +173,7 @@ function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
   }
 }
 
+/** Extracts the bearer token expected by authenticated backend routes. */
 function readBearerToken(header: string): string {
   if (!header || !header.startsWith("Bearer ")) {
     throw new HttpError(401, "Missing Bearer token")
@@ -177,6 +182,7 @@ function readBearerToken(header: string): string {
   return header.slice("Bearer ".length)
 }
 
+/** Converts thrown backend errors into consistent JSON HTTP responses. */
 function toErrorResponse(error: unknown): Response {
   const statusCode = error instanceof HttpError ? error.statusCode : 500
   const message = error instanceof Error ? error.message : "Unknown error"

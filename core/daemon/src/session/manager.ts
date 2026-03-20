@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type {
   CreateDaemonSessionRequest,
   DaemonDiagnosticEvent,
@@ -15,7 +16,6 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
-import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import {
   SessionStateStorage,
   SessionStorage,
@@ -23,9 +23,12 @@ import {
   type SessionDiagnosticEvent,
   type SQLSessionUpdate,
 } from "@goddard-ai/storage"
-import { randomUUID, randomBytes } from "node:crypto"
+import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
+import { randomBytes, randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
+import { prependAgentBinToPath } from "../config.ts"
+import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -33,13 +36,12 @@ import {
   isAcpRequest,
   matchAcpRequest,
 } from "./acp.ts"
-import { prependAgentBinToPath } from "../config.ts"
 import { fetchRegistryAgent } from "./registry.ts"
-import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
 
+/** Falls back to a safe placeholder when the build-time version constant is unavailable. */
 function getPackageVersion(): string {
   try {
     return __VERSION__
@@ -50,19 +52,21 @@ function getPackageVersion(): string {
 
 const logger = createDaemonLogger()
 
+/** Tracks in-flight client requests so agent responses can be correlated back to session state. */
 type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
 
+/** Represents the most recent permission request awaiting a client decision. */
 type PermissionRequest = acp.AnyMessage & {
   id: unknown
   params: acp.RequestPermissionRequest
 }
 
-// ACP request metadata tracked in memory so response messages can update session state.
+/** Captures prompt requests so their responses can drive status transitions. */
 type PromptRequestMessage = acp.AnyMessage & {
   params: acp.PromptRequest
 }
 
-// Live daemon-owned session runtime that cannot survive process restarts.
+/** Holds the live runtime state for a daemon-owned session process. */
 type ActiveSession = {
   id: string
   acpId: string
@@ -80,6 +84,7 @@ type ActiveSession = {
   clientRequests: ClientRequestMap
 }
 
+/** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
 export type SessionManager = {
   createSession: (params: CreateDaemonSessionRequest) => Promise<DaemonSession>
   connectSession: (id: string) => Promise<DaemonSession>
@@ -92,6 +97,7 @@ export type SessionManager = {
   close: () => Promise<void>
 }
 
+/** Ensures the daemon's system prompt is prepended to the first user prompt sent to an agent. */
 export function injectSystemPrompt(
   request: acp.PromptRequest,
   systemPrompt: string,
@@ -105,6 +111,7 @@ export function injectSystemPrompt(
   }
 }
 
+/** Maps client-originated ACP messages to any immediate session status changes they imply. */
 function sessionStatusFromClientMessage(
   message: acp.AnyMessage,
   status: SessionStatus,
@@ -113,17 +120,14 @@ function sessionStatusFromClientMessage(
     return null
   }
 
-  const cancelRequest = matchAcpRequest<acp.CancelRequestNotification>(
-    message,
-    acp.AGENT_METHODS.session_cancel,
-  )
-  if (cancelRequest) {
+  if (isAcpRequest(message, acp.AGENT_METHODS.session_cancel)) {
     return "cancelled"
   }
 
   return null
 }
 
+/** Interprets agent responses in the context of the triggering client request. */
 function sessionStatusFromAgentMessage(
   clientRequest: acp.AnyMessage | undefined,
   message: acp.AnyMessage,
@@ -136,26 +140,29 @@ function sessionStatusFromAgentMessage(
     return null
   }
 
-  const result = getAcpMessageResult<acp.PromptResponse>(message)
-  if (result?.stopReason === "end_turn") {
+  if (getAcpMessageResult<acp.PromptResponse>(message)?.stopReason === "end_turn") {
     return "done"
   }
 
   return null
 }
 
+/** Treats abrupt termination signals as session errors instead of normal shutdowns. */
 function isErrorSignal(signal: string | null): boolean {
   return signal === "SIGKILL" || signal === "SIGABRT" || signal === "SIGQUIT"
 }
 
+/** Detects one-shot sessions that should exit immediately after the initial prompt completes. */
 function shouldExitAfterInitialPrompt(params: CreateDaemonSessionRequest): boolean {
   return params.oneShot === true && params.initialPrompt !== undefined
 }
 
+/** Normalizes persisted timestamps to ISO strings for schema responses. */
 function toIsoString(value: Date | number): string {
   return (value instanceof Date ? value : new Date(value)).toISOString()
 }
 
+/** Derives reconnectability and history availability from stored connection state. */
 function toConnectionState(input: {
   mode: SessionConnectionMode
   activeDaemonSession: boolean
@@ -169,6 +176,7 @@ function toConnectionState(input: {
   }
 }
 
+/** Hydrates a stored session record with derived state needed by daemon clients. */
 async function toDaemonSession(
   record: Awaited<ReturnType<typeof SessionStorage.get>>,
 ): Promise<DaemonSession> {
@@ -206,6 +214,7 @@ async function toDaemonSession(
   }
 }
 
+/** Produces a stable agent name whether the request used an id or a resolved distribution. */
 function agentNameFromInput(agent: string | AgentDistribution): string {
   if (typeof agent === "string") {
     return agent
@@ -214,6 +223,7 @@ function agentNameFromInput(agent: string | AgentDistribution): string {
   return agent.name
 }
 
+/** Builds the child-process environment expected by session agents. */
 function buildAgentProcessEnv(input: {
   daemonUrl: string
   token: string
@@ -228,11 +238,12 @@ function buildAgentProcessEnv(input: {
   }
 }
 
+/** Resolves and launches the requested agent distribution for a new daemon session. */
 async function spawnAgentProcess(
   daemonUrl: string,
   token: string,
   params: {
-    agent: string | AgentDistribution
+    agent: ACPAdapterName | AgentDistribution
     cwd: string
     agentBinDir: string
     env?: Record<string, string>
@@ -264,6 +275,7 @@ async function spawnAgentProcess(
   })
 }
 
+/** Chooses the concrete command invocation for a resolved agent distribution. */
 function resolveAgentProcessSpec(agent: AgentDistribution): {
   cmd: string
   args: string[]
@@ -297,6 +309,7 @@ function resolveAgentProcessSpec(agent: AgentDistribution): {
   throw new Error(`Unsupported agent distribution for ${agent.id}`)
 }
 
+/** Selects the platform-specific binary target for the current runtime when available. */
 function resolveBinaryTarget(agent: AgentDistribution): AgentBinaryTarget | null {
   const platformKey = toAgentBinaryPlatform(process.platform, process.arch)
   if (!platformKey) {
@@ -306,6 +319,7 @@ function resolveBinaryTarget(agent: AgentDistribution): AgentBinaryTarget | null
   return agent.distribution.binary?.[platformKey] ?? null
 }
 
+/** Converts Node platform metadata into the registry's binary target keys. */
 function toAgentBinaryPlatform(
   platform: NodeJS.Platform,
   arch: string,
@@ -329,6 +343,7 @@ function toAgentBinaryPlatform(
     : null
 }
 
+/** Performs the ACP handshake and optional initial prompt before live streaming begins. */
 async function initializeSession(
   input: Writable,
   output: Readable,
@@ -410,6 +425,7 @@ async function initializeSession(
   }
 }
 
+/** Extracts repository ownership metadata used for permission scoping. */
 function parseRepoScope(metadata?: DaemonSessionMetadata): {
   owner: string
   repo: string
@@ -425,6 +441,7 @@ function parseRepoScope(metadata?: DaemonSessionMetadata): {
   }
 }
 
+/** Builds the structured logging context shared across session lifecycle events. */
 function buildSessionLogContext(params: {
   agent: string | AgentDistribution
   cwd: string
@@ -462,6 +479,7 @@ function buildSessionLogContext(params: {
   }
 }
 
+/** Creates a normalized diagnostic record for persistence and log correlation. */
 function createDiagnosticEvent(
   sessionId: string,
   type: string,
@@ -475,6 +493,7 @@ function createDiagnosticEvent(
   }
 }
 
+/** Logs raw transport chunks with a compact preview for debugging broken streams. */
 function logAgentChunk(sessionId: string, acpId: string | undefined, chunk: Uint8Array): void {
   if (chunk.byteLength === 0) {
     return
@@ -487,6 +506,7 @@ function logAgentChunk(sessionId: string, acpId: string | undefined, chunk: Uint
   })
 }
 
+/** Logs ACP messages in a structured form without dumping full payloads verbatim. */
 function logAgentMessage(
   event: "agent.message_read" | "agent.message_write",
   sessionId: string,
@@ -503,6 +523,7 @@ function logAgentMessage(
   })
 }
 
+/** Creates the daemon session manager and owns reconciliation of live session processes. */
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string

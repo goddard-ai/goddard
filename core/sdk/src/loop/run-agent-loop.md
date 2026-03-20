@@ -1,0 +1,35 @@
+# Agent Loop Domain Concepts
+
+- Scope:
+  - This document explains the domain concepts that appear in [`core/sdk/src/loop/run-agent-loop.ts`](./run-agent-loop.ts).
+  - It focuses on loop behavior rather than daemon session internals.
+- `Agent Loop`
+  - A repeated cycle that sends prompts to an agent session over time.
+  - Why: so a caller can define ongoing behavior without manually supervising every prompt.
+- `Loop Cycle`
+  - One complete pass of prompt generation, prompt delivery, and pacing.
+  - Why: so retry handling and rate limits can be reasoned about around a stable unit of work.
+- `Next Prompt`
+  - The loop's source of forward progress.
+  - Why: so each cycle can derive fresh intent from the caller instead of replaying a fixed prompt forever.
+- `Retry Attempt`
+  - One follow-up try for the same cycle after a prompt failure.
+  - Why: so transient failures do not automatically end a loop that still has a sensible path forward.
+- `Retryable Error`
+  - A failure the caller's retry policy considers safe to try again.
+  - Why: so the loop can distinguish recoverable interruptions from failures that should stop the run.
+- `Backoff`
+  - The growing delay applied between retry attempts.
+  - Why: so repeated failures do not immediately hammer the same failing condition.
+- `Jitter`
+  - The small random variation applied to retry delays.
+  - Why: so repeated loop failures do not fall into perfectly synchronized retry patterns.
+- `Throttle`
+  - The pacing boundary enforced between completed cycles.
+  - Why: so the loop respects caller-defined operational limits even when the agent can respond quickly.
+- `Pause Threshold`
+  - The cycle count at which the loop deliberately takes a long break.
+  - Why: so very long-lived loops periodically yield instead of running forever at a steady cadence.
+- `Exit Cleanup`
+  - The loop's promise to stop the underlying session when the host process exits.
+  - Why: so loop-owned sessions do not keep running after the caller disappears unexpectedly.

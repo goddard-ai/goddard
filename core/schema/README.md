@@ -2,6 +2,10 @@
 
 This package contains shared communication types and their Zod validation schemas for the Goddard AI project. It is used to enforce strict data validation between the backend and SDK.
 
+## Related Docs
+
+- [Schema Glossary](./glossary.md)
+
 ## Usage
 
 ```typescript

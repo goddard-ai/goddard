@@ -11,10 +11,12 @@ export type RunAgentOptions = DaemonClientOptions
 /** Read-only daemon session lookup options shared with `runAgent`. */
 export type GetDaemonSessionOptions = RunAgentOptions
 
+/** Detects the session-creation case that returns no live client session object. */
 function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
   return "sessionId" in params === false && params.oneShot === true
 }
 
+/** Turns a writable ACP transport into daemon `sessionSend` requests. */
 function createMessageInputTransport(client: DaemonIpcClient, id: string): WritableStream {
   let buffer = ""
   const decoder = new TextDecoder()
@@ -43,6 +45,7 @@ function createMessageInputTransport(client: DaemonIpcClient, id: string): Writa
   })
 }
 
+/** Flushes newline-delimited ACP messages from a partial input buffer. */
 async function flushMessageBuffer(
   buffer: string,
   client: DaemonIpcClient,
@@ -66,6 +69,7 @@ async function flushMessageBuffer(
   return remainingBuffer
 }
 
+/** Normalizes writable stream chunks into ACP NDJSON text. */
 function decodeStreamChunk(chunk: unknown, decoder: TextDecoder): string {
   if (typeof chunk === "string") {
     return chunk
@@ -77,6 +81,7 @@ function decodeStreamChunk(chunk: unknown, decoder: TextDecoder): string {
   throw new Error(`Unsupported ACP transport chunk: ${String(chunk)}`)
 }
 
+/** Turns daemon-published session messages back into a readable ACP output transport. */
 async function createMessageOutputTransport(
   client: DaemonIpcClient,
   id: string,
