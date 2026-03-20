@@ -74,6 +74,11 @@ export function createDaemonLogger(writeLine: DaemonLogWriter = defaultWriteLine
   }
 }
 
+/** Returns true when daemon logs are rendered in expanded verbose mode. */
+export function isVerboseDaemonLogging(): boolean {
+  return daemonLogMode === "verbose"
+}
+
 export function createPayloadPreview(value: unknown, options: DaemonSanitizeOptions = {}): unknown {
   return sanitizeValue(value, options.maxStringLength ?? 512, options.parentKey)
 }

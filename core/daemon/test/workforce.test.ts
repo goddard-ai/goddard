@@ -2,8 +2,9 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 import { startDaemonServer } from "../src/ipc.ts"
+import { configureDaemonLogging } from "../src/logging.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 import { WorkforceRuntime } from "../src/workforce/runtime.ts"
@@ -356,6 +357,90 @@ test("create-intent requests target the root agent and specialize the root sessi
   expect(capturedInitialPrompt).toMatch(/Request intent: create/)
 })
 
+test("workforce runtime logs request-to-session correlation for launched sessions", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-logs-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  let runtime!: WorkforceRuntime
+  const { logs } = await captureDaemonLogs(async () => {
+    runtime = await WorkforceRuntime.start(rootDir, {
+      sessionManager: {
+        createSession: async (input) => {
+          const metadata =
+            input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
+              ? (input.metadata.workforce as { requestId: string; agentId: string })
+              : null
+
+          if (!metadata) {
+            throw new Error("Missing workforce metadata")
+          }
+
+          await runtime.respond({
+            requestId: metadata.requestId,
+            output: "done",
+            actor: {
+              sessionId: "daemon-session-1",
+              agentId: metadata.agentId,
+              requestId: metadata.requestId,
+            },
+          })
+
+          return {
+            id: "daemon-session-1",
+            acpId: "acp-session-1",
+            status: "done",
+          } as never
+        },
+      } as never,
+    })
+
+    await runtime.createRequest({
+      targetAgentId: "root",
+      payload: "Ship the logging changes.",
+      actor: { sessionId: null, agentId: null, requestId: null },
+    })
+
+    await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
+  })
+
+  const launchLog = logs.find((entry) => entry.event === "workforce.session_launch_started")
+  expect(launchLog).toBeTruthy()
+  expect(launchLog?.agentId).toBe("root")
+
+  const completedLog = logs.find(
+    (entry) =>
+      entry.event === "workforce.session_launch_completed" &&
+      entry.sessionId === "daemon-session-1",
+  )
+  expect(completedLog).toBeTruthy()
+  expect(completedLog?.acpId).toBe("acp-session-1")
+  expect(typeof completedLog?.requestId).toBe("string")
+})
+
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number = 5_000) {
   const startedAt = Date.now()
 
@@ -368,4 +453,31 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: n
   }
 
   throw new Error("Timed out waiting for workforce condition")
+}
+
+async function captureDaemonLogs<T>(
+  action: () => Promise<T>,
+): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
+  const output: string[] = []
+  const restoreLogging = configureDaemonLogging({ mode: "json" })
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"))
+    return true
+  }) as typeof process.stdout.write)
+
+  try {
+    const result = await action()
+    return {
+      logs: output
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+      result,
+    }
+  } finally {
+    stdout.mockRestore()
+    restoreLogging()
+  }
 }

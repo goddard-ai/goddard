@@ -1,4 +1,5 @@
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
+import { createDaemonLogger } from "../logging.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"
 import {
   WorkforceRuntime,
@@ -60,6 +61,7 @@ export interface WorkforceManager {
 }
 
 export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceManager {
+  const logger = createDaemonLogger()
   const runtimes = new Map<string, WorkforceRuntime>()
 
   async function getRuntime(
@@ -82,13 +84,25 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
       const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
       const existing = runtimes.get(normalizedRootDir)
       if (existing) {
+        logger.log("workforce.runtime_reused", {
+          rootDir: normalizedRootDir,
+        })
         return existing.getWorkforce()
       }
 
-      const runtime = await (deps.createRuntime ?? WorkforceRuntime.start)(normalizedRootDir, {
-        sessionManager: deps.sessionManager,
-        runSession: deps.runSession,
-      })
+      let runtime: WorkforceRuntime
+      try {
+        runtime = await (deps.createRuntime ?? WorkforceRuntime.start)(normalizedRootDir, {
+          sessionManager: deps.sessionManager,
+          runSession: deps.runSession,
+        })
+      } catch (error) {
+        logger.log("workforce.runtime_start_failed", {
+          rootDir: normalizedRootDir,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      }
       runtimes.set(normalizedRootDir, runtime)
       return runtime.getWorkforce()
     },

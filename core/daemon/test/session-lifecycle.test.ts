@@ -440,6 +440,16 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
   expect((chunkLog!.preview as any).truncated).toBe(true)
   expect((chunkLog!.preview as any).byteLength > 256).toBe(true)
 
+  const statusChangeLog = logs.find(
+    (entry) =>
+      entry.event === "session_status_changed" &&
+      entry.sessionId === result.sessionId &&
+      entry.previousStatus === "active" &&
+      entry.nextStatus === "done",
+  )
+  expect(statusChangeLog).toBeTruthy()
+  expect(statusChangeLog?.reason).toBe("agent_message")
+
   const diagnostics = await client.send("sessionDiagnostics", { id: result.sessionId })
   expect(
     diagnostics.events.some(

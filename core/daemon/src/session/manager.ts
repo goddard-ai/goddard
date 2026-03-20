@@ -425,6 +425,43 @@ function parseRepoScope(metadata?: DaemonSessionMetadata): {
   }
 }
 
+function buildSessionLogContext(params: {
+  agent: string | AgentDistribution
+  cwd: string
+  oneShot?: boolean
+  metadata?: DaemonSessionMetadata
+}): Record<string, unknown> {
+  const metadata = params.metadata
+  const workforceMetadata =
+    metadata && typeof metadata === "object" && "workforce" in metadata
+      ? (metadata.workforce as {
+          rootDir?: unknown
+          agentId?: unknown
+          requestId?: unknown
+        } | null)
+      : null
+
+  return {
+    agent: agentNameFromInput(params.agent),
+    cwd: params.cwd,
+    oneShot: params.oneShot === true,
+    repository: typeof metadata?.repository === "string" ? metadata.repository : undefined,
+    prNumber: typeof metadata?.prNumber === "number" ? metadata.prNumber : undefined,
+    workforceRootDir:
+      workforceMetadata && typeof workforceMetadata.rootDir === "string"
+        ? workforceMetadata.rootDir
+        : undefined,
+    workforceAgentId:
+      workforceMetadata && typeof workforceMetadata.agentId === "string"
+        ? workforceMetadata.agentId
+        : undefined,
+    workforceRequestId:
+      workforceMetadata && typeof workforceMetadata.requestId === "string"
+        ? workforceMetadata.requestId
+        : undefined,
+  }
+}
+
 function createDiagnosticEvent(
   sessionId: string,
   type: string,
@@ -474,13 +511,25 @@ export function createSessionManager(input: {
   const activeSessions = new Map<string, ActiveSession>()
   const ready = reconcilePersistedSessions()
 
-  async function updateSession(id: string, update: SQLSessionUpdate): Promise<void> {
+  async function updateSession(
+    id: string,
+    update: SQLSessionUpdate,
+    detail?: Record<string, unknown>,
+  ): Promise<void> {
     const active = activeSessions.get(id)
+    const previousStatus = active?.status ?? (await SessionStorage.get(id))?.status
     if (update.status && active) {
       active.status = update.status
     }
 
     await SessionStorage.update(id, update)
+    if (update.status && previousStatus && previousStatus !== update.status) {
+      await emitDiagnostic(id, "session_status_changed", {
+        previousStatus,
+        nextStatus: update.status,
+        ...detail,
+      })
+    }
   }
 
   async function appendHistory(id: string, message: acp.AnyMessage): Promise<void> {
@@ -578,6 +627,7 @@ export function createSessionManager(input: {
     const id = randomUUID()
     const token = randomBytes(32).toString("hex")
     const scope = parseRepoScope(params.metadata)
+    const sessionLogContext = buildSessionLogContext(params)
     const sessionContext = {
       sessionId: id,
       acpId: undefined as string | undefined,
@@ -592,6 +642,11 @@ export function createSessionManager(input: {
     })
 
     try {
+      logger.log("session.launch_requested", {
+        sessionId: id,
+        ...sessionLogContext,
+      })
+
       const process = await spawnAgentProcess(input.daemonUrl, token, {
         agent: params.agent,
         cwd: params.cwd,
@@ -631,12 +686,11 @@ export function createSessionManager(input: {
       })
       await emitDiagnostic(id, "session_created", {
         status: initialized.status,
-        oneShot: params.oneShot === true,
-        agent: agentNameFromInput(params.agent),
+        ...sessionLogContext,
       })
 
       if (shouldExitAfterInitialPrompt(params)) {
-        await updateSession(id, { status: "done" })
+        await updateSession(id, { status: "done" }, { reason: "one_shot_completed" })
         await setConnectionMode(id, "history", false)
         await emitDiagnostic(id, "session_completed_one_shot")
         process.kill()
@@ -682,7 +736,15 @@ export function createSessionManager(input: {
           const clientRequest = active.clientRequests.get(message.id)
           const nextStatus = sessionStatusFromAgentMessage(clientRequest, message)
           if (nextStatus) {
-            await updateSession(active.id, { status: nextStatus })
+            await updateSession(
+              active.id,
+              { status: nextStatus },
+              {
+                reason: "agent_message",
+                requestMethod: clientRequest?.method,
+                responseId: message.id,
+              },
+            )
           }
           if (clientRequest) {
             active.clientRequests.delete(message.id)
@@ -717,7 +779,11 @@ export function createSessionManager(input: {
           nextStatus: nextUpdate.status ?? active.status,
         })
         if (Object.keys(nextUpdate).length > 0) {
-          await updateSession(active.id, nextUpdate).catch(() => {})
+          await updateSession(active.id, nextUpdate, {
+            reason: "agent_process_exit",
+            code,
+            signal,
+          }).catch(() => {})
         }
       }
 
@@ -728,6 +794,11 @@ export function createSessionManager(input: {
       activeSessions.set(active.id, active)
       return toDaemonSession(await SessionStorage.get(id))
     } catch (error) {
+      logger.log("session.launch_failed", {
+        sessionId: id,
+        ...sessionLogContext,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
       await SessionPermissionsStorage.revoke(id).catch(() => {})
       await SessionStateStorage.remove(id).catch(() => {})
       throw error
@@ -794,7 +865,15 @@ export function createSessionManager(input: {
     } else {
       const nextStatus = sessionStatusFromClientMessage(message, active.status)
       if (nextStatus) {
-        await updateSession(active.id, { status: nextStatus })
+        await updateSession(
+          active.id,
+          { status: nextStatus },
+          {
+            reason: "client_message",
+            method: "method" in message ? message.method : undefined,
+            messageId: "id" in message ? message.id : undefined,
+          },
+        )
       }
 
       if (
