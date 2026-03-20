@@ -25,6 +25,7 @@
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/storage": "workspace:^",
     "cmd-ts": "^0.15.0",
-    "kleur": "^4.1.5"
+    "kleur": "^4.1.5",
+    "radashi": "^12.7.2"
   }
 }

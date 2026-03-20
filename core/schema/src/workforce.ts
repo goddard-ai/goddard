@@ -1,4 +1,5 @@
 import type { AgentDistribution } from "./session-server.js"
+import type { WorkforceRequestIntent } from "./workforce/requests.js"
 
 export type { WorkforceRequestIntent } from "./workforce/requests.js"
 
@@ -45,7 +46,7 @@ export interface WorkforceRequestEvent extends WorkforceEventBase {
   requestId: string
   toAgentId: string
   fromAgentId: string | null
-  intent: import("./workforce/requests.js").WorkforceRequestIntent
+  intent: WorkforceRequestIntent
   input: string
 }
 
@@ -119,7 +120,7 @@ export interface WorkforceRequestRecord {
   id: string
   toAgentId: string
   fromAgentId: string | null
-  intent: import("./workforce/requests.js").WorkforceRequestIntent
+  intent: WorkforceRequestIntent
   input: string
   updates: string[]
   status: WorkforceRequestStatus

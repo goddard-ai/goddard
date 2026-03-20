@@ -1,10 +1,11 @@
 import type * as acp from "@agentclientprotocol/sdk"
+import type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
 import type { SessionStatus } from "./db.js"
 import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.js"
 
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
-export type { CreateDaemonSessionRequest, DaemonSessionPathParams } from "./daemon/sessions.js"
 export type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
+export type { CreateDaemonSessionRequest, DaemonSessionPathParams } from "./daemon/sessions.js"
 export type {
   CancelDaemonWorkforceRequest,
   CreateDaemonWorkforceRequestRequest,
@@ -72,7 +73,7 @@ export type DaemonSession = DaemonSessionIdentity & {
   status: SessionStatus
   agentName: string
   cwd: string
-  metadata: import("./daemon/session-metadata.js").DaemonSessionMetadata | null
+  metadata: DaemonSessionMetadata | null
   connection: DaemonSessionConnection
   diagnostics: DaemonSessionDiagnostics
   createdAt: string

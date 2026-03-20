@@ -45,11 +45,11 @@
     "@goddard-ai/storage": "workspace:^",
     "cron-parser": "^5.5.0",
     "exit-hook": "^4.0.0",
+    "radashi": "^12.7.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@goddard-ai/daemon": "workspace:^",
-    "drizzle-kit": "^0.31.9",
-    "radashi": "^12.7.2"
+    "drizzle-kit": "^0.31.9"
   }
 }
