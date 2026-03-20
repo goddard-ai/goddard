@@ -54,7 +54,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
-    "@goddard-ai/backend": "workspace:^",
+    "@goddard-ai/backend-client": "workspace:^",
     "@goddard-ai/config": "workspace:^",
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/schema": "workspace:^",

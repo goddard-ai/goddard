@@ -1,7 +1,7 @@
+import { InMemoryBackendControlPlane, startBackendServer } from "@goddard-ai/backend"
 import { InMemoryTokenStorage } from "@goddard-ai/storage"
-import { assert, test } from "vitest"
-import { createBackendClient } from "../src/client.ts"
-import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
+import { expect, test } from "vitest"
+import { createBackendClient } from "../src/index.ts"
 
 test("backend client creates PRs and checks managed status through rouzer route helpers", async () => {
   const controlPlane = new InMemoryBackendControlPlane()
@@ -27,11 +27,10 @@ test("backend client creates PRs and checks managed status through rouzer route 
       base: "main",
     })
 
-    assert.equal(pr.number, 1)
-    assert.equal(
-      await client.pr.isManaged({ owner: "goddard-ai", repo: "sdk", prNumber: pr.number }),
-      true,
-    )
+    expect(pr.number).toBe(1)
+    await expect(
+      client.pr.isManaged({ owner: "goddard-ai", repo: "sdk", prNumber: pr.number }),
+    ).resolves.toBe(true)
   } finally {
     await server.close()
   }
@@ -51,11 +50,11 @@ test("backend client manages auth session state through token storage", async ()
       githubUsername: "alec",
     })
 
-    assert.equal(await tokenStorage.getToken(), session.token)
-    assert.deepEqual(await client.auth.whoami(), session)
+    await expect(tokenStorage.getToken()).resolves.toBe(session.token)
+    await expect(client.auth.whoami()).resolves.toEqual(session)
 
     await client.auth.logout()
-    assert.equal(await tokenStorage.getToken(), null)
+    await expect(tokenStorage.getToken()).resolves.toBeNull()
   } finally {
     await server.close()
   }
@@ -92,9 +91,9 @@ test("backend client subscribes to unified stream via rouzer route response", as
     })
 
     const event = (await eventPromise) as { type: string; prNumber: number }
-    assert.equal(pr.number, 1)
-    assert.equal(event.type, "pr.created")
-    assert.equal(event.prNumber, 1)
+    expect(pr.number).toBe(1)
+    expect(event.type).toBe("pr.created")
+    expect(event.prNumber).toBe(1)
 
     subscription.close()
   } finally {

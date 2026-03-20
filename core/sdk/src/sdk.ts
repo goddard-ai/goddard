@@ -1,4 +1,4 @@
-import { createBackendClient, type BackendClient } from "@goddard-ai/backend/client"
+import { createBackendClient, type BackendClient } from "@goddard-ai/backend-client"
 import type {
   CreatePrInput,
   DeviceFlowComplete,

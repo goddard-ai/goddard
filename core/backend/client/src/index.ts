@@ -12,13 +12,13 @@ import * as routes from "@goddard-ai/schema/backend/routes"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
 import { createClient } from "rouzer"
 
-// Fetch implementation used by the backend client.
+/** Fetch implementation consumed by the backend client. */
 type FetchLike = typeof fetch
 
-// Listener shape for stream event subscriptions.
+/** Listener signature used by backend stream subscriptions. */
 type StreamHandler = (event?: unknown) => void
 
-// Constructor options for the backend client.
+/** Constructor options for the backend client. */
 type BackendClientOptions = {
   baseUrl: string
   tokenStorage?: TokenStorage
@@ -177,6 +177,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
   }
 }
 
+/** Resolves the stored auth token or fails when the client is unauthenticated. */
 async function requireToken(tokenStorage: TokenStorage): Promise<string> {
   const token = await tokenStorage.getToken()
   if (!token) {
@@ -186,6 +187,7 @@ async function requireToken(tokenStorage: TokenStorage): Promise<string> {
   return token
 }
 
+/** Reads the backend SSE response stream until the subscription closes or the stream ends. */
 async function consumeSseResponse(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   subscription: BackendStreamSubscription,
@@ -219,6 +221,7 @@ async function consumeSseResponse(
   }
 }
 
+/** Emits complete SSE messages from the buffered stream content and preserves any trailing partial frame. */
 function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription): string {
   let remaining = buffer
 
@@ -246,6 +249,7 @@ function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription)
   }
 }
 
+/** Extracts the SSE data payload lines from one event frame. */
 function parseSseData(chunk: string): string | null {
   const lines = chunk.split(/\r?\n/)
   const dataLines: string[] = []
