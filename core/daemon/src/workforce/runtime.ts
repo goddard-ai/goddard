@@ -464,7 +464,7 @@ export class WorkforceRuntime {
 
     const requestId = uuidv7()
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "request",
       requestId,
@@ -504,7 +504,7 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "update",
       requestId: input.requestId,
@@ -539,7 +539,7 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "cancel",
       requestId: input.requestId,
@@ -570,7 +570,7 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "truncate",
       agentId: input.agentId,
@@ -602,7 +602,7 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "response",
       requestId: input.requestId,
@@ -634,7 +634,7 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "suspend",
       requestId: input.requestId,
@@ -652,10 +652,11 @@ export class WorkforceRuntime {
     })
   }
 
-  private async appendEvent(event: WorkforceLedgerEvent): Promise<void> {
-    await appendWorkforceLedgerEvent(this.#rootDir, event)
-    this.#events.push(event)
-    applyWorkforceEvent(this.#projection.requests, event)
+  private async appendEvent(event: Omit<WorkforceLedgerEvent, "id"> & { id?: string }): Promise<void> {
+    const eventWithId = { ...event, id: event.id ?? uuidv7() } as WorkforceLedgerEvent
+    await appendWorkforceLedgerEvent(this.#rootDir, eventWithId)
+    this.#events.push(eventWithId)
+    applyWorkforceEvent(this.#projection.requests, eventWithId)
     this.#projection = {
       requests: this.#projection.requests,
       queues: buildWorkforceQueues(this.#projection.requests),
@@ -713,7 +714,7 @@ export class WorkforceRuntime {
     const queuedBefore = this.#projection.queues[agentId]?.length ?? 0
 
     await this.appendEvent({
-      id: uuidv7(),
+
       at: new Date().toISOString(),
       type: "handle",
       requestId,
@@ -766,7 +767,7 @@ export class WorkforceRuntime {
     const errorMessage = error instanceof Error ? error.message : String(error)
     if (attempt >= 3) {
       await this.appendEvent({
-        id: uuidv7(),
+
         at: new Date().toISOString(),
         type: "error",
         requestId,
