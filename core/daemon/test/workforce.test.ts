@@ -208,11 +208,11 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
             requestId: request.id,
           },
         })
-        return
+        return "session-1"
       }
 
       if (request.input === "fail me") {
-        return
+        return "session-1"
       }
 
       await runtime.respond({
@@ -224,6 +224,8 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
           requestId: request.id,
         },
       })
+
+      return "session-1"
     },
   })
 

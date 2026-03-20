@@ -445,7 +445,7 @@ export async function startDaemonServer(
       await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
       await new Promise<void>((resolve, reject) => {
-        ipcServer.server.close((error) => {
+        ipcServer.server.close((error: any) => {
           if (error) {
             reject(error)
             return

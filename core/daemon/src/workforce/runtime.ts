@@ -35,11 +35,10 @@ export interface WorkforceSessionRunInput {
   config: WorkforceConfig
   request: WorkforceRequestRecord
   recentActivity: WorkforceLedgerEvent[]
-  sessionId: string
 }
 
 /** Session runner abstraction used by tests and the real daemon session bridge. */
-export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promise<void>
+export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promise<string>
 
 /** Mutable runtime dependencies shared by one workload host. */
 export interface WorkforceRuntimeDeps {
@@ -144,7 +143,7 @@ function buildInitialPrompt(
 async function defaultRunWorkforceSession(
   deps: WorkforceRuntimeDeps,
   input: WorkforceSessionRunInput,
-): Promise<void> {
+): Promise<string> {
   const agentDistribution = input.agent.agent ?? input.config.defaultAgent
   const metadata = {
     workforce: {
@@ -154,8 +153,7 @@ async function defaultRunWorkforceSession(
     },
   }
 
-  await deps.sessionManager.createSession({
-    id: input.sessionId,
+  const session = await deps.sessionManager.createSession({
     agent: agentDistribution,
     cwd: input.agent.cwd === "." ? input.rootDir : join(input.rootDir, input.agent.cwd),
     mcpServers: [],
@@ -169,6 +167,8 @@ async function defaultRunWorkforceSession(
       GODDARD_WORKFORCE_REQUEST_ID: input.request.id,
     },
   })
+
+  return session.id
 }
 
 function assertRequestExists(
@@ -466,27 +466,25 @@ export class WorkforceRuntime {
     const agent = assertAgentExists(this.#config, agentId)
     const request = assertRequestExists(this.#projection, requestId)
     const attempt = request.attemptCount + 1
-    const sessionId = randomUUID()
-
-    await this.appendEvent({
-      id: randomUUID(),
-      at: new Date().toISOString(),
-      type: "handle",
-      requestId,
-      agentId,
-      attempt,
-      sessionId,
-    })
 
     try {
       const runSession =
         this.#deps.runSession ?? ((input) => defaultRunWorkforceSession(this.#deps, input))
-      await runSession({
+      const sessionId = await runSession({
         rootDir: this.#rootDir,
         agent,
         config: this.#config,
         request: assertRequestExists(this.#projection, requestId),
         recentActivity: buildRecentActivity(this.#events, request),
+      })
+
+      await this.appendEvent({
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        type: "handle",
+        requestId,
+        agentId,
+        attempt,
         sessionId,
       })
     } catch (error) {
