@@ -78,57 +78,29 @@ function formatRequestContext(request: WorkforceRequestRecord): string {
   return [request.input, ...request.updates].filter((entry) => entry.trim().length > 0).join("\n\n")
 }
 
-function buildRootAgentSystemPrompt(): string {
-  return dedent`
-    Rules,
-    - Never modify code outside your owned paths.
-    - Run all \`workforce\` commands in the terminal.
-    - If a payload is long or multiline, write it to a file and pass the file path.
-    - End every active request with either \`workforce respond\` or \`workforce suspend\`.
-
-    Available commands
-    \`workforce request --target-agent-id <agent-id> --input-file <path>\`
-      - Queue new work for another agent.
-    \`workforce update --request-id <request-id> --input-file <path>\`
-      - Append context to an existing request and re-queue it.
-    \`workforce cancel --request-id <request-id> [--reason-file <path>]\`
-      - Cancel an existing request.
+function buildRootAgentSystemPrompt() {
+  const rootCommands = dedent`
     \`workforce truncate [--agent-id <agent-id>] [--reason-file <path>]\`
       - Cancel pending queued or suspended work for one agent or the whole workforce.
-    \`workforce respond --output-file <path>\`
-      - Complete the current request.
-    \`workforce suspend --reason-file <path>\`
-      - Suspend the current request with a clear reason.
-
-    Guidance
+  `
+  const rootGuidance = dedent`
     - Coordinate repo-wide work and delegate when ownership is clear.
   `
+  return {
+    commands: rootCommands,
+    guidance: rootGuidance,
+  }
 }
 
-function buildDomainAgentSystemPrompt(): string {
-  return dedent`
-    Rules
-    - Never modify code outside your owned paths.
-    - Run all \`workforce\` commands in the terminal.
-    - If a payload is long or multiline, write it to a file and pass the file path.
-    - End every active request with either \`workforce respond\` or \`workforce suspend\`.
-
-    Available commands
-    \`workforce request --target-agent-id <agent-id> --input-file <path>\`
-      - Queue new work for another agent.
-    \`workforce update --request-id <request-id> --input-file <path>\`
-      - Append context to a request you originally sent.
-    \`workforce cancel --request-id <request-id> [--reason-file <path>]\`
-      - Cancel a request you originally sent.
-    \`workforce respond --output-file <path>\`
-      - Complete the current request.
-    \`workforce suspend --reason-file <path>\`
-      - Suspend the current request with a clear reason.
-
-    Guidance
+function buildDomainAgentSystemPrompt() {
+  const domainGuidance = dedent`
     - Work only inside your owned paths.
     - If blocked by missing authority, missing context, or out-of-scope work, use \`workforce suspend\`.
   `
+  return {
+    commands: "",
+    guidance: domainGuidance,
+  }
 }
 
 function buildSystemPrompt(
@@ -139,14 +111,74 @@ function buildSystemPrompt(
 ): string {
   const workingDirectory = agent.cwd === "." ? "." : agent.cwd
 
+  const offLimitsPaths = new Set<string>()
+  for (const myPath of agent.owns) {
+    for (const otherAgent of config.agents) {
+      if (otherAgent.id === agent.id) {
+        continue
+      }
+
+      for (const otherPath of otherAgent.owns) {
+        if (myPath === "." && otherPath !== ".") {
+          offLimitsPaths.add(otherPath)
+        } else if (myPath !== "." && otherPath.startsWith(`${myPath}/`)) {
+          offLimitsPaths.add(otherPath)
+        }
+      }
+    }
+  }
+
+  const promptLines = [
+    dedent`
+      You are the Goddard Workforce ${agent.role} agent "${agent.name}" (${agent.id}).
+      Repository root: ${rootDir}
+      Working directory: ${workingDirectory}
+      Owned paths: ${agent.owns.join(", ")}
+      Root agent id: ${config.rootAgentId}
+    `,
+  ]
+
+  if (offLimitsPaths.size > 0) {
+    promptLines.push(
+      `WARNING: The following paths are owned by other agents and are off limits: ${Array.from(offLimitsPaths).sort().join(", ")}`,
+    )
+  }
+
+  const sharedRules = dedent`
+    - Never modify code outside your owned paths.
+    - Run all \`workforce\` commands in the terminal.
+    - If a payload is long or multiline, write it to a file and pass the file path.
+    - End every active request with either \`workforce respond\` or \`workforce suspend\`.
+  `
+
+  const sharedCommands = dedent`
+    \`workforce request --target-agent-id <agent-id> --input-file <path>\`
+      - Queue new work for another agent.
+    \`workforce update --request-id <request-id> --input-file <path>\`
+      - Append context to a request you originally sent.
+    \`workforce cancel --request-id <request-id> [--reason-file <path>]\`
+      - Cancel a request you originally sent.
+    \`workforce respond --output-file <path>\`
+      - Complete the current request.
+    \`workforce suspend --reason-file <path>\`
+      - Suspend the current request with a clear reason.
+  `
+
+  const agentPrompt =
+    agent.role === "root" ? buildRootAgentSystemPrompt() : buildDomainAgentSystemPrompt()
+
   return [
-    `You are the Goddard Workforce ${agent.role} agent "${agent.name}" (${agent.id}).`,
-    `Repository root: ${rootDir}`,
-    `Working directory: ${workingDirectory}`,
-    `Owned paths: ${agent.owns.join(", ")}`,
-    `Root agent id: ${config.rootAgentId}`,
+    ...promptLines,
     "",
-    agent.role === "root" ? buildRootAgentSystemPrompt() : buildDomainAgentSystemPrompt(),
+    "Rules",
+    sharedRules,
+    "",
+    "Available commands",
+    sharedCommands,
+    agentPrompt.commands,
+    "",
+    "Guidance",
+    agentPrompt.guidance,
     ...buildIntentSpecificSystemPrompt(config, agent, request.intent),
   ].join("\n")
 }
