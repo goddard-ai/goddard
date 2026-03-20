@@ -193,11 +193,14 @@ function buildIntentSpecificSystemPrompt(
   }
 
   return [
-    "This request is a create request.",
-    "You are being asked to create a new project from scratch or add new packages to the existing workspace when the requested feature needs them.",
-    "Review the current workspace structure, packages, and ownership boundaries before deciding what to create.",
-    "Do not assume new packages are required; first determine whether the requested feature fits the existing workspace.",
-    "If new packages are appropriate, define them intentionally and delegate follow-up implementation work through the workforce.",
+    "",
+    "This request has create intent.",
+    "Decide first whether the requested capability fits the existing workspace or genuinely requires a new package or project surface.",
+    "Inspect the current workspace structure, package boundaries, naming patterns, and ownership before proposing anything new.",
+    "Prefer the smallest coherent design that fits the existing architecture. Do not create new packages just to mirror the wording of the request or to isolate trivial code.",
+    "If new structure is warranted, define its purpose, ownership boundary, and why it should exist before implementation begins.",
+    "Delegate follow-up implementation only through agents that already exist in the active workforce.",
+    "If the right solution appears to require a new workforce agent or different ownership boundaries, recommend that topology change explicitly for human approval instead of assuming you can reshape the active workforce yourself.",
   ]
 }
 
