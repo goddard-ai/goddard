@@ -111,18 +111,22 @@ function buildSystemPrompt(
 ): string {
   const workingDirectory = agent.cwd === "." ? "." : agent.cwd
 
+  const normalizePath = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "")
+
   const offLimitsPaths = new Set<string>()
-  for (const myPath of agent.owns) {
+  for (const myPathRaw of agent.owns) {
+    const myPath = normalizePath(myPathRaw)
     for (const otherAgent of config.agents) {
       if (otherAgent.id === agent.id) {
         continue
       }
 
-      for (const otherPath of otherAgent.owns) {
+      for (const otherPathRaw of otherAgent.owns) {
+        const otherPath = normalizePath(otherPathRaw)
         if (myPath === "." && otherPath !== ".") {
-          offLimitsPaths.add(otherPath)
+          offLimitsPaths.add(otherPathRaw)
         } else if (myPath !== "." && otherPath.startsWith(`${myPath}/`)) {
-          offLimitsPaths.add(otherPath)
+          offLimitsPaths.add(otherPathRaw)
         }
       }
     }
