@@ -54,4 +54,5 @@ The test suite is maintained by AI agents and should stay lean.
 - Prefer contract-level tests over implementation-detail tests.
 - In Vitest test files, use the `expect` API for assertions instead of `assert` imports from either Vitest or Node.
 - Avoid assertions against informal constants or incidental content fragments. Exact checks for real contract strings, such as error messages or stable literals, are acceptable.
+- Do not assert long natural-language prose such as full prompt paragraphs, guidance text, or similar wording-heavy output when a shorter contract-level check can cover the behavior. Prefer stable commands, structured fields, intent markers, ownership data, or other durable signals.
 - When replacing a shallow or brittle test, remove the old test instead of keeping both unless both protect distinct behavior.
