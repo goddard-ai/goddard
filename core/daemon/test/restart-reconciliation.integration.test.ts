@@ -27,6 +27,21 @@ test("real storage reconciliation marks interrupted sessions as archived history
 
   process.env.HOME = homeDir
 
+  const worktreeCleanupMock = vi.fn(() => true)
+  vi.doMock("@goddard-ai/worktree", () => ({
+    Worktree: class {
+      poweredBy = "mock-worktree"
+
+      setup() {
+        throw new Error("setup should not run during reconciliation")
+      }
+
+      cleanup(worktreeDir: string, branchName: string) {
+        return worktreeCleanupMock(worktreeDir, branchName)
+      }
+    },
+  }))
+
   const [{ startDaemonServer }, { createDaemonIpcClient }, storage] = await Promise.all([
     import("../src/ipc.ts"),
     import("@goddard-ai/daemon-client"),
@@ -41,7 +56,16 @@ test("real storage reconciliation marks interrupted sessions as archived history
     agentName: "pi",
     cwd: process.cwd(),
     mcpServers: [],
-    metadata: null,
+    metadata: {
+      worktree: {
+        repoRoot: homeDir,
+        requestedCwd: homeDir,
+        effectiveCwd: "/tmp/mock-worktree/session-real-restart-session-1",
+        worktreeDir: "/tmp/mock-worktree/session-real-restart-session-1",
+        branchName: "session-real-restart-session-1",
+        poweredBy: "mock-worktree",
+      },
+    },
   })
   await storage.SessionStateStorage.create({
     sessionId,
@@ -90,6 +114,10 @@ test("real storage reconciliation marks interrupted sessions as archived history
   expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
+  expect(worktreeCleanupMock).toHaveBeenCalledWith(
+    "/tmp/mock-worktree/session-real-restart-session-1",
+    "session-real-restart-session-1",
+  )
 
   await expect(client.send("sessionResolveToken", { token: "real-token-1" })).rejects.toThrow(
     /invalid session token/i,

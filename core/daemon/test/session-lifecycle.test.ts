@@ -5,11 +5,22 @@ import { join } from "node:path"
 import { afterEach, expect, test, vi } from "vitest"
 import { configureDaemonLogging } from "../src/logging.ts"
 
-const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
+const {
+  permissionsBySessionId,
+  permissionsByToken,
+  sessionStates,
+  sessions,
+  worktreeConstructorMock,
+  worktreeSetupMock,
+  worktreeCleanupMock,
+} = vi.hoisted(() => ({
   sessions: new Map<string, any>(),
   sessionStates: new Map<string, any>(),
   permissionsBySessionId: new Map<string, any>(),
   permissionsByToken: new Map<string, any>(),
+  worktreeConstructorMock: vi.fn(),
+  worktreeSetupMock: vi.fn(),
+  worktreeCleanupMock: vi.fn(() => true),
 }))
 
 vi.mock("@goddard-ai/storage", () => ({
@@ -121,6 +132,30 @@ vi.mock("@goddard-ai/storage/session-permissions", () => ({
   },
 }))
 
+vi.mock("@goddard-ai/worktree", () => ({
+  Worktree: class {
+    poweredBy = "mock-worktree"
+    cwd: string
+
+    constructor(options: { cwd: string }) {
+      this.cwd = options.cwd
+      worktreeConstructorMock(options)
+    }
+
+    setup(branchName: string) {
+      worktreeSetupMock(branchName)
+      return {
+        worktreeDir: this.cwd,
+        branchName,
+      }
+    }
+
+    cleanup(worktreeDir: string, branchName: string) {
+      return worktreeCleanupMock(worktreeDir, branchName)
+    }
+  },
+}))
+
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
@@ -132,6 +167,9 @@ afterEach(async () => {
   sessionStates.clear()
   permissionsBySessionId.clear()
   permissionsByToken.clear()
+  worktreeConstructorMock.mockClear()
+  worktreeSetupMock.mockClear()
+  worktreeCleanupMock.mockClear()
 
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
@@ -206,6 +244,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   })
 
   expect(await SessionPermissionsStorage.getByToken(permissions.token)).toBeNull()
+  expect(worktreeCleanupMock).toHaveBeenCalledTimes(1)
 })
 
 test("daemon persists repository context into direct session columns", async () => {
@@ -252,7 +291,16 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     agentName: "node",
     cwd: process.cwd(),
     mcpServers: [],
-    metadata: null,
+    metadata: {
+      worktree: {
+        repoRoot: process.cwd(),
+        requestedCwd: process.cwd(),
+        effectiveCwd: "/tmp/mock-worktree/session-session-restart-1",
+        worktreeDir: "/tmp/mock-worktree/session-session-restart-1",
+        branchName: "session-session-restart-1",
+        poweredBy: "mock-worktree",
+      },
+    },
     createdAt: new Date(),
     updatedAt: new Date(),
     errorMessage: null,
@@ -297,6 +345,10 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
+  expect(worktreeCleanupMock).toHaveBeenCalledWith(
+    "/tmp/mock-worktree/session-session-restart-1",
+    "session-session-restart-1",
+  )
   await expect(client.send("sessionConnect", { id: sessionId })).rejects.toThrow(/archived/i)
   await expect(client.send("sessionResolveToken", { token: "tok-restart-1" })).rejects.toThrow(
     /invalid session token/i,
@@ -351,6 +403,56 @@ test("multiple clients can observe the same live session stream independently", 
   await Promise.resolve(unsubscribeB()).catch(() => {})
   expect(clientAMessages.length > 0).toBe(true)
   expect(clientBMessages.length > 0).toBe(true)
+})
+
+test("daemon sessions run inside the mapped worktree subdirectory", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const requestedCwd = join(process.cwd(), "src")
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: requestedCwd,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(created.session.cwd).toBe(join(process.cwd(), "src"))
+  expect(created.session.metadata).toEqual(
+    expect.objectContaining({
+      worktree: expect.objectContaining({
+        requestedCwd,
+        effectiveCwd: join(process.cwd(), "src"),
+        poweredBy: "mock-worktree",
+      }),
+    }),
+  )
+})
+
+test("one-shot daemon sessions clean up their worktree after the initial prompt completes", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    oneShot: true,
+    initialPrompt: "Say hello and stop.",
+  })
+
+  expect(created.session.status).toBe("done")
+
+  await waitFor(async () => {
+    return worktreeCleanupMock.mock.calls.length > 0
+  })
+
+  expect(worktreeCleanupMock).toHaveBeenCalled()
 })
 
 test("daemon logs agent message and chunk traffic without persisting high-volume events", async () => {

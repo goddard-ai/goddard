@@ -84,12 +84,21 @@
 - `Repository Scope`
   - The repository ownership context attached to a session, including optional pull request limits.
   - Why: so session permissions can be constrained to the repository context the session is meant to operate within.
+- `Session Worktree`
+  - The isolated repository checkout the daemon provisions for a fresh session before the agent starts.
+  - Why: so daemon-managed work does not mutate the caller's primary checkout or collide with concurrent sessions.
+- `Effective Cwd`
+  - The directory inside the session worktree where the agent process actually starts.
+  - Why: so callers can target a repository subdirectory while still getting full repository isolation.
 - `Allowed Pull Request Numbers`
   - The specific pull requests a session is permitted to act on when pull-request scoping is present.
   - Why: so session authority can be narrowed from an entire repository to a specific work item.
 - `Session Metadata`
   - Structured context attached to a session that describes the surrounding work environment.
   - Why: so auxiliary context such as workforce linkage can travel with the session without going into prompt text.
+- `Worktree Metadata`
+  - The persisted worktree identity attached to session metadata.
+  - Why: so daemon restart reconciliation can clean up orphaned session worktrees after interrupted runs.
 - `Workforce Metadata`
   - The part of session metadata that identifies a broader orchestrated work request and the participating agent.
   - Why: so session events can be tied back to multi-agent workflows.

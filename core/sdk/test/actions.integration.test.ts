@@ -1,11 +1,15 @@
 import { startDaemonServer, type DaemonServer } from "@goddard-ai/daemon/ipc"
+import { execFile } from "node:child_process"
 import * as fs from "node:fs/promises"
 import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
+import { promisify } from "node:util"
 import { afterEach, assert, test, vi } from "vitest"
 import { runAgent } from "../src/daemon/session/client.ts"
 import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
+
+const execFileAsync = promisify(execFile)
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),
@@ -153,6 +157,7 @@ test("resolved actions can run through the daemon-backed session client", async 
   })
 
   await fs.mkdir(actionsDir, { recursive: true })
+  await initializeGitRepo(tempDir)
   await fs.writeFile(
     path.join(actionsDir, "review.md"),
     "Review the current diff carefully.\n",
@@ -245,4 +250,10 @@ async function startTestDaemon(): Promise<DaemonServer> {
   })
 
   return daemon
+}
+
+async function initializeGitRepo(cwd: string): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd })
+  await execFileAsync("git", ["config", "user.name", "Goddard Test"], { cwd })
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], { cwd })
 }
