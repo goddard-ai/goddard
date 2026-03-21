@@ -137,6 +137,8 @@ describe("runAgent", () => {
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
+      repository: undefined,
+      prNumber: undefined,
       metadata: undefined,
       initialPrompt: "Ship it",
       oneShot: true,

@@ -26,7 +26,10 @@ export namespace SessionStorage {
   }
 
   /** Lists recent session rows in stable `updatedAt desc, id desc` order. */
-  export async function listRecent(input: { limit: number; cursor?: SQLSessionListCursor }) {
+  export async function listRecent(input: {
+    limit: number
+    cursor?: SQLSessionListCursor
+  }) {
     const query = db.select().from(sessions)
     if (input.cursor) {
       query.where(
