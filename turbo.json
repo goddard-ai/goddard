@@ -12,7 +12,7 @@
     },
     "lint": {
       "dependsOn": ["^lint"],
-      "inputs": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/oxlintrc.json"],
+      "inputs": ["**/*.ts", "**/*.tsx", "**/oxlintrc.json"],
       "outputs": []
     }
   }
