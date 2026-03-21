@@ -22,8 +22,10 @@ export class GoddardSdk extends BaseGoddardSdk {
   get loop() {
     return {
       resolve: loops.resolveLoop,
-      run: loops.runAdHocLoop,
-      runNamed: loops.runNamedLoop,
+      start: loops.startNamedLoop,
+      get: loops.getLoop,
+      list: loops.listLoops,
+      stop: loops.stopLoop,
     }
   }
 

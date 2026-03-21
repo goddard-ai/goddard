@@ -1,12 +1,13 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { createServer } from "@goddard-ai/ipc"
-import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
+import type { CreateDaemonSessionRequest, StartDaemonLoopRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { SessionStorage } from "@goddard-ai/storage"
 import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { once } from "node:events"
 import { resolveDaemonRuntimeConfig } from "../config.js"
+import { createLoopManager } from "../loop/index.js"
 import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.js"
 import { createSessionManager } from "../session/manager.js"
 import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.js"
@@ -35,6 +36,7 @@ export async function startDaemonServer(
   await prepareSocketPath(socketPath)
 
   let sessionManager!: ReturnType<typeof createSessionManager>
+  let loopManager!: ReturnType<typeof createLoopManager>
   let workforceManager!: ReturnType<typeof createWorkforceManager>
 
   async function resolveWorkforceActor(
@@ -279,6 +281,40 @@ export async function startDaemonServer(
         }
       },
     ),
+    loopStart: withRequestLogging<
+      StartDaemonLoopRequest,
+      { loop: Awaited<ReturnType<typeof loopManager.startLoop>> }
+    >("loopStart", async (payload) => {
+      return {
+        loop: await loopManager.startLoop(payload),
+      }
+    }),
+    loopGet: withRequestLogging<
+      { rootDir: string; loopName: string },
+      { loop: Awaited<ReturnType<typeof loopManager.getLoop>> }
+    >("loopGet", async ({ rootDir, loopName }) => {
+      return {
+        loop: await loopManager.getLoop(rootDir, loopName),
+      }
+    }),
+    loopList: withRequestLogging<{}, { loops: Awaited<ReturnType<typeof loopManager.listLoops>> }>(
+      "loopList",
+      async () => {
+        return {
+          loops: await loopManager.listLoops(),
+        }
+      },
+    ),
+    loopShutdown: withRequestLogging<
+      { rootDir: string; loopName: string },
+      { rootDir: string; loopName: string; success: boolean }
+    >("loopShutdown", async ({ rootDir, loopName }) => {
+      return {
+        rootDir,
+        loopName,
+        success: await loopManager.shutdownLoop(rootDir, loopName),
+      }
+    }),
     workforceStart: withRequestLogging<
       { rootDir: string },
       { workforce: Awaited<ReturnType<typeof workforceManager.startWorkforce>> }
@@ -418,6 +454,9 @@ export async function startDaemonServer(
       ipcServer.publish("sessionMessage", { id, message })
     },
   })
+  loopManager = (deps.createLoopManager ?? ((input) => createLoopManager(input)))({
+    sessionManager,
+  })
   workforceManager = (deps.createWorkforceManager ?? ((input) => createWorkforceManager(input)))({
     sessionManager,
   })
@@ -442,6 +481,7 @@ export async function startDaemonServer(
         socketPath,
         daemonUrl,
       })
+      await loopManager.close().catch(() => {})
       await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
       await new Promise<void>((resolve, reject) => {

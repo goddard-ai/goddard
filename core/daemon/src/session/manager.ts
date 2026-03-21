@@ -67,6 +67,11 @@ type PromptRequestMessage = acp.AnyMessage & {
 }
 
 /** Holds the live runtime state for a daemon-owned session process. */
+/** Pending daemon-owned prompt request waiting for the agent response frame. */
+type PendingPromptRequest = {
+  resolve: (response: acp.PromptResponse) => void
+  reject: (error: Error) => void
+}
 type ActiveSession = {
   id: string
   acpId: string
@@ -82,6 +87,7 @@ type ActiveSession = {
   systemPrompt: string
   lastPermissionRequest: PermissionRequest | null
   clientRequests: ClientRequestMap
+  pendingPrompts: Map<string | number, PendingPromptRequest>
 }
 
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
@@ -92,6 +98,7 @@ export type SessionManager = {
   getHistory: (id: string) => Promise<GetDaemonSessionHistoryResponse>
   getDiagnostics: (id: string) => Promise<GetDaemonSessionDiagnosticsResponse>
   sendMessage: (id: string, message: acp.AnyMessage) => Promise<void>
+  promptSession: (id: string, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
   shutdownSession: (id: string) => Promise<boolean>
   resolveSessionIdByToken: (token: string) => Promise<string>
   close: () => Promise<void>
@@ -524,6 +531,54 @@ function logAgentMessage(
 }
 
 /** Creates the daemon session manager and owns reconciliation of live session processes. */
+/** Resolves or rejects one pending prompt when its agent response frame arrives. */
+function settlePendingPrompt(active: ActiveSession, message: acp.AnyMessage): void {
+  if ("id" in message === false || message.id == null) {
+    return
+  }
+
+  const pending = active.pendingPrompts.get(message.id)
+  if (!pending) {
+    return
+  }
+
+  active.pendingPrompts.delete(message.id)
+  if ("error" in message) {
+    pending.reject(new Error(resolveJsonRpcErrorMessage(message.error)))
+    return
+  }
+
+  pending.resolve(message.result as acp.PromptResponse)
+}
+
+/** Rejects any in-flight prompt waits when a daemon session is torn down. */
+function rejectPendingPrompts(active: ActiveSession, error: Error): void {
+  for (const pending of active.pendingPrompts.values()) {
+    pending.reject(error)
+  }
+  active.pendingPrompts.clear()
+}
+
+/** Formats one JSON-RPC error payload into a stable daemon error message. */
+function resolveJsonRpcErrorMessage(error: {
+  code?: number
+  message?: string
+  data?: unknown
+}): string {
+  if (typeof error.message === "string" && error.message.length > 0) {
+    return error.message
+  }
+
+  if (typeof error.code === "number") {
+    return `Agent request failed with code ${error.code}`
+  }
+
+  if (error.data !== undefined) {
+    return `Agent request failed: ${JSON.stringify(error.data)}`
+  }
+
+  return "Agent request failed"
+}
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
@@ -745,6 +800,7 @@ export function createSessionManager(input: {
         systemPrompt: params.systemPrompt,
         lastPermissionRequest: null,
         clientRequests: new Map(),
+        pendingPrompts: new Map(),
       }
 
       active.subscription = connection.subscribe(async (message) => {
@@ -770,6 +826,7 @@ export function createSessionManager(input: {
           if (clientRequest) {
             active.clientRequests.delete(message.id)
           }
+          settlePendingPrompt(active, message)
         }
 
         await appendHistory(active.id, message)
@@ -778,6 +835,10 @@ export function createSessionManager(input: {
 
       const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
         activeSessions.delete(active.id)
+        rejectPendingPrompts(
+          active,
+          new Error(`Session ${active.id} ended before the prompt completed.`),
+        )
         await active.writer.close().catch(() => {})
         await active.subscription.close().catch(() => {})
         await SessionPermissionsStorage.revoke(active.id).catch(() => {})
@@ -920,6 +981,41 @@ export function createSessionManager(input: {
     await active.writer.write(message)
   }
 
+  async function promptSession(
+    id: string,
+    prompt: string | acp.ContentBlock[],
+  ): Promise<acp.PromptResponse> {
+    await ready
+    const active = activeSessions.get(id)
+    if (!active) {
+      throw new Error(`Session ${id} is not active`)
+    }
+
+    const requestId = randomUUID()
+    const response = new Promise<acp.PromptResponse>((resolve, reject) => {
+      active.pendingPrompts.set(requestId, {
+        resolve,
+        reject,
+      })
+    })
+
+    try {
+      await sendMessage(id, {
+        jsonrpc: "2.0",
+        id: requestId,
+        method: acp.AGENT_METHODS.session_prompt,
+        params: {
+          sessionId: active.acpId,
+          prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
+        },
+      } satisfies acp.AnyMessage)
+      return await response
+    } catch (error) {
+      active.pendingPrompts.delete(requestId)
+      throw error
+    }
+  }
+
   async function shutdownSession(id: string): Promise<boolean> {
     await ready
     const active = activeSessions.get(id)
@@ -960,6 +1056,7 @@ export function createSessionManager(input: {
     getHistory,
     getDiagnostics,
     sendMessage,
+    promptSession,
     shutdownSession,
     resolveSessionIdByToken,
     close,

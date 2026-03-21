@@ -1,49 +1,26 @@
-import * as assert from "node:assert/strict"
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { afterEach, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 
-const mockedExitHooks = vi.hoisted(() => ({
-  callbacks: [] as Array<() => void>,
+const mockedDaemonLoops = vi.hoisted(() => ({
+  getDaemonLoop: vi.fn(),
+  listDaemonLoops: vi.fn(),
+  shutdownDaemonLoop: vi.fn(),
+  startDaemonLoop: vi.fn(),
 }))
 
-const mockedLoop = vi.hoisted(() => {
-  const session = {
-    sessionId: "loop-session",
-    stop: vi.fn(async () => {}),
-  }
+vi.mock("../../src/daemon/loops.ts", () => mockedDaemonLoops)
 
-  return {
-    session,
-    runAgentLoop: vi.fn(async () => session),
-  }
-})
-
-vi.mock("exit-hook", () => ({
-  default: vi.fn((callback: () => void) => {
-    mockedExitHooks.callbacks.push(callback)
-    return () => {
-      const callbackIndex = mockedExitHooks.callbacks.indexOf(callback)
-      if (callbackIndex >= 0) {
-        mockedExitHooks.callbacks.splice(callbackIndex, 1)
-      }
-    }
-  }),
-}))
-
-vi.mock("../../src/loop/run-agent-loop.ts", () => ({
-  runAgentLoop: mockedLoop.runAgentLoop,
-}))
-
-import { buildLoopParams, resolveLoop, runAdHocLoop } from "../../src/node/loops.ts"
+import { buildLoopStartRequest, resolveLoop, startNamedLoop } from "../../src/node/loops.ts"
 
 const originalHome = process.env.HOME
 
 afterEach(() => {
-  mockedExitHooks.callbacks.length = 0
-  mockedLoop.session.stop.mockClear()
-  mockedLoop.runAgentLoop.mockClear()
+  mockedDaemonLoops.getDaemonLoop.mockReset()
+  mockedDaemonLoops.listDaemonLoops.mockReset()
+  mockedDaemonLoops.shutdownDaemonLoop.mockReset()
+  mockedDaemonLoops.startDaemonLoop.mockReset()
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -96,8 +73,8 @@ test("resolveLoop merges root defaults with packaged loop config", async () => {
 
   const loop = await resolveLoop("review", tempDir)
 
-  assert.equal(loop.promptModulePath, path.join(loopDir, "prompt.js"))
-  assert.deepEqual(loop.config, {
+  expect(loop.promptModulePath).toBe(path.join(loopDir, "prompt.js"))
+  expect(loop.config).toEqual({
     session: {
       agent: "pi-acp",
       cwd: "/tmp/root",
@@ -115,35 +92,57 @@ test("resolveLoop merges root defaults with packaged loop config", async () => {
   })
 })
 
-test("buildLoopParams loads nextPrompt from prompt.js", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-build-"))
-  const promptModulePath = path.join(tempDir, "prompt.js")
-
-  await fs.writeFile(
-    promptModulePath,
-    'export function nextPrompt() { return "Continue the current task." }\n',
-    "utf-8",
-  )
-
-  const params = await buildLoopParams({
-    path: tempDir,
-    promptModulePath,
-    config: {
-      session: {
-        agent: "pi-acp",
-        cwd: tempDir,
-        mcpServers: [],
-      },
-      rateLimits: {
-        cycleDelay: "1s",
-        maxOpsPerMinute: 5,
-        maxCyclesBeforePause: 10,
+test("buildLoopStartRequest resolves packaged config into daemon payload", () => {
+  const request = buildLoopStartRequest(
+    "review",
+    "/repo",
+    {
+      path: "/repo/.goddard/loops/review",
+      promptModulePath: "/repo/.goddard/loops/review/prompt.js",
+      config: {
+        session: {
+          agent: "pi-acp",
+          cwd: "/repo",
+          mcpServers: [],
+          systemPrompt: "Use the loop checklist.",
+        },
+        rateLimits: {
+          cycleDelay: "1s",
+          maxOpsPerMinute: 5,
+          maxCyclesBeforePause: 10,
+        },
       },
     },
-  })
+    {
+      retries: {
+        maxAttempts: 3,
+      },
+    },
+  )
 
-  assert.equal(params.nextPrompt(), "Continue the current task.")
-  assert.equal(params.retries.maxAttempts, 1)
+  expect(request).toEqual({
+    rootDir: path.resolve("/repo"),
+    loopName: "review",
+    promptModulePath: path.resolve("/repo/.goddard/loops/review/prompt.js"),
+    session: {
+      agent: "pi-acp",
+      cwd: "/repo",
+      mcpServers: [],
+      systemPrompt: "Use the loop checklist.",
+    },
+    rateLimits: {
+      cycleDelay: "1s",
+      maxOpsPerMinute: 5,
+      maxCyclesBeforePause: 10,
+    },
+    retries: {
+      maxAttempts: 3,
+      initialDelayMs: 500,
+      maxDelayMs: 5_000,
+      backoffFactor: 2,
+      jitterRatio: 0.2,
+    },
+  })
 })
 
 test("resolveLoop rejects prompt.md-only loop packages", async () => {
@@ -154,42 +153,81 @@ test("resolveLoop rejects prompt.md-only loop packages", async () => {
   await fs.writeFile(path.join(loopDir, "prompt.md"), "Legacy prompt.\n", "utf-8")
   await fs.writeFile(path.join(loopDir, "config.json"), JSON.stringify({}), "utf-8")
 
-  await assert.rejects(resolveLoop("review", tempDir), /must not contain prompt\.md/)
+  await expect(resolveLoop("review", tempDir)).rejects.toThrow(/must not contain prompt\.md/)
 })
 
-test("runAdHocLoop imports promptModulePath and forwards resolved params", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-ad-hoc-"))
-  const promptModulePath = path.join(tempDir, "prompt.js")
+test("startNamedLoop forwards the resolved daemon start payload", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-start-"))
+  const loopDir = path.join(tempDir, ".goddard", "loops", "review")
 
+  mockedDaemonLoops.startDaemonLoop.mockResolvedValue({
+    rootDir: tempDir,
+    loopName: "review",
+  })
+
+  await fs.mkdir(loopDir, { recursive: true })
   await fs.writeFile(
-    promptModulePath,
-    'export function nextPrompt() { return "Continue the ad hoc task." }\n',
+    path.join(tempDir, ".goddard", "config.json"),
+    JSON.stringify({
+      loops: {
+        session: {
+          agent: "pi-acp",
+          cwd: tempDir,
+          mcpServers: [],
+        },
+        rateLimits: {
+          cycleDelay: "30s",
+          maxOpsPerMinute: 4,
+          maxCyclesBeforePause: 200,
+        },
+      },
+    }),
+    "utf-8",
+  )
+  await fs.writeFile(path.join(loopDir, "config.json"), JSON.stringify({}), "utf-8")
+  await fs.writeFile(
+    path.join(loopDir, "prompt.js"),
+    'export function nextPrompt() { return "Continue the current task." }\n',
     "utf-8",
   )
 
-  await runAdHocLoop({
-    promptModulePath,
-    session: {
-      agent: "pi-acp",
-      cwd: tempDir,
-      mcpServers: [],
-    },
-    rateLimits: {
-      cycleDelay: "1s",
-      maxOpsPerMinute: 5,
-      maxCyclesBeforePause: 10,
-    },
+  await expect(startNamedLoop("review", { session: { cwd: tempDir } })).resolves.toEqual({
+    rootDir: tempDir,
+    loopName: "review",
   })
 
-  assert.equal(mockedLoop.runAgentLoop.mock.calls.length, 1)
-  const firstCall = mockedLoop.runAgentLoop.mock.calls[0]
-  assert.ok(firstCall)
-  const [params] = firstCall as unknown as [Awaited<ReturnType<typeof buildLoopParams>>]
-  assert.equal(params.nextPrompt(), "Continue the ad hoc task.")
-  assert.equal(params.retries.maxAttempts, 1)
-  assert.equal(mockedExitHooks.callbacks.length, 1)
+  expect(mockedDaemonLoops.startDaemonLoop).toHaveBeenCalledWith(
+    {
+      rootDir: tempDir,
+      loopName: "review",
+      promptModulePath: path.join(loopDir, "prompt.js"),
+      session: {
+        agent: "pi-acp",
+        cwd: tempDir,
+        mcpServers: [],
+      },
+      rateLimits: {
+        cycleDelay: "30s",
+        maxOpsPerMinute: 4,
+        maxCyclesBeforePause: 200,
+      },
+      retries: {
+        maxAttempts: 1,
+        initialDelayMs: 500,
+        maxDelayMs: 5_000,
+        backoffFactor: 2,
+        jitterRatio: 0.2,
+      },
+    },
+    undefined,
+  )
+})
 
-  await mockedExitHooks.callbacks[0]()
+test("node SDK loop helpers no longer expose ad hoc run entrypoints", async () => {
+  const { GoddardSdk } = await import("../../src/node/index.ts")
+  const sdk = new GoddardSdk({ backendUrl: "https://api.example.com" })
 
-  assert.equal(mockedLoop.session.stop.mock.calls.length, 1)
+  expect("run" in sdk.loop).toBe(false)
+  expect("runNamed" in sdk.loop).toBe(false)
+  expect(Object.keys(sdk.loop).sort()).toEqual(["get", "list", "resolve", "start", "stop"])
 })

@@ -1,21 +1,30 @@
 import { $type } from "@goddard-ai/ipc"
 import { z } from "zod"
 import { DaemonSessionIdParams } from "./common/params.js"
-import { CreateDaemonSessionRequest } from "./daemon/sessions.js"
+import {
+  GetDaemonLoopRequest,
+  ShutdownDaemonLoopRequest,
+  StartDaemonLoopRequest,
+} from "./daemon/loops.js"
 import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
+import { CreateDaemonSessionRequest } from "./daemon/sessions.js"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
+  GetDaemonLoopResponse,
   GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
   GetDaemonSessionResponse,
   GetDaemonWorkforceResponse,
+  ListDaemonLoopsResponse,
   ListDaemonWorkforcesResponse,
   MutateDaemonWorkforceResponse,
   ReplyPrDaemonResponse,
+  ShutdownDaemonLoopResponse,
   ShutdownDaemonSessionResponse,
   ShutdownDaemonWorkforceResponse,
   StartDaemonWorkforceResponse,
+  StartDaemonLoopResponse,
   SubmitPrDaemonResponse,
 } from "./daemon.js"
 import {
@@ -84,6 +93,22 @@ export const daemonIpcSchema = {
       sessionResolveToken: {
         payload: z.object({ token: z.string() }),
         response: $type<{ id: string }>(),
+      },
+      loopStart: {
+        payload: StartDaemonLoopRequest,
+        response: $type<StartDaemonLoopResponse>(),
+      },
+      loopGet: {
+        payload: GetDaemonLoopRequest,
+        response: $type<GetDaemonLoopResponse>(),
+      },
+      loopList: {
+        payload: z.object({}),
+        response: $type<ListDaemonLoopsResponse>(),
+      },
+      loopShutdown: {
+        payload: ShutdownDaemonLoopRequest,
+        response: $type<ShutdownDaemonLoopResponse>(),
       },
       workforceStart: {
         payload: StartDaemonWorkforceRequest,

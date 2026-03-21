@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | `@goddard-ai/sdk` | Backend HTTP API access, auth, PR operations, unified stream subscription | Daemon session lifecycle, runtime loop helpers |
 | `@goddard-ai/sdk/daemon` | Daemon-backed agent sessions (`runAgent`, `AgentSession`) | Low-level daemon URL parsing and IPC transport factories |
-| `@goddard-ai/sdk/loop` | Loop/runtime orchestration on top of daemon sessions | Backend HTTP API access, host-specific IPC wiring |
+| `@goddard-ai/sdk/loop` | Daemon-backed loop lifecycle control | Backend HTTP API access, host-specific IPC wiring |
 | `@goddard-ai/sdk/node` | Node composition helpers and env-driven conveniences | Cross-environment transport ownership |
 
 ## `daemon-client` vs `sdk/daemon`
@@ -35,7 +35,7 @@ Use `@goddard-ai/sdk/daemon` when you need to:
 
 ## Environment Behavior
 
-`@goddard-ai/sdk/daemon` and `@goddard-ai/sdk/loop` accept explicit `RunAgentOptions`/daemon options for non-Node hosts.
+`@goddard-ai/sdk/daemon` and `@goddard-ai/sdk/loop` accept explicit daemon connection options for non-Node hosts.
 
 - Node convenience path: omit options and rely on `GODDARD_DAEMON_URL` when the host process provides it.
 - App path: pass an explicit `daemonUrl` and injected `createClient` factory. Do not rely on Node defaults in the app.
@@ -51,6 +51,7 @@ Node helpers resolve persisted config from JSON only:
 - Packaged loops: `.goddard/loops/<name>/prompt.js` + `.goddard/loops/<name>/config.json`
 
 Persisted prompt frontmatter is not supported. Loop `nextPrompt` logic comes from `prompt.js`, not JSON.
+Started loops are daemon-owned background runtimes, so the initiating SDK host process may exit after startup without stopping the loop.
 
 ## Examples
 
@@ -102,14 +103,16 @@ const history = await session.getHistory()
 await session.stop()
 ```
 
-Loop usage:
+Loop daemon lifecycle usage:
 
 ```ts
-import { runAgentLoop } from "@goddard-ai/sdk/loop"
+import { startDaemonLoop } from "@goddard-ai/sdk/loop"
 
-await runAgentLoop(
+const loop = await startDaemonLoop(
   {
-    nextPrompt: () => "Continue the current task.",
+    rootDir: process.cwd(),
+    loopName: "triage",
+    promptModulePath: "/workspace/.goddard/loops/triage/prompt.js",
     session: {
       agent: "pi",
       cwd: process.cwd(),
@@ -127,14 +130,14 @@ await runAgentLoop(
       maxDelayMs: 5_000,
       backoffFactor: 2,
       jitterRatio: 0.2,
-      retryableErrors: (error) => error instanceof Error,
     },
   },
-  undefined,
   {
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
   },
 )
+
+console.log(loop.sessionId)
 ```
 
 Node convenience usage:
@@ -152,25 +155,14 @@ await sdk.actions.run("review", {
   systemPrompt: "Use the local review checklist.",
 })
 
-await sdk.loop.runNamed("triage", {
+await sdk.loop.start("triage", {
   session: {
     cwd: process.cwd(),
   },
 })
 
-await sdk.loop.run({
-  promptModulePath: "/workspace/.goddard/loops/ad-hoc-review/prompt.js",
-  session: {
-    agent: "pi",
-    cwd: process.cwd(),
-    mcpServers: [],
-  },
-  rateLimits: {
-    cycleDelay: "30s",
-    maxOpsPerMinute: 4,
-    maxCyclesBeforePause: 200,
-  },
-})
+const loops = await sdk.loop.list()
+await sdk.loop.stop(process.cwd(), "triage")
 ```
 
 App/Tauri daemon binding:

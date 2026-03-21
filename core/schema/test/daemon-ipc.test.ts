@@ -1,8 +1,8 @@
-import { assert, test } from "vitest"
+import { expect, test } from "vitest"
 import { daemonIpcSchema } from "../src/daemon-ipc.ts"
 
-test("daemon IPC parses workforce lifecycle and mutation payloads", () => {
-  assert.deepEqual(
+test("daemon IPC parses loop and workforce lifecycle payloads", () => {
+  expect(
     daemonIpcSchema.client.requests.sessionCreate.payload.parse({
       agent: {
         id: "node-agent",
@@ -20,35 +20,71 @@ test("daemon IPC parses workforce lifecycle and mutation payloads", () => {
       mcpServers: [],
       systemPrompt: "Follow the spec.",
     }),
-    {
-      agent: {
-        id: "node-agent",
-        name: "Node Agent",
-        version: "1.0.0",
-        description: "Local node-based ACP test agent.",
-        distribution: {
-          npx: {
-            package: "@example/node-agent",
-            args: ["agent.mjs"],
-          },
+  ).toEqual({
+    agent: {
+      id: "node-agent",
+      name: "Node Agent",
+      version: "1.0.0",
+      description: "Local node-based ACP test agent.",
+      distribution: {
+        npx: {
+          package: "@example/node-agent",
+          args: ["agent.mjs"],
         },
       },
+    },
+    cwd: "/repo",
+    mcpServers: [],
+    systemPrompt: "Follow the spec.",
+  })
+
+  expect(
+    daemonIpcSchema.client.requests.loopStart.payload.parse({
+      rootDir: "/repo",
+      loopName: "review",
+      promptModulePath: "/repo/.goddard/loops/review/prompt.js",
+      session: {
+        agent: "pi-acp",
+        cwd: "/repo",
+        mcpServers: [],
+      },
+      rateLimits: {
+        cycleDelay: "30s",
+        maxOpsPerMinute: 4,
+        maxCyclesBeforePause: 200,
+      },
+      retries: {
+        maxAttempts: 1,
+        initialDelayMs: 500,
+        maxDelayMs: 5_000,
+        backoffFactor: 2,
+        jitterRatio: 0.2,
+      },
+    }),
+  ).toEqual({
+    rootDir: "/repo",
+    loopName: "review",
+    promptModulePath: "/repo/.goddard/loops/review/prompt.js",
+    session: {
+      agent: "pi-acp",
       cwd: "/repo",
       mcpServers: [],
-      systemPrompt: "Follow the spec.",
     },
-  )
-
-  assert.deepEqual(
-    daemonIpcSchema.client.requests.workforceStart.payload.parse({
-      rootDir: "/repo",
-    }),
-    {
-      rootDir: "/repo",
+    rateLimits: {
+      cycleDelay: "30s",
+      maxOpsPerMinute: 4,
+      maxCyclesBeforePause: 200,
     },
-  )
+    retries: {
+      maxAttempts: 1,
+      initialDelayMs: 500,
+      maxDelayMs: 5_000,
+      backoffFactor: 2,
+      jitterRatio: 0.2,
+    },
+  })
 
-  assert.deepEqual(
+  expect(
     daemonIpcSchema.client.requests.workforceRequest.payload.parse({
       rootDir: "/repo",
       targetAgentId: "api",
@@ -56,27 +92,11 @@ test("daemon IPC parses workforce lifecycle and mutation payloads", () => {
       intent: "create",
       token: "tok_1",
     }),
-    {
-      rootDir: "/repo",
-      targetAgentId: "api",
-      input: "Ship it.",
-      intent: "create",
-      token: "tok_1",
-    },
-  )
-
-  assert.deepEqual(
-    daemonIpcSchema.client.requests.workforceSuspend.payload.parse({
-      rootDir: "/repo",
-      requestId: "req-1",
-      reason: "Need a root decision.",
-      token: "tok_1",
-    }),
-    {
-      rootDir: "/repo",
-      requestId: "req-1",
-      reason: "Need a root decision.",
-      token: "tok_1",
-    },
-  )
+  ).toEqual({
+    rootDir: "/repo",
+    targetAgentId: "api",
+    input: "Ship it.",
+    intent: "create",
+    token: "tok_1",
+  })
 })

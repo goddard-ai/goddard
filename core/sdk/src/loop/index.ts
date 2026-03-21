@@ -1,12 +1,11 @@
 export type {
-  AgentLoopHandler,
-  AgentLoopParams,
-  AgentLoopRateLimits,
-  AgentLoopRetryConfig,
-  AgentLoopSessionParams,
-} from "@goddard-ai/schema/loop"
-export { LOOP_SYSTEM_PROMPT } from "./prompts.js"
-export { runAgentLoop } from "./run-agent-loop.js"
+  DaemonLoop,
+  DaemonLoopConfig,
+  DaemonLoopStatus,
+  GetDaemonLoopRequest,
+  ShutdownDaemonLoopRequest,
+  StartDaemonLoopRequest,
+} from "@goddard-ai/schema/daemon"
 export type {
   GoddardLoopConfigDocument,
   GoddardLoopRateLimitsConfig,
@@ -18,3 +17,9 @@ export {
   resolvedLoopRateLimitsSchema,
   resolvedLoopRetriesSchema,
 } from "./types.js"
+export {
+  getDaemonLoop,
+  listDaemonLoops,
+  shutdownDaemonLoop,
+  startDaemonLoop,
+} from "../daemon/loops.js"

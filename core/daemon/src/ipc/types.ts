@@ -3,6 +3,7 @@ import type { ManagedPrLocationRecord } from "@goddard-ai/storage/managed-pr-loc
 import type { SessionPermissionsRecord } from "@goddard-ai/storage/session-permissions"
 import type { SessionManager } from "../session/index.js"
 import type { WorkforceManager } from "../workforce/index.js"
+import type { LoopManager } from "../loop/index.js"
 
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest }
 
@@ -48,5 +49,6 @@ export type DaemonServerDeps = {
   recordManagedPrLocation?: (
     record: Omit<ManagedPrLocationRecord, "updatedAt">,
   ) => Promise<ManagedPrLocationRecord>
+  createLoopManager?: (input: { sessionManager: SessionManager }) => LoopManager
   createWorkforceManager?: (input: { sessionManager: SessionManager }) => WorkforceManager
 }
