@@ -1,6 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonSession,
+  ListDaemonSessionsRequest,
+  ListDaemonSessionsResponse,
+} from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { resolveDaemonClient, type DaemonClientOptions } from "../client.js"
 import { AgentSession } from "./client-session.js"
@@ -213,4 +217,13 @@ export async function getDaemonSession(
   const client = resolveDaemonClient(options)
   const response = await client.send("sessionGet", { id })
   return response.session
+}
+
+/** Returns one page of daemon-managed sessions in stable recency order. */
+export async function listDaemonSessions(
+  params: ListDaemonSessionsRequest = {},
+  options?: GetDaemonSessionOptions,
+): Promise<ListDaemonSessionsResponse> {
+  const client = resolveDaemonClient(options)
+  return client.send("sessionList", params)
 }

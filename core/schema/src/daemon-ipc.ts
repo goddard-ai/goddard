@@ -7,7 +7,7 @@ import {
   StartDaemonLoopRequest,
 } from "./daemon/loops.js"
 import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
-import { CreateDaemonSessionRequest } from "./daemon/sessions.js"
+import { CreateDaemonSessionRequest, ListDaemonSessionsRequest } from "./daemon/sessions.js"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
@@ -17,6 +17,7 @@ import type {
   GetDaemonSessionResponse,
   GetDaemonWorkforceResponse,
   ListDaemonLoopsResponse,
+  ListDaemonSessionsResponse,
   ListDaemonWorkforcesResponse,
   MutateDaemonWorkforceResponse,
   ReplyPrDaemonResponse,
@@ -62,6 +63,10 @@ export const daemonIpcSchema = {
       sessionCreate: {
         payload: CreateDaemonSessionRequest,
         response: $type<CreateDaemonSessionResponse>(),
+      },
+      sessionList: {
+        payload: ListDaemonSessionsRequest,
+        response: $type<ListDaemonSessionsResponse>(),
       },
       sessionGet: {
         payload: DaemonSessionIdParams,

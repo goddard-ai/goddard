@@ -28,6 +28,15 @@ export const CreateDaemonSessionRequest = z.object({
 /** TypeScript shape of the daemon session-creation payload contract. */
 export type CreateDaemonSessionRequest = z.infer<typeof CreateDaemonSessionRequest>
 
+/** Request payload used to list daemon-managed sessions in stable recency order. */
+export const ListDaemonSessionsRequest = z.object({
+  limit: z.number().int().positive().optional(),
+  cursor: z.string().optional(),
+})
+
+/** TypeScript shape of the daemon session-list payload contract. */
+export type ListDaemonSessionsRequest = z.infer<typeof ListDaemonSessionsRequest>
+
 /** Path and payload params used to address one daemon-managed session. */
 export const DaemonSessionPathParams = DaemonSessionIdParams
 

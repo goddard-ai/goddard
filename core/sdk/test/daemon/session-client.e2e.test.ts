@@ -27,6 +27,30 @@ vi.mock("@goddard-ai/storage", () => ({
       })
     }),
     list: vi.fn(async () => Array.from(sessions.values())),
+    listRecent: vi.fn(
+      async ({ limit, cursor }: { limit: number; cursor?: { updatedAt: Date; id: string } }) => {
+        return Array.from(sessions.values())
+          .sort((left: any, right: any) => {
+            const updatedAtDiff = right.updatedAt.valueOf() - left.updatedAt.valueOf()
+            if (updatedAtDiff !== 0) {
+              return updatedAtDiff
+            }
+
+            return right.id.localeCompare(left.id)
+          })
+          .filter((record: any) => {
+            if (!cursor) {
+              return true
+            }
+
+            return (
+              record.updatedAt.valueOf() < cursor.updatedAt.valueOf() ||
+              (record.updatedAt.valueOf() === cursor.updatedAt.valueOf() && record.id < cursor.id)
+            )
+          })
+          .slice(0, limit)
+      },
+    ),
     get: vi.fn(async (id: string) => sessions.get(id) ?? null),
     update: vi.fn(async (id: string, data: any) => {
       const existing = sessions.get(id)

@@ -137,6 +137,8 @@ describe("runAgent", () => {
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
+      repository: undefined,
+      prNumber: undefined,
       metadata: undefined,
       initialPrompt: "Ship it",
       oneShot: true,
@@ -238,5 +240,24 @@ describe("runAgent", () => {
     expect(session.connection.mode).toBe("history")
     expect(session.connection.reconnectable).toBe(false)
     expect(sendMock).toHaveBeenCalledWith("sessionGet", { id: "daemon-session-4" })
+  })
+
+  test("lists recent daemon sessions with pagination params", async () => {
+    sendMock.mockResolvedValueOnce({
+      sessions: [buildSession("daemon-session-5", "acp-session-5")],
+      nextCursor: "cursor-1",
+      hasMore: true,
+    })
+
+    const { listDaemonSessions } = await import("../../src/daemon/session/client.js")
+    const response = await listDaemonSessions({ limit: 10, cursor: "cursor-0" })
+
+    expect(response.sessions).toHaveLength(1)
+    expect(response.nextCursor).toBe("cursor-1")
+    expect(response.hasMore).toBe(true)
+    expect(sendMock).toHaveBeenCalledWith("sessionList", {
+      limit: 10,
+      cursor: "cursor-0",
+    })
   })
 })

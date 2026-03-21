@@ -8,6 +8,8 @@ import type {
   DaemonSessionMetadata,
   GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
+  ListDaemonSessionsRequest,
+  ListDaemonSessionsResponse,
 } from "@goddard-ai/schema/daemon"
 import type { SessionStatus } from "@goddard-ai/schema/db"
 import {
@@ -21,6 +23,7 @@ import {
   SessionStorage,
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
+  type SQLSessionListCursor,
   type SQLSessionUpdate,
 } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
@@ -101,6 +104,7 @@ type ActiveSession = {
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
 export type SessionManager = {
   createSession: (params: CreateDaemonSessionRequest) => Promise<DaemonSession>
+  listSessions: (params: ListDaemonSessionsRequest) => Promise<ListDaemonSessionsResponse>
   connectSession: (id: string) => Promise<DaemonSession>
   getSession: (id: string) => Promise<DaemonSession>
   getHistory: (id: string) => Promise<GetDaemonSessionHistoryResponse>
@@ -604,6 +608,64 @@ function resolveJsonRpcErrorMessage(error: {
 
   return "Agent request failed"
 }
+
+const DEFAULT_SESSION_PAGE_SIZE = 20
+const MAX_SESSION_PAGE_SIZE = 100
+
+/** Encodes one recency cursor for the public session-list contract. */
+function encodeSessionListCursor(input: { updatedAt: Date | string; id: string }): string {
+  return Buffer.from(
+    JSON.stringify({
+      updatedAt: input.updatedAt instanceof Date ? input.updatedAt.toISOString() : input.updatedAt,
+      id: input.id,
+    }),
+    "utf8",
+  ).toString("base64url")
+}
+
+/** Decodes one public session-list cursor back into its stable ordering key. */
+function decodeSessionListCursor(cursor?: string): SQLSessionListCursor | undefined {
+  if (!cursor) {
+    return undefined
+  }
+
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      updatedAt?: unknown
+      id?: unknown
+    }
+
+    if (typeof decoded.updatedAt !== "string" || typeof decoded.id !== "string") {
+      throw new Error("Invalid cursor payload")
+    }
+
+    const updatedAt = new Date(decoded.updatedAt)
+    if (Number.isNaN(updatedAt.valueOf())) {
+      throw new Error("Invalid cursor timestamp")
+    }
+
+    return {
+      updatedAt,
+      id: decoded.id,
+    }
+  } catch {
+    throw new Error("Invalid session cursor")
+  }
+}
+
+/** Normalizes optional session page sizes to the daemon's supported bounds. */
+function normalizeSessionPageSize(limit?: number): number {
+  if (!Number.isFinite(limit)) {
+    return DEFAULT_SESSION_PAGE_SIZE
+  }
+
+  return Math.min(
+    Math.max(Math.trunc(limit ?? DEFAULT_SESSION_PAGE_SIZE), 1),
+    MAX_SESSION_PAGE_SIZE,
+  )
+}
+
+/** Creates the daemon-owned session lifecycle boundary over storage and agent processes. */
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
@@ -663,12 +725,12 @@ export function createSessionManager(input: {
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
-    let persistedSessions: Awaited<ReturnType<typeof SessionStorage.list>>
+    let persistedSessions: Awaited<ReturnType<typeof SessionStorage.listAll>>
     let permissions: Awaited<ReturnType<typeof SessionPermissionsStorage.list>>
 
     try {
       ;[persistedSessions, permissions] = await Promise.all([
-        SessionStorage.list(),
+        SessionStorage.listAll(),
         SessionPermissionsStorage.list(),
       ])
     } catch (error) {
@@ -972,6 +1034,25 @@ export function createSessionManager(input: {
     return toDaemonSession(await SessionStorage.get(id))
   }
 
+  async function listSessions(
+    params: ListDaemonSessionsRequest,
+  ): Promise<ListDaemonSessionsResponse> {
+    await ready
+    const pageSize = normalizeSessionPageSize(params.limit)
+    const records = await SessionStorage.listRecent({
+      limit: pageSize + 1,
+      cursor: decodeSessionListCursor(params.cursor),
+    })
+    const hasMore = records.length > pageSize
+    const pageRecords = records.slice(0, pageSize)
+
+    return {
+      sessions: await Promise.all(pageRecords.map((record) => toDaemonSession(record))),
+      nextCursor: hasMore ? encodeSessionListCursor(pageRecords[pageRecords.length - 1]!) : null,
+      hasMore,
+    }
+  }
+
   async function connectSession(id: string): Promise<DaemonSession> {
     await ready
     if (!activeSessions.has(id)) {
@@ -1228,6 +1309,7 @@ export function createSessionManager(input: {
 
   return {
     createSession,
+    listSessions,
     connectSession,
     getSession,
     getHistory,
