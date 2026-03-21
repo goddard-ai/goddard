@@ -208,6 +208,41 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   expect(await SessionPermissionsStorage.getByToken(permissions.token)).toBeNull()
 })
 
+test("daemon persists repository context into direct session columns", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    repository: "acme/widgets",
+    prNumber: 12,
+    metadata: {
+      workforce: { agentId: "reviewer", requestId: "req-1" },
+    },
+  })
+
+  expect(created.session.repository).toBe("acme/widgets")
+  expect(created.session.prNumber).toBe(12)
+  expect(created.session.metadata).toEqual({
+    workforce: { agentId: "reviewer", requestId: "req-1" },
+  })
+  expect(sessions.get(created.session.id)).toMatchObject({
+    repository: "acme/widgets",
+    prNumber: 12,
+    metadata: {
+      workforce: { agentId: "reviewer", requestId: "req-1" },
+    },
+  })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {
   const sessionId = "session-restart-1"
   sessions.set(sessionId, {

@@ -89,7 +89,7 @@
   - Why: so session authority can be narrowed from an entire repository to a specific work item.
 - `Session Metadata`
   - Structured context attached to a session that describes the surrounding work environment.
-  - Why: so business context such as repository identity or workforce linkage can travel with the session without going into prompt text.
+  - Why: so auxiliary context such as workforce linkage can travel with the session without going into prompt text.
 - `Workforce Metadata`
   - The part of session metadata that identifies a broader orchestrated work request and the participating agent.
   - Why: so session events can be tied back to multi-agent workflows.

@@ -21,6 +21,8 @@ interface BaseSessionParams {
   mcpServers: acp.McpServer[]
   systemPrompt?: string
   env?: Record<string, string>
+  repository?: string
+  prNumber?: number
   metadata?: DaemonSessionMetadata
 }
 

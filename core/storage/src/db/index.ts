@@ -40,6 +40,8 @@ function ensureSchema(client: Database.Database): void {
       blockedReason TEXT,
       initiative TEXT,
       lastAgentMessage TEXT,
+      repository TEXT,
+      prNumber INTEGER,
       metadata TEXT
     );
 
@@ -55,5 +57,29 @@ function ensureSchema(client: Database.Database): void {
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
+  `)
+
+  ensureSessionRepositoryColumns(client)
+}
+
+/** Ensures direct repository and PR columns plus indexes exist for session queries. */
+function ensureSessionRepositoryColumns(client: Database.Database): void {
+  const sessionColumns = new Set(
+    (client.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  )
+
+  if (!sessionColumns.has("repository")) {
+    client.exec("ALTER TABLE sessions ADD COLUMN repository TEXT;")
+  }
+
+  if (!sessionColumns.has("prNumber")) {
+    client.exec("ALTER TABLE sessions ADD COLUMN prNumber INTEGER;")
+  }
+
+  client.exec(`
+    CREATE INDEX IF NOT EXISTS sessions_repository_idx ON sessions (repository);
+    CREATE INDEX IF NOT EXISTS sessions_repository_pr_number_idx ON sessions (repository, prNumber);
   `)
 }

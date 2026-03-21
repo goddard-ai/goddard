@@ -132,10 +132,8 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       initialPrompt: input.prompt,
       oneShot: true,
       systemPrompt: buildBackgroundSystemPrompt(),
-      metadata: {
-        repository: `${input.event.owner}/${input.event.repo}`,
-        prNumber: input.event.prNumber,
-      },
+      repository: `${input.event.owner}/${input.event.repo}`,
+      prNumber: input.event.prNumber,
       env: buildOneShotEnv(input.agentBinDir, input.env),
     })
     return 0

@@ -13,6 +13,8 @@ const sessionConfig = z
     mcpServers: z.array(z.unknown()).optional(),
     systemPrompt: z.string().min(1).optional(),
     env: stringRecord.optional(),
+    repository: z.string().min(1).optional(),
+    prNumber: z.number().int().optional(),
     metadata: DaemonSessionMetadata.optional(),
   })
   .passthrough()

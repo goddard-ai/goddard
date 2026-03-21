@@ -79,6 +79,8 @@ export type DaemonSession = DaemonSessionIdentity & {
   status: SessionStatus
   agentName: string
   cwd: string
+  repository: string | null
+  prNumber: number | null
   metadata: DaemonSessionMetadata | null
   connection: DaemonSessionConnection
   diagnostics: DaemonSessionDiagnostics

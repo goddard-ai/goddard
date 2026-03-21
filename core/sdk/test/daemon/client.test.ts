@@ -47,6 +47,8 @@ describe("runAgent", () => {
       status: "active" as const,
       agentName: "pi",
       cwd: "/tmp/project",
+      repository: null,
+      prNumber: null,
       metadata: null,
       connection: {
         mode: "live" as const,
@@ -99,6 +101,8 @@ describe("runAgent", () => {
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
+      repository: undefined,
+      prNumber: undefined,
       metadata: undefined,
       initialPrompt: "Ship it",
       oneShot: true,

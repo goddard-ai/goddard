@@ -14,7 +14,7 @@
   - Why: so creation, connection, history, diagnostics, and access control all refer to the same unit of work.
 - `Session Metadata`
   - Structured context attached to a daemon session.
-  - Why: so work context such as repository identity or workforce ownership can travel with the session without being embedded in prompt text.
+  - Why: so auxiliary work context such as workforce ownership can travel with the session without being embedded in prompt text.
 - `Repo Event`
   - A backend-originated description of a meaningful repository change.
   - Why: so the backend and daemon can communicate about pull-request-related activity using a stable shared contract.

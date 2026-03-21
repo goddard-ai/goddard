@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { db } from "./db/index.js"
 import { sessions } from "./db/schema.js"
 
@@ -24,6 +24,19 @@ export namespace SessionStorage {
 
   export async function getByAcpId(acpId: string) {
     return (await db.select().from(sessions).where(eq(sessions.acpId, acpId)))[0]
+  }
+
+  /** Lists all sessions currently associated with one repository. */
+  export async function listByRepository(repository: string) {
+    return db.select().from(sessions).where(eq(sessions.repository, repository))
+  }
+
+  /** Lists all sessions currently associated with one repository pull request. */
+  export async function listByRepositoryPr(repository: string, prNumber: number) {
+    return db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.repository, repository), eq(sessions.prNumber, prNumber)))
   }
 
   export async function update(id: string, data: SQLSessionUpdate) {

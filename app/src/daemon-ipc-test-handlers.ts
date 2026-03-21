@@ -27,6 +27,8 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
         status: "active" as const,
         agentName: "test-agent",
         cwd: process.cwd(),
+        repository: null,
+        prNumber: null,
         metadata: {},
         connection: {
           mode: "live" as const,
