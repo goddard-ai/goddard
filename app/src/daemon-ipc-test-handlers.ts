@@ -51,6 +51,30 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
     }
   }
 
+  function encodeSessionCursor(input: { updatedAt: string; id: string }): string {
+    return Buffer.from(JSON.stringify(input), "utf8").toString("base64url")
+  }
+
+  function decodeSessionCursor(cursor?: string): { updatedAt: string; id: string } | null {
+    if (!cursor) {
+      return null
+    }
+
+    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      updatedAt?: unknown
+      id?: unknown
+    }
+
+    if (typeof decoded.updatedAt !== "string" || typeof decoded.id !== "string") {
+      throw new Error("Invalid session cursor")
+    }
+
+    return {
+      updatedAt: decoded.updatedAt,
+      id: decoded.id,
+    }
+  }
+
   function getWorkforceStatus(rootDir: string) {
     return {
       state: "running" as const,
@@ -135,6 +159,30 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
       const acpId = `acp-session-${nextSessionId}`
       sessionHistory.set(id, { acpId, history: [] })
       return getSessionResponse(id)
+    },
+    sessionList: async ({ limit, cursor }) => {
+      const pageSize = Math.min(Math.max(limit ?? 20, 1), 100)
+      const decodedCursor = decodeSessionCursor(cursor)
+      const sessionIds = Array.from(sessionHistory.keys()).sort((left, right) =>
+        right.localeCompare(left),
+      )
+      const filteredIds = decodedCursor
+        ? sessionIds.filter((id) => id < decodedCursor.id)
+        : sessionIds
+      const pageIds = filteredIds.slice(0, pageSize + 1)
+      const hasMore = pageIds.length > pageSize
+      const visibleIds = pageIds.slice(0, pageSize)
+
+      return {
+        sessions: visibleIds.map((id) => getSessionResponse(id).session),
+        nextCursor: hasMore
+          ? encodeSessionCursor({
+              updatedAt: getSessionResponse(visibleIds[visibleIds.length - 1]!).session.updatedAt,
+              id: visibleIds[visibleIds.length - 1]!,
+            })
+          : null,
+        hasMore,
+      }
     },
     sessionGet: async ({ id }) => getSessionResponse(id),
     sessionConnect: async ({ id }) => getSessionResponse(id),
