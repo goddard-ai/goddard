@@ -23,7 +23,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
-    "test": "vitest run --passWithNoTests"
+    "test": "bun run ./scripts/test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",

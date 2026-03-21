@@ -27,13 +27,14 @@ import {
   type SQLSessionUpdate,
 } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
-import treeKill from "@goddard-ai/tree-kill"
-import { execSync, spawn, type ChildProcessByStdio } from "node:child_process"
+import treeKill, { type ProcessLike } from "@goddard-ai/tree-kill"
 import { randomBytes, randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
 import { prependAgentBinToPath } from "../config.js"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.js"
 import {
+  type AgentInputStream,
+  type AgentOutputStream,
   createAgentConnection,
   createAgentMessageStream,
   getAcpMessageResult,
@@ -82,11 +83,22 @@ type PendingPromptRequest = {
   resolve: (response: acp.PromptResponse) => void
   reject: (error: Error) => void
 }
+
+/** Callback fired when one Bun-managed agent process exits. */
+type AgentProcessExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void
+
+/** Bun subprocess wrapper that preserves the exit hooks and stdio surface the daemon expects. */
+type AgentProcessHandle = ProcessLike & {
+  stdin: AgentInputStream
+  stdout: AgentOutputStream
+  onceExit: (handler: AgentProcessExitHandler) => void
+}
+
 type ActiveSession = {
   id: string
   acpId: string
   token: string
-  process: ChildProcessByStdio<Writable, Readable, null>
+  process: AgentProcessHandle
   writer: WritableStreamDefaultWriter<acp.AnyMessage>
   subscription: {
     close: () => Promise<void>
@@ -264,6 +276,84 @@ function buildAgentProcessEnv(input: {
   }
 }
 
+/** Resolves the local Claude executable when the Claude ACP wrapper is in use. */
+function resolveClaudeExecutable(): string | null {
+  return Bun.which("claude") ?? null
+}
+
+/** Wraps Bun's subprocess API with the minimal process hooks used by session management. */
+function createAgentProcessHandle(input: {
+  cmd: string
+  args: string[]
+  cwd: string
+  env: NodeJS.ProcessEnv
+}): AgentProcessHandle {
+  let exitState: { code: number | null; signal: NodeJS.Signals | null } | null = null
+  const exitHandlers = new Set<AgentProcessExitHandler>()
+  const subprocess = Bun.spawn([input.cmd, ...input.args], {
+    cwd: input.cwd,
+    env: input.env,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "inherit",
+    onExit(_subprocess, exitCode, signalCode) {
+      exitState = {
+        code: exitCode,
+        signal: signalCode as NodeJS.Signals | null,
+      }
+
+      for (const handler of exitHandlers) {
+        handler(exitState.code, exitState.signal)
+      }
+      exitHandlers.clear()
+    },
+  })
+
+  if (!subprocess.stdin || !subprocess.stdout) {
+    throw new Error(`Agent process ${input.cmd} did not expose piped stdio`)
+  }
+
+  const stdin = new Writable({
+    write(chunk, _encoding, callback) {
+      Promise.resolve(subprocess.stdin!.write(chunk))
+        .then(() => callback())
+        .catch((error) => {
+          callback(error instanceof Error ? error : new Error(String(error)))
+        })
+    },
+    final(callback) {
+      Promise.resolve(subprocess.stdin!.end())
+        .then(() => callback())
+        .catch((error) => {
+          callback(error instanceof Error ? error : new Error(String(error)))
+        })
+    },
+  })
+  const stdout = Readable.fromWeb(subprocess.stdout)
+
+  return {
+    stdin,
+    stdout,
+    pid: subprocess.pid,
+    kill(signal) {
+      subprocess.kill(signal as never)
+      return true
+    },
+    onceExit(handler) {
+      if (exitState) {
+        handler(exitState.code, exitState.signal)
+        return
+      }
+
+      const wrapped: AgentProcessExitHandler = (code, signal) => {
+        exitHandlers.delete(wrapped)
+        handler(code, signal)
+      }
+      exitHandlers.add(wrapped)
+    },
+  }
+}
+
 /** Resolves and launches the requested agent distribution for a new daemon session. */
 async function spawnAgentProcess(
   daemonUrl: string,
@@ -274,7 +364,7 @@ async function spawnAgentProcess(
     agentBinDir: string
     env?: Record<string, string>
   },
-): Promise<ChildProcessByStdio<Writable, Readable, null>> {
+): Promise<AgentProcessHandle> {
   const agentId = typeof params.agent === "string" ? params.agent : params.agent.id
   let agent = params.agent
 
@@ -290,18 +380,15 @@ async function spawnAgentProcess(
 
   const extraEnv: Record<string, string> = {}
   if (agentId === "claude-acp") {
-    try {
-      const claudePath = execSync("which claude", { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim()
-      if (claudePath) {
-        extraEnv["CLAUDE_CODE_EXECUTABLE"] = claudePath
-      }
-    } catch {
-      // Ignored
+    const claudePath = resolveClaudeExecutable()
+    if (claudePath) {
+      extraEnv["CLAUDE_CODE_EXECUTABLE"] = claudePath
     }
   }
 
-  return spawn(processSpec.cmd, processSpec.args, {
-    stdio: ["pipe", "pipe", "inherit"],
+  return createAgentProcessHandle({
+    cmd: processSpec.cmd,
+    args: processSpec.args,
     cwd: params.cwd,
     env: buildAgentProcessEnv({
       daemonUrl,
@@ -386,8 +473,8 @@ function toAgentBinaryPlatform(
 
 /** Performs the ACP handshake and optional initial prompt before live streaming begins. */
 async function initializeSession(
-  input: Writable,
-  output: Readable,
+  input: AgentInputStream,
+  output: AgentOutputStream,
   params: CreateDaemonSessionRequest,
   hooks: {
     onMessageWrite?: (message: acp.AnyMessage) => void
@@ -915,7 +1002,7 @@ export function createSessionManager(input: {
           await cleanupDetachedWorktree(id, sessionWorktree)
         }
 
-        process.once("exit", (code, signal) => {
+        process.onceExit((code, signal) => {
           void handleOneShotExit(code, signal)
         })
 
@@ -1025,7 +1112,7 @@ export function createSessionManager(input: {
         await cleanupActiveWorktree(active)
       }
 
-      process.once("exit", (code, signal) => {
+      process.onceExit((code, signal) => {
         void handleExit(code, signal)
       })
 

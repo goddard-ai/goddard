@@ -1,12 +1,13 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, mock, test, vi } from "bun:test"
 
 const cleanup: Array<() => Promise<void>> = []
 
 afterEach(async () => {
-  vi.resetModules()
+  mock.restore()
+  vi.resetAllMocks()
 
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
@@ -28,7 +29,7 @@ test("real storage reconciliation marks interrupted sessions as archived history
   process.env.HOME = homeDir
 
   const worktreeCleanupMock = vi.fn(() => true)
-  vi.doMock("@goddard-ai/worktree", () => ({
+  mock.module("@goddard-ai/worktree", () => ({
     Worktree: class {
       poweredBy = "mock-worktree"
 
@@ -47,6 +48,7 @@ test("real storage reconciliation marks interrupted sessions as archived history
     import("@goddard-ai/daemon-client"),
     import("@goddard-ai/storage"),
   ])
+  mock.restore()
 
   const sessionId = "real-restart-session-1"
   await storage.SessionStorage.create({

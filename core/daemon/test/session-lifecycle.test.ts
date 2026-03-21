@@ -2,28 +2,21 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, mock, test, vi } from "bun:test"
+import type { DaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
 
-const {
-  permissionsBySessionId,
-  permissionsByToken,
-  sessionStates,
-  sessions,
-  worktreeConstructorMock,
-  worktreeSetupMock,
-  worktreeCleanupMock,
-} = vi.hoisted(() => ({
-  sessions: new Map<string, any>(),
-  sessionStates: new Map<string, any>(),
-  permissionsBySessionId: new Map<string, any>(),
-  permissionsByToken: new Map<string, any>(),
-  worktreeConstructorMock: vi.fn(),
-  worktreeSetupMock: vi.fn(),
-  worktreeCleanupMock: vi.fn(() => true),
-}))
+const sessions = new Map<string, any>()
+const sessionStates = new Map<string, any>()
+const permissionsBySessionId = new Map<string, any>()
+const permissionsByToken = new Map<string, any>()
+const worktreeConstructorMock = vi.fn()
+const worktreeSetupMock = vi.fn()
+const worktreeCleanupMock = vi.fn(() => true)
+const actualStorage = await import("../../storage/src/index.ts")
 
-vi.mock("@goddard-ai/storage", () => ({
+mock.module("@goddard-ai/storage", () => ({
+  ...actualStorage,
   SessionStorage: {
     create: vi.fn(async (record: any) => {
       const now = new Date()
@@ -38,6 +31,7 @@ vi.mock("@goddard-ai/storage", () => ({
       })
     }),
     list: vi.fn(async () => Array.from(sessions.values())),
+    listAll: vi.fn(async () => Array.from(sessions.values())),
     listRecent: vi.fn(
       async ({ limit, cursor }: { limit: number; cursor?: { updatedAt: Date; id: string } }) => {
         return Array.from(sessions.values())
@@ -125,7 +119,7 @@ vi.mock("@goddard-ai/storage", () => ({
   },
 }))
 
-vi.mock("@goddard-ai/storage/session-permissions", () => ({
+mock.module("@goddard-ai/storage/session-permissions", () => ({
   SessionPermissionsStorage: {
     create: vi.fn(async (record: any) => {
       const created = { ...record, createdAt: new Date().toISOString() }
@@ -156,7 +150,7 @@ vi.mock("@goddard-ai/storage/session-permissions", () => ({
   },
 }))
 
-vi.mock("@goddard-ai/worktree", () => ({
+mock.module("@goddard-ai/worktree", () => ({
   Worktree: class {
     poweredBy = "mock-worktree"
     cwd: string
@@ -180,9 +174,10 @@ vi.mock("@goddard-ai/worktree", () => ({
   },
 }))
 
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
-import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
-import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+const { createDaemonIpcClient } = await import("@goddard-ai/daemon-client")
+const { SessionPermissionsStorage } = await import("@goddard-ai/storage/session-permissions")
+const { startDaemonServer } = await import("../src/ipc.ts")
+mock.restore()
 
 const cleanup: Array<() => Promise<void>> = []
 
