@@ -58,6 +58,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
             agent: "pi-acp",
             cwd: rootDir,
             mcpServers: [],
+            systemPrompt: "",
           },
           rateLimits: {
             cycleDelay: "30s",
@@ -104,6 +105,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
       agent: "pi-acp",
       cwd: "/repo",
       mcpServers: [],
+      systemPrompt: "",
     },
     rateLimits: {
       cycleDelay: "30s",
