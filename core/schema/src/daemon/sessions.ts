@@ -6,12 +6,15 @@ import { AgentDistribution } from "../session-server/agent-distribution.js"
 import { DaemonSessionMetadata } from "./session-metadata.js"
 
 const initialPrompt = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
+const SessionWorktreeOptions = z.object({
+  enabled: z.boolean().optional(),
+})
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateDaemonSessionRequest = z.object({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
   cwd: z.string(),
-  useWorktree: z.boolean().optional(),
+  worktree: SessionWorktreeOptions.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string(),
   env: z.record(z.string(), z.string()).optional(),

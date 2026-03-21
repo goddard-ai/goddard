@@ -98,7 +98,7 @@ describe("runAgent", () => {
     expect(sendMock).toHaveBeenCalledWith("sessionCreate", {
       agent: "pi",
       cwd: "/tmp/project",
-      useWorktree: undefined,
+      worktree: undefined,
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
@@ -122,7 +122,7 @@ describe("runAgent", () => {
       runAgent({
         agent: "pi",
         cwd: "/tmp/project",
-        useWorktree: false,
+        worktree: { enabled: false },
         mcpServers: [],
         systemPrompt: "Follow the spec.",
         initialPrompt: "Ship it",
@@ -133,7 +133,7 @@ describe("runAgent", () => {
     expect(sendMock).toHaveBeenCalledWith("sessionCreate", {
       agent: "pi",
       cwd: "/tmp/project",
-      useWorktree: false,
+      worktree: { enabled: false },
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
