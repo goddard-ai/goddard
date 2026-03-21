@@ -30,18 +30,19 @@ describe("daemon workforce tool", () => {
   const previousEnv = process.env
   let tempDir = ""
   let emptyFile = ""
+  let logSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "goddard-workforce-tool-"))
     emptyFile = join(tempDir, "empty.txt")
     await writeFile(emptyFile, "", "utf-8")
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 
     process.env = {
       ...previousEnv,
       GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
       GODDARD_SESSION_TOKEN: "tok_session",
       GODDARD_WORKFORCE_ROOT_DIR: "/repo",
-      GODDARD_WORKFORCE_REQUEST_ID: "req-env",
     }
 
     sendMock.mockClear()
@@ -49,6 +50,7 @@ describe("daemon workforce tool", () => {
   })
 
   afterEach(async () => {
+    logSpy.mockRestore()
     process.env = previousEnv
     await rm(tempDir, { recursive: true, force: true })
   })
@@ -93,25 +95,33 @@ describe("daemon workforce tool", () => {
     })
   })
 
-  test("workforce respond and suspend require the session token", async () => {
-    await workforceRespond("req-1", "Done.")
-    await workforceSuspend("req-1", "Need a root decision.")
+  test("workforce respond and suspend delegate through daemon IPC without request ids", async () => {
+    await workforceRespond("Done.")
+    await workforceSuspend("Need a root decision.")
 
     expect(sendMock).toHaveBeenNthCalledWith(1, "workforceRespond", {
       rootDir: "/repo",
-      requestId: "req-1",
       output: "Done.",
       token: "tok_session",
     })
     expect(sendMock).toHaveBeenNthCalledWith(2, "workforceSuspend", {
       rootDir: "/repo",
-      requestId: "req-1",
       reason: "Need a root decision.",
       token: "tok_session",
     })
   })
 
-  test("main routes request and respond subcommands", async () => {
+  test("workforce respond and suspend reject missing session tokens", async () => {
+    delete process.env.GODDARD_SESSION_TOKEN
+
+    await expect(workforceRespond("Done.")).rejects.toThrow("GODDARD_SESSION_TOKEN is required")
+    await expect(workforceSuspend("Need a root decision.")).rejects.toThrow(
+      "GODDARD_SESSION_TOKEN is required",
+    )
+    expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  test("main routes request and respond subcommands without success logs", async () => {
     await main(["request", "--target-agent-id", "api", "--input-file", emptyFile])
     await main(["respond", "--output-file", emptyFile])
 
@@ -123,9 +133,9 @@ describe("daemon workforce tool", () => {
     })
     expect(sendMock).toHaveBeenNthCalledWith(2, "workforceRespond", {
       rootDir: "/repo",
-      requestId: "req-env",
       output: "",
       token: "tok_session",
     })
+    expect(logSpy).not.toHaveBeenCalled()
   })
 })

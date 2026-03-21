@@ -85,6 +85,14 @@ export async function startDaemonServer(
     }
   }
 
+  function requireActorRequestId(actor: WorkforceActorContext): string {
+    if (!actor.requestId) {
+      throw new Error("Session is not attached to an active workforce request")
+    }
+
+    return actor.requestId
+  }
+
   function withRequestLogging<TPayload, TResponse>(
     requestName: string,
     handler: (
@@ -426,7 +434,7 @@ export async function startDaemonServer(
       )
     }),
     workforceRespond: withRequestLogging<
-      { rootDir: string; requestId: string; output: string; token: string },
+      { rootDir: string; output: string; token: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceRespond", async (payload, context) => {
       const actor = await resolveWorkforceActor(payload.token, context)
@@ -434,14 +442,14 @@ export async function startDaemonServer(
         payload.rootDir,
         {
           type: "respond",
-          requestId: payload.requestId,
+          requestId: requireActorRequestId(actor),
           output: payload.output,
         },
         actor,
       )
     }),
     workforceSuspend: withRequestLogging<
-      { rootDir: string; requestId: string; reason: string; token: string },
+      { rootDir: string; reason: string; token: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceSuspend", async (payload, context) => {
       const actor = await resolveWorkforceActor(payload.token, context)
@@ -449,7 +457,7 @@ export async function startDaemonServer(
         payload.rootDir,
         {
           type: "suspend",
-          requestId: payload.requestId,
+          requestId: requireActorRequestId(actor),
           reason: payload.reason,
         },
         actor,
@@ -495,7 +503,7 @@ export async function startDaemonServer(
       await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
       await new Promise<void>((resolve, reject) => {
-        ipcServer.server.close((error) => {
+        ipcServer.server.close((error?: Error) => {
           if (error) {
             reject(error)
             return

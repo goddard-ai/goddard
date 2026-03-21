@@ -50,6 +50,14 @@ export interface WorkforceRuntimeDeps {
   runSession?: WorkforceSessionRunner
 }
 
+/** One workforce ledger event before the runtime assigns its durable event id. */
+type WorkforcePendingLedgerEvent = {
+  [TType in WorkforceLedgerEvent["type"]]: Omit<
+    Extract<WorkforceLedgerEvent, { type: TType }>,
+    "id"
+  > & { id?: string }
+}[WorkforceLedgerEvent["type"]]
+
 /** Collects the most relevant recent ledger activity for the agent about to handle a request. */
 function buildRecentActivity(
   events: WorkforceLedgerEvent[],
@@ -222,8 +230,7 @@ function buildInitialPrompt(
 ): string {
   return concat(
     `Repository root: ${rootDir}`,
-    `Current request id: ${request.id}`,
-    `Sender agent id: ${request.fromAgentId ?? "operator"}`,
+    request.fromAgentId ? `Sender agent id: ${request.fromAgentId}` : "Sender agent id: operator",
     `Request intent: ${request.intent}`,
     recentActivity.length > 0
       ? ["", "Recent activity:", recentActivity.map((event) => JSON.stringify(event)).join("\n")]
