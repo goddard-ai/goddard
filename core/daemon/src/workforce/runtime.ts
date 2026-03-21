@@ -310,7 +310,6 @@ async function defaultRunWorkforceSession(
     env: {
       GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
       GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
-      GODDARD_WORKFORCE_REQUEST_ID: input.request.id,
     },
   })
 
@@ -365,6 +364,17 @@ function canManageRequest(
   }
 
   return actor.agentId === config.rootAgentId || actor.agentId === request.fromAgentId
+}
+
+/** Ensures an authenticated workforce session can only finish or suspend its attached request. */
+function assertActorOwnsActiveRequest(
+  actor: WorkforceActorContext,
+  requestId: string,
+  verb: string,
+): void {
+  if (actor.requestId !== null && actor.requestId !== requestId) {
+    throw new Error(`Session request ${actor.requestId} cannot ${verb} ${requestId}`)
+  }
 }
 
 /** A daemon-managed repo-local workforce runtime and its active queue state. */
@@ -595,6 +605,7 @@ export class WorkforceRuntime {
     actor: WorkforceActorContext
   }): Promise<void> {
     const request = assertRequestExists(this.#projection, input.requestId)
+    assertActorOwnsActiveRequest(input.actor, input.requestId, "respond to")
     if (input.actor.agentId !== request.toAgentId) {
       throw new Error(
         `Agent ${input.actor.agentId ?? "unknown"} cannot respond to ${input.requestId}`,
@@ -628,6 +639,7 @@ export class WorkforceRuntime {
     actor: WorkforceActorContext
   }): Promise<void> {
     const request = assertRequestExists(this.#projection, input.requestId)
+    assertActorOwnsActiveRequest(input.actor, input.requestId, "suspend")
     if (input.actor.agentId !== request.toAgentId) {
       throw new Error(`Agent ${input.actor.agentId ?? "unknown"} cannot suspend ${input.requestId}`)
     }
