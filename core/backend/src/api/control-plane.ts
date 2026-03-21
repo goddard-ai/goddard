@@ -7,8 +7,15 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
+  RepoEventRecord,
 } from "@goddard-ai/schema/backend"
 import type { Env } from "../env.js"
+
+/** Managed event record persisted by the backend together with its routing owner. */
+export type PersistedRepoEvent = {
+  githubUsername: string
+  record: RepoEventRecord
+}
 
 /** Backend operations that the HTTP router can delegate to a storage implementation. */
 export interface BackendControlPlane {
@@ -32,6 +39,8 @@ export interface BackendControlPlane {
     env?: Env,
   ): Promise<void> | void
   handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent
+  recordRepoEvent(event: RepoEvent): Promise<PersistedRepoEvent | null> | PersistedRepoEvent | null
+  getRepoEventHistory(token: string, after?: number): Promise<RepoEventRecord[]> | RepoEventRecord[]
   resolveEventOwner?(event: RepoEvent): Promise<string | undefined> | string | undefined
   addStreamSocket?(streamKey: string, socket: unknown): void
   removeStreamSocket?(streamKey: string, socket: unknown): void

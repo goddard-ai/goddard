@@ -29,3 +29,10 @@ export const pullRequests = sqliteTable("pull_requests", {
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull(),
 })
+
+export const repoEvents = sqliteTable("repo_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  githubUsername: text("github_username").notNull(),
+  eventJson: text("event_json").notNull(),
+  createdAt: text("created_at").notNull(),
+})

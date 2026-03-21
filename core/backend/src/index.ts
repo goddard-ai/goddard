@@ -1,6 +1,5 @@
-import { type RepoEvent } from "@goddard-ai/schema/backend"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
-import { type BackendControlPlane } from "./api/control-plane.js"
+import { type BackendControlPlane, type PersistedRepoEvent } from "./api/control-plane.js"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.js"
 import { createBackendRouter } from "./api/router.js"
 import { createSseSession } from "./utils.js"
@@ -74,7 +73,10 @@ export async function startBackendServer(
   }
 }
 
-function broadcastToInMemoryStreams(controlPlane: BackendControlPlane, event: RepoEvent): void {
+function broadcastToInMemoryStreams(
+  controlPlane: BackendControlPlane,
+  event: PersistedRepoEvent,
+): void {
   if ("broadcast" in controlPlane && typeof controlPlane.broadcast === "function") {
     controlPlane.broadcast(event)
   }

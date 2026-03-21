@@ -44,10 +44,34 @@ export type RepoEvent = z.infer<typeof RepoEvent>
 
 /** SSE payload delivered over the backend feedback stream. */
 export const StreamMessage = z.object({
+  id: z.number().int().positive().optional(),
   event: RepoEvent,
 })
 
 export type StreamMessage = z.infer<typeof StreamMessage>
+
+/** Persisted managed pull-request event paired with its monotonic backend cursor. */
+export const RepoEventRecord = z.object({
+  id: z.number().int().positive(),
+  createdAt: z.string(),
+  event: RepoEvent,
+})
+
+export type RepoEventRecord = z.infer<typeof RepoEventRecord>
+
+/** Query payload used to fetch managed pull-request events after one cursor. */
+export const RepoEventHistoryQuery = z.object({
+  after: z.coerce.number().int().positive().optional(),
+})
+
+export type RepoEventHistoryQuery = z.infer<typeof RepoEventHistoryQuery>
+
+/** Response payload returned by the managed pull-request event history route. */
+export const RepoEventHistoryResponse = z.object({
+  events: z.array(RepoEventRecord),
+})
+
+export type RepoEventHistoryResponse = z.infer<typeof RepoEventHistoryResponse>
 
 const issueCommentWebhook = z.object({
   type: z.literal("issue_comment"),

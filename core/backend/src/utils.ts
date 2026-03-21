@@ -48,12 +48,12 @@ export function createSseSession(onClose: () => void): { response: Response; sin
   })
 
   const sink: StreamSink = {
-    send(payload) {
+    send(message) {
       if (isClosed || !controller) {
         return
       }
 
-      controller.enqueue(encoder.encode(formatSseDataFrame(payload)))
+      controller.enqueue(encoder.encode(formatSseDataFrame(message.data, message.id)))
     },
     close,
   }
@@ -71,8 +71,9 @@ export function createSseSession(onClose: () => void): { response: Response; sin
   }
 }
 
-export function formatSseDataFrame(payload: string): string {
+export function formatSseDataFrame(payload: string, id?: string | number): string {
   const normalized = payload.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
   const lines = normalized.split("\n")
-  return `${lines.map((line) => `data: ${line}`).join("\n")}\n\n`
+  const prefix = id === undefined ? "" : `id: ${id}\n`
+  return `${prefix}${lines.map((line) => `data: ${line}`).join("\n")}\n\n`
 }

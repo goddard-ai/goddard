@@ -7,6 +7,7 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
+  RepoEventRecord,
 } from "@goddard-ai/schema/backend"
 import { randomBytes } from "node:crypto"
 import type { Env } from "../env.js"
@@ -14,6 +15,7 @@ import { hashToInteger, toPublicSession } from "../utils.js"
 import {
   type BackendControlPlane,
   HttpError,
+  type PersistedRepoEvent,
   assertRepo,
   postPrCommentViaApp,
 } from "./control-plane.js"
@@ -26,7 +28,7 @@ export type DeviceSessionRecord = { githubUsername: string; createdAt: number; e
 
 /** Minimal sink interface used by local SSE fanout. */
 export type StreamSink = {
-  send: (payload: string) => void
+  send: (message: { data: string; id?: string | number }) => void
   close?: () => void
 }
 
@@ -39,8 +41,10 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   #deviceSessions = new Map<string, DeviceSessionRecord>()
   #authSessions = new Map<string, SessionRecord>()
   #pullRequests: PullRequestRecord[] = []
+  #repoEvents: PersistedRepoEvent[] = []
   #streamsByUser = new Map<string, Set<StreamSink>>()
   #nextPrId = 1
+  #nextRepoEventId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
     const githubUsername = input.githubUsername?.trim() || "developer"
@@ -206,6 +210,35 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     return mapped
   }
 
+  getRepoEventHistory(token: string, after?: number): RepoEventRecord[] {
+    const session = this.getSession(token)
+    return this.#repoEvents
+      .filter(
+        ({ githubUsername, record }) =>
+          githubUsername === session.githubUsername && (after === undefined || record.id > after),
+      )
+      .map(({ record }) => record)
+  }
+
+  recordRepoEvent(event: RepoEvent): PersistedRepoEvent | null {
+    const githubUsername = this.resolveEventOwner(event)
+    if (!githubUsername) {
+      return null
+    }
+
+    const persistedEvent: PersistedRepoEvent = {
+      githubUsername,
+      record: {
+        id: this.#nextRepoEventId++,
+        createdAt: new Date().toISOString(),
+        event,
+      },
+    }
+
+    this.#repoEvents.push(persistedEvent)
+    return persistedEvent
+  }
+
   addStreamSocket(githubUsername: string, socket: unknown): void {
     if (!isStreamSink(socket)) {
       return
@@ -228,21 +261,17 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     }
   }
 
-  broadcast(event: RepoEvent): void {
-    const githubUsername = this.resolveEventOwner(event)
-    if (!githubUsername) {
-      return
-    }
-
+  broadcast(persistedEvent: PersistedRepoEvent): void {
+    const { githubUsername, record } = persistedEvent
     const sockets = this.#streamsByUser.get(githubUsername)
     if (!sockets) {
       return
     }
 
-    const payload = JSON.stringify({ event })
+    const payload = JSON.stringify({ event: record.event })
     for (const socket of sockets) {
       try {
-        socket.send(payload)
+        socket.send({ data: payload, id: record.id })
       } catch {
         sockets.delete(socket)
         socket.close?.()

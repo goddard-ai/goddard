@@ -15,6 +15,8 @@ const stubControlPlane: BackendControlPlane = {
   isManagedPr: notUsed,
   replyToPr: notUsed,
   handleGitHubWebhook: notUsed,
+  recordRepoEvent: notUsed,
+  getRepoEventHistory: notUsed,
   resolveEventOwner: notUsed,
 }
 
@@ -82,6 +84,64 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
   assert.equal(response.status, 200)
   assert.equal(await response.text(), "stream-ok")
   assert.equal(capturedGithubUsername, "alec")
+})
+
+test("createBackendRouter delegates stream history route to the control plane", async () => {
+  const controlPlane: BackendControlPlane = {
+    ...stubControlPlane,
+    getRepoEventHistory(token, after) {
+      assert.equal(token, "tok_1")
+      assert.equal(after, 7)
+      return [
+        {
+          id: 8,
+          createdAt: "2026-03-21T00:00:00.000Z",
+          event: {
+            type: "comment",
+            owner: "goddard-ai",
+            repo: "sdk",
+            prNumber: 1,
+            author: "teammate",
+            body: "ship it",
+            reactionAdded: "eyes",
+            createdAt: "2026-03-21T00:00:00.000Z",
+          },
+        },
+      ]
+    },
+  }
+
+  const router = createBackendRouter({
+    createControlPlane: () => controlPlane,
+  })
+
+  const response = await router(
+    createContext(
+      new Request("https://example.test/stream/history?after=7", {
+        headers: { authorization: "Bearer tok_1" },
+      }),
+    ) as any,
+  )
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    events: [
+      {
+        id: 8,
+        createdAt: "2026-03-21T00:00:00.000Z",
+        event: {
+          type: "comment",
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: 1,
+          author: "teammate",
+          body: "ship it",
+          reactionAdded: "eyes",
+          createdAt: "2026-03-21T00:00:00.000Z",
+        },
+      },
+    ],
+  })
 })
 
 test("createBackendRouter serializes HttpError responses", async () => {

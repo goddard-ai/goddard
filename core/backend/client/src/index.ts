@@ -6,6 +6,7 @@ import type {
   DeviceFlowStart,
   PullRequestRecord,
   RepoRef,
+  RepoEventRecord,
   StreamMessage,
 } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
@@ -48,6 +49,7 @@ export type BackendClient = {
     reply: (input: RepoRef & { prNumber: number; body: string }) => Promise<{ success: boolean }>
   }
   stream: {
+    history: (input?: { after?: number }) => Promise<RepoEventRecord[]>
     subscribe: () => Promise<StreamSubscription>
   }
 }
@@ -146,6 +148,14 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       },
     },
     stream: {
+      history: async (input = {}) => {
+        const token = await requireToken(tokenStorage)
+        const response = await rouzerClient.repoStreamHistoryRoute.GET({
+          headers: { authorization: `Bearer ${token}` },
+          query: input,
+        })
+        return response.events
+      },
       subscribe: async () => {
         const token = await requireToken(tokenStorage)
         const abortController = new AbortController()
@@ -234,13 +244,18 @@ function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription)
     const chunk = remaining.slice(0, match.index)
     remaining = remaining.slice(match.index + match[0].length)
 
-    const data = parseSseData(chunk)
-    if (!data) {
+    const message = parseSseMessage(chunk)
+    if (!message?.data) {
       continue
     }
 
     try {
-      const parsed = JSON.parse(data) as StreamMessage
+      const parsed = JSON.parse(message.data) as StreamMessage
+      const streamMessage: StreamMessage = {
+        id: message.id ?? parsed.id,
+        event: parsed.event,
+      }
+      subscription.emit("message", streamMessage)
       subscription.emit("event", parsed.event)
       subscription.emit(parsed.event.type, parsed.event)
     } catch (error) {
@@ -249,13 +264,22 @@ function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription)
   }
 }
 
-/** Extracts the SSE data payload lines from one event frame. */
-function parseSseData(chunk: string): string | null {
+/** Extracts the SSE id and data payload lines from one event frame. */
+function parseSseMessage(chunk: string): { id?: number; data?: string } | null {
   const lines = chunk.split(/\r?\n/)
   const dataLines: string[] = []
+  let id: number | undefined
 
   for (const line of lines) {
     if (!line || line.startsWith(":")) {
+      continue
+    }
+
+    if (line.startsWith("id:")) {
+      const parsedId = Number.parseInt(line.slice("id:".length).trim(), 10)
+      if (Number.isInteger(parsedId) && parsedId > 0) {
+        id = parsedId
+      }
       continue
     }
 
@@ -264,5 +288,5 @@ function parseSseData(chunk: string): string | null {
     }
   }
 
-  return dataLines.length > 0 ? dataLines.join("\n") : null
+  return dataLines.length > 0 ? { id, data: dataLines.join("\n") } : null
 }

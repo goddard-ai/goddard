@@ -3,6 +3,7 @@ import type {
   CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowStart,
+  RepoEventRecord,
   RepoRef,
 } from "@goddard-ai/schema/backend"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
@@ -102,6 +103,9 @@ export class GoddardSdk {
 
   get stream() {
     return {
+      history: async (input: { after?: number } = {}): Promise<RepoEventRecord[]> => {
+        return this.#backend.stream.history(input)
+      },
       subscribe: async () => {
         return this.#backend.stream.subscribe()
       },

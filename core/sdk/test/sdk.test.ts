@@ -177,6 +177,53 @@ test("stream emits error event for malformed payloads", async () => {
   sub.close()
 })
 
+test("stream.history uses the authenticated backend client route", async () => {
+  const storage = new InMemoryTokenStorage()
+  await storage.setToken("tok_history")
+
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input)
+    if (url.includes("/stream/history?after=7")) {
+      expect(init?.headers && (init.headers as Record<string, string>).authorization).toBe(
+        "Bearer tok_history",
+      )
+      return jsonResponse(200, {
+        events: [
+          {
+            id: 8,
+            createdAt: new Date().toISOString(),
+            event: {
+              type: "comment",
+              owner: "org",
+              repo: "repo",
+              prNumber: 4,
+              author: "teammate",
+              body: "ship it",
+              reactionAdded: "eyes",
+              createdAt: new Date().toISOString(),
+            },
+          },
+        ],
+      })
+    }
+
+    return jsonResponse(404, { error: "not found" })
+  }
+
+  const sdk = new GoddardSdk({
+    backendUrl: "http://127.0.0.1:8787",
+    tokenStorage: storage,
+    fetch: fetchImpl,
+  })
+
+  await expect(sdk.stream.history({ after: 7 })).resolves.toEqual([
+    expect.objectContaining({
+      id: 8,
+      event: expect.objectContaining({ type: "comment", prNumber: 4 }),
+    }),
+  ])
+})
+
 function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
     status,

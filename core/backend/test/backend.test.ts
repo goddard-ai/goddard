@@ -182,9 +182,79 @@ test("sse stream receives webhook events for a managed PR", async () => {
       body: "looks good",
     })
 
-    const parsed = (await eventPromise) as { event: { type: string; reactionAdded: string } }
+    const parsed = (await eventPromise) as {
+      id: number
+      event: { type: string; reactionAdded: string }
+    }
+    assert.equal(parsed.id, 2)
     assert.equal(parsed.event.type, "comment")
     assert.equal(parsed.event.reactionAdded, "eyes")
+  } finally {
+    await server.close()
+  }
+})
+
+test("stream history returns managed events for the authenticated user in cursor order", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const alecFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: alecFlow.deviceCode,
+      githubUsername: "alec",
+    })
+    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
+    const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: bobFlow.deviceCode,
+      githubUsername: "bob",
+    })
+
+    await postJson(
+      `${baseUrl}/pr/create`,
+      { owner: "goddard-ai", repo: "sdk", title: "Alec PR", head: "feat/alec", base: "main" },
+      alecSession.token,
+    )
+    await postJson(
+      `${baseUrl}/pr/create`,
+      { owner: "goddard-ai", repo: "daemon", title: "Bob PR", head: "feat/bob", base: "main" },
+      bobSession.token,
+    )
+
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      author: "teammate",
+      body: "looks good",
+    })
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "daemon",
+      prNumber: 1,
+      author: "teammate",
+      body: "bob only",
+    })
+
+    const response = await fetch(`${baseUrl}/stream/history?after=1`, {
+      headers: { authorization: `Bearer ${alecSession.token}` },
+    })
+
+    assert.equal(response.status, 200)
+    const payload = (await response.json()) as {
+      events: Array<{ id: number; event: { type: string; prNumber: number; repo: string } }>
+    }
+    assert.deepEqual(
+      payload.events.map((event) => ({
+        id: event.id,
+        type: event.event.type,
+        repo: event.event.repo,
+        prNumber: event.event.prNumber,
+      })),
+      [{ id: 3, type: "comment", repo: "sdk", prNumber: 1 }],
+    )
   } finally {
     await server.close()
   }
@@ -321,7 +391,17 @@ async function readFirstSseEvent(response: Response, timeoutMs = 1000): Promise<
 
       if (dataLines.length > 0) {
         await reader.cancel()
-        return JSON.parse(dataLines.join("\n"))
+        return {
+          id: Number.parseInt(
+            rawEvent
+              .split("\n")
+              .find((line) => line.startsWith("id:"))
+              ?.slice("id:".length)
+              .trim() ?? "",
+            10,
+          ),
+          ...JSON.parse(dataLines.join("\n")),
+        }
       }
 
       separatorIndex = buffer.indexOf("\n\n")

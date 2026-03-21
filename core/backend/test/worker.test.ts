@@ -17,22 +17,27 @@ test("user stream durable object fans out published events to subscribers", asyn
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        event: {
-          type: "comment",
-          owner: "goddard-ai",
-          repo: "sdk",
-          prNumber: 1,
-          author: "teammate",
-          body: "looks good",
-          reactionAdded: "eyes",
+        record: {
+          id: 9,
           createdAt: new Date().toISOString(),
+          event: {
+            type: "comment",
+            owner: "goddard-ai",
+            repo: "sdk",
+            prNumber: 1,
+            author: "teammate",
+            body: "looks good",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          },
         },
       }),
     }),
   )
 
   assert.equal(publishResponse.status, 204)
-  const payload = (await eventPromise) as { event: { type: string; prNumber: number } }
+  const payload = (await eventPromise) as { id?: number; event: { type: string; prNumber: number } }
+  assert.equal(payload.id, 9)
   assert.equal(payload.event.type, "comment")
   assert.equal(payload.event.prNumber, 1)
 
@@ -68,7 +73,17 @@ async function readFirstSseEvent(response: Response): Promise<unknown> {
 
       if (dataLines.length > 0) {
         await reader.cancel()
-        return JSON.parse(dataLines.join("\n"))
+        return {
+          id: Number.parseInt(
+            rawEvent
+              .split("\n")
+              .find((line) => line.startsWith("id:"))
+              ?.slice("id:".length)
+              .trim() ?? "",
+            10,
+          ),
+          event: JSON.parse(dataLines.join("\n")).event,
+        }
       }
 
       separatorIndex = buffer.indexOf("\n\n")

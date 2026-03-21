@@ -7,6 +7,7 @@ import {
   prManagedRoute,
   githubWebhookRoute,
   repoStreamRoute,
+  repoStreamHistoryRoute,
 } from "../src/backend/routes.ts"
 
 test("backend routes keep their stable public paths", () => {
@@ -17,4 +18,5 @@ test("backend routes keep their stable public paths", () => {
   assert.equal(prManagedRoute.path.source, "pr/managed")
   assert.equal(githubWebhookRoute.path.source, "webhooks/github")
   assert.equal(repoStreamRoute.path.source, "stream")
+  assert.equal(repoStreamHistoryRoute.path.source, "stream/history")
 })

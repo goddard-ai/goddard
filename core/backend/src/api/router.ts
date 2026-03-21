@@ -1,15 +1,19 @@
-import type { RepoEvent } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
 import { createRouter } from "rouzer"
 import { TursoBackendControlPlane } from "../db/persistence.js"
 import type { Env } from "../env.js"
-import { HttpError, assertRepo, type BackendControlPlane } from "./control-plane.js"
+import {
+  HttpError,
+  assertRepo,
+  type BackendControlPlane,
+  type PersistedRepoEvent,
+} from "./control-plane.js"
 
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
+  broadcastEvent?: (env: Env, event: PersistedRepoEvent) => Promise<void>
   handleUserStream?: (env: Env, githubUsername: string, request: Request) => Promise<Response>
 }
 
@@ -59,7 +63,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const token = readBearerToken(ctx.headers.authorization)
           const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await broadcastEvent(env, {
+          const persistedEvent = await controlPlane.recordRepoEvent({
             type: "pr.created",
             owner: pr.owner,
             repo: pr.repo,
@@ -68,6 +72,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             author: pr.createdBy,
             createdAt: pr.createdAt,
           })
+          if (persistedEvent) {
+            await broadcastEvent(env, persistedEvent)
+          }
 
           return pr
         } catch (error) {
@@ -114,8 +121,24 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const event = await controlPlane.handleGitHubWebhook(ctx.body)
-          await broadcastEvent(env, event)
+          const persistedEvent = await controlPlane.recordRepoEvent(event)
+          if (persistedEvent) {
+            await broadcastEvent(env, persistedEvent)
+          }
           return event
+        } catch (error) {
+          return toErrorResponse(error)
+        }
+      },
+    },
+    repoStreamHistoryRoute: {
+      GET: async (ctx) => {
+        try {
+          const controlPlane = createControlPlane(readEnv(ctx))
+          const token = readBearerToken(ctx.headers.authorization)
+          return {
+            events: await controlPlane.getRepoEventHistory(token, ctx.query.after),
+          }
         } catch (error) {
           return toErrorResponse(error)
         }
@@ -149,7 +172,7 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
 }
 
 /** Provides a safe default when the worker host does not supply event broadcasting. */
-async function noopBroadcast(_env: Env, _event: RepoEvent): Promise<void> {
+async function noopBroadcast(_env: Env, _event: PersistedRepoEvent): Promise<void> {
   // No-op: the caller (e.g. worker.js) should provide a real implementation.
 }
 

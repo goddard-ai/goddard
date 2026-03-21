@@ -18,6 +18,9 @@
 - `Repo Event Broadcast`
   - The backend act of publishing a repository event to interested local consumers.
   - Why: so one backend-side state change can drive downstream automation promptly.
+- `Repo Event History`
+  - The durable backend log of normalized managed pull-request stream events keyed by a monotonic cursor.
+  - Why: so local consumers can catch up after disconnects without falling back to repository polling.
 - `GitHub App Installation`
   - The repository-level authority the backend uses to act on GitHub resources.
   - Why: so pull request creation and replies happen under explicit app-managed permissions rather than user tokens.

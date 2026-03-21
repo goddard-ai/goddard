@@ -11,4 +11,11 @@ export {
   PullRequestRecord,
   ReplyPrInput,
 } from "./backend/pull-requests.js"
-export { GitHubWebhookInput, RepoEvent, StreamMessage } from "./backend/repo-events.js"
+export {
+  GitHubWebhookInput,
+  RepoEvent,
+  RepoEventHistoryQuery,
+  RepoEventHistoryResponse,
+  RepoEventRecord,
+  StreamMessage,
+} from "./backend/repo-events.js"

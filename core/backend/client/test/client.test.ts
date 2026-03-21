@@ -100,3 +100,60 @@ test("backend client subscribes to unified stream via rouzer route response", as
     await server.close()
   }
 })
+
+test("backend client exposes event history and live stream message ids", async () => {
+  const controlPlane = new InMemoryBackendControlPlane()
+  const server = await startBackendServer(controlPlane, { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+  const tokenStorage = new InMemoryTokenStorage()
+
+  try {
+    const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
+    const session = controlPlane.completeDeviceFlow({
+      deviceCode: flow.deviceCode,
+      githubUsername: "alec",
+    })
+    await tokenStorage.setToken(session.token)
+
+    const client = createBackendClient({ baseUrl, tokenStorage })
+    const subscription = await client.stream.subscribe()
+    const messagePromise = new Promise<unknown>((resolve) => {
+      subscription.on("message", resolve)
+    })
+
+    await client.pr.create({
+      owner: "goddard-ai",
+      repo: "sdk",
+      title: "Stream me",
+      body: "Done",
+      head: "feat/stream",
+      base: "main",
+    })
+
+    const message = (await messagePromise) as { id: number; event: { type: string } }
+    expect(message.id).toBe(1)
+    expect(message.event.type).toBe("pr.created")
+
+    await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "issue_comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "teammate",
+        body: "looks good",
+      }),
+    })
+
+    await expect(client.stream.history()).resolves.toEqual([
+      expect.objectContaining({ id: 1, event: expect.objectContaining({ type: "pr.created" }) }),
+      expect.objectContaining({ id: 2, event: expect.objectContaining({ type: "comment" }) }),
+    ])
+
+    subscription.close()
+  } finally {
+    await server.close()
+  }
+})

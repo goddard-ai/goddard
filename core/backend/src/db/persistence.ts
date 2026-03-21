@@ -7,7 +7,9 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
+  RepoEventRecord,
 } from "@goddard-ai/schema/backend"
+import { RepoEvent as RepoEventSchema } from "@goddard-ai/schema/backend"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
@@ -17,6 +19,7 @@ import {
   type BackendControlPlane,
   createPrViaApp,
   HttpError,
+  type PersistedRepoEvent,
   postPrCommentViaApp,
 } from "../api/control-plane.js"
 import type { Env } from "../env.js"
@@ -213,6 +216,53 @@ export class TursoBackendControlPlane implements BackendControlPlane {
           }
 
     return mapped
+  }
+
+  async getRepoEventHistory(token: string, after?: number): Promise<RepoEventRecord[]> {
+    const session = await this.getSession(token)
+    const rows = await this.#db
+      .select()
+      .from(schema.repoEvents)
+      .where(
+        after === undefined
+          ? eq(schema.repoEvents.githubUsername, session.githubUsername)
+          : and(
+              eq(schema.repoEvents.githubUsername, session.githubUsername),
+              gt(schema.repoEvents.id, after),
+            ),
+      )
+      .orderBy(schema.repoEvents.id)
+
+    return rows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      event: RepoEventSchema.parse(JSON.parse(row.eventJson)),
+    }))
+  }
+
+  async recordRepoEvent(event: RepoEvent): Promise<PersistedRepoEvent | null> {
+    const githubUsername = await this.resolveEventOwner(event)
+    if (!githubUsername) {
+      return null
+    }
+
+    const [row] = await this.#db
+      .insert(schema.repoEvents)
+      .values({
+        githubUsername,
+        eventJson: JSON.stringify(event),
+        createdAt: new Date().toISOString(),
+      })
+      .returning()
+
+    return {
+      githubUsername,
+      record: {
+        id: row.id,
+        createdAt: row.createdAt,
+        event,
+      },
+    }
   }
 
   async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {

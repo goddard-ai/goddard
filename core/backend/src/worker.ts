@@ -1,23 +1,21 @@
-import type { RepoEvent } from "@goddard-ai/schema/backend"
+import type { RepoEvent, RepoEventRecord } from "@goddard-ai/schema/backend"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
-import { createClient } from "@libsql/client/web"
 import { createBackendRouter } from "./api/router.js"
 import { TursoBackendControlPlane } from "./db/persistence.js"
 import type { Env } from "./env.js"
 import { createSseSession } from "./utils.js"
+import { createClient } from "@libsql/client/web"
 
 const router = createBackendRouter({
-  broadcastEvent: async (env, event) => {
-    const githubUsername = await createWorkerControlPlane(env).resolveEventOwner?.(event)
-    if (!githubUsername) {
-      return
-    }
-
-    await getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/publish", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ event }),
-    })
+  broadcastEvent: async (env, persistedEvent) => {
+    await getUserStreamStub(env, persistedEvent.githubUsername).fetch(
+      "https://user-stream.internal/publish",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ record: persistedEvent.record }),
+      },
+    )
   },
   handleUserStream: async (env, githubUsername, _request) => {
     return getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/subscribe")
@@ -48,12 +46,12 @@ export class UserStream {
   }
 
   async #publish(request: Request): Promise<Response> {
-    const payload = (await request.json()) as { event: RepoEvent }
-    const frame = JSON.stringify({ event: payload.event })
+    const payload = (await request.json()) as { record: RepoEventRecord }
+    const frame = JSON.stringify({ event: payload.record.event })
 
     for (const sink of this.#sinks) {
       try {
-        sink.send(frame)
+        sink.send({ data: frame, id: payload.record.id })
       } catch {
         this.#sinks.delete(sink)
         sink.close?.()
