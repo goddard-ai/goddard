@@ -1,21 +1,17 @@
 import type { Model } from "@goddard-ai/config"
 import {
-  LoopConfig,
-  ResolvedLoopRateLimits,
-  ResolvedLoopRetries,
   type GoddardLoopConfigDocument,
   type GoddardLoopRateLimitsConfig,
   type GoddardLoopRetriesConfig,
+  type ResolvedLoopRateLimits,
+  type ResolvedLoopRetries,
 } from "@goddard-ai/schema/config"
 
-export {
-  LoopConfig as loopConfigSchema,
-  ResolvedLoopRateLimits as resolvedLoopRateLimitsSchema,
-  ResolvedLoopRetries as resolvedLoopRetriesSchema,
-}
 export type {
   GoddardLoopConfigDocument,
   GoddardLoopRateLimitsConfig,
   GoddardLoopRetriesConfig,
   Model,
+  ResolvedLoopRateLimits,
+  ResolvedLoopRetries,
 }

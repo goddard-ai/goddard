@@ -11,11 +11,8 @@ export type {
   GoddardLoopRateLimitsConfig,
   GoddardLoopRetriesConfig,
   Model,
-} from "./types.js"
-export {
-  loopConfigSchema,
-  resolvedLoopRateLimitsSchema,
-  resolvedLoopRetriesSchema,
+  ResolvedLoopRateLimits,
+  ResolvedLoopRetries,
 } from "./types.js"
 export {
   getDaemonLoop,
