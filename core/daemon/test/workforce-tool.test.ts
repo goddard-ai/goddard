@@ -1,22 +1,22 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, mock, test, vi } from "bun:test"
 
-const { createDaemonIpcClientFromEnvMock, sendMock } = vi.hoisted(() => ({
-  sendMock: vi.fn(async (_name: string) => ({ requestId: "req-1" })),
-  createDaemonIpcClientFromEnvMock: vi.fn(() => ({
-    client: {
-      send: sendMock,
-    },
-  })),
+const sendMock = vi.fn(async (_name: string) => ({ requestId: "req-1" }))
+const createDaemonIpcClientFromEnvMock = vi.fn(() => ({
+  client: {
+    send: sendMock,
+  },
 }))
+const actualDaemonClient = await import("../client/src/index.ts")
 
-vi.mock("@goddard-ai/daemon-client", () => ({
+mock.module("@goddard-ai/daemon-client", () => ({
+  ...actualDaemonClient,
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
 }))
 
-import {
+const {
   main,
   workforceCancel,
   workforceRequest,
@@ -24,7 +24,8 @@ import {
   workforceSuspend,
   workforceTruncate,
   workforceUpdate,
-} from "../src/bin/workforce-tool.ts"
+} = await import("../src/bin/workforce-tool.ts")
+mock.restore()
 
 describe("daemon workforce tool", () => {
   const previousEnv = process.env

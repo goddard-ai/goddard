@@ -1,5 +1,5 @@
-import Database from "better-sqlite3"
-import { drizzle } from "drizzle-orm/better-sqlite3"
+import { Database } from "bun:sqlite"
+import { drizzle } from "drizzle-orm/bun-sqlite"
 import fs from "node:fs"
 import { getDatabasePath, getGoddardGlobalDir } from "../paths.js"
 import * as schema from "./schema.js"
@@ -9,23 +9,18 @@ if (!fs.existsSync(dir)) {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-// Lazy init the DB to avoid better-sqlite3 loading issues in environments where it's imported but not used, or bindings not found at test time.
-let _db: ReturnType<typeof drizzle> | null = null
-export const db = new Proxy({} as ReturnType<typeof drizzle>, {
-  get(target, prop) {
-    if (!_db) {
-      const client = new Database(getDatabasePath())
-      ensureSchema(client)
-      _db = drizzle({
-        client,
-        schema,
-      })
-    }
-    return (_db as any)[prop]
-  },
-})
+/** Creates the shared storage database handle backed by Bun's native SQLite runtime. */
+function createDatabase() {
+  const client = new Database(getDatabasePath(), { create: true })
+  ensureSchema(client)
+  return drizzle({ client, schema })
+}
 
-function ensureSchema(client: Database.Database): void {
+/** Shared Drizzle database handle for storage-backed persistence. */
+export const db = createDatabase()
+
+/** Ensures the durable SQL tables and indexes exist before storage access begins. */
+function ensureSchema(client: Database): void {
   client.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -63,9 +58,9 @@ function ensureSchema(client: Database.Database): void {
 }
 
 /** Ensures direct repository and PR columns plus indexes exist for session queries. */
-function ensureSessionRepositoryColumns(client: Database.Database): void {
+function ensureSessionRepositoryColumns(client: Database): void {
   const sessionColumns = new Set(
-    (client.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map(
+    (client.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map(
       (column) => column.name,
     ),
   )

@@ -1,43 +1,47 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, mock, test, vi } from "bun:test"
 
-const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(() => ({
-  updateMock: vi.fn(async () => undefined),
-  sendMock: vi.fn(async (name: string) => {
-    if (name === "sessionResolveToken") {
-      return { id: "session-7" }
+const updateMock = vi.fn(async () => undefined)
+const sendMock = vi.fn(async (name: string) => {
+  if (name === "sessionResolveToken") {
+    return { id: "session-7" }
+  }
+  if (name === "prSubmit") {
+    return {
+      number: 12,
+      url: "https://github.com/acme/widgets/pull/12",
     }
-    if (name === "prSubmit") {
-      return {
-        number: 12,
-        url: "https://github.com/acme/widgets/pull/12",
-      }
-    }
-    if (name === "prReply") {
-      return { success: true }
-    }
-    return { ok: true }
-  }),
-  createDaemonIpcClientFromEnvMock: vi.fn(() => ({
-    client: {
-      send: sendMock,
-    },
-  })),
+  }
+  if (name === "prReply") {
+    return { success: true }
+  }
+  return { ok: true }
+})
+const createDaemonIpcClientFromEnvMock = vi.fn(() => ({
+  client: {
+    send: sendMock,
+  },
 }))
+const actualStorage = await import("../../storage/src/index.ts")
+const actualDaemonClient = await import("../client/src/index.ts")
 
-vi.mock("@goddard-ai/storage", () => ({
+mock.module("@goddard-ai/storage", () => ({
+  ...actualStorage,
   SessionStorage: {
     update: updateMock,
   },
 }))
 
-vi.mock("@goddard-ai/daemon-client", () => ({
+mock.module("@goddard-ai/daemon-client", () => ({
+  ...actualDaemonClient,
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
 }))
 
-import { declareInitiative, main, reportBlocker, reportCompleted } from "../src/bin/goddard-tool.ts"
+const { declareInitiative, main, reportBlocker, reportCompleted } =
+  await import("../src/bin/goddard-tool.ts")
+mock.restore()
 
 describe("daemon goddard tool", () => {
   const previousEnv = process.env

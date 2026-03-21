@@ -15,6 +15,15 @@ declare const __VERSION__: string
 
 const daemonRunFeatures = ["ipc", "stream"] as const
 
+/** Falls back to a placeholder version when the build-time constant is unavailable. */
+function getPackageVersion(): string {
+  try {
+    return __VERSION__
+  } catch {
+    return "0.0.0"
+  }
+}
+
 function resolveRunFeatureFlags(features: readonly (typeof daemonRunFeatures)[number][]) {
   if (features.length === 0) {
     return {
@@ -44,7 +53,7 @@ function resolveLogMode(options: { json: boolean; verbose: boolean }) {
 
 const app = subcommands({
   name: "goddard-daemon",
-  version: __VERSION__,
+  version: getPackageVersion(),
   description: "Goddard background daemon for IPC, automation, and unified event handling",
   cmds: {
     run: command({

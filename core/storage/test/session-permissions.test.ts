@@ -1,29 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { SessionPermissionsStorage } from "../src/session-permissions.js"
-import { getSessionPermissionsPath } from "../src/paths.js"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { mkdtemp, rm } from "node:fs/promises"
+import { SessionPermissionsStorage } from "../src/session-permissions.js"
 
-vi.mock("../src/paths.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/paths.js")>()
-  return {
-    ...actual,
-    getSessionPermissionsPath: vi.fn(),
-  }
-})
+let tmpDir = ""
+const previousHome = process.env.HOME
 
 describe("SessionPermissionsStorage", () => {
-  let tmpDir: string
-
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "goddard-session-permissions-test-"))
-    vi.mocked(getSessionPermissionsPath).mockReturnValue(join(tmpDir, "session-permissions.json"))
+    process.env.HOME = tmpDir
   })
 
   afterEach(async () => {
+    process.env.HOME = previousHome
     await rm(tmpDir, { recursive: true, force: true })
-    vi.resetAllMocks()
   })
 
   it("creates and retrieves a session permissions record", async () => {

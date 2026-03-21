@@ -4,7 +4,7 @@ import type {
   WorkforceRequestRecord,
   WorkforceTruncateEvent,
 } from "@goddard-ai/schema/workforce"
-import { appendFile, readFile } from "node:fs/promises"
+import { appendFile } from "node:fs/promises"
 import { buildWorkforcePaths } from "./paths.js"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -150,7 +150,9 @@ export function applyWorkforceEvent(
 
 export async function readWorkforceLedger(rootDir: string): Promise<WorkforceLedgerEvent[]> {
   const paths = buildWorkforcePaths(rootDir)
-  const content = await readFile(paths.ledgerPath, "utf-8").catch(() => "")
+  const content = await Bun.file(paths.ledgerPath)
+    .text()
+    .catch(() => "")
 
   return content
     .split("\n")

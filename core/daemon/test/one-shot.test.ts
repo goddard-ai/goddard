@@ -1,18 +1,19 @@
-import { beforeEach, expect, test, vi } from "vitest"
+import { beforeEach, expect, mock, test, vi } from "bun:test"
 
-const { createDaemonIpcClientMock, sendMock } = vi.hoisted(() => ({
-  sendMock: vi.fn(async () => ({ session: { id: "session-1" } })),
-  createDaemonIpcClientMock: vi.fn(() => ({
-    send: sendMock,
-  })),
+const sendMock = vi.fn(async () => ({ session: { id: "session-1" } }))
+const createDaemonIpcClientMock = vi.fn(() => ({
+  send: sendMock,
 }))
+const actualDaemonClient = await import("../client/src/index.ts")
 
-vi.mock("@goddard-ai/daemon-client", () => ({
+mock.module("@goddard-ai/daemon-client", () => ({
+  ...actualDaemonClient,
   createDaemonIpcClient: createDaemonIpcClientMock,
   readSocketPathFromDaemonUrl: vi.fn((value: string) => value),
 }))
 
-import { runOneShot } from "../src/one-shot.ts"
+const { runOneShot } = await import("../src/one-shot.ts")
+mock.restore()
 
 beforeEach(() => {
   sendMock.mockClear()

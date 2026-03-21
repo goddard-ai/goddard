@@ -23,7 +23,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
-    "test": "vitest run --passWithNoTests"
+    "test": "bun run ./scripts/test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
@@ -35,7 +35,6 @@
     "@goddard-ai/tree-kill": "workspace:^",
     "@goddard-ai/worktree": "workspace:^",
     "cmd-ts": "^0.15.0",
-    "cron-parser": "^5.5.0",
     "kleur": "^4.1.5",
     "radashi": "^12.7.2"
   }

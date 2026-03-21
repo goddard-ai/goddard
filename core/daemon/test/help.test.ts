@@ -1,11 +1,13 @@
-import { test, expect } from "vitest"
+import { test, expect } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { join } from "node:path"
 
-const BIN_PATH = join(__dirname, "../dist/main.mjs")
+const BIN_PATH = join(__dirname, "../src/main.ts")
 
 test("goddard-daemon prints help when --help is passed", () => {
-  const result = spawnSync("node", [BIN_PATH, "--help"], { encoding: "utf-8" })
+  const result = spawnSync("bun", ["--conditions", "source", BIN_PATH, "--help"], {
+    encoding: "utf-8",
+  })
   const output = `${result.stdout}${result.stderr}`
   expect(output).toContain("goddard-daemon")
   expect(output).toContain("run")
@@ -13,7 +15,9 @@ test("goddard-daemon prints help when --help is passed", () => {
 })
 
 test("goddard-daemon run prints help when --help is passed", () => {
-  const result = spawnSync("node", [BIN_PATH, "run", "--help"], { encoding: "utf-8" })
+  const result = spawnSync("bun", ["--conditions", "source", BIN_PATH, "run", "--help"], {
+    encoding: "utf-8",
+  })
   const output = `${result.stdout}${result.stderr}`
   expect(output).toContain("run")
   expect(output).toContain("--base-url")

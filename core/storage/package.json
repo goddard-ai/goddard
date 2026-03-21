@@ -38,19 +38,17 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
-    "test": "vitest run --passWithNoTests",
+    "test": "bun test --conditions source",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/schema": "workspace:^",
-    "better-sqlite3": "^12.6.2",
     "drizzle-orm": "1.0.0-beta.16-ea816b6",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.5",
     "drizzle-kit": "1.0.0-beta.16-ea816b6"
   }
