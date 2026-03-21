@@ -11,7 +11,7 @@
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
     "typecheck": "turbo run typecheck --output-logs=errors-only",
     "lint": "turbo run lint",
-    "test": "pnpm -r run test",
+    "test": "turbo run test",
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
   },
