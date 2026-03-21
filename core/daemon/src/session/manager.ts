@@ -725,12 +725,12 @@ export function createSessionManager(input: {
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
-    let persistedSessions: Awaited<ReturnType<typeof SessionStorage.list>>
+    let persistedSessions: Awaited<ReturnType<typeof SessionStorage.listAll>>
     let permissions: Awaited<ReturnType<typeof SessionPermissionsStorage.list>>
 
     try {
       ;[persistedSessions, permissions] = await Promise.all([
-        SessionStorage.list(),
+        SessionStorage.listAll(),
         SessionPermissionsStorage.list(),
       ])
     } catch (error) {
