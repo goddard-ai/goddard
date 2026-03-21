@@ -10,8 +10,10 @@ if (!fs.existsSync(dir)) {
 }
 
 // Lazy init the DB to avoid better-sqlite3 loading issues in environments where it's imported but not used, or bindings not found at test time.
-let _db: ReturnType<typeof drizzle> | null = null
-export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+type StorageDatabase = ReturnType<typeof drizzle<typeof schema>>
+
+let _db: StorageDatabase | null = null
+export const db: StorageDatabase = new Proxy({} as StorageDatabase, {
   get(target, prop) {
     if (!_db) {
       const client = new Database(getDatabasePath())

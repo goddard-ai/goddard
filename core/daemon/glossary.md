@@ -24,6 +24,9 @@
 - `One-Shot Run`
   - A daemon-triggered session intended to finish after a single initial prompt.
   - Why: so the daemon can perform background automation without treating every task as an interactive conversation.
+- `Repo Event Cursor`
+  - The daemon's durable checkpoint into the backend-managed pull-request event stream for one authenticated user.
+  - Why: so startup can replay missed events before resuming live subscription.
 - `Background Prompt`
   - The daemon-owned instruction frame used for automated, non-interactive work.
   - Why: so background sessions follow a different operating context from foreground user-driven sessions.

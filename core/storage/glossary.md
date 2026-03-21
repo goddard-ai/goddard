@@ -14,6 +14,9 @@
 - `Managed PR Location`
   - The stored mapping from a managed pull request to a local checkout directory.
   - Why: so automated daemon work can find the right repository copy when it needs to act on a pull request.
+- `Repo Event Cursor`
+  - The stored replay position for one authenticated user's managed pull-request event stream.
+  - Why: so the daemon can recover missed events after disconnects or restarts without reprocessing the entire stream.
 - `Token Record`
   - Durable credential material stored for later authenticated use.
   - Why: so tools can preserve necessary local authorization state across runs.

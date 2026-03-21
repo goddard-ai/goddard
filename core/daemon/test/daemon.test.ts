@@ -89,6 +89,7 @@ test("daemon run subscribes once, handles events across repositories, and passes
         isManaged: async () => true,
       },
       stream: {
+        history: async () => [],
         subscribe: async () => {
           subCalls += 1
           return subscription
@@ -107,28 +108,36 @@ test("daemon run subscribes once, handles events across repositories, and passes
       runOneShotCalls.push(input)
       return 0
     },
+    readRepoEventCursor: async () => undefined,
+    writeRepoEventCursor: async () => {},
     waitForShutdown: async (close) => {
-      subscription.emit("event", {
-        type: "comment" as const,
-        owner: "other",
-        repo: "repo",
-        prNumber: 123,
-        author: "alice",
-        body: "handle this too",
-        reactionAdded: "eyes",
-        createdAt: new Date().toISOString(),
+      subscription.emit("message", {
+        id: 1,
+        event: {
+          type: "comment" as const,
+          owner: "other",
+          repo: "repo",
+          prNumber: 123,
+          author: "alice",
+          body: "handle this too",
+          reactionAdded: "eyes",
+          createdAt: new Date().toISOString(),
+        },
       })
       const event = {
-        type: "comment" as const,
-        owner: "test",
-        repo: "repo",
-        prNumber: 123,
-        author: "alice",
-        body: "fix it",
-        reactionAdded: "eyes",
-        createdAt: new Date().toISOString(),
+        id: 2,
+        event: {
+          type: "comment" as const,
+          owner: "test",
+          repo: "repo",
+          prNumber: 123,
+          author: "alice",
+          body: "fix it",
+          reactionAdded: "eyes",
+          createdAt: new Date().toISOString(),
+        },
       }
-      subscription.emit("event", event)
+      subscription.emit("message", event)
       await new Promise((resolve) => setTimeout(resolve, 0))
       await close()
     },
@@ -304,6 +313,7 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
             isManaged: async () => true,
           },
           stream: {
+            history: async () => [],
             subscribe: async () => {
               subCalls += 1
               return subscription
@@ -322,16 +332,21 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
           runOneShotCalls.push(input)
           return 0
         },
+        readRepoEventCursor: async () => undefined,
+        writeRepoEventCursor: async () => {},
         waitForShutdown: async (close) => {
-          subscription.emit("event", {
-            type: "comment" as const,
-            owner: "test",
-            repo: "repo",
-            prNumber: 456,
-            author: "alice",
-            body: "fix it",
-            reactionAdded: "eyes",
-            createdAt: new Date().toISOString(),
+          subscription.emit("message", {
+            id: 1,
+            event: {
+              type: "comment" as const,
+              owner: "test",
+              repo: "repo",
+              prNumber: 456,
+              author: "alice",
+              body: "fix it",
+              reactionAdded: "eyes",
+              createdAt: new Date().toISOString(),
+            },
           })
           await new Promise((resolve) => setTimeout(resolve, 0))
           await close()
@@ -349,6 +364,122 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
       (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
     ),
   ).toBe(true)
+})
+
+test("daemon replays history before buffered live events and advances the cursor after each success", async () => {
+  const subscription = new MockStreamSubscription()
+  const runOneShotCalls: Array<{ prNumber: number }> = []
+  const writtenCursorIds: number[] = []
+
+  const exitCode = await runDaemon(
+    {
+      baseUrl: "",
+      socketPath: "/tmp/replay-daemon.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
+      logMode: "json",
+    },
+    {
+      createBackendClient: async () => ({
+        auth: {
+          startDeviceFlow: async () => ({
+            deviceCode: "dev",
+            userCode: "code",
+            verificationUri: "https://github.com/login/device",
+            expiresIn: 900,
+            interval: 5,
+          }),
+          completeDeviceFlow: async () => ({
+            token: "tok",
+            githubUsername: "alec",
+            githubUserId: 1,
+          }),
+          whoami: async () => ({
+            token: "tok",
+            githubUsername: "alec",
+            githubUserId: 1,
+          }),
+          logout: async () => {},
+        },
+        pr: {
+          create: async () => ({
+            number: 1,
+            url: "https://github.com/acme/widgets/pull/1",
+          }),
+          reply: async () => ({ success: true }),
+          isManaged: async () => true,
+        },
+        stream: {
+          history: async () => {
+            subscription.emit("message", {
+              id: 3,
+              event: {
+                type: "comment" as const,
+                owner: "test",
+                repo: "repo",
+                prNumber: 3,
+                author: "alice",
+                body: "live",
+                reactionAdded: "eyes",
+                createdAt: new Date().toISOString(),
+              },
+            })
+            return [
+              {
+                id: 1,
+                createdAt: new Date().toISOString(),
+                event: {
+                  type: "comment" as const,
+                  owner: "test",
+                  repo: "repo",
+                  prNumber: 1,
+                  author: "alice",
+                  body: "history-1",
+                  reactionAdded: "eyes",
+                  createdAt: new Date().toISOString(),
+                },
+              },
+              {
+                id: 2,
+                createdAt: new Date().toISOString(),
+                event: {
+                  type: "comment" as const,
+                  owner: "test",
+                  repo: "repo",
+                  prNumber: 2,
+                  author: "alice",
+                  body: "history-2",
+                  reactionAdded: "eyes",
+                  createdAt: new Date().toISOString(),
+                },
+              },
+            ]
+          },
+          subscribe: async () => subscription,
+        },
+      }),
+      startIpcServer: async () => ({
+        daemonUrl: "http://unix/?socketPath=%2Ftmp%2Freplay-daemon.sock",
+        socketPath: "/tmp/replay-daemon.sock",
+        close: async () => {},
+      }),
+      runOneShot: async (input) => {
+        runOneShotCalls.push({ prNumber: input.event.prNumber })
+        return 0
+      },
+      readRepoEventCursor: async () => 0,
+      writeRepoEventCursor: async (_githubUsername, eventId) => {
+        writtenCursorIds.push(eventId)
+      },
+      waitForShutdown: async (close) => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        await close()
+      },
+    },
+  )
+
+  expect(exitCode).toBe(0)
+  expect(runOneShotCalls).toEqual([{ prNumber: 1 }, { prNumber: 2 }, { prNumber: 3 }])
+  expect(writtenCursorIds).toEqual([1, 2, 3])
 })
 
 test("daemon run defaults to concise pretty terminal logs", async () => {

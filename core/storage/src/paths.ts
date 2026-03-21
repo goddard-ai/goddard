@@ -31,6 +31,10 @@ export function getManagedPrLocationsPath(): string {
   return join(getGoddardGlobalDir(), "managed-pr-locations.json")
 }
 
+export function getRepoEventCursorPath(): string {
+  return join(getGoddardGlobalDir(), "repo-event-cursors.json")
+}
+
 export async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path, fsConstants.F_OK)
