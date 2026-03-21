@@ -164,6 +164,8 @@ export async function runAgent(
           mcpServers: params.mcpServers,
           systemPrompt: params.systemPrompt ?? "",
           env: params.env,
+          repository: params.repository,
+          prNumber: params.prNumber,
           metadata: params.metadata,
           initialPrompt: params.initialPrompt,
           oneShot: params.oneShot,

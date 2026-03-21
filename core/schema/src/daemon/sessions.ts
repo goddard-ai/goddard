@@ -14,6 +14,8 @@ export const CreateDaemonSessionRequest = z.object({
   mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string(),
   env: z.record(z.string(), z.string()).optional(),
+  repository: z.string().optional(),
+  prNumber: z.number().int().optional(),
   metadata: DaemonSessionMetadata.optional(),
   initialPrompt: initialPrompt.optional(),
   oneShot: z.boolean().optional(),

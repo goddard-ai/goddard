@@ -206,7 +206,9 @@ async function toDaemonSession(
     status: record.status,
     agentName: record.agentName,
     cwd: record.cwd,
-    metadata: record.metadata,
+    repository: record.repository ?? null,
+    prNumber: typeof record.prNumber === "number" ? record.prNumber : null,
+    metadata: record.metadata && typeof record.metadata === "object" ? record.metadata : null,
     connection: toConnectionState({
       mode: state?.connectionMode ?? "none",
       activeDaemonSession: state?.activeDaemonSession ?? false,
@@ -437,19 +439,24 @@ async function initializeSession(
   }
 }
 
-/** Extracts repository ownership metadata used for permission scoping. */
-function parseRepoScope(metadata?: DaemonSessionMetadata): {
+/** Extracts repository ownership fields used for permission scoping and persistence. */
+function parseRepoScope(params: { repository?: string; prNumber?: number }): {
+  repository: string | null
+  prNumber: number | null
   owner: string
   repo: string
   allowedPrNumbers: number[]
 } {
-  const repository = metadata?.repository?.trim() ?? ""
+  const repository = params.repository?.trim() ?? ""
+  const prNumber = typeof params.prNumber === "number" ? params.prNumber : null
   const [owner, repo] = repository.split("/")
 
   return {
+    repository: repository.length > 0 ? repository : null,
+    prNumber,
     owner: owner ?? "",
     repo: repo ?? "",
-    allowedPrNumbers: typeof metadata?.prNumber === "number" ? [metadata.prNumber] : [],
+    allowedPrNumbers: prNumber === null ? [] : [prNumber],
   }
 }
 
@@ -458,6 +465,8 @@ function buildSessionLogContext(params: {
   agent: string | AgentDistribution
   cwd: string
   oneShot?: boolean
+  repository?: string
+  prNumber?: number
   metadata?: DaemonSessionMetadata
 }): Record<string, unknown> {
   const metadata = params.metadata
@@ -474,8 +483,8 @@ function buildSessionLogContext(params: {
     agent: agentNameFromInput(params.agent),
     cwd: params.cwd,
     oneShot: params.oneShot === true,
-    repository: typeof metadata?.repository === "string" ? metadata.repository : undefined,
-    prNumber: typeof metadata?.prNumber === "number" ? metadata.prNumber : undefined,
+    repository: typeof params.repository === "string" ? params.repository : undefined,
+    prNumber: typeof params.prNumber === "number" ? params.prNumber : undefined,
     workforceRootDir:
       workforceMetadata && typeof workforceMetadata.rootDir === "string"
         ? workforceMetadata.rootDir
@@ -711,7 +720,7 @@ export function createSessionManager(input: {
     await ready
     const id = randomUUID()
     const token = randomBytes(32).toString("hex")
-    const scope = parseRepoScope(params.metadata)
+    const scope = parseRepoScope(params)
     const sessionLogContext = buildSessionLogContext(params)
     const sessionContext = {
       sessionId: id,
@@ -767,6 +776,8 @@ export function createSessionManager(input: {
         agentName: agentNameFromInput(params.agent),
         cwd: params.cwd,
         mcpServers: params.mcpServers,
+        repository: scope.repository,
+        prNumber: scope.prNumber,
         metadata: params.metadata ?? null,
       })
       await emitDiagnostic(id, "session_created", {

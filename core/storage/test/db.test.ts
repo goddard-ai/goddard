@@ -87,6 +87,56 @@ describe("Database Storage (Session & Loop)", () => {
       expect(ids).toContain("sess-2")
     })
 
+    it("filters sessions by repository and pull request", async () => {
+      const { SessionStorage } = await import("../src/session.js")
+
+      const now = new Date()
+      await SessionStorage.create({
+        id: "sess-1",
+        acpId: "acp-1",
+        status: "idle",
+        agentName: "test-agent",
+        cwd: "/tmp",
+        mcpServers: "[]",
+        repository: "acme/widgets",
+        prNumber: 12,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      await SessionStorage.create({
+        id: "sess-2",
+        acpId: "acp-2",
+        status: "running",
+        agentName: "test-agent",
+        cwd: "/tmp",
+        mcpServers: "[]",
+        repository: "acme/widgets",
+        prNumber: 99,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      await SessionStorage.create({
+        id: "sess-3",
+        acpId: "acp-3",
+        status: "done",
+        agentName: "test-agent",
+        cwd: "/tmp",
+        mcpServers: "[]",
+        repository: "other/repo",
+        prNumber: 12,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+      const repositorySessions = await SessionStorage.listByRepository("acme/widgets")
+      expect(repositorySessions.map((record) => record.id).sort()).toEqual(["sess-1", "sess-2"])
+
+      const prSessions = await SessionStorage.listByRepositoryPr("acme/widgets", 12)
+      expect(prSessions.map((record) => record.id)).toEqual(["sess-1"])
+    })
+
     it("updates a session", async () => {
       const { SessionStorage } = await import("../src/session.js")
 
