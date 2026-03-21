@@ -11,6 +11,7 @@ const initialPrompt = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())
 export const CreateDaemonSessionRequest = z.object({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
   cwd: z.string(),
+  useWorktree: z.boolean().optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string(),
   env: z.record(z.string(), z.string()).optional(),

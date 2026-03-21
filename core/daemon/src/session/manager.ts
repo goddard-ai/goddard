@@ -744,7 +744,8 @@ export function createSessionManager(input: {
     }
 
     try {
-      sessionWorktree = createSessionWorktree(id, params.cwd, params.metadata)
+      sessionWorktree =
+        params.useWorktree === false ? null : createSessionWorktree(id, params.cwd, params.metadata)
       if (sessionWorktree) {
         storedMetadata = {
           ...params.metadata,

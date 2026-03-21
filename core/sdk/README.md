@@ -31,7 +31,7 @@ Use `@goddard-ai/sdk/daemon` when you need to:
 - Read daemon-managed session history.
 - Shut sessions down through the daemon contract.
 
-Fresh daemon-backed sessions use isolated worktrees when the provided `cwd` lives inside a git repository. Non-repository directories keep using the original `cwd`.
+Fresh daemon-backed sessions use isolated worktrees when the provided `cwd` lives inside a git repository. Set `useWorktree: false` to force a session to run directly in the original checkout instead. Non-repository directories keep using the original `cwd`.
 
 `daemon-client` owns transport setup. `sdk/daemon` owns session semantics.
 

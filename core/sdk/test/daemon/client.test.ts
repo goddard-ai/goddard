@@ -98,6 +98,7 @@ describe("runAgent", () => {
     expect(sendMock).toHaveBeenCalledWith("sessionCreate", {
       agent: "pi",
       cwd: "/tmp/project",
+      useWorktree: undefined,
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
@@ -108,6 +109,38 @@ describe("runAgent", () => {
       oneShot: true,
     })
     expect(subscribeMock).not.toHaveBeenCalled()
+  })
+
+  test("forwards worktree opt-out to daemon session creation", async () => {
+    sendMock.mockResolvedValueOnce({
+      session: buildSession("daemon-session-5", "acp-session-5"),
+    })
+
+    const { runAgent } = await import("../../src/daemon/session/client.js")
+
+    await expect(
+      runAgent({
+        agent: "pi",
+        cwd: "/tmp/project",
+        useWorktree: false,
+        mcpServers: [],
+        systemPrompt: "Follow the spec.",
+        initialPrompt: "Ship it",
+        oneShot: true,
+      }),
+    ).resolves.toBeNull()
+
+    expect(sendMock).toHaveBeenCalledWith("sessionCreate", {
+      agent: "pi",
+      cwd: "/tmp/project",
+      useWorktree: false,
+      mcpServers: [],
+      systemPrompt: "Follow the spec.",
+      env: undefined,
+      metadata: undefined,
+      initialPrompt: "Ship it",
+      oneShot: true,
+    })
   })
 
   test("connects to daemon-hosted sessions and delegates history/shutdown over IPC", async () => {
