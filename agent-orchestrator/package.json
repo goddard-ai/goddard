@@ -1,0 +1,16 @@
+{
+  "name": "agent-orchestrator",
+  "version": "1.0.0",
+  "description": "Ultra-Minimal Cloud Coding Agent Adapter",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx test-run.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
