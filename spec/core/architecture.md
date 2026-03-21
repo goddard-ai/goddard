@@ -3,8 +3,8 @@
 ## Technology Stack
 | Layer | Technology |
 |-------|-----------|
-| API / Webhooks / SSE | Cloudflare Workers |
-| Real-time broadcast | Server-Sent Events (SSE) / Cloudflare Workers |
+| API / Webhooks / Live Streams | Cloudflare Workers |
+| Real-time broadcast | User-scoped NDJSON streams / Cloudflare Workers |
 | Database | Turso (SQLite at the Edge) + Drizzle ORM |
 | Authentication | GitHub OAuth Device Flow |
 | Desktop application | Tauri + web frontend |
@@ -27,7 +27,7 @@ These components can be packaged independently and synchronized to standalone re
 - Session validation on protected requests.
 - Webhook ingest and routing for pull request and review feedback events.
 - Managed reaction behavior via GitHub App identity.
-- User-scoped event fan-out over SSE for managed pull request ownership.
+- User-scoped event fan-out over long-lived NDJSON streams for managed pull request ownership.
 
 Boundary:
 - Production persistence is Turso-backed.
@@ -37,7 +37,7 @@ Boundary:
 ### SDK
 Design rule: platform capabilities live here first.
 - Expose typed operations for authentication, pull request creation, managed pull request stream subscription, and daemon-backed local automation control.
-- Normalize stream frames into stable event contracts.
+- Normalize live stream messages into stable event contracts.
 - Accept injected `TokenStorage` to avoid environment lock-in.
 
 ### Desktop Workspace

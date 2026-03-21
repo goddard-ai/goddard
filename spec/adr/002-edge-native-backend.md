@@ -7,13 +7,13 @@ ACTIVE
 
 The Goddard backend must handle two distinct workloads:
 1. **Stateless request handling** — auth, PR creation, webhook ingest. These are short-lived, independently scalable operations.
-2. **Stateful real-time fan-out** — maintaining open SSE connections for authenticated users and broadcasting managed pull request events to the correct owner. This requires stream state that survives across individual requests.
+2. **Stateful real-time fan-out** — maintaining open live stream connections for authenticated users and broadcasting managed pull request events to the correct owner. This requires stream state that survives across individual requests.
 
 We needed a deployment model that serves both workloads with sub-second global latency, without managing servers.
 
 ## Decision
 
-The backend runs on **Cloudflare Workers** for stateless request handling and **Cloudflare Durable Objects** for user-scoped SSE state and event fan-out. **Turso** (SQLite at the Edge) provides durable persistence for users, sessions, GitHub App installations, and managed pull request ownership.
+The backend runs on **Cloudflare Workers** for stateless request handling and **Cloudflare Durable Objects** for user-scoped live stream state and event fan-out. **Turso** (SQLite at the Edge) provides durable persistence for users, sessions, GitHub App installations, and managed pull request ownership.
 
 ## Rationale
 
