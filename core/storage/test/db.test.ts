@@ -1,29 +1,27 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { db } from "../src/db/index.js"
-import { loops, sessions } from "../src/db/schema.js"
-import { LoopStorage } from "../src/loop.js"
-import { getDatabasePath } from "../src/paths.js"
-import { SessionStorage } from "../src/session.js"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
-vi.mock("../src/paths.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/paths.js")>()
-  return {
-    ...actual,
-    getDatabasePath: vi.fn(),
-  }
-})
+let tmpDir = ""
+let db: typeof import("../src/db/index.js").db
+let loops: typeof import("../src/db/schema.js").loops
+let sessions: typeof import("../src/db/schema.js").sessions
+let LoopStorage: typeof import("../src/loop.js").LoopStorage
+let SessionStorage: typeof import("../src/session.js").SessionStorage
+const previousHome = process.env.HOME
 
 describe("Database Storage (Session & Loop)", () => {
-  let tmpDir: string
-  let dbPath: string
-
   beforeAll(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "goddard-db-test-"))
-    dbPath = join(tmpDir, "goddard.db")
-    vi.mocked(getDatabasePath).mockReturnValue(dbPath)
+    process.env.HOME = tmpDir
+
+    ;[{ db }, { loops, sessions }, { LoopStorage }, { SessionStorage }] = await Promise.all([
+      import("../src/db/index.js"),
+      import("../src/db/schema.js"),
+      import("../src/loop.js"),
+      import("../src/session.js"),
+    ])
   })
 
   beforeEach(async () => {
@@ -32,8 +30,8 @@ describe("Database Storage (Session & Loop)", () => {
   })
 
   afterAll(async () => {
+    process.env.HOME = previousHome
     await rm(tmpDir, { recursive: true, force: true })
-    vi.resetAllMocks()
   })
 
   describe("SessionStorage", () => {

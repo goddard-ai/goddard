@@ -38,7 +38,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
-    "test": "vitest run --passWithNoTests",
+    "test": "bun test --conditions source",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
