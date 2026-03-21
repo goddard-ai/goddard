@@ -201,6 +201,9 @@ importers:
       '@goddard-ai/tree-kill':
         specifier: workspace:^
         version: link:../tree-kill
+      '@goddard-ai/worktree':
+        specifier: workspace:^
+        version: link:../worktree
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0

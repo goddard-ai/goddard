@@ -21,6 +21,8 @@ When the daemon launches agent sessions, it prepends the resolved agent-bin dire
 - `GODDARD_DAEMON_URL`
 - `GODDARD_SESSION_TOKEN`
 
+Daemon-backed sessions now require `cwd` to resolve inside a git repository. The daemon provisions an isolated session worktree under `.goddard-agents/` for each fresh session and starts the agent in the mapped directory inside that worktree.
+
 If no values are provided, the daemon falls back to the standard local backend URL and the default socket path under `~/.goddard`.
 
 ## Issues & Feature Requests

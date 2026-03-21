@@ -1,7 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
-import { spawnSync } from "node:child_process"
 import { prependAgentBinToPath } from "./config.js"
 import type { FeedbackEvent } from "./feedback.js"
 import { createDaemonLogger } from "./logging.js"
@@ -62,72 +61,12 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     return 1
   }
 
-  const branchName = `pr-${input.event.prNumber}`
-  const agentsDir = `${projectDir}/.goddard-agents`
-  const worktreeDir = `${agentsDir}/${branchName}-${Date.now()}`
-
-  spawnSync("mkdir", ["-p", agentsDir])
-
-  try {
-    let cpArgs = ["-R", `${projectDir}/`, worktreeDir]
-    // Prefer copy-on-write cloning when the platform supports it, but fall back to a plain recursive copy.
-    if (process.platform === "darwin") {
-      cpArgs = ["-cR", `${projectDir}/`, worktreeDir]
-    } else if (process.platform === "linux") {
-      cpArgs = ["--reflink=auto", "-R", `${projectDir}/`, worktreeDir]
-    }
-
-    let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
-    let fallbackAttempted = false
-
-    if (cloneResult.status !== 0 && process.platform === "darwin") {
-      fallbackAttempted = true
-      cpArgs = ["-R", `${projectDir}/`, worktreeDir]
-      cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
-    }
-
-    if (cloneResult.status !== 0) {
-      logger.log("one_shot.workspace_prepare_failed", {
-        repository: `${input.event.owner}/${input.event.repo}`,
-        prNumber: input.event.prNumber,
-        worktreeDir,
-        attemptedCommand: `cp ${cpArgs.join(" ")}`,
-        fallbackAttempted,
-        stderr: cloneResult.stderr?.trim() || undefined,
-        errorMessage: cloneResult.error?.message,
-      })
-      return 1
-    }
-  } catch (error) {
-    logger.log("one_shot.workspace_prepare_failed", {
-      repository: `${input.event.owner}/${input.event.repo}`,
-      prNumber: input.event.prNumber,
-      worktreeDir,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    })
-    return 1
-  }
-
-  try {
-    spawnSync("git", ["fetch", "origin", `pull/${input.event.prNumber}/head:${branchName}`], {
-      cwd: worktreeDir,
-      stdio: "ignore",
-    })
-    spawnSync("git", ["checkout", branchName], {
-      cwd: worktreeDir,
-      stdio: "ignore",
-    })
-  } catch {
-    // Fall back to the copied checkout when the PR ref cannot be fetched into the scratch workspace.
-    // Ignore git setup failures and let pi run against copied workspace state.
-  }
-
   try {
     readSocketPathFromDaemonUrl(input.daemonUrl)
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
     await client.send("sessionCreate", {
       agent: "pi",
-      cwd: worktreeDir,
+      cwd: projectDir,
       mcpServers: [],
       initialPrompt: input.prompt,
       oneShot: true,
@@ -142,7 +81,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
       daemonUrl: input.daemonUrl,
-      worktreeDir,
+      cwd: projectDir,
       errorMessage: error instanceof Error ? error.message : String(error),
     })
     return 1

@@ -1,11 +1,10 @@
 import { beforeEach, expect, test, vi } from "vitest"
 
-const { createDaemonIpcClientMock, sendMock, spawnSyncMock } = vi.hoisted(() => ({
+const { createDaemonIpcClientMock, sendMock } = vi.hoisted(() => ({
   sendMock: vi.fn(async () => ({ session: { id: "session-1" } })),
   createDaemonIpcClientMock: vi.fn(() => ({
     send: sendMock,
   })),
-  spawnSyncMock: vi.fn(() => ({ status: 0 })),
 }))
 
 vi.mock("@goddard-ai/daemon-client", () => ({
@@ -13,16 +12,11 @@ vi.mock("@goddard-ai/daemon-client", () => ({
   readSocketPathFromDaemonUrl: vi.fn((value: string) => value),
 }))
 
-vi.mock("node:child_process", () => ({
-  spawnSync: spawnSyncMock,
-}))
-
 import { runOneShot } from "../src/one-shot.ts"
 
 beforeEach(() => {
   sendMock.mockClear()
   createDaemonIpcClientMock.mockClear()
-  spawnSyncMock.mockClear()
 })
 
 test("runOneShot creates a daemon-hosted one-shot session over IPC", async () => {
@@ -53,6 +47,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
   const [name, params] = sendMock.mock.calls[0] ?? []
   expect(name).toBe("sessionCreate")
   expect(params.agent).toBe("pi")
+  expect(params.cwd).toBe("/tmp/project")
   expect(params.oneShot).toBe(true)
   expect(params.initialPrompt).toBe("reply to feedback")
   expect(params.repository).toBe("acme/widgets")

@@ -38,6 +38,12 @@ import {
   matchAcpRequest,
 } from "./acp.js"
 import { fetchRegistryAgent } from "./registry.js"
+import {
+  cleanupSessionWorktree,
+  createSessionWorktree,
+  parseSessionWorktreeMetadata,
+  type SessionWorktreeHandle,
+} from "./worktree.js"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
@@ -89,6 +95,7 @@ type ActiveSession = {
   lastPermissionRequest: PermissionRequest | null
   clientRequests: ClientRequestMap
   pendingPrompts: Map<string | number, PendingPromptRequest>
+  worktree: SessionWorktreeHandle | null
 }
 
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
@@ -471,6 +478,7 @@ function buildSessionLogContext(params: {
   metadata?: DaemonSessionMetadata
 }): Record<string, unknown> {
   const metadata = params.metadata
+  const worktreeMetadata = parseSessionWorktreeMetadata(metadata)
   const workforceMetadata =
     metadata && typeof metadata === "object" && "workforce" in metadata
       ? (metadata.workforce as {
@@ -498,6 +506,8 @@ function buildSessionLogContext(params: {
       workforceMetadata && typeof workforceMetadata.requestId === "string"
         ? workforceMetadata.requestId
         : undefined,
+    worktreeDir: worktreeMetadata?.worktreeDir,
+    worktreePoweredBy: worktreeMetadata?.poweredBy,
   }
 }
 
@@ -679,6 +689,7 @@ export function createSessionManager(input: {
     await Promise.all(
       persistedSessions.map(async (session) => {
         const state = await SessionStateStorage.get(session.id)
+        const worktree = parseSessionWorktreeMetadata(session.metadata)
         if (!state) {
           await SessionStateStorage.create({
             sessionId: session.id,
@@ -704,6 +715,7 @@ export function createSessionManager(input: {
             previousStatus: session.status,
           })
           await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+          await cleanupPersistedWorktree(session.id, worktree)
           return
         }
 
@@ -713,6 +725,7 @@ export function createSessionManager(input: {
           false,
         )
         await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+        await cleanupPersistedWorktree(session.id, worktree)
       }),
     )
   }
@@ -722,11 +735,33 @@ export function createSessionManager(input: {
     const id = randomUUID()
     const token = randomBytes(32).toString("hex")
     const scope = parseRepoScope(params)
-    const sessionLogContext = buildSessionLogContext(params)
+    let sessionWorktree: SessionWorktreeHandle | null = null
+    let storedMetadata = params.metadata ?? undefined
     const sessionContext = {
       sessionId: id,
       acpId: undefined as string | undefined,
     }
+
+    try {
+      sessionWorktree = createSessionWorktree(id, params.cwd, params.metadata)
+      storedMetadata = {
+        ...params.metadata,
+        worktree: sessionWorktree.metadata,
+      }
+    } catch (error) {
+      logger.log("session.worktree_setup_failed", {
+        sessionId: id,
+        cwd: params.cwd,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+
+    const sessionLogContext = buildSessionLogContext({
+      ...params,
+      cwd: sessionWorktree.metadata.effectiveCwd,
+      metadata: storedMetadata,
+    })
 
     await SessionPermissionsStorage.create({
       sessionId: id,
@@ -744,7 +779,7 @@ export function createSessionManager(input: {
 
       const process = await spawnAgentProcess(input.daemonUrl, token, {
         agent: params.agent,
-        cwd: params.cwd,
+        cwd: sessionWorktree.metadata.effectiveCwd,
         agentBinDir: input.agentBinDir,
         env: params.env,
       })
@@ -775,11 +810,11 @@ export function createSessionManager(input: {
         acpId: initialized.acpId,
         status: initialized.status,
         agentName: agentNameFromInput(params.agent),
-        cwd: params.cwd,
+        cwd: sessionWorktree.metadata.effectiveCwd,
         mcpServers: params.mcpServers,
         repository: scope.repository,
         prNumber: scope.prNumber,
-        metadata: params.metadata ?? null,
+        metadata: storedMetadata ?? null,
       })
       await emitDiagnostic(id, "session_created", {
         status: initialized.status,
@@ -787,6 +822,19 @@ export function createSessionManager(input: {
       })
 
       if (shouldExitAfterInitialPrompt(params)) {
+        const handleOneShotExit = async (code: number | null, signal: NodeJS.Signals | null) => {
+          await emitDiagnostic(id, "agent_process_exit", {
+            code,
+            signal,
+            nextStatus: "done",
+          })
+          await cleanupDetachedWorktree(id, sessionWorktree)
+        }
+
+        process.once("exit", (code, signal) => {
+          void handleOneShotExit(code, signal)
+        })
+
         // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
         await updateSession(id, { status: "done" }, { reason: "one_shot_completed" })
         await setConnectionMode(id, "history", false)
@@ -823,6 +871,7 @@ export function createSessionManager(input: {
         lastPermissionRequest: null,
         clientRequests: new Map(),
         pendingPrompts: new Map(),
+        worktree: sessionWorktree,
       }
 
       active.subscription = connection.subscribe(async (message) => {
@@ -889,6 +938,7 @@ export function createSessionManager(input: {
             signal,
           }).catch(() => {})
         }
+        await cleanupActiveWorktree(active)
       }
 
       process.once("exit", (code, signal) => {
@@ -905,6 +955,7 @@ export function createSessionManager(input: {
       })
       await SessionPermissionsStorage.revoke(id).catch(() => {})
       await SessionStateStorage.remove(id).catch(() => {})
+      sessionWorktree?.cleanup()
       throw error
     }
   }
@@ -1068,9 +1119,106 @@ export function createSessionManager(input: {
       await session.writer.close().catch(() => {})
       await session.subscription.close().catch(() => {})
       await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+      await cleanupActiveWorktree(session)
     }
     activeSessions.clear()
   }
+
+  async function cleanupPersistedWorktree(
+    sessionId: string,
+    worktree: ReturnType<typeof parseSessionWorktreeMetadata>,
+  ): Promise<void> {
+    if (!worktree) {
+      return
+    }
+
+    try {
+      const success = cleanupSessionWorktree(worktree)
+      await emitDiagnostic(sessionId, "session_worktree_cleanup_reconciled", {
+        worktreeDir: worktree.worktreeDir,
+        branchName: worktree.branchName,
+        success,
+      })
+    } catch (error) {
+      logger.log("session.worktree_cleanup_failed", {
+        sessionId,
+        phase: "reconcile",
+        worktreeDir: worktree.worktreeDir,
+        branchName: worktree.branchName,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+      await emitDiagnostic(sessionId, "session_worktree_cleanup_reconciled", {
+        worktreeDir: worktree.worktreeDir,
+        branchName: worktree.branchName,
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  async function cleanupActiveWorktree(active: ActiveSession): Promise<void> {
+    if (!active.worktree) {
+      return
+    }
+
+    try {
+      const success = active.worktree.cleanup()
+      await emitDiagnostic(active.id, "session_worktree_cleanup_finished", {
+        worktreeDir: active.worktree.metadata.worktreeDir,
+        branchName: active.worktree.metadata.branchName,
+        success,
+      })
+    } catch (error) {
+      logger.log("session.worktree_cleanup_failed", {
+        sessionId: active.id,
+        phase: "active",
+        worktreeDir: active.worktree.metadata.worktreeDir,
+        branchName: active.worktree.metadata.branchName,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+      await emitDiagnostic(active.id, "session_worktree_cleanup_finished", {
+        worktreeDir: active.worktree.metadata.worktreeDir,
+        branchName: active.worktree.metadata.branchName,
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      active.worktree = null
+    }
+  }
+
+  async function cleanupDetachedWorktree(
+    sessionId: string,
+    worktree: SessionWorktreeHandle | null,
+  ): Promise<void> {
+    if (!worktree) {
+      return
+    }
+
+    try {
+      const success = worktree.cleanup()
+      await emitDiagnostic(sessionId, "session_worktree_cleanup_finished", {
+        worktreeDir: worktree.metadata.worktreeDir,
+        branchName: worktree.metadata.branchName,
+        success,
+      })
+    } catch (error) {
+      logger.log("session.worktree_cleanup_failed", {
+        sessionId,
+        phase: "detached",
+        worktreeDir: worktree.metadata.worktreeDir,
+        branchName: worktree.metadata.branchName,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+      await emitDiagnostic(sessionId, "session_worktree_cleanup_finished", {
+        worktreeDir: worktree.metadata.worktreeDir,
+        branchName: worktree.metadata.branchName,
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   return {
     createSession,
     connectSession,
