@@ -286,6 +286,11 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   await vi.waitFor(() => {
     expect(sessionManager.promptSession).toHaveBeenCalledTimes(3)
   })
+  expect(sessionManager.createSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      worktree: { enabled: true },
+    }),
+  )
   await vi.waitFor(() => {
     expect(sessionManager.shutdownSession).toHaveBeenCalledWith("session-1")
   })

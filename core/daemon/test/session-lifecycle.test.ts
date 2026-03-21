@@ -244,7 +244,6 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   })
 
   expect(await SessionPermissionsStorage.getByToken(permissions.token)).toBeNull()
-  expect(worktreeCleanupMock).toHaveBeenCalledTimes(1)
 })
 
 test("daemon persists repository context into direct session columns", async () => {
@@ -405,12 +404,13 @@ test("multiple clients can observe the same live session stream independently", 
   expect(clientBMessages.length > 0).toBe(true)
 })
 
-test("daemon sessions run inside the mapped worktree subdirectory", async () => {
+test("daemon sessions keep the local cwd by default even inside git repositories", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const requestedCwd = join(process.cwd(), "src")
+  const setupCallsBefore = worktreeSetupMock.mock.calls.length
 
   const created = await client.send("sessionCreate", {
     agent: createNodeAgent(exampleAgentPath),
@@ -420,15 +420,8 @@ test("daemon sessions run inside the mapped worktree subdirectory", async () => 
   })
 
   expect(created.session.cwd).toBe(join(process.cwd(), "src"))
-  expect(created.session.metadata).toEqual(
-    expect.objectContaining({
-      worktree: expect.objectContaining({
-        requestedCwd,
-        effectiveCwd: join(process.cwd(), "src"),
-        poweredBy: "mock-worktree",
-      }),
-    }),
-  )
+  expect(created.session.metadata).toBeNull()
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
 })
 
 test("non-repository session cwd values skip worktree isolation", async () => {
@@ -455,27 +448,36 @@ test("non-repository session cwd values skip worktree isolation", async () => {
   expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
 })
 
-test("session worktree opt-out keeps git-backed sessions on the local cwd", async () => {
+test("session worktree opt-in runs inside the mapped worktree subdirectory", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const requestedCwd = join(process.cwd(), "src")
   const setupCallsBefore = worktreeSetupMock.mock.calls.length
 
   const created = await client.send("sessionCreate", {
     agent: createNodeAgent(exampleAgentPath),
-    cwd: process.cwd(),
-    worktree: { enabled: false },
+    cwd: requestedCwd,
+    worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  expect(created.session.cwd).toBe(process.cwd())
-  expect(created.session.metadata).toBeNull()
-  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
+  expect(created.session.cwd).toBe(requestedCwd)
+  expect(created.session.metadata).toEqual(
+    expect.objectContaining({
+      worktree: expect.objectContaining({
+        requestedCwd,
+        effectiveCwd: requestedCwd,
+        poweredBy: "mock-worktree",
+      }),
+    }),
+  )
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore + 1)
 })
 
-test("one-shot daemon sessions clean up their worktree after the initial prompt completes", async () => {
+test("one-shot daemon sessions clean up their worktree after the initial prompt completes when enabled", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
@@ -484,6 +486,7 @@ test("one-shot daemon sessions clean up their worktree after the initial prompt 
   const created = await client.send("sessionCreate", {
     agent: createNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
+    worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
     oneShot: true,

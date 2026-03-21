@@ -111,7 +111,7 @@ describe("runAgent", () => {
     expect(subscribeMock).not.toHaveBeenCalled()
   })
 
-  test("forwards worktree opt-out to daemon session creation", async () => {
+  test("forwards worktree opt-in to daemon session creation", async () => {
     sendMock.mockResolvedValueOnce({
       session: buildSession("daemon-session-5", "acp-session-5"),
     })
@@ -122,7 +122,7 @@ describe("runAgent", () => {
       runAgent({
         agent: "pi",
         cwd: "/tmp/project",
-        worktree: { enabled: false },
+        worktree: { enabled: true },
         mcpServers: [],
         systemPrompt: "Follow the spec.",
         initialPrompt: "Ship it",
@@ -133,7 +133,7 @@ describe("runAgent", () => {
     expect(sendMock).toHaveBeenCalledWith("sessionCreate", {
       agent: "pi",
       cwd: "/tmp/project",
-      worktree: { enabled: false },
+      worktree: { enabled: true },
       mcpServers: [],
       systemPrompt: "Follow the spec.",
       env: undefined,
