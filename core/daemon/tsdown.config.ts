@@ -6,7 +6,7 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 const isDebug = process.env.DEBUG === "true"
 
 export default defineConfig({
-  entry: ["./src/main.ts", "./src/bin/*.ts"],
+  entry: ["./src/ipc.ts", "./src/main.ts", "./src/bin/*.ts"],
   format: "esm",
   target: "node18",
   clean: true,

@@ -8,14 +8,14 @@
   },
   "type": "module",
   "exports": {
-    "./*": {
+    "./ipc": {
       "types": {
-        "source": "./src/*.ts",
-        "default": "./dist/*.d.mts"
+        "source": "./src/ipc.ts",
+        "default": "./dist/ipc.d.mts"
       },
       "import": {
-        "source": "./src/*.ts",
-        "default": "./dist/*.mjs"
+        "source": "./src/ipc.ts",
+        "default": "./dist/ipc.mjs"
       }
     }
   },
