@@ -26,7 +26,6 @@ This is a **Tauri 2.0** desktop application using a **Frontend-Heavy** architect
 6.  **Component Design**:
     - **Inline Handlers**: Prefer inlining event handlers if they are only called in one place.
 7.  **Formatting**: Always run `npm run format` after modifying files to maintain consistent code style.
-
 ## File Structure
 
 - `src/`: Frontend Preact code

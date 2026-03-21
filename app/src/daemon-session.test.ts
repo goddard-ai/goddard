@@ -1,12 +1,12 @@
 import { createNodeClient } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/server"
-import type { GetDaemonSessionHistoryResponse } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, assert, test, vi } from "vitest"
+import { createDaemonSessionTestIpcHandlers } from "./daemon-ipc-test-handlers.js"
 import { createAppDaemonIpcClient } from "./daemon-session.js"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
@@ -300,221 +300,11 @@ async function startTestDaemon(): Promise<{
 }> {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-app-daemon-"))
   const socketPath = join(socketDir, "daemon.sock")
-  let nextSessionId = 0
-  const workforceRoots = new Set<string>()
-  const sessionHistory = new Map<
-    string,
-    { acpId: string; history: GetDaemonSessionHistoryResponse["history"] }
-  >()
-
-  function getSessionResponse(id: string) {
-    const session = sessionHistory.get(id)
-    if (!session) {
-      throw new Error("Session not found")
-    }
-
-    return {
-      session: {
-        id,
-        acpId: session.acpId,
-        status: "active" as const,
-        agentName: "test-agent",
-        cwd: process.cwd(),
-        metadata: {},
-        connection: {
-          mode: "live" as const,
-          reconnectable: true,
-          historyAvailable: session.history.length > 0,
-          activeDaemonSession: true,
-        },
-        diagnostics: {
-          eventCount: 0,
-          historyLength: session.history.length,
-          lastEventAt: null,
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        errorMessage: null,
-        blockedReason: null,
-        initiative: null,
-        lastAgentMessage: null,
-      },
-    }
-  }
-
-  function getWorkforceStatus(rootDir: string) {
-    return {
-      state: "running" as const,
-      rootDir,
-      configPath: `${rootDir}/.goddard/workforce.json`,
-      ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
-      activeRequestCount: 0,
-      queuedRequestCount: 0,
-      suspendedRequestCount: 0,
-      failedRequestCount: 0,
-    }
-  }
-
-  function getWorkforceResponse(rootDir: string) {
-    return {
-      workforce: {
-        ...getWorkforceStatus(rootDir),
-        config: {
-          version: 1 as const,
-          defaultAgent: "pi-acp",
-          rootAgentId: "root",
-          agents: [
-            {
-              id: "root",
-              name: "@repo/root",
-              role: "root" as const,
-              cwd: ".",
-              owns: ["."],
-            },
-          ],
-        },
-      },
-    }
-  }
-
-  // Keep this test-local IPC handler list in sync with daemonIpcSchema and
-  // core/daemon/src/ipc/server.ts. When new daemon IPC methods are added,
-  // stub them here too or the app bridge tests will drift.
-  const ipcServer = createServer(socketPath, daemonIpcSchema, {
-    health: async () => ({ ok: true }),
-    prSubmit: async () => ({ number: 1, url: "https://github.com/example/repo/pull/1" }),
-    prReply: async () => ({ success: true }),
-    sessionCreate: async () => {
-      const id = `daemon-session-${nextSessionId++}`
-      const acpId = `acp-session-${nextSessionId}`
-      sessionHistory.set(id, { acpId, history: [] })
-      return getSessionResponse(id)
-    },
-    sessionGet: async ({ id }) => getSessionResponse(id),
-    sessionConnect: async ({ id }) => getSessionResponse(id),
-    sessionHistory: async ({ id }) => {
-      const session = sessionHistory.get(id)
-      if (!session) {
-        throw new Error("Session not found")
-      }
-      return {
-        id,
-        acpId: session.acpId,
-        connection: {
-          mode: "live" as const,
-          reconnectable: true,
-          historyAvailable: session.history.length > 0,
-          activeDaemonSession: true,
-        },
-        history: [...session.history],
-      }
-    },
-    sessionDiagnostics: async ({ id }) => {
-      const session = sessionHistory.get(id)
-      if (!session) {
-        throw new Error("Session not found")
-      }
-      return {
-        id,
-        acpId: session.acpId,
-        connection: {
-          mode: "live" as const,
-          reconnectable: true,
-          historyAvailable: session.history.length > 0,
-          activeDaemonSession: true,
-        },
-        events: [],
-      }
-    },
-    sessionShutdown: async ({ id }) => {
-      return {
-        id,
-        success: sessionHistory.delete(id),
-      }
-    },
-    sessionSend: async ({ id, message }) => {
-      const session = sessionHistory.get(id)
-      if (!session) {
-        throw new Error("Session not found")
-      }
-      session.history.push(message as GetDaemonSessionHistoryResponse["history"][number])
-      if (
-        typeof message === "object" &&
-        message !== null &&
-        "id" in message &&
-        (typeof message.id === "string" || typeof message.id === "number")
-      ) {
-        session.history.push({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { stopReason: "end_turn" },
-        })
-      }
-      return { accepted: true as const }
-    },
-    sessionResolveToken: async () => ({ id: "daemon-session-0" }),
-    workforceStart: async ({ rootDir }) => {
-      workforceRoots.add(rootDir)
-      return getWorkforceResponse(rootDir)
-    },
-    workforceGet: async ({ rootDir }) => {
-      workforceRoots.add(rootDir)
-      return getWorkforceResponse(rootDir)
-    },
-    workforceList: async () => ({
-      workforces: Array.from(workforceRoots)
-        .sort()
-        .map((rootDir) => getWorkforceStatus(rootDir)),
-    }),
-    workforceShutdown: async ({ rootDir }) => {
-      return {
-        rootDir,
-        success: workforceRoots.delete(rootDir),
-      }
-    },
-    workforceRequest: async ({ rootDir }) => {
-      workforceRoots.add(rootDir)
-      return {
-        workforce: getWorkforceStatus(rootDir),
-        requestId: "test-workforce-request",
-      }
-    },
-    workforceUpdate: async ({ rootDir, requestId }) => {
-      workforceRoots.add(rootDir)
-      return {
-        workforce: getWorkforceStatus(rootDir),
-        requestId,
-      }
-    },
-    workforceCancel: async ({ rootDir, requestId }) => {
-      workforceRoots.add(rootDir)
-      return {
-        workforce: getWorkforceStatus(rootDir),
-        requestId,
-      }
-    },
-    workforceTruncate: async ({ rootDir }) => {
-      workforceRoots.add(rootDir)
-      return {
-        workforce: getWorkforceStatus(rootDir),
-        requestId: null,
-      }
-    },
-    workforceRespond: async ({ rootDir, requestId }) => {
-      workforceRoots.add(rootDir)
-      return {
-        workforce: getWorkforceStatus(rootDir),
-        requestId,
-      }
-    },
-    workforceSuspend: async ({ rootDir, requestId }) => {
-      workforceRoots.add(rootDir)
-      return {
-        workforce: getWorkforceStatus(rootDir),
-        requestId,
-      }
-    },
-  })
+  const ipcServer = createServer(
+    socketPath,
+    daemonIpcSchema,
+    createDaemonSessionTestIpcHandlers().handlers,
+  )
 
   cleanup.push(async () => {
     await new Promise<void>((resolve, reject) => {
