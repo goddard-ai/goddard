@@ -58,7 +58,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
             agent: "pi-acp",
             cwd: rootDir,
             mcpServers: [],
-            systemPrompt: "",
+            systemPrompt: "test",
           },
           rateLimits: {
             cycleDelay: "30s",
@@ -105,7 +105,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
       agent: "pi-acp",
       cwd: "/repo",
       mcpServers: [],
-      systemPrompt: "",
+      systemPrompt: "test",
     },
     rateLimits: {
       cycleDelay: "30s",
@@ -178,6 +178,7 @@ test("loop manager reuses one runtime per normalized repository root and loop na
       agent: "pi-acp",
       cwd: tempRoot,
       mcpServers: [],
+      systemPrompt: "test",
     },
     rateLimits: {
       cycleDelay: "30s",
@@ -200,6 +201,7 @@ test("loop manager reuses one runtime per normalized repository root and loop na
       agent: "pi-acp",
       cwd: tempRoot,
       mcpServers: [],
+      systemPrompt: "test",
     },
     rateLimits: {
       cycleDelay: "30s",
@@ -261,6 +263,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
         agent: "pi-acp",
         cwd: rootDir,
         mcpServers: [],
+        systemPrompt: "test",
       },
       rateLimits: {
         cycleDelay: "0s",
