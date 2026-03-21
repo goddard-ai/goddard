@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "bun:test"
 
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {

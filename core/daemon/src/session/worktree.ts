@@ -3,7 +3,6 @@ import { Worktree } from "@goddard-ai/worktree"
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
 import { relative, join } from "node:path"
-import { spawnSync } from "node:child_process"
 
 const defaultWorktreeDirName = ".goddard-agents"
 
@@ -126,17 +125,18 @@ export function cleanupSessionWorktree(metadata: SessionWorktreeMetadata): boole
  * Resolves the containing git repository root for one requested session cwd when one exists.
  */
 function resolveGitRepoRoot(cwd: string): string | null {
-  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+  const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
     cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
 
-  if (result.status !== 0) {
+  if (!result.success) {
     return null
   }
 
-  const repoRoot = result.stdout.trim()
+  const repoRoot = Buffer.from(result.stdout).toString("utf8").trim()
   if (!repoRoot) {
     return null
   }

@@ -1,7 +1,6 @@
 import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { getGoddardGlobalDir } from "@goddard-ai/storage"
 import { mkdir, rm } from "node:fs/promises"
-import { request as httpRequest } from "node:http"
 import * as path from "node:path"
 import { ipcPath } from "../ipc-path.js"
 
@@ -34,7 +33,7 @@ async function ensureSocketPathAvailable(socketPath: string): Promise<void> {
     throw new Error(`A Goddard daemon is already listening at ${socketPath}`)
   } catch (error) {
     const code = typeof error === "object" && error && "code" in error ? error.code : undefined
-    if (code === "ENOENT" || code === "ECONNREFUSED") {
+    if (code === "FailedToOpenSocket") {
       await rm(socketPath, { force: true }).catch(() => {})
       return
     }
@@ -43,23 +42,13 @@ async function ensureSocketPathAvailable(socketPath: string): Promise<void> {
   }
 }
 
-function requestDaemonSocket(socketPath: string, pathname: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = httpRequest(
-      {
-        socketPath,
-        path: pathname,
-        method: "GET",
-      },
-      (response) => {
-        response.resume()
-        resolve()
-      },
-    )
-
-    request.once("error", (error) => reject(error))
-    request.end()
+async function requestDaemonSocket(socketPath: string, pathname: string): Promise<void> {
+  const response = await fetch(`http://localhost${pathname}`, {
+    method: "GET",
+    unix: socketPath,
   })
+
+  await response.arrayBuffer()
 }
 
 function toPosixPath(value: string): string {

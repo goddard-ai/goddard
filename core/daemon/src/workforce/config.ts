@@ -1,5 +1,5 @@
 import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { buildWorkforcePaths } from "./paths.js"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -37,7 +37,7 @@ function assertAgentConfig(value: unknown, index: number): asserts value is Work
 
 export async function readWorkforceConfig(rootDir: string): Promise<WorkforceConfig> {
   const paths = buildWorkforcePaths(rootDir)
-  const parsed = JSON.parse(await readFile(paths.configPath, "utf-8")) as unknown
+  const parsed = JSON.parse(await Bun.file(paths.configPath).text()) as unknown
 
   if (!isRecord(parsed) || parsed.version !== 1) {
     throw new Error(`Invalid workforce config at ${paths.configPath}`)
@@ -67,8 +67,8 @@ export async function ensureWorkforceFiles(rootDir: string): Promise<void> {
   await mkdir(paths.goddardDir, { recursive: true })
 
   try {
-    await readFile(paths.ledgerPath, "utf-8")
+    await Bun.file(paths.ledgerPath).text()
   } catch {
-    await writeFile(paths.ledgerPath, "", "utf-8")
+    await Bun.write(paths.ledgerPath, "")
   }
 }
