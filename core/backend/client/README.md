@@ -13,4 +13,4 @@ Use `@goddard-ai/sdk` instead when you want the stable higher-level facade rathe
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](./LICENSE-AGPLv3).
+This project is licensed under the [MIT License](./LICENSE-MIT).
