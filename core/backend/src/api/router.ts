@@ -149,7 +149,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
+          const token = readStreamToken(ctx.headers.authorization, ctx.query.token)
           const session = await controlPlane.getSession(token)
 
           return await handleUserStream(env, session.githubUsername, ctx.request)
@@ -203,6 +203,15 @@ function readBearerToken(header: string): string {
   }
 
   return header.slice("Bearer ".length)
+}
+
+/** Extracts the stream auth token from the upgrade query or falls back to a bearer header. */
+function readStreamToken(header: string | undefined, queryToken: string | undefined): string {
+  if (queryToken?.trim()) {
+    return queryToken
+  }
+
+  return readBearerToken(header ?? "")
 }
 
 /** Converts thrown backend errors into consistent JSON HTTP responses. */

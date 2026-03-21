@@ -1,4 +1,4 @@
-import { test, assert } from "vitest"
+import { expect, test } from "vitest"
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
 
 test("control plane creates PR authored by authenticated user", () => {
@@ -18,8 +18,8 @@ test("control plane creates PR authored by authenticated user", () => {
     base: "main",
   })
 
-  assert.equal(pr.number, 1)
-  assert.match(pr.body, /Authored via CLI by @alec/)
+  expect(pr.number).toBe(1)
+  expect(pr.body).toMatch(/Authored via CLI by @alec/)
 })
 
 test("http api supports login and pr creation", async () => {
@@ -45,7 +45,7 @@ test("http api supports login and pr creation", async () => {
       session.token,
     )
 
-    assert.equal(pr.number, 1)
+    expect(pr.number).toBe(1)
   } finally {
     await server.close()
   }
@@ -72,15 +72,15 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
-    assert.equal(managedResponse.status, 200)
-    assert.deepEqual(await managedResponse.json(), { managed: true })
+    expect(managedResponse.status).toBe(200)
+    expect(await managedResponse.json()).toEqual({ managed: true })
 
     const unmanagedResponse = await fetch(
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=9`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
-    assert.equal(unmanagedResponse.status, 200)
-    assert.deepEqual(await unmanagedResponse.json(), { managed: false })
+    expect(unmanagedResponse.status).toBe(200)
+    expect(await unmanagedResponse.json()).toEqual({ managed: false })
 
     const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
@@ -92,8 +92,8 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${bobSession.token}` } },
     )
-    assert.equal(foreignResponse.status, 200)
-    assert.deepEqual(await foreignResponse.json(), { managed: false })
+    expect(foreignResponse.status).toBe(200)
+    expect(await foreignResponse.json()).toEqual({ managed: false })
   } finally {
     await server.close()
   }
@@ -113,7 +113,7 @@ test("expired auth sessions are rejected", () => {
 
     Date.now = () => 1000 + 1000 * 60 * 60 * 24 + 1
 
-    assert.throws(() => backend.getSession(session.token), /Session expired/)
+    expect(() => backend.getSession(session.token)).toThrow(/Session expired/)
   } finally {
     Date.now = originalNow
   }
@@ -132,17 +132,18 @@ test("invalid JSON body returns 400", async () => {
       body: "{",
     })
 
-    assert.equal(response.status, 400)
+    expect(response.status).toBe(400)
     const payload = (await response.json()) as { message: string }
-    assert.equal(payload.message, "Invalid request body")
+    expect(payload.message).toBe("Invalid request body")
   } finally {
     await server.close()
   }
 })
 
-test("ndjson stream receives webhook events for a managed PR", async () => {
+test("websocket stream receives webhook events for a managed PR", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
+  let streamSocket: WebSocket | undefined
 
   try {
     const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
@@ -163,15 +164,8 @@ test("ndjson stream receives webhook events for a managed PR", async () => {
       session.token,
     )
 
-    const streamResponse = await fetch(`${baseUrl}/stream`, {
-      headers: {
-        accept: "application/x-ndjson",
-        authorization: `Bearer ${session.token}`,
-      },
-    })
-
-    assert.equal(streamResponse.status, 200)
-    const eventPromise = readFirstNdjsonEvent(streamResponse)
+    streamSocket = await connectStreamSocket(baseUrl, session.token)
+    const eventPromise = readFirstSocketMessage(streamSocket)
 
     await postJson(`${baseUrl}/webhooks/github`, {
       type: "issue_comment",
@@ -186,10 +180,11 @@ test("ndjson stream receives webhook events for a managed PR", async () => {
       id: number
       event: { type: string; reactionAdded: string }
     }
-    assert.equal(parsed.id, 2)
-    assert.equal(parsed.event.type, "comment")
-    assert.equal(parsed.event.reactionAdded, "eyes")
+    expect(parsed.id).toBe(2)
+    expect(parsed.event.type).toBe("comment")
+    expect(parsed.event.reactionAdded).toBe("eyes")
   } finally {
+    streamSocket?.close()
     await server.close()
   }
 })
@@ -242,19 +237,18 @@ test("stream history returns managed events for the authenticated user in cursor
       headers: { authorization: `Bearer ${alecSession.token}` },
     })
 
-    assert.equal(response.status, 200)
+    expect(response.status).toBe(200)
     const payload = (await response.json()) as {
       events: Array<{ id: number; event: { type: string; prNumber: number; repo: string } }>
     }
-    assert.deepEqual(
+    expect(
       payload.events.map((event) => ({
         id: event.id,
         type: event.event.type,
         repo: event.event.repo,
         prNumber: event.event.prNumber,
       })),
-      [{ id: 3, type: "comment", repo: "sdk", prNumber: 1 }],
-    )
+    ).toEqual([{ id: 3, type: "comment", repo: "sdk", prNumber: 1 }])
   } finally {
     await server.close()
   }
@@ -263,6 +257,8 @@ test("stream history returns managed events for the authenticated user in cursor
 test("unified stream only emits events for managed PRs owned by the authenticated user", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
+  let alecStream: WebSocket | undefined
+  let bobStream: WebSocket | undefined
 
   try {
     const alecFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
@@ -299,18 +295,10 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       bobSession.token,
     )
 
-    const alecStream = await fetch(`${baseUrl}/stream`, {
-      headers: {
-        accept: "application/x-ndjson",
-        authorization: `Bearer ${alecSession.token}`,
-      },
-    })
-    const bobStream = await fetch(`${baseUrl}/stream`, {
-      headers: {
-        accept: "application/x-ndjson",
-        authorization: `Bearer ${bobSession.token}`,
-      },
-    })
+    alecStream = await connectStreamSocket(baseUrl, alecSession.token)
+    bobStream = await connectStreamSocket(baseUrl, bobSession.token)
+    const alecEventPromise = readFirstSocketMessage(alecStream)
+    const bobEventPromise = assertNoSocketMessage(bobStream, 100)
 
     await postJson(`${baseUrl}/webhooks/github`, {
       type: "issue_comment",
@@ -321,10 +309,12 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       body: "looks good",
     })
 
-    const alecEvent = (await readFirstNdjsonEvent(alecStream)) as { event: { prNumber: number } }
-    assert.equal(alecEvent.event.prNumber, 1)
-    await assertNoNdjsonEvent(bobStream, 100)
+    const alecEvent = (await alecEventPromise) as { event: { prNumber: number } }
+    expect(alecEvent.event.prNumber).toBe(1)
+    await bobEventPromise
   } finally {
+    alecStream?.close()
+    bobStream?.close()
     await server.close()
   }
 })
@@ -332,6 +322,7 @@ test("unified stream only emits events for managed PRs owned by the authenticate
 test("unified stream ignores webhook events for unmanaged PRs", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
+  let streamSocket: WebSocket | undefined
 
   try {
     const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
@@ -340,12 +331,7 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       githubUsername: "alec",
     })
 
-    const streamResponse = await fetch(`${baseUrl}/stream`, {
-      headers: {
-        accept: "application/x-ndjson",
-        authorization: `Bearer ${session.token}`,
-      },
-    })
+    streamSocket = await connectStreamSocket(baseUrl, session.token)
 
     await postJson(`${baseUrl}/webhooks/github`, {
       type: "issue_comment",
@@ -356,81 +342,87 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       body: "looks good",
     })
 
-    await assertNoNdjsonEvent(streamResponse, 100)
+    await assertNoSocketMessage(streamSocket, 100)
   } finally {
+    streamSocket?.close()
     await server.close()
   }
 })
 
-async function readFirstNdjsonEvent(response: Response, timeoutMs = 1000): Promise<unknown> {
-  if (!response.body) {
-    throw new Error("Missing NDJSON response body")
-  }
+async function connectStreamSocket(baseUrl: string, token: string): Promise<WebSocket> {
+  const socket = new WebSocket(createStreamUrl(baseUrl, token))
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-
-  while (true) {
-    const { value, done } = await readWithTimeout(reader, timeoutMs)
-    if (done) {
-      break
+  await new Promise<void>((resolve, reject) => {
+    socket.onopen = () => resolve()
+    socket.onerror = () => reject(new Error("WebSocket connection failed"))
+    socket.onclose = (event) => {
+      reject(new Error(`WebSocket closed before opening (${event.code})`))
     }
+  })
 
-    buffer += decoder.decode(value, { stream: true })
-
-    let separatorIndex = buffer.indexOf("\n")
-    while (separatorIndex !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex).trim()
-      buffer = buffer.slice(separatorIndex + 1)
-
-      if (rawEvent) {
-        await reader.cancel()
-        return JSON.parse(rawEvent)
-      }
-
-      separatorIndex = buffer.indexOf("\n")
-    }
-  }
-
-  throw new Error("NDJSON stream ended before emitting data")
+  return socket
 }
 
-async function assertNoNdjsonEvent(response: Response, timeoutMs: number): Promise<void> {
+async function readFirstSocketMessage(socket: WebSocket, timeoutMs = 1000): Promise<unknown> {
+  return readWithTimeout(socket, timeoutMs)
+}
+
+async function assertNoSocketMessage(socket: WebSocket, timeoutMs: number): Promise<void> {
   try {
-    await readFirstNdjsonEvent(response, timeoutMs)
+    await readFirstSocketMessage(socket, timeoutMs)
   } catch (error) {
-    assert.match(
-      String(error),
-      /(Timed out waiting for NDJSON event|NDJSON stream ended before emitting data)/,
-    )
+    expect(String(error)).toMatch(/Timed out waiting for WebSocket message/)
     return
   }
 
-  assert.fail(`Expected no NDJSON event within ${timeoutMs}ms`)
+  throw new Error(`Expected no WebSocket message within ${timeoutMs}ms`)
 }
 
-async function readWithTimeout(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  timeoutMs: number,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined
+/** Waits for the next non-heartbeat WebSocket message and parses it as JSON. */
+async function readWithTimeout(socket: WebSocket, timeoutMs: number): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      cleanup()
+      reject(new Error(`Timed out waiting for WebSocket message after ${timeoutMs}ms`))
+    }, timeoutMs)
 
-  try {
-    return await Promise.race([
-      reader.read(),
-      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          void reader.cancel().catch(() => {})
-          reject(new Error(`Timed out waiting for NDJSON event after ${timeoutMs}ms`))
-        }, timeoutMs)
-      }),
-    ])
-  } finally {
-    if (timeoutId) {
+    const cleanup = () => {
       clearTimeout(timeoutId)
+      socket.removeEventListener("message", onMessage)
+      socket.removeEventListener("error", onError)
+      socket.removeEventListener("close", onClose)
     }
-  }
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data === "pong") {
+        return
+      }
+
+      cleanup()
+      resolve(JSON.parse(String(event.data)))
+    }
+
+    const onError = () => {
+      cleanup()
+      reject(new Error("WebSocket error while waiting for message"))
+    }
+
+    const onClose = (event: CloseEvent) => {
+      cleanup()
+      reject(new Error(`WebSocket closed while waiting for message (${event.code})`))
+    }
+
+    socket.addEventListener("message", onMessage)
+    socket.addEventListener("error", onError)
+    socket.addEventListener("close", onClose)
+  })
+}
+
+function createStreamUrl(baseUrl: string, token: string): string {
+  const url = new URL("/stream", baseUrl)
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  url.searchParams.set("token", token)
+  return url.toString()
 }
 
 async function postJson(url: string, payload: unknown, token?: string): Promise<any> {

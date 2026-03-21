@@ -1,6 +1,17 @@
 import { InMemoryTokenStorage } from "@goddard-ai/storage"
-import { expect, test } from "vitest"
+import { afterEach, expect, test } from "vitest"
 import { GoddardSdk } from "../src/sdk.ts"
+
+const originalWebSocket = globalThis.WebSocket
+
+afterEach(() => {
+  if (originalWebSocket) {
+    globalThis.WebSocket = originalWebSocket
+  } else {
+    Reflect.deleteProperty(globalThis, "WebSocket")
+  }
+  MockWebSocket.instances.length = 0
+})
 
 test("device flow stores token and whoami uses auth header", async () => {
   const storage = new InMemoryTokenStorage()
@@ -133,44 +144,26 @@ test("pr.isManaged returns managed status", async () => {
 test("stream emits error event for malformed payloads", async () => {
   const storage = new InMemoryTokenStorage()
   await storage.setToken("tok_stream")
-
-  const encoder = new TextEncoder()
-  let controller: ReadableStreamDefaultController<Uint8Array> | undefined
-
-  const fetchImpl: typeof fetch = async (input) => {
-    const url = String(input)
-    if (url.endsWith("/stream")) {
-      const stream = new ReadableStream<Uint8Array>({
-        start(ctrl) {
-          controller = ctrl
-        },
-      })
-
-      return new Response(stream, {
-        status: 200,
-        headers: {
-          "content-type": "application/x-ndjson",
-        },
-      })
-    }
-
-    return jsonResponse(404, { error: "not found" })
-  }
+  globalThis.WebSocket = MockWebSocket as any
 
   const sdk = new GoddardSdk({
     backendUrl: "http://127.0.0.1:8787",
     tokenStorage: storage,
-    fetch: fetchImpl,
+    fetch: async () => jsonResponse(404, { error: "not found" }),
   })
 
   const sub = await sdk.stream.subscribe()
+  const socket = MockWebSocket.instances[0]
+  if (!socket) {
+    throw new Error("Expected one WebSocket instance")
+  }
 
   let errorMessage = ""
   sub.on("error", (error) => {
     errorMessage = error instanceof Error ? error.message : String(error)
   })
 
-  controller?.enqueue(encoder.encode("{\n"))
+  socket.emitRawMessage("{")
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   expect(errorMessage).toMatch(/Invalid stream payload/)
@@ -231,4 +224,48 @@ function jsonResponse(status: number, payload: unknown): Response {
       "content-type": "application/json",
     },
   })
+}
+
+/** Minimal WebSocket mock for SDK stream tests. */
+class MockWebSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSING = 2
+  static readonly CLOSED = 3
+  static readonly instances: MockWebSocket[] = []
+
+  readyState = MockWebSocket.CONNECTING
+  onopen: ((event: Event) => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  onclose: ((event: CloseEvent) => void) | null = null
+
+  constructor(_url: string) {
+    MockWebSocket.instances.push(this)
+    queueMicrotask(() => {
+      this.readyState = MockWebSocket.OPEN
+      this.onopen?.({ type: "open" } as Event)
+    })
+  }
+
+  send(_message: string): void {
+    // No-op for tests.
+  }
+
+  close(code = 1000, reason = ""): void {
+    this.readyState = MockWebSocket.CLOSED
+    this.onclose?.({
+      type: "close",
+      code,
+      reason,
+      wasClean: true,
+    } as CloseEvent)
+  }
+
+  emitRawMessage(data: string): void {
+    this.onmessage?.({
+      type: "message",
+      data,
+    } as MessageEvent)
+  }
 }

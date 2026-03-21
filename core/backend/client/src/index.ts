@@ -19,6 +19,9 @@ type FetchLike = typeof fetch
 /** Listener signature used by backend stream subscriptions. */
 type StreamHandler = (event?: unknown) => void
 
+/** Browser-compatible WebSocket constructor used for live stream subscriptions. */
+type WebSocketConstructor = typeof WebSocket
+
 /** Constructor options for the backend client. */
 type BackendClientOptions = {
   baseUrl: string
@@ -53,6 +56,9 @@ export type BackendClient = {
     subscribe: () => Promise<StreamSubscription>
   }
 }
+
+const STREAM_HEARTBEAT_INTERVAL_MS = 30_000
+const STREAM_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000] as const
 
 class BackendStreamSubscription implements StreamSubscription {
   #dispose: () => void
@@ -159,32 +165,122 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       },
       subscribe: async () => {
         const token = await requireToken(tokenStorage)
-        const abortController = new AbortController()
-        const response = await fetchImpl(new URL("/stream", options.baseUrl).toString(), {
-          headers: {
-            accept: "application/x-ndjson",
-            authorization: `Bearer ${token}`,
-          },
-          signal: abortController.signal,
-        })
+        const WebSocketImpl = requireWebSocketConstructor()
+        const streamUrl = createStreamWebSocketUrl(options.baseUrl, token)
+        let socket: WebSocket | null = null
+        let heartbeatTimer: ReturnType<typeof setInterval> | undefined
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+        let reconnectAttempts = 0
+        let manualClose = false
 
-        if (!response.ok) {
-          throw new Error(`Stream request failed (${response.status}): ${await response.text()}`)
+        const stopHeartbeat = () => {
+          if (!heartbeatTimer) {
+            return
+          }
+
+          clearInterval(heartbeatTimer)
+          heartbeatTimer = undefined
         }
 
-        if (!response.body) {
-          throw new Error("Stream response did not include a body")
+        const scheduleReconnect = (subscription: BackendStreamSubscription) => {
+          if (manualClose || reconnectTimer || subscription.isClosed()) {
+            return
+          }
+
+          const delay =
+            STREAM_RECONNECT_DELAYS_MS[
+              Math.min(reconnectAttempts, STREAM_RECONNECT_DELAYS_MS.length - 1)
+            ]
+          reconnectAttempts += 1
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined
+            void connect(subscription).catch((error) => {
+              subscription.emit("error", error)
+              scheduleReconnect(subscription)
+            })
+          }, delay)
         }
 
-        const reader = response.body.getReader()
+        const connect = async (subscription: BackendStreamSubscription): Promise<void> => {
+          await new Promise<void>((resolve, reject) => {
+            let opened = false
+            let lastError: Error | undefined
+            const nextSocket = new WebSocketImpl(streamUrl)
+
+            nextSocket.onopen = () => {
+              opened = true
+              reconnectAttempts = 0
+              socket = nextSocket
+              stopHeartbeat()
+              heartbeatTimer = setInterval(() => {
+                if (socket?.readyState === 1) {
+                  socket.send("ping")
+                }
+              }, STREAM_HEARTBEAT_INTERVAL_MS)
+              subscription.emit("open")
+              resolve()
+            }
+
+            nextSocket.onmessage = (event) => {
+              const payload = toWebSocketMessageText(event.data)
+              if (payload === "pong") {
+                return
+              }
+
+              try {
+                emitStreamMessage(subscription, JSON.parse(payload) as StreamMessage)
+              } catch (error) {
+                subscription.emit("error", new Error(`Invalid stream payload: ${String(error)}`))
+              }
+            }
+
+            nextSocket.onerror = () => {
+              lastError = new Error("Stream socket error")
+              if (opened) {
+                subscription.emit("error", lastError)
+              }
+            }
+
+            nextSocket.onclose = (event) => {
+              if (socket === nextSocket) {
+                socket = null
+              }
+              stopHeartbeat()
+
+              if (manualClose || subscription.isClosed()) {
+                return
+              }
+
+              const closeError =
+                lastError ??
+                new Error(
+                  `Stream socket closed (${event.code}${event.reason ? `: ${event.reason}` : ""})`,
+                )
+
+              if (!opened) {
+                reject(closeError)
+                return
+              }
+
+              scheduleReconnect(subscription)
+            }
+          })
+        }
+
         const subscription = new BackendStreamSubscription(() => {
-          abortController.abort()
-          void reader.cancel().catch(() => {})
+          manualClose = true
+          stopHeartbeat()
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer)
+            reconnectTimer = undefined
+          }
+          if (socket && socket.readyState < 2) {
+            socket.close()
+          }
+          socket = null
         })
 
-        subscription.emit("open")
-        void consumeNdjsonResponse(reader, subscription, abortController.signal)
-
+        await connect(subscription)
         return subscription
       },
     },
@@ -201,65 +297,47 @@ async function requireToken(tokenStorage: TokenStorage): Promise<string> {
   return token
 }
 
-/** Reads the backend NDJSON response stream until the subscription closes or the stream ends. */
-async function consumeNdjsonResponse(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  subscription: BackendStreamSubscription,
-  signal: AbortSignal,
-): Promise<void> {
-  const decoder = new TextDecoder()
-  let buffer = ""
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) {
-        break
-      }
-
-      buffer += decoder.decode(value, { stream: true })
-      buffer = flushNdjsonBuffer(buffer, subscription)
-    }
-
-    buffer += decoder.decode()
-    flushNdjsonBuffer(buffer, subscription)
-  } catch (error) {
-    if (!signal.aborted) {
-      subscription.emit("error", error)
-    }
-  } finally {
-    await reader.cancel().catch(() => {})
-    if (!subscription.isClosed()) {
-      subscription.close()
-    }
+/** Resolves the global WebSocket implementation required for live stream subscriptions. */
+function requireWebSocketConstructor(): WebSocketConstructor {
+  if (typeof WebSocket === "undefined") {
+    throw new Error("WebSocket is not available in this runtime")
   }
+
+  return WebSocket
 }
 
-/** Emits complete NDJSON messages from the buffered stream content and preserves any trailing partial line. */
-function flushNdjsonBuffer(buffer: string, subscription: BackendStreamSubscription): string {
-  let remaining = buffer
+/** Converts the configured backend base URL into the matching WebSocket stream URL. */
+function createStreamWebSocketUrl(baseUrl: string, token: string): string {
+  const url = new URL("/stream", baseUrl)
+  url.protocol =
+    url.protocol === "https:" ? "wss:" : url.protocol === "http:" ? "ws:" : url.protocol
+  url.searchParams.set("token", token)
+  return url.toString()
+}
 
-  while (true) {
-    const newlineIndex = remaining.indexOf("\n")
-    if (newlineIndex === -1) {
-      return remaining
-    }
+/** Emits one parsed stream message through the stable subscription event surface. */
+function emitStreamMessage(
+  subscription: BackendStreamSubscription,
+  streamMessage: StreamMessage,
+): void {
+  subscription.emit("message", streamMessage)
+  subscription.emit("event", streamMessage.event)
+  subscription.emit(streamMessage.event.type, streamMessage.event)
+}
 
-    const chunk = remaining.slice(0, newlineIndex).trim()
-    remaining = remaining.slice(newlineIndex + 1)
-
-    if (!chunk) {
-      continue
-    }
-
-    try {
-      const streamMessage = JSON.parse(chunk) as StreamMessage
-      subscription.emit("message", streamMessage)
-      const parsed = streamMessage
-      subscription.emit("event", parsed.event)
-      subscription.emit(parsed.event.type, parsed.event)
-    } catch (error) {
-      subscription.emit("error", new Error(`Invalid stream payload: ${String(error)}`))
-    }
+/** Converts an inbound WebSocket frame payload into the UTF-8 text expected by the stream contract. */
+function toWebSocketMessageText(data: unknown): string {
+  if (typeof data === "string") {
+    return data
   }
+
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data))
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder().decode(data)
+  }
+
+  throw new Error(`Unsupported WebSocket payload type: ${typeof data}`)
 }

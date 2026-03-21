@@ -8,6 +8,7 @@ import type {
   PullRequestRecord,
   RepoEvent,
   RepoEventRecord,
+  StreamMessage,
 } from "@goddard-ai/schema/backend"
 import { randomBytes } from "node:crypto"
 import type { Env } from "../env.js"
@@ -28,7 +29,7 @@ export type DeviceSessionRecord = { githubUsername: string; createdAt: number; e
 
 /** Minimal sink interface used by local live-stream fanout. */
 export type StreamSink = {
-  send: (message: { data: string; id?: string | number }) => void
+  send: (message: StreamMessage) => void
   close?: () => void
 }
 
@@ -268,10 +269,10 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
       return
     }
 
-    const payload = JSON.stringify({ event: record.event })
+    const payload: StreamMessage = { id: record.id, event: record.event }
     for (const socket of sockets) {
       try {
-        socket.send({ data: payload, id: record.id })
+        socket.send(payload)
       } catch {
         sockets.delete(socket)
         socket.close?.()

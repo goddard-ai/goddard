@@ -1,22 +1,35 @@
-import { test, assert } from "vitest"
+import { expect, test } from "vitest"
 import { UserStream } from "../src/worker.ts"
 
-test("user stream durable object fans out published events to subscribers", async () => {
-  const stream = new UserStream()
-  const controller = new AbortController()
-  const response = await stream.fetch(
-    new Request("https://user-stream.internal/subscribe", {
-      signal: controller.signal,
+test("user stream durable object upgrades sockets, stores attachments, and fans out published events", async () => {
+  const context = new FakeUserStreamContext()
+  const runtime = new FakeUserStreamRuntime()
+  const stream = new UserStream(context as any, {} as any, runtime as any)
+
+  const upgradeResponse = await stream.fetch(
+    new Request("https://user-stream.internal/stream", {
+      headers: {
+        upgrade: "websocket",
+        "x-github-username": "alec",
+      },
     }),
   )
 
-  const eventPromise = readFirstNdjsonEvent(response)
+  expect(upgradeResponse.status).toBe(101)
+  expect(context.autoResponsePair).toEqual({ request: "ping", response: "pong" })
+  expect(context.getWebSockets()).toHaveLength(1)
+  expect(context.getWebSockets()[0]?.deserializeAttachment()).toEqual({ githubUsername: "alec" })
+
+  const otherSocket = new FakeSocket()
+  otherSocket.serializeAttachment({ githubUsername: "bob" })
+  context.acceptWebSocket(otherSocket as any)
 
   const publishResponse = await stream.fetch(
     new Request("https://user-stream.internal/publish", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        githubUsername: "alec",
         record: {
           id: 9,
           createdAt: new Date().toISOString(),
@@ -35,45 +48,78 @@ test("user stream durable object fans out published events to subscribers", asyn
     }),
   )
 
-  assert.equal(publishResponse.status, 204)
-  const payload = (await eventPromise) as { id?: number; event: { type: string; prNumber: number } }
-  assert.equal(payload.id, 9)
-  assert.equal(payload.event.type, "comment")
-  assert.equal(payload.event.prNumber, 1)
-
-  controller.abort()
+  expect(publishResponse.status).toBe(204)
+  expect(context.getWebSockets()[0]?.sentMessages).toHaveLength(1)
+  expect(JSON.parse(context.getWebSockets()[0]?.sentMessages[0] ?? "{}")).toMatchObject({
+    id: 9,
+    event: {
+      type: "comment",
+      prNumber: 1,
+    },
+  })
+  expect(otherSocket.sentMessages).toHaveLength(0)
 })
 
-async function readFirstNdjsonEvent(response: Response): Promise<unknown> {
-  if (!response.body) {
-    throw new Error("Missing NDJSON response body")
+/** Minimal fake Durable Object hibernation context used by the worker tests. */
+class FakeUserStreamContext {
+  autoResponsePair: { request: string; response: string } | undefined
+  #sockets: FakeSocket[] = []
+
+  acceptWebSocket(socket: FakeSocket): void {
+    this.#sockets.push(socket)
   }
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
+  getWebSockets(): FakeSocket[] {
+    return [...this.#sockets]
+  }
 
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) {
-      break
-    }
+  setWebSocketAutoResponse(pair: { request: string; response: string }): void {
+    this.autoResponsePair = pair
+  }
+}
 
-    buffer += decoder.decode(value, { stream: true })
-
-    let separatorIndex = buffer.indexOf("\n")
-    while (separatorIndex !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex).trim()
-      buffer = buffer.slice(separatorIndex + 1)
-
-      if (rawEvent) {
-        await reader.cancel()
-        return JSON.parse(rawEvent)
-      }
-
-      separatorIndex = buffer.indexOf("\n")
+/** Test runtime that replaces Cloudflare WebSocket primitives with local fakes. */
+class FakeUserStreamRuntime {
+  createWebSocketPair(): { client: FakeSocket; server: FakeSocket } {
+    return {
+      client: new FakeSocket(),
+      server: new FakeSocket(),
     }
   }
 
-  throw new Error("NDJSON stream ended before emitting data")
+  createAutoResponsePair(
+    request: string,
+    response: string,
+  ): {
+    request: string
+    response: string
+  } {
+    return { request, response }
+  }
+
+  createUpgradeResponse(): Response {
+    return { status: 101 } as Response
+  }
+}
+
+/** Fake socket implementation that records frames and persisted attachments. */
+class FakeSocket {
+  sentMessages: string[] = []
+  #attachment: unknown
+
+  send(message: string): void {
+    this.sentMessages.push(message)
+  }
+
+  close(): void {
+    // No-op for tests.
+  }
+
+  serializeAttachment(attachment: unknown): void {
+    this.#attachment = attachment
+  }
+
+  deserializeAttachment(): unknown {
+    return this.#attachment
+  }
 }

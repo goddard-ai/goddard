@@ -1,5 +1,5 @@
 import type { AuthSession } from "@goddard-ai/schema/backend"
-import type { SessionRecord, StreamSink } from "./api/in-memory-control-plane.js"
+import type { SessionRecord } from "./api/in-memory-control-plane.js"
 
 export function hashToInteger(value: string): number {
   let hash = 0
@@ -16,63 +16,4 @@ export function toPublicSession(session: SessionRecord): AuthSession {
     githubUsername: session.githubUsername,
     githubUserId: session.githubUserId,
   }
-}
-
-export function createNdjsonSession(onClose: () => void): { response: Response; sink: StreamSink } {
-  const encoder = new TextEncoder()
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
-  let isClosed = false
-
-  const close = () => {
-    if (isClosed) {
-      return
-    }
-
-    isClosed = true
-    try {
-      controller?.close()
-    } catch {
-      // no-op: controller can already be closed by the runtime
-    }
-    onClose()
-  }
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(ctrl) {
-      controller = ctrl
-      ctrl.enqueue(encoder.encode("\n"))
-    },
-    cancel() {
-      close()
-    },
-  })
-
-  const sink: StreamSink = {
-    send(message) {
-      if (isClosed || !controller) {
-        return
-      }
-
-      controller.enqueue(encoder.encode(formatNdjsonFrame(message.data, message.id)))
-    },
-    close,
-  }
-
-  return {
-    response: new Response(stream, {
-      status: 200,
-      headers: {
-        "content-type": "application/x-ndjson",
-        "cache-control": "no-cache, no-transform",
-        connection: "keep-alive",
-      },
-    }),
-    sink,
-  }
-}
-
-export function formatNdjsonFrame(payload: string, id?: string | number): string {
-  const parsed = JSON.parse(payload) as Record<string, unknown>
-  const message = id === undefined ? parsed : { id, ...parsed }
-  return `${JSON.stringify(message)}\n`
 }
