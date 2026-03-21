@@ -3,8 +3,13 @@ import { homedir } from "node:os"
 import { access } from "node:fs/promises"
 import { constants as fsConstants } from "node:fs"
 
+/** Prefers an explicit home override so Bun-based tests can redirect storage roots reliably. */
+function resolveHomeDir(): string {
+  return process.env.HOME || homedir()
+}
+
 export function getGoddardGlobalDir(): string {
-  return join(homedir(), ".goddard")
+  return join(resolveHomeDir(), ".goddard")
 }
 
 export function getGlobalConfigPath(): string {

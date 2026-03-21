@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import * as fs from "node:fs/promises"
+import { mkdir, readdir, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getGoddardGlobalDir } from "./paths.js"
 
@@ -31,7 +31,7 @@ export namespace SessionStateStorage {
   export async function list(): Promise<SessionStateRecord[]> {
     const directory = getSessionStateDir()
     try {
-      const entries = await fs.readdir(directory)
+      const entries = await readdir(directory)
       const records = await Promise.all(
         entries.map((entry) => readStateFile(join(directory, entry))),
       )
@@ -99,7 +99,7 @@ export namespace SessionStateStorage {
   }
 
   export async function remove(sessionId: string): Promise<void> {
-    await fs.rm(getSessionStatePath(sessionId), { force: true }).catch(() => {})
+    await rm(getSessionStatePath(sessionId), { force: true }).catch(() => {})
   }
 }
 
@@ -116,7 +116,7 @@ function getSessionStatePath(sessionId: string): string {
 /** Reads and parses one persisted session-state record when it exists. */
 async function readStateFile(path: string): Promise<SessionStateRecord | null> {
   try {
-    const raw = await fs.readFile(path, "utf-8")
+    const raw = await Bun.file(path).text()
     return JSON.parse(raw) as SessionStateRecord
   } catch {
     return null
@@ -126,6 +126,6 @@ async function readStateFile(path: string): Promise<SessionStateRecord | null> {
 /** Writes one complete session-state snapshot back to durable storage. */
 async function writeStateFile(record: SessionStateRecord): Promise<void> {
   const path = getSessionStatePath(record.sessionId)
-  await fs.mkdir(dirname(path), { recursive: true })
-  await fs.writeFile(path, `${JSON.stringify(record, null, 2)}\n`, "utf-8")
+  await mkdir(dirname(path), { recursive: true })
+  await Bun.write(path, `${JSON.stringify(record, null, 2)}\n`)
 }
