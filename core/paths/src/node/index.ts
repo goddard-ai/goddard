@@ -11,9 +11,14 @@ import {
   GODDARD_SESSION_STATE_DIRECTORY,
 } from "../constants.ts"
 
+/** Resolves the active home directory, preferring an explicit override for tests and Bun runs. */
+function resolveHomeDir(): string {
+  return process.env.HOME || homedir()
+}
+
 /** Returns the user-scoped global `.goddard` directory. */
 export function getGoddardGlobalDir(): string {
-  return join(homedir(), GODDARD_DIRECTORY_NAME)
+  return join(resolveHomeDir(), GODDARD_DIRECTORY_NAME)
 }
 
 /** Returns the global root config file path. */
