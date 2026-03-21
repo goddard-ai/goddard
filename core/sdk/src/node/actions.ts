@@ -1,4 +1,5 @@
-import { mergeActionConfigLayers, type GoddardActionConfigDocument } from "@goddard-ai/config"
+import { mergeActionConfigLayers } from "@goddard-ai/config"
+import { GoddardActionConfigDocument } from "@goddard-ai/schema/config"
 import type { NewSessionParams, SessionParams } from "@goddard-ai/schema/session-server"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
