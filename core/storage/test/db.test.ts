@@ -84,7 +84,7 @@ describe("Database Storage (Session & Loop)", () => {
 
       const list = await SessionStorage.list()
       expect(list.length).toBe(2)
-      const ids = list.map(r => r.id)
+      const ids = list.map((r) => r.id)
       expect(ids).toContain("sess-1")
       expect(ids).toContain("sess-2")
     })
