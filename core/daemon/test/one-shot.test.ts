@@ -48,6 +48,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
   expect(name).toBe("sessionCreate")
   expect(params.agent).toBe("pi")
   expect(params.cwd).toBe("/tmp/project")
+  expect(params.worktree).toEqual({ enabled: true })
   expect(params.oneShot).toBe(true)
   expect(params.initialPrompt).toBe("reply to feedback")
   expect(params.repository).toBe("acme/widgets")

@@ -67,6 +67,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     await client.send("sessionCreate", {
       agent: "pi",
       cwd: projectDir,
+      worktree: { enabled: true },
       mcpServers: [],
       initialPrompt: input.prompt,
       oneShot: true,
