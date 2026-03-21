@@ -6,9 +6,12 @@ import * as fs from "node:fs/promises"
 
 async function requireSessionId(): Promise<string> {
   const { client } = createDaemonIpcClientFromEnv()
-  const sessionToken = requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
-  const result = await client.send("sessionResolveToken", { token: sessionToken })
+  const result = await client.send("sessionResolveToken", { token: requireSessionToken() })
   return result.id
+}
+
+function requireSessionToken(): string {
+  return requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
 }
 
 export async function declareInitiative(sessionId: string, title: string) {
@@ -36,9 +39,8 @@ export async function reportCompleted(sessionId: string) {
 
 export async function submitPr(sessionId: string, title: string, body: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  const sessionToken = requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
   const pr = await client.send("prSubmit", {
-    token: sessionToken,
+    token: requireSessionToken(),
     cwd: process.cwd(),
     title,
     body,
@@ -52,9 +54,8 @@ export async function submitPr(sessionId: string, title: string, body: string) {
 
 export async function replyPr(sessionId: string, message: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  const sessionToken = requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
   await client.send("prReply", {
-    token: sessionToken,
+    token: requireSessionToken(),
     cwd: process.cwd(),
     message,
   })
