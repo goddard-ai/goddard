@@ -72,9 +72,9 @@ vi.mock("@goddard-ai/storage", (): typeof import("@goddard-ai/storage") => ({
         initiative: null,
         lastAgentMessage: null,
       })
-    }) as any,
-    list: vi.fn(async () => Array.from(sessions.values())) as any,
-    get: vi.fn(async (id: string) => sessions.get(id) ?? null) as any,
+    }),
+    list: vi.fn(async () => Array.from(sessions.values())),
+    get: vi.fn(async (id: string) => sessions.get(id) ?? null),
     update: vi.fn(async (id: string, data: any) => {
       const existing = sessions.get(id)
       if (!existing || typeof existing !== "object" || existing === null) {
@@ -85,8 +85,8 @@ vi.mock("@goddard-ai/storage", (): typeof import("@goddard-ai/storage") => ({
         ...data,
         updatedAt: new Date(),
       })
-    }) as any,
-  } as any,
+    }),
+  },
   SessionStateStorage: {
     create: vi.fn(async (record: any) => {
       const now = new Date().toISOString()
@@ -134,7 +134,7 @@ vi.mock("@goddard-ai/storage", (): typeof import("@goddard-ai/storage") => ({
     remove: vi.fn(async (sessionId: string) => {
       sessionStates.delete(sessionId)
     }),
-  } as any
+  },
 } as any))
 
 vi.mock("@goddard-ai/storage/session-permissions", (): typeof import("@goddard-ai/storage/session-permissions") => ({
@@ -165,7 +165,7 @@ vi.mock("@goddard-ai/storage/session-permissions", (): typeof import("@goddard-a
       permissionsBySessionId.delete(sessionId)
       permissionsByToken.delete(existing.token)
     }),
-  } as any
+  },
 } as any))
 
 const cleanup: Array<() => Promise<void>> = []
