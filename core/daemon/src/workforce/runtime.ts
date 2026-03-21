@@ -676,6 +676,7 @@ export class WorkforceRuntime {
       return
     }
 
+    // Bounce drains to a microtask so appendEvent() can finish mutating projection state first.
     queueMicrotask(() => {
       void this.drainAgent(agentId)
     })

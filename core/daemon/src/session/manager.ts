@@ -183,6 +183,11 @@ function toConnectionState(input: {
   }
 }
 
+/** Chooses the archived connection mode from whether any session history survived persistence. */
+function archivedConnectionMode(historyLength: number): SessionConnectionMode {
+  return historyLength > 0 ? "history" : "none"
+}
+
 /** Hydrates a stored session record with derived state needed by daemon clients. */
 async function toDaemonSession(
   record: Awaited<ReturnType<typeof SessionStorage.get>>,
@@ -692,7 +697,7 @@ export function createSessionManager(input: {
           return
         }
 
-        await setConnectionMode(session.id, state?.history.length ? "history" : "none", false)
+        await setConnectionMode(session.id, archivedConnectionMode(state?.history.length ?? 0), false)
         await SessionPermissionsStorage.revoke(session.id).catch(() => {})
       }),
     )
@@ -766,6 +771,7 @@ export function createSessionManager(input: {
       })
 
       if (shouldExitAfterInitialPrompt(params)) {
+        // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
         await updateSession(id, { status: "done" }, { reason: "one_shot_completed" })
         await setConnectionMode(id, "history", false)
         await emitDiagnostic(id, "session_completed_one_shot")
@@ -854,7 +860,7 @@ export function createSessionManager(input: {
           nextUpdate.status = "cancelled"
         }
 
-        await setConnectionMode(active.id, active.history.length > 0 ? "history" : "none", false)
+        await setConnectionMode(active.id, archivedConnectionMode(active.history.length), false)
         await emitDiagnostic(active.id, "agent_process_exit", {
           code,
           signal,

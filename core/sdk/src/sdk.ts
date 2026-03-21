@@ -7,6 +7,16 @@ import type {
 } from "@goddard-ai/schema/backend"
 import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
 
+/** Detects the OAuth polling response that means the user has not finished approving yet. */
+function isAuthorizationPendingError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("authorization_pending")
+}
+
+/** Detects the OAuth polling response that asks the client to slow its polling cadence. */
+function isSlowDownError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("slow_down")
+}
+
 /** Constructor options for the SDK facade. */
 export type GoddardSdkOptions = {
   backendUrl: string
@@ -51,17 +61,15 @@ export class GoddardSdk {
           try {
             return await this.auth.completeDeviceFlow({
               deviceCode: start.deviceCode,
-              githubUsername: githubUsername ?? "",
+              githubUsername,
             })
-          } catch (error: any) {
-            if (
-              error.message &&
-              !error.message.includes("authorization_pending") &&
-              !error.message.includes("slow_down")
-            ) {
+          } catch (error: unknown) {
+            if (!isAuthorizationPendingError(error) && !isSlowDownError(error)) {
               throw error
             }
-            if (error.message && error.message.includes("slow_down")) {
+
+            // Honor backend backpressure without abandoning the current device flow attempt.
+            if (isSlowDownError(error)) {
               delay += 5000
             }
           }

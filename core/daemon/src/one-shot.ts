@@ -70,6 +70,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
 
   try {
     let cpArgs = ["-R", `${projectDir}/`, worktreeDir]
+    // Prefer copy-on-write cloning when the platform supports it, but fall back to a plain recursive copy.
     if (process.platform === "darwin") {
       cpArgs = ["-cR", `${projectDir}/`, worktreeDir]
     } else if (process.platform === "linux") {
@@ -117,6 +118,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       stdio: "ignore",
     })
   } catch {
+    // Fall back to the copied checkout when the PR ref cannot be fetched into the scratch workspace.
     // Ignore git setup failures and let pi run against copied workspace state.
   }
 

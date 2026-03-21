@@ -8,6 +8,12 @@ import type { SessionManager } from "../session/index.js"
 import { LoopRateLimiter } from "./rate-limiter.js"
 
 const logger = createDaemonLogger()
+const LOOP_PAUSE_INTERVAL_MS = 24 * 60 * 60 * 1000
+
+/** Detects the configured cycle boundary where the loop intentionally pauses for a full day. */
+function shouldPauseLoop(cycleCount: number, maxCyclesBeforePause: number): boolean {
+  return cycleCount % maxCyclesBeforePause === 0
+}
 
 /** Runtime dependencies shared by one daemon-owned loop host. */
 export interface LoopRuntimeDeps {
@@ -92,6 +98,7 @@ export class LoopRuntime {
       }
       throw error
     })
+    // Suppress the detached task warning here because failures are already logged and surfaced via runtime state.
     runtime.#runTask.catch(() => {})
     return runtime
   }
@@ -151,8 +158,9 @@ export class LoopRuntime {
         return
       }
 
-      if (this.#cycleCount % this.#config.rateLimits.maxCyclesBeforePause === 0) {
-        await this.#sleep(24 * 60 * 60 * 1000)
+      if (shouldPauseLoop(this.#cycleCount, this.#config.rateLimits.maxCyclesBeforePause)) {
+        // Insert a long pause so unattended loops yield after each configured burst of cycles.
+        await this.#sleep(LOOP_PAUSE_INTERVAL_MS)
       }
     }
   }

@@ -79,6 +79,7 @@
 - Every TypeScript type alias and interface, whether exported or internal, must have a human-readable `/** ... */` description comment.
 - Every non-trivial top-level function must have a human-readable `/** ... */` description comment.
 - These comments should explain the non-obvious what and, when useful, the why.
+- Strange coding patterns must have a brief `//` comment stating what they are doing and why they are necessary.
 - Do not add JSDoc tag boilerplate such as `@param` or `@returns`.
 - Do not document the obvious or describe line-by-line implementation mechanics.
 - If a non-trivial top-level function truly has nothing useful to document, you may omit the block and optionally leave a short `//` comment explaining the absence.

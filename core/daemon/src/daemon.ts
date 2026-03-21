@@ -93,6 +93,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     }
 
     const activeIpcServer = ipcServer
+    // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
     const runningPrs = new Set<string>()
     const subscription = enableStream ? await client.stream.subscribe() : null
 

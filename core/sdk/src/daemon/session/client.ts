@@ -99,6 +99,7 @@ async function createMessageOutputTransport(
     if (
       messageId !== id ||
       closed ||
+      // Drop daemon-published agent requests here because the ACP client handles that side locally.
       (typeof message === "object" &&
         message !== null &&
         "method" in message &&
