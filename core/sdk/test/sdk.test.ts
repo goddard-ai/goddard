@@ -149,7 +149,7 @@ test("stream emits error event for malformed payloads", async () => {
       return new Response(stream, {
         status: 200,
         headers: {
-          "content-type": "text/event-stream",
+          "content-type": "application/x-ndjson",
         },
       })
     }
@@ -170,7 +170,7 @@ test("stream emits error event for malformed payloads", async () => {
     errorMessage = error instanceof Error ? error.message : String(error)
   })
 
-  controller?.enqueue(encoder.encode("data: {\n\n"))
+  controller?.enqueue(encoder.encode("{\n"))
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   expect(errorMessage).toMatch(/Invalid stream payload/)

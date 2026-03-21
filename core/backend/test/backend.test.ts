@@ -140,7 +140,7 @@ test("invalid JSON body returns 400", async () => {
   }
 })
 
-test("sse stream receives webhook events for a managed PR", async () => {
+test("ndjson stream receives webhook events for a managed PR", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
@@ -165,13 +165,13 @@ test("sse stream receives webhook events for a managed PR", async () => {
 
     const streamResponse = await fetch(`${baseUrl}/stream`, {
       headers: {
-        accept: "text/event-stream",
+        accept: "application/x-ndjson",
         authorization: `Bearer ${session.token}`,
       },
     })
 
     assert.equal(streamResponse.status, 200)
-    const eventPromise = readFirstSseEvent(streamResponse)
+    const eventPromise = readFirstNdjsonEvent(streamResponse)
 
     await postJson(`${baseUrl}/webhooks/github`, {
       type: "issue_comment",
@@ -301,13 +301,13 @@ test("unified stream only emits events for managed PRs owned by the authenticate
 
     const alecStream = await fetch(`${baseUrl}/stream`, {
       headers: {
-        accept: "text/event-stream",
+        accept: "application/x-ndjson",
         authorization: `Bearer ${alecSession.token}`,
       },
     })
     const bobStream = await fetch(`${baseUrl}/stream`, {
       headers: {
-        accept: "text/event-stream",
+        accept: "application/x-ndjson",
         authorization: `Bearer ${bobSession.token}`,
       },
     })
@@ -321,9 +321,9 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       body: "looks good",
     })
 
-    const alecEvent = (await readFirstSseEvent(alecStream)) as { event: { prNumber: number } }
+    const alecEvent = (await readFirstNdjsonEvent(alecStream)) as { event: { prNumber: number } }
     assert.equal(alecEvent.event.prNumber, 1)
-    await assertNoSseEvent(bobStream, 100)
+    await assertNoNdjsonEvent(bobStream, 100)
   } finally {
     await server.close()
   }
@@ -342,7 +342,7 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
 
     const streamResponse = await fetch(`${baseUrl}/stream`, {
       headers: {
-        accept: "text/event-stream",
+        accept: "application/x-ndjson",
         authorization: `Bearer ${session.token}`,
       },
     })
@@ -356,15 +356,15 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       body: "looks good",
     })
 
-    await assertNoSseEvent(streamResponse, 100)
+    await assertNoNdjsonEvent(streamResponse, 100)
   } finally {
     await server.close()
   }
 })
 
-async function readFirstSseEvent(response: Response, timeoutMs = 1000): Promise<unknown> {
+async function readFirstNdjsonEvent(response: Response, timeoutMs = 1000): Promise<unknown> {
   if (!response.body) {
-    throw new Error("Missing SSE response body")
+    throw new Error("Missing NDJSON response body")
   }
 
   const reader = response.body.getReader()
@@ -379,50 +379,35 @@ async function readFirstSseEvent(response: Response, timeoutMs = 1000): Promise<
 
     buffer += decoder.decode(value, { stream: true })
 
-    let separatorIndex = buffer.indexOf("\n\n")
+    let separatorIndex = buffer.indexOf("\n")
     while (separatorIndex !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex)
-      buffer = buffer.slice(separatorIndex + 2)
+      const rawEvent = buffer.slice(0, separatorIndex).trim()
+      buffer = buffer.slice(separatorIndex + 1)
 
-      const dataLines = rawEvent
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trimStart())
-
-      if (dataLines.length > 0) {
+      if (rawEvent) {
         await reader.cancel()
-        return {
-          id: Number.parseInt(
-            rawEvent
-              .split("\n")
-              .find((line) => line.startsWith("id:"))
-              ?.slice("id:".length)
-              .trim() ?? "",
-            10,
-          ),
-          ...JSON.parse(dataLines.join("\n")),
-        }
+        return JSON.parse(rawEvent)
       }
 
-      separatorIndex = buffer.indexOf("\n\n")
+      separatorIndex = buffer.indexOf("\n")
     }
   }
 
-  throw new Error("SSE stream ended before emitting data")
+  throw new Error("NDJSON stream ended before emitting data")
 }
 
-async function assertNoSseEvent(response: Response, timeoutMs: number): Promise<void> {
+async function assertNoNdjsonEvent(response: Response, timeoutMs: number): Promise<void> {
   try {
-    await readFirstSseEvent(response, timeoutMs)
+    await readFirstNdjsonEvent(response, timeoutMs)
   } catch (error) {
     assert.match(
       String(error),
-      /(Timed out waiting for SSE event|SSE stream ended before emitting data)/,
+      /(Timed out waiting for NDJSON event|NDJSON stream ended before emitting data)/,
     )
     return
   }
 
-  assert.fail(`Expected no SSE event within ${timeoutMs}ms`)
+  assert.fail(`Expected no NDJSON event within ${timeoutMs}ms`)
 }
 
 async function readWithTimeout(
@@ -437,7 +422,7 @@ async function readWithTimeout(
       new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
         timeoutId = setTimeout(() => {
           void reader.cancel().catch(() => {})
-          reject(new Error(`Timed out waiting for SSE event after ${timeoutMs}ms`))
+          reject(new Error(`Timed out waiting for NDJSON event after ${timeoutMs}ms`))
         }, timeoutMs)
       }),
     ])

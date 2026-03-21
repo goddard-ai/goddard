@@ -26,7 +26,7 @@ type BackendClientOptions = {
   fetchImpl?: FetchLike
 }
 
-/** Disposable SSE subscription returned by the backend client. */
+/** Disposable live-stream subscription returned by the backend client. */
 export type StreamSubscription = {
   on: (eventName: string, handler: StreamHandler) => StreamSubscription
   off: (eventName: string, handler: StreamHandler) => StreamSubscription
@@ -97,9 +97,10 @@ class BackendStreamSubscription implements StreamSubscription {
 /** Creates a backend client that owns auth, PR, and stream HTTP behavior. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
   const tokenStorage = options.tokenStorage ?? new InMemoryTokenStorage()
+  const fetchImpl = options.fetchImpl ?? fetch
   const rouzerClient = createClient({
     baseURL: options.baseUrl,
-    fetch: options.fetchImpl ?? fetch,
+    fetch: fetchImpl,
     routes,
   })
 
@@ -159,8 +160,11 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       subscribe: async () => {
         const token = await requireToken(tokenStorage)
         const abortController = new AbortController()
-        const response = await rouzerClient.repoStreamRoute.GET({
-          headers: { authorization: `Bearer ${token}` },
+        const response = await fetchImpl(new URL("/stream", options.baseUrl).toString(), {
+          headers: {
+            accept: "application/x-ndjson",
+            authorization: `Bearer ${token}`,
+          },
           signal: abortController.signal,
         })
 
@@ -179,7 +183,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         })
 
         subscription.emit("open")
-        void consumeSseResponse(reader, subscription, abortController.signal)
+        void consumeNdjsonResponse(reader, subscription, abortController.signal)
 
         return subscription
       },
@@ -197,8 +201,8 @@ async function requireToken(tokenStorage: TokenStorage): Promise<string> {
   return token
 }
 
-/** Reads the backend SSE response stream until the subscription closes or the stream ends. */
-async function consumeSseResponse(
+/** Reads the backend NDJSON response stream until the subscription closes or the stream ends. */
+async function consumeNdjsonResponse(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   subscription: BackendStreamSubscription,
   signal: AbortSignal,
@@ -214,11 +218,11 @@ async function consumeSseResponse(
       }
 
       buffer += decoder.decode(value, { stream: true })
-      buffer = flushSseBuffer(buffer, subscription)
+      buffer = flushNdjsonBuffer(buffer, subscription)
     }
 
     buffer += decoder.decode()
-    flushSseBuffer(buffer, subscription)
+    flushNdjsonBuffer(buffer, subscription)
   } catch (error) {
     if (!signal.aborted) {
       subscription.emit("error", error)
@@ -231,62 +235,31 @@ async function consumeSseResponse(
   }
 }
 
-/** Emits complete SSE messages from the buffered stream content and preserves any trailing partial frame. */
-function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription): string {
+/** Emits complete NDJSON messages from the buffered stream content and preserves any trailing partial line. */
+function flushNdjsonBuffer(buffer: string, subscription: BackendStreamSubscription): string {
   let remaining = buffer
 
   while (true) {
-    const match = remaining.match(/\r?\n\r?\n/)
-    if (!match || match.index === undefined) {
+    const newlineIndex = remaining.indexOf("\n")
+    if (newlineIndex === -1) {
       return remaining
     }
 
-    const chunk = remaining.slice(0, match.index)
-    remaining = remaining.slice(match.index + match[0].length)
+    const chunk = remaining.slice(0, newlineIndex).trim()
+    remaining = remaining.slice(newlineIndex + 1)
 
-    const message = parseSseMessage(chunk)
-    if (!message?.data) {
+    if (!chunk) {
       continue
     }
 
     try {
-      const parsed = JSON.parse(message.data) as StreamMessage
-      const streamMessage: StreamMessage = {
-        id: message.id ?? parsed.id,
-        event: parsed.event,
-      }
+      const streamMessage = JSON.parse(chunk) as StreamMessage
       subscription.emit("message", streamMessage)
+      const parsed = streamMessage
       subscription.emit("event", parsed.event)
       subscription.emit(parsed.event.type, parsed.event)
     } catch (error) {
       subscription.emit("error", new Error(`Invalid stream payload: ${String(error)}`))
     }
   }
-}
-
-/** Extracts the SSE id and data payload lines from one event frame. */
-function parseSseMessage(chunk: string): { id?: number; data?: string } | null {
-  const lines = chunk.split(/\r?\n/)
-  const dataLines: string[] = []
-  let id: number | undefined
-
-  for (const line of lines) {
-    if (!line || line.startsWith(":")) {
-      continue
-    }
-
-    if (line.startsWith("id:")) {
-      const parsedId = Number.parseInt(line.slice("id:".length).trim(), 10)
-      if (Number.isInteger(parsedId) && parsedId > 0) {
-        id = parsedId
-      }
-      continue
-    }
-
-    if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trimStart())
-    }
-  }
-
-  return dataLines.length > 0 ? { id, data: dataLines.join("\n") } : null
 }

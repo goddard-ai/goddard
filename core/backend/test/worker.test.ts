@@ -10,7 +10,7 @@ test("user stream durable object fans out published events to subscribers", asyn
     }),
   )
 
-  const eventPromise = readFirstSseEvent(response)
+  const eventPromise = readFirstNdjsonEvent(response)
 
   const publishResponse = await stream.fetch(
     new Request("https://user-stream.internal/publish", {
@@ -44,9 +44,9 @@ test("user stream durable object fans out published events to subscribers", asyn
   controller.abort()
 })
 
-async function readFirstSseEvent(response: Response): Promise<unknown> {
+async function readFirstNdjsonEvent(response: Response): Promise<unknown> {
   if (!response.body) {
-    throw new Error("Missing SSE response body")
+    throw new Error("Missing NDJSON response body")
   }
 
   const reader = response.body.getReader()
@@ -61,34 +61,19 @@ async function readFirstSseEvent(response: Response): Promise<unknown> {
 
     buffer += decoder.decode(value, { stream: true })
 
-    let separatorIndex = buffer.indexOf("\n\n")
+    let separatorIndex = buffer.indexOf("\n")
     while (separatorIndex !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex)
-      buffer = buffer.slice(separatorIndex + 2)
+      const rawEvent = buffer.slice(0, separatorIndex).trim()
+      buffer = buffer.slice(separatorIndex + 1)
 
-      const dataLines = rawEvent
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trimStart())
-
-      if (dataLines.length > 0) {
+      if (rawEvent) {
         await reader.cancel()
-        return {
-          id: Number.parseInt(
-            rawEvent
-              .split("\n")
-              .find((line) => line.startsWith("id:"))
-              ?.slice("id:".length)
-              .trim() ?? "",
-            10,
-          ),
-          event: JSON.parse(dataLines.join("\n")).event,
-        }
+        return JSON.parse(rawEvent)
       }
 
-      separatorIndex = buffer.indexOf("\n\n")
+      separatorIndex = buffer.indexOf("\n")
     }
   }
 
-  throw new Error("SSE stream ended before emitting data")
+  throw new Error("NDJSON stream ended before emitting data")
 }

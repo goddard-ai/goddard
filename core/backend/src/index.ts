@@ -2,7 +2,7 @@ import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { type BackendControlPlane, type PersistedRepoEvent } from "./api/control-plane.js"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.js"
 import { createBackendRouter } from "./api/router.js"
-import { createSseSession } from "./utils.js"
+import { createNdjsonSession } from "./utils.js"
 
 export * from "./api/control-plane.js"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.js"
@@ -35,21 +35,21 @@ export async function startBackendServer(
       broadcastToInMemoryStreams(controlPlane, event)
     },
     handleUserStream: async (_env, githubUsername, request) => {
-      const sseSession = createSseSession(() => {
-        controlPlane.removeStreamSocket?.(githubUsername, sseSession.sink)
+      const streamSession = createNdjsonSession(() => {
+        controlPlane.removeStreamSocket?.(githubUsername, streamSession.sink)
       })
 
-      controlPlane.addStreamSocket?.(githubUsername, sseSession.sink)
+      controlPlane.addStreamSocket?.(githubUsername, streamSession.sink)
       request.signal.addEventListener(
         "abort",
         () => {
-          controlPlane.removeStreamSocket?.(githubUsername, sseSession.sink)
-          sseSession.sink.close?.()
+          controlPlane.removeStreamSocket?.(githubUsername, streamSession.sink)
+          streamSession.sink.close?.()
         },
         { once: true },
       )
 
-      return sseSession.response
+      return streamSession.response
     },
   })
 

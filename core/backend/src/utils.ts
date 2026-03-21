@@ -18,7 +18,7 @@ export function toPublicSession(session: SessionRecord): AuthSession {
   }
 }
 
-export function createSseSession(onClose: () => void): { response: Response; sink: StreamSink } {
+export function createNdjsonSession(onClose: () => void): { response: Response; sink: StreamSink } {
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null
   let isClosed = false
@@ -40,7 +40,7 @@ export function createSseSession(onClose: () => void): { response: Response; sin
   const stream = new ReadableStream<Uint8Array>({
     start(ctrl) {
       controller = ctrl
-      ctrl.enqueue(encoder.encode(": connected\n\n"))
+      ctrl.enqueue(encoder.encode("\n"))
     },
     cancel() {
       close()
@@ -53,7 +53,7 @@ export function createSseSession(onClose: () => void): { response: Response; sin
         return
       }
 
-      controller.enqueue(encoder.encode(formatSseDataFrame(message.data, message.id)))
+      controller.enqueue(encoder.encode(formatNdjsonFrame(message.data, message.id)))
     },
     close,
   }
@@ -62,7 +62,7 @@ export function createSseSession(onClose: () => void): { response: Response; sin
     response: new Response(stream, {
       status: 200,
       headers: {
-        "content-type": "text/event-stream",
+        "content-type": "application/x-ndjson",
         "cache-control": "no-cache, no-transform",
         connection: "keep-alive",
       },
@@ -71,9 +71,8 @@ export function createSseSession(onClose: () => void): { response: Response; sin
   }
 }
 
-export function formatSseDataFrame(payload: string, id?: string | number): string {
-  const normalized = payload.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-  const lines = normalized.split("\n")
-  const prefix = id === undefined ? "" : `id: ${id}\n`
-  return `${prefix}${lines.map((line) => `data: ${line}`).join("\n")}\n\n`
+export function formatNdjsonFrame(payload: string, id?: string | number): string {
+  const parsed = JSON.parse(payload) as Record<string, unknown>
+  const message = id === undefined ? parsed : { id, ...parsed }
+  return `${JSON.stringify(message)}\n`
 }

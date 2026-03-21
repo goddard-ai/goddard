@@ -1,10 +1,8 @@
-import type { RepoEvent, RepoEventRecord } from "@goddard-ai/schema/backend"
+import type { RepoEventRecord } from "@goddard-ai/schema/backend"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createBackendRouter } from "./api/router.js"
-import { TursoBackendControlPlane } from "./db/persistence.js"
 import type { Env } from "./env.js"
-import { createSseSession } from "./utils.js"
-import { createClient } from "@libsql/client/web"
+import { createNdjsonSession } from "./utils.js"
 
 const router = createBackendRouter({
   broadcastEvent: async (env, persistedEvent) => {
@@ -29,9 +27,9 @@ const worker = {
 
 export default worker
 
-/** User-scoped Durable Object that owns SSE subscribers for one Goddard user. */
+/** User-scoped Durable Object that owns live NDJSON subscribers for one Goddard user. */
 export class UserStream {
-  readonly #sinks = new Set<ReturnType<typeof createSseSession>["sink"]>()
+  readonly #sinks = new Set<ReturnType<typeof createNdjsonSession>["sink"]>()
 
   fetch(request: Request): Promise<Response> | Response {
     const url = new URL(request.url)
@@ -62,7 +60,7 @@ export class UserStream {
   }
 
   #subscribe(request: Request): Response {
-    const session = createSseSession(() => {
+    const session = createNdjsonSession(() => {
       this.#sinks.delete(session.sink)
     })
 
@@ -78,15 +76,6 @@ export class UserStream {
 
     return session.response
   }
-}
-
-function createWorkerControlPlane(env: Env): TursoBackendControlPlane {
-  return new TursoBackendControlPlane(
-    createClient({
-      url: env.TURSO_DB_URL,
-      authToken: env.TURSO_DB_AUTH_TOKEN,
-    }) as any,
-  )
 }
 
 function getUserStreamStub(env: Env, githubUsername: string) {

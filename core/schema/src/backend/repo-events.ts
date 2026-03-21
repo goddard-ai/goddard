@@ -42,7 +42,7 @@ export const RepoEvent = z.discriminatedUnion("type", [
 
 export type RepoEvent = z.infer<typeof RepoEvent>
 
-/** SSE payload delivered over the backend feedback stream. */
+/** Live stream payload delivered over the backend feedback stream. */
 export const StreamMessage = z.object({
   id: z.number().int().positive().optional(),
   event: RepoEvent,

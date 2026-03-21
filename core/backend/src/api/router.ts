@@ -176,13 +176,13 @@ async function noopBroadcast(_env: Env, _event: PersistedRepoEvent): Promise<voi
   // No-op: the caller (e.g. worker.js) should provide a real implementation.
 }
 
-/** Returns a clear placeholder response when server-sent events are not wired in. */
+/** Returns a clear placeholder response when live stream delivery is not wired in. */
 async function defaultHandleUserStream(
   _env: Env,
   _githubUsername: string,
   _request: Request,
 ): Promise<Response> {
-  return new Response("SSE handler not configured", { status: 501 })
+  return new Response("Stream handler not configured", { status: 501 })
 }
 
 /** Rehydrates the worker environment values used by the backend control plane. */

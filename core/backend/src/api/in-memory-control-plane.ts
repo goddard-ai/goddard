@@ -26,7 +26,7 @@ export type SessionRecord = AuthSession & { expiresAt: number }
 /** Stored device-code session awaiting completion. */
 export type DeviceSessionRecord = { githubUsername: string; createdAt: number; expiresAt: number }
 
-/** Minimal sink interface used by local SSE fanout. */
+/** Minimal sink interface used by local live-stream fanout. */
 export type StreamSink = {
   send: (message: { data: string; id?: string | number }) => void
   close?: () => void
@@ -297,7 +297,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   }
 }
 
-/** Returns whether a value supports the minimal send/close contract used by SSE fanout. */
+/** Returns whether a value supports the minimal send/close contract used by live-stream fanout. */
 export function isStreamSink(value: unknown): value is StreamSink {
   return (
     !!value &&
