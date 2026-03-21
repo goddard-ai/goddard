@@ -9,10 +9,9 @@
         "source": "./src/index.ts",
         "default": "./dist/index.d.mts"
       },
-      "import": {
-        "source": "./src/index.ts",
-        "default": "./dist/index.mjs"
-      }
+      "source": "./src/index.ts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
     }
   },
   "scripts": {

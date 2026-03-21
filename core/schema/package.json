@@ -10,10 +10,9 @@
         "source": "./src/*.ts",
         "default": "./dist/*.d.mts"
       },
-      "import": {
-        "source": "./src/*.ts",
-        "default": "./dist/*.mjs"
-      }
+      "source": "./src/*.ts",
+      "import": "./dist/*.mjs",
+      "default": "./dist/*.mjs"
     }
   },
   "scripts": {

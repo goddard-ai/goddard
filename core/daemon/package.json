@@ -13,10 +13,9 @@
         "source": "./src/ipc.ts",
         "default": "./dist/ipc.d.mts"
       },
-      "import": {
-        "source": "./src/ipc.ts",
-        "default": "./dist/ipc.mjs"
-      }
+      "source": "./src/ipc.ts",
+      "import": "./dist/ipc.mjs",
+      "default": "./dist/ipc.mjs"
     }
   },
   "scripts": {

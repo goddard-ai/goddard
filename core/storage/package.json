@@ -10,30 +10,27 @@
         "source": "./src/index.ts",
         "default": "./dist/index.d.mts"
       },
-      "import": {
-        "source": "./src/index.ts",
-        "default": "./dist/index.mjs"
-      }
+      "source": "./src/index.ts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
     },
     "./session-permissions": {
       "types": {
         "source": "./src/session-permissions.ts",
         "default": "./dist/session-permissions.d.mts"
       },
-      "import": {
-        "source": "./src/session-permissions.ts",
-        "default": "./dist/session-permissions.mjs"
-      }
+      "source": "./src/session-permissions.ts",
+      "import": "./dist/session-permissions.mjs",
+      "default": "./dist/session-permissions.mjs"
     },
     "./managed-pr-locations": {
       "types": {
         "source": "./src/managed-pr-locations.ts",
         "default": "./dist/managed-pr-locations.d.mts"
       },
-      "import": {
-        "source": "./src/managed-pr-locations.ts",
-        "default": "./dist/managed-pr-locations.mjs"
-      }
+      "source": "./src/managed-pr-locations.ts",
+      "import": "./dist/managed-pr-locations.mjs",
+      "default": "./dist/managed-pr-locations.mjs"
     }
   },
   "scripts": {
@@ -47,12 +44,12 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
+    "@goddard-ai/schema": "workspace:^",
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "1.0.0-beta.16-ea816b6",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@goddard-ai/schema": "workspace:^",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.5",
     "drizzle-kit": "1.0.0-beta.16-ea816b6"

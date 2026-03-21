@@ -291,6 +291,9 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.15.0
         version: 0.15.0(zod@4.3.6)
+      '@goddard-ai/schema':
+        specifier: workspace:^
+        version: link:../schema
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
@@ -301,9 +304,6 @@ importers:
         specifier: ^13.0.0
         version: 13.0.0
     devDependencies:
-      '@goddard-ai/schema':
-        specifier: workspace:^
-        version: link:../schema
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
