@@ -1,0 +1,26 @@
+{
+  "name": "@goddard-ai/tree-kill",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "import": "./dist/index.mjs",
+      "source": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  }
+}
