@@ -1,5 +1,3 @@
-import cronParser from "cron-parser"
-
 /** Rate limiter that enforces loop cadence and rolling per-minute throughput. */
 export class LoopRateLimiter {
   readonly #wallclockDelay: string
@@ -49,8 +47,7 @@ function resolveWallclockDelay(delay: string): number {
   }
 
   try {
-    const interval = cronParser.parse(delay)
-    return interval.next().toDate().getTime() - Date.now()
+    return Bun.cron.parse(delay).getTime() - Date.now()
   } catch {
     return 60 * 1000
   }

@@ -1,6 +1,5 @@
 import type { SessionWorktreeMetadata } from "@goddard-ai/schema/daemon"
 import { Worktree, type WorktreePlugin } from "@goddard-ai/worktree"
-import { spawnSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 
@@ -102,33 +101,41 @@ export function cleanupSessionWorktree(
  * Resolves the containing git repository root for one requested session cwd when one exists.
  */
 function resolveGitRepoRoot(cwd: string): string | null {
-  const { status, stdout } = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+  const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
     cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
 
-  if (status !== 0) return null
+  if (!result.success) {
+    return null
+  }
 
-  const repoRoot = stdout.trim()
-  return repoRoot || null
+  const repoRoot = Buffer.from(result.stdout).toString("utf8").trim()
+  if (!repoRoot) {
+    return null
+  }
+
+  return resolve(repoRoot)
 }
 
 /**
  * Resolves the active branch name for one existing worktree folder.
  */
 function resolveExistingWorktreeBranchName(cwd: string): string {
-  const { status, stdout } = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+  const result = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"], {
     cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
 
-  if (status !== 0) {
+  if (!result.success) {
     throw new Error(`Existing worktree folder must be a git worktree: ${cwd}`)
   }
 
-  const branchName = stdout.trim()
+  const branchName = Buffer.from(result.stdout).toString("utf8").trim()
   if (!branchName) {
     throw new Error(`Existing worktree folder must have a readable branch name: ${cwd}`)
   }

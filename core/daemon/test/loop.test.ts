@@ -2,7 +2,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "bun:test"
 import { startDaemonServer } from "../src/ipc.ts"
 import { createLoopManager } from "../src/loop/manager.ts"
 import { normalizeLoopRootDir } from "../src/loop/paths.ts"
@@ -15,6 +15,33 @@ afterEach(async () => {
     await cleanup.pop()?.()
   }
 })
+
+/** Polls until the assertion passes or the timeout expires under Bun test. */
+async function waitForExpectation(
+  assertion: () => void,
+  {
+    timeoutMs = 2_000,
+    intervalMs = 25,
+  }: {
+    timeoutMs?: number
+    intervalMs?: number
+  } = {},
+) {
+  const deadline = Date.now() + timeoutMs
+
+  while (true) {
+    try {
+      assertion()
+      return
+    } catch (error) {
+      if (Date.now() >= deadline) {
+        throw error
+      }
+    }
+
+    await Bun.sleep(intervalMs)
+  }
+}
 
 test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-loop-ipc-"))
@@ -338,8 +365,8 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     },
   )
 
-  await vi.waitFor(() => {
-    expect(promptSessionCalls).toHaveLength(3)
+  await waitForExpectation(() => {
+    expect(sessionManager.promptSession).toHaveBeenCalledTimes(3)
   })
   expect(newSessionCalls[0]).toEqual(
     expect.objectContaining({
@@ -347,8 +374,8 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
       worktree: { enabled: true },
     }),
   )
-  await vi.waitFor(() => {
-    expect(shutdownSessionCalls).toContain("session-1")
+  await waitForExpectation(() => {
+    expect(sessionManager.shutdownSession).toHaveBeenCalledWith("session-1")
   })
 
   expect(runtime.getStatus()).toEqual(

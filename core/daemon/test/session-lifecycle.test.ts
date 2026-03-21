@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, afterEach, expect, test } from "vitest"
+import { afterAll, afterEach, expect, test } from "bun:test"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import {
   SessionPermissionsStorage,
