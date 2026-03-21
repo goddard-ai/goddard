@@ -27,15 +27,15 @@ const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(()
   })),
 }))
 
-vi.mock("@goddard-ai/storage", () => ({
+vi.mock("@goddard-ai/storage", (): typeof import("@goddard-ai/storage") => ({
   SessionStorage: {
     update: updateMock,
   },
-}))
+} as any))
 
-vi.mock("@goddard-ai/daemon-client", () => ({
+vi.mock("@goddard-ai/daemon-client", (): typeof import("@goddard-ai/daemon-client") => ({
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
-}))
+} as any))
 
 import { declareInitiative, main, reportBlocker, reportCompleted } from "../src/bin/goddard-tool.ts"
 

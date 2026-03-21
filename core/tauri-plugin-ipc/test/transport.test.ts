@@ -4,13 +4,13 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
 // Mock the Tauri APIs
-vi.mock("@tauri-apps/api/core", () => ({
+vi.mock("@tauri-apps/api/core", (): typeof import("@tauri-apps/api/core") => ({
   invoke: vi.fn(),
-}))
+} as any))
 
-vi.mock("@tauri-apps/api/event", () => ({
+vi.mock("@tauri-apps/api/event", (): typeof import("@tauri-apps/api/event") => ({
   listen: vi.fn(),
-}))
+} as any))
 
 describe("createTauriTransport", () => {
   beforeEach(() => {

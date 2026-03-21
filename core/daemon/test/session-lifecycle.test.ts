@@ -23,7 +23,7 @@ const {
   worktreeCleanupMock: vi.fn(() => true),
 }))
 
-vi.mock("@goddard-ai/storage", () => ({
+vi.mock("@goddard-ai/storage", (): typeof import("@goddard-ai/storage") => ({
   SessionStorage: {
     create: vi.fn(async (record: any) => {
       const now = new Date()
@@ -123,10 +123,10 @@ vi.mock("@goddard-ai/storage", () => ({
     remove: vi.fn(async (sessionId: string) => {
       sessionStates.delete(sessionId)
     }),
-  },
-}))
+  } as any
+} as any))
 
-vi.mock("@goddard-ai/storage/session-permissions", () => ({
+vi.mock("@goddard-ai/storage/session-permissions", (): typeof import("@goddard-ai/storage/session-permissions") => ({
   SessionPermissionsStorage: {
     create: vi.fn(async (record: any) => {
       const created = { ...record, createdAt: new Date().toISOString() }
@@ -154,10 +154,10 @@ vi.mock("@goddard-ai/storage/session-permissions", () => ({
       permissionsBySessionId.delete(sessionId)
       permissionsByToken.delete(existing.token)
     }),
-  },
-}))
+  } as any
+} as any))
 
-vi.mock("@goddard-ai/worktree", () => ({
+vi.mock("@goddard-ai/worktree", (): typeof import("@goddard-ai/worktree") => ({
   Worktree: class {
     poweredBy = "mock-worktree"
     cwd: string
@@ -178,8 +178,8 @@ vi.mock("@goddard-ai/worktree", () => ({
     cleanup(worktreeDir: string, branchName: string) {
       return worktreeCleanupMock(worktreeDir, branchName)
     }
-  },
-}))
+  } as any,
+} as any))
 
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"

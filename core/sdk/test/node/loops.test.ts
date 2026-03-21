@@ -10,7 +10,7 @@ const mockedDaemonLoops = vi.hoisted(() => ({
   startDaemonLoop: vi.fn(),
 }))
 
-vi.mock("../../src/daemon/loops.ts", () => mockedDaemonLoops)
+vi.mock("../../src/daemon/loops.ts", (): typeof import("../../src/daemon/loops.ts") => mockedDaemonLoops as any)
 
 import { buildLoopStartRequest, resolveLoop, startNamedLoop } from "../../src/node/loops.ts"
 

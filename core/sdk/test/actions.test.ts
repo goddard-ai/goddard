@@ -4,9 +4,9 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, test, vi } from "vitest"
 
-vi.mock("../src/daemon/index.ts", () => ({
+vi.mock("../src/daemon/index.ts", (): typeof import("../src/daemon/index.ts") => ({
   runAgent: vi.fn(),
-}))
+} as any))
 
 import {
   buildActionSessionParams,
