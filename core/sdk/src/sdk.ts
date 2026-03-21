@@ -38,12 +38,15 @@ export class GoddardSdk {
 
   get auth() {
     return {
+      /** Initiates a new GitHub device authorization flow. */
       startDeviceFlow: async (input: DeviceFlowStart = {}) => {
         return this.#backend.auth.startDeviceFlow(input)
       },
+      /** Polls or finalizes a previously started device authorization flow. */
       completeDeviceFlow: async (input: DeviceFlowComplete) => {
         return this.#backend.auth.completeDeviceFlow(input)
       },
+      /** High-level helper that manages the entire device flow lifecycle, prompting the user and waiting for authorization. */
       login: async ({
         githubUsername,
         onPrompt,
@@ -77,9 +80,11 @@ export class GoddardSdk {
         }
         throw new Error("Device flow authentication timed out.")
       },
+      /** Retrieves the currently authenticated user's identity. */
       whoami: async () => {
         return this.#backend.auth.whoami()
       },
+      /** Clears local authentication state and revokes any active tokens. */
       logout: async () => {
         await this.#backend.auth.logout()
       },
@@ -88,12 +93,15 @@ export class GoddardSdk {
 
   get pr() {
     return {
+      /** Submits a new pull request to the connected backend for processing. */
       create: async (input: CreatePrInput) => {
         return this.#backend.pr.create(input)
       },
+      /** Checks if a specific pull request is currently tracked and managed by Goddard. */
       isManaged: async ({ owner, repo, prNumber }: RepoRef & { prNumber: number }) => {
         return this.#backend.pr.isManaged({ owner, repo, prNumber })
       },
+      /** Posts a new comment or reply to an existing managed pull request. */
       reply: async (input: { owner: string; repo: string; prNumber: number; body: string }) => {
         return this.#backend.pr.reply(input)
       },
@@ -102,6 +110,7 @@ export class GoddardSdk {
 
   get stream() {
     return {
+      /** Opens a persistent connection to receive real-time updates from the backend. */
       subscribe: async () => {
         return this.#backend.stream.subscribe()
       },
