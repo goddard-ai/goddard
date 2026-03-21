@@ -697,7 +697,11 @@ export function createSessionManager(input: {
           return
         }
 
-        await setConnectionMode(session.id, archivedConnectionMode(state?.history.length ?? 0), false)
+        await setConnectionMode(
+          session.id,
+          archivedConnectionMode(state?.history.length ?? 0),
+          false,
+        )
         await SessionPermissionsStorage.revoke(session.id).catch(() => {})
       }),
     )
