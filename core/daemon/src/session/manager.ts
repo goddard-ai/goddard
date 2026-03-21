@@ -28,7 +28,7 @@ import {
 } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import treeKill from "@goddard-ai/tree-kill"
-import { spawn, type ChildProcessByStdio } from "node:child_process"
+import { execSync, spawn, type ChildProcessByStdio } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
 import { prependAgentBinToPath } from "../config.js"
@@ -275,7 +275,9 @@ async function spawnAgentProcess(
     env?: Record<string, string>
   },
 ): Promise<ChildProcessByStdio<Writable, Readable, null>> {
+  const agentId = typeof params.agent === "string" ? params.agent : params.agent.id
   let agent = params.agent
+
   if (typeof agent === "string") {
     const fetchedAgent = await fetchRegistryAgent(agent)
     if (!fetchedAgent) {
@@ -285,6 +287,18 @@ async function spawnAgentProcess(
   }
 
   const processSpec = resolveAgentProcessSpec(agent)
+
+  const extraEnv: Record<string, string> = {}
+  if (agentId === "claude-acp") {
+    try {
+      const claudePath = execSync("which claude", { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim()
+      if (claudePath) {
+        extraEnv["CLAUDE_CODE_EXECUTABLE"] = claudePath
+      }
+    } catch {
+      // Ignored
+    }
+  }
 
   return spawn(processSpec.cmd, processSpec.args, {
     stdio: ["pipe", "pipe", "inherit"],
@@ -296,6 +310,7 @@ async function spawnAgentProcess(
       env: {
         ...processSpec.env,
         ...params.env,
+        ...extraEnv,
       },
     }),
   })
