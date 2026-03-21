@@ -251,11 +251,13 @@ function buildAgentProcessEnv(input: {
     GODDARD_SESSION_TOKEN: input.token,
   }
   if (input.githubUsername) {
-    env.GODDARD_USER_NAME = input.githubUsername
+    env.GIT_AUTHOR_NAME = input.githubUsername
   }
   if (input.githubUserEmail) {
-    env.GODDARD_USER_EMAIL = input.githubUserEmail
+    env.GIT_AUTHOR_EMAIL = input.githubUserEmail
   }
+  env.GIT_COMMITTER_NAME = "goddard-assistant"
+  env.GIT_COMMITTER_EMAIL = "goddard-ai@proton.me"
   return env
 }
 
