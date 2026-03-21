@@ -38,6 +38,30 @@ vi.mock("@goddard-ai/storage", () => ({
       })
     }),
     list: vi.fn(async () => Array.from(sessions.values())),
+    listRecent: vi.fn(
+      async ({ limit, cursor }: { limit: number; cursor?: { updatedAt: Date; id: string } }) => {
+        return Array.from(sessions.values())
+          .sort((left: any, right: any) => {
+            const updatedAtDiff = right.updatedAt.valueOf() - left.updatedAt.valueOf()
+            if (updatedAtDiff !== 0) {
+              return updatedAtDiff
+            }
+
+            return right.id.localeCompare(left.id)
+          })
+          .filter((record: any) => {
+            if (!cursor) {
+              return true
+            }
+
+            return (
+              record.updatedAt.valueOf() < cursor.updatedAt.valueOf() ||
+              (record.updatedAt.valueOf() === cursor.updatedAt.valueOf() && record.id < cursor.id)
+            )
+          })
+          .slice(0, limit)
+      },
+    ),
     get: vi.fn(async (id: string) => sessions.get(id) ?? null),
     update: vi.fn(async (id: string, data: any) => {
       const existing = sessions.get(id)
@@ -793,6 +817,150 @@ test("abnormal agent exit invalidates reconnects and repeated shutdowns are harm
 
   expect((await client.send("sessionShutdown", { id: created.session.id })).success).toBe(false)
   expect((await client.send("sessionShutdown", { id: created.session.id })).success).toBe(false)
+})
+
+test("daemon lists recent sessions with a stable paginated cursor", async () => {
+  const createdAt = new Date("2026-01-01T00:00:10.000Z")
+  sessions.set("sess-a", {
+    id: "sess-a",
+    acpId: "acp-a",
+    status: "done",
+    agentName: "node",
+    cwd: process.cwd(),
+    mcpServers: [],
+    metadata: null,
+    createdAt,
+    updatedAt: new Date("2026-01-01T00:00:10.000Z"),
+    errorMessage: null,
+    blockedReason: null,
+    initiative: "Older",
+    lastAgentMessage: "oldest",
+  })
+  sessions.set("sess-b", {
+    id: "sess-b",
+    acpId: "acp-b",
+    status: "done",
+    agentName: "node",
+    cwd: process.cwd(),
+    mcpServers: [],
+    metadata: null,
+    createdAt,
+    updatedAt: new Date("2026-01-01T00:00:11.000Z"),
+    errorMessage: null,
+    blockedReason: null,
+    initiative: "Middle",
+    lastAgentMessage: "middle",
+  })
+  sessions.set("sess-c", {
+    id: "sess-c",
+    acpId: "acp-c",
+    status: "blocked",
+    agentName: "node",
+    cwd: process.cwd(),
+    mcpServers: [],
+    metadata: null,
+    createdAt,
+    updatedAt: new Date("2026-01-01T00:00:11.000Z"),
+    errorMessage: null,
+    blockedReason: "Needs review",
+    initiative: "Newest",
+    lastAgentMessage: "newest",
+  })
+  sessionStates.set("sess-a", {
+    sessionId: "sess-a",
+    acpId: "acp-a",
+    connectionMode: "history",
+    history: [],
+    diagnostics: [],
+    activeDaemonSession: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+  sessionStates.set("sess-b", {
+    sessionId: "sess-b",
+    acpId: "acp-b",
+    connectionMode: "live",
+    history: [{ jsonrpc: "2.0", method: "session/update", params: {} }],
+    diagnostics: [
+      { type: "session_status_changed", at: new Date().toISOString(), sessionId: "sess-b" },
+    ],
+    activeDaemonSession: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+  sessionStates.set("sess-c", {
+    sessionId: "sess-c",
+    acpId: "acp-c",
+    connectionMode: "history",
+    history: [{ jsonrpc: "2.0", method: "session/update", params: {} }],
+    diagnostics: [
+      { type: "session_status_changed", at: "2026-01-01T00:00:12.000Z", sessionId: "sess-c" },
+      { type: "session_connected", at: "2026-01-01T00:00:13.000Z", sessionId: "sess-c" },
+    ],
+    activeDaemonSession: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const firstPage = await client.send("sessionList", { limit: 2 })
+  expect(firstPage.sessions.map((session) => session.id)).toEqual(["sess-c", "sess-b"])
+  expect(firstPage.hasMore).toBe(true)
+  expect(typeof firstPage.nextCursor).toBe("string")
+  expect(firstPage.sessions[0]?.diagnostics.historyLength).toBe(1)
+  expect(firstPage.sessions[0]?.connection.mode).toBe("history")
+
+  const secondPage = await client.send("sessionList", {
+    limit: 2,
+    cursor: firstPage.nextCursor ?? undefined,
+  })
+  expect(secondPage.sessions.map((session) => session.id)).toEqual(["sess-a"])
+  expect(secondPage.hasMore).toBe(false)
+  expect(secondPage.nextCursor).toBeNull()
+})
+
+test("daemon session listing defaults and caps page size", async () => {
+  for (let index = 0; index < 120; index += 1) {
+    const id = `sess-${index.toString().padStart(3, "0")}`
+    sessions.set(id, {
+      id,
+      acpId: `acp-${id}`,
+      status: "done",
+      agentName: "node",
+      cwd: process.cwd(),
+      mcpServers: [],
+      metadata: null,
+      createdAt: new Date(1_700_000_000_000 + index * 1_000),
+      updatedAt: new Date(1_700_000_000_000 + index * 1_000),
+      errorMessage: null,
+      blockedReason: null,
+      initiative: null,
+      lastAgentMessage: null,
+    })
+    sessionStates.set(id, {
+      sessionId: id,
+      acpId: `acp-${id}`,
+      connectionMode: "history",
+      history: [],
+      diagnostics: [],
+      activeDaemonSession: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const defaultPage = await client.send("sessionList", {})
+  expect(defaultPage.sessions).toHaveLength(20)
+  expect(defaultPage.hasMore).toBe(true)
+
+  const cappedPage = await client.send("sessionList", { limit: 999 })
+  expect(cappedPage.sessions).toHaveLength(100)
+  expect(cappedPage.hasMore).toBe(true)
 })
 
 async function startTestDaemon(): Promise<DaemonServer> {

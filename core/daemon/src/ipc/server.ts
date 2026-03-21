@@ -1,6 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { createServer } from "@goddard-ai/ipc"
-import type { CreateDaemonSessionRequest, StartDaemonLoopRequest } from "@goddard-ai/schema/daemon"
+import type {
+  CreateDaemonSessionRequest,
+  ListDaemonSessionsRequest,
+  StartDaemonLoopRequest,
+} from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { SessionStorage } from "@goddard-ai/storage"
 import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
@@ -226,6 +230,12 @@ export async function startDaemonServer(
       }
       context.setSessionId(response.session.id)
       return response
+    }),
+    sessionList: withRequestLogging<
+      ListDaemonSessionsRequest,
+      Awaited<ReturnType<typeof sessionManager.listSessions>>
+    >("sessionList", async (payload) => {
+      return sessionManager.listSessions(payload)
     }),
     sessionGet: withRequestLogging<
       { id: string },

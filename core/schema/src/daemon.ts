@@ -1,6 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
-import type { CreateDaemonSessionRequest } from "./daemon/sessions.js"
+import type { CreateDaemonSessionRequest, ListDaemonSessionsRequest } from "./daemon/sessions.js"
 import type { SessionStatus } from "./db.js"
 import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.js"
 
@@ -11,7 +11,11 @@ export type {
   StartDaemonLoopRequest,
 } from "./daemon/loops.js"
 export type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
-export type { CreateDaemonSessionRequest, DaemonSessionPathParams } from "./daemon/sessions.js"
+export type {
+  CreateDaemonSessionRequest,
+  DaemonSessionPathParams,
+  ListDaemonSessionsRequest,
+} from "./daemon/sessions.js"
 export type {
   CancelDaemonWorkforceRequest,
   CreateDaemonWorkforceRequestRequest,
@@ -95,6 +99,13 @@ export type DaemonSession = DaemonSessionIdentity & {
 /** Response payload returned after one daemon-managed session is created. */
 export type CreateDaemonSessionResponse = {
   session: DaemonSession
+}
+
+/** Response payload returned after one daemon-managed session page is fetched. */
+export type ListDaemonSessionsResponse = {
+  sessions: DaemonSession[]
+  nextCursor: string | null
+  hasMore: boolean
 }
 
 /** Response payload returned after one daemon-managed session is fetched. */
