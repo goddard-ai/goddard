@@ -1,10 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { SessionStorage } from "../src/session.js"
-import { LoopStorage } from "../src/loop.js"
-import { getDatabasePath } from "../src/paths.js"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getDatabasePath } from "../src/paths.js"
 
 vi.mock("../src/paths.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/paths.js")>()
