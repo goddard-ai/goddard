@@ -16,7 +16,7 @@
       "outputs": []
     },
     "test": {
-      "dependsOn": [],
+      "dependsOn": ["^test"],
       "inputs": ["**/*.ts", "**/*.tsx", "**/vitest.config.ts", "vitest.config.ts"],
       "outputs": []
     }
