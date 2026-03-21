@@ -87,6 +87,7 @@
 - `Session Worktree`
   - The optional isolated repository checkout the daemon provisions for a fresh session before the agent starts.
   - Why: so daemon-managed work inside git repositories does not mutate the caller's primary checkout or collide with concurrent sessions.
+  - Callers may opt out per session, which keeps the agent in the original checkout instead of provisioning isolation.
 - `Effective Cwd`
   - The directory inside the session worktree where the agent process actually starts.
   - Why: so callers can target a repository subdirectory while still getting full repository isolation.

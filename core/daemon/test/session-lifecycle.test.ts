@@ -455,6 +455,26 @@ test("non-repository session cwd values skip worktree isolation", async () => {
   expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
 })
 
+test("session worktree opt-out keeps git-backed sessions on the local cwd", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const setupCallsBefore = worktreeSetupMock.mock.calls.length
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: process.cwd(),
+    useWorktree: false,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(created.session.cwd).toBe(process.cwd())
+  expect(created.session.metadata).toBeNull()
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
+})
+
 test("one-shot daemon sessions clean up their worktree after the initial prompt completes", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

@@ -18,6 +18,7 @@ export type { AgentBinaryPlatform } from "./session-server/agent-distribution.js
 interface BaseSessionParams {
   agent: ACPAdapterName | AgentDistribution
   cwd: string
+  useWorktree?: boolean
   mcpServers: acp.McpServer[]
   systemPrompt?: string
   env?: Record<string, string>
