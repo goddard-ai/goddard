@@ -165,6 +165,7 @@ export async function runAgent(
           systemPrompt: params.systemPrompt ?? "",
           env: params.env,
           metadata: params.metadata,
+          gitUser: params.gitUser,
           initialPrompt: params.initialPrompt,
           oneShot: params.oneShot,
         })

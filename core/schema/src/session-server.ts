@@ -22,6 +22,7 @@ interface BaseSessionParams {
   systemPrompt?: string
   env?: Record<string, string>
   metadata?: DaemonSessionMetadata
+  gitUser?: { username: string; email: string }
 }
 
 /** Parameters used to create one fresh daemon-backed agent session. */

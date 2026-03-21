@@ -7,6 +7,13 @@ import {
   type GoddardRootConfigDocument,
 } from "@goddard-ai/schema/config"
 
+export type {
+  GoddardActionConfigDocument,
+  GoddardLoopConfigDocument,
+  GoddardRootConfigDocument,
+} from "@goddard-ai/schema/config"
+
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------

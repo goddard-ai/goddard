@@ -15,6 +15,10 @@ export const CreateDaemonSessionRequest = z.object({
   systemPrompt: z.string(),
   env: z.record(z.string(), z.string()).optional(),
   metadata: DaemonSessionMetadata.optional(),
+  gitUser: z.object({
+    username: z.string(),
+    email: z.string()
+  }).optional(),
   initialPrompt: initialPrompt.optional(),
   oneShot: z.boolean().optional(),
 })

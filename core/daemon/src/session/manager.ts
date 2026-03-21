@@ -256,8 +256,12 @@ function buildAgentProcessEnv(input: {
   if (input.githubUserEmail) {
     env.GIT_AUTHOR_EMAIL = input.githubUserEmail
   }
-  env.GIT_COMMITTER_NAME = "goddard-assistant"
-  env.GIT_COMMITTER_EMAIL = "goddard-ai@proton.me"
+
+  if (input.githubUsername && input.githubUserEmail) {
+    env.GIT_COMMITTER_NAME = "goddard-assistant"
+    env.GIT_COMMITTER_EMAIL = "goddard-ai@proton.me"
+  }
+
   return env
 }
 
@@ -748,8 +752,8 @@ export function createSessionManager(input: {
         cwd: params.cwd,
         agentBinDir: input.agentBinDir,
         env: params.env,
-        githubUsername: typeof params.metadata?.githubUsername === 'string' ? params.metadata.githubUsername : undefined,
-        githubUserEmail: typeof params.metadata?.githubUserEmail === 'string' ? params.metadata.githubUserEmail : undefined,
+        githubUsername: params.gitUser?.username,
+        githubUserEmail: params.gitUser?.email,
       })
 
       const initialized = await initializeSession(process.stdin, process.stdout, params, {
