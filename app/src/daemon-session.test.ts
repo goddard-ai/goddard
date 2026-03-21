@@ -300,11 +300,7 @@ async function startTestDaemon(): Promise<{
 }> {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-app-daemon-"))
   const socketPath = join(socketDir, "daemon.sock")
-  const ipcServer = createServer(
-    socketPath,
-    daemonIpcSchema,
-    createDaemonSessionTestIpcHandlers().handlers,
-  )
+  const ipcServer = createServer(socketPath, daemonIpcSchema, createDaemonSessionTestIpcHandlers())
 
   cleanup.push(async () => {
     await new Promise<void>((resolve, reject) => {

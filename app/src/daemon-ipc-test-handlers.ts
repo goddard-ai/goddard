@@ -4,8 +4,9 @@ import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 
 /**
  * Builds the app transport test's daemon IPC handler stub from one shared place.
+ * The explicit Handlers return type keeps this list exhaustive with the schema.
  */
-export function createDaemonSessionTestIpcHandlers() {
+export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcSchema> {
   let nextSessionId = 0
   const workforceRoots = new Set<string>()
   const sessionHistory = new Map<
@@ -123,7 +124,7 @@ export function createDaemonSessionTestIpcHandlers() {
     }
   }
 
-  const handlers: Handlers<typeof daemonIpcSchema> = {
+  return {
     health: async () => ({ ok: true }),
     prSubmit: async () => ({ number: 1, url: "https://github.com/example/repo/pull/1" }),
     prReply: async () => ({ success: true }),
@@ -264,6 +265,4 @@ export function createDaemonSessionTestIpcHandlers() {
       }
     },
   }
-
-  return { handlers }
 }
