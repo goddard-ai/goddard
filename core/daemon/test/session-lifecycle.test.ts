@@ -465,7 +465,7 @@ test("session worktree opt-out keeps git-backed sessions on the local cwd", asyn
   const created = await client.send("sessionCreate", {
     agent: createNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
-    useWorktree: false,
+    worktree: { enabled: false },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })

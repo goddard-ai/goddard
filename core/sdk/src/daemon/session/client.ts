@@ -161,7 +161,7 @@ export async function runAgent(
       : await client.send("sessionCreate", {
           agent: params.agent,
           cwd: params.cwd,
-          useWorktree: params.useWorktree,
+          worktree: params.worktree,
           mcpServers: params.mcpServers,
           systemPrompt: params.systemPrompt ?? "",
           env: params.env,

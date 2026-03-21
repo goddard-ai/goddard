@@ -14,11 +14,16 @@ export {
 } from "./session-server/agent-distribution.js"
 export type { AgentBinaryPlatform } from "./session-server/agent-distribution.js"
 
+/** Structured worktree settings accepted when starting one daemon-backed session. */
+export interface SessionWorktreeOptions {
+  enabled?: boolean
+}
+
 /** Shared session creation fields used by both new and reconnect flows. */
 interface BaseSessionParams {
   agent: ACPAdapterName | AgentDistribution
   cwd: string
-  useWorktree?: boolean
+  worktree?: SessionWorktreeOptions
   mcpServers: acp.McpServer[]
   systemPrompt?: string
   env?: Record<string, string>
