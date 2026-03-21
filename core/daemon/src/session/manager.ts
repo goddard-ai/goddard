@@ -737,6 +737,7 @@ export function createSessionManager(input: {
     const scope = parseRepoScope(params)
     let sessionWorktree: SessionWorktreeHandle | null = null
     let storedMetadata = params.metadata ?? undefined
+    let sessionCwd = params.cwd
     const sessionContext = {
       sessionId: id,
       acpId: undefined as string | undefined,
@@ -744,9 +745,12 @@ export function createSessionManager(input: {
 
     try {
       sessionWorktree = createSessionWorktree(id, params.cwd, params.metadata)
-      storedMetadata = {
-        ...params.metadata,
-        worktree: sessionWorktree.metadata,
+      if (sessionWorktree) {
+        storedMetadata = {
+          ...params.metadata,
+          worktree: sessionWorktree.metadata,
+        }
+        sessionCwd = sessionWorktree.metadata.effectiveCwd
       }
     } catch (error) {
       logger.log("session.worktree_setup_failed", {
@@ -759,7 +763,7 @@ export function createSessionManager(input: {
 
     const sessionLogContext = buildSessionLogContext({
       ...params,
-      cwd: sessionWorktree.metadata.effectiveCwd,
+      cwd: sessionCwd,
       metadata: storedMetadata,
     })
 
@@ -779,7 +783,7 @@ export function createSessionManager(input: {
 
       const process = await spawnAgentProcess(input.daemonUrl, token, {
         agent: params.agent,
-        cwd: sessionWorktree.metadata.effectiveCwd,
+        cwd: sessionCwd,
         agentBinDir: input.agentBinDir,
         env: params.env,
       })
@@ -810,7 +814,7 @@ export function createSessionManager(input: {
         acpId: initialized.acpId,
         status: initialized.status,
         agentName: agentNameFromInput(params.agent),
-        cwd: sessionWorktree.metadata.effectiveCwd,
+        cwd: sessionCwd,
         mcpServers: params.mcpServers,
         repository: scope.repository,
         prNumber: scope.prNumber,

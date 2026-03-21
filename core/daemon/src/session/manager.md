@@ -85,8 +85,8 @@
   - The repository ownership context attached to a session, including optional pull request limits.
   - Why: so session permissions can be constrained to the repository context the session is meant to operate within.
 - `Session Worktree`
-  - The isolated repository checkout the daemon provisions for a fresh session before the agent starts.
-  - Why: so daemon-managed work does not mutate the caller's primary checkout or collide with concurrent sessions.
+  - The optional isolated repository checkout the daemon provisions for a fresh session before the agent starts.
+  - Why: so daemon-managed work inside git repositories does not mutate the caller's primary checkout or collide with concurrent sessions.
 - `Effective Cwd`
   - The directory inside the session worktree where the agent process actually starts.
   - Why: so callers can target a repository subdirectory while still getting full repository isolation.

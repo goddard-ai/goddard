@@ -71,9 +71,13 @@ export function createSessionWorktree(
   sessionId: string,
   cwd: string,
   metadata?: DaemonSessionMetadata,
-): SessionWorktreeHandle {
+): SessionWorktreeHandle | null {
   const requestedCwd = resolveRealPath(cwd)
   const repoRoot = resolveGitRepoRoot(requestedCwd)
+  if (!repoRoot) {
+    return null
+  }
+
   const relativeCwd = relative(repoRoot, requestedCwd)
   const branchName =
     typeof metadata?.prNumber === "number" ? `pr-${metadata.prNumber}` : `session-${sessionId}`
@@ -119,9 +123,9 @@ export function cleanupSessionWorktree(metadata: SessionWorktreeMetadata): boole
 }
 
 /**
- * Resolves the containing git repository root for one requested session cwd.
+ * Resolves the containing git repository root for one requested session cwd when one exists.
  */
-function resolveGitRepoRoot(cwd: string): string {
+function resolveGitRepoRoot(cwd: string): string | null {
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
@@ -129,17 +133,12 @@ function resolveGitRepoRoot(cwd: string): string {
   })
 
   if (result.status !== 0) {
-    const stderr = result.stderr?.trim()
-    throw new Error(
-      stderr
-        ? `Daemon sessions require a git repository cwd. ${stderr}`
-        : `Daemon sessions require a git repository cwd: ${cwd}`,
-    )
+    return null
   }
 
   const repoRoot = result.stdout.trim()
   if (!repoRoot) {
-    throw new Error(`Daemon sessions require a git repository cwd: ${cwd}`)
+    return null
   }
 
   return resolve(repoRoot)

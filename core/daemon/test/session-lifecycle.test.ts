@@ -431,6 +431,30 @@ test("daemon sessions run inside the mapped worktree subdirectory", async () => 
   )
 })
 
+test("non-repository session cwd values skip worktree isolation", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-daemon-nonrepo-"))
+
+  cleanup.push(async () => {
+    await rm(cwd, { recursive: true, force: true })
+  })
+
+  const setupCallsBefore = worktreeSetupMock.mock.calls.length
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(exampleAgentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(created.session.cwd).toBe(cwd)
+  expect(created.session.metadata).toBeNull()
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
+})
+
 test("one-shot daemon sessions clean up their worktree after the initial prompt completes", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
