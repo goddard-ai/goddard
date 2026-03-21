@@ -55,7 +55,7 @@ test("runOneShot creates a daemon-hosted one-shot session over IPC", async () =>
   expect(params.agent).toBe("pi")
   expect(params.oneShot).toBe(true)
   expect(params.initialPrompt).toBe("reply to feedback")
-  expect(params.metadata).toEqual({ repository: "acme/widgets", prNumber: 12 })
+  expect(params.metadata).toEqual({ repository: "acme/widgets", prNumber: 12, githubUsername: "alice" })
   expect(params.env.PATH).toContain("/usr/bin:/bin")
   expect(params.env.PATH).toContain("/tmp/goddard-agent-bin")
   expect(params.systemPrompt).toContain("goddard")

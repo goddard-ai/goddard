@@ -135,6 +135,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       metadata: {
         repository: `${input.event.owner}/${input.event.repo}`,
         prNumber: input.event.prNumber,
+        githubUsername: input.event.author,
       },
       env: buildOneShotEnv(input.agentBinDir, input.env),
     })

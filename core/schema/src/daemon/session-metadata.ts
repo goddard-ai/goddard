@@ -5,6 +5,8 @@ export const DaemonSessionMetadata = z
   .object({
     repository: z.string().optional(),
     prNumber: z.number().int().optional(),
+    githubUsername: z.string().optional(),
+    githubUserEmail: z.string().optional(),
   })
   .catchall(z.unknown())
 

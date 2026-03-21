@@ -47,6 +47,7 @@ test("daemon IPC parses loop and workforce lifecycle payloads", () => {
         agent: "pi-acp",
         cwd: "/repo",
         mcpServers: [],
+        systemPrompt: "Follow the spec.",
       },
       rateLimits: {
         cycleDelay: "30s",
@@ -69,6 +70,7 @@ test("daemon IPC parses loop and workforce lifecycle payloads", () => {
       agent: "pi-acp",
       cwd: "/repo",
       mcpServers: [],
+      systemPrompt: "Follow the spec.",
     },
     rateLimits: {
       cycleDelay: "30s",

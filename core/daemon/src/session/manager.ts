@@ -241,13 +241,22 @@ function buildAgentProcessEnv(input: {
   token: string
   agentBinDir: string
   env?: Record<string, string>
+  githubUsername?: string
+  githubUserEmail?: string
 }): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...prependAgentBinToPath(input.agentBinDir, input.env),
     GODDARD_DAEMON_URL: input.daemonUrl,
     GODDARD_SESSION_TOKEN: input.token,
   }
+  if (input.githubUsername) {
+    env.GODDARD_USER_NAME = input.githubUsername
+  }
+  if (input.githubUserEmail) {
+    env.GODDARD_USER_EMAIL = input.githubUserEmail
+  }
+  return env
 }
 
 /** Resolves and launches the requested agent distribution for a new daemon session. */
@@ -259,6 +268,8 @@ async function spawnAgentProcess(
     cwd: string
     agentBinDir: string
     env?: Record<string, string>
+    githubUsername?: string
+    githubUserEmail?: string
   },
 ): Promise<ChildProcessByStdio<Writable, Readable, null>> {
   let agent = params.agent
@@ -283,6 +294,8 @@ async function spawnAgentProcess(
         ...processSpec.env,
         ...params.env,
       },
+      githubUsername: params.githubUsername,
+      githubUserEmail: params.githubUserEmail,
     }),
   })
 }
@@ -733,6 +746,8 @@ export function createSessionManager(input: {
         cwd: params.cwd,
         agentBinDir: input.agentBinDir,
         env: params.env,
+        githubUsername: typeof params.metadata?.githubUsername === 'string' ? params.metadata.githubUsername : undefined,
+        githubUserEmail: typeof params.metadata?.githubUserEmail === 'string' ? params.metadata.githubUserEmail : undefined,
       })
 
       const initialized = await initializeSession(process.stdin, process.stdout, params, {
