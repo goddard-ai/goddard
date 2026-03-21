@@ -20,11 +20,13 @@ const { createDaemonIpcClientFromEnvMock, unsubscribeMock, sendMock, subscribeMo
   },
 )
 
-vi.mock("@goddard-ai/daemon-client", (): typeof import("@goddard-ai/daemon-client") => ({
+vi.mock("@goddard-ai/daemon-client", async (importOriginal): Promise<typeof import("@goddard-ai/daemon-client")> => ({
+  ...(await importOriginal<typeof import("@goddard-ai/daemon-client")>()),
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
-} as any))
+}))
 
-vi.mock("@agentclientprotocol/sdk", (): typeof import("@agentclientprotocol/sdk") => ({
+vi.mock("@agentclientprotocol/sdk", async (importOriginal): Promise<typeof import("@agentclientprotocol/sdk")> => ({
+  ...(await importOriginal<typeof import("@agentclientprotocol/sdk")>()),
   AGENT_METHODS: {
     session_prompt: "session/prompt",
     session_cancel: "session/cancel",
@@ -32,12 +34,12 @@ vi.mock("@agentclientprotocol/sdk", (): typeof import("@agentclientprotocol/sdk"
   ndJsonStream: vi.fn(() => ({
     readable: new ReadableStream(),
     writable: new WritableStream(),
-  })),
+  })) as any,
   ClientSideConnection: class MockClientSideConnection {
     prompt = vi.fn()
     cancel = vi.fn()
-  },
-} as any))
+  } as any,
+}))
 
 describe("runAgent", () => {
   function buildSession(id: string, acpId: string) {

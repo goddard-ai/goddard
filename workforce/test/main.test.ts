@@ -38,15 +38,17 @@ const {
   updateWorkforceRequestMock: vi.fn(),
 }))
 
-vi.mock("@clack/prompts", (): typeof import("@clack/prompts") => ({
+vi.mock("@clack/prompts", async (importOriginal): Promise<typeof import("@clack/prompts")> => ({
+  ...(await importOriginal<typeof import("@clack/prompts")>()),
   cancel: cancelMock,
   intro: introMock,
   isCancel: isCancelMock,
   multiselect: multiselectMock,
   outro: outroMock,
-} as any))
+}))
 
-vi.mock("@goddard-ai/sdk/node", (): typeof import("@goddard-ai/sdk/node") => ({
+vi.mock("@goddard-ai/sdk/node", async (importOriginal): Promise<typeof import("@goddard-ai/sdk/node")> => ({
+  ...(await importOriginal<typeof import("@goddard-ai/sdk/node")>()),
   cancelWorkforceRequest: cancelWorkforceRequestMock,
   createWorkforceRequest: createWorkforceRequestMock,
   discoverWorkforceInitCandidates: discoverWorkforceInitCandidatesMock,
@@ -58,7 +60,7 @@ vi.mock("@goddard-ai/sdk/node", (): typeof import("@goddard-ai/sdk/node") => ({
   stopWorkforce: stopWorkforceMock,
   truncateWorkforce: truncateWorkforceMock,
   updateWorkforceRequest: updateWorkforceRequestMock,
-} as any))
+}))
 
 beforeEach(() => {
   cancelMock.mockReset()
