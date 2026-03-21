@@ -9,6 +9,11 @@
       "dependsOn": ["^typecheck"],
       "inputs": ["**/*.ts", "**/tsconfig.json", "**/tsdown.config.ts", "tsconfig.base.json"],
       "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "inputs": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/oxlintrc.json"],
+      "outputs": []
     }
   }
 }
