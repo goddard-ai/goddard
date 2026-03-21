@@ -27,10 +27,7 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
         status: "active" as const,
         agentName: "test-agent",
         cwd: process.cwd(),
-        metadata: {
-          githubUsername: "jules",
-          githubUserEmail: "jules@example.com"
-        },
+        metadata: {},
         connection: {
           mode: "live" as const,
           reconnectable: true,

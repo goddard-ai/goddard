@@ -686,3 +686,478 @@ async function captureDaemonLogs<T>(
     restoreLogging()
   }
 }
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const parsed = JSON.parse(line)
+      if (parsed.method === "session/initialize") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      } else if (parsed.method === "session/prompt") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { stopReason: "end_turn" } })
+      }
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    }
+  })
+
+  // Wait for the agent to execute
+  const connection = await client.send("sessionConnect", { id: created.session.id })
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: { jsonrpc: "2.0", method: "initialize", id: 1, params: { protocolVersion: "1.0.0", capabilities: {}, clientInfo: { name: "test", version: "1.0.0" } } }
+  })
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: { jsonrpc: "2.0", method: "prompt", id: 2, params: { prompt: "Go" } }
+  })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      break
+    } catch {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      send({ jsonrpc: "2.0", id: 0, result: { stopReason: "end_turn" } })
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    }
+  })
+
+  await client.send("sessionConnect", { id: created.session.id })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      if (envOutput) break
+    } catch {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const parsed = JSON.parse(line)
+      if (parsed.method === "initialize") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      } else if (parsed.method === "prompt") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { stopReason: "end_turn" } })
+      }
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    }
+  })
+
+  // Wait for the agent to execute
+  await client.send("sessionConnect", { id: created.session.id })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      break
+    } catch {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  cleanup.push(() => daemon.close())
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const parsed = JSON.parse(line)
+      if (parsed.method === "initialize") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      } else if (parsed.method === "prompt") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { stopReason: "end_turn" } })
+      } else {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      }
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    },
+    oneShot: true
+  })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      if (envOutput) break
+    } catch {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  cleanup.push(() => daemon.close())
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const parsed = JSON.parse(line)
+      if (parsed.method === "initialize") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      } else if (parsed.method === "prompt") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { stopReason: "end_turn" } })
+      } else {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      }
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    },
+    oneShot: true
+  })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      if (envOutput) break
+    } catch {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  cleanup.push(() => daemon.close())
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const parsed = JSON.parse(line)
+      if (parsed.method === "session/initialize") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      } else if (parsed.method === "session/prompt") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { stopReason: "end_turn" } })
+      } else {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      }
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    },
+    oneShot: true
+  })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      if (envOutput) break
+    } catch {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
+
+test("daemon passes githubUsername and githubUserEmail to the agent environment as GIT_AUTHOR_* and GIT_COMMITTER_* if provided in metadata", async () => {
+  const daemon = await startTestDaemon()
+  cleanup.push(() => daemon.close())
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const cwd = await mkdtemp(join(tmpdir(), "goddard-test-"))
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+    import { writeFileSync } from "node:fs"
+
+    writeFileSync("${cwd}/env-output.json", JSON.stringify({
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL
+    }))
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const parsed = JSON.parse(line)
+      if (parsed.method === "initialize") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      } else if (parsed.method === "prompt") {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { stopReason: "end_turn" } })
+      } else {
+        send({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })
+      }
+    })
+  `)
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(agentPath),
+    cwd,
+    mcpServers: [],
+    systemPrompt: "You are a test agent.",
+    metadata: {
+      githubUsername: "jules",
+      githubUserEmail: "jules@example.com"
+    },
+    oneShot: true
+  })
+
+  let envOutput = ""
+  for (let i = 0; i < 50; i++) {
+    try {
+      envOutput = await import("node:fs/promises").then((m) =>
+        m.readFile(join(cwd, "env-output.json"), "utf8")
+      )
+      if (envOutput) break
+    } catch {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+  const envVars = envOutput ? JSON.parse(envOutput) : {}
+
+  expect(envVars.GIT_AUTHOR_NAME).toBe("jules")
+  expect(envVars.GIT_AUTHOR_EMAIL).toBe("jules@example.com")
+  expect(envVars.GIT_COMMITTER_NAME).toBe("goddard-assistant")
+  expect(envVars.GIT_COMMITTER_EMAIL).toBe("goddard-ai@proton.me")
+
+  await rm(cwd, { recursive: true, force: true })
+})
