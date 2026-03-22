@@ -44,8 +44,6 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.3.5",
-    "drizzle-kit": "1.0.0-beta.16-ea816b6"
+    "@types/better-sqlite3": "^7.6.13"
   }
 }

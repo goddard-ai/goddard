@@ -1,29 +1,33 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { SessionStatus } from "@goddard-ai/schema/db"
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { v7 as uuidv7 } from "uuid"
 
-export const sessions = sqliteTable("sessions", {
-  id: text().primaryKey(),
-  acpId: text().notNull().unique(),
-  status: text({ enum: SessionStatus }).notNull().default("idle"),
-  agentName: text().notNull(),
-  cwd: text().notNull(),
-  mcpServers: text({ mode: "json" }).notNull().$type<acp.McpServer[]>(),
-  createdAt: integer({ mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: integer({ mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  errorMessage: text(),
-  blockedReason: text(),
-  initiative: text(),
-  lastAgentMessage: text(),
-  repository: text(),
-  prNumber: integer(),
-  metadata: text({ mode: "json" }).$type<Record<string, any>>(),
-})
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text().primaryKey(),
+    acpId: text().notNull().unique(),
+    status: text({ enum: SessionStatus }).notNull().default("idle"),
+    agentName: text().notNull(),
+    cwd: text().notNull(),
+    mcpServers: text({ mode: "json" }).notNull().$type<acp.McpServer[]>(),
+    createdAt: integer({ mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer({ mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    errorMessage: text(),
+    blockedReason: text(),
+    initiative: text(),
+    lastAgentMessage: text(),
+    repository: text(),
+    prNumber: integer(),
+    metadata: text({ mode: "json" }).$type<Record<string, any>>(),
+  },
+  (table) => [index("idx_sessions_repository_pr_number").on(table.repository, table.prNumber)],
+)
 
 export const loops = sqliteTable("loops", {
   id: text().primaryKey(),

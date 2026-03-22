@@ -1,5 +1,5 @@
 import { and, desc, eq, lt, or } from "drizzle-orm"
-import { db } from "./db/index.js"
+import { getDatabaseInstance } from "./db/index.js"
 import { sessions } from "./db/schema.js"
 
 /** Full SQL row shape accepted when creating a durable session record. */
@@ -17,15 +17,18 @@ export type SQLSessionListCursor = {
 /** SQL-backed storage for the primary durable facts about daemon sessions. */
 export namespace SessionStorage {
   export async function create(data: SQLSessionInsert) {
+    const db = await getDatabaseInstance()
     await db.insert(sessions).values(data)
   }
 
   /** Lists every persisted session row without pagination. */
   export async function listAll() {
+    const db = await getDatabaseInstance()
     return db.select().from(sessions)
   }
 
   export async function listRecent(input: { limit: number; cursor?: SQLSessionListCursor }) {
+    const db = await getDatabaseInstance()
     const query = db.select().from(sessions)
     if (input.cursor) {
       query.where(
@@ -40,20 +43,24 @@ export namespace SessionStorage {
   }
 
   export async function get(id: string) {
+    const db = await getDatabaseInstance()
     return (await db.select().from(sessions).where(eq(sessions.id, id)))[0]
   }
 
   export async function getByAcpId(acpId: string) {
+    const db = await getDatabaseInstance()
     return (await db.select().from(sessions).where(eq(sessions.acpId, acpId)))[0]
   }
 
   /** Lists all sessions currently associated with one repository. */
   export async function listByRepository(repository: string) {
+    const db = await getDatabaseInstance()
     return db.select().from(sessions).where(eq(sessions.repository, repository))
   }
 
   /** Lists all sessions currently associated with one repository pull request. */
   export async function listByRepositoryPr(repository: string, prNumber: number) {
+    const db = await getDatabaseInstance()
     return db
       .select()
       .from(sessions)
@@ -61,6 +68,7 @@ export namespace SessionStorage {
   }
 
   export async function update(id: string, data: SQLSessionUpdate) {
+    const db = await getDatabaseInstance()
     await db
       .update(sessions)
       .set({ ...data, updatedAt: new Date() })

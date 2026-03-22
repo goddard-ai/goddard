@@ -23,8 +23,5 @@
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/storage": "workspace:^"
-  },
-  "devDependencies": {
-    "@types/node": "^25.3.5"
   }
 }

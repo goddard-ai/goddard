@@ -18,8 +18,5 @@
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run --passWithNoTests"
-  },
-  "devDependencies": {
-    "@types/node": "^25.5.0"
   }
 }
