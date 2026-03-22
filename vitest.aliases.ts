@@ -30,7 +30,7 @@ const ignoredDirectoryNames = new Set([".git", "dist", "node_modules"])
 const rootDir = resolve(import.meta.dirname)
 
 /**
- * Global source aliases for every workspace package export that declares a `source` target.
+ * Global source aliases for every workspace package export that declares a `types.source` target.
  */
 export const workspaceAliases = readWorkspacePackages().flatMap(createSourceAliasesForPackage)
 
@@ -133,14 +133,19 @@ function createSourceAliasesForPackage(pkg: WorkspacePackage): AliasEntry[] {
 }
 
 /**
- * Reads the `source` export target from one package export entry when present.
+ * Reads the `types.source` export target from one package export entry when present.
  */
 function readSourceExportTarget(value: unknown): string | null {
   if (!value || typeof value !== "object") {
     return null
   }
 
-  const source = (value as Record<string, unknown>).source
+  const types = (value as Record<string, unknown>).types
+  if (!types || typeof types !== "object") {
+    return null
+  }
+
+  const source = (types as Record<string, unknown>).source
   return typeof source === "string" ? source : null
 }
 

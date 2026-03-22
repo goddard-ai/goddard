@@ -37,6 +37,7 @@ vi.mock("@goddard-ai/storage", () => ({
         lastAgentMessage: null,
       })
     }),
+    listAll: vi.fn(async () => Array.from(sessions.values())),
     list: vi.fn(async () => Array.from(sessions.values())),
     listRecent: vi.fn(
       async ({ limit, cursor }: { limit: number; cursor?: { updatedAt: Date; id: string } }) => {

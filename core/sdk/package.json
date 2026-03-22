@@ -9,36 +9,28 @@
         "source": "./src/index.ts",
         "default": "./dist/index.d.mts"
       },
-      "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
-      "default": "./dist/index.mjs"
+      "import": "./dist/index.mjs"
     },
     "./daemon": {
       "types": {
         "source": "./src/daemon/index.ts",
         "default": "./dist/daemon/index.d.mts"
       },
-      "source": "./src/daemon/index.ts",
-      "import": "./dist/daemon/index.mjs",
-      "default": "./dist/daemon/index.mjs"
+      "import": "./dist/daemon/index.mjs"
     },
     "./loop": {
       "types": {
         "source": "./src/loop/index.ts",
         "default": "./dist/loop/index.d.mts"
       },
-      "source": "./src/loop/index.ts",
-      "import": "./dist/loop/index.mjs",
-      "default": "./dist/loop/index.mjs"
+      "import": "./dist/loop/index.mjs"
     },
     "./node": {
       "types": {
         "source": "./src/node/index.ts",
         "default": "./dist/node/index.d.mts"
       },
-      "source": "./src/node/index.ts",
-      "import": "./dist/node/index.mjs",
-      "default": "./dist/node/index.mjs"
+      "import": "./dist/node/index.mjs"
     }
   },
   "scripts": {

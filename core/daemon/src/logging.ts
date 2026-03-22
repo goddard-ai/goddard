@@ -2,7 +2,8 @@ import kleur from "kleur"
 import { randomUUID } from "node:crypto"
 import { inspect } from "node:util"
 
-const defaultWriteLine = (line: string) => {
+const defaultWriteLine = (_line: string) => {}
+const stdoutWriteLine = (line: string) => {
   process.stdout.write(`${line}\n`)
 }
 
@@ -47,7 +48,7 @@ export function configureDaemonLogging(options: {
   const previousWriter = daemonLogWriter
 
   daemonLogMode = options.mode ?? daemonLogMode
-  daemonLogWriter = options.writeLine ?? daemonLogWriter
+  daemonLogWriter = options.writeLine ?? stdoutWriteLine
 
   return () => {
     daemonLogMode = previousMode

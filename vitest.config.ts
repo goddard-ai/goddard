@@ -6,11 +6,10 @@ export default defineConfig({
     environment: "node",
     include: ["**/*.test.ts"],
     globals: true,
-    silent: true,
-    reporters: ["default"],
+    silent: "passed-only",
+    reporters: ["dot"],
   },
   resolve: {
     alias: workspaceAliases,
-    conditions: ["source", "import", "default"],
   },
 })

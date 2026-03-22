@@ -9,18 +9,14 @@
         "source": "./src/index.ts",
         "default": "./dist/index.d.mts"
       },
-      "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
-      "default": "./dist/index.mjs"
+      "import": "./dist/index.mjs"
     },
     "./*": {
       "types": {
         "source": "./src/*.ts",
         "default": "./dist/*.d.mts"
       },
-      "source": "./src/*.ts",
-      "import": "./dist/*.mjs",
-      "default": "./dist/*.mjs"
+      "import": "./dist/*.mjs"
     }
   },
   "scripts": {

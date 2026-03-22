@@ -9,8 +9,7 @@
         "source": "./src/index.ts",
         "default": "./dist/index.d.mts"
       },
-      "import": "./dist/index.mjs",
-      "source": "./src/index.ts"
+      "import": "./dist/index.mjs"
     }
   },
   "scripts": {
