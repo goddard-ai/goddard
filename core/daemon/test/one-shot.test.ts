@@ -7,16 +7,19 @@ const { createDaemonIpcClientMock, sendMock } = vi.hoisted(() => ({
   })),
 }))
 
-vi.mock("@goddard-ai/daemon-client", async (importOriginal): Promise<typeof import("@goddard-ai/daemon-client")> => {
-  const actual = await importOriginal<typeof import("@goddard-ai/daemon-client")>()
-  return {
-    ...actual,
-    createDaemonIpcClient: createDaemonIpcClientMock,
-    readSocketPathFromDaemonUrl: vi.fn<typeof actual.readSocketPathFromDaemonUrl>(
-      (value: string) => value,
-    ),
-  }
-})
+vi.mock(
+  "@goddard-ai/daemon-client",
+  async (importOriginal): Promise<typeof import("@goddard-ai/daemon-client")> => {
+    const actual = await importOriginal<typeof import("@goddard-ai/daemon-client")>()
+    return {
+      ...actual,
+      createDaemonIpcClient: createDaemonIpcClientMock,
+      readSocketPathFromDaemonUrl: vi.fn<typeof actual.readSocketPathFromDaemonUrl>(
+        (value: string) => value,
+      ),
+    }
+  },
+)
 
 import { runOneShot } from "../src/one-shot.ts"
 

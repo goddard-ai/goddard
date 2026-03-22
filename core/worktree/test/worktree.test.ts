@@ -6,15 +6,21 @@ import { Worktree } from "../src/index.ts"
 import { defaultPlugin } from "../src/default-plugin.ts"
 import type { WorktreePlugin } from "../src/types.ts"
 
-vi.mock("node:child_process", async (importOriginal): Promise<typeof import("node:child_process")> => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-  spawnSync: vi.fn<typeof childProcess.spawnSync>(),
-}))
+vi.mock(
+  "node:child_process",
+  async (importOriginal): Promise<typeof import("node:child_process")> => ({
+    ...(await importOriginal<typeof import("node:child_process")>()),
+    spawnSync: vi.fn<typeof childProcess.spawnSync>(),
+  }),
+)
 
-vi.mock("node:fs", async (importOriginal): Promise<typeof import("node:fs")> => ({
-  ...(await importOriginal<typeof import("node:fs")>()),
-  existsSync: vi.fn<typeof fs.existsSync>(() => false),
-}))
+vi.mock(
+  "node:fs",
+  async (importOriginal): Promise<typeof import("node:fs")> => ({
+    ...(await importOriginal<typeof import("node:fs")>()),
+    existsSync: vi.fn<typeof fs.existsSync>(() => false),
+  }),
+)
 
 function createPlugin(name: string, overrides: Partial<WorktreePlugin> = {}): WorktreePlugin {
   return {

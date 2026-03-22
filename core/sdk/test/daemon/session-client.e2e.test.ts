@@ -12,151 +12,164 @@ const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = 
   permissionsByToken: new Map<string, any>(),
 }))
 
-vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
-  const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+vi.mock(
+  "@goddard-ai/storage",
+  async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
+    const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
 
-  return {
-    ...actual,
-    SessionStorage: {
-      ...actual.SessionStorage,
-    create: vi.fn(async (record: any) => {
-      const now = new Date()
-      sessions.set(record.id, {
-        ...record,
-        createdAt: now,
-        updatedAt: now,
-        errorMessage: null,
-        blockedReason: null,
-        initiative: null,
-        lastAgentMessage: null,
-      })
-    }),
-    list: vi.fn(async () => Array.from(sessions.values())),
-    listRecent: vi.fn(
-      async ({ limit, cursor }: { limit: number; cursor?: { updatedAt: Date; id: string } }) => {
-        return Array.from(sessions.values())
-          .sort((left: any, right: any) => {
-            const updatedAtDiff = right.updatedAt.valueOf() - left.updatedAt.valueOf()
-            if (updatedAtDiff !== 0) {
-              return updatedAtDiff
-            }
-
-            return right.id.localeCompare(left.id)
+    return {
+      ...actual,
+      SessionStorage: {
+        ...actual.SessionStorage,
+        create: vi.fn(async (record: any) => {
+          const now = new Date()
+          sessions.set(record.id, {
+            ...record,
+            createdAt: now,
+            updatedAt: now,
+            errorMessage: null,
+            blockedReason: null,
+            initiative: null,
+            lastAgentMessage: null,
           })
-          .filter((record: any) => {
-            if (!cursor) {
-              return true
-            }
+        }),
+        list: vi.fn(async () => Array.from(sessions.values())),
+        listRecent: vi.fn(
+          async ({
+            limit,
+            cursor,
+          }: {
+            limit: number
+            cursor?: { updatedAt: Date; id: string }
+          }) => {
+            return Array.from(sessions.values())
+              .sort((left: any, right: any) => {
+                const updatedAtDiff = right.updatedAt.valueOf() - left.updatedAt.valueOf()
+                if (updatedAtDiff !== 0) {
+                  return updatedAtDiff
+                }
 
-            return (
-              record.updatedAt.valueOf() < cursor.updatedAt.valueOf() ||
-              (record.updatedAt.valueOf() === cursor.updatedAt.valueOf() && record.id < cursor.id)
-            )
+                return right.id.localeCompare(left.id)
+              })
+              .filter((record: any) => {
+                if (!cursor) {
+                  return true
+                }
+
+                return (
+                  record.updatedAt.valueOf() < cursor.updatedAt.valueOf() ||
+                  (record.updatedAt.valueOf() === cursor.updatedAt.valueOf() &&
+                    record.id < cursor.id)
+                )
+              })
+              .slice(0, limit)
+          },
+        ),
+        get: vi.fn(async (id: string) => sessions.get(id) ?? null),
+        update: vi.fn(async (id: string, data: any) => {
+          const existing = sessions.get(id)
+          if (!existing || typeof existing !== "object" || existing === null) {
+            return
+          }
+          sessions.set(id, {
+            ...existing,
+            ...data,
+            updatedAt: new Date(),
           })
-          .slice(0, limit)
+        }),
       },
-    ),
-    get: vi.fn(async (id: string) => sessions.get(id) ?? null),
-    update: vi.fn(async (id: string, data: any) => {
-      const existing = sessions.get(id)
-      if (!existing || typeof existing !== "object" || existing === null) {
-        return
-      }
-      sessions.set(id, {
-        ...existing,
-        ...data,
-        updatedAt: new Date(),
-      })
-    }),
+      SessionStateStorage: {
+        ...actual.SessionStateStorage,
+        create: vi.fn(async (record: any) => {
+          const now = new Date().toISOString()
+          const created = { ...record, createdAt: now, updatedAt: now }
+          sessionStates.set(record.sessionId, created)
+          return created
+        }),
+        list: vi.fn(async () => Array.from(sessionStates.values())),
+        get: vi.fn(async (sessionId: string) => sessionStates.get(sessionId) ?? null),
+        update: vi.fn(async (sessionId: string, data: any) => {
+          const existing = sessionStates.get(sessionId)
+          if (!existing) {
+            return null
+          }
+          const updated = { ...existing, ...data, updatedAt: new Date().toISOString() }
+          sessionStates.set(sessionId, updated)
+          return updated
+        }),
+        appendHistory: vi.fn(async (sessionId: string, message: any) => {
+          const existing = sessionStates.get(sessionId)
+          if (!existing) {
+            return null
+          }
+          const updated = {
+            ...existing,
+            history: [...existing.history, message],
+            updatedAt: new Date().toISOString(),
+          }
+          sessionStates.set(sessionId, updated)
+          return updated
+        }),
+        appendDiagnostic: vi.fn(async (sessionId: string, event: any) => {
+          const existing = sessionStates.get(sessionId)
+          if (!existing) {
+            return null
+          }
+          const updated = {
+            ...existing,
+            diagnostics: [...existing.diagnostics, event],
+            updatedAt: new Date().toISOString(),
+          }
+          sessionStates.set(sessionId, updated)
+          return updated
+        }),
+        remove: vi.fn(async (sessionId: string) => {
+          sessionStates.delete(sessionId)
+        }),
+      },
+    }
   },
-  SessionStateStorage: {
-      ...actual.SessionStateStorage,
-    create: vi.fn(async (record: any) => {
-      const now = new Date().toISOString()
-      const created = { ...record, createdAt: now, updatedAt: now }
-      sessionStates.set(record.sessionId, created)
-      return created
-    }),
-    list: vi.fn(async () => Array.from(sessionStates.values())),
-    get: vi.fn(async (sessionId: string) => sessionStates.get(sessionId) ?? null),
-    update: vi.fn(async (sessionId: string, data: any) => {
-      const existing = sessionStates.get(sessionId)
-      if (!existing) {
-        return null
-      }
-      const updated = { ...existing, ...data, updatedAt: new Date().toISOString() }
-      sessionStates.set(sessionId, updated)
-      return updated
-    }),
-    appendHistory: vi.fn(async (sessionId: string, message: any) => {
-      const existing = sessionStates.get(sessionId)
-      if (!existing) {
-        return null
-      }
-      const updated = {
-        ...existing,
-        history: [...existing.history, message],
-        updatedAt: new Date().toISOString(),
-      }
-      sessionStates.set(sessionId, updated)
-      return updated
-    }),
-    appendDiagnostic: vi.fn(async (sessionId: string, event: any) => {
-      const existing = sessionStates.get(sessionId)
-      if (!existing) {
-        return null
-      }
-      const updated = {
-        ...existing,
-        diagnostics: [...existing.diagnostics, event],
-        updatedAt: new Date().toISOString(),
-      }
-      sessionStates.set(sessionId, updated)
-      return updated
-    }),
-    remove: vi.fn(async (sessionId: string) => {
-      sessionStates.delete(sessionId)
-    }),
-  },
-  }
-})
+)
 
-vi.mock("@goddard-ai/storage/session-permissions", async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => {
-  const actual = await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()
+vi.mock(
+  "@goddard-ai/storage/session-permissions",
+  async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => {
+    const actual = await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()
 
-  return {
-    ...actual,
-    SessionPermissionsStorage: {
-      ...actual.SessionPermissionsStorage,
-    create: vi.fn(async (record: any) => {
-      const created = { ...record, createdAt: new Date().toISOString() }
-      permissionsBySessionId.set(record.sessionId, created)
-      permissionsByToken.set(record.token, created)
-      return created
-    }),
-    get: vi.fn(async (sessionId: string) => permissionsBySessionId.get(sessionId) ?? null),
-    getByToken: vi.fn(async (token: string) => permissionsByToken.get(token) ?? null),
-    list: vi.fn(async () => Array.from(permissionsBySessionId.values())),
-    addAllowedPr: vi.fn(async (sessionId: string, prNumber: number) => {
-      const existing = permissionsBySessionId.get(sessionId)
-      if (!existing) {
-        return
-      }
-      if (!existing.allowedPrNumbers.includes(prNumber)) {
-        existing.allowedPrNumbers = [...existing.allowedPrNumbers, prNumber]
-      }
-    }),
-    revoke: vi.fn(async (sessionId: string) => {
-      const existing = permissionsBySessionId.get(sessionId)
-      if (!existing) {
-        return
-      }
-      permissionsBySessionId.delete(sessionId)
-      permissionsByToken.delete(existing.token)
-    }),
+    return {
+      ...actual,
+      SessionPermissionsStorage: {
+        ...actual.SessionPermissionsStorage,
+        create: vi.fn(async (record: any) => {
+          const created = { ...record, createdAt: new Date().toISOString() }
+          permissionsBySessionId.set(record.sessionId, created)
+          permissionsByToken.set(record.token, created)
+          return created
+        }),
+        get: vi.fn(async (sessionId: string) => permissionsBySessionId.get(sessionId) ?? null),
+        getByToken: vi.fn(async (token: string) => permissionsByToken.get(token) ?? null),
+        list: vi.fn(async () => Array.from(permissionsBySessionId.values())),
+        addAllowedPr: vi.fn(async (sessionId: string, prNumber: number) => {
+          const existing = permissionsBySessionId.get(sessionId)
+          if (!existing) {
+            return
+          }
+          if (!existing.allowedPrNumbers.includes(prNumber)) {
+            existing.allowedPrNumbers = [...existing.allowedPrNumbers, prNumber]
+          }
+        }),
+        revoke: vi.fn(async (sessionId: string) => {
+          const existing = permissionsBySessionId.get(sessionId)
+          if (!existing) {
+            return
+          }
+          permissionsBySessionId.delete(sessionId)
+          permissionsByToken.delete(existing.token)
+        }),
+      },
+    }
   },
-  }
-})
+)
 
 const cleanup: Array<() => Promise<void>> = []
 

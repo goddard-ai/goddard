@@ -27,21 +27,27 @@ const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(()
   })),
 }))
 
-vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
-  const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
-  return {
-    ...actual,
-    SessionStorage: {
-      ...actual.SessionStorage,
-      update: updateMock,
-    },
-  }
-})
+vi.mock(
+  "@goddard-ai/storage",
+  async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
+    const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+    return {
+      ...actual,
+      SessionStorage: {
+        ...actual.SessionStorage,
+        update: updateMock,
+      },
+    }
+  },
+)
 
-vi.mock("@goddard-ai/daemon-client", async (importOriginal): Promise<typeof import("@goddard-ai/daemon-client")> => ({
-  ...(await importOriginal<typeof import("@goddard-ai/daemon-client")>()),
-  createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
-}))
+vi.mock(
+  "@goddard-ai/daemon-client",
+  async (importOriginal): Promise<typeof import("@goddard-ai/daemon-client")> => ({
+    ...(await importOriginal<typeof import("@goddard-ai/daemon-client")>()),
+    createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
+  }),
+)
 
 import { declareInitiative, main, reportBlocker, reportCompleted } from "../src/bin/goddard-tool.ts"
 

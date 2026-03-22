@@ -291,7 +291,10 @@ async function spawnAgentProcess(
   const extraEnv: Record<string, string> = {}
   if (agentId === "claude-acp") {
     try {
-      const claudePath = execSync("which claude", { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim()
+      const claudePath = execSync("which claude", {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim()
       if (claudePath) {
         extraEnv["CLAUDE_CODE_EXECUTABLE"] = claudePath
       }

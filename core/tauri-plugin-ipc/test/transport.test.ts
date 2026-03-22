@@ -4,21 +4,27 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
 // Mock the Tauri APIs
-vi.mock("@tauri-apps/api/core", async (importOriginal): Promise<typeof import("@tauri-apps/api/core")> => {
-  const actual = await importOriginal<typeof import("@tauri-apps/api/core")>()
-  return {
-    ...actual,
-    invoke: vi.fn<typeof actual.invoke>(),
-  }
-})
+vi.mock(
+  "@tauri-apps/api/core",
+  async (importOriginal): Promise<typeof import("@tauri-apps/api/core")> => {
+    const actual = await importOriginal<typeof import("@tauri-apps/api/core")>()
+    return {
+      ...actual,
+      invoke: vi.fn<typeof actual.invoke>(),
+    }
+  },
+)
 
-vi.mock("@tauri-apps/api/event", async (importOriginal): Promise<typeof import("@tauri-apps/api/event")> => {
-  const actual = await importOriginal<typeof import("@tauri-apps/api/event")>()
-  return {
-    ...actual,
-    listen: vi.fn<typeof actual.listen>(),
-  }
-})
+vi.mock(
+  "@tauri-apps/api/event",
+  async (importOriginal): Promise<typeof import("@tauri-apps/api/event")> => {
+    const actual = await importOriginal<typeof import("@tauri-apps/api/event")>()
+    return {
+      ...actual,
+      listen: vi.fn<typeof actual.listen>(),
+    }
+  },
+)
 
 describe("createTauriTransport", () => {
   beforeEach(() => {

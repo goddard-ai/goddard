@@ -38,29 +38,35 @@ const {
   updateWorkforceRequestMock: vi.fn(),
 }))
 
-vi.mock("@clack/prompts", async (importOriginal): Promise<typeof import("@clack/prompts")> => ({
-  ...(await importOriginal<typeof import("@clack/prompts")>()),
-  cancel: cancelMock,
-  intro: introMock,
-  isCancel: isCancelMock,
-  multiselect: multiselectMock,
-  outro: outroMock,
-}))
+vi.mock(
+  "@clack/prompts",
+  async (importOriginal): Promise<typeof import("@clack/prompts")> => ({
+    ...(await importOriginal<typeof import("@clack/prompts")>()),
+    cancel: cancelMock,
+    intro: introMock,
+    isCancel: isCancelMock,
+    multiselect: multiselectMock,
+    outro: outroMock,
+  }),
+)
 
-vi.mock("@goddard-ai/sdk/node", async (importOriginal): Promise<typeof import("@goddard-ai/sdk/node")> => ({
-  ...(await importOriginal<typeof import("@goddard-ai/sdk/node")>()),
-  cancelWorkforceRequest: cancelWorkforceRequestMock,
-  createWorkforceRequest: createWorkforceRequestMock,
-  discoverWorkforceInitCandidates: discoverWorkforceInitCandidatesMock,
-  getWorkforce: getWorkforceMock,
-  initializeWorkforce: initializeWorkforceMock,
-  listWorkforces: listWorkforcesMock,
-  resolveRepositoryRoot: resolveRepositoryRootMock,
-  startWorkforce: startWorkforceMock,
-  stopWorkforce: stopWorkforceMock,
-  truncateWorkforce: truncateWorkforceMock,
-  updateWorkforceRequest: updateWorkforceRequestMock,
-}))
+vi.mock(
+  "@goddard-ai/sdk/node",
+  async (importOriginal): Promise<typeof import("@goddard-ai/sdk/node")> => ({
+    ...(await importOriginal<typeof import("@goddard-ai/sdk/node")>()),
+    cancelWorkforceRequest: cancelWorkforceRequestMock,
+    createWorkforceRequest: createWorkforceRequestMock,
+    discoverWorkforceInitCandidates: discoverWorkforceInitCandidatesMock,
+    getWorkforce: getWorkforceMock,
+    initializeWorkforce: initializeWorkforceMock,
+    listWorkforces: listWorkforcesMock,
+    resolveRepositoryRoot: resolveRepositoryRootMock,
+    startWorkforce: startWorkforceMock,
+    stopWorkforce: stopWorkforceMock,
+    truncateWorkforce: truncateWorkforceMock,
+    updateWorkforceRequest: updateWorkforceRequestMock,
+  }),
+)
 
 beforeEach(() => {
   cancelMock.mockReset()

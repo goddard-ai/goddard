@@ -4,10 +4,13 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, test, vi } from "vitest"
 
-vi.mock("../src/daemon/index.ts", async (importOriginal): Promise<typeof import("../src/daemon/index.ts")> => ({
-  ...(await importOriginal<typeof import("../src/daemon/index.ts")>()),
-  runAgent: vi.fn(),
-}))
+vi.mock(
+  "../src/daemon/index.ts",
+  async (importOriginal): Promise<typeof import("../src/daemon/index.ts")> => ({
+    ...(await importOriginal<typeof import("../src/daemon/index.ts")>()),
+    runAgent: vi.fn(),
+  }),
+)
 
 import {
   buildActionSessionParams,
