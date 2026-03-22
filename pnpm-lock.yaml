@@ -176,10 +176,6 @@ importers:
       '@goddard-ai/schema':
         specifier: workspace:^
         version: link:../schema
-    devDependencies:
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
 
   core/daemon:
     dependencies:
@@ -234,20 +230,12 @@ importers:
       '@goddard-ai/storage':
         specifier: workspace:^
         version: link:../../storage
-    devDependencies:
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
 
   core/ipc:
     dependencies:
       zod:
         specifier: ^4.3.6
         version: 4.3.6
-    devDependencies:
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
 
   core/schema:
     dependencies:
@@ -316,9 +304,6 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
 
   core/tauri-plugin-ipc:
     dependencies:
@@ -329,17 +314,9 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1
 
-  core/tree-kill:
-    devDependencies:
-      '@types/node':
-        specifier: ^25.5.0
-        version: 25.5.0
+  core/tree-kill: {}
 
-  core/worktree:
-    devDependencies:
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
+  core/worktree: {}
 
   workforce:
     dependencies:
@@ -352,10 +329,6 @@ importers:
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0
-    devDependencies:
-      '@types/node':
-        specifier: ^25.3.5
-        version: 25.3.5
 
 packages:
 
