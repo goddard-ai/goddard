@@ -1,8 +1,16 @@
 import { defineConfig } from "vitest/config"
-import { workspaceProjects } from "./vitest.workspace.ts"
+import { workspaceAliases } from "./vitest.aliases"
 
 export default defineConfig({
   test: {
-    projects: workspaceProjects,
+    environment: "node",
+    include: ["**/*.test.ts"],
+    globals: true,
+    silent: true,
+    reporters: ["default"],
+  },
+  resolve: {
+    alias: workspaceAliases,
+    conditions: ["source", "import", "default"],
   },
 })
