@@ -96,3 +96,5 @@ export function mergeLoopConfigLayers(
 ): GoddardLoopConfigDocument {
   return LoopConfig.parse(mergeConfigLayers<GoddardLoopConfigDocument>(layers))
 }
+
+export * from "./agent-resolver.js"

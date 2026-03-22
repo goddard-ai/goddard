@@ -5,6 +5,7 @@ import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { runAgent } from "../daemon/session/client.js"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import { readActionConfig, readMergedRootConfig } from "./config.js"
 
 /** Runtime overrides accepted when invoking a named action. */
@@ -16,18 +17,6 @@ export type ResolvedAgentAction = {
   config: GoddardActionConfigDocument
   path: string
 }
-
-const DEFAULT_AGENT = {
-  id: "pi-coding-agent",
-  name: "PI Coding Agent",
-  version: "0.0.0",
-  description: "Default PI coding agent distribution.",
-  distribution: {
-    npx: {
-      package: "@mariozechner/pi-coding-agent",
-    },
-  },
-} as const
 
 function detectLegacyFrontmatter(content: string, path: string): void {
   if (content.startsWith("---\n") || content.startsWith("---\r\n")) {
@@ -120,11 +109,13 @@ export function buildActionSessionParams(
   action: ResolvedAgentAction,
   overrides?: AgentActionConfig,
 ): SessionParams & { oneShot: true } {
+  const mergedConfig = toRuntimeActionConfig(action.config)
+
   return {
-    agent: DEFAULT_AGENT,
+    agent: mergedConfig.agent ?? "pi-acp",
     cwd: process.cwd(),
     mcpServers: [],
-    ...toRuntimeActionConfig(action.config),
+    ...mergedConfig,
     ...overrides,
     oneShot: true as const,
     initialPrompt: action.prompt,
@@ -147,12 +138,16 @@ export async function resolveAction(
     )
   }
 
+  const mergedConfig = mergeActionConfigLayers(
+    ensureActionConfig(config.actions, "root config"),
+    action.config,
+  )
+
+  mergedConfig.agent = mergedConfig.agent ?? (await resolveDefaultAgent(config, "actions"))
+
   return {
     ...action,
-    config: mergeActionConfigLayers(
-      ensureActionConfig(config.actions, "root config"),
-      action.config,
-    ),
+    config: mergedConfig,
   }
 }
 

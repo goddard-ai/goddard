@@ -1,5 +1,14 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
-import { startDaemonServer, type DaemonServer } from "@goddard-ai/daemon/ipc"
+import { startDaemonServer, type DaemonServer } from "../../../daemon/src/ipc.js"
+import { vi } from "vitest"
+
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"

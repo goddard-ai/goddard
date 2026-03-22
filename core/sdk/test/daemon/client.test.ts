@@ -24,6 +24,14 @@ vi.mock("@goddard-ai/daemon-client", () => ({
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
 }))
 
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 vi.mock("@agentclientprotocol/sdk", () => ({
   AGENT_METHODS: {
     session_prompt: "session/prompt",

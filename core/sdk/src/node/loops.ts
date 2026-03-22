@@ -11,6 +11,7 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import { readLoopConfig, readMergedRootConfig } from "./config.js"
 import {
   type LoopClientOptions,
@@ -134,9 +135,15 @@ export async function resolveLoop(
     )
   }
 
+  const mergedConfig = mergeLoopConfigLayers(config.loops, loop.config)
+  const sessionConfig = mergedConfig.session ?? {}
+
+  sessionConfig.agent = sessionConfig.agent ?? (await resolveDefaultAgent(config, "loops"))
+  mergedConfig.session = sessionConfig
+
   return {
     ...loop,
-    config: mergeLoopConfigLayers(config.loops, loop.config),
+    config: mergedConfig,
   }
 }
 

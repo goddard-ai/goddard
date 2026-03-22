@@ -1,10 +1,19 @@
-import { startDaemonServer, type DaemonServer } from "@goddard-ai/daemon/ipc"
+import { startDaemonServer, type DaemonServer } from "../../daemon/src/ipc.js"
 import * as fs from "node:fs/promises"
 import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, assert, test, vi } from "vitest"
 import { runAgent } from "../src/daemon/session/client.ts"
+
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({

@@ -186,6 +186,9 @@ importers:
       '@goddard-ai/backend-client':
         specifier: workspace:^
         version: link:../backend/client
+      '@goddard-ai/config':
+        specifier: workspace:^
+        version: link:../config
       '@goddard-ai/daemon-client':
         specifier: workspace:^
         version: link:client
@@ -201,6 +204,9 @@ importers:
       cmd-ts:
         specifier: ^0.15.0
         version: 0.15.0
+      cron-parser:
+        specifier: ^5.5.0
+        version: 5.5.0
       kleur:
         specifier: ^4.1.5
         version: 4.1.5

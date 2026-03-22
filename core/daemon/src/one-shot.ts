@@ -1,4 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { spawnSync } from "node:child_process"
@@ -126,7 +127,7 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
     readSocketPathFromDaemonUrl(input.daemonUrl)
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
     await client.send("sessionCreate", {
-      agent: "pi",
+      agent: await resolveDefaultAgent(),
       cwd: worktreeDir,
       mcpServers: [],
       initialPrompt: input.prompt,

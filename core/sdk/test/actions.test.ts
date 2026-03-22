@@ -8,6 +8,14 @@ vi.mock("../src/daemon/index.ts", () => ({
   runAgent: vi.fn(),
 }))
 
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 import {
   buildActionSessionParams,
   resolveAction,
@@ -50,6 +58,7 @@ test("resolveAction applies local root defaults to prompt-only actions", async (
 
   assert.equal(action.prompt, "Review the current diff carefully.\n")
   assert.deepEqual(action.config, {
+    agent: "pi-acp",
     cwd: "/tmp/local-root",
     systemPrompt: "Use the repository checklist.",
   })
@@ -89,6 +98,7 @@ test("resolveAction merges root defaults with packaged config.json", async () =>
 
   assert.equal(action.prompt, "Ship the change.\n")
   assert.deepEqual(action.config, {
+    agent: "pi-acp",
     systemPrompt: "Use repository defaults.",
     cwd: "/tmp/entity-override",
     env: {
@@ -130,6 +140,7 @@ test("resolveAction applies local root defaults to a globally defined action", a
 
   assert.equal(action.prompt, "Use the global action.\n")
   assert.deepEqual(action.config, {
+    agent: "pi-acp",
     cwd: "/tmp/local-root",
     systemPrompt: "Use the global defaults.",
   })

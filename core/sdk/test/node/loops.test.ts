@@ -12,6 +12,14 @@ const mockedDaemonLoops = vi.hoisted(() => ({
 
 vi.mock("../../src/daemon/loops.ts", () => mockedDaemonLoops)
 
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 import { buildLoopStartRequest, resolveLoop, startNamedLoop } from "../../src/node/loops.ts"
 
 const originalHome = process.env.HOME
