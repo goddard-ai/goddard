@@ -1,6 +1,6 @@
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { join } from "node:path"
-import { getDefaultDaemonSocketPath } from "./ipc/socket.js"
+import { getDefaultDaemonSocketPath } from "./ipc/socket.ts"
 
 /** Environment variables recognized by the daemon runtime. */
 export type DaemonRuntimeEnv = Record<string, string | undefined>

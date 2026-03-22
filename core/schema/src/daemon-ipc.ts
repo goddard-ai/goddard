@@ -1,13 +1,6 @@
 import { $type } from "@goddard-ai/ipc"
 import { z } from "zod"
-import { DaemonSessionIdParams } from "./common/params.js"
-import {
-  GetDaemonLoopRequest,
-  ShutdownDaemonLoopRequest,
-  StartDaemonLoopRequest,
-} from "./daemon/loops.js"
-import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
-import { CreateDaemonSessionRequest, ListDaemonSessionsRequest } from "./daemon/sessions.js"
+import { DaemonSessionIdParams } from "./common/params.ts"
 import type {
   CreateDaemonSessionResponse,
   DaemonHealth,
@@ -24,10 +17,17 @@ import type {
   ShutdownDaemonLoopResponse,
   ShutdownDaemonSessionResponse,
   ShutdownDaemonWorkforceResponse,
-  StartDaemonWorkforceResponse,
   StartDaemonLoopResponse,
+  StartDaemonWorkforceResponse,
   SubmitPrDaemonResponse,
-} from "./daemon.js"
+} from "./daemon.ts"
+import {
+  GetDaemonLoopRequest,
+  ShutdownDaemonLoopRequest,
+  StartDaemonLoopRequest,
+} from "./daemon/loops.ts"
+import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.ts"
+import { CreateDaemonSessionRequest, ListDaemonSessionsRequest } from "./daemon/sessions.ts"
 import {
   CancelDaemonWorkforceRequest,
   CreateDaemonWorkforceRequestRequest,
@@ -38,7 +38,7 @@ import {
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
   UpdateDaemonWorkforceRequest,
-} from "./workforce/requests.js"
+} from "./workforce/requests.ts"
 
 /** IPC contract map shared by the daemon client and server. */
 export const daemonIpcSchema = {

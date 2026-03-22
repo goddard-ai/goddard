@@ -14,7 +14,7 @@ export {
   truncateDaemonWorkforce as truncateWorkforce,
   updateDaemonWorkforceRequest as updateWorkforceRequest,
   type WorkforceClientOptions,
-} from "../daemon/workforce.js"
+} from "../daemon/workforce.ts"
 
 const execFileAsync = promisify(execFile)
 

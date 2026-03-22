@@ -5,7 +5,7 @@ import type {
   WorkforceTruncateEvent,
 } from "@goddard-ai/schema/workforce"
 import { appendFile, readFile } from "node:fs/promises"
-import { buildWorkforcePaths } from "./paths.js"
+import { buildWorkforcePaths } from "./paths.ts"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && Array.isArray(value) === false

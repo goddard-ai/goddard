@@ -7,12 +7,12 @@ import type {
   WorkforceRequestIntent,
   WorkforceRequestRecord,
 } from "@goddard-ai/schema/workforce"
-import { v7 as uuidv7 } from "uuid"
 import { join } from "node:path"
 import { concat, dedent } from "radashi"
-import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.js"
-import type { SessionManager } from "../session/index.js"
-import { ensureWorkforceFiles, readWorkforceConfig } from "./config.js"
+import { v7 as uuidv7 } from "uuid"
+import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.ts"
+import type { SessionManager } from "../session/index.ts"
+import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
 import {
   appendWorkforceLedgerEvent,
   applyWorkforceEvent,
@@ -20,8 +20,8 @@ import {
   readWorkforceLedger,
   replayWorkforceProjection,
   summarizeWorkforceProjection,
-} from "./ledger.js"
-import { buildWorkforcePaths } from "./paths.js"
+} from "./ledger.ts"
+import { buildWorkforcePaths } from "./paths.ts"
 
 const logger = createDaemonLogger()
 
@@ -49,14 +49,6 @@ export interface WorkforceRuntimeDeps {
   sessionManager: SessionManager
   runSession?: WorkforceSessionRunner
 }
-
-/** One workforce ledger event before the runtime assigns its durable event id. */
-type WorkforcePendingLedgerEvent = {
-  [TType in WorkforceLedgerEvent["type"]]: Omit<
-    Extract<WorkforceLedgerEvent, { type: TType }>,
-    "id"
-  > & { id?: string }
-}[WorkforceLedgerEvent["type"]]
 
 /** Collects the most relevant recent ledger activity for the agent about to handle a request. */
 function buildRecentActivity(

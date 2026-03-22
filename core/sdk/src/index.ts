@@ -1,1 +1,1 @@
-export * from "./sdk.js"
+export * from "./sdk.ts"

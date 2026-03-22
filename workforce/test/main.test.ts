@@ -44,7 +44,7 @@ vi.mock(
     ...(await importOriginal<typeof import("@clack/prompts")>()),
     cancel: cancelMock,
     intro: introMock,
-    isCancel: isCancelMock,
+    isCancel: isCancelMock as unknown as (value: unknown) => value is symbol,
     multiselect: multiselectMock,
     outro: outroMock,
   }),

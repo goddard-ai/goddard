@@ -1,11 +1,11 @@
 import { $type, route } from "rouzer"
-import { BearerHeaders } from "../../common/auth.js"
+import { BearerHeaders } from "../../common/auth.ts"
 import {
   CreatePrInput,
   ManagedPrQuery,
   ReplyPrInput,
   type PullRequestRecord,
-} from "../pull-requests.js"
+} from "../pull-requests.ts"
 
 /** Creates a managed pull request through the backend. */
 export const prCreateRoute = route("pr/create", {

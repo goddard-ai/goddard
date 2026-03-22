@@ -5,12 +5,12 @@ import type {
   GetDaemonSessionResponse,
   ListDaemonSessionsResponse,
   ShutdownDaemonSessionResponse,
-} from "../../daemon.js"
+} from "../../daemon.ts"
 import {
   CreateDaemonSessionRequest,
   DaemonSessionPathParams,
   ListDaemonSessionsRequest,
-} from "../sessions.js"
+} from "../sessions.ts"
 
 /** Fetches one page of daemon-managed sessions in stable recency order. */
 export const sessionListRoute = route("sessions", {

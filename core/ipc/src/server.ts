@@ -7,7 +7,7 @@ import {
   type ResType,
   type StrName,
   type StrPayload,
-} from "./schema.js"
+} from "./schema.ts"
 
 export type Handlers<S extends AppSchema> = {
   [K in ReqName<S>]: (payload: ReqPayload<S, K>) => Promise<ResType<S, K>> | ResType<S, K>

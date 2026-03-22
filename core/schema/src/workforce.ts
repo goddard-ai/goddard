@@ -1,7 +1,7 @@
-import type { AgentDistribution } from "./session-server.js"
-import type { WorkforceRequestIntent } from "./workforce/requests.js"
+import type { AgentDistribution } from "./session-server.ts"
+import type { WorkforceRequestIntent } from "./workforce/requests.ts"
 
-export type { WorkforceRequestIntent } from "./workforce/requests.js"
+export type { WorkforceRequestIntent } from "./workforce/requests.ts"
 
 /** Supported workforce agent roles within one repository-owned runtime. */
 export type WorkforceAgentRole = "root" | "domain"

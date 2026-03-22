@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import * as fs from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { getGoddardGlobalDir } from "./paths.js"
+import { getGoddardGlobalDir } from "./paths.ts"
 
 /** Durable connectivity summary for a daemon session across daemon restarts. */
 export type SessionConnectionMode = "live" | "history" | "none"

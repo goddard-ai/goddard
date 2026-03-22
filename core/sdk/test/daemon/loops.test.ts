@@ -39,7 +39,7 @@ describe("daemon loop client", () => {
       .mockResolvedValueOnce({ success: true })
 
     const { listDaemonLoops, shutdownDaemonLoop, startDaemonLoop } =
-      await import("../../src/daemon/loops.js")
+      await import("../../src/daemon/loops.ts")
 
     await expect(
       startDaemonLoop({

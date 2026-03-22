@@ -86,7 +86,7 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-1", "acp-session-1"),
     })
 
-    const { runAgent } = await import("../../src/daemon/session/client.js")
+    const { runAgent } = await import("../../src/daemon/session/client.ts")
 
     await expect(
       runAgent({
@@ -120,7 +120,7 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-5", "acp-session-5"),
     })
 
-    const { runAgent } = await import("../../src/daemon/session/client.js")
+    const { runAgent } = await import("../../src/daemon/session/client.ts")
 
     await expect(
       runAgent({
@@ -170,7 +170,7 @@ describe("runAgent", () => {
         success: true,
       })
 
-    const { runAgent } = await import("../../src/daemon/session/client.js")
+    const { runAgent } = await import("../../src/daemon/session/client.ts")
 
     const session = await runAgent({
       sessionId: "daemon-session-2",
@@ -199,7 +199,7 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-3", "acp-session-3"),
     })
 
-    const { runAgent } = await import("../../src/daemon/session/client.js")
+    const { runAgent } = await import("../../src/daemon/session/client.ts")
 
     const explicitClient = {
       send: sendMock,
@@ -238,7 +238,7 @@ describe("runAgent", () => {
       },
     })
 
-    const { getDaemonSession } = await import("../../src/daemon/session/client.js")
+    const { getDaemonSession } = await import("../../src/daemon/session/client.ts")
     const session = await getDaemonSession("daemon-session-4")
 
     expect(session.connection.mode).toBe("history")
@@ -253,7 +253,7 @@ describe("runAgent", () => {
       hasMore: true,
     })
 
-    const { listDaemonSessions } = await import("../../src/daemon/session/client.js")
+    const { listDaemonSessions } = await import("../../src/daemon/session/client.ts")
     const response = await listDaemonSessions({ limit: 10, cursor: "cursor-0" })
 
     expect(response.sessions).toHaveLength(1)

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getSessionPermissionsPath } from "./paths.js"
+import { getSessionPermissionsPath } from "./paths.ts"
 
 export type SessionPermissionsRecord = {
   sessionId: string

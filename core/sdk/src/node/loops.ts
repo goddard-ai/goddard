@@ -11,14 +11,14 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { readLoopConfig, readMergedRootConfig } from "./config.js"
 import {
-  type LoopClientOptions,
   getDaemonLoop,
   listDaemonLoops,
   shutdownDaemonLoop,
   startDaemonLoop,
-} from "../daemon/loops.js"
+  type LoopClientOptions,
+} from "../daemon/loops.ts"
+import { readLoopConfig, readMergedRootConfig } from "./config.ts"
 
 /** Runtime overrides accepted when starting one packaged daemon-owned loop. */
 export type AgentLoopRuntimeOverrides = {

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getManagedPrLocationsPath } from "./paths.js"
+import { getManagedPrLocationsPath } from "./paths.ts"
 
 /** Durable local checkout metadata for one managed pull request. */
 export type ManagedPrLocationRecord = {

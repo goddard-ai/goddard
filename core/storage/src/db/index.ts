@@ -4,8 +4,8 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator"
 import fs from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { getDatabasePath, getGoddardGlobalDir } from "../paths.js"
-import * as schema from "./schema.js"
+import { getDatabasePath, getGoddardGlobalDir } from "../paths.ts"
+import * as schema from "./schema.ts"
 
 /** Drizzle database handle for storage-owned SQLite persistence. */
 export type StorageDatabase = BetterSQLite3Database<typeof schema>

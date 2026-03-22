@@ -1,11 +1,11 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
 import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
-import { proportionalJitter } from "radashi"
 import { pathToFileURL } from "node:url"
-import { createDaemonLogger, createPayloadPreview } from "../logging.js"
-import type { SessionManager } from "../session/index.js"
-import { LoopRateLimiter } from "./rate-limiter.js"
+import { proportionalJitter } from "radashi"
+import { createDaemonLogger, createPayloadPreview } from "../logging.ts"
+import type { SessionManager } from "../session/index.ts"
+import { LoopRateLimiter } from "./rate-limiter.ts"
 
 const logger = createDaemonLogger()
 const LOOP_PAUSE_INTERVAL_MS = 24 * 60 * 60 * 1000

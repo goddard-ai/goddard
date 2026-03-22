@@ -6,8 +6,8 @@ import type {
   ListDaemonSessionsResponse,
 } from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
-import { resolveDaemonClient, type DaemonClientOptions } from "../client.js"
-import { AgentSession } from "./client-session.js"
+import { resolveDaemonClient, type DaemonClientOptions } from "../client.ts"
+import { AgentSession } from "./client-session.ts"
 
 /** Backward-compatible options for SDK helpers that create or attach daemon sessions. */
 export type RunAgentOptions = DaemonClientOptions

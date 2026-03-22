@@ -1,6 +1,6 @@
 import { z } from "zod"
-import { DaemonSessionMetadata } from "./daemon/session-metadata.js"
-import { AgentDistribution } from "./session-server.js"
+import { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
+import { AgentDistribution } from "./session-server.ts"
 
 const stringRecord = z.record(z.string(), z.string())
 

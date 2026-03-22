@@ -18,10 +18,10 @@ import {
   createPrViaApp,
   HttpError,
   postPrCommentViaApp,
-} from "../api/control-plane.js"
-import type { Env } from "../env.js"
-import { hashToInteger } from "../utils.js"
-import * as schema from "./schema.js"
+} from "../api/control-plane.ts"
+import type { Env } from "../env.ts"
+import { hashToInteger } from "../utils.ts"
+import * as schema from "./schema.ts"
 
 /** Turso-backed backend control plane used by the real backend worker. */
 export class TursoBackendControlPlane implements BackendControlPlane {

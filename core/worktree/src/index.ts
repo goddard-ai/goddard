@@ -1,8 +1,8 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { defaultPlugin } from "./default-plugin.js"
-import type { WorktreePlugin, WorktreeSetupOptions } from "./types.js"
-import { worktrunkPlugin } from "./worktrunk.js"
+import { defaultPlugin } from "./default-plugin.ts"
+import type { WorktreePlugin, WorktreeSetupOptions } from "./types.ts"
+import { worktrunkPlugin } from "./worktrunk.ts"
 
 export type { WorktreePlugin, WorktreeSetupOptions }
 

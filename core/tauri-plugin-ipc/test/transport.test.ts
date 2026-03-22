@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { createTauriTransport, IPC_STREAM_EVENT } from "../src/transport.js"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createTauriTransport, IPC_STREAM_EVENT } from "../src/transport.ts"
 
 // Mock the Tauri APIs
 vi.mock(

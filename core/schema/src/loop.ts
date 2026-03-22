@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import type { SessionParams } from "./session-server.js"
+import type { SessionParams } from "./session-server.ts"
 
 /** Session configuration allowed for loop-managed daemon sessions. */
 export type AgentLoopSessionParams = Omit<

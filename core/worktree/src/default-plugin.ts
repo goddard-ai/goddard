@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process"
-import * as fs from "node:fs"
-import * as path from "node:path"
-import * as os from "node:os"
 import * as crypto from "node:crypto"
-import type { WorktreePlugin, WorktreeSetupOptions } from "./types.js"
+import * as fs from "node:fs"
+import * as os from "node:os"
+import * as path from "node:path"
+import type { WorktreePlugin, WorktreeSetupOptions } from "./types.ts"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm"
-import { getDatabaseInstance } from "./db/index.js"
-import { loops } from "./db/schema.js"
+import { getDatabaseInstance } from "./db/index.ts"
+import { loops } from "./db/schema.ts"
 
 /** Full SQL row shape accepted when creating a durable loop record. */
 export type SQLLoopInsert = typeof loops.$inferInsert

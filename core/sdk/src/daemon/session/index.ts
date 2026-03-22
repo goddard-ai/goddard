@@ -1,2 +1,2 @@
-export * from "./client-session.js"
-export * from "./client.js"
+export * from "./client-session.ts"
+export * from "./client.ts"

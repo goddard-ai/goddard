@@ -1,6 +1,6 @@
 import { and, desc, eq, lt, or } from "drizzle-orm"
-import { getDatabaseInstance } from "./db/index.js"
-import { sessions } from "./db/schema.js"
+import { getDatabaseInstance } from "./db/index.ts"
+import { sessions } from "./db/schema.ts"
 
 /** Full SQL row shape accepted when creating a durable session record. */
 export type SQLSessionInsert = typeof sessions.$inferInsert

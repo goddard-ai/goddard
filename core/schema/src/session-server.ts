@@ -1,18 +1,18 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import type { ACPAdapterName } from "./acp-adapters.js"
-import type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
-import type { AgentDistribution } from "./session-server/agent-distribution.js"
+import type { ACPAdapterName } from "./acp-adapters.ts"
+import type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
+import type { AgentDistribution } from "./session-server/agent-distribution.ts"
 
 export {
   AgentBinaryDistribution,
+  agentBinaryPlatforms,
   AgentBinaryTarget,
   AgentDistribution,
   AgentDistributionEnv,
   AgentInstallationMethods,
   AgentPackageDistribution,
-  agentBinaryPlatforms,
-} from "./session-server/agent-distribution.js"
-export type { AgentBinaryPlatform } from "./session-server/agent-distribution.js"
+} from "./session-server/agent-distribution.ts"
+export type { AgentBinaryPlatform } from "./session-server/agent-distribution.ts"
 
 /** Structured worktree settings accepted when starting one daemon-backed session. */
 export interface SessionWorktreeOptions {

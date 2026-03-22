@@ -9,7 +9,7 @@ import {
   string,
   subcommands,
 } from "cmd-ts"
-import { runDaemon } from "./daemon.js"
+import { runDaemon } from "./daemon.ts"
 
 declare const __VERSION__: string
 

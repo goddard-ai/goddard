@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { FileTokenStorage } from "../src/token.js"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { FileTokenStorage } from "../src/token.ts"
 
 describe("FileTokenStorage", () => {
   let tmpDir: string

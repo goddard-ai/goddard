@@ -1,7 +1,7 @@
-export * from "./routes/auth.js"
-export * from "./routes/pull-requests.js"
-export * from "./routes/webhooks.js"
-export * from "./routes/stream.js"
+export * from "./routes/auth.ts"
+export * from "./routes/pull-requests.ts"
+export * from "./routes/stream.ts"
+export * from "./routes/webhooks.ts"
 
 export type {
   CreatePrInput,
@@ -9,4 +9,4 @@ export type {
   DeviceFlowStart,
   GitHubWebhookInput,
   ReplyPrInput,
-} from "../backend.js"
+} from "../backend.ts"

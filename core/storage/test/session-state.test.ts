@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { SessionStateStorage, SessionDiagnosticEvent } from "../src/session-state.js"
-import { getGoddardGlobalDir } from "../src/paths.js"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getGoddardGlobalDir } from "../src/paths.ts"
+import { SessionDiagnosticEvent, SessionStateStorage } from "../src/session-state.ts"
 
-vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.js")> => {
-  const actual = await importOriginal<typeof import("../src/paths.js")>()
+vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.ts")> => {
+  const actual = await importOriginal<typeof import("../src/paths.ts")>()
   return {
     ...actual,
     getGoddardGlobalDir: vi.fn<typeof actual.getGoddardGlobalDir>(),

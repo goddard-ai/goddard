@@ -1,6 +1,6 @@
-export * from "./routes/health.js"
-export * from "./routes/pull-requests.js"
-export * from "./routes/sessions.js"
+export * from "./routes/health.ts"
+export * from "./routes/pull-requests.ts"
+export * from "./routes/sessions.ts"
 
 export type {
   CreateDaemonSessionRequest,
@@ -8,4 +8,4 @@ export type {
   ListDaemonSessionsRequest,
   ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
-} from "../daemon.js"
+} from "../daemon.ts"

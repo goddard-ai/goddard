@@ -1,9 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
-import { ACPAdapterName } from "../acp-adapters.js"
-import { DaemonSessionIdParams } from "../common/params.js"
-import { AgentDistribution } from "../session-server/agent-distribution.js"
-import { DaemonSessionMetadata } from "./session-metadata.js"
+import { ACPAdapterName } from "../acp-adapters.ts"
+import { DaemonSessionIdParams } from "../common/params.ts"
+import { AgentDistribution } from "../session-server/agent-distribution.ts"
+import { DaemonSessionMetadata } from "./session-metadata.ts"
 
 const initialPrompt = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
 const SessionWorktreeOptions = z.object({

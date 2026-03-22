@@ -6,6 +6,12 @@ export type {
   ShutdownDaemonLoopRequest,
   StartDaemonLoopRequest,
 } from "@goddard-ai/schema/daemon"
+export {
+  getDaemonLoop,
+  listDaemonLoops,
+  shutdownDaemonLoop,
+  startDaemonLoop,
+} from "../daemon/loops.ts"
 export type {
   GoddardLoopConfigDocument,
   GoddardLoopRateLimitsConfig,
@@ -13,10 +19,4 @@ export type {
   Model,
   ResolvedLoopRateLimits,
   ResolvedLoopRetries,
-} from "./types.js"
-export {
-  getDaemonLoop,
-  listDaemonLoops,
-  shutdownDaemonLoop,
-  startDaemonLoop,
-} from "../daemon/loops.js"
+} from "./types.ts"

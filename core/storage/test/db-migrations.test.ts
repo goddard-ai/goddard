@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { getDatabaseInstance } from "../src/db/index.js"
-import { getDatabasePath } from "../src/paths.js"
+import { getDatabaseInstance } from "../src/db/index.ts"
+import { getDatabasePath } from "../src/paths.ts"
 
-vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.js")> => {
-  const actual = await importOriginal<typeof import("../src/paths.js")>()
+vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.ts")> => {
+  const actual = await importOriginal<typeof import("../src/paths.ts")>()
   return {
     ...actual,
     getDatabasePath: vi.fn<typeof actual.getDatabasePath>(),

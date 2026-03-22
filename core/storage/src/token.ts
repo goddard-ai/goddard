@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import type { TokenStorage } from "./interfaces.js"
-import { getGoddardGlobalDir } from "./paths.js"
+import type { TokenStorage } from "./interfaces.ts"
+import { getGoddardGlobalDir } from "./paths.ts"
 
 type ConfigFile = {
   token?: string

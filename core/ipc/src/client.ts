@@ -5,8 +5,8 @@ import {
   type ResType,
   type StrName,
   type StrPayload,
-} from "./schema.js"
-import { type IpcTransport } from "./transport.js"
+} from "./schema.ts"
+import { type IpcTransport } from "./transport.ts"
 
 export function createClient<S extends AppSchema>(schema: S, transport: IpcTransport) {
   async function send<K extends ReqName<S>>(

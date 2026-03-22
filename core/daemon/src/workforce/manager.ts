@@ -1,11 +1,11 @@
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
-import { createDaemonLogger } from "../logging.js"
-import { normalizeWorkforceRootDir } from "./paths.js"
+import { createDaemonLogger } from "../logging.ts"
+import { normalizeWorkforceRootDir } from "./paths.ts"
 import {
   WorkforceRuntime,
   type WorkforceActorContext,
   type WorkforceRuntimeDeps,
-} from "./runtime.js"
+} from "./runtime.ts"
 
 /** Supported daemon-side workforce mutations routed over IPC or agent tools. */
 export type WorkforceManagerMutation =

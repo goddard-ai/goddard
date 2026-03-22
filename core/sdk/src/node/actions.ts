@@ -4,8 +4,8 @@ import type { NewSessionParams, SessionParams } from "@goddard-ai/schema/session
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { runAgent } from "../daemon/session/client.js"
-import { readActionConfig, readMergedRootConfig } from "./config.js"
+import { runAgent } from "../daemon/session/client.ts"
+import { readActionConfig, readMergedRootConfig } from "./config.ts"
 
 /** Runtime overrides accepted when invoking a named action. */
 export type AgentActionConfig = Omit<Partial<NewSessionParams>, "oneShot" | "initialPrompt">

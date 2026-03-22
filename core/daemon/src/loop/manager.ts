@@ -1,8 +1,8 @@
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
 import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
-import { createDaemonLogger } from "../logging.js"
-import { normalizeLoopIdentity } from "./paths.js"
-import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.js"
+import { createDaemonLogger } from "../logging.ts"
+import { normalizeLoopIdentity } from "./paths.ts"
+import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
 
 const logger = createDaemonLogger()
 

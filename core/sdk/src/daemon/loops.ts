@@ -3,7 +3,7 @@ import type {
   DaemonLoopStatus,
   StartDaemonLoopRequest,
 } from "@goddard-ai/schema/daemon"
-import { resolveDaemonClient, type DaemonClientOptions } from "./client.js"
+import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
 
 /** Shared daemon connection options for loop lifecycle helpers. */
 export type LoopClientOptions = DaemonClientOptions

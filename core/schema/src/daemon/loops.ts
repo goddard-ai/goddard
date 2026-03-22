@@ -1,6 +1,6 @@
 import { z } from "zod"
-import { ResolvedLoopRateLimits, ResolvedLoopRetries } from "../config.js"
-import { CreateDaemonSessionRequest } from "./sessions.js"
+import { ResolvedLoopRateLimits, ResolvedLoopRetries } from "../config.ts"
+import { CreateDaemonSessionRequest } from "./sessions.ts"
 
 /** Fully resolved session settings used to start one daemon-owned loop runtime. */
 const DaemonLoopSessionConfig = CreateDaemonSessionRequest.omit({

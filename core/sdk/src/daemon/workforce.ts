@@ -1,6 +1,6 @@
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
 import type { WorkforceRequestIntent } from "@goddard-ai/schema/workforce"
-import { resolveDaemonClient, type DaemonClientOptions } from "./client.js"
+import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
 
 /** Shared daemon connection options for workforce lifecycle helpers. */
 export type WorkforceClientOptions = DaemonClientOptions

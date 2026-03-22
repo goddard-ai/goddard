@@ -1,21 +1,21 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
-import type { CreateDaemonSessionRequest, ListDaemonSessionsRequest } from "./daemon/sessions.js"
-import type { SessionStatus } from "./db.js"
-import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.js"
+import type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
+import type { CreateDaemonSessionRequest } from "./daemon/sessions.ts"
+import type { SessionStatus } from "./db.ts"
+import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.ts"
 
-export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.js"
 export type {
   GetDaemonLoopRequest,
   ShutdownDaemonLoopRequest,
   StartDaemonLoopRequest,
-} from "./daemon/loops.js"
-export type { DaemonSessionMetadata } from "./daemon/session-metadata.js"
+} from "./daemon/loops.ts"
+export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.ts"
+export type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
 export type {
   CreateDaemonSessionRequest,
   DaemonSessionPathParams,
   ListDaemonSessionsRequest,
-} from "./daemon/sessions.js"
+} from "./daemon/sessions.ts"
 export type {
   CancelDaemonWorkforceRequest,
   CreateDaemonWorkforceRequestRequest,
@@ -26,7 +26,7 @@ export type {
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
   UpdateDaemonWorkforceRequest,
-} from "./workforce/requests.js"
+} from "./workforce/requests.ts"
 
 /** Minimal daemon liveness payload returned by health probes. */
 export type DaemonHealth = {

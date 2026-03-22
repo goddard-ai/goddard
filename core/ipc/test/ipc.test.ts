@@ -5,9 +5,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test } from "vitest"
 import { z } from "zod"
-import { $type, type AppSchema } from "../src/index.js"
-import { createNodeClient } from "../src/node-client.js"
-import { createServer } from "../src/server.js"
+import { $type, type AppSchema } from "../src/index.ts"
+import { createNodeClient } from "../src/node-client.ts"
+import { createServer } from "../src/server.ts"
 
 const schema = {
   client: {

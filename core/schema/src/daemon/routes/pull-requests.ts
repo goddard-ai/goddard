@@ -1,7 +1,7 @@
 import { $type, route } from "rouzer"
-import { BearerHeaders } from "../../common/auth.js"
-import { type ReplyPrDaemonResponse, type SubmitPrDaemonResponse } from "../../daemon.js"
-import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "../pull-requests.js"
+import { BearerHeaders } from "../../common/auth.ts"
+import { type ReplyPrDaemonResponse, type SubmitPrDaemonResponse } from "../../daemon.ts"
+import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "../pull-requests.ts"
 
 /** Creates a pull request through the daemon. */
 export const prSubmitRoute = route("pr/submit", {

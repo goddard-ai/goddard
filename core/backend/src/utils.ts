@@ -1,5 +1,5 @@
 import type { AuthSession } from "@goddard-ai/schema/backend"
-import type { SessionRecord, StreamSink } from "./api/in-memory-control-plane.js"
+import type { SessionRecord, StreamSink } from "./api/in-memory-control-plane.ts"
 
 export function hashToInteger(value: string): number {
   let hash = 0

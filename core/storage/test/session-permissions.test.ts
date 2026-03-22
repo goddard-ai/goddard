@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { SessionPermissionsStorage } from "../src/session-permissions.js"
-import { getSessionPermissionsPath } from "../src/paths.js"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getSessionPermissionsPath } from "../src/paths.ts"
+import { SessionPermissionsStorage } from "../src/session-permissions.ts"
 
-vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.js")> => {
-  const actual = await importOriginal<typeof import("../src/paths.js")>()
+vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.ts")> => {
+  const actual = await importOriginal<typeof import("../src/paths.ts")>()
   return {
     ...actual,
     getSessionPermissionsPath: vi.fn<typeof actual.getSessionPermissionsPath>(),

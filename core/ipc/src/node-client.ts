@@ -1,7 +1,7 @@
 import * as http from "node:http"
-import { createClient } from "./client.js"
-import { type AppSchema } from "./schema.js"
-import { type IpcTransport } from "./transport.js"
+import { createClient } from "./client.ts"
+import { type AppSchema } from "./schema.ts"
+import { type IpcTransport } from "./transport.ts"
 
 function getErrorMessage(body: string) {
   if (!body) {

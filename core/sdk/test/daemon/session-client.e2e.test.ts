@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, assert, test, vi } from "vitest"
-import { runAgent } from "../../src/daemon/session/client.js"
+import { runAgent } from "../../src/daemon/session/client.ts"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),

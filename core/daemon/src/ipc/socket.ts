@@ -3,7 +3,7 @@ import { getGoddardGlobalDir } from "@goddard-ai/storage"
 import { mkdir, rm } from "node:fs/promises"
 import { request as httpRequest } from "node:http"
 import * as path from "node:path"
-import { ipcPath } from "../ipc-path.js"
+import { ipcPath } from "../ipc-path.ts"
 
 export { createDaemonUrl, readSocketPathFromDaemonUrl }
 

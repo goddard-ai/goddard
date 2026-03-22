@@ -39,7 +39,7 @@ describe("daemon workforce client", () => {
       .mockResolvedValueOnce({ success: true })
 
     const { startDaemonWorkforce, listDaemonWorkforces, shutdownDaemonWorkforce } =
-      await import("../../src/daemon/workforce.js")
+      await import("../../src/daemon/workforce.ts")
 
     await expect(startDaemonWorkforce("/repo")).resolves.toEqual({ rootDir: "/repo" })
     await expect(listDaemonWorkforces()).resolves.toEqual([{ rootDir: "/repo" }])
@@ -56,7 +56,7 @@ describe("daemon workforce client", () => {
       requestId: "req-create-1",
     })
 
-    const { createDaemonWorkforceRequest } = await import("../../src/daemon/workforce.js")
+    const { createDaemonWorkforceRequest } = await import("../../src/daemon/workforce.ts")
 
     await expect(
       createDaemonWorkforceRequest({

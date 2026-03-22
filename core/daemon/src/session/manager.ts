@@ -31,22 +31,22 @@ import treeKill from "@goddard-ai/tree-kill"
 import { execSync, spawn, type ChildProcessByStdio } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
-import { prependAgentBinToPath } from "../config.js"
-import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.js"
+import { prependAgentBinToPath } from "../config.ts"
+import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
   getAcpMessageResult,
   isAcpRequest,
   matchAcpRequest,
-} from "./acp.js"
-import { fetchRegistryAgent } from "./registry.js"
+} from "./acp.ts"
+import { fetchRegistryAgent } from "./registry.ts"
 import {
   cleanupSessionWorktree,
   createSessionWorktree,
   parseSessionWorktreeMetadata,
   type SessionWorktreeHandle,
-} from "./worktree.js"
+} from "./worktree.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
