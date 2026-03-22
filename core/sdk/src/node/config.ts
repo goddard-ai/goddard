@@ -14,7 +14,9 @@ import {
   getLocalConfigPath,
 } from "@goddard-ai/storage"
 import { constants as fsConstants } from "node:fs"
-import { access, readFile } from "node:fs/promises"
+import { access, readFile, writeFile } from "node:fs/promises"
+import { dirname, relative } from "node:path"
+import { createRequire } from "node:module"
 import { z } from "zod"
 
 /** Paths and merged root config for a single node config resolution request. */
@@ -23,6 +25,8 @@ export type ResolvedConfigRoots = {
   localRoot: string
   config: GoddardRootConfigDocument
 }
+
+const require = createRequire(import.meta.url)
 
 /** Returns true when a filesystem path exists. */
 export async function pathExists(path: string): Promise<boolean> {
@@ -44,12 +48,30 @@ export async function readJsonConfig<T>(
     return undefined
   }
 
-  let parsed: unknown
+  let parsed: any
 
   try {
     parsed = JSON.parse(await readFile(path, "utf-8"))
   } catch (error) {
     throw new Error(`${label} at ${path} must be valid JSON.`, { cause: error })
+  }
+
+  if (typeof parsed === "object" && parsed !== null && !("$schema" in parsed)) {
+    let schemaFileName = "goddard.json"
+    if (label === "Action config") {
+      schemaFileName = "action.json"
+    } else if (label === "Loop config") {
+      schemaFileName = "loop.json"
+    }
+
+    try {
+      const resolvedSchemaPath = require.resolve(`@goddard-ai/schema/schemas/${schemaFileName}`)
+      const relPath = relative(dirname(path), resolvedSchemaPath)
+      parsed.$schema = relPath
+      await writeFile(path, JSON.stringify(parsed, null, 2))
+    } catch (e) {
+      // Ignore errors if the schema file cannot be resolved or written
+    }
   }
 
   const result = schema.safeParse(parsed)
@@ -81,10 +103,18 @@ export async function readMergedRootConfig(
 export async function readActionConfig(
   path: string,
 ): Promise<GoddardActionConfigDocument | undefined> {
-  return readJsonConfig(path, ActionConfig, "Action config")
+  const result = await readJsonConfig(path, ActionConfig, "Action config")
+  if (result && "$schema" in result) {
+    delete (result as any).$schema
+  }
+  return result
 }
 
 /** Reads and validates a packaged loop config document. */
 export async function readLoopConfig(path: string): Promise<GoddardLoopConfigDocument | undefined> {
-  return readJsonConfig(path, LoopConfig, "Loop config")
+  const result = await readJsonConfig(path, LoopConfig, "Loop config")
+  if (result && "$schema" in result) {
+    delete (result as any).$schema
+  }
+  return result
 }

@@ -11,10 +11,12 @@
         "default": "./dist/*.d.mts"
       },
       "import": "./dist/*.mjs"
-    }
+    },
+    "./schemas/*": "./schemas/*"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && pnpm run generate-schemas",
+    "generate-schemas": "tsx scripts/generate-json-schemas.ts",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
@@ -24,6 +26,10 @@
     "@agentclientprotocol/sdk": "^0.15.0",
     "@goddard-ai/ipc": "workspace:^",
     "rouzer": "^2.0.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
   }
 }
