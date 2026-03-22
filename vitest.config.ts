@@ -1,12 +1,8 @@
 import { defineConfig } from "vitest/config"
+import { workspaceProjects } from "./vitest.workspace.ts"
 
 export default defineConfig({
   test: {
-    environment: "node",
-    include: ["**/*.test.ts"],
-    globals: true,
-  },
-  resolve: {
-    conditions: ["source", "import", "default"],
+    projects: workspaceProjects,
   },
 })
