@@ -2,8 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { db } from "../src/db/index.js"
-import { loops, sessions } from "../src/db/schema.js"
+import { getDb } from "../src/db/index.js"
+import { artifacts, loops, sessions } from "../src/db/schema.js"
 import { LoopStorage } from "../src/loop.js"
 import { getDatabasePath } from "../src/paths.js"
 import { SessionStorage } from "../src/session.js"
@@ -27,6 +27,8 @@ describe("Database Storage (Session & Loop)", () => {
   })
 
   beforeEach(async () => {
+    const db = await getDb()
+    await db.delete(artifacts)
     await db.delete(loops)
     await db.delete(sessions)
   })
@@ -37,6 +39,22 @@ describe("Database Storage (Session & Loop)", () => {
   })
 
   describe("SessionStorage", () => {
+    it("memoizes database initialization and applies the declared schema", async () => {
+      const first = getDb()
+      const second = getDb()
+
+      expect(first).toBe(second)
+
+      const db = await first
+      const tableNames = (
+        db.all(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'loops', 'artifacts') ORDER BY name",
+        ) as Array<{ name: string }>
+      ).map((table) => table.name)
+
+      expect(tableNames).toEqual(["artifacts", "loops", "sessions"])
+    })
+
     it("creates and retrieves a session", async () => {
       const now = new Date()
       await SessionStorage.create({
