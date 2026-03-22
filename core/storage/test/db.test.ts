@@ -8,11 +8,11 @@ import { LoopStorage } from "../src/loop.js"
 import { getDatabasePath } from "../src/paths.js"
 import { SessionStorage } from "../src/session.js"
 
-vi.mock("../src/paths.js", async (importOriginal) => {
+vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.js")> => {
   const actual = await importOriginal<typeof import("../src/paths.js")>()
   return {
     ...actual,
-    getDatabasePath: vi.fn(),
+    getDatabasePath: vi.fn<typeof actual.getDatabasePath>(),
   }
 })
 

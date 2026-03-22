@@ -24,7 +24,8 @@ const {
   updateDaemonWorkforceRequestMock: vi.fn(),
 }))
 
-vi.mock("../src/daemon/workforce.js", () => ({
+vi.mock("../src/daemon/workforce.js", async (importOriginal): Promise<typeof import("../src/daemon/workforce.js")> => ({
+  ...(await importOriginal<typeof import("../src/daemon/workforce.js")>()),
   cancelDaemonWorkforceRequest: cancelDaemonWorkforceRequestMock,
   createDaemonWorkforceRequest: createDaemonWorkforceRequestMock,
   getDaemonWorkforce: getDaemonWorkforceMock,

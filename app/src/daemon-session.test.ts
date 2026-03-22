@@ -10,7 +10,7 @@ import { createDaemonSessionTestIpcHandlers } from "./daemon-ipc-test-handlers.j
 import { createAppDaemonIpcClient } from "./daemon-session.js"
 
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
-  sessions: new Map<string, unknown>(),
+  sessions: new Map<string, any>(),
   sessionStates: new Map<string, any>(),
   permissionsBySessionId: new Map<string, any>(),
   permissionsByToken: new Map<string, any>(),
@@ -59,7 +59,8 @@ function createNodeAgent(agentPath: string) {
   }
 }
 
-vi.mock("@goddard-ai/storage", () => ({
+vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => ({
+  ...(await importOriginal<typeof import("@goddard-ai/storage")>()),
   SessionStorage: {
     create: vi.fn(async (record: any) => {
       const now = new Date()
@@ -75,6 +76,9 @@ vi.mock("@goddard-ai/storage", () => ({
     }),
     list: vi.fn(async () => Array.from(sessions.values())),
     get: vi.fn(async (id: string) => sessions.get(id) ?? null),
+    getByAcpId: vi.fn(async (acpId: string) => Array.from(sessions.values()).find((s: any) => s.acpId === acpId) ?? null),
+    listByRepository: vi.fn(async (repository: string) => Array.from(sessions.values()).filter((s: any) => s.repository === repository)),
+    listByRepositoryPr: vi.fn(async (repository: string, prNumber: number) => Array.from(sessions.values()).filter((s: any) => s.repository === repository && s.prNumber === prNumber)),
     update: vi.fn(async (id: string, data: any) => {
       const existing = sessions.get(id)
       if (!existing || typeof existing !== "object" || existing === null) {
@@ -137,7 +141,8 @@ vi.mock("@goddard-ai/storage", () => ({
   },
 }))
 
-vi.mock("@goddard-ai/storage/session-permissions", () => ({
+vi.mock("@goddard-ai/storage/session-permissions", async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => ({
+  ...(await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()),
   SessionPermissionsStorage: {
     create: vi.fn(async (record: any) => {
       const created = { ...record, createdAt: new Date().toISOString() }

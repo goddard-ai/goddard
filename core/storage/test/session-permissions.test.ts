@@ -5,11 +5,11 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { mkdtemp, rm } from "node:fs/promises"
 
-vi.mock("../src/paths.js", async (importOriginal) => {
+vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.js")> => {
   const actual = await importOriginal<typeof import("../src/paths.js")>()
   return {
     ...actual,
-    getSessionPermissionsPath: vi.fn(),
+    getSessionPermissionsPath: vi.fn<typeof actual.getSessionPermissionsPath>(),
   }
 })
 

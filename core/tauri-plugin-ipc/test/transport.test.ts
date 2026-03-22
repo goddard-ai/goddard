@@ -4,13 +4,21 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
 // Mock the Tauri APIs
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
-}))
+vi.mock("@tauri-apps/api/core", async (importOriginal): Promise<typeof import("@tauri-apps/api/core")> => {
+  const actual = await importOriginal<typeof import("@tauri-apps/api/core")>()
+  return {
+    ...actual,
+    invoke: vi.fn<typeof actual.invoke>(),
+  }
+})
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(),
-}))
+vi.mock("@tauri-apps/api/event", async (importOriginal): Promise<typeof import("@tauri-apps/api/event")> => {
+  const actual = await importOriginal<typeof import("@tauri-apps/api/event")>()
+  return {
+    ...actual,
+    listen: vi.fn<typeof actual.listen>(),
+  }
+})
 
 describe("createTauriTransport", () => {
   beforeEach(() => {
@@ -30,8 +38,8 @@ describe("createTauriTransport", () => {
   })
 
   it("subscribe filters messages correctly and unlisten does not leak", async () => {
-    const unlistenMock = vi.fn()
-    vi.mocked(listen).mockResolvedValue(unlistenMock as any)
+    const unlistenMock: Awaited<ReturnType<typeof listen>> = vi.fn(async () => undefined)
+    vi.mocked(listen).mockResolvedValue(unlistenMock)
     vi.mocked(invoke).mockResolvedValue("sub-123" as never)
 
     const transport = createTauriTransport("/tmp/socket.sock")
@@ -98,8 +106,8 @@ describe("createTauriTransport", () => {
   })
 
   it("failed subscribe cleanup calls unlisten and does not leak listeners", async () => {
-    const unlistenMock = vi.fn()
-    vi.mocked(listen).mockResolvedValue(unlistenMock as any)
+    const unlistenMock: Awaited<ReturnType<typeof listen>> = vi.fn(async () => undefined)
+    vi.mocked(listen).mockResolvedValue(unlistenMock)
     vi.mocked(invoke).mockRejectedValueOnce(new Error("Plugin error"))
 
     const transport = createTauriTransport("/tmp/socket.sock")

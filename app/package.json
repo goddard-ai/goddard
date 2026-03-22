@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/storage": "workspace:^",
     "@preact/preset-vite": "^2.10.3",
     "@tauri-apps/cli": "^2.10.1",
     "vite": "^7.3.1"

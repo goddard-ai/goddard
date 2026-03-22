@@ -12,7 +12,8 @@ const { createDaemonIpcClientFromEnvMock, sendMock } = vi.hoisted(() => ({
   })),
 }))
 
-vi.mock("@goddard-ai/daemon-client", () => ({
+vi.mock("@goddard-ai/daemon-client", async (importOriginal): Promise<typeof import("@goddard-ai/daemon-client")> => ({
+  ...(await importOriginal<typeof import("@goddard-ai/daemon-client")>()),
   createDaemonIpcClientFromEnv: createDaemonIpcClientFromEnvMock,
 }))
 
