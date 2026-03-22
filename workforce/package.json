@@ -18,8 +18,5 @@
     "@clack/prompts": "^0.11.0",
     "@goddard-ai/sdk": "workspace:^",
     "cmd-ts": "^0.15.0"
-  },
-  "devDependencies": {
-    "@types/node": "^25.3.5"
   }
 }

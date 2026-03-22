@@ -21,8 +21,5 @@
   },
   "dependencies": {
     "@goddard-ai/schema": "workspace:^"
-  },
-  "devDependencies": {
-    "@types/node": "^25.3.5"
   }
 }

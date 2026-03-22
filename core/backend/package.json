@@ -33,14 +33,13 @@
     "@hattip/adapter-cloudflare-workers": "^0.0.49",
     "@hattip/adapter-node": "^0.0.49",
     "@libsql/client": "^0.17.0",
-    "drizzle-orm": "1.0.0-beta.15-859cf75",
+    "drizzle-orm": "1.0.0-beta.18-7eb39f0",
     "octokit": "^5.0.5",
     "rouzer": "^2.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
     "alchemy": "^0.87.0",
-    "drizzle-kit": "1.0.0-beta.15-859cf75",
     "wrangler": "^4.71.0"
   }
 }
