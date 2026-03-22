@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { getDb } from "../src/db/index.js"
+import { getDatabaseInstance } from "../src/db/index.js"
 import { artifacts, loops, sessions } from "../src/db/schema.js"
 import { LoopStorage } from "../src/loop.js"
 import { getDatabasePath } from "../src/paths.js"
@@ -27,7 +27,7 @@ describe("Database Storage (Session & Loop)", () => {
   })
 
   beforeEach(async () => {
-    const db = await getDb()
+    const db = await getDatabaseInstance()
     await db.delete(artifacts)
     await db.delete(loops)
     await db.delete(sessions)
@@ -40,8 +40,8 @@ describe("Database Storage (Session & Loop)", () => {
 
   describe("SessionStorage", () => {
     it("memoizes database initialization and applies the declared schema", async () => {
-      const first = getDb()
-      const second = getDb()
+      const first = getDatabaseInstance()
+      const second = getDatabaseInstance()
 
       expect(first).toBe(second)
 

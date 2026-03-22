@@ -26,7 +26,7 @@ export const sessions = sqliteTable(
     prNumber: integer(),
     metadata: text({ mode: "json" }).$type<Record<string, any>>(),
   },
-  (table) => [index().on(table.repository, table.prNumber)],
+  (table) => [index("idx_sessions_repository_pr_number").on(table.repository, table.prNumber)],
 )
 
 export const loops = sqliteTable("loops", {

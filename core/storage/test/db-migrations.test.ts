@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getDatabaseInstance } from "../src/db/index.js"
 import { getDatabasePath } from "../src/paths.js"
 
 vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src/paths.js")> => {
@@ -84,8 +85,7 @@ describe("storage database migrations", () => {
       .run("sess-legacy", "acp-legacy", "idle", "test-agent", "/tmp", "[]", Date.now(), Date.now())
     legacy.close()
 
-    const { getDb } = await import("../src/db/index.js")
-    const db = await getDb()
+    const db = await getDatabaseInstance()
 
     const tableNames = (
       db.all(
