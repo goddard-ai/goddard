@@ -300,18 +300,18 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
         requestId: null,
       }
     },
-    workforceRespond: async ({ rootDir, requestId }) => {
+    workforceRespond: async ({ rootDir }) => {
       workforceRoots.add(rootDir)
       return {
         workforce: getWorkforceStatus(rootDir),
-        requestId,
+        requestId: "test-workforce-request",
       }
     },
-    workforceSuspend: async ({ rootDir, requestId }) => {
+    workforceSuspend: async ({ rootDir }) => {
       workforceRoots.add(rootDir)
       return {
         workforce: getWorkforceStatus(rootDir),
-        requestId,
+        requestId: "test-workforce-request",
       }
     },
   }

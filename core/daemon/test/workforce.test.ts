@@ -487,6 +487,7 @@ test("create-intent requests target the root agent and specialize the root sessi
   let defaultSystemPrompt = ""
   let createSystemPrompt = ""
   let createInitialPrompt = ""
+  let capturedEnv: Record<string, string> | undefined
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
@@ -495,6 +496,7 @@ test("create-intent requests target the root agent and specialize the root sessi
           typeof input.initialPrompt === "string"
             ? input.initialPrompt
             : JSON.stringify(input.initialPrompt)
+        capturedEnv = input.env
 
         if (initialPrompt.includes("Request intent: create")) {
           createSystemPrompt = input.systemPrompt
@@ -567,6 +569,8 @@ test("create-intent requests target the root agent and specialize the root sessi
   ])
   expect(createSystemPrompt).not.toBe(defaultSystemPrompt)
   expect(createInitialPrompt).toContain("Request intent: create")
+  expect(createInitialPrompt).not.toContain("Current request id:")
+  expect(capturedEnv).not.toHaveProperty("GODDARD_WORKFORCE_REQUEST_ID")
 })
 
 test("domain-agent sessions advertise sender-owned update and cancel commands", async () => {
@@ -734,6 +738,82 @@ test("workforce runtime logs request-to-session correlation for launched session
   expect(completedLog).toBeTruthy()
   expect(completedLog?.acpId).toBe("acp-session-1")
   expect(typeof completedLog?.requestId).toBe("string")
+})
+
+test("workforce runtime rejects responses and suspends for a different attached request", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-session-request-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  let releaseSession = () => {}
+  const sessionBlocked = new Promise<void>((resolve) => {
+    releaseSession = resolve
+  })
+
+  const runtime = await WorkforceRuntime.start(rootDir, {
+    sessionManager: {} as never,
+    runSession: async () => {
+      await sessionBlocked
+    },
+  })
+
+  const requestId = await runtime.createRequest({
+    targetAgentId: "root",
+    payload: "complete me",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
+  await waitFor(() => runtime.getStatus().activeRequestCount === 1)
+
+  await expect(
+    runtime.respond({
+      requestId,
+      output: "completed",
+      actor: {
+        sessionId: "session-1",
+        agentId: "root",
+        requestId: "req-other",
+      },
+    }),
+  ).rejects.toThrow("Session request req-other cannot respond to")
+
+  await expect(
+    runtime.suspend({
+      requestId,
+      reason: "Need help.",
+      actor: {
+        sessionId: "session-1",
+        agentId: "root",
+        requestId: "req-other",
+      },
+    }),
+  ).rejects.toThrow("Session request req-other cannot suspend")
+
+  releaseSession()
+  await waitFor(() => runtime.getStatus().failedRequestCount === 1)
 })
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number = 5_000) {

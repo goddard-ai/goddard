@@ -7,7 +7,7 @@ import type {
   WorkforceRequestIntent,
   WorkforceRequestRecord,
 } from "@goddard-ai/schema/workforce"
-import { randomUUID } from "node:crypto"
+import { v7 as uuidv7 } from "uuid"
 import { join } from "node:path"
 import { concat, dedent } from "radashi"
 import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.js"
@@ -49,6 +49,14 @@ export interface WorkforceRuntimeDeps {
   sessionManager: SessionManager
   runSession?: WorkforceSessionRunner
 }
+
+/** One workforce ledger event before the runtime assigns its durable event id. */
+type WorkforcePendingLedgerEvent = {
+  [TType in WorkforceLedgerEvent["type"]]: Omit<
+    Extract<WorkforceLedgerEvent, { type: TType }>,
+    "id"
+  > & { id?: string }
+}[WorkforceLedgerEvent["type"]]
 
 /** Collects the most relevant recent ledger activity for the agent about to handle a request. */
 function buildRecentActivity(
@@ -222,8 +230,7 @@ function buildInitialPrompt(
 ): string {
   return concat(
     `Repository root: ${rootDir}`,
-    `Current request id: ${request.id}`,
-    `Sender agent id: ${request.fromAgentId ?? "operator"}`,
+    request.fromAgentId ? `Sender agent id: ${request.fromAgentId}` : "Sender agent id: operator",
     `Request intent: ${request.intent}`,
     recentActivity.length > 0
       ? ["", "Recent activity:", recentActivity.map((event) => JSON.stringify(event)).join("\n")]
@@ -303,7 +310,6 @@ async function defaultRunWorkforceSession(
     env: {
       GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
       GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
-      GODDARD_WORKFORCE_REQUEST_ID: input.request.id,
     },
   })
 
@@ -358,6 +364,17 @@ function canManageRequest(
   }
 
   return actor.agentId === config.rootAgentId || actor.agentId === request.fromAgentId
+}
+
+/** Ensures an authenticated workforce session can only finish or suspend its attached request. */
+function assertActorOwnsActiveRequest(
+  actor: WorkforceActorContext,
+  requestId: string,
+  verb: string,
+): void {
+  if (actor.requestId !== null && actor.requestId !== requestId) {
+    throw new Error(`Session request ${actor.requestId} cannot ${verb} ${requestId}`)
+  }
 }
 
 /** A daemon-managed repo-local workforce runtime and its active queue state. */
@@ -462,9 +479,8 @@ export class WorkforceRuntime {
       throw new Error("Create requests must target the root workforce agent")
     }
 
-    const requestId = randomUUID()
+    const requestId = uuidv7()
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "request",
       requestId,
@@ -504,7 +520,6 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "update",
       requestId: input.requestId,
@@ -539,7 +554,6 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "cancel",
       requestId: input.requestId,
@@ -570,7 +584,6 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "truncate",
       agentId: input.agentId,
@@ -592,6 +605,7 @@ export class WorkforceRuntime {
     actor: WorkforceActorContext
   }): Promise<void> {
     const request = assertRequestExists(this.#projection, input.requestId)
+    assertActorOwnsActiveRequest(input.actor, input.requestId, "respond to")
     if (input.actor.agentId !== request.toAgentId) {
       throw new Error(
         `Agent ${input.actor.agentId ?? "unknown"} cannot respond to ${input.requestId}`,
@@ -602,7 +616,6 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "response",
       requestId: input.requestId,
@@ -626,6 +639,7 @@ export class WorkforceRuntime {
     actor: WorkforceActorContext
   }): Promise<void> {
     const request = assertRequestExists(this.#projection, input.requestId)
+    assertActorOwnsActiveRequest(input.actor, input.requestId, "suspend")
     if (input.actor.agentId !== request.toAgentId) {
       throw new Error(`Agent ${input.actor.agentId ?? "unknown"} cannot suspend ${input.requestId}`)
     }
@@ -634,7 +648,6 @@ export class WorkforceRuntime {
     }
 
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "suspend",
       requestId: input.requestId,
@@ -652,10 +665,13 @@ export class WorkforceRuntime {
     })
   }
 
-  private async appendEvent(event: WorkforceLedgerEvent): Promise<void> {
-    await appendWorkforceLedgerEvent(this.#rootDir, event)
-    this.#events.push(event)
-    applyWorkforceEvent(this.#projection.requests, event)
+  private async appendEvent(
+    event: Omit<WorkforceLedgerEvent, "id"> & { id?: string },
+  ): Promise<void> {
+    const eventWithId = { ...event, id: event.id ?? uuidv7() } as WorkforceLedgerEvent
+    await appendWorkforceLedgerEvent(this.#rootDir, eventWithId)
+    this.#events.push(eventWithId)
+    applyWorkforceEvent(this.#projection.requests, eventWithId)
     this.#projection = {
       requests: this.#projection.requests,
       queues: buildWorkforceQueues(this.#projection.requests),
@@ -713,7 +729,6 @@ export class WorkforceRuntime {
     const queuedBefore = this.#projection.queues[agentId]?.length ?? 0
 
     await this.appendEvent({
-      id: randomUUID(),
       at: new Date().toISOString(),
       type: "handle",
       requestId,
@@ -766,7 +781,6 @@ export class WorkforceRuntime {
     const errorMessage = error instanceof Error ? error.message : String(error)
     if (attempt >= 3) {
       await this.appendEvent({
-        id: randomUUID(),
         at: new Date().toISOString(),
         type: "error",
         requestId,

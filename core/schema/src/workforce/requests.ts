@@ -77,7 +77,6 @@ export type TruncateDaemonWorkforceRequest = z.infer<typeof TruncateDaemonWorkfo
 /** Request payload used by an active workforce agent to finish its current task. */
 export const RespondDaemonWorkforceRequest = z.object({
   rootDir: z.string(),
-  requestId: z.string(),
   output: z.string(),
   token: z.string(),
 })
@@ -87,7 +86,6 @@ export type RespondDaemonWorkforceRequest = z.infer<typeof RespondDaemonWorkforc
 /** Request payload used by an active workforce agent to suspend its current task. */
 export const SuspendDaemonWorkforceRequest = z.object({
   rootDir: z.string(),
-  requestId: z.string(),
   reason: z.string(),
   token: z.string(),
 })

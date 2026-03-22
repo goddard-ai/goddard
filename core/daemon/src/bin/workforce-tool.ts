@@ -23,10 +23,8 @@ function requireWorkforceRootDir(): string {
   return requiredEnv(process.env.GODDARD_WORKFORCE_ROOT_DIR, "GODDARD_WORKFORCE_ROOT_DIR")
 }
 
-function requireWorkforceRequestId(value?: string): string {
-  return (
-    value ?? requiredEnv(process.env.GODDARD_WORKFORCE_REQUEST_ID, "GODDARD_WORKFORCE_REQUEST_ID")
-  )
+function requireSessionToken(): string {
+  return requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
 }
 
 function optionalSessionToken(): string | undefined {
@@ -73,23 +71,21 @@ export async function workforceTruncate(agentId?: string, reason?: string) {
   })
 }
 
-export async function workforceRespond(requestId: string, output: string) {
+export async function workforceRespond(output: string) {
   const { client } = createDaemonIpcClientFromEnv()
   return client.send("workforceRespond", {
     rootDir: requireWorkforceRootDir(),
-    requestId,
     output,
-    token: requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN"),
+    token: requireSessionToken(),
   })
 }
 
-export async function workforceSuspend(requestId: string, reason: string) {
+export async function workforceSuspend(reason: string) {
   const { client } = createDaemonIpcClientFromEnv()
   return client.send("workforceSuspend", {
     rootDir: requireWorkforceRootDir(),
-    requestId,
     reason,
-    token: requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN"),
+    token: requireSessionToken(),
   })
 }
 
@@ -113,11 +109,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          const response = await workforceRequest(
-            args.targetAgentId,
-            await fs.readFile(args.inputFile, "utf-8"),
-          )
-          console.log(`Workforce request appended: ${response.requestId ?? "unknown"}`)
+          await workforceRequest(args.targetAgentId, await fs.readFile(args.inputFile, "utf-8"))
         },
       }),
       update: command({
@@ -137,7 +129,6 @@ export async function main(argv: string[]) {
         },
         handler: async (args) => {
           await workforceUpdate(args.requestId, await fs.readFile(args.inputFile, "utf-8"))
-          console.log(`Workforce request updated: ${args.requestId}`)
         },
       }),
       cancel: command({
@@ -157,7 +148,6 @@ export async function main(argv: string[]) {
         },
         handler: async (args) => {
           await workforceCancel(args.requestId, await readOptionalFile(args.reasonFile))
-          console.log(`Workforce request cancelled: ${args.requestId}`)
         },
       }),
       truncate: command({
@@ -181,7 +171,6 @@ export async function main(argv: string[]) {
             args.agentId || undefined,
             await readOptionalFile(args.reasonFile),
           )
-          console.log(`Workforce queue truncated${args.agentId ? ` for ${args.agentId}` : ""}.`)
         },
       }),
       respond: command({
@@ -195,9 +184,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          const requestId = requireWorkforceRequestId()
-          await workforceRespond(requestId, await fs.readFile(args.outputFile, "utf-8"))
-          console.log(`Workforce request responded: ${requestId}`)
+          await workforceRespond(await fs.readFile(args.outputFile, "utf-8"))
         },
       }),
       suspend: command({
@@ -211,9 +198,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          const requestId = requireWorkforceRequestId()
-          await workforceSuspend(requestId, await fs.readFile(args.reasonFile, "utf-8"))
-          console.log(`Workforce request suspended: ${requestId}`)
+          await workforceSuspend(await fs.readFile(args.reasonFile, "utf-8"))
         },
       }),
     },
