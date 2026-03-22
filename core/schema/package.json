@@ -11,10 +11,12 @@
         "default": "./dist/*.d.mts"
       },
       "import": "./dist/*.mjs"
-    }
+    },
+    "./json/*": "./json/*"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && pnpm run generate-schemas",
+    "generate-schemas": "node scripts/generate-json-schemas.ts && oxfmt json/",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",

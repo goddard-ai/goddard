@@ -30,6 +30,7 @@ afterEach(() => {
 })
 
 test("resolveAction applies local root defaults to prompt-only actions", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-md-"))
   const actionsDir = path.join(tempDir, ".goddard", "actions")
 
@@ -38,8 +39,11 @@ test("resolveAction applies local root defaults to prompt-only actions", async (
     path.join(tempDir, ".goddard", "config.json"),
     JSON.stringify({
       actions: {
-        cwd: "/tmp/local-root",
-        systemPrompt: "Use the repository checklist.",
+        session: {
+          env: {
+            ROOT: "true",
+          },
+        },
       },
     }),
     "utf-8",
@@ -54,12 +58,16 @@ test("resolveAction applies local root defaults to prompt-only actions", async (
 
   assert.equal(action.prompt, "Review the current diff carefully.\n")
   assert.deepEqual(action.config, {
-    cwd: "/tmp/local-root",
-    systemPrompt: "Use the repository checklist.",
+    session: {
+      env: {
+        ROOT: "true",
+      },
+    },
   })
 })
 
 test("resolveAction merges root defaults with packaged config.json", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-dir-"))
   const actionDir = path.join(tempDir, ".goddard", "actions", "ship-it")
 
@@ -68,9 +76,10 @@ test("resolveAction merges root defaults with packaged config.json", async () =>
     path.join(tempDir, ".goddard", "config.json"),
     JSON.stringify({
       actions: {
-        systemPrompt: "Use repository defaults.",
-        env: {
-          SHARED: "true",
+        session: {
+          env: {
+            SHARED: "true",
+          },
         },
       },
     }),
@@ -80,11 +89,12 @@ test("resolveAction merges root defaults with packaged config.json", async () =>
   await fs.writeFile(
     path.join(actionDir, "config.json"),
     JSON.stringify({
-      cwd: "/tmp/entity-override",
-      env: {
-        ENTITY: "true",
+      session: {
+        env: {
+          ENTITY: "true",
+        },
+        mcpServers: [{ name: "filesystem" }],
       },
-      mcpServers: [{ name: "filesystem" }],
     }),
     "utf-8",
   )
@@ -93,13 +103,12 @@ test("resolveAction merges root defaults with packaged config.json", async () =>
 
   assert.equal(action.prompt, "Ship the change.\n")
   assert.deepEqual(action.config, {
-    systemPrompt: "Use repository defaults.",
-    cwd: "/tmp/entity-override",
-    env: {
-      SHARED: "true",
-      ENTITY: "true",
+    session: {
+      env: {
+        ENTITY: "true",
+      },
+      mcpServers: [{ name: "filesystem" }],
     },
-    mcpServers: [{ name: "filesystem" }],
   })
 })
 
@@ -114,7 +123,11 @@ test("resolveAction applies local root defaults to a globally defined action", a
   await fs.writeFile(
     path.join(globalActionDir, "config.json"),
     JSON.stringify({
-      systemPrompt: "Use the global defaults.",
+      session: {
+        env: {
+          GLOBAL: "true",
+        },
+      },
     }),
     "utf-8",
   )
@@ -124,7 +137,11 @@ test("resolveAction applies local root defaults to a globally defined action", a
     path.join(tempDir, ".goddard", "config.json"),
     JSON.stringify({
       actions: {
-        cwd: "/tmp/local-root",
+        session: {
+          env: {
+            LOCAL: "true",
+          },
+        },
       },
     }),
     "utf-8",
@@ -134,12 +151,16 @@ test("resolveAction applies local root defaults to a globally defined action", a
 
   assert.equal(action.prompt, "Use the global action.\n")
   assert.deepEqual(action.config, {
-    cwd: "/tmp/local-root",
-    systemPrompt: "Use the global defaults.",
+    session: {
+      env: {
+        GLOBAL: "true",
+      },
+    },
   })
 })
 
 test("resolveAction rejects frontmatter-based actions", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-frontmatter-"))
   const actionsDir = path.join(tempDir, ".goddard", "actions")
 
@@ -157,8 +178,11 @@ test("buildActionSessionParams lets runtime config override resolved defaults", 
   const action: ResolvedAgentAction = {
     prompt: "Review the pull request.",
     config: {
-      cwd: "/tmp/action-cwd",
-      systemPrompt: "Follow the security checklist.",
+      session: {
+        env: {
+          ACTION: "true",
+        },
+      },
     },
     path: "/tmp/review.md",
   }
@@ -170,4 +194,7 @@ test("buildActionSessionParams lets runtime config override resolved defaults", 
 
   assert.equal(params.cwd, "/tmp/caller-cwd")
   assert.equal(params.systemPrompt, "Start with repo conventions.")
+  assert.deepEqual(params.env, {
+    ACTION: "true",
+  })
 })

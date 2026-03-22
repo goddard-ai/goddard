@@ -1,19 +1,16 @@
 import { mergeActionConfigLayers } from "@goddard-ai/config"
-import { GoddardActionConfigDocument } from "@goddard-ai/schema/config"
-import type { NewSessionParams, SessionParams } from "@goddard-ai/schema/session-server"
+import { ActionConfig, InlineSessionParams } from "@goddard-ai/schema/config"
+import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { runAgent } from "../daemon/session/client.ts"
 import { readActionConfig, readMergedRootConfig } from "./config.ts"
 
-/** Runtime overrides accepted when invoking a named action. */
-export type AgentActionConfig = Omit<Partial<NewSessionParams>, "oneShot" | "initialPrompt">
-
 /** A resolved named action prompt and merged persisted config. */
 export type ResolvedAgentAction = {
   prompt: string
-  config: GoddardActionConfigDocument
+  config: ActionConfig
   path: string
 }
 
@@ -37,10 +34,7 @@ function detectLegacyFrontmatter(content: string, path: string): void {
   }
 }
 
-function ensureActionConfig(
-  value: GoddardActionConfigDocument | undefined,
-  path: string,
-): GoddardActionConfigDocument {
+function ensureActionConfig(value: ActionConfig | undefined, path: string): ActionConfig {
   if (!value) {
     return {}
   }
@@ -50,10 +44,6 @@ function ensureActionConfig(
   }
 
   return value
-}
-
-function toRuntimeActionConfig(config: GoddardActionConfigDocument): AgentActionConfig {
-  return config as AgentActionConfig
 }
 
 async function loadMarkdownPrompt(path: string): Promise<string> {
@@ -118,14 +108,14 @@ async function resolveActionFromRoot(
 /** Builds daemon session params for a resolved action plus runtime overrides. */
 export function buildActionSessionParams(
   action: ResolvedAgentAction,
-  overrides?: AgentActionConfig,
+  params?: InlineSessionParams,
 ): SessionParams & { oneShot: true } {
   return {
     agent: DEFAULT_AGENT,
     cwd: process.cwd(),
     mcpServers: [],
-    ...toRuntimeActionConfig(action.config),
-    ...overrides,
+    ...action.config.session,
+    ...params,
     oneShot: true as const,
     initialPrompt: action.prompt,
   }
@@ -150,6 +140,7 @@ export async function resolveAction(
   return {
     ...action,
     config: mergeActionConfigLayers(
+      config.session ? { session: config.session } : undefined,
       ensureActionConfig(config.actions, "root config"),
       action.config,
     ),
@@ -157,7 +148,7 @@ export async function resolveAction(
 }
 
 /** Runs a named action through the daemon-backed session client. */
-export async function runAgentAction(actionName: string, options: AgentActionConfig) {
-  const cwd = options.cwd ?? process.cwd()
-  return runAgent(buildActionSessionParams(await resolveAction(actionName, cwd), options))
+export async function runAgentAction(actionName: string, params: InlineSessionParams = {}) {
+  const action = await resolveAction(actionName, params.cwd)
+  return runAgent(buildActionSessionParams(action, params))
 }
