@@ -48,7 +48,7 @@ async function requestDaemonSocket(socketPath: string, pathname: string): Promis
     unix: socketPath,
   })
 
-  await response.arrayBuffer()
+  await response.body?.cancel()
 }
 
 function toPosixPath(value: string): string {
