@@ -65,6 +65,7 @@ export async function readJsonConfig<T>(
     }
 
     try {
+      // Use require.resolve dynamically to find the schema file path from this module
       const resolvedSchemaPath = require.resolve(`@goddard-ai/schema/schemas/${schemaFileName}`)
       const relPath = relative(dirname(path), resolvedSchemaPath)
       parsed.$schema = relPath
