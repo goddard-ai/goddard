@@ -75,12 +75,13 @@ vi.mock(
           lastAgentMessage: null,
         })
       }),
-      list: vi.fn(async () => Array.from(sessions.values())),
       get: vi.fn(async (id: string) => sessions.get(id) ?? null),
       getByAcpId: vi.fn(
         async (acpId: string) =>
           Array.from(sessions.values()).find((s: any) => s.acpId === acpId) ?? null,
       ),
+      listAll: vi.fn(async () => Array.from(sessions.values())),
+      listRecent: vi.fn(async () => Array.from(sessions.values())),
       listByRepository: vi.fn(async (repository: string) =>
         Array.from(sessions.values()).filter((s: any) => s.repository === repository),
       ),
