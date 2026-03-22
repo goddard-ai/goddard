@@ -9,6 +9,8 @@
 - `Workforce Configuration`
   - The repository-local definition of which agents exist, what roles they play, and which paths they own.
   - Why: so delegation and path authority are explicit instead of improvised at runtime.
+  - It may also define a shared `env` map plus agent-local `env` overlays for daemon-managed sessions.
+  - Agent-local `env` entries override shared `env` keys for that agent's handled requests.
 - `Root Agent`
   - The workforce agent with repo-wide coordination authority.
   - Why: so one agent can make delegation and scope decisions that would be unsafe for narrower agents to assume.

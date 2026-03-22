@@ -448,6 +448,92 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
   expect(systemPrompts["lib"]).not.toContain("packages/foo")
 })
 
+test("workforce sessions merge shared env with agent-local env overrides", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-env-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await mkdir(join(rootDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(rootDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi",
+        rootAgentId: "root",
+        env: {
+          SHARED_ONLY: "shared",
+          OVERRIDE_ME: "shared-value",
+        },
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+            env: {
+              CLAUDE_CODE_EXECUTABLE: "/custom/claude",
+              OVERRIDE_ME: "local-value",
+            },
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
+
+  let runtime!: WorkforceRuntime
+  let capturedEnv: Record<string, string> | undefined
+
+  runtime = await WorkforceRuntime.start(rootDir, {
+    sessionManager: {
+      createSession: async (input) => {
+        capturedEnv = input.env
+
+        const metadata =
+          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
+            ? (input.metadata.workforce as { requestId: string; agentId: string })
+            : null
+
+        if (!metadata) {
+          throw new Error("Missing workforce metadata")
+        }
+
+        await runtime.respond({
+          requestId: metadata.requestId,
+          output: "done",
+          actor: {
+            sessionId: "session-1",
+            agentId: metadata.agentId,
+            requestId: metadata.requestId,
+          },
+        })
+
+        return {} as never
+      },
+    } as never,
+  })
+
+  const requestId = await runtime.createRequest({
+    targetAgentId: "root",
+    payload: "Use the configured env.",
+    actor: { sessionId: null, agentId: null, requestId: null },
+  })
+
+  await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
+
+  expect(capturedEnv).toEqual({
+    SHARED_ONLY: "shared",
+    OVERRIDE_ME: "local-value",
+    CLAUDE_CODE_EXECUTABLE: "/custom/claude",
+    GODDARD_WORKFORCE_ROOT_DIR: rootDir,
+    GODDARD_WORKFORCE_AGENT_ID: "root",
+    GODDARD_WORKFORCE_REQUEST_ID: requestId,
+  })
+})
+
 test("create-intent requests target the root agent and specialize the root session prompt", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-create-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))

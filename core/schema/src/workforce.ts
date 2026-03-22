@@ -6,6 +6,9 @@ export type { WorkforceRequestIntent } from "./workforce/requests.js"
 /** Supported workforce agent roles within one repository-owned runtime. */
 export type WorkforceAgentRole = "root" | "domain"
 
+/** Environment variables configured for workforce-managed agent sessions. */
+export type WorkforceAgentEnv = Record<string, string>
+
 /** Stable lifecycle states for one workforce request after replay. */
 export type WorkforceRequestStatus =
   | "queued"
@@ -23,6 +26,7 @@ export interface WorkforceAgentConfig {
   cwd: string
   owns: string[]
   agent?: string | AgentDistribution
+  env?: WorkforceAgentEnv
 }
 
 /** Repository-local workforce configuration stored in `.goddard/workforce.json`. */
@@ -30,6 +34,7 @@ export interface WorkforceConfig {
   version: 1
   defaultAgent: string | AgentDistribution
   rootAgentId: string
+  env?: WorkforceAgentEnv
   agents: WorkforceAgentConfig[]
 }
 

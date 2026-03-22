@@ -200,9 +200,9 @@ afterEach(async () => {
   }
 })
 
-function createNodeAgent(agentPath: string) {
+function createNodeAgent(agentPath: string, id: string = "node-agent") {
   return {
-    id: "node-agent",
+    id,
     name: "Node Agent",
     version: "1.0.0",
     description: "Local node-based ACP test agent.",
@@ -524,6 +524,149 @@ test("one-shot daemon sessions clean up their worktree after the initial prompt 
   })
 
   expect(worktreeCleanupMock).toHaveBeenCalled()
+})
+
+test("claude-acp only sees CLAUDE_CODE_EXECUTABLE when callers inject it explicitly", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const originalClaudeExecutable = process.env.CLAUDE_CODE_EXECUTABLE
+  delete process.env.CLAUDE_CODE_EXECUTABLE
+
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const message = JSON.parse(line)
+
+      if (message.method === "initialize") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: { loadSession: false },
+          },
+        })
+        return
+      }
+
+      if (message.method === "session/new") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { sessionId: "agent-session-claude-env" },
+        })
+        return
+      }
+
+      if (message.method === "session/prompt") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            stopReason: "end_turn",
+            content: [
+              {
+                type: "text",
+                text: process.env.CLAUDE_CODE_EXECUTABLE ?? "missing",
+              },
+            ],
+          },
+        })
+      }
+    })
+  `)
+
+  try {
+    const createdWithoutEnv = await client.send("sessionCreate", {
+      agent: createNodeAgent(agentPath, "claude-acp"),
+      cwd: process.cwd(),
+      mcpServers: [],
+      systemPrompt: "Keep responses short.",
+    })
+
+    await client.send("sessionSend", {
+      id: createdWithoutEnv.session.id,
+      message: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session/prompt",
+        params: {
+          sessionId: createdWithoutEnv.session.acpId,
+          prompt: [{ type: "text", text: "Report the executable path." }],
+        },
+      },
+    })
+
+    await waitFor(async () => {
+      const session = await client.send("sessionGet", { id: createdWithoutEnv.session.id })
+      return session.session.status === "done"
+    })
+
+    const historyWithoutEnv = await client.send("sessionHistory", {
+      id: createdWithoutEnv.session.id,
+    })
+    expect(
+      historyWithoutEnv.history.at(-1) && "result" in historyWithoutEnv.history.at(-1)!
+        ? (
+            historyWithoutEnv.history.at(-1) as {
+              result?: { content?: Array<{ text?: string }> }
+            }
+          ).result?.content?.[0]?.text
+        : null,
+    ).toBe("missing")
+
+    const createdWithEnv = await client.send("sessionCreate", {
+      agent: createNodeAgent(agentPath, "claude-acp"),
+      cwd: process.cwd(),
+      mcpServers: [],
+      systemPrompt: "Keep responses short.",
+      env: {
+        CLAUDE_CODE_EXECUTABLE: "/custom/claude",
+      },
+    })
+
+    await client.send("sessionSend", {
+      id: createdWithEnv.session.id,
+      message: {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "session/prompt",
+        params: {
+          sessionId: createdWithEnv.session.acpId,
+          prompt: [{ type: "text", text: "Report the executable path." }],
+        },
+      },
+    })
+
+    await waitFor(async () => {
+      const session = await client.send("sessionGet", { id: createdWithEnv.session.id })
+      return session.session.status === "done"
+    })
+
+    const historyWithEnv = await client.send("sessionHistory", { id: createdWithEnv.session.id })
+    expect(
+      historyWithEnv.history.at(-1) && "result" in historyWithEnv.history.at(-1)!
+        ? (
+            historyWithEnv.history.at(-1) as {
+              result?: { content?: Array<{ text?: string }> }
+            }
+          ).result?.content?.[0]?.text
+        : null,
+    ).toBe("/custom/claude")
+  } finally {
+    if (originalClaudeExecutable === undefined) {
+      delete process.env.CLAUDE_CODE_EXECUTABLE
+    } else {
+      process.env.CLAUDE_CODE_EXECUTABLE = originalClaudeExecutable
+    }
+  }
 })
 
 test("daemon logs agent message and chunk traffic without persisting high-volume events", async () => {

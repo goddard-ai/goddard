@@ -6,6 +6,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && Array.isArray(value) === false
 }
 
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string")
+}
+
 function assertAgentConfig(value: unknown, index: number): asserts value is WorkforceAgentConfig {
   if (!isRecord(value)) {
     throw new Error(`Invalid workforce agent at index ${index}`)
@@ -33,6 +37,10 @@ function assertAgentConfig(value: unknown, index: number): asserts value is Work
   ) {
     throw new Error(`Workforce agent ${index} must include non-empty owned paths`)
   }
+
+  if (value.env !== undefined && isStringRecord(value.env) === false) {
+    throw new Error(`Workforce agent ${index} has an invalid env map`)
+  }
 }
 
 export async function readWorkforceConfig(rootDir: string): Promise<WorkforceConfig> {
@@ -48,6 +56,10 @@ export async function readWorkforceConfig(rootDir: string): Promise<WorkforceCon
     typeof parsed.rootAgentId !== "string" ||
     Array.isArray(parsed.agents) === false
   ) {
+    throw new Error(`Invalid workforce config at ${paths.configPath}`)
+  }
+
+  if (parsed.env !== undefined && isStringRecord(parsed.env) === false) {
     throw new Error(`Invalid workforce config at ${paths.configPath}`)
   }
 

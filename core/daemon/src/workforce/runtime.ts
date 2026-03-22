@@ -268,6 +268,22 @@ function buildVerboseTextField(field: string, value: string): Record<string, unk
   }
 }
 
+/** Merges shared and agent-local workforce env so agent-local keys override shared defaults. */
+function buildWorkforceSessionEnv(
+  rootDir: string,
+  config: WorkforceConfig,
+  agent: WorkforceAgentConfig,
+  request: WorkforceRequestRecord,
+): Record<string, string> {
+  return {
+    ...config.env,
+    ...agent.env,
+    GODDARD_WORKFORCE_ROOT_DIR: rootDir,
+    GODDARD_WORKFORCE_AGENT_ID: agent.id,
+    GODDARD_WORKFORCE_REQUEST_ID: request.id,
+  }
+}
+
 /** Launches one daemon session for a workforce request using the runtime's ownership rules. */
 async function defaultRunWorkforceSession(
   deps: WorkforceRuntimeDeps,
@@ -300,11 +316,7 @@ async function defaultRunWorkforceSession(
     metadata,
     oneShot: true,
     initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
-    env: {
-      GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
-      GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
-      GODDARD_WORKFORCE_REQUEST_ID: input.request.id,
-    },
+    env: buildWorkforceSessionEnv(input.rootDir, input.config, input.agent, input.request),
   })
 
   logger.log("workforce.session_completed", {
