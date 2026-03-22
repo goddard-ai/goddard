@@ -6,8 +6,13 @@ on:
     branches:
       - main
 
+env:
+  NODE_VERSION: 22
+  PNPM_VERSION: 10.32.1
+  PNPM_STORE_PATH: ~/.pnpm-store
+
 jobs:
-  typecheck:
+  setup:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,12 +20,53 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure pnpm store
+        run: pnpm config set store-dir "$PNPM_STORE_PATH"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node${{ env.NODE_VERSION }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Fetch dependencies
+        run: pnpm fetch --frozen-lockfile
+
+  typecheck:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure pnpm store
+        run: pnpm config set store-dir "$PNPM_STORE_PATH"
+
+      - name: Restore pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node${{ env.NODE_VERSION }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Cache turbo build setup
         uses: actions/cache@v4
@@ -31,12 +77,13 @@ jobs:
             ${{ runner.os }}-turbo-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --offline
 
       - name: Typecheck
         run: pnpm run typecheck
 
   lint:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,12 +91,23 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure pnpm store
+        run: pnpm config set store-dir "$PNPM_STORE_PATH"
+
+      - name: Restore pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node${{ env.NODE_VERSION }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Cache turbo build setup
         uses: actions/cache@v4
@@ -60,12 +118,13 @@ jobs:
             ${{ runner.os }}-turbo-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --offline
 
       - name: Lint
         run: pnpm run lint
 
   test:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,12 +132,23 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure pnpm store
+        run: pnpm config set store-dir "$PNPM_STORE_PATH"
+
+      - name: Restore pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: ${{ runner.os }}-${{ runner.arch }}-node${{ env.NODE_VERSION }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Cache turbo build setup
         uses: actions/cache@v4
@@ -89,7 +159,7 @@ jobs:
             ${{ runner.os }}-turbo-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --offline
 
       - name: Test
         run: pnpm run test
