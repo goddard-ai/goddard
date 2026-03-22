@@ -1,0 +1,413 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "session": {
+      "description": "Default session settings applied to all agent actions.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "Agent to run. Use an installed adapter id or an inline agent distribution manifest.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentSetting"
+            }
+          ]
+        },
+        "mcpServers": {
+          "description": "Additional MCP server definitions to attach to the session.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/McpServer"
+          }
+        },
+        "env": {
+          "description": "Environment variables to inject into the session process.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": ["$schema"],
+  "additionalProperties": false,
+  "definitions": {
+    "AgentSetting": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$",
+              "description": "Stable machine-readable identifier for the agent."
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Human-readable agent name."
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+",
+              "description": "Semantic version of the agent distribution manifest."
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Short summary of what the agent does."
+            },
+            "repository": {
+              "description": "Repository URL for the agent source or release metadata.",
+              "type": "string",
+              "format": "uri"
+            },
+            "authors": {
+              "description": "List of authors or maintainers for the agent.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "license": {
+              "description": "License identifier or label for the agent.",
+              "type": "string"
+            },
+            "icon": {
+              "description": "Icon reference for the agent, such as an emoji or asset identifier.",
+              "type": "string"
+            },
+            "distribution": {
+              "type": "object",
+              "properties": {
+                "binary": {
+                  "description": "Binary artifacts to download and run directly.",
+                  "type": "object",
+                  "properties": {
+                    "darwin-aarch64": {
+                      "description": "Binary target for the darwin-aarch64 platform.",
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Archive URL containing the platform-specific agent binary."
+                        },
+                        "cmd": {
+                          "type": "string",
+                          "description": "Executable command to run after the archive is unpacked."
+                        },
+                        "args": {
+                          "description": "Default command-line arguments to pass to the binary.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "description": "Environment variables required by this binary target.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["archive", "cmd"],
+                      "additionalProperties": false
+                    },
+                    "darwin-x86_64": {
+                      "description": "Binary target for the darwin-x86_64 platform.",
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Archive URL containing the platform-specific agent binary."
+                        },
+                        "cmd": {
+                          "type": "string",
+                          "description": "Executable command to run after the archive is unpacked."
+                        },
+                        "args": {
+                          "description": "Default command-line arguments to pass to the binary.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "description": "Environment variables required by this binary target.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["archive", "cmd"],
+                      "additionalProperties": false
+                    },
+                    "linux-aarch64": {
+                      "description": "Binary target for the linux-aarch64 platform.",
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Archive URL containing the platform-specific agent binary."
+                        },
+                        "cmd": {
+                          "type": "string",
+                          "description": "Executable command to run after the archive is unpacked."
+                        },
+                        "args": {
+                          "description": "Default command-line arguments to pass to the binary.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "description": "Environment variables required by this binary target.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["archive", "cmd"],
+                      "additionalProperties": false
+                    },
+                    "linux-x86_64": {
+                      "description": "Binary target for the linux-x86_64 platform.",
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Archive URL containing the platform-specific agent binary."
+                        },
+                        "cmd": {
+                          "type": "string",
+                          "description": "Executable command to run after the archive is unpacked."
+                        },
+                        "args": {
+                          "description": "Default command-line arguments to pass to the binary.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "description": "Environment variables required by this binary target.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["archive", "cmd"],
+                      "additionalProperties": false
+                    },
+                    "windows-aarch64": {
+                      "description": "Binary target for the windows-aarch64 platform.",
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Archive URL containing the platform-specific agent binary."
+                        },
+                        "cmd": {
+                          "type": "string",
+                          "description": "Executable command to run after the archive is unpacked."
+                        },
+                        "args": {
+                          "description": "Default command-line arguments to pass to the binary.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "description": "Environment variables required by this binary target.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["archive", "cmd"],
+                      "additionalProperties": false
+                    },
+                    "windows-x86_64": {
+                      "description": "Binary target for the windows-x86_64 platform.",
+                      "type": "object",
+                      "properties": {
+                        "archive": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Archive URL containing the platform-specific agent binary."
+                        },
+                        "cmd": {
+                          "type": "string",
+                          "description": "Executable command to run after the archive is unpacked."
+                        },
+                        "args": {
+                          "description": "Default command-line arguments to pass to the binary.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "env": {
+                          "description": "Environment variables required by this binary target.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["archive", "cmd"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "npx": {
+                  "description": "Package distribution to run with npx.",
+                  "type": "object",
+                  "properties": {
+                    "package": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Package specifier to install or execute with the selected package runner."
+                    },
+                    "args": {
+                      "description": "Default command-line arguments to pass through the package runner.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "env": {
+                      "description": "Environment variables required by this package-based install method.",
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["package"],
+                  "additionalProperties": false
+                },
+                "uvx": {
+                  "description": "Package distribution to run with uvx.",
+                  "type": "object",
+                  "properties": {
+                    "package": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Package specifier to install or execute with the selected package runner."
+                    },
+                    "args": {
+                      "description": "Default command-line arguments to pass through the package runner.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "env": {
+                      "description": "Environment variables required by this package-based install method.",
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["package"],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false,
+              "description": "Instructions for installing and launching the agent."
+            }
+          },
+          "required": ["id", "name", "version", "description", "distribution"],
+          "additionalProperties": false,
+          "description": "Structured agent manifest accepted anywhere a config can inline an agent distribution."
+        }
+      ],
+      "id": "AgentSetting",
+      "examples": [
+        "amp-acp",
+        "auggie",
+        "autohand",
+        "claude-acp",
+        "cline",
+        "codebuddy-code",
+        "codex-acp",
+        "corust-agent",
+        "crow-cli",
+        "cursor",
+        "deepagents",
+        "dimcode",
+        "factory-droid",
+        "fast-agent",
+        "gemini",
+        "github-copilot-cli",
+        "goose",
+        "junie",
+        "kilo",
+        "kimi",
+        "minion-code",
+        "mistral-vibe",
+        "nova",
+        "opencode",
+        "pi-acp",
+        "qoder",
+        "qwen-code",
+        "stakpak"
+      ]
+    },
+    "McpServer": {
+      "$ref": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json#/$defs/McpServer"
+    }
+  }
+}

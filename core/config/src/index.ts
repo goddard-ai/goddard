@@ -1,11 +1,5 @@
-import {
-  ActionConfig,
-  LoopConfig,
-  RootConfig,
-  type GoddardActionConfigDocument,
-  type GoddardLoopConfigDocument,
-  type GoddardRootConfigDocument,
-} from "@goddard-ai/schema/config"
+import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
+import { isPlainObject, selectFirst } from "radashi"
 
 // ---------------------------------------------------------------------------
 // Models
@@ -35,10 +29,6 @@ type ValueOf<T> = T[keyof T]
 /** Supported model identifiers accepted by loop-facing configuration APIs. */
 export type Model = ValueOf<typeof Models.Anthropic> | ValueOf<typeof Models.OpenAi> | (string & {})
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 function mergeValue(baseValue: unknown, overrideValue: unknown): unknown {
   if (overrideValue === undefined) {
     return baseValue
@@ -52,7 +42,7 @@ function mergeValue(baseValue: unknown, overrideValue: unknown): unknown {
     return overrideValue
   }
 
-  const baseObject = isPlainObject(baseValue) ? baseValue : {}
+  const baseObject = isPlainObject(baseValue) ? (baseValue as Record<string, unknown>) : {}
   const merged: Record<string, unknown> = { ...baseObject }
 
   for (const [key, value] of Object.entries(overrideValue)) {
@@ -76,23 +66,48 @@ function mergeConfigLayers<T extends Record<string, unknown>>(layers: Array<T | 
   return merged as T
 }
 
+function selectLast<T, R>(
+  values: ReadonlyArray<T>,
+  predicate: (value: T, index: number) => R | undefined,
+): R | undefined {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const result = predicate(values[index], index)
+    if (result !== undefined) {
+      return result
+    }
+  }
+
+  return undefined
+}
+
 /** Merges root config layers using later layers as overrides. */
-export function mergeRootConfigLayers(
-  ...layers: Array<GoddardRootConfigDocument | undefined>
-): GoddardRootConfigDocument {
-  return RootConfig.parse(mergeConfigLayers<GoddardRootConfigDocument>(layers))
+export function mergeRootConfigLayers(...layers: Array<UserConfig | undefined>): UserConfig {
+  const merged = mergeConfigLayers<UserConfig>(layers)
+
+  return UserConfig.parse({
+    ...merged,
+    session: selectLast(layers, (layer) => layer?.session),
+    actions: mergeActionConfigLayers(...layers.map((layer) => layer?.actions)),
+    loops: mergeLoopConfigLayers(...layers.map((layer) => layer?.loops)),
+  })
 }
 
 /** Merges action config layers using later layers as overrides. */
-export function mergeActionConfigLayers(
-  ...layers: Array<GoddardActionConfigDocument | undefined>
-): GoddardActionConfigDocument {
-  return ActionConfig.parse(mergeConfigLayers<GoddardActionConfigDocument>(layers))
+export function mergeActionConfigLayers(...layers: Array<ActionConfig | undefined>): ActionConfig {
+  const merged = mergeConfigLayers<ActionConfig>(layers)
+
+  return ActionConfig.parse({
+    ...merged,
+    session: selectLast(layers, (layer) => layer?.session),
+  })
 }
 
 /** Merges loop config layers using later layers as overrides. */
-export function mergeLoopConfigLayers(
-  ...layers: Array<GoddardLoopConfigDocument | undefined>
-): GoddardLoopConfigDocument {
-  return LoopConfig.parse(mergeConfigLayers<GoddardLoopConfigDocument>(layers))
+export function mergeLoopConfigLayers(...layers: Array<LoopConfig | undefined>): LoopConfig {
+  const merged = mergeConfigLayers<LoopConfig>(layers)
+
+  return LoopConfig.parse({
+    ...merged,
+    session: selectLast(layers, (layer) => layer?.session),
+  })
 }

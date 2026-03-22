@@ -1,9 +1,5 @@
 import { mergeLoopConfigLayers } from "@goddard-ai/config"
-import {
-  ResolvedLoopConfig,
-  type GoddardLoopConfigDocument,
-  type ResolvedGoddardLoopConfigDocument,
-} from "@goddard-ai/schema/config"
+import { ResolvedLoopConfig, type LoopConfig } from "@goddard-ai/schema/config"
 import type {
   DaemonLoop,
   DaemonLoopStatus,
@@ -29,7 +25,7 @@ export type AgentLoopRuntimeOverrides = {
 
 /** A resolved named loop package with merged persisted config and a prompt module path. */
 export type ResolvedAgentLoop = {
-  config: GoddardLoopConfigDocument
+  config: LoopConfig
   path: string
   promptModulePath: string
 }
@@ -43,29 +39,26 @@ const DEFAULT_LOOP_RETRIES: StartDaemonLoopRequest["retries"] = {
   jitterRatio: 0.2,
 }
 
-/** Splits caller overrides into the persisted loop config layers accepted by the resolver. */
-function toPersistedLoopOverrides(
-  overrides: AgentLoopRuntimeOverrides | undefined,
-): GoddardLoopConfigDocument | undefined {
-  if (!overrides) {
-    return undefined
-  }
-
-  return {
-    session: overrides.session as GoddardLoopConfigDocument["session"],
-    rateLimits: overrides.rateLimits as GoddardLoopConfigDocument["rateLimits"],
-    retries: overrides.retries as GoddardLoopConfigDocument["retries"],
-  }
-}
-
 /** Resolves one merged loop config document into the fully required runtime contract. */
-function resolveLoopConfig(config: GoddardLoopConfigDocument): ResolvedGoddardLoopConfigDocument {
+function resolveLoopConfig(
+  config: LoopConfig,
+  rootDir: string,
+  overrides?: AgentLoopRuntimeOverrides,
+): ResolvedLoopConfig {
   return ResolvedLoopConfig.parse({
-    session: config.session,
-    rateLimits: config.rateLimits,
+    session: {
+      cwd: rootDir,
+      ...config.session,
+      ...overrides?.session,
+    },
+    rateLimits: {
+      ...config.rateLimits,
+      ...overrides?.rateLimits,
+    },
     retries: {
       ...DEFAULT_LOOP_RETRIES,
       ...config.retries,
+      ...overrides?.retries,
     },
   })
 }
@@ -136,7 +129,11 @@ export async function resolveLoop(
 
   return {
     ...loop,
-    config: mergeLoopConfigLayers(config.loops, loop.config),
+    config: mergeLoopConfigLayers(
+      config.session ? { session: config.session } : undefined,
+      config.loops,
+      loop.config,
+    ),
   }
 }
 
@@ -147,9 +144,7 @@ export function buildLoopStartRequest(
   loop: ResolvedAgentLoop,
   overrides?: AgentLoopRuntimeOverrides,
 ): StartDaemonLoopRequest {
-  const resolvedConfig = resolveLoopConfig(
-    mergeLoopConfigLayers(loop.config, toPersistedLoopOverrides(overrides)),
-  )
+  const resolvedConfig = resolveLoopConfig(loop.config, resolve(rootDir), overrides)
 
   return {
     rootDir: resolve(rootDir),

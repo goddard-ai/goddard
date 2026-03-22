@@ -37,6 +37,7 @@ afterEach(() => {
 })
 
 test("resolveLoop merges root defaults with packaged loop config", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-dir-"))
   const loopDir = path.join(tempDir, ".goddard", "loops", "review")
 
@@ -47,7 +48,6 @@ test("resolveLoop merges root defaults with packaged loop config", async () => {
       loops: {
         session: {
           agent: "pi-acp",
-          cwd: "/tmp/root",
           mcpServers: [],
         },
         rateLimits: {
@@ -62,9 +62,6 @@ test("resolveLoop merges root defaults with packaged loop config", async () => {
   await fs.writeFile(
     path.join(loopDir, "config.json"),
     JSON.stringify({
-      session: {
-        systemPrompt: "Use the loop checklist.",
-      },
       retries: {
         maxAttempts: 2,
       },
@@ -83,9 +80,7 @@ test("resolveLoop merges root defaults with packaged loop config", async () => {
   expect(loop.config).toEqual({
     session: {
       agent: "pi-acp",
-      cwd: "/tmp/root",
       mcpServers: [],
-      systemPrompt: "Use the loop checklist.",
     },
     rateLimits: {
       cycleDelay: "1s",
@@ -108,9 +103,7 @@ test("buildLoopStartRequest resolves packaged config into daemon payload", () =>
       config: {
         session: {
           agent: "pi-acp",
-          cwd: "/repo",
           mcpServers: [],
-          systemPrompt: "Use the loop checklist.",
         },
         rateLimits: {
           cycleDelay: "1s",
@@ -120,6 +113,9 @@ test("buildLoopStartRequest resolves packaged config into daemon payload", () =>
       },
     },
     {
+      session: {
+        systemPrompt: "Use the loop checklist.",
+      },
       retries: {
         maxAttempts: 3,
       },
@@ -152,6 +148,7 @@ test("buildLoopStartRequest resolves packaged config into daemon payload", () =>
 })
 
 test("resolveLoop rejects prompt.md-only loop packages", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-invalid-"))
   const loopDir = path.join(tempDir, ".goddard", "loops", "review")
 
@@ -163,6 +160,7 @@ test("resolveLoop rejects prompt.md-only loop packages", async () => {
 })
 
 test("startNamedLoop forwards the resolved daemon start payload", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-loop-start-"))
   const loopDir = path.join(tempDir, ".goddard", "loops", "review")
 
@@ -178,7 +176,6 @@ test("startNamedLoop forwards the resolved daemon start payload", async () => {
       loops: {
         session: {
           agent: "pi-acp",
-          cwd: tempDir,
           mcpServers: [],
         },
         rateLimits: {

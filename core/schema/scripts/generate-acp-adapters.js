@@ -24,20 +24,18 @@ async function fetchAdapterIds() {
 async function main() {
   try {
     const ids = await fetchAdapterIds()
-    const typeAliasName = "ACPAdapterName"
-
-    const unionMembers = ids
-      .sort()
-      .map((id) => `  | '${id}'`)
-      .join("\n")
+    const sortedIds = ids.sort()
+    const values = sortedIds.map((id) => `  "${id}",`).join("\n")
 
     const content = `/**
  * This file is auto-generated. Do not edit manually.
  */
 
-export type ${typeAliasName} =
-${unionMembers}
-  | (string & {});
+export const ACPAdapterNames = [
+${values}
+] as const
+
+export type ACPAdapterName = (typeof ACPAdapterNames)[number] | (string & {})
 `
 
     const outputPath = path.resolve(__dirname, "../src/acp-adapters.ts")

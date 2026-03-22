@@ -160,6 +160,7 @@ afterEach(async () => {
 })
 
 test("resolved actions can run through the daemon-backed session client", async () => {
+  process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-daemon-"))
   const actionsDir = path.join(tempDir, ".goddard", "actions")
   const daemon = await startTestDaemon()
@@ -181,7 +182,11 @@ test("resolved actions can run through the daemon-backed session client", async 
     path.join(tempDir, ".goddard", "config.json"),
     JSON.stringify({
       actions: {
-        systemPrompt: "Start with the action checklist.",
+        session: {
+          env: {
+            ACTION_ROOT: "true",
+          },
+        },
       },
     }),
     "utf-8",
