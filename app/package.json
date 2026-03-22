@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "test": "vitest run",
+    "test": "vitest run -c ../vitest.config.ts",
     "typecheck": "tsgo -p . --noEmit",
     "tauri": "tauri"
   },
