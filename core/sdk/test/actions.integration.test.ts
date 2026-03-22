@@ -24,6 +24,7 @@ vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@g
   return {
     ...actual,
     SessionStorage: {
+      ...actual.SessionStorage,
       create: vi.fn(async (record: any) => {
         const now = new Date()
         sessions.set(record.id, {
@@ -51,6 +52,7 @@ vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@g
       }),
     },
     SessionStateStorage: {
+      ...actual.SessionStateStorage,
       create: vi.fn(async (record: any) => {
         const now = new Date().toISOString()
         const created = { ...record, createdAt: now, updatedAt: now }
@@ -98,11 +100,16 @@ vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@g
         sessionStates.delete(sessionId)
       }),
     },
-  } as any
+  }
 })
 
-vi.mock("@goddard-ai/storage/session-permissions", (): typeof import("@goddard-ai/storage/session-permissions") => ({
-  SessionPermissionsStorage: {
+vi.mock("@goddard-ai/storage/session-permissions", async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => {
+  const actual = await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()
+
+  return {
+    ...actual,
+    SessionPermissionsStorage: {
+      ...actual.SessionPermissionsStorage,
     create: vi.fn(async (record: any) => {
       const created = { ...record, createdAt: new Date().toISOString() }
       permissionsBySessionId.set(record.sessionId, created)
@@ -129,8 +136,9 @@ vi.mock("@goddard-ai/storage/session-permissions", (): typeof import("@goddard-a
       permissionsBySessionId.delete(sessionId)
       permissionsByToken.delete(existing.token)
     }),
-  } as any
-}))
+    },
+  }
+})
 
 const cleanup: Array<() => Promise<void>> = []
 

@@ -9,8 +9,8 @@ vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src
   const actual = await importOriginal<typeof import("../src/paths.js")>()
   return {
     ...actual,
-    getGoddardGlobalDir: vi.fn(),
-  } as any
+    getGoddardGlobalDir: vi.fn<typeof actual.getGoddardGlobalDir>(),
+  }
 })
 
 describe("SessionStateStorage", () => {
@@ -112,7 +112,10 @@ describe("SessionStateStorage", () => {
       activeDaemonSession: true,
     })
 
-    const mockMessage = { type: "text", text: "hello" } as any
+    const mockMessage: Parameters<typeof SessionStateStorage.appendHistory>[1] = {
+      type: "text",
+      text: "hello",
+    }
     const updated = await SessionStateStorage.appendHistory("sess-1", mockMessage)
 
     expect(updated?.history.length).toBe(1)

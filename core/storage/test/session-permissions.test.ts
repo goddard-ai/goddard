@@ -9,8 +9,8 @@ vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src
   const actual = await importOriginal<typeof import("../src/paths.js")>()
   return {
     ...actual,
-    getSessionPermissionsPath: vi.fn(),
-  } as any
+    getSessionPermissionsPath: vi.fn<typeof actual.getSessionPermissionsPath>(),
+  }
 })
 
 describe("SessionPermissionsStorage", () => {

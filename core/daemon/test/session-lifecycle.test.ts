@@ -23,9 +23,13 @@ const {
   worktreeCleanupMock: vi.fn(() => true),
 }))
 
-vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => ({
-  ...(await importOriginal<typeof import("@goddard-ai/storage")>()),
-  SessionStorage: {
+vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
+  const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+
+  return {
+    ...actual,
+    SessionStorage: {
+      ...actual.SessionStorage,
     create: vi.fn(async (record: any) => {
       const now = new Date()
       sessions.set(record.id, {
@@ -78,6 +82,7 @@ vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@g
     }),
   },
   SessionStateStorage: {
+      ...actual.SessionStateStorage,
     create: vi.fn(async (record: any) => {
       const now = new Date().toISOString()
       const created = { ...record, createdAt: now, updatedAt: now }
@@ -124,12 +129,17 @@ vi.mock("@goddard-ai/storage", async (importOriginal): Promise<typeof import("@g
     remove: vi.fn(async (sessionId: string) => {
       sessionStates.delete(sessionId)
     }),
-  } as any
-} as any))
+  },
+  }
+})
 
-vi.mock("@goddard-ai/storage/session-permissions", async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => ({
-  ...(await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()),
-  SessionPermissionsStorage: {
+vi.mock("@goddard-ai/storage/session-permissions", async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => {
+  const actual = await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()
+
+  return {
+    ...actual,
+    SessionPermissionsStorage: {
+      ...actual.SessionPermissionsStorage,
     create: vi.fn(async (record: any) => {
       const created = { ...record, createdAt: new Date().toISOString() }
       permissionsBySessionId.set(record.sessionId, created)
@@ -156,12 +166,16 @@ vi.mock("@goddard-ai/storage/session-permissions", async (importOriginal): Promi
       permissionsBySessionId.delete(sessionId)
       permissionsByToken.delete(existing.token)
     }),
-  } as any
-} as any))
+  },
+  }
+})
 
-vi.mock("@goddard-ai/worktree", async (importOriginal): Promise<typeof import("@goddard-ai/worktree")> => ({
-  ...(await importOriginal<typeof import("@goddard-ai/worktree")>()),
-  Worktree: class {
+vi.mock("@goddard-ai/worktree", async (importOriginal): Promise<typeof import("@goddard-ai/worktree")> => {
+  const actual = await importOriginal<typeof import("@goddard-ai/worktree")>()
+
+  return {
+    ...actual,
+    Worktree: class {
     poweredBy = "mock-worktree"
     cwd: string
 
@@ -181,8 +195,9 @@ vi.mock("@goddard-ai/worktree", async (importOriginal): Promise<typeof import("@
     cleanup(worktreeDir: string, branchName: string) {
       return worktreeCleanupMock(worktreeDir, branchName)
     }
-  } as any,
-}))
+    },
+  }
+})
 
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
@@ -622,7 +637,12 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
   expect(writeLog).toBeTruthy()
   expect(writeLog?.acpId).toBe(result.acpId)
   expect(writeLog?.hasId).toBe(true)
-  expect((writeLog!.message as any).params.prompt[1].text).toEqual({
+  const writeMessage = writeLog?.message as {
+    params: {
+      prompt: Array<{ text?: { text: string; byteLength: number; truncated: boolean } }>
+    }
+  }
+  expect(writeMessage?.params.prompt[1]?.text).toEqual({
     text: `${longPrompt.slice(0, 512)}...`,
     byteLength: Buffer.byteLength(longPrompt),
     truncated: true,
@@ -634,7 +654,12 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
   expect(readLog).toBeTruthy()
   expect(readLog?.acpId).toBe(result.acpId)
   expect(readLog?.hasId).toBe(true)
-  expect((readLog!.message as any).result.content[0].text).toEqual({
+  const readMessage = readLog?.message as {
+    result: {
+      content: Array<{ text?: { text: string; byteLength: number; truncated: boolean } }>
+    }
+  }
+  expect(readMessage?.result.content[0]?.text).toEqual({
     text: `${longReply.slice(0, 512)}...`,
     byteLength: Buffer.byteLength(longReply),
     truncated: true,
@@ -644,13 +669,16 @@ test("daemon logs agent message and chunk traffic without persisting high-volume
     (entry) =>
       entry.event === "agent.chunk_read" &&
       entry.sessionId === result.sessionId &&
-      (entry.preview as any)?.truncated === true,
+      (entry.preview as { truncated?: boolean } | undefined)?.truncated === true,
   )
   expect(chunkLog).toBeTruthy()
   expect(chunkLog?.acpId).toBe(result.acpId)
-  expect(typeof (chunkLog!.preview as any).text).toBe("string")
-  expect((chunkLog!.preview as any).truncated).toBe(true)
-  expect((chunkLog!.preview as any).byteLength > 256).toBe(true)
+  const chunkPreview = chunkLog?.preview as
+    | { text: string; truncated: boolean; byteLength: number }
+    | undefined
+  expect(typeof chunkPreview?.text).toBe("string")
+  expect(chunkPreview?.truncated).toBe(true)
+  expect((chunkPreview?.byteLength ?? 0) > 256).toBe(true)
 
   const statusChangeLog = logs.find(
     (entry) =>

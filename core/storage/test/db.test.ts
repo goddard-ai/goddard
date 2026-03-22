@@ -12,8 +12,8 @@ vi.mock("../src/paths.js", async (importOriginal): Promise<typeof import("../src
   const actual = await importOriginal<typeof import("../src/paths.js")>()
   return {
     ...actual,
-    getDatabasePath: vi.fn(),
-  } as any
+    getDatabasePath: vi.fn<typeof actual.getDatabasePath>(),
+  }
 })
 
 describe("Database Storage (Session & Loop)", () => {
