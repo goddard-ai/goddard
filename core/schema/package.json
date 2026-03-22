@@ -12,11 +12,11 @@
       },
       "import": "./dist/*.mjs"
     },
-    "./schemas/*": "./schemas/*"
+    "./json/*": "./json/*"
   },
   "scripts": {
     "build": "tsdown && pnpm run generate-schemas",
-    "generate-schemas": "tsx scripts/generate-json-schemas.ts",
+    "generate-schemas": "node scripts/generate-json-schemas.ts",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
@@ -28,8 +28,5 @@
     "rouzer": "^2.0.0",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.1"
-  },
-  "devDependencies": {
-    "tsx": "^4.21.0"
   }
 }
