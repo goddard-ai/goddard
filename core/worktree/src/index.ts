@@ -81,7 +81,7 @@ export class Worktree {
     }
   }
 
-  cleanup(worktreeDir: string, branchName: string): void {
-    this.plugin.cleanup(worktreeDir, branchName)
+  cleanup(worktreeDir: string, branchName: string): boolean {
+    return this.plugin.cleanup(worktreeDir, branchName)
   }
 }
