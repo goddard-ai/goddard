@@ -1,9 +1,8 @@
 import type { DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
 import { Worktree } from "@goddard-ai/worktree"
-import { realpathSync } from "node:fs"
-import { resolve } from "node:path"
-import { relative, join } from "node:path"
 import { spawnSync } from "node:child_process"
+import { realpathSync } from "node:fs"
+import { join, relative, resolve } from "node:path"
 
 const defaultWorktreeDirName = ".goddard-agents"
 
