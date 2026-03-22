@@ -2,7 +2,6 @@
   "rust-analyzer.linkedProjects": ["app/src-tauri/Cargo.toml", "core/tauri-plugin-ipc/Cargo.toml"],
   "editor.formatOnSave": true,
   "editor.defaultFormatter": "oxc.oxc-vscode",
-  "typescript.experimental.useTsgo": true,
   "typescript.tsdk": "./node_modules/typescript/lib",
   "oxc.enable.oxfmt": true,
   "editor.codeActionsOnSave": {
