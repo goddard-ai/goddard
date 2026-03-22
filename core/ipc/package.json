@@ -9,6 +9,7 @@
         "source": "./src/index.ts",
         "default": "./dist/index.d.mts"
       },
+      "bun": "./src/index.ts",
       "import": "./dist/index.mjs"
     },
     "./node": {
@@ -16,6 +17,7 @@
         "source": "./src/node/index.ts",
         "default": "./dist/node/index.d.mts"
       },
+      "bun": "./src/node/index.ts",
       "import": "./dist/node/index.mjs"
     }
   },

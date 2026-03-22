@@ -1,5 +1,5 @@
 import { InMemoryBackendControlPlane, startBackendServer } from "@goddard-ai/backend"
-import { expect, test } from "vitest"
+import { expect, test } from "bun:test"
 import { createBackendClient } from "../src/backend.ts"
 
 test("daemon backend client creates PRs and checks managed status through rouzer route helpers", async () => {
@@ -73,6 +73,8 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   const server = await startBackendServer(controlPlane, { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
   let authorization: string | null = null
+  let subscription: Awaited<ReturnType<ReturnType<typeof createBackendClient>["stream"]["subscribe"]>> | null =
+    null
 
   try {
     const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
@@ -86,7 +88,7 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    const subscription = await client.stream.subscribe()
+    subscription = await client.stream.subscribe()
 
     const eventPromise = new Promise<unknown>((resolve) => {
       subscription.on("event", resolve)
@@ -105,9 +107,9 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
     expect(pr.number).toBe(1)
     expect(event.type).toBe("pr.created")
     expect(event.prNumber).toBe(1)
-
-    subscription.close()
   } finally {
+    subscription?.close()
+    await Bun.sleep(10)
     await server.close()
   }
 })

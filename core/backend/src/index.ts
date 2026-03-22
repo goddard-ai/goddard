@@ -1,5 +1,6 @@
 import { type RepoEvent } from "@goddard-ai/schema/backend"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
+import type { Socket } from "node:net"
 import { type BackendControlPlane } from "./api/control-plane.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 import { createBackendRouter } from "./api/router.ts"
@@ -55,6 +56,14 @@ export async function startBackendServer(
   })
 
   const httpServer = createNodeServer(router)
+  const sockets = new Set<Socket>()
+
+  httpServer.on("connection", (socket) => {
+    sockets.add(socket)
+    socket.on("close", () => {
+      sockets.delete(socket)
+    })
+  })
 
   await new Promise<void>((resolve) => httpServer.listen(port, host, () => resolve()))
 
@@ -62,13 +71,30 @@ export async function startBackendServer(
     port: Number((httpServer.address() as { port: number }).port),
     close: async () => {
       await new Promise<void>((resolve, reject) => {
-        httpServer.close((error) => {
+        const handleClose = (error?: Error | null) => {
+          if (error && "code" in error && error.code === "ERR_SERVER_NOT_RUNNING") {
+            resolve()
+            return
+          }
           if (error) {
             reject(error)
             return
           }
           resolve()
-        })
+        }
+
+        try {
+          httpServer.close((error) => {
+            handleClose(error)
+          })
+        } catch (error) {
+          handleClose(error instanceof Error ? error : new Error(String(error)))
+        }
+
+        httpServer.closeAllConnections?.()
+        for (const socket of sockets) {
+          socket.destroy()
+        }
       })
     },
   }

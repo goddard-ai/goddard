@@ -10,6 +10,7 @@
         "source": "./src/*.ts",
         "default": "./dist/*.d.mts"
       },
+      "bun": "./src/*.ts",
       "import": "./dist/*.mjs"
     },
     "./json/*": "./json/*"

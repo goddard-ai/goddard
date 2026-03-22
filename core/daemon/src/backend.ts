@@ -158,9 +158,11 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
           throw new Error("Stream response did not include a body")
         }
 
+        const body = response.body
         const reader = response.body.getReader()
         const subscription = new BackendStreamSubscription(() => {
           abortController.abort()
+          void body.cancel().catch(() => {})
           void reader.cancel().catch(() => {})
         })
 
