@@ -59,7 +59,6 @@ export class LoopRuntime {
   static async start(config: StartDaemonLoopRequest, deps: LoopRuntimeDeps): Promise<LoopRuntime> {
     const session = await deps.sessionManager.createSession({
       ...config.session,
-      worktree: config.session.worktree ?? { enabled: true },
       systemPrompt: config.session.systemPrompt ?? "",
       metadata: {
         ...config.session.metadata,
@@ -69,6 +68,7 @@ export class LoopRuntime {
           promptModulePath: config.promptModulePath,
         },
       },
+      worktree: config.session.worktree ?? { enabled: true },
     })
 
     const runtime = new LoopRuntime({

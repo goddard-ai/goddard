@@ -114,10 +114,7 @@ test("real storage reconciliation marks interrupted sessions as archived history
   expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
-  expect(worktreeCleanupMock).toHaveBeenCalledWith(
-    "/tmp/mock-worktree/session-real-restart-session-1",
-    "session-real-restart-session-1",
-  )
+  expect(worktreeCleanupMock).not.toHaveBeenCalled()
 
   await expect(client.send("sessionResolveToken", { token: "real-token-1" })).rejects.toThrow(
     /invalid session token/i,

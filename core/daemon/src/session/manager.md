@@ -90,7 +90,8 @@
 - `Session Worktree`
   - The optional isolated repository checkout the daemon provisions for a fresh session before the agent starts.
   - Why: so daemon-managed work inside git repositories does not mutate the caller's primary checkout or collide with concurrent sessions.
-  - The session manager only provisions it when a caller opts in with `worktree.enabled: true`.
+  - The session manager provisions it when a caller opts in with `worktree.enabled: true`.
+  - The session manager may reuse an already-prepared worktree by session id or by `worktree.existingFolder`.
   - Higher-level daemon lifecycles may apply that opt-in automatically when isolation is part of their contract.
 - `Effective Cwd`
   - The directory inside the session worktree where the agent process actually starts.
@@ -103,7 +104,7 @@
   - Why: so auxiliary context such as workforce linkage can travel with the session without going into prompt text.
 - `Worktree Metadata`
   - The persisted worktree identity attached to session metadata.
-  - Why: so daemon restart reconciliation can clean up orphaned session worktrees after interrupted runs.
+  - Why: so explicit cleanup flows and operators can find the isolated workspace after the session itself has ended.
 - `Workforce Metadata`
   - The part of session metadata that identifies a broader orchestrated work request and the participating agent.
   - Why: so session events can be tied back to multi-agent workflows.

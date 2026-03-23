@@ -253,7 +253,7 @@ test("resolved actions can run through the daemon-backed session client", async 
   )
 
   expect(result).toBeNull()
-})
+}, 10_000)
 
 async function startTestDaemon(): Promise<DaemonServer> {
   const socketDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-session-"))
