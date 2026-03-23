@@ -21,6 +21,9 @@
 - `Binary Target`
   - The platform-specific executable shape of an agent distribution.
   - Why: so the same logical agent can run correctly across operating systems and architectures.
+  - Archive-backed or raw-binary targets are installed into the global `.goddard/binaries` cache before launch.
+  - Supported payloads include `.zip`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, and raw binaries.
+  - Relative `cmd` values are resolved from the installed payload root instead of the caller's current `PATH`.
 - `Registry Agent`
   - An agent referenced by a stable identifier instead of a fully inlined runnable specification.
   - Why: so callers can ask for known agents by name while the daemon resolves the runnable details.

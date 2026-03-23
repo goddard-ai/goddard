@@ -18,7 +18,7 @@ export const AgentDistributionEnv = z.record(z.string(), z.string())
 
 export type AgentDistributionEnv = z.infer<typeof AgentDistributionEnv>
 
-/** Binary execution target metadata for one supported platform. */
+/** Binary execution target metadata for one supported platform. `archive` may be zip, tar.gz, tgz, tar.bz2, tbz2, or a raw binary payload, and `cmd` resolves from the installed root. */
 export const AgentBinaryTarget = z
   .object({
     archive: z.url(),
