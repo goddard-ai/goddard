@@ -234,7 +234,7 @@ export async function startDaemonServer(
       { session: Awaited<ReturnType<typeof sessionManager.createSession>> }
     >("sessionCreate", async (payload, context) => {
       const response = {
-        session: await sessionManager.createSession(payload as CreateDaemonSessionRequest),
+        session: await sessionManager.createSession(payload),
       }
       context.setSessionId(response.session.id)
       return response

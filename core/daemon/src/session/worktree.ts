@@ -1,14 +1,10 @@
 import type { DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
-import { Worktree } from "@goddard-ai/worktree"
+import { Worktree, WorktreePlugin } from "@goddard-ai/worktree"
 import { spawnSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 
-const defaultWorktreeDirName = ".goddard-agents"
-
-/**
- * Worktree metadata persisted onto daemon sessions so cleanup can be retried later.
- */
+/** Worktree metadata persisted onto daemon sessions so explicit cleanup flows can find it later. */
 export interface SessionWorktreeMetadata {
   repoRoot: string
   requestedCwd: string
@@ -16,14 +12,6 @@ export interface SessionWorktreeMetadata {
   worktreeDir: string
   branchName: string
   poweredBy: string
-}
-
-/**
- * Live worktree state owned by one daemon session while its agent process is active.
- */
-export interface SessionWorktreeHandle {
-  metadata: SessionWorktreeMetadata
-  cleanup: () => boolean
 }
 
 /**
@@ -63,34 +51,66 @@ export function parseSessionWorktreeMetadata(
   }
 }
 
+/** Prepared worktree state returned when one daemon session opts into isolation. */
+export interface PreparedSessionWorktree {
+  worktree: Worktree
+  effectiveCwd: string
+  metadata: SessionWorktreeMetadata
+  logContext: Record<string, unknown>
+}
+
 /**
  * Creates one daemon-owned worktree and maps the requested cwd into the cloned workspace.
  */
-export function createSessionWorktree(
+export function prepareSessionWorktree(
   sessionId: string,
   cwd: string,
-  metadata?: DaemonSessionMetadata,
-): SessionWorktreeHandle | null {
-  const requestedCwd = resolveRealPath(cwd)
+  params: {
+    /**
+     * If provided, use this branch name instead of the default one.
+     */
+    branchNameOverride?: string
+    /**
+     * Custom integration plugins to use for worktree setup.
+     */
+    worktreePlugins?: WorktreePlugin[]
+    /**
+     * Use this already-provisioned folder instead of creating a new worktree.
+     */
+    existingFolder?: string
+    /**
+     * If the default worktree implementation is used, ensure this folder
+     * exists in the repository root. Worktrees are stored in this folder.
+     */
+    defaultWorktreesFolder?: string
+  } = {},
+): PreparedSessionWorktree | null {
+  const requestedCwd = resolve(realpathSync.native(cwd))
   const repoRoot = resolveGitRepoRoot(requestedCwd)
   if (!repoRoot) {
     return null
   }
 
   const relativeCwd = relative(repoRoot, requestedCwd)
-  const branchName =
-    typeof metadata?.prNumber === "number" ? `pr-${metadata.prNumber}` : `session-${sessionId}`
   const worktree = new Worktree({
     cwd: repoRoot,
-    defaultPluginDirName: defaultWorktreeDirName,
+    plugins: params.worktreePlugins,
+    defaultPluginDirName: params.defaultWorktreesFolder,
   })
-  const { worktreeDir } = worktree.setup(branchName)
-  const effectiveCwd =
-    relativeCwd.length === 0 ? worktreeDir : join(worktreeDir, normalizeRelativePath(relativeCwd))
-
-  let cleaned = false
+  const existingFolder = params.existingFolder
+    ? resolve(realpathSync.native(params.existingFolder))
+    : null
+  const { worktreeDir, branchName } = existingFolder
+    ? {
+        worktreeDir: existingFolder,
+        branchName: resolveExistingWorktreeBranchName(existingFolder),
+      }
+    : worktree.setup(params.branchNameOverride || `goddard-${sessionId}`)
+  const effectiveCwd = join(worktreeDir, relativeCwd)
 
   return {
+    worktree,
+    effectiveCwd,
     metadata: {
       repoRoot,
       requestedCwd,
@@ -99,24 +119,34 @@ export function createSessionWorktree(
       branchName,
       poweredBy: worktree.poweredBy,
     },
-    cleanup: () => {
-      if (cleaned) {
-        return true
-      }
-
-      cleaned = true
-      return worktree.cleanup(worktreeDir, branchName)
+    logContext: {
+      worktreeDir,
+      worktreePoweredBy: worktree.poweredBy,
     },
   }
 }
 
 /**
- * Removes one persisted daemon worktree using metadata recorded on the session.
+ * Removes one daemon session worktree using the metadata recorded at creation time.
  */
-export function cleanupSessionWorktree(metadata: SessionWorktreeMetadata): boolean {
+export function cleanupSessionWorktree(
+  metadata: SessionWorktreeMetadata,
+  params: {
+    /**
+     * Custom integration plugins to use for worktree cleanup.
+     */
+    worktreePlugins?: WorktreePlugin[]
+    /**
+     * If the default worktree implementation is used, ensure this folder
+     * exists in the repository root. Worktrees are stored in this folder.
+     */
+    defaultWorktreesFolder?: string
+  } = {},
+): boolean {
   const worktree = new Worktree({
     cwd: metadata.repoRoot,
-    defaultPluginDirName: defaultWorktreeDirName,
+    plugins: params.worktreePlugins,
+    defaultPluginDirName: params.defaultWorktreesFolder,
   })
   return worktree.cleanup(metadata.worktreeDir, metadata.branchName)
 }
@@ -125,34 +155,36 @@ export function cleanupSessionWorktree(metadata: SessionWorktreeMetadata): boole
  * Resolves the containing git repository root for one requested session cwd when one exists.
  */
 function resolveGitRepoRoot(cwd: string): string | null {
-  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+  const { status, stdout } = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "ignore"],
   })
 
-  if (result.status !== 0) {
-    return null
-  }
+  if (status !== 0) return null
 
-  const repoRoot = result.stdout.trim()
-  if (!repoRoot) {
-    return null
-  }
-
-  return resolve(repoRoot)
+  const repoRoot = stdout.trim()
+  return repoRoot || null
 }
 
 /**
- * Normalizes a relative path before it is appended under a worktree root.
+ * Resolves the active branch name for one existing worktree folder.
  */
-function normalizeRelativePath(value: string): string {
-  return value === "." ? "" : value
-}
+function resolveExistingWorktreeBranchName(cwd: string): string {
+  const { status, stdout } = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  })
 
-/**
- * Resolves one path through the filesystem so symlinked temp roots stay consistent.
- */
-function resolveRealPath(value: string): string {
-  return resolve(realpathSync.native(value))
+  if (status !== 0) {
+    throw new Error(`Existing worktree folder must be a git worktree: ${cwd}`)
+  }
+
+  const branchName = stdout.trim()
+  if (!branchName) {
+    throw new Error(`Existing worktree folder must have a readable branch name: ${cwd}`)
+  }
+
+  return branchName
 }

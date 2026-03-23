@@ -11,6 +11,7 @@ import type {
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
 } from "@goddard-ai/schema/daemon"
+import type { UserConfig } from "@goddard-ai/schema/config"
 import type { SessionStatus } from "@goddard-ai/schema/db"
 import {
   agentBinaryPlatforms,
@@ -35,6 +36,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
+import type { WorktreePlugin } from "@goddard-ai/worktree"
 import { prependAgentBinToPath } from "../config.ts"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
@@ -44,17 +46,16 @@ import {
   isAcpRequest,
   matchAcpRequest,
 } from "./acp.ts"
-import { fetchRegistryAgent } from "./registry.ts"
 import {
   binaryInstallMarkerFileName,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
+import { fetchRegistryAgent } from "./registry.ts"
 import {
-  cleanupSessionWorktree,
-  createSessionWorktree,
   parseSessionWorktreeMetadata,
-  type SessionWorktreeHandle,
+  prepareSessionWorktree,
+  type SessionWorktreeMetadata,
 } from "./worktree.ts"
 
 /** The current version of `@goddard-ai/daemon` */
@@ -92,7 +93,6 @@ type PromptRequestMessage = acp.AnyMessage & {
   params: acp.PromptRequest
 }
 
-/** Holds the live runtime state for a daemon-owned session process. */
 /** Pending daemon-owned prompt request waiting for the agent response frame. */
 type PendingPromptRequest = {
   resolve: (response: acp.PromptResponse) => void
@@ -105,6 +105,7 @@ type ResolvedBinaryTarget = {
   target: AgentBinaryTarget
 }
 
+/** Holds the live runtime state for a daemon-owned session process. */
 type ActiveSession = {
   id: string
   acpId: string
@@ -121,12 +122,19 @@ type ActiveSession = {
   lastPermissionRequest: PermissionRequest | null
   clientRequests: ClientRequestMap
   pendingPrompts: Map<string | number, PendingPromptRequest>
-  worktree: SessionWorktreeHandle | null
+}
+
+/** Internal session-create shape accepted before the manager resolves ids, tokens, and worktrees. */
+interface CreateSessionParams extends CreateDaemonSessionRequest {
+  id?: string
+  token?: string
+  config?: UserConfig
+  worktreePlugins?: WorktreePlugin[]
 }
 
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
 export type SessionManager = {
-  createSession: (params: CreateDaemonSessionRequest) => Promise<DaemonSession>
+  createSession: (params: CreateSessionParams) => Promise<DaemonSession>
   listSessions: (params: ListDaemonSessionsRequest) => Promise<ListDaemonSessionsResponse>
   connectSession: (id: string) => Promise<DaemonSession>
   getSession: (id: string) => Promise<DaemonSession>
@@ -195,7 +203,7 @@ function isErrorSignal(signal: string | null): boolean {
 }
 
 /** Detects one-shot sessions that should exit immediately after the initial prompt completes. */
-function shouldExitAfterInitialPrompt(params: CreateDaemonSessionRequest): boolean {
+function shouldExitAfterInitialPrompt(params: CreateSessionParams): boolean {
   return params.oneShot === true && params.initialPrompt !== undefined
 }
 
@@ -221,6 +229,20 @@ function toConnectionState(input: {
 /** Chooses the archived connection mode from whether any session history survived persistence. */
 function archivedConnectionMode(historyLength: number): SessionConnectionMode {
   return historyLength > 0 ? "history" : "none"
+}
+
+/** Merges structured session metadata layers while dropping empty results. */
+function mergeSessionMetadata(
+  ...layers: Array<DaemonSessionMetadata | null | undefined>
+): DaemonSessionMetadata | undefined {
+  const merged = Object.assign(
+    {},
+    ...layers.filter(
+      (layer): layer is DaemonSessionMetadata => typeof layer === "object" && layer !== null,
+    ),
+  )
+
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 /** Hydrates a stored session record with derived state needed by daemon clients. */
@@ -602,9 +624,9 @@ function buildSessionLogContext(params: {
   repository?: string
   prNumber?: number
   metadata?: DaemonSessionMetadata
+  launchLogContext?: Record<string, unknown>
 }): Record<string, unknown> {
   const metadata = params.metadata
-  const worktreeMetadata = parseSessionWorktreeMetadata(metadata)
   const workforceMetadata =
     metadata && typeof metadata === "object" && "workforce" in metadata
       ? (metadata.workforce as {
@@ -632,8 +654,7 @@ function buildSessionLogContext(params: {
       workforceMetadata && typeof workforceMetadata.requestId === "string"
         ? workforceMetadata.requestId
         : undefined,
-    worktreeDir: worktreeMetadata?.worktreeDir,
-    worktreePoweredBy: worktreeMetadata?.poweredBy,
+    ...params.launchLogContext,
   }
 }
 
@@ -687,19 +708,16 @@ function settlePendingPrompt(active: ActiveSession, message: acp.AnyMessage): vo
   if ("id" in message === false || message.id == null) {
     return
   }
-
   const pending = active.pendingPrompts.get(message.id)
   if (!pending) {
     return
   }
-
   active.pendingPrompts.delete(message.id)
   if ("error" in message) {
     pending.reject(new Error(resolveJsonRpcErrorMessage(message.error)))
-    return
+  } else if ("result" in message) {
+    pending.resolve(getAcpMessageResult<acp.PromptResponse>(message))
   }
-
-  pending.resolve(message.result as acp.PromptResponse)
 }
 
 /** Rejects any in-flight prompt waits when a daemon session is torn down. */
@@ -874,7 +892,6 @@ export function createSessionManager(input: {
     await Promise.all(
       persistedSessions.map(async (session) => {
         const state = await SessionStateStorage.get(session.id)
-        const worktree = parseSessionWorktreeMetadata(session.metadata)
         if (!state) {
           await SessionStateStorage.create({
             sessionId: session.id,
@@ -900,7 +917,6 @@ export function createSessionManager(input: {
             previousStatus: session.status,
           })
           await SessionPermissionsStorage.revoke(session.id).catch(() => {})
-          await cleanupPersistedWorktree(session.id, worktree)
           return
         }
 
@@ -910,49 +926,64 @@ export function createSessionManager(input: {
           false,
         )
         await SessionPermissionsStorage.revoke(session.id).catch(() => {})
-        await cleanupPersistedWorktree(session.id, worktree)
       }),
     )
   }
 
-  async function createSession(params: CreateDaemonSessionRequest): Promise<DaemonSession> {
+  async function createSession(params: CreateSessionParams): Promise<DaemonSession> {
     await ready
-    const id = randomUUID()
-    const token = randomBytes(32).toString("hex")
+    const existingSession =
+      typeof params.id === "string" ? await SessionStorage.get(params.id) : null
+    if (params.id && !existingSession) {
+      throw new Error(`Cannot resume unknown session: ${params.id}`)
+    }
+
+    const id = existingSession?.id ?? params.id ?? randomUUID()
+    const token = params.token ?? randomBytes(32).toString("hex")
+    const existingState = existingSession ? await SessionStateStorage.get(id) : null
+    const existingWorktreeMetadata =
+      params.worktree?.enabled === true
+        ? parseSessionWorktreeMetadata(existingSession?.metadata)
+        : null
+    const configuredExistingFolder =
+      params.worktree?.enabled === true && typeof params.worktree.existingFolder === "string"
+        ? params.worktree.existingFolder.trim()
+        : ""
+    const preparedWorktree =
+      params.worktree?.enabled === true && !existingWorktreeMetadata
+        ? prepareSessionWorktree(id, params.cwd, {
+            branchNameOverride:
+              typeof params.prNumber === "number" ? `pr-${params.prNumber}` : undefined,
+            worktreePlugins: params.worktreePlugins,
+            existingFolder: configuredExistingFolder || undefined,
+            defaultWorktreesFolder: params.config?.worktrees?.defaultFolder,
+          })
+        : null
+    const worktreeMetadata = existingWorktreeMetadata ?? preparedWorktree?.metadata ?? null
+    const cwd = worktreeMetadata?.effectiveCwd ?? params.cwd
+    const metadata = mergeSessionMetadata(
+      existingSession?.metadata,
+      params.metadata,
+      worktreeMetadata ? ({ worktree: worktreeMetadata } as DaemonSessionMetadata) : undefined,
+    )
     const scope = parseRepoScope(params)
-    let sessionWorktree: SessionWorktreeHandle | null = null
-    let storedMetadata = params.metadata ?? undefined
-    let sessionCwd = params.cwd
     const sessionContext = {
       sessionId: id,
       acpId: undefined as string | undefined,
     }
 
-    try {
-      sessionWorktree =
-        params.worktree?.enabled === true
-          ? createSessionWorktree(id, params.cwd, params.metadata)
-          : null
-      if (sessionWorktree) {
-        storedMetadata = {
-          ...params.metadata,
-          worktree: sessionWorktree.metadata,
-        }
-        sessionCwd = sessionWorktree.metadata.effectiveCwd
-      }
-    } catch (error) {
-      logger.log("session.worktree_setup_failed", {
-        sessionId: id,
-        cwd: params.cwd,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-      throw error
-    }
-
     const sessionLogContext = buildSessionLogContext({
       ...params,
-      cwd: sessionCwd,
-      metadata: storedMetadata,
+      cwd,
+      metadata,
+      launchLogContext:
+        worktreeMetadata || preparedWorktree
+          ? {
+              worktreeDir: worktreeMetadata?.worktreeDir ?? preparedWorktree?.metadata.worktreeDir,
+              worktreePoweredBy:
+                worktreeMetadata?.poweredBy ?? preparedWorktree?.metadata.poweredBy,
+            }
+          : undefined,
     })
 
     await SessionPermissionsStorage.create({
@@ -971,44 +1002,92 @@ export function createSessionManager(input: {
 
       const process = await spawnAgentProcess(input.daemonUrl, token, {
         agent: params.agent,
-        cwd: sessionCwd,
+        cwd,
         agentBinDir: input.agentBinDir,
         env: params.env,
         registry: input.registry,
       })
 
-      const initialized = await initializeSession(process.stdin, process.stdout, params, {
-        onMessageWrite: (message) => {
-          logAgentMessage(
-            "agent.message_write",
-            sessionContext.sessionId,
-            sessionContext.acpId,
-            message,
-          )
+      const initialized = await initializeSession(
+        process.stdin,
+        process.stdout,
+        {
+          agent: params.agent,
+          cwd,
+          worktree: params.worktree,
+          mcpServers: params.mcpServers,
+          systemPrompt: params.systemPrompt,
+          env: params.env,
+          repository: params.repository,
+          prNumber: params.prNumber,
+          metadata,
+          initialPrompt: params.initialPrompt,
+          oneShot: params.oneShot,
         },
-      })
+        {
+          onMessageWrite: (message) => {
+            logAgentMessage(
+              "agent.message_write",
+              sessionContext.sessionId,
+              sessionContext.acpId,
+              message,
+            )
+          },
+        },
+      )
       sessionContext.acpId = initialized.acpId
 
-      await SessionStateStorage.create({
-        sessionId: id,
-        acpId: initialized.acpId,
-        connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
-        history: [...initialized.history],
-        diagnostics: [],
-        activeDaemonSession: !shouldExitAfterInitialPrompt(params),
-      })
+      const initialHistory = existingState
+        ? [...existingState.history, ...initialized.history]
+        : [...initialized.history]
+      const initialDiagnostics = existingState?.diagnostics ?? []
+      if (existingState) {
+        await SessionStateStorage.update(id, {
+          acpId: initialized.acpId,
+          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+          history: initialHistory,
+          diagnostics: initialDiagnostics,
+          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
+        })
+      } else {
+        await SessionStateStorage.create({
+          sessionId: id,
+          acpId: initialized.acpId,
+          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+          history: initialHistory,
+          diagnostics: initialDiagnostics,
+          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
+        })
+      }
 
-      await SessionStorage.create({
-        id,
-        acpId: initialized.acpId,
-        status: initialized.status,
-        agentName: agentNameFromInput(params.agent),
-        cwd: sessionCwd,
-        mcpServers: params.mcpServers,
-        repository: scope.repository,
-        prNumber: scope.prNumber,
-        metadata: storedMetadata ?? null,
-      })
+      if (existingSession) {
+        await SessionStorage.update(id, {
+          acpId: initialized.acpId,
+          status: initialized.status,
+          agentName: agentNameFromInput(params.agent),
+          cwd,
+          mcpServers: params.mcpServers,
+          repository: scope.repository,
+          prNumber: scope.prNumber,
+          metadata: metadata ?? null,
+          errorMessage: null,
+          blockedReason: null,
+          initiative: null,
+          lastAgentMessage: null,
+        })
+      } else {
+        await SessionStorage.create({
+          id,
+          acpId: initialized.acpId,
+          status: initialized.status,
+          agentName: agentNameFromInput(params.agent),
+          cwd,
+          mcpServers: params.mcpServers,
+          repository: scope.repository,
+          prNumber: scope.prNumber,
+          metadata: metadata ?? null,
+        })
+      }
       await emitDiagnostic(id, "session_created", {
         status: initialized.status,
         ...sessionLogContext,
@@ -1021,7 +1100,6 @@ export function createSessionManager(input: {
             signal,
             nextStatus: "done",
           })
-          await cleanupDetachedWorktree(id, sessionWorktree)
         }
 
         process.once("exit", (code, signal) => {
@@ -1058,13 +1136,12 @@ export function createSessionManager(input: {
         writer,
         subscription: { close: async () => {} },
         status: initialized.status,
-        history: [...initialized.history],
+        history: initialHistory,
         isFirstPrompt: initialized.isFirstPrompt,
         systemPrompt: params.systemPrompt,
         lastPermissionRequest: null,
         clientRequests: new Map(),
         pendingPrompts: new Map(),
-        worktree: sessionWorktree,
       }
 
       active.subscription = connection.subscribe(async (message) => {
@@ -1131,7 +1208,6 @@ export function createSessionManager(input: {
             signal,
           }).catch(() => {})
         }
-        await cleanupActiveWorktree(active)
       }
 
       process.once("exit", (code, signal) => {
@@ -1148,7 +1224,6 @@ export function createSessionManager(input: {
       })
       await SessionPermissionsStorage.revoke(id).catch(() => {})
       await SessionStateStorage.remove(id).catch(() => {})
-      sessionWorktree?.cleanup()
       throw error
     }
   }
@@ -1331,104 +1406,8 @@ export function createSessionManager(input: {
       await session.writer.close().catch(() => {})
       await session.subscription.close().catch(() => {})
       await SessionPermissionsStorage.revoke(session.id).catch(() => {})
-      await cleanupActiveWorktree(session)
     }
     activeSessions.clear()
-  }
-
-  async function cleanupPersistedWorktree(
-    sessionId: string,
-    worktree: ReturnType<typeof parseSessionWorktreeMetadata>,
-  ): Promise<void> {
-    if (!worktree) {
-      return
-    }
-
-    try {
-      const success = cleanupSessionWorktree(worktree)
-      await emitDiagnostic(sessionId, "session_worktree_cleanup_reconciled", {
-        worktreeDir: worktree.worktreeDir,
-        branchName: worktree.branchName,
-        success,
-      })
-    } catch (error) {
-      logger.log("session.worktree_cleanup_failed", {
-        sessionId,
-        phase: "reconcile",
-        worktreeDir: worktree.worktreeDir,
-        branchName: worktree.branchName,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-      await emitDiagnostic(sessionId, "session_worktree_cleanup_reconciled", {
-        worktreeDir: worktree.worktreeDir,
-        branchName: worktree.branchName,
-        success: false,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  async function cleanupActiveWorktree(active: ActiveSession): Promise<void> {
-    if (!active.worktree) {
-      return
-    }
-
-    try {
-      const success = active.worktree.cleanup()
-      await emitDiagnostic(active.id, "session_worktree_cleanup_finished", {
-        worktreeDir: active.worktree.metadata.worktreeDir,
-        branchName: active.worktree.metadata.branchName,
-        success,
-      })
-    } catch (error) {
-      logger.log("session.worktree_cleanup_failed", {
-        sessionId: active.id,
-        phase: "active",
-        worktreeDir: active.worktree.metadata.worktreeDir,
-        branchName: active.worktree.metadata.branchName,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-      await emitDiagnostic(active.id, "session_worktree_cleanup_finished", {
-        worktreeDir: active.worktree.metadata.worktreeDir,
-        branchName: active.worktree.metadata.branchName,
-        success: false,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-    } finally {
-      active.worktree = null
-    }
-  }
-
-  async function cleanupDetachedWorktree(
-    sessionId: string,
-    worktree: SessionWorktreeHandle | null,
-  ): Promise<void> {
-    if (!worktree) {
-      return
-    }
-
-    try {
-      const success = worktree.cleanup()
-      await emitDiagnostic(sessionId, "session_worktree_cleanup_finished", {
-        worktreeDir: worktree.metadata.worktreeDir,
-        branchName: worktree.metadata.branchName,
-        success,
-      })
-    } catch (error) {
-      logger.log("session.worktree_cleanup_failed", {
-        sessionId,
-        phase: "detached",
-        worktreeDir: worktree.metadata.worktreeDir,
-        branchName: worktree.metadata.branchName,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-      await emitDiagnostic(sessionId, "session_worktree_cleanup_finished", {
-        worktreeDir: worktree.metadata.worktreeDir,
-        branchName: worktree.metadata.branchName,
-        success: false,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-    }
   }
 
   return {

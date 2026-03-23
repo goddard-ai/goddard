@@ -144,9 +144,25 @@ export const LoopConfig = z
 
 export type LoopConfig = z.infer<typeof LoopConfig>
 
+/** Schema for persisted daemon worktree defaults loaded from JSON. */
+export const WorktreesConfig = z
+  .strictObject({
+    defaultFolder: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Default repository-local folder name used for daemon-managed worktrees."),
+  })
+  .describe("Persisted worktree defaults loaded from JSON.")
+
+export type WorktreesConfig = z.infer<typeof WorktreesConfig>
+
 /** Schema for the shared root config document. */
 export const UserConfig = z
   .strictObject({
+    worktrees: WorktreesConfig.optional().describe(
+      "Default settings for daemon-managed worktrees.",
+    ),
     session: StaticSessionParams.optional().describe(
       "Default session settings applied to all sessions.",
     ),
@@ -206,5 +222,6 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(ActionConfig, { id: "ActionConfig" })
   z.globalRegistry.add(LoopConfig, { id: "LoopConfig" })
+  z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })
 }
