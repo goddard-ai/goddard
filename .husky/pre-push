@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+while read local_ref local_sha remote_ref remote_sha
+do
+  if [ "$1" = "origin" ] && [ "$remote_ref" = "refs/heads/main" ]; then
+    pnpm check || exit 1
+  fi
+done
