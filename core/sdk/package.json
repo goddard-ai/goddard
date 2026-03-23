@@ -11,6 +11,13 @@
       },
       "import": "./dist/index.mjs"
     },
+    "./daemon": {
+      "types": {
+        "source": "./src/daemon/index.ts",
+        "default": "./dist/daemon/index.d.mts"
+      },
+      "import": "./dist/daemon/index.mjs"
+    },
     "./node": {
       "types": {
         "source": "./src/node/index.ts",

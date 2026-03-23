@@ -12,6 +12,9 @@
 - `Daemon Surface`
   - The browser-safe SDK API that mirrors daemon IPC actions through thin namespace methods.
   - Why: so every host sees one stable SDK shape instead of separate wrapper layers for the same daemon contract.
+- `Agent Session Wrapper`
+  - The object-backed SDK helper that keeps one live daemon-backed ACP session behind a stable `AgentSession` instance.
+  - Why: so callers that need interactive session semantics do not have to rebuild transport wiring on top of the thin daemon IPC namespace.
 - `Node Surface`
   - The SDK layer that injects a Node-resolved daemon client into the browser-safe daemon surface.
   - Why: so env and socket defaults stay host-specific without changing the SDK method signatures.
