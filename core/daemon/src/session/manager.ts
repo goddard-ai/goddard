@@ -296,16 +296,21 @@ export async function spawnAgentProcess(
     cwd: string
     agentBinDir: string
     env?: Record<string, string>
+    registry?: Record<string, AgentDistribution>
   },
 ): Promise<ChildProcessByStdio<Writable, Readable, null>> {
   let agent = params.agent
 
   if (typeof agent === "string") {
-    const fetchedAgent = await fetchRegistryAgent(agent)
-    if (!fetchedAgent) {
-      throw new Error(`Agent not found: ${agent}`)
+    if (params.registry?.[agent]) {
+      agent = params.registry[agent]
+    } else {
+      const fetchedAgent = await fetchRegistryAgent(agent)
+      if (!fetchedAgent) {
+        throw new Error(`Agent not found: ${agent}`)
+      }
+      agent = fetchedAgent
     }
-    agent = fetchedAgent
   }
 
   const processSpec = await resolveAgentProcessSpec(agent)
@@ -787,6 +792,7 @@ export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
   publish: (id: string, message: acp.AnyMessage) => void
+  registry?: Record<string, AgentDistribution>
 }): SessionManager {
   const activeSessions = new Map<string, ActiveSession>()
   const ready = reconcilePersistedSessions()
@@ -968,6 +974,7 @@ export function createSessionManager(input: {
         cwd: sessionCwd,
         agentBinDir: input.agentBinDir,
         env: params.env,
+        registry: input.registry,
       })
 
       const initialized = await initializeSession(process.stdin, process.stdout, params, {

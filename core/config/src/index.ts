@@ -89,6 +89,12 @@ export function mergeRootConfigLayers(...layers: Array<UserConfig | undefined>):
     session: selectLast(layers, (layer) => layer?.session),
     actions: mergeActionConfigLayers(...layers.map((layer) => layer?.actions)),
     loops: mergeLoopConfigLayers(...layers.map((layer) => layer?.loops)),
+    registry: layers.reduce((acc, layer) => {
+      if (layer?.registry) {
+        return { ...acc, ...layer.registry }
+      }
+      return acc
+    }, undefined as UserConfig["registry"]),
   })
 }
 
