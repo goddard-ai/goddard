@@ -1,3 +1,4 @@
+import { dedent } from "radashi"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
@@ -236,15 +237,16 @@ afterEach(async () => {
 })
 
 function createNodeAgent(agentPath: string) {
-  const unixWrapper = `#!/bin/sh
-exec "${process.execPath}" "${agentPath}" "$@"
-`
-  const windowsWrapper = `@echo off
-"${process.execPath}" "${agentPath}" %*
-`
+  const unixWrapper = dedent`
+    #!/bin/sh
+    exec "${process.execPath}" "${agentPath}" "$@"
+  `
+  const windowsWrapper = dedent`
+    @echo off
+    "${process.execPath}" "${agentPath}" %*
+  `
   const unixArchive = `data:text/plain;base64,${Buffer.from(unixWrapper).toString("base64")}`
   const windowsArchive = `data:text/plain;base64,${Buffer.from(windowsWrapper).toString("base64")}`
-
   return {
     id: "node-agent",
     name: "Node Agent",
