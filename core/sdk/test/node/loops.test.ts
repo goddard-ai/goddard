@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
 
 const mockedDaemonLoops = vi.hoisted(() => ({
   getDaemonLoop: vi.fn(),
@@ -18,15 +18,34 @@ vi.mock(
   }),
 )
 
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 import { buildLoopStartRequest, resolveLoop, startNamedLoop } from "../../src/node/loops.ts"
 
 const originalHome = process.env.HOME
+let isolatedHomeDir: string | null = null
 
-afterEach(() => {
+beforeEach(async () => {
+  isolatedHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-sdk-home-"))
+  process.env.HOME = isolatedHomeDir
+})
+
+afterEach(async () => {
   mockedDaemonLoops.getDaemonLoop.mockReset()
   mockedDaemonLoops.listDaemonLoops.mockReset()
   mockedDaemonLoops.shutdownDaemonLoop.mockReset()
   mockedDaemonLoops.startDaemonLoop.mockReset()
+
+  if (isolatedHomeDir) {
+    await fs.rm(isolatedHomeDir, { recursive: true, force: true })
+    isolatedHomeDir = null
+  }
 
   if (originalHome === undefined) {
     delete process.env.HOME

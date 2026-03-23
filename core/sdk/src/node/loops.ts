@@ -1,4 +1,4 @@
-import { mergeLoopConfigLayers } from "@goddard-ai/config"
+import { mergeLoopConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
 import { ResolvedLoopConfig, type LoopConfig } from "@goddard-ai/schema/config"
 import type {
   DaemonLoop,
@@ -127,12 +127,17 @@ export async function resolveLoop(
     )
   }
 
+  const mergedConfig = mergeLoopConfigLayers(config.loops, loop.config)
+  const sessionConfig = mergedConfig.session ?? {}
+
+  sessionConfig.agent = sessionConfig.agent ?? (await resolveDefaultAgent(config, "loops"))
+  mergedConfig.session = sessionConfig
+
   return {
     ...loop,
     config: mergeLoopConfigLayers(
       config.session ? { session: config.session } : undefined,
-      config.loops,
-      loop.config,
+      mergedConfig,
     ),
   }
 }

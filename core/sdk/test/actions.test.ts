@@ -12,6 +12,14 @@ vi.mock(
   }),
 )
 
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 import {
   buildActionSessionParams,
   resolveAction,
@@ -59,6 +67,7 @@ test("resolveAction applies local root defaults to prompt-only actions", async (
   assert.equal(action.prompt, "Review the current diff carefully.\n")
   assert.deepEqual(action.config, {
     session: {
+      agent: "pi-acp",
       env: {
         ROOT: "true",
       },
@@ -104,6 +113,7 @@ test("resolveAction merges root defaults with packaged config.json", async () =>
   assert.equal(action.prompt, "Ship the change.\n")
   assert.deepEqual(action.config, {
     session: {
+      agent: "pi-acp",
       env: {
         ENTITY: "true",
       },
@@ -152,6 +162,7 @@ test("resolveAction applies local root defaults to a globally defined action", a
   assert.equal(action.prompt, "Use the global action.\n")
   assert.deepEqual(action.config, {
     session: {
+      agent: "pi-acp",
       env: {
         GLOBAL: "true",
       },

@@ -111,3 +111,5 @@ export function mergeLoopConfigLayers(...layers: Array<LoopConfig | undefined>):
     session: selectLast(layers, (layer) => layer?.session),
   })
 }
+
+export * from "./agent-resolver.js"
