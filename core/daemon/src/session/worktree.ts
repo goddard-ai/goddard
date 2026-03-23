@@ -136,17 +136,11 @@ export function cleanupSessionWorktree(
      * Custom integration plugins to use for worktree cleanup.
      */
     worktreePlugins?: WorktreePlugin[]
-    /**
-     * If the default worktree implementation is used, ensure this folder
-     * exists in the repository root. Worktrees are stored in this folder.
-     */
-    defaultWorktreesFolder?: string
   } = {},
 ): boolean {
   const worktree = new Worktree({
     cwd: metadata.repoRoot,
     plugins: params.worktreePlugins,
-    defaultPluginDirName: params.defaultWorktreesFolder,
   })
   return worktree.cleanup(metadata.worktreeDir, metadata.branchName)
 }
