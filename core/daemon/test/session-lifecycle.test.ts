@@ -1,5 +1,6 @@
 import { dedent } from "radashi"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -473,7 +474,12 @@ test("daemon sessions keep the local cwd by default even inside git repositories
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
-  const requestedCwd = join(process.cwd(), "src")
+  const repoRoot = await mkdtemp(join(tmpdir(), "goddard-daemon-repo-"))
+  cleanup.push(async () => { await rm(repoRoot, { recursive: true, force: true }) })
+  spawnSync("git", ["init"], { cwd: repoRoot })
+  const requestedCwd = join(repoRoot, "src")
+  await mkdir(requestedCwd, { recursive: true })
+
   const setupCallsBefore = worktreeSetupMock.mock.calls.length
 
   const created = await client.send("sessionCreate", {
@@ -483,7 +489,7 @@ test("daemon sessions keep the local cwd by default even inside git repositories
     systemPrompt: "Keep responses short.",
   })
 
-  expect(created.session.cwd).toBe(join(process.cwd(), "src"))
+  expect(created.session.cwd).toBe(requestedCwd)
   expect(created.session.metadata).toBeNull()
   expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
 })
@@ -517,7 +523,12 @@ test("session worktree opt-in runs inside the mapped worktree subdirectory", asy
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
-  const requestedCwd = join(process.cwd(), "src")
+  const repoRoot = await mkdtemp(join(tmpdir(), "goddard-daemon-repo-"))
+  cleanup.push(async () => { await rm(repoRoot, { recursive: true, force: true }) })
+  spawnSync("git", ["init"], { cwd: repoRoot })
+  const requestedCwd = join(repoRoot, "src")
+  await mkdir(requestedCwd, { recursive: true })
+
   const setupCallsBefore = worktreeSetupMock.mock.calls.length
 
   const created = await client.send("sessionCreate", {
@@ -547,9 +558,13 @@ test("one-shot daemon sessions clean up their worktree after the initial prompt 
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
+  const repoRoot = await mkdtemp(join(tmpdir(), "goddard-daemon-repo-"))
+  cleanup.push(async () => { await rm(repoRoot, { recursive: true, force: true }) })
+  spawnSync("git", ["init"], { cwd: repoRoot })
+
   const created = await client.send("sessionCreate", {
     agent: createNodeAgent(exampleAgentPath),
-    cwd: process.cwd(),
+    cwd: repoRoot,
     worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",

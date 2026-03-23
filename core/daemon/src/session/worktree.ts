@@ -135,7 +135,7 @@ function resolveGitRepoRoot(cwd: string): string | null {
     return null
   }
 
-  const repoRoot = result.stdout.trim()
+  const repoRoot = result.stdout.toString("utf8").trim()
   if (!repoRoot) {
     return null
   }

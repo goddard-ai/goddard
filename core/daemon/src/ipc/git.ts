@@ -85,5 +85,5 @@ function runGit(cwd: string, args: string[]): string {
     throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed in ${cwd}`)
   }
 
-  return result.stdout.trim()
+  return result.stdout.toString("utf8").trim()
 }
