@@ -94,7 +94,6 @@ export type DaemonSession = DaemonSessionIdentity & {
   blockedReason: string | null
   initiative: string | null
   lastAgentMessage: string | null
-  models?: acp.SessionModelState | null
 }
 
 /** Response payload returned after one daemon-managed session is created. */

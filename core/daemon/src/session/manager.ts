@@ -260,7 +260,6 @@ async function toDaemonSession(
     blockedReason: record.blockedReason,
     initiative: record.initiative,
     lastAgentMessage: record.lastAgentMessage,
-    models: record.models ?? null,
   }
 }
 
@@ -517,7 +516,6 @@ async function initializeSession(
   isFirstPrompt: boolean
   history: acp.AnyMessage[]
   acpId: string
-  models?: acp.SessionModelState | null
 }> {
   const history: acp.AnyMessage[] = []
   const stream = createAgentMessageStream(input, output)
@@ -580,7 +578,6 @@ async function initializeSession(
       isFirstPrompt,
       history,
       acpId: newSession.sessionId,
-      models: newSession.models,
     }
   } finally {
     await stream.readable.cancel().catch(() => {})
@@ -1021,7 +1018,6 @@ export function createSessionManager(input: {
         repository: scope.repository,
         prNumber: scope.prNumber,
         metadata: storedMetadata ?? null,
-        models: initialized.models ?? null,
       })
       await emitDiagnostic(id, "session_created", {
         status: initialized.status,
