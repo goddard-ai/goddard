@@ -26,6 +26,10 @@ export const StaticSessionParams = z
       .record(z.string(), z.string())
       .optional()
       .describe("Environment variables to inject into the session process."),
+    model: z
+      .string()
+      .optional()
+      .describe("Model identifier to set for the session upon initialization."),
   })
   .describe("Persisted session defaults that are safe to store in shared JSON config.")
 

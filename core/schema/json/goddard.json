@@ -30,6 +30,10 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "model": {
+          "description": "Model identifier to set for the session upon initialization.",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -456,6 +460,10 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "model": {
+              "description": "Model identifier to set for the session upon initialization.",
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -495,6 +503,10 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "model": {
+              "description": "Model identifier to set for the session upon initialization.",
+              "type": "string"
             }
           },
           "additionalProperties": false
