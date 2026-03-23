@@ -25,6 +25,7 @@ export const sessions = sqliteTable(
     repository: text(),
     prNumber: integer(),
     metadata: text({ mode: "json" }).$type<Record<string, any>>(),
+    models: text({ mode: "json" }).$type<acp.SessionModelState>(),
   },
   (table) => [index("idx_sessions_repository_pr_number").on(table.repository, table.prNumber)],
 )

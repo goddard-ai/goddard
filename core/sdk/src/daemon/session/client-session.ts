@@ -41,6 +41,27 @@ export class AgentSession {
     return this.acpClient.cancel({ sessionId: this.acpSessionId })
   }
 
+  /** Sets the active model for the connected agent session. */
+  async setAgentModel(modelId: string) {
+    const models = this.session.models
+
+    if (models) {
+      if (models.currentModelId === modelId) {
+        return
+      }
+
+      const isModelAvailable = models.availableModels.some((m) => m.modelId === modelId)
+      if (!isModelAvailable) {
+        throw new Error(`Model ${modelId} is not available for this session`)
+      }
+    }
+
+    await this.acpClient.unstable_setSessionModel({
+      sessionId: this.acpSessionId,
+      modelId,
+    })
+  }
+
   /** Retrieves the message history for the connected agent session. */
   async getHistory(): Promise<acp.AnyMessage[]> {
     const response = await this.daemonClient.send("sessionHistory", {
