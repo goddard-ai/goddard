@@ -3,14 +3,9 @@ import * as acp from "@agentclientprotocol/sdk"
 import * as os from "node:os"
 import { createAgentMessageStream } from "../session/acp.ts"
 import { spawnAgentProcess } from "../session/manager.ts"
+import { ACPAdapterNames } from "@goddard-ai/schema/acp-adapters"
 
-async function main() {
-  const adapterName = process.argv[2]
-  if (!adapterName) {
-    console.error("Usage: goddard-test-acp-session <adapter-name>")
-    process.exit(1)
-  }
-
+async function testAdapter(adapterName: string) {
   const processHandle = await spawnAgentProcess("http://localhost:0", "test-token", {
     agent: adapterName,
     cwd: process.cwd(),
@@ -39,9 +34,30 @@ async function main() {
     mcpServers: [],
   })
 
+  console.log(`\n=== Session for ${adapterName} ===`)
   console.dir(session, { depth: null })
 
   processHandle.kill()
+}
+
+async function main() {
+  const args = process.argv.slice(2)
+  if (args.length === 0) {
+    console.error("Usage: goddard-test-acp-session <adapter-name...> | --all")
+    process.exit(1)
+  }
+
+  let adaptersToTest: string[] = []
+  if (args.includes("--all")) {
+    adaptersToTest = [...ACPAdapterNames]
+  } else {
+    adaptersToTest = args
+  }
+
+  for (const adapterName of adaptersToTest) {
+    await testAdapter(adapterName)
+  }
+
   process.exit(0)
 }
 
