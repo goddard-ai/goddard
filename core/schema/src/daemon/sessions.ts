@@ -8,7 +8,6 @@ import { DaemonSessionMetadata } from "./session-metadata.ts"
 /** Session-start initial prompt values accepted by the daemon session API. */
 export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
 
-/** TypeScript shape for the daemon session API's initial prompt option. */
 export type InitialPromptOption = z.infer<typeof InitialPromptOption>
 
 /** Worktree options accepted by the daemon session API. */
@@ -17,7 +16,6 @@ export const SessionWorktreeParams = z.object({
   existingFolder: z.string().optional(),
 })
 
-/** TypeScript shape for the daemon session API's worktree options. */
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
 
 /** Request payload used to create one daemon-managed session. */
@@ -35,7 +33,6 @@ export const CreateDaemonSessionRequest = z.object({
   oneShot: z.boolean().optional(),
 })
 
-/** TypeScript shape of the daemon session-creation payload contract. */
 export type CreateDaemonSessionRequest = z.infer<typeof CreateDaemonSessionRequest>
 
 /** Request payload used to list daemon-managed sessions in stable recency order. */
@@ -44,11 +41,9 @@ export const ListDaemonSessionsRequest = z.object({
   cursor: z.string().optional(),
 })
 
-/** TypeScript shape of the daemon session-list payload contract. */
 export type ListDaemonSessionsRequest = z.infer<typeof ListDaemonSessionsRequest>
 
 /** Path and payload params used to address one daemon-managed session. */
 export const DaemonSessionPathParams = DaemonSessionIdParams
 
-/** TypeScript shape of the path params used to address one daemon-managed session. */
 export type DaemonSessionPathParams = z.infer<typeof DaemonSessionPathParams>

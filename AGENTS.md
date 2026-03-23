@@ -77,6 +77,7 @@
 - Inline values instead of introducing single-use variables unless the variable materially improves readability or avoids repeating a complex expression.
 - Every exported module declaration must have a human-readable `/** ... */` description comment.
 - Every TypeScript type alias and interface, whether exported or internal, must have a human-readable `/** ... */` description comment.
+  - **EXCEPT** when the type was inferred from a Zod schema of the same name.
 - Every non-trivial top-level function must have a human-readable `/** ... */` description comment.
 - These comments should explain the non-obvious what and, when useful, the why.
 - Strange coding patterns must have a brief `//` comment stating what they are doing and why they are necessary.
