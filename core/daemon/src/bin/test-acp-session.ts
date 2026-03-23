@@ -42,7 +42,7 @@ async function testAdapter(adapterName: string, prompt?: string) {
     try {
       await connection.prompt({
         sessionId: session.sessionId,
-        prompt: [{ type: "text", text: prompt }]
+        prompt: [{ type: "text", text: prompt }],
       })
       console.log(`\n--- Prompt Sent ---`)
     } catch (e) {
