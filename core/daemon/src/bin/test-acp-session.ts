@@ -5,7 +5,7 @@ import { createAgentMessageStream } from "../session/acp.ts"
 import { spawnAgentProcess } from "../session/manager.ts"
 import { ACPAdapterNames } from "@goddard-ai/schema/acp-adapters"
 
-async function testAdapter(adapterName: string) {
+async function testAdapter(adapterName: string, prompt?: string) {
   const processHandle = await spawnAgentProcess("http://localhost:0", "test-token", {
     agent: adapterName,
     cwd: process.cwd(),
@@ -37,10 +37,23 @@ async function testAdapter(adapterName: string) {
   console.log(`\n=== Session for ${adapterName} ===`)
   console.dir(session, { depth: null })
 
+  if (prompt) {
+    console.log(`\n--- Sending Prompt: "${prompt}" ---`)
+    try {
+      await connection.prompt({
+        sessionId: session.sessionId,
+        prompt: [{ type: "text", text: prompt }]
+      })
+      console.log(`\n--- Prompt Sent ---`)
+    } catch (e) {
+      console.log(`\n--- Failed to send prompt: ${e instanceof Error ? e.message : String(e)} ---`)
+    }
+  }
+
   processHandle.kill()
 }
 
-import { command, run, restPositionals, string, flag } from "cmd-ts"
+import { command, run, restPositionals, string, flag, option, optional } from "cmd-ts"
 
 const app = command({
   name: "goddard-test-acp-session",
@@ -54,8 +67,13 @@ const app = command({
       long: "all",
       description: "Test all available adapters",
     }),
+    prompt: option({
+      type: optional(string),
+      long: "prompt",
+      description: "Provide a one-shot prompt to send to the session",
+    }),
   },
-  handler: async ({ adapters, all }) => {
+  handler: async ({ adapters, all, prompt }) => {
     let adaptersToTest: string[] = []
 
     if (all) {
@@ -68,7 +86,7 @@ const app = command({
     }
 
     for (const adapterName of adaptersToTest) {
-      await testAdapter(adapterName)
+      await testAdapter(adapterName, prompt)
     }
 
     process.exit(0)
