@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
+import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type {
   CreateDaemonSessionRequest,
   DaemonDiagnosticEvent,
@@ -19,6 +19,8 @@ import {
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
 import {
+  fileExists,
+  getGoddardGlobalDir,
   SessionStateStorage,
   SessionStorage,
   type SessionConnectionMode,
@@ -29,7 +31,9 @@ import {
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import treeKill from "@goddard-ai/tree-kill"
 import { execSync, spawn, type ChildProcessByStdio } from "node:child_process"
-import { randomBytes, randomUUID } from "node:crypto"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
+import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { prependAgentBinToPath } from "../config.ts"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
@@ -41,6 +45,11 @@ import {
   matchAcpRequest,
 } from "./acp.ts"
 import { fetchRegistryAgent } from "./registry.ts"
+import {
+  binaryInstallMarkerFileName,
+  installBinaryTargetPayload,
+  resolveInstalledBinaryCommand,
+} from "./archive.ts"
 import {
   cleanupSessionWorktree,
   createSessionWorktree,
@@ -65,6 +74,13 @@ const logger = createDaemonLogger()
 /** Tracks in-flight client requests so agent responses can be correlated back to session state. */
 type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
 
+/** Describes the concrete child-process invocation for a resolved agent distribution. */
+type AgentProcessSpec = {
+  cmd: string
+  args: string[]
+  env?: Record<string, string>
+}
+
 /** Represents the most recent permission request awaiting a client decision. */
 type PermissionRequest = acp.AnyMessage & {
   id: unknown
@@ -82,6 +98,13 @@ type PendingPromptRequest = {
   resolve: (response: acp.PromptResponse) => void
   reject: (error: Error) => void
 }
+
+/** Couples a binary target with the platform key that selected it. */
+type ResolvedBinaryTarget = {
+  platformKey: AgentBinaryPlatform
+  target: AgentBinaryTarget
+}
+
 type ActiveSession = {
   id: string
   acpId: string
@@ -265,7 +288,7 @@ function buildAgentProcessEnv(input: {
 }
 
 /** Resolves and launches the requested agent distribution for a new daemon session. */
-async function spawnAgentProcess(
+export async function spawnAgentProcess(
   daemonUrl: string,
   token: string,
   params: {
@@ -286,7 +309,7 @@ async function spawnAgentProcess(
     agent = fetchedAgent
   }
 
-  const processSpec = resolveAgentProcessSpec(agent)
+  const processSpec = await resolveAgentProcessSpec(agent)
 
   const extraEnv: Record<string, string> = {}
   if (agentId === "claude-acp") {
@@ -320,17 +343,13 @@ async function spawnAgentProcess(
 }
 
 /** Chooses the concrete command invocation for a resolved agent distribution. */
-function resolveAgentProcessSpec(agent: AgentDistribution): {
-  cmd: string
-  args: string[]
-  env?: Record<string, string>
-} {
+export async function resolveAgentProcessSpec(agent: AgentDistribution): Promise<AgentProcessSpec> {
   const binaryTarget = resolveBinaryTarget(agent)
   if (binaryTarget) {
     return {
-      cmd: binaryTarget.cmd,
-      args: binaryTarget.args ?? [],
-      env: binaryTarget.env,
+      cmd: await resolveBinaryCommand(agent, binaryTarget),
+      args: binaryTarget.target.args ?? [],
+      env: binaryTarget.target.env,
     }
   }
 
@@ -354,13 +373,21 @@ function resolveAgentProcessSpec(agent: AgentDistribution): {
 }
 
 /** Selects the platform-specific binary target for the current runtime when available. */
-function resolveBinaryTarget(agent: AgentDistribution): AgentBinaryTarget | null {
+function resolveBinaryTarget(agent: AgentDistribution): ResolvedBinaryTarget | null {
   const platformKey = toAgentBinaryPlatform(process.platform, process.arch)
   if (!platformKey) {
     return null
   }
 
-  return agent.distribution.binary?.[platformKey] ?? null
+  const target = agent.distribution.binary?.[platformKey]
+  if (!target) {
+    return null
+  }
+
+  return {
+    platformKey,
+    target,
+  }
 }
 
 /** Converts Node platform metadata into the registry's binary target keys. */
@@ -385,6 +412,95 @@ function toAgentBinaryPlatform(
   return agentBinaryPlatforms.includes(key as AgentBinaryPlatform)
     ? (key as AgentBinaryPlatform)
     : null
+}
+
+/** Resolves the runnable binary path for an archive-backed target, installing it into the global cache first. */
+async function resolveBinaryCommand(
+  agent: AgentDistribution,
+  binaryTarget: ResolvedBinaryTarget,
+): Promise<string> {
+  const installDir = getBinaryInstallDir(agent, binaryTarget)
+  const installMarkerPath = join(installDir, binaryInstallMarkerFileName)
+
+  if (!(await fileExists(installMarkerPath))) {
+    await installBinaryArchive(
+      agent.id,
+      binaryTarget.target.archive,
+      binaryTarget.target.cmd,
+      installDir,
+    )
+  }
+
+  await cleanupOtherAgentBinaryInstalls(agent.id, installDir)
+
+  return await resolveInstalledBinaryCommand(installDir, binaryTarget.target.cmd)
+}
+
+/** Computes the global cache directory for one archive-backed binary target. */
+function getBinaryInstallDir(agent: AgentDistribution, binaryTarget: ResolvedBinaryTarget): string {
+  const archiveHash = createHash("sha256")
+    .update(binaryTarget.target.archive)
+    .digest("hex")
+    .slice(0, 12)
+
+  return join(
+    getGoddardGlobalDir(),
+    "binaries",
+    `${agent.id}-${agent.version}-${binaryTarget.platformKey}-${archiveHash}`,
+  )
+}
+
+/** Downloads and installs one archive-backed or raw binary target into its final global cache directory. */
+async function installBinaryArchive(
+  agentId: string,
+  archiveUrl: string,
+  cmd: string,
+  installDir: string,
+): Promise<void> {
+  const binariesDir = join(getGoddardGlobalDir(), "binaries")
+  await mkdir(binariesDir, { recursive: true })
+  await rm(installDir, { recursive: true, force: true })
+
+  const stagingParentDir = await mkdtemp(join(binariesDir, "install-"))
+  const stagedInstallDir = join(stagingParentDir, "install")
+
+  try {
+    await installBinaryTargetPayload({
+      archiveUrl,
+      cmd,
+      installDir: stagedInstallDir,
+    })
+    await writeFile(join(stagedInstallDir, binaryInstallMarkerFileName), `${archiveUrl}\n`, "utf8")
+    await rename(stagedInstallDir, installDir)
+    await cleanupOtherAgentBinaryInstalls(agentId, installDir)
+  } finally {
+    await rm(stagingParentDir, { recursive: true, force: true })
+  }
+}
+
+/** Removes cached binary installs for the same agent id except for the active install directory. */
+async function cleanupOtherAgentBinaryInstalls(
+  agentId: string,
+  activeInstallDir: string,
+): Promise<void> {
+  const binariesDir = join(getGoddardGlobalDir(), "binaries")
+  if (!(await fileExists(binariesDir))) {
+    return
+  }
+
+  const agentPrefix = `${agentId}-`
+  const installs = await readdir(binariesDir, { withFileTypes: true })
+
+  await Promise.all(
+    installs
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          entry.name.startsWith(agentPrefix) &&
+          join(binariesDir, entry.name) !== activeInstallDir,
+      )
+      .map((entry) => rm(join(binariesDir, entry.name), { recursive: true, force: true })),
+  )
 }
 
 /** Performs the ACP handshake and optional initial prompt before live streaming begins. */

@@ -236,6 +236,15 @@ afterEach(async () => {
 })
 
 function createNodeAgent(agentPath: string) {
+  const unixWrapper = `#!/bin/sh
+exec "${process.execPath}" "${agentPath}" "$@"
+`
+  const windowsWrapper = `@echo off
+"${process.execPath}" "${agentPath}" %*
+`
+  const unixArchive = `data:text/plain;base64,${Buffer.from(unixWrapper).toString("base64")}`
+  const windowsArchive = `data:text/plain;base64,${Buffer.from(windowsWrapper).toString("base64")}`
+
   return {
     id: "node-agent",
     name: "Node Agent",
@@ -244,34 +253,28 @@ function createNodeAgent(agentPath: string) {
     distribution: {
       binary: {
         "darwin-aarch64": {
-          archive: "https://example.com/node-agent-darwin-aarch64.tar.gz",
-          cmd: "node",
-          args: [agentPath],
+          archive: unixArchive,
+          cmd: "agent",
         },
         "darwin-x86_64": {
-          archive: "https://example.com/node-agent-darwin-x86_64.tar.gz",
-          cmd: "node",
-          args: [agentPath],
+          archive: unixArchive,
+          cmd: "agent",
         },
         "linux-aarch64": {
-          archive: "https://example.com/node-agent-linux-aarch64.tar.gz",
-          cmd: "node",
-          args: [agentPath],
+          archive: unixArchive,
+          cmd: "agent",
         },
         "linux-x86_64": {
-          archive: "https://example.com/node-agent-linux-x86_64.tar.gz",
-          cmd: "node",
-          args: [agentPath],
+          archive: unixArchive,
+          cmd: "agent",
         },
         "windows-aarch64": {
-          archive: "https://example.com/node-agent-windows-aarch64.zip",
-          cmd: "node",
-          args: [agentPath],
+          archive: windowsArchive,
+          cmd: "agent.cmd",
         },
         "windows-x86_64": {
-          archive: "https://example.com/node-agent-windows-x86_64.zip",
-          cmd: "node",
-          args: [agentPath],
+          archive: windowsArchive,
+          cmd: "agent.cmd",
         },
       },
     },
