@@ -40,28 +40,42 @@ async function testAdapter(adapterName: string) {
   processHandle.kill()
 }
 
-async function main() {
-  const args = process.argv.slice(2)
-  if (args.length === 0) {
-    console.error("Usage: goddard-test-acp-session <adapter-name...> | --all")
-    process.exit(1)
-  }
+import { command, run, restPositionals, string, flag } from "cmd-ts"
 
-  let adaptersToTest: string[] = []
-  if (args.includes("--all")) {
-    adaptersToTest = [...ACPAdapterNames]
-  } else {
-    adaptersToTest = args
-  }
+const app = command({
+  name: "goddard-test-acp-session",
+  args: {
+    adapters: restPositionals({
+      type: string,
+      displayName: "adapter-name",
+      description: "Name(s) of the adapters to test",
+    }),
+    all: flag({
+      long: "all",
+      description: "Test all available adapters",
+    }),
+  },
+  handler: async ({ adapters, all }) => {
+    let adaptersToTest: string[] = []
 
-  for (const adapterName of adaptersToTest) {
-    await testAdapter(adapterName)
-  }
+    if (all) {
+      adaptersToTest = [...ACPAdapterNames]
+    } else if (adapters.length > 0) {
+      adaptersToTest = adapters
+    } else {
+      console.error("Usage: goddard-test-acp-session <adapter-name...> | --all")
+      process.exit(1)
+    }
 
-  process.exit(0)
-}
+    for (const adapterName of adaptersToTest) {
+      await testAdapter(adapterName)
+    }
 
-main().catch((error) => {
+    process.exit(0)
+  },
+})
+
+run(app, process.argv.slice(2)).catch((error) => {
   console.error(error)
   process.exit(1)
 })
