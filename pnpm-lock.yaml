@@ -185,6 +185,9 @@ importers:
       '@goddard-ai/backend-client':
         specifier: workspace:^
         version: link:../backend/client
+      '@goddard-ai/config':
+        specifier: workspace:^
+        version: link:../config
       '@goddard-ai/daemon-client':
         specifier: workspace:^
         version: link:client
