@@ -22,6 +22,8 @@ export function matchAcpRequest<T>(message: acp.AnyMessage, method: string): T |
   return isAcpRequest(message, method) ? (message.params as T) : null
 }
 
+export function getAcpMessageResult<T>(message: acp.AnyMessage & { result: unknown }): T
+export function getAcpMessageResult<T>(message: acp.AnyMessage): T | null
 export function getAcpMessageResult<T>(message: acp.AnyMessage): T | null {
   return "result" in message ? (message.result as T) : null
 }

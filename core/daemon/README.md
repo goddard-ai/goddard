@@ -21,7 +21,7 @@ When the daemon launches agent sessions, it prepends the resolved agent-bin dire
 - `GODDARD_DAEMON_URL`
 - `GODDARD_SESSION_TOKEN`
 
-Direct daemon session creation keeps the original `cwd` by default, even inside git repositories. Callers can opt into isolated session worktrees with `worktree: { enabled: true }`. Higher-level daemon-owned lifecycles such as PR feedback one-shots can enable worktrees explicitly when isolation is required.
+Direct daemon session creation keeps the original `cwd` by default, even inside git repositories. Callers can opt into isolated session worktrees with `worktree: { enabled: true }`. The session manager provisions those worktrees during `createSession()` and persists the resulting worktree metadata on the session. When resuming a session, it can reuse either the persisted worktree for that session id or an explicit `worktree.existingFolder`. Worktree cleanup is not automatic on session exit or daemon restart; it is managed explicitly by separate cleanup flows. Higher-level daemon-owned lifecycles such as PR feedback one-shots can enable worktrees automatically when isolation is required.
 
 If no values are provided, the daemon falls back to the standard local backend URL and the default socket path under `~/.goddard`.
 

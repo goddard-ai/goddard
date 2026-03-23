@@ -1,8 +1,8 @@
-import { dedent } from "radashi"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
+import { dedent } from "radashi"
 import { afterEach, expect, test, vi } from "vitest"
 import { configureDaemonLogging } from "../src/logging.ts"
 
@@ -21,7 +21,7 @@ const {
   permissionsByToken: new Map<string, any>(),
   worktreeConstructorMock: vi.fn(),
   worktreeSetupMock: vi.fn(),
-  worktreeCleanupMock: vi.fn(() => true),
+  worktreeCleanupMock: vi.fn((_worktreeDir: string, _branchName: string) => true),
 }))
 
 vi.mock(
@@ -46,7 +46,6 @@ vi.mock(
           })
         }),
         listAll: vi.fn(async () => Array.from(sessions.values())),
-        list: vi.fn(async () => Array.from(sessions.values())),
         listRecent: vi.fn(
           async ({
             limit,
@@ -194,8 +193,9 @@ vi.mock(
       Worktree: class {
         poweredBy = "mock-worktree"
         cwd: string
+        plugin: any
 
-        constructor(options: { cwd: string }) {
+        constructor(options: { cwd: string; plugins?: unknown[]; defaultPluginDirName?: string }) {
           this.cwd = options.cwd
           worktreeConstructorMock(options)
         }
@@ -218,7 +218,9 @@ vi.mock(
 
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
+import assert from "node:assert"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+import { createSessionManager } from "../src/session/manager.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 
@@ -298,7 +300,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   })
 
   const permissions = await SessionPermissionsStorage.get(created.session.id)
-  expect(permissions).toBeTruthy()
+  assert(permissions)
   expect(typeof permissions.token).toBe("string")
 
   await client.send("sessionShutdown", { id: created.session.id })
@@ -408,10 +410,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
-  expect(worktreeCleanupMock).toHaveBeenCalledWith(
-    "/tmp/mock-worktree/session-session-restart-1",
-    "session-session-restart-1",
-  )
+  expect(worktreeCleanupMock).not.toHaveBeenCalled()
   await expect(client.send("sessionConnect", { id: sessionId })).rejects.toThrow(/archived/i)
   await expect(client.send("sessionResolveToken", { token: "tok-restart-1" })).rejects.toThrow(
     /invalid session token/i,
@@ -541,7 +540,159 @@ test("session worktree opt-in runs inside the mapped worktree subdirectory", asy
   expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore + 1)
 })
 
-test("one-shot daemon sessions clean up their worktree after the initial prompt completes when enabled", async () => {
+test("session manager forwards worktree config and plugins into setup", async () => {
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const worktreePlugins = [
+    {
+      name: "custom-plugin",
+      isApplicable: () => true,
+      setup: () => null,
+      cleanup: () => true,
+    },
+  ]
+
+  const manager = createSessionManager({
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fsession-worktree-config.sock",
+    agentBinDir: process.cwd(),
+    publish: () => {},
+  })
+
+  const setupCallsBefore = worktreeSetupMock.mock.calls.length
+  await manager.createSession({
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: join(process.cwd(), "src"),
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    config: {
+      worktrees: {
+        defaultFolder: ".sessions",
+      },
+    },
+    worktreePlugins,
+  })
+
+  expect(worktreeConstructorMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      defaultPluginDirName: ".sessions",
+      plugins: worktreePlugins,
+    }),
+  )
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore + 1)
+
+  await manager.close()
+})
+
+test("session worktree existingFolder reuses the provided folder without provisioning a new worktree", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const requestedCwd = join(process.cwd(), "src")
+  const existingFolder = resolve(process.cwd(), "..", "..")
+  const setupCallsBefore = worktreeSetupMock.mock.calls.length
+
+  const created = await client.send("sessionCreate", {
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: requestedCwd,
+    worktree: { enabled: true, existingFolder },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(created.session.metadata).toEqual(
+    expect.objectContaining({
+      worktree: expect.objectContaining({
+        worktreeDir: existingFolder,
+        effectiveCwd: requestedCwd,
+      }),
+    }),
+  )
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
+})
+
+test("session manager reuses persisted worktree metadata when resuming by session id", async () => {
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const existingId = "session-resume-1"
+  const existingFolder = resolve(process.cwd(), "..", "..")
+  const requestedCwd = join(process.cwd(), "src")
+  const setupCallsBefore = worktreeSetupMock.mock.calls.length
+
+  sessions.set(existingId, {
+    id: existingId,
+    acpId: "acp-old",
+    status: "error",
+    agentName: "Node Agent",
+    cwd: requestedCwd,
+    mcpServers: [],
+    metadata: {
+      worktree: {
+        repoRoot: existingFolder,
+        requestedCwd,
+        effectiveCwd: requestedCwd,
+        worktreeDir: existingFolder,
+        branchName: "main",
+        poweredBy: "mock-worktree",
+      },
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    errorMessage: "old error",
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+  })
+  sessionStates.set(existingId, {
+    sessionId: existingId,
+    acpId: "acp-old",
+    connectionMode: "history",
+    history: [{ jsonrpc: "2.0", method: "session/update", params: { value: "persisted" } }],
+    diagnostics: [],
+    activeDaemonSession: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+
+  const manager = createSessionManager({
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fsession-resume.sock",
+    agentBinDir: process.cwd(),
+    publish: () => {},
+  })
+
+  const session = await manager.createSession({
+    id: existingId,
+    agent: createNodeAgent(exampleAgentPath),
+    cwd: requestedCwd,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(session.id).toBe(existingId)
+  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
+  expect(sessions.get(existingId)?.metadata).toEqual(
+    expect.objectContaining({
+      worktree: expect.objectContaining({
+        worktreeDir: existingFolder,
+        effectiveCwd: requestedCwd,
+      }),
+    }),
+  )
+  expect(sessionStates.get(existingId)?.history).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        method: "session/update",
+      }),
+    ]),
+  )
+
+  await manager.shutdownSession(existingId)
+  await manager.close()
+})
+
+test("one-shot daemon sessions keep their worktree after the initial prompt completes when enabled", async () => {
   const daemon = await startTestDaemon()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
@@ -558,12 +709,7 @@ test("one-shot daemon sessions clean up their worktree after the initial prompt 
   })
 
   expect(created.session.status).toBe("done")
-
-  await waitFor(async () => {
-    return worktreeCleanupMock.mock.calls.length > 0
-  })
-
-  expect(worktreeCleanupMock).toHaveBeenCalled()
+  expect(worktreeCleanupMock).not.toHaveBeenCalled()
 })
 
 test("daemon logs agent message and chunk traffic without persisting high-volume events", async () => {

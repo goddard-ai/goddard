@@ -288,6 +288,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   })
   expect(sessionManager.createSession).toHaveBeenCalledWith(
     expect.objectContaining({
+      cwd: rootDir,
       worktree: { enabled: true },
     }),
   )
