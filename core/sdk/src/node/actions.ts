@@ -1,4 +1,4 @@
-import { mergeActionConfigLayers } from "@goddard-ai/config"
+import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
 import { ActionConfig, InlineSessionParams } from "@goddard-ai/schema/config"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { existsSync } from "node:fs"
@@ -13,18 +13,6 @@ export type ResolvedAgentAction = {
   config: ActionConfig
   path: string
 }
-
-const DEFAULT_AGENT = {
-  id: "pi-coding-agent",
-  name: "PI Coding Agent",
-  version: "0.0.0",
-  description: "Default PI coding agent distribution.",
-  distribution: {
-    npx: {
-      package: "@mariozechner/pi-coding-agent",
-    },
-  },
-} as const
 
 function detectLegacyFrontmatter(content: string, path: string): void {
   if (content.startsWith("---\n") || content.startsWith("---\r\n")) {
@@ -110,11 +98,13 @@ export function buildActionSessionParams(
   action: ResolvedAgentAction,
   params?: InlineSessionParams,
 ): SessionParams & { oneShot: true } {
+  const sessionConfig = action.config.session ?? {}
+
   return {
-    agent: DEFAULT_AGENT,
+    agent: sessionConfig.agent ?? "pi-acp",
     cwd: process.cwd(),
     mcpServers: [],
-    ...action.config.session,
+    ...sessionConfig,
     ...params,
     oneShot: true as const,
     initialPrompt: action.prompt,
@@ -137,13 +127,18 @@ export async function resolveAction(
     )
   }
 
+  const mergedConfig = mergeActionConfigLayers(
+    config.session ? { session: config.session } : undefined,
+    ensureActionConfig(config.actions, "root config"),
+    action.config,
+  )
+  const sessionConfig = mergedConfig.session ?? {}
+  sessionConfig.agent = sessionConfig.agent ?? (await resolveDefaultAgent(config, "actions"))
+  mergedConfig.session = sessionConfig
+
   return {
     ...action,
-    config: mergeActionConfigLayers(
-      config.session ? { session: config.session } : undefined,
-      ensureActionConfig(config.actions, "root config"),
-      action.config,
-    ),
+    config: mergedConfig,
   }
 }
 

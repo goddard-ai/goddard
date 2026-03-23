@@ -5,8 +5,17 @@ import { createRequire } from "node:module"
 import * as os from "node:os"
 import * as path from "node:path"
 import { promisify } from "node:util"
-import { afterEach, assert, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "vitest"
 import { runAgent } from "../src/daemon/session/client.ts"
+
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 import { buildActionSessionParams, resolveAction } from "../src/node/actions.ts"
 
 const execFileAsync = promisify(execFile)
@@ -243,7 +252,7 @@ test("resolved actions can run through the daemon-backed session client", async 
     { daemonUrl: daemon.daemonUrl },
   )
 
-  assert.equal(result, null)
+  expect(result).toBeNull()
 })
 
 async function startTestDaemon(): Promise<DaemonServer> {

@@ -5,6 +5,14 @@ import { join } from "node:path"
 import { afterEach, assert, test, vi } from "vitest"
 import { runAgent } from "../../src/daemon/session/client.ts"
 
+vi.mock("@goddard-ai/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goddard-ai/config")>()
+  return {
+    ...actual,
+    resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
+  }
+})
+
 const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = vi.hoisted(() => ({
   sessions: new Map<string, unknown>(),
   sessionStates: new Map<string, any>(),
