@@ -89,6 +89,7 @@ export function mergeRootConfigLayers(...layers: Array<UserConfig | undefined>):
     session: selectLast(layers, (layer) => layer?.session),
     actions: mergeActionConfigLayers(...layers.map((layer) => layer?.actions)),
     loops: mergeLoopConfigLayers(...layers.map((layer) => layer?.loops)),
+    registry: selectLast(layers, (layer) => layer?.registry),
   })
 }
 

@@ -152,6 +152,10 @@ export const UserConfig = z
     ),
     actions: ActionConfig.optional().describe("Default settings for agent actions."),
     loops: LoopConfig.optional().describe("Default settings for long-running agent loops."),
+    registry: z
+      .record(z.string(), AgentDistribution)
+      .optional()
+      .describe("Custom registry of ACP agent distributions."),
   })
   .describe("Shared root config document loaded from local and global JSON files.")
 
