@@ -8,7 +8,7 @@
   - Why: so a single agent conversation or task can have stable identity, status, history, diagnostics, and access control.
 - `Session Manager`
   - The daemon boundary responsible for the session lifecycle.
-  - Why: so creation, connection, messaging, history lookup, diagnostics lookup, and shutdown all live behind one interface.
+  - Why: so fresh session creation, stored session loading, connection, messaging, history lookup, diagnostics lookup, and shutdown all live behind one interface.
 - `ACP`
   - The protocol used to exchange structured messages between the daemon side and the agent side.
   - Why: so sessions are driven by a stable message model instead of ad hoc process conventions.
@@ -90,8 +90,8 @@
 - `Session Worktree`
   - The optional isolated repository checkout the daemon provisions for a fresh session before the agent starts.
   - Why: so daemon-managed work inside git repositories does not mutate the caller's primary checkout or collide with concurrent sessions.
-  - The session manager provisions it when a caller opts in with `worktree.enabled: true`.
-  - The session manager may reuse an already-prepared worktree by session id or by `worktree.existingFolder`.
+  - The session manager provisions it during `newSession()` when a caller opts in with `worktree.enabled: true`.
+  - The session manager may reuse an already-prepared worktree during `loadSession()` by session id.
   - Higher-level daemon lifecycles may apply that opt-in automatically when isolation is part of their contract.
 - `Effective Cwd`
   - The directory inside the session worktree where the agent process actually starts.

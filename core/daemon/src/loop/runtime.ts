@@ -57,7 +57,7 @@ export class LoopRuntime {
 
   /** Starts one daemon-owned loop runtime and begins background cycle execution. */
   static async start(config: StartDaemonLoopRequest, deps: LoopRuntimeDeps): Promise<LoopRuntime> {
-    const session = await deps.sessionManager.createSession({
+    const session = await deps.sessionManager.newSession({
       ...config.session,
       systemPrompt: config.session.systemPrompt ?? "",
       metadata: {

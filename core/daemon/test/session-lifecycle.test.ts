@@ -559,7 +559,7 @@ test("session manager forwards worktree config and plugins into setup", async ()
   })
 
   const setupCallsBefore = worktreeSetupMock.mock.calls.length
-  await manager.createSession({
+  await manager.newSession({
     agent: createNodeAgent(exampleAgentPath),
     cwd: join(process.cwd(), "src"),
     worktree: { enabled: true },
@@ -584,35 +584,7 @@ test("session manager forwards worktree config and plugins into setup", async ()
   await manager.close()
 })
 
-test("session worktree existingFolder reuses the provided folder without provisioning a new worktree", async () => {
-  const daemon = await startTestDaemon()
-  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const require = createRequire(import.meta.url)
-  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
-  const requestedCwd = join(process.cwd(), "src")
-  const existingFolder = resolve(process.cwd(), "..", "..")
-  const setupCallsBefore = worktreeSetupMock.mock.calls.length
-
-  const created = await client.send("sessionCreate", {
-    agent: createNodeAgent(exampleAgentPath),
-    cwd: requestedCwd,
-    worktree: { enabled: true, existingFolder },
-    mcpServers: [],
-    systemPrompt: "Keep responses short.",
-  })
-
-  expect(created.session.metadata).toEqual(
-    expect.objectContaining({
-      worktree: expect.objectContaining({
-        worktreeDir: existingFolder,
-        effectiveCwd: requestedCwd,
-      }),
-    }),
-  )
-  expect(worktreeSetupMock.mock.calls.length).toBe(setupCallsBefore)
-})
-
-test("session manager reuses persisted worktree metadata when resuming by session id", async () => {
+test("session manager reuses persisted worktree metadata when loading by session id", async () => {
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const existingId = "session-resume-1"
@@ -661,7 +633,7 @@ test("session manager reuses persisted worktree metadata when resuming by sessio
     publish: () => {},
   })
 
-  const session = await manager.createSession({
+  const session = await manager.loadSession({
     id: existingId,
     agent: createNodeAgent(exampleAgentPath),
     cwd: requestedCwd,
@@ -687,6 +659,100 @@ test("session manager reuses persisted worktree metadata when resuming by sessio
       }),
     ]),
   )
+
+  await manager.shutdownSession(existingId)
+  await manager.close()
+})
+
+test("session manager loads the prior ACP session when the agent supports ACP loadSession", async () => {
+  const agentPath = await createAgentScript(`
+    import * as readline from "node:readline"
+
+    const rl = readline.createInterface({ input: process.stdin })
+
+    function send(message) {
+      process.stdout.write(\`\${JSON.stringify(message)}\\n\`)
+    }
+
+    rl.on("line", (line) => {
+      const message = JSON.parse(line)
+
+      if (message.method === "initialize") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: { loadSession: true },
+          },
+        })
+        return
+      }
+
+      if (message.method === "session/load") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {},
+        })
+        return
+      }
+
+      if (message.method === "session/new") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { sessionId: "unexpected-new-session" },
+        })
+      }
+    })
+  `)
+  const existingId = "session-load-1"
+  const existingAcpId = "acp-load-1"
+
+  sessions.set(existingId, {
+    id: existingId,
+    acpId: existingAcpId,
+    status: "error",
+    agentName: "Node Agent",
+    cwd: process.cwd(),
+    mcpServers: [],
+    metadata: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    errorMessage: "old error",
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+  })
+  sessionStates.set(existingId, {
+    sessionId: existingId,
+    acpId: existingAcpId,
+    connectionMode: "history",
+    history: [{ jsonrpc: "2.0", method: "session/update", params: { value: "persisted" } }],
+    diagnostics: [],
+    activeDaemonSession: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+
+  const manager = createSessionManager({
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fsession-load.sock",
+    agentBinDir: process.cwd(),
+    publish: () => {},
+  })
+
+  const session = await manager.loadSession({
+    id: existingId,
+    agent: createNodeAgent(agentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(session.id).toBe(existingId)
+  expect(session.acpId).toBe(existingAcpId)
+  expect(sessionStates.get(existingId)?.acpId).toBe(existingAcpId)
 
   await manager.shutdownSession(existingId)
   await manager.close()

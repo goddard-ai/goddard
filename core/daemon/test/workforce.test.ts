@@ -402,7 +402,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      createSession: async (input) => {
+      newSession: async (input) => {
         const metadata =
           input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
             ? (input.metadata.workforce as { requestId: string; agentId: string })
@@ -491,7 +491,7 @@ test("create-intent requests target the root agent and specialize the root sessi
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      createSession: async (input) => {
+      newSession: async (input) => {
         const initialPrompt =
           typeof input.initialPrompt === "string"
             ? input.initialPrompt
@@ -613,7 +613,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      createSession: async (input) => {
+      newSession: async (input) => {
         capturedSystemPrompt = input.systemPrompt
 
         const metadata =
@@ -689,7 +689,7 @@ test("workforce runtime logs request-to-session correlation for launched session
   const { logs } = await captureDaemonLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
       sessionManager: {
-        createSession: async (input) => {
+        newSession: async (input) => {
           const metadata =
             input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
               ? (input.metadata.workforce as { requestId: string; agentId: string })

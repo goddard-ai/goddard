@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
+import type { DaemonSessionMetadata, SessionWorktreeMetadata } from "./daemon/session-metadata.ts"
 import type { CreateDaemonSessionRequest } from "./daemon/sessions.ts"
 import type { SessionStatus } from "./db.ts"
 import type { WorkforceConfig, WorkforceProjectionSummary } from "./workforce.ts"
@@ -10,7 +10,7 @@ export type {
   StartDaemonLoopRequest,
 } from "./daemon/loops.ts"
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.ts"
-export type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
+export type { DaemonSessionMetadata, SessionWorktreeMetadata } from "./daemon/session-metadata.ts"
 export type {
   CreateDaemonSessionRequest,
   DaemonSessionPathParams,

@@ -242,7 +242,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   )
 
   const sessionManager = {
-    createSession: vi.fn(async () => ({
+    newSession: vi.fn(async () => ({
       id: "session-1",
       acpId: "acp-1",
     })),
@@ -286,7 +286,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   await vi.waitFor(() => {
     expect(sessionManager.promptSession).toHaveBeenCalledTimes(3)
   })
-  expect(sessionManager.createSession).toHaveBeenCalledWith(
+  expect(sessionManager.newSession).toHaveBeenCalledWith(
     expect.objectContaining({
       cwd: rootDir,
       worktree: { enabled: true },

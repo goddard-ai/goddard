@@ -291,7 +291,7 @@ async function defaultRunWorkforceSession(
     cwd,
   })
 
-  const session = await deps.sessionManager.createSession({
+  const session = await deps.sessionManager.newSession({
     agent: agentDistribution,
     cwd,
     mcpServers: [],

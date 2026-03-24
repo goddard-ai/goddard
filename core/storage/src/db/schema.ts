@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
 import { SessionStatus } from "@goddard-ai/schema/db"
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { v7 as uuidv7 } from "uuid"
@@ -24,7 +25,7 @@ export const sessions = sqliteTable(
     lastAgentMessage: text(),
     repository: text(),
     prNumber: integer(),
-    metadata: text({ mode: "json" }).$type<Record<string, any>>(),
+    metadata: text({ mode: "json" }).$type<DaemonSessionMetadata>(),
   },
   (table) => [index("idx_sessions_repository_pr_number").on(table.repository, table.prNumber)],
 )

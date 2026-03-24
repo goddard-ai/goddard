@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
+import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
   CreateDaemonSessionRequest,
   DaemonDiagnosticEvent,
@@ -11,7 +12,7 @@ import type {
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
 } from "@goddard-ai/schema/daemon"
-import type { UserConfig } from "@goddard-ai/schema/config"
+import { InitialPromptOption } from "@goddard-ai/schema/daemon/sessions"
 import type { SessionStatus } from "@goddard-ai/schema/db"
 import {
   agentBinaryPlatforms,
@@ -31,12 +32,12 @@ import {
 } from "@goddard-ai/storage"
 import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import treeKill from "@goddard-ai/tree-kill"
+import type { WorktreePlugin } from "@goddard-ai/worktree"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
-import type { WorktreePlugin } from "@goddard-ai/worktree"
 import { prependAgentBinToPath } from "../config.ts"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
@@ -52,11 +53,7 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import { fetchRegistryAgent } from "./registry.ts"
-import {
-  parseSessionWorktreeMetadata,
-  prepareSessionWorktree,
-  type SessionWorktreeMetadata,
-} from "./worktree.ts"
+import { prepareSessionWorktree } from "./worktree.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
@@ -124,17 +121,25 @@ type ActiveSession = {
   pendingPrompts: Map<string | number, PendingPromptRequest>
 }
 
-/** Internal session-create shape accepted before the manager resolves ids, tokens, and worktrees. */
-interface CreateSessionParams extends CreateDaemonSessionRequest {
-  id?: string
+/** Shared session-launch options resolved by the daemon before an agent process starts. */
+interface SessionLaunchParams extends CreateDaemonSessionRequest {
   token?: string
   config?: UserConfig
   worktreePlugins?: WorktreePlugin[]
 }
 
+/** Fresh daemon session input accepted by `SessionManager.newSession()`. */
+interface NewSessionParams extends SessionLaunchParams {}
+
+/** Stored daemon session input accepted by `SessionManager.loadSession()`. */
+interface LoadSessionParams extends SessionLaunchParams {
+  id: string
+}
+
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
 export type SessionManager = {
-  createSession: (params: CreateSessionParams) => Promise<DaemonSession>
+  newSession: (params: NewSessionParams) => Promise<DaemonSession>
+  loadSession: (params: LoadSessionParams) => Promise<DaemonSession>
   listSessions: (params: ListDaemonSessionsRequest) => Promise<ListDaemonSessionsResponse>
   connectSession: (id: string) => Promise<DaemonSession>
   getSession: (id: string) => Promise<DaemonSession>
@@ -159,6 +164,23 @@ export function injectSystemPrompt(
       ...request.prompt,
     ],
   }
+}
+
+function createInitialPromptRequest(params: {
+  sessionId: string
+  prompt: InitialPromptOption
+  isFirstPrompt: boolean
+  systemPrompt: string
+}) {
+  const promptRequest = {
+    sessionId: params.sessionId,
+    prompt:
+      typeof params.prompt === "string" ? [{ type: "text", text: params.prompt }] : params.prompt,
+  } satisfies acp.PromptRequest
+
+  return params.isFirstPrompt
+    ? injectSystemPrompt(promptRequest, params.systemPrompt)
+    : promptRequest
 }
 
 /** Maps client-originated ACP messages to any immediate session status changes they imply. */
@@ -203,7 +225,7 @@ function isErrorSignal(signal: string | null): boolean {
 }
 
 /** Detects one-shot sessions that should exit immediately after the initial prompt completes. */
-function shouldExitAfterInitialPrompt(params: CreateSessionParams): boolean {
+function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
   return params.oneShot === true && params.initialPrompt !== undefined
 }
 
@@ -517,77 +539,102 @@ async function cleanupOtherAgentBinaryInstalls(
 async function initializeSession(
   input: Writable,
   output: Readable,
-  params: CreateDaemonSessionRequest,
-  hooks: {
+  params: CreateDaemonSessionRequest & {
+    resumeAcpId?: string
     onMessageWrite?: (message: acp.AnyMessage) => void
-  } = {},
-): Promise<{
-  status: SessionStatus
-  isFirstPrompt: boolean
-  history: acp.AnyMessage[]
-  acpId: string
-}> {
+  },
+): Promise<
+  acp.InitializeResponse & {
+    status: SessionStatus
+    isFirstPrompt: boolean
+    history: acp.AnyMessage[]
+    acpId: string
+  }
+> {
   const history: acp.AnyMessage[] = []
   const stream = createAgentMessageStream(input, output)
 
-  const agent = new acp.ClientSideConnection(
-    () => ({
-      async requestPermission() {
-        return { outcome: { outcome: "cancelled" } }
-      },
-      async sessionUpdate(params: any) {
-        const message = {
-          jsonrpc: "2.0",
-          method: acp.CLIENT_METHODS.session_update,
-          params,
-        } satisfies acp.AnyMessage
-        history.push(message)
-      },
-    }),
-    stream,
-  )
-
   try {
-    await agent.initialize({
+    const agent = new acp.ClientSideConnection(
+      () => ({
+        async requestPermission() {
+          return { outcome: { outcome: "cancelled" } }
+        },
+        async sessionUpdate(params: any) {
+          const message = {
+            jsonrpc: "2.0",
+            method: acp.CLIENT_METHODS.session_update,
+            params,
+          } satisfies acp.AnyMessage
+          history.push(message)
+        },
+      }),
+      stream,
+    )
+
+    const initializeResult = await agent.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
       clientInfo: { name: "npm:@goddard-ai/daemon", version: getPackageVersion() },
     })
 
-    const newSession = await agent.newSession(params)
     let status: SessionStatus = "active"
     let isFirstPrompt = true
+    let acpId: string
+
+    if (
+      params.resumeAcpId !== undefined &&
+      initializeResult.agentCapabilities?.loadSession === true
+    ) {
+      await agent.loadSession({
+        sessionId: params.resumeAcpId,
+        cwd: params.cwd,
+        mcpServers: params.mcpServers,
+      })
+      acpId = params.resumeAcpId
+      isFirstPrompt = false
+    } else {
+      const newSession = await agent.newSession(params)
+      acpId = newSession.sessionId
+    }
 
     if (params.initialPrompt !== undefined) {
-      const promptRequest = injectSystemPrompt(
-        {
-          sessionId: newSession.sessionId,
-          prompt:
-            typeof params.initialPrompt === "string"
-              ? [{ type: "text", text: params.initialPrompt }]
-              : params.initialPrompt,
-        },
-        params.systemPrompt,
-      )
-
-      history.push({
+      const initialMessage = {
         jsonrpc: "2.0",
         method: acp.AGENT_METHODS.session_prompt,
-        params: promptRequest,
-      } satisfies acp.AnyMessage)
-      hooks.onMessageWrite?.(history.at(-1)!)
+        params: createInitialPromptRequest({
+          sessionId: acpId,
+          prompt: params.initialPrompt,
+          isFirstPrompt,
+          systemPrompt: params.systemPrompt,
+        }),
+      } satisfies acp.AnyMessage
 
-      const response = await agent.prompt(promptRequest)
-      if (response.stopReason === "end_turn") {
-        status = "done"
+      history.push(initialMessage)
+      params.onMessageWrite?.(initialMessage)
+
+      const response = await agent.prompt(initialMessage.params)
+      switch (response.stopReason) {
+        case "cancelled":
+          status = "cancelled"
+          break
+        case "end_turn":
+        case "max_tokens":
+        case "max_turn_requests":
+        case "refusal":
+          status = "done"
+          break
+        default:
+          response.stopReason satisfies never
       }
       isFirstPrompt = false
     }
 
     return {
+      ...initializeResult,
       status,
       isFirstPrompt,
       history,
-      acpId: newSession.sessionId,
+      acpId,
     }
   } finally {
     await stream.readable.cancel().catch(() => {})
@@ -930,43 +977,33 @@ export function createSessionManager(input: {
     )
   }
 
-  async function createSession(params: CreateSessionParams): Promise<DaemonSession> {
+  async function launchSession(
+    params: SessionLaunchParams,
+    existingSession: Awaited<ReturnType<typeof SessionStorage.get>> | null = null,
+  ): Promise<DaemonSession> {
     await ready
-    const existingSession =
-      typeof params.id === "string" ? await SessionStorage.get(params.id) : null
-    if (params.id && !existingSession) {
-      throw new Error(`Cannot resume unknown session: ${params.id}`)
-    }
-
-    const id = existingSession?.id ?? params.id ?? randomUUID()
+    const id = existingSession?.id ?? randomUUID()
     const token = params.token ?? randomBytes(32).toString("hex")
     const existingState = existingSession ? await SessionStateStorage.get(id) : null
-    const existingWorktreeMetadata =
-      params.worktree?.enabled === true
-        ? parseSessionWorktreeMetadata(existingSession?.metadata)
-        : null
-    const configuredExistingFolder =
-      params.worktree?.enabled === true && typeof params.worktree.existingFolder === "string"
-        ? params.worktree.existingFolder.trim()
-        : ""
-    const preparedWorktree =
-      params.worktree?.enabled === true && !existingWorktreeMetadata
+
+    const existingWorktree = existingSession?.metadata?.worktree
+    const worktree =
+      existingWorktree != null || params.worktree?.enabled === true
         ? prepareSessionWorktree(id, params.cwd, {
             branchNameOverride:
               typeof params.prNumber === "number" ? `pr-${params.prNumber}` : undefined,
             worktreePlugins: params.worktreePlugins,
-            existingFolder: configuredExistingFolder || undefined,
+            existingFolder: existingWorktree?.worktreeDir,
             defaultWorktreesFolder: params.config?.worktrees?.defaultFolder,
           })
         : null
-    const worktreeMetadata = existingWorktreeMetadata ?? preparedWorktree?.metadata ?? null
-    const cwd = worktreeMetadata?.effectiveCwd ?? params.cwd
+
+    const cwd = worktree?.effectiveCwd ?? params.cwd
     const metadata = mergeSessionMetadata(
       existingSession?.metadata,
       params.metadata,
-      worktreeMetadata ? ({ worktree: worktreeMetadata } as DaemonSessionMetadata) : undefined,
+      worktree && { worktree: worktree.metadata },
     )
-    const scope = parseRepoScope(params)
     const sessionContext = {
       sessionId: id,
       acpId: undefined as string | undefined,
@@ -976,15 +1013,15 @@ export function createSessionManager(input: {
       ...params,
       cwd,
       metadata,
-      launchLogContext:
-        worktreeMetadata || preparedWorktree
-          ? {
-              worktreeDir: worktreeMetadata?.worktreeDir ?? preparedWorktree?.metadata.worktreeDir,
-              worktreePoweredBy:
-                worktreeMetadata?.poweredBy ?? preparedWorktree?.metadata.poweredBy,
-            }
-          : undefined,
+      launchLogContext: worktree
+        ? {
+            worktreeDir: worktree.metadata.worktreeDir,
+            worktreePoweredBy: worktree.metadata.poweredBy,
+          }
+        : undefined,
     })
+
+    const scope = parseRepoScope(params)
 
     await SessionPermissionsStorage.create({
       sessionId: id,
@@ -1000,7 +1037,7 @@ export function createSessionManager(input: {
         ...sessionLogContext,
       })
 
-      const process = await spawnAgentProcess(input.daemonUrl, token, {
+      const agentProcess = await spawnAgentProcess(input.daemonUrl, token, {
         agent: params.agent,
         cwd,
         agentBinDir: input.agentBinDir,
@@ -1008,39 +1045,31 @@ export function createSessionManager(input: {
         registry: input.registry,
       })
 
-      const initialized = await initializeSession(
-        process.stdin,
-        process.stdout,
-        {
-          agent: params.agent,
-          cwd,
-          worktree: params.worktree,
-          mcpServers: params.mcpServers,
-          systemPrompt: params.systemPrompt,
-          env: params.env,
-          repository: params.repository,
-          prNumber: params.prNumber,
-          metadata,
-          initialPrompt: params.initialPrompt,
-          oneShot: params.oneShot,
+      const initialized = await initializeSession(agentProcess.stdin, agentProcess.stdout, {
+        ...params,
+        cwd,
+        metadata,
+        resumeAcpId: existingState?.acpId ?? existingSession?.acpId,
+        onMessageWrite: (message) => {
+          logAgentMessage(
+            "agent.message_write",
+            sessionContext.sessionId,
+            sessionContext.acpId,
+            message,
+          )
         },
-        {
-          onMessageWrite: (message) => {
-            logAgentMessage(
-              "agent.message_write",
-              sessionContext.sessionId,
-              sessionContext.acpId,
-              message,
-            )
-          },
-        },
-      )
+      })
       sessionContext.acpId = initialized.acpId
 
       const initialHistory = existingState
-        ? [...existingState.history, ...initialized.history]
+        ? initialized.acpId === existingState.acpId
+          ? existingState.history.length > 0
+            ? [...existingState.history]
+            : [...initialized.history]
+          : [...existingState.history, ...initialized.history]
         : [...initialized.history]
       const initialDiagnostics = existingState?.diagnostics ?? []
+
       if (existingState) {
         await SessionStateStorage.update(id, {
           acpId: initialized.acpId,
@@ -1094,28 +1123,24 @@ export function createSessionManager(input: {
       })
 
       if (shouldExitAfterInitialPrompt(params)) {
-        const handleOneShotExit = async (code: number | null, signal: NodeJS.Signals | null) => {
-          await emitDiagnostic(id, "agent_process_exit", {
+        agentProcess.once("exit", (code, signal) => {
+          emitDiagnostic(id, "agent_process_exit", {
             code,
             signal,
             nextStatus: "done",
-          })
-        }
-
-        process.once("exit", (code, signal) => {
-          void handleOneShotExit(code, signal)
+          }).catch(console.error)
         })
 
         // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
         await updateSession(id, { status: "done" }, { reason: "one_shot_completed" })
         await setConnectionMode(id, "history", false)
         await emitDiagnostic(id, "session_completed_one_shot")
-        await treeKill(process)
+        await treeKill(agentProcess)
         await SessionPermissionsStorage.revoke(id).catch(() => {})
         return toDaemonSession(await SessionStorage.get(id))
       }
 
-      const connection = createAgentConnection(process.stdin, process.stdout, {
+      const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
         onChunk: (chunk) => {
           logAgentChunk(sessionContext.sessionId, sessionContext.acpId, chunk)
         },
@@ -1128,11 +1153,11 @@ export function createSessionManager(input: {
         },
       })
       const writer = connection.getWriter()
-      const active: ActiveSession = {
+      const activeSession: ActiveSession = {
         id,
         acpId: initialized.acpId,
         token,
-        process,
+        process: agentProcess,
         writer,
         subscription: { close: async () => {} },
         status: initialized.status,
@@ -1144,18 +1169,18 @@ export function createSessionManager(input: {
         pendingPrompts: new Map(),
       }
 
-      active.subscription = connection.subscribe(async (message) => {
-        logAgentMessage("agent.message_read", active.id, active.acpId, message)
+      activeSession.subscription = connection.subscribe(async (message) => {
+        logAgentMessage("agent.message_read", activeSession.id, activeSession.acpId, message)
         if (
           isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
         ) {
-          active.lastPermissionRequest = message
+          activeSession.lastPermissionRequest = message
         } else if ("id" in message && message.id != null) {
-          const clientRequest = active.clientRequests.get(message.id)
+          const clientRequest = activeSession.clientRequests.get(message.id)
           const nextStatus = sessionStatusFromAgentMessage(clientRequest, message)
           if (nextStatus) {
             await updateSession(
-              active.id,
+              activeSession.id,
               { status: nextStatus },
               {
                 reason: "agent_message",
@@ -1165,24 +1190,24 @@ export function createSessionManager(input: {
             )
           }
           if (clientRequest) {
-            active.clientRequests.delete(message.id)
+            activeSession.clientRequests.delete(message.id)
           }
-          settlePendingPrompt(active, message)
+          settlePendingPrompt(activeSession, message)
         }
 
-        await appendHistory(active.id, message)
-        input.publish(active.id, message)
+        await appendHistory(activeSession.id, message)
+        input.publish(activeSession.id, message)
       })
 
       const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
-        activeSessions.delete(active.id)
+        activeSessions.delete(activeSession.id)
         rejectPendingPrompts(
-          active,
-          new Error(`Session ${active.id} ended before the prompt completed.`),
+          activeSession,
+          new Error(`Session ${activeSession.id} ended before the prompt completed.`),
         )
-        await active.writer.close().catch(() => {})
-        await active.subscription.close().catch(() => {})
-        await SessionPermissionsStorage.revoke(active.id).catch(() => {})
+        await activeSession.writer.close().catch(() => {})
+        await activeSession.subscription.close().catch(() => {})
+        await SessionPermissionsStorage.revoke(activeSession.id).catch(() => {})
 
         const nextUpdate: SQLSessionUpdate = {}
         if (code !== 0 && code !== null) {
@@ -1191,18 +1216,22 @@ export function createSessionManager(input: {
         } else if (isErrorSignal(signal)) {
           nextUpdate.status = "error"
           nextUpdate.errorMessage = `Killed by ${signal}`
-        } else if (active.status !== "done") {
+        } else if (activeSession.status !== "done") {
           nextUpdate.status = "cancelled"
         }
 
-        await setConnectionMode(active.id, archivedConnectionMode(active.history.length), false)
-        await emitDiagnostic(active.id, "agent_process_exit", {
+        await setConnectionMode(
+          activeSession.id,
+          archivedConnectionMode(activeSession.history.length),
+          false,
+        )
+        await emitDiagnostic(activeSession.id, "agent_process_exit", {
           code,
           signal,
-          nextStatus: nextUpdate.status ?? active.status,
+          nextStatus: nextUpdate.status ?? activeSession.status,
         })
         if (Object.keys(nextUpdate).length > 0) {
-          await updateSession(active.id, nextUpdate, {
+          await updateSession(activeSession.id, nextUpdate, {
             reason: "agent_process_exit",
             code,
             signal,
@@ -1210,11 +1239,11 @@ export function createSessionManager(input: {
         }
       }
 
-      process.once("exit", (code, signal) => {
+      agentProcess.once("exit", (code, signal) => {
         void handleExit(code, signal)
       })
 
-      activeSessions.set(active.id, active)
+      activeSessions.set(activeSession.id, activeSession)
       return toDaemonSession(await SessionStorage.get(id))
     } catch (error) {
       logger.log("session.launch_failed", {
@@ -1226,6 +1255,20 @@ export function createSessionManager(input: {
       await SessionStateStorage.remove(id).catch(() => {})
       throw error
     }
+  }
+
+  async function newSession(params: NewSessionParams): Promise<DaemonSession> {
+    return launchSession(params)
+  }
+
+  async function loadSession(params: LoadSessionParams): Promise<DaemonSession> {
+    await ready
+    const existingSession = await SessionStorage.get(params.id)
+    if (!existingSession) {
+      throw new Error(`Cannot load unknown session: ${params.id}`)
+    }
+
+    return launchSession(params, existingSession)
   }
 
   async function getSession(id: string): Promise<DaemonSession> {
@@ -1411,7 +1454,8 @@ export function createSessionManager(input: {
   }
 
   return {
-    createSession,
+    newSession,
+    loadSession,
     listSessions,
     connectSession,
     getSession,

@@ -1,55 +1,8 @@
-import type { DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
-import { Worktree, WorktreePlugin } from "@goddard-ai/worktree"
+import type { SessionWorktreeMetadata } from "@goddard-ai/schema/daemon"
+import { Worktree, type WorktreePlugin } from "@goddard-ai/worktree"
 import { spawnSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
-
-/** Worktree metadata persisted onto daemon sessions so explicit cleanup flows can find it later. */
-export interface SessionWorktreeMetadata {
-  repoRoot: string
-  requestedCwd: string
-  effectiveCwd: string
-  worktreeDir: string
-  branchName: string
-  poweredBy: string
-}
-
-/**
- * Returns the stored worktree metadata when one was attached to a daemon session.
- */
-export function parseSessionWorktreeMetadata(
-  metadata: DaemonSessionMetadata | null | undefined,
-): SessionWorktreeMetadata | null {
-  const candidate =
-    metadata && typeof metadata === "object" && "worktree" in metadata ? metadata.worktree : null
-
-  if (!candidate || typeof candidate !== "object") {
-    return null
-  }
-
-  const { repoRoot, requestedCwd, effectiveCwd, worktreeDir, branchName, poweredBy } =
-    candidate as Record<string, unknown>
-
-  if (
-    typeof repoRoot !== "string" ||
-    typeof requestedCwd !== "string" ||
-    typeof effectiveCwd !== "string" ||
-    typeof worktreeDir !== "string" ||
-    typeof branchName !== "string" ||
-    typeof poweredBy !== "string"
-  ) {
-    return null
-  }
-
-  return {
-    repoRoot,
-    requestedCwd,
-    effectiveCwd,
-    worktreeDir,
-    branchName,
-    poweredBy,
-  }
-}
 
 /** Prepared worktree state returned when one daemon session opts into isolation. */
 export interface PreparedSessionWorktree {

@@ -13,7 +13,6 @@ export type InitialPromptOption = z.infer<typeof InitialPromptOption>
 /** Worktree options accepted by the daemon session API. */
 export const SessionWorktreeParams = z.object({
   enabled: z.boolean().optional(),
-  existingFolder: z.string().optional(),
 })
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
