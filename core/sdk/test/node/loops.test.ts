@@ -2,6 +2,8 @@ import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
+import { GoddardSdk } from "../../src/node/index.ts"
+import { buildLoopStartRequest, resolveLoop, startNamedLoop } from "../../src/node/loops.ts"
 
 const mockedDaemonLoops = vi.hoisted(() => ({
   getDaemonLoop: vi.fn(),
@@ -25,8 +27,6 @@ vi.mock("@goddard-ai/config", async (importOriginal) => {
     resolveDefaultAgent: vi.fn().mockResolvedValue("pi-acp"),
   }
 })
-
-import { buildLoopStartRequest, resolveLoop, startNamedLoop } from "../../src/node/loops.ts"
 
 const originalHome = process.env.HOME
 let isolatedHomeDir: string | null = null
@@ -246,7 +246,6 @@ test("startNamedLoop forwards the resolved daemon start payload", async () => {
 })
 
 test("node SDK loop helpers no longer expose ad hoc run entrypoints", async () => {
-  const { GoddardSdk } = await import("../../src/node/index.ts")
   const sdk = new GoddardSdk({ backendUrl: "https://api.example.com" })
 
   expect("run" in sdk.loop).toBe(false)

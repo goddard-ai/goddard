@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import {
+  createDaemonWorkforceRequest,
+  listDaemonWorkforces,
+  shutdownDaemonWorkforce,
+  startDaemonWorkforce,
+} from "../../src/daemon/workforce.ts"
 
 const { createDaemonIpcClientFromEnvMock, sendMock } = vi.hoisted(() => {
   const sendMock = vi.fn()
@@ -38,9 +44,6 @@ describe("daemon workforce client", () => {
       .mockResolvedValueOnce({ workforces: [{ rootDir: "/repo" }] })
       .mockResolvedValueOnce({ success: true })
 
-    const { startDaemonWorkforce, listDaemonWorkforces, shutdownDaemonWorkforce } =
-      await import("../../src/daemon/workforce.ts")
-
     await expect(startDaemonWorkforce("/repo")).resolves.toEqual({ rootDir: "/repo" })
     await expect(listDaemonWorkforces()).resolves.toEqual([{ rootDir: "/repo" }])
     await expect(shutdownDaemonWorkforce("/repo")).resolves.toBe(true)
@@ -55,8 +58,6 @@ describe("daemon workforce client", () => {
       workforce: { rootDir: "/repo" },
       requestId: "req-create-1",
     })
-
-    const { createDaemonWorkforceRequest } = await import("../../src/daemon/workforce.ts")
 
     await expect(
       createDaemonWorkforceRequest({

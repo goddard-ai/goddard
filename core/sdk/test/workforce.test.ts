@@ -3,6 +3,12 @@ import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
 import { assert, beforeEach, test, vi } from "vitest"
+import * as workforce from "../src/node/workforce.ts"
+import {
+  discoverWorkforceInitCandidates,
+  initializeWorkforce,
+  resolveRepositoryRoot,
+} from "../src/node/workforce.ts"
 
 const {
   cancelDaemonWorkforceRequestMock,
@@ -39,8 +45,6 @@ vi.mock(
   }),
 )
 
-const workforceModule = await import("../src/node/workforce.ts")
-
 beforeEach(() => {
   cancelDaemonWorkforceRequestMock.mockReset()
   createDaemonWorkforceRequestMock.mockReset()
@@ -59,7 +63,6 @@ test("resolveRepositoryRoot returns the nearest git root", async () => {
   await fs.mkdir(nestedDir, { recursive: true })
   runGit(rootDir, ["init"])
 
-  const { resolveRepositoryRoot } = workforceModule
   assert.equal(
     await fs.realpath(await resolveRepositoryRoot(nestedDir)),
     await fs.realpath(rootDir),
@@ -74,7 +77,6 @@ test("discoverWorkforceInitCandidates returns nested packages under the reposito
   await writePackageJson(path.join(rootDir, "packages", "api"), "@repo/api")
   await fs.mkdir(path.join(rootDir, "node_modules", "ignored"), { recursive: true })
 
-  const { discoverWorkforceInitCandidates } = workforceModule
   const candidates = await discoverWorkforceInitCandidates(rootDir)
 
   assert.deepEqual(
@@ -90,7 +92,6 @@ test("initializeWorkforce creates root config and ledger files", async () => {
   await writePackageJson(rootDir, "@repo/root")
   await writePackageJson(uiDir, "@repo/ui")
 
-  const { initializeWorkforce } = workforceModule
   const initialized = await initializeWorkforce(rootDir, [rootDir, uiDir])
   const config = JSON.parse(await fs.readFile(initialized.configPath, "utf-8")) as {
     rootAgentId: string
@@ -111,8 +112,6 @@ test("node workforce helpers delegate lifecycle and request mutations to daemon 
   updateDaemonWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
   cancelDaemonWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
   truncateDaemonWorkforceMock.mockResolvedValue({ requestId: null })
-
-  const workforce = workforceModule
 
   await workforce.startWorkforce("/repo", {
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",

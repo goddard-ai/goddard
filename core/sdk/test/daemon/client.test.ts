@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { getDaemonSession, listDaemonSessions, runAgent } from "../../src/daemon/session/client.ts"
 
 const { createDaemonIpcClientFromEnvMock, unsubscribeMock, sendMock, subscribeMock } = vi.hoisted(
   () => {
@@ -51,8 +52,6 @@ vi.mock(
   },
 )
 
-const daemonSessionClientModule = await import("../../src/daemon/session/client.ts")
-
 describe("runAgent", () => {
   function buildSession(id: string, acpId: string) {
     return {
@@ -96,8 +95,6 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-1", "acp-session-1"),
     })
 
-    const { runAgent } = daemonSessionClientModule
-
     await expect(
       runAgent({
         agent: "pi",
@@ -129,8 +126,6 @@ describe("runAgent", () => {
     sendMock.mockResolvedValueOnce({
       session: buildSession("daemon-session-5", "acp-session-5"),
     })
-
-    const { runAgent } = daemonSessionClientModule
 
     await expect(
       runAgent({
@@ -180,8 +175,6 @@ describe("runAgent", () => {
         success: true,
       })
 
-    const { runAgent } = daemonSessionClientModule
-
     const session = await runAgent({
       sessionId: "daemon-session-2",
       agent: "pi",
@@ -208,8 +201,6 @@ describe("runAgent", () => {
     sendMock.mockResolvedValueOnce({
       session: buildSession("daemon-session-3", "acp-session-3"),
     })
-
-    const { runAgent } = daemonSessionClientModule
 
     const explicitClient = {
       send: sendMock,
@@ -248,7 +239,6 @@ describe("runAgent", () => {
       },
     })
 
-    const { getDaemonSession } = daemonSessionClientModule
     const session = await getDaemonSession("daemon-session-4")
 
     expect(session.connection.mode).toBe("history")
@@ -263,7 +253,6 @@ describe("runAgent", () => {
       hasMore: true,
     })
 
-    const { listDaemonSessions } = daemonSessionClientModule
     const response = await listDaemonSessions({ limit: 10, cursor: "cursor-0" })
 
     expect(response.sessions).toHaveLength(1)
