@@ -105,10 +105,32 @@
 
 - Do not add automated tests for the `app/` package.
 - Keep the rest of the test suite lean and intentional.
+- Ban repository-local Vitest mocking and stubbing APIs:
+  - `vi.mock`
+  - `vi.doMock`
+  - `vi.hoisted`
+  - `vi.fn`
+  - `vi.spyOn`
+  - `vi.mocked`
+  - `vi.stubGlobal`
+  - `vi.stubEnv`
+  - `vi.unstubAllGlobals`
+  - `vi.unstubAllEnvs`
+  - `mockImplementation`, `mockResolvedValue`, `mockReturnValue`, and similar helpers
+- Allowed exception:
+  - explicit non-local third-party integration boundaries only
+  - examples: remote webhook providers, remote agent archive downloads, remote AI harnesses
+- Treat first-party packages, local modules, Node stdlib seams, prompt libraries, Tauri host APIs, `console`, `process`, and local daemon/client wrappers as non-exception cases.
+- Do not replace `vi.mock` with another hidden fake layer.
+- Do not build manual fake dependencies out of `vi.fn()`.
+- Prefer real temp directories, temp `HOME`, copied fixtures, real git repositories, real worktrees, real daemon servers, subprocess-based CLI tests, and real ACP fixture processes.
+- If a test only proves that one first-party wrapper calls another first-party wrapper, delete it unless it protects a user-visible contract not covered elsewhere.
 - Do not keep a test just because it already exists.
 - Remove tests that do not protect a meaningful contract, user-visible behavior, regression boundary, or shared mock drift check.
 - Prefer contract-level tests over implementation-detail tests.
 - In Vitest files, use `expect` rather than `assert` from either Vitest or Node.
+- For daemon logging tests, capture logs through explicit seams such as `configureDaemonLogging({ writeLine })` instead of spying on stdout.
+- For CLI tests that remain, capture real subprocess output instead of spying on `console` or `process`.
 - Avoid assertions against incidental fragments, informal constants, or wording-heavy output when a shorter contract-level check will cover the behavior.
 - Exact checks for real contract strings, stable literals, or other intentionally durable outputs are acceptable.
 - Prefer stable signals such as commands, structured fields, intent markers, ownership data, and explicit contract strings over long natural-language prose.
