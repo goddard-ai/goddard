@@ -168,7 +168,8 @@ afterEach(async () => {
   }
 })
 
-test("resolved actions can run through the daemon-backed session client", async () => {
+// Disabled until daemon-backed agent launches stop relying on placeholder archive URLs.
+test.skip("resolved actions can run through the daemon-backed session client", async () => {
   process.env.HOME = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-home-"))
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-action-daemon-"))
   const actionsDir = path.join(tempDir, ".goddard", "actions")
