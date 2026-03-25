@@ -4,4 +4,5 @@ node_modules
 /roadmap
 *.py
 patch_*.js
-**/.goddard/processed-at.json
+core/**/src/**/*.d.ts
+core/**/src/**/*.d.ts.map
