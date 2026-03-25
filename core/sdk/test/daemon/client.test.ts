@@ -51,6 +51,8 @@ vi.mock(
   },
 )
 
+const daemonSessionClientModule = await import("../../src/daemon/session/client.ts")
+
 describe("runAgent", () => {
   function buildSession(id: string, acpId: string) {
     return {
@@ -94,7 +96,7 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-1", "acp-session-1"),
     })
 
-    const { runAgent } = await import("../../src/daemon/session/client.ts")
+    const { runAgent } = daemonSessionClientModule
 
     await expect(
       runAgent({
@@ -128,7 +130,7 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-5", "acp-session-5"),
     })
 
-    const { runAgent } = await import("../../src/daemon/session/client.ts")
+    const { runAgent } = daemonSessionClientModule
 
     await expect(
       runAgent({
@@ -178,7 +180,7 @@ describe("runAgent", () => {
         success: true,
       })
 
-    const { runAgent } = await import("../../src/daemon/session/client.ts")
+    const { runAgent } = daemonSessionClientModule
 
     const session = await runAgent({
       sessionId: "daemon-session-2",
@@ -207,7 +209,7 @@ describe("runAgent", () => {
       session: buildSession("daemon-session-3", "acp-session-3"),
     })
 
-    const { runAgent } = await import("../../src/daemon/session/client.ts")
+    const { runAgent } = daemonSessionClientModule
 
     const explicitClient = {
       send: sendMock,
@@ -246,7 +248,7 @@ describe("runAgent", () => {
       },
     })
 
-    const { getDaemonSession } = await import("../../src/daemon/session/client.ts")
+    const { getDaemonSession } = daemonSessionClientModule
     const session = await getDaemonSession("daemon-session-4")
 
     expect(session.connection.mode).toBe("history")
@@ -261,7 +263,7 @@ describe("runAgent", () => {
       hasMore: true,
     })
 
-    const { listDaemonSessions } = await import("../../src/daemon/session/client.ts")
+    const { listDaemonSessions } = daemonSessionClientModule
     const response = await listDaemonSessions({ limit: 10, cursor: "cursor-0" })
 
     expect(response.sessions).toHaveLength(1)

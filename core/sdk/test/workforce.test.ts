@@ -39,6 +39,8 @@ vi.mock(
   }),
 )
 
+const workforceModule = await import("../src/node/workforce.ts")
+
 beforeEach(() => {
   cancelDaemonWorkforceRequestMock.mockReset()
   createDaemonWorkforceRequestMock.mockReset()
@@ -57,7 +59,7 @@ test("resolveRepositoryRoot returns the nearest git root", async () => {
   await fs.mkdir(nestedDir, { recursive: true })
   runGit(rootDir, ["init"])
 
-  const { resolveRepositoryRoot } = await import("../src/node/workforce.ts")
+  const { resolveRepositoryRoot } = workforceModule
   assert.equal(
     await fs.realpath(await resolveRepositoryRoot(nestedDir)),
     await fs.realpath(rootDir),
@@ -72,7 +74,7 @@ test("discoverWorkforceInitCandidates returns nested packages under the reposito
   await writePackageJson(path.join(rootDir, "packages", "api"), "@repo/api")
   await fs.mkdir(path.join(rootDir, "node_modules", "ignored"), { recursive: true })
 
-  const { discoverWorkforceInitCandidates } = await import("../src/node/workforce.ts")
+  const { discoverWorkforceInitCandidates } = workforceModule
   const candidates = await discoverWorkforceInitCandidates(rootDir)
 
   assert.deepEqual(
@@ -88,7 +90,7 @@ test("initializeWorkforce creates root config and ledger files", async () => {
   await writePackageJson(rootDir, "@repo/root")
   await writePackageJson(uiDir, "@repo/ui")
 
-  const { initializeWorkforce } = await import("../src/node/workforce.ts")
+  const { initializeWorkforce } = workforceModule
   const initialized = await initializeWorkforce(rootDir, [rootDir, uiDir])
   const config = JSON.parse(await fs.readFile(initialized.configPath, "utf-8")) as {
     rootAgentId: string
@@ -110,7 +112,7 @@ test("node workforce helpers delegate lifecycle and request mutations to daemon 
   cancelDaemonWorkforceRequestMock.mockResolvedValue({ requestId: "req-1" })
   truncateDaemonWorkforceMock.mockResolvedValue({ requestId: null })
 
-  const workforce = await import("../src/node/workforce.ts")
+  const workforce = workforceModule
 
   await workforce.startWorkforce("/repo", {
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
