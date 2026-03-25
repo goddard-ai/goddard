@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk"
+import { getSessionStateDir, getSessionStatePath } from "@goddard-ai/paths"
 import * as fs from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { getGoddardGlobalDir } from "./paths.ts"
 
 /** Durable connectivity summary for a daemon session across daemon restarts. */
 export type SessionConnectionMode = "live" | "history" | "none"
@@ -101,16 +101,6 @@ export namespace SessionStateStorage {
   export async function remove(sessionId: string): Promise<void> {
     await fs.rm(getSessionStatePath(sessionId), { force: true }).catch(() => {})
   }
-}
-
-/** Returns the directory used for durable session-state files. */
-function getSessionStateDir(): string {
-  return join(getGoddardGlobalDir(), "session-state")
-}
-
-/** Maps one daemon session id to its persisted state file path. */
-function getSessionStatePath(sessionId: string): string {
-  return join(getSessionStateDir(), `${sessionId}.json`)
 }
 
 /** Reads and parses one persisted session-state record when it exists. */

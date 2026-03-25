@@ -1,14 +1,5 @@
-import { execFileSync } from "node:child_process"
-import * as fs from "node:fs/promises"
-import * as os from "node:os"
-import * as path from "node:path"
 import { assert, beforeEach, test, vi } from "vitest"
 import * as workforce from "../src/node/workforce.ts"
-import {
-  discoverWorkforceInitCandidates,
-  initializeWorkforce,
-  resolveRepositoryRoot,
-} from "../src/node/workforce.ts"
 
 const {
   cancelDaemonWorkforceRequestMock,
@@ -54,53 +45,6 @@ beforeEach(() => {
   startDaemonWorkforceMock.mockReset()
   truncateDaemonWorkforceMock.mockReset()
   updateDaemonWorkforceRequestMock.mockReset()
-})
-
-test("resolveRepositoryRoot returns the nearest git root", async () => {
-  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-root-"))
-  const nestedDir = path.join(rootDir, "packages", "worker")
-
-  await fs.mkdir(nestedDir, { recursive: true })
-  runGit(rootDir, ["init"])
-
-  assert.equal(
-    await fs.realpath(await resolveRepositoryRoot(nestedDir)),
-    await fs.realpath(rootDir),
-  )
-})
-
-test("discoverWorkforceInitCandidates returns nested packages under the repository root", async () => {
-  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-candidates-"))
-
-  await writePackageJson(rootDir, "@repo/root")
-  await writePackageJson(path.join(rootDir, "packages", "ui"), "@repo/ui")
-  await writePackageJson(path.join(rootDir, "packages", "api"), "@repo/api")
-  await fs.mkdir(path.join(rootDir, "node_modules", "ignored"), { recursive: true })
-
-  const candidates = await discoverWorkforceInitCandidates(rootDir)
-
-  assert.deepEqual(
-    candidates.map((pkg) => `${pkg.name}:${pkg.relativeDir}`),
-    ["@repo/root:.", "@repo/api:packages/api", "@repo/ui:packages/ui"],
-  )
-})
-
-test("initializeWorkforce creates root config and ledger files", async () => {
-  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "goddard-workforce-init-"))
-  const uiDir = path.join(rootDir, "packages", "ui")
-
-  await writePackageJson(rootDir, "@repo/root")
-  await writePackageJson(uiDir, "@repo/ui")
-
-  const initialized = await initializeWorkforce(rootDir, [rootDir, uiDir])
-  const config = JSON.parse(await fs.readFile(initialized.configPath, "utf-8")) as {
-    rootAgentId: string
-    agents: Array<{ id: string; cwd: string }>
-  }
-
-  assert.equal(config.rootAgentId, "root")
-  assert.deepEqual(config.agents.map((agent) => agent.cwd).sort(), [".", "packages/ui"])
-  assert.equal(await fs.readFile(initialized.ledgerPath, "utf-8"), "")
 })
 
 test("node workforce helpers delegate lifecycle and request mutations to daemon wrappers", async () => {
@@ -149,16 +93,3 @@ test("node workforce helpers delegate lifecycle and request mutations to daemon 
   assert.equal(cancelDaemonWorkforceRequestMock.mock.calls.length, 1)
   assert.equal(truncateDaemonWorkforceMock.mock.calls.length, 1)
 })
-
-async function writePackageJson(directory: string, name: string): Promise<void> {
-  await fs.mkdir(directory, { recursive: true })
-  await fs.writeFile(
-    path.join(directory, "package.json"),
-    JSON.stringify({ name }, null, 2),
-    "utf-8",
-  )
-}
-
-function runGit(cwd: string, args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "pipe" })
-}

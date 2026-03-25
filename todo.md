@@ -16,8 +16,6 @@
 
 ### SDK & Architecture
 - [ ] Implement `GoddardSdk.loop.spec` and `propose` in `@goddard-ai/sdk` (remove direct `pi` spawns in CLI).
-- [ ] Centralize `FileTokenStorage` into `@goddard-ai/sdk/node`.
-- [ ] Implement backend logic for `sdk.pr.isManaged` to filter events correctly.
 
 ### Daemon Improvements
 - [ ] Implement automatic cleanup of `.goddard-agents/` worktrees after sessions finish.

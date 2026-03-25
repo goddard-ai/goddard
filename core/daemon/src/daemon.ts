@@ -1,6 +1,5 @@
-import { createBackendClient, type BackendClient } from "@goddard-ai/backend-client"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
-import { FileTokenStorage } from "@goddard-ai/storage"
+import { createBackendClient, type BackendClient } from "./backend.ts"
 import { resolveDaemonRuntimeConfig } from "./config.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
@@ -11,6 +10,7 @@ import {
   type DaemonLogMode,
 } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
+import { DaemonAuthTokenStore } from "./persistence/auth-token.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
@@ -218,6 +218,18 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
   })
 }
 
+/** Creates the daemon-owned backend client with auth headers sourced from daemon persistence. */
 async function defaultCreateBackendClient(baseUrl: string): Promise<BackendClient> {
-  return createBackendClient({ baseUrl, tokenStorage: new FileTokenStorage() })
+  const authTokens = new DaemonAuthTokenStore()
+
+  return createBackendClient({
+    baseUrl,
+    getAuthorizationHeader: async () => {
+      const token = await authTokens.getToken()
+      return token ? `Bearer ${token}` : null
+    },
+    clearAuthorization: async () => {
+      await authTokens.clearToken()
+    },
+  })
 }

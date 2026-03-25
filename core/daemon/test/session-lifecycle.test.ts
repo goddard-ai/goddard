@@ -25,9 +25,9 @@ const {
 }))
 
 vi.mock(
-  "@goddard-ai/storage",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
-    const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+  "../src/persistence/index.ts",
+  async (importOriginal): Promise<typeof import("../src/persistence/index.ts")> => {
+    const actual = await importOriginal<typeof import("../src/persistence/index.ts")>()
 
     return {
       ...actual,
@@ -144,9 +144,10 @@ vi.mock(
 )
 
 vi.mock(
-  "@goddard-ai/storage/session-permissions",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => {
-    const actual = await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()
+  "../src/persistence/session-permissions.ts",
+  async (importOriginal): Promise<typeof import("../src/persistence/session-permissions.ts")> => {
+    const actual =
+      await importOriginal<typeof import("../src/persistence/session-permissions.ts")>()
 
     return {
       ...actual,
@@ -217,8 +218,7 @@ vi.mock(
 )
 
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
-import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
-import assert from "node:assert"
+import { SessionPermissionsStorage } from "../src/persistence/session-permissions.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { createSessionManager } from "../src/session/manager.ts"
 
@@ -300,7 +300,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   })
 
   const permissions = await SessionPermissionsStorage.get(created.session.id)
-  assert(permissions)
+  expect(permissions).toBeTruthy()
   expect(typeof permissions.token).toBe("string")
 
   await client.send("sessionShutdown", { id: created.session.id })
@@ -1234,6 +1234,22 @@ async function startTestDaemon(): Promise<DaemonServer> {
 
   const daemon = await startDaemonServer(
     {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({
           number: 1,

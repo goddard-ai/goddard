@@ -1,5 +1,5 @@
 import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
-import { isPlainObject, selectFirst } from "radashi"
+import { isPlainObject } from "radashi"
 
 // ---------------------------------------------------------------------------
 // Models
@@ -89,12 +89,15 @@ export function mergeRootConfigLayers(...layers: Array<UserConfig | undefined>):
     session: selectLast(layers, (layer) => layer?.session),
     actions: mergeActionConfigLayers(...layers.map((layer) => layer?.actions)),
     loops: mergeLoopConfigLayers(...layers.map((layer) => layer?.loops)),
-    registry: layers.reduce((acc, layer) => {
-      if (layer?.registry) {
-        return { ...acc, ...layer.registry }
-      }
-      return acc
-    }, undefined as UserConfig["registry"]),
+    registry: layers.reduce(
+      (acc, layer) => {
+        if (layer?.registry) {
+          return { ...acc, ...layer.registry }
+        }
+        return acc
+      },
+      undefined as UserConfig["registry"],
+    ),
   })
 }
 

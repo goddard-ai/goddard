@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@goddard-ai/ipc": "workspace:^",
-    "@goddard-ai/schema": "workspace:^",
-    "@goddard-ai/storage": "workspace:^"
+    "@goddard-ai/paths": "workspace:^",
+    "@goddard-ai/schema": "workspace:^"
   }
 }

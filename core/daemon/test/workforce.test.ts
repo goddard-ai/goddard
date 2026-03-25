@@ -21,6 +21,22 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-ipc-"))
   const daemon = await startDaemonServer(
     {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
         reply: async () => ({ success: true }),

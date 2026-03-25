@@ -20,7 +20,7 @@ This review covers the current checked-in test suite across the workspace, inclu
 - Packages that still use `vitest run --passWithNoTests` despite having test files:
   - `core/daemon`
   - `core/daemon/client`
-  - `core/storage`
+  - `core/paths`
   - `core/tauri-plugin-ipc`
   - `core/worktree`
 
@@ -52,7 +52,7 @@ Recommendation:
 
 ### 2. Shared storage mocks still drift across packages
 
-- Storage-backed session behavior now has real tests in `core/storage/test/`, which is good.
+- Storage-backed session behavior now has real tests in `core/paths/test/`, which is good.
 - Even so, large inline mock implementations still exist in:
   - `app/src/daemon-session.test.ts`
   - `core/daemon/test/session-lifecycle.test.ts`
@@ -68,7 +68,7 @@ Why this matters:
 Recommendation:
 
 - Extract shared fixtures for session storage and session permissions.
-- Prefer thin fixtures that mirror the `core/storage` contract rather than hand-maintained per-file maps.
+- Prefer thin fixtures that mirror the `core/paths` contract rather than hand-maintained per-file maps.
 
 ### 3. The backend production persistence path is still effectively untested
 
@@ -102,7 +102,7 @@ Recommendation:
 
 ## What Improved Since The Last Review
 
-- `core/storage` is no longer a zero-test package.
+- `core/paths` is no longer a zero-test package.
   - It now has real tests for token storage, session state storage, session permissions storage, and database-backed session / loop storage.
 - `core/tauri-plugin-ipc` is no longer untested.
   - It now covers send, filtered subscribe delivery, unsubscribe cleanup, and failed subscribe cleanup.
@@ -118,14 +118,14 @@ Recommendation:
 - `core/daemon/test/workforce.test.ts` and `core/daemon/test/loop.test.ts` cover the daemon-owned background runtimes at a useful behavior level.
 - `core/sdk/test/daemon/session-client.e2e.test.ts` still provides high-value daemon integration coverage from the SDK side.
 - `core/backend/test/backend.test.ts` exercises user-visible login, PR creation, managed PR checks, and unified stream behavior through the HTTP server.
-- `core/storage/test/db.test.ts` gives the suite a real persistence contract for session and loop records.
+- `core/paths/test/db.test.ts` gives the suite a real persistence contract for session and loop records.
 - `core/ipc/test/ipc.test.ts` stays lean and useful by checking request validation, structured errors, and NDJSON streaming over a real socket.
 - `core/tauri-plugin-ipc/test/transport.test.ts` is now a solid adapter-level contract suite.
 
 ### Good alignment with the repository testing policy
 
 - The best suites check package boundaries and user-visible behavior instead of private helpers.
-- Recent additions in `core/storage` and `core/tauri-plugin-ipc` are compact and contract-oriented.
+- Recent additions in `core/paths` and `core/tauri-plugin-ipc` are compact and contract-oriented.
 
 ## Packages Needing More Attention
 
@@ -174,7 +174,7 @@ Recommendation:
 - Status: strong around daemon integration, thinner around backend HTTP success paths.
 - Recommendation: add stream success-path, close behavior, `auth.login()`, and `pr.reply()` coverage.
 
-### `core/storage`
+### `core/paths`
 
 - Status: meaningfully improved and now worth treating as a contract source for shared fixtures.
 - Remaining gaps:
@@ -211,7 +211,7 @@ Recommendation:
 
 ## Bottom Line
 
-The suite is materially better than the previous review described. `core/storage` and `core/tauri-plugin-ipc` are no longer blind spots, and the daemon-centered behavioral coverage remains the strongest part of the repo.
+The suite is materially better than the previous review described. `core/paths` and `core/tauri-plugin-ipc` are no longer blind spots, and the daemon-centered behavioral coverage remains the strongest part of the repo.
 
 The highest-value issues now are different:
 

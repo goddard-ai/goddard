@@ -1,7 +1,7 @@
 import { createNodeClient } from "@goddard-ai/ipc"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { getGoddardGlobalDir } from "@goddard-ai/storage"
+import { getGoddardGlobalDir } from "@goddard-ai/paths"
 import * as path from "node:path"
 
 const ipcPrefix = process.platform === "win32" ? "//./pipe/" : ""

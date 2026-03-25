@@ -1,9 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
-import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
 import { pathToFileURL } from "node:url"
 import { proportionalJitter } from "radashi"
 import { createDaemonLogger, createPayloadPreview } from "../logging.ts"
+import type { ResolvedDaemonLoopStartRequest } from "../resolvers/loops.ts"
 import type { SessionManager } from "../session/index.ts"
 import { LoopRateLimiter } from "./rate-limiter.ts"
 
@@ -23,7 +23,7 @@ export interface LoopRuntimeDeps {
 
 /** Daemon-owned loop runtime backed by one persistent daemon session. */
 export class LoopRuntime {
-  readonly #config: StartDaemonLoopRequest
+  readonly #config: ResolvedDaemonLoopStartRequest
   readonly #deps: LoopRuntimeDeps
   readonly #startedAt: string
   readonly #sessionId: string
@@ -39,7 +39,7 @@ export class LoopRuntime {
   #stoppedNotified = false
 
   private constructor(input: {
-    config: StartDaemonLoopRequest
+    config: ResolvedDaemonLoopStartRequest
     deps: LoopRuntimeDeps
     sessionId: string
     sessionAcpId: string
@@ -56,7 +56,10 @@ export class LoopRuntime {
   }
 
   /** Starts one daemon-owned loop runtime and begins background cycle execution. */
-  static async start(config: StartDaemonLoopRequest, deps: LoopRuntimeDeps): Promise<LoopRuntime> {
+  static async start(
+    config: ResolvedDaemonLoopStartRequest,
+    deps: LoopRuntimeDeps,
+  ): Promise<LoopRuntime> {
     const session = await deps.sessionManager.newSession({
       ...config.session,
       systemPrompt: config.session.systemPrompt ?? "",

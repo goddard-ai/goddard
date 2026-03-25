@@ -20,6 +20,26 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-loop-ipc-"))
   const daemon = await startDaemonServer(
     {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
         reply: async () => ({ success: true }),
@@ -34,7 +54,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
           state: "running",
           rootDir: input.rootDir,
           loopName: input.loopName,
-          promptModulePath: input.promptModulePath,
+          promptModulePath: `${input.rootDir}/.goddard/loops/${input.loopName}/prompt.js`,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "session-1",
           acpId: "acp-1",
@@ -100,7 +120,6 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
   const started = await client.send("loopStart", {
     rootDir: "/repo",
     loopName: "review",
-    promptModulePath: "/repo/.goddard/loops/review/prompt.js",
     session: {
       agent: "pi-acp",
       cwd: "/repo",
@@ -134,6 +153,29 @@ test("loop manager reuses one runtime per normalized repository root and loop na
   const created: Array<{ rootDir: string; loopName: string }> = []
   const manager = createLoopManager({
     sessionManager: {} as never,
+    resolveLoopStartRequest: async (input) => ({
+      rootDir: input.rootDir,
+      loopName: input.loopName,
+      promptModulePath: `${input.rootDir}/.goddard/loops/${input.loopName}/prompt.js`,
+      session: {
+        agent: "pi-acp",
+        cwd: input.rootDir,
+        mcpServers: [],
+        systemPrompt: "test",
+      },
+      rateLimits: {
+        cycleDelay: "30s",
+        maxOpsPerMinute: 4,
+        maxCyclesBeforePause: 200,
+      },
+      retries: {
+        maxAttempts: 1,
+        initialDelayMs: 500,
+        maxDelayMs: 5_000,
+        backoffFactor: 2,
+        jitterRatio: 0.2,
+      },
+    }),
     createRuntime: async (input) => {
       created.push({ rootDir: input.rootDir, loopName: input.loopName })
       return {
@@ -173,7 +215,6 @@ test("loop manager reuses one runtime per normalized repository root and loop na
   await manager.startLoop({
     rootDir: tempRoot,
     loopName: "review",
-    promptModulePath: `${tempRoot}/.goddard/loops/review/prompt.js`,
     session: {
       agent: "pi-acp",
       cwd: tempRoot,
@@ -196,7 +237,6 @@ test("loop manager reuses one runtime per normalized repository root and loop na
   await manager.startLoop({
     rootDir: tempRoot,
     loopName: "review",
-    promptModulePath: `${tempRoot}/.goddard/loops/review/prompt.js`,
     session: {
       agent: "pi-acp",
       cwd: tempRoot,

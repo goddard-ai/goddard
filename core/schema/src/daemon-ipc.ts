@@ -1,4 +1,5 @@
 import { $type } from "@goddard-ai/ipc"
+import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { z } from "zod"
 import { DaemonSessionIdParams } from "./common/params.ts"
 import type {
@@ -21,6 +22,7 @@ import type {
   StartDaemonWorkforceResponse,
   SubmitPrDaemonResponse,
 } from "./daemon.ts"
+import { RunNamedDaemonActionRequest } from "./daemon/actions.ts"
 import {
   GetDaemonLoopRequest,
   ShutdownDaemonLoopRequest,
@@ -47,6 +49,22 @@ export const daemonIpcSchema = {
       health: {
         payload: z.object({}),
         response: $type<DaemonHealth>(),
+      },
+      authDeviceStart: {
+        payload: DeviceFlowStart,
+        response: $type<DeviceFlowSession>(),
+      },
+      authDeviceComplete: {
+        payload: DeviceFlowComplete,
+        response: $type<AuthSession>(),
+      },
+      authWhoami: {
+        payload: z.object({}),
+        response: $type<AuthSession>(),
+      },
+      authLogout: {
+        payload: z.object({}),
+        response: $type<{ success: true }>(),
       },
       prSubmit: {
         payload: SubmitPrDaemonRequest.extend({
@@ -98,6 +116,10 @@ export const daemonIpcSchema = {
       sessionResolveToken: {
         payload: z.object({ token: z.string() }),
         response: $type<{ id: string }>(),
+      },
+      actionRun: {
+        payload: RunNamedDaemonActionRequest,
+        response: $type<CreateDaemonSessionResponse>(),
       },
       loopStart: {
         payload: StartDaemonLoopRequest,

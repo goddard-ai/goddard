@@ -1,10 +1,10 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createDaemonLogger } from "./logging.ts"
+import { ManagedPrLocationStorage } from "./persistence/managed-pr-locations.ts"
 import * as prompts from "./prompts/index.ts"
 
 export type OneShotInput = {

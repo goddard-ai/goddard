@@ -36,13 +36,12 @@ Boundary:
 
 ### SDK
 Design rule: platform capabilities live here first.
-- Expose typed operations for authentication, pull request creation, managed pull request stream subscription, and daemon-backed local automation control.
-- Normalize stream frames into stable event contracts.
-- Accept injected `TokenStorage` to avoid environment lock-in.
+- Expose typed operations for daemon-backed authentication and daemon-backed local automation control.
+- Keep backend auth state out of SDK-owned persistence and route user auth through the daemon boundary.
 
 ### Desktop Workspace
 - Primary human-facing workspace for authentication, session steering, pull request review, specs, tasks, and roadmap context.
-- Use SDK contracts for pull request operations, managed pull request stream subscription, and other platform interactions.
+- Use SDK contracts for daemon-backed authentication and other platform interactions.
 - Host or supervise local background automation when unattended execution is enabled.
 
 Boundary:

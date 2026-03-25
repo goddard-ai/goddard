@@ -1,4 +1,4 @@
-import { afterEach, assert, beforeEach, test, vi } from "vitest"
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
 
 const cancelledSelection = Symbol("cancelled-selection")
 
@@ -56,17 +56,20 @@ vi.mock(
     ...(await importOriginal<typeof import("@goddard-ai/sdk/node")>()),
     cancelWorkforceRequest: cancelWorkforceRequestMock,
     createWorkforceRequest: createWorkforceRequestMock,
-    discoverWorkforceInitCandidates: discoverWorkforceInitCandidatesMock,
     getWorkforce: getWorkforceMock,
-    initializeWorkforce: initializeWorkforceMock,
     listWorkforces: listWorkforcesMock,
-    resolveRepositoryRoot: resolveRepositoryRootMock,
     startWorkforce: startWorkforceMock,
     stopWorkforce: stopWorkforceMock,
     truncateWorkforce: truncateWorkforceMock,
     updateWorkforceRequest: updateWorkforceRequestMock,
   }),
 )
+
+vi.mock("@goddard-ai/daemon/workforce", () => ({
+  discoverWorkforceInitCandidates: discoverWorkforceInitCandidatesMock,
+  initializeWorkforce: initializeWorkforceMock,
+  resolveRepositoryRoot: resolveRepositoryRootMock,
+}))
 
 beforeEach(() => {
   cancelMock.mockReset()
@@ -99,9 +102,9 @@ test("init exits cleanly when there are no workforce candidates", async () => {
   const { main } = await import("../src/main.ts")
   await main(["init", "--root", "/repo/packages/app"])
 
-  assert.equal(consoleLog.mock.calls[0]?.[0], "No workforce candidates found under /repo.")
-  assert.equal(multiselectMock.mock.calls.length, 0)
-  assert.equal(initializeWorkforceMock.mock.calls.length, 0)
+  expect(consoleLog.mock.calls[0]?.[0]).toBe("No workforce candidates found under /repo.")
+  expect(multiselectMock).not.toHaveBeenCalled()
+  expect(initializeWorkforceMock).not.toHaveBeenCalled()
 })
 
 test("init cancels without creating files when the prompt is cancelled", async () => {
@@ -119,8 +122,8 @@ test("init cancels without creating files when the prompt is cancelled", async (
   const { main } = await import("../src/main.ts")
   await main(["init", "--root", "/repo"])
 
-  assert.equal(cancelMock.mock.calls.length, 1)
-  assert.equal(initializeWorkforceMock.mock.calls.length, 0)
+  expect(cancelMock).toHaveBeenCalledTimes(1)
+  expect(initializeWorkforceMock).not.toHaveBeenCalled()
 })
 
 test("init maps selected packages into workforce initialization", async () => {
@@ -147,9 +150,9 @@ test("init maps selected packages into workforce initialization", async () => {
   const { main } = await import("../src/main.ts")
   await main(["init", "--root", "/repo"])
 
-  assert.deepEqual(initializeWorkforceMock.mock.calls[0]?.[0], "/repo")
-  assert.deepEqual(initializeWorkforceMock.mock.calls[0]?.[1], ["/repo", "/repo/packages/ui"])
-  assert.equal(outroMock.mock.calls.length, 1)
+  expect(initializeWorkforceMock.mock.calls[0]?.[0]).toBe("/repo")
+  expect(initializeWorkforceMock.mock.calls[0]?.[1]).toEqual(["/repo", "/repo/packages/ui"])
+  expect(outroMock).toHaveBeenCalledTimes(1)
 })
 
 test("start and stop commands forward lifecycle control to the daemon-backed SDK helpers", async () => {
@@ -163,10 +166,10 @@ test("start and stop commands forward lifecycle control to the daemon-backed SDK
   await main(["start", "--root", "/repo/packages/app"])
   await main(["stop", "--root", "/repo/packages/app"])
 
-  assert.equal(startWorkforceMock.mock.calls.length, 1)
-  assert.equal(stopWorkforceMock.mock.calls.length, 1)
-  assert.match(String(consoleLog.mock.calls[0]?.[0]), /Started workforce for \/repo\./)
-  assert.match(String(consoleLog.mock.calls[1]?.[0]), /Stopped workforce for \/repo\./)
+  expect(startWorkforceMock).toHaveBeenCalledTimes(1)
+  expect(stopWorkforceMock).toHaveBeenCalledTimes(1)
+  expect(String(consoleLog.mock.calls[0]?.[0])).toMatch(/Started workforce for \/repo\./)
+  expect(String(consoleLog.mock.calls[1]?.[0])).toMatch(/Stopped workforce for \/repo\./)
 })
 
 test("status and list print daemon-backed workforce state", async () => {
@@ -179,10 +182,10 @@ test("status and list print daemon-backed workforce state", async () => {
   await main(["status", "--root", "/repo"])
   await main(["list"])
 
-  assert.equal(getWorkforceMock.mock.calls.length, 1)
-  assert.equal(listWorkforcesMock.mock.calls.length, 1)
-  assert.match(String(consoleLog.mock.calls[0]?.[0]), /"rootDir": "\/repo"/)
-  assert.match(String(consoleLog.mock.calls[1]?.[0]), /"activeRequestCount": 0/)
+  expect(getWorkforceMock).toHaveBeenCalledTimes(1)
+  expect(listWorkforcesMock).toHaveBeenCalledTimes(1)
+  expect(String(consoleLog.mock.calls[0]?.[0])).toMatch(/"rootDir": "\/repo"/)
+  expect(String(consoleLog.mock.calls[1]?.[0])).toMatch(/"activeRequestCount": 0/)
 })
 
 test("request defaults to the root agent and update/truncate call the matching SDK helpers", async () => {
@@ -197,17 +200,17 @@ test("request defaults to the root agent and update/truncate call the matching S
   await main(["update", "--root", "/repo", "--request-id", "req-1", "--message", "Resume it."])
   await main(["truncate", "--root", "/repo", "--agent-id", "api", "--reason", "Reset queue."])
 
-  assert.equal(createWorkforceRequestMock.mock.calls.length, 1)
-  assert.equal(updateWorkforceRequestMock.mock.calls.length, 1)
-  assert.equal(truncateWorkforceMock.mock.calls.length, 1)
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+  expect(createWorkforceRequestMock).toHaveBeenCalledTimes(1)
+  expect(updateWorkforceRequestMock).toHaveBeenCalledTimes(1)
+  expect(truncateWorkforceMock).toHaveBeenCalledTimes(1)
+  expect(createWorkforceRequestMock.mock.calls[0]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "root",
     message: "Ship it.",
   })
-  assert.match(String(consoleLog.mock.calls[0]?.[0]), /Queued workforce request req-1\./)
-  assert.match(String(consoleLog.mock.calls[1]?.[0]), /Updated workforce request req-1\./)
-  assert.match(String(consoleLog.mock.calls[2]?.[0]), /Truncated workforce queue for \/repo\./)
+  expect(String(consoleLog.mock.calls[0]?.[0])).toMatch(/Queued workforce request req-1\./)
+  expect(String(consoleLog.mock.calls[1]?.[0])).toMatch(/Updated workforce request req-1\./)
+  expect(String(consoleLog.mock.calls[2]?.[0])).toMatch(/Truncated workforce queue for \/repo\./)
 })
 
 test("request accepts -t as a short alias for --target-agent-id", async () => {
@@ -218,7 +221,7 @@ test("request accepts -t as a short alias for --target-agent-id", async () => {
   const { main } = await import("../src/main.ts")
   await main(["request", "--root", "/repo", "-t", "api", "--message", "Ship it."])
 
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+  expect(createWorkforceRequestMock.mock.calls[0]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "api",
     message: "Ship it.",
@@ -234,12 +237,12 @@ test("request accepts the message positionally and lets --message override it", 
   await main(["request", "--root", "/repo", "Ship it."])
   await main(["request", "--root", "/repo", "--message", "Option wins.", "Positional loses."])
 
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+  expect(createWorkforceRequestMock.mock.calls[0]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "root",
     message: "Ship it.",
   })
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[1]?.[0], {
+  expect(createWorkforceRequestMock.mock.calls[1]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "root",
     message: "Option wins.",
@@ -265,14 +268,14 @@ test("create routes a create-intent request to the root workforce agent", async 
     "Build a worker package for scheduled jobs.",
   ])
 
-  assert.equal(getWorkforceMock.mock.calls.length, 1)
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+  expect(getWorkforceMock).toHaveBeenCalledTimes(1)
+  expect(createWorkforceRequestMock.mock.calls[0]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "root",
     message: "Build a worker package for scheduled jobs.",
     intent: "create",
   })
-  assert.equal(String(consoleLog.mock.calls[0]?.[0]), "Queued create request req-create-1.")
+  expect(String(consoleLog.mock.calls[0]?.[0])).toBe("Queued create request req-create-1.")
 })
 
 test("create accepts the message positionally and lets --message override it", async () => {
@@ -289,13 +292,13 @@ test("create accepts the message positionally and lets --message override it", a
   await main(["create", "--root", "/repo", "Build a worker package."])
   await main(["create", "--root", "/repo", "--message", "Option wins.", "Positional loses."])
 
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[0]?.[0], {
+  expect(createWorkforceRequestMock.mock.calls[0]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "root",
     message: "Build a worker package.",
     intent: "create",
   })
-  assert.deepEqual(createWorkforceRequestMock.mock.calls[1]?.[0], {
+  expect(createWorkforceRequestMock.mock.calls[1]?.[0]).toEqual({
     rootDir: "/repo",
     targetAgentId: "root",
     message: "Option wins.",
@@ -321,12 +324,12 @@ test("update accepts the message positionally and lets --message override it", a
     "Positional loses.",
   ])
 
-  assert.deepEqual(updateWorkforceRequestMock.mock.calls[0]?.[0], {
+  expect(updateWorkforceRequestMock.mock.calls[0]?.[0]).toEqual({
     rootDir: "/repo",
     requestId: "req-1",
     message: "Resume it.",
   })
-  assert.deepEqual(updateWorkforceRequestMock.mock.calls[1]?.[0], {
+  expect(updateWorkforceRequestMock.mock.calls[1]?.[0]).toEqual({
     rootDir: "/repo",
     requestId: "req-1",
     message: "Option wins.",
@@ -344,23 +347,21 @@ test("help output includes command and arg descriptions", async () => {
   await main(["update", "--help"])
 
   const helpOutput = consoleLog.mock.calls.map((call) => String(call[0])).join("\n")
-  assert.match(helpOutput, /Manage daemon-owned workforce runtimes and requests/)
-  assert.match(helpOutput, /Queue a new workforce request for a target agent/)
-  assert.match(helpOutput, /--target-agent-id/)
-  assert.match(helpOutput, /-t/)
-  assert.match(helpOutput, /defaults to root/)
-  assert.match(
-    helpOutput,
+  expect(helpOutput).toMatch(/Manage daemon-owned workforce runtimes and requests/)
+  expect(helpOutput).toMatch(/Queue a new workforce request for a target agent/)
+  expect(helpOutput).toMatch(/--target-agent-id/)
+  expect(helpOutput).toMatch(/-t/)
+  expect(helpOutput).toMatch(/defaults to root/)
+  expect(helpOutput).toMatch(
     /Ask the root agent to scaffold a new project or add packages for a feature/,
   )
-  assert.match(helpOutput, /--root/)
-  assert.match(helpOutput, /Repository root or any path inside the repository/)
-  assert.match(helpOutput, /--message/)
-  assert.match(helpOutput, /\[message\]/)
-  assert.match(helpOutput, /overrides the positional message/)
-  assert.match(
-    helpOutput,
+  expect(helpOutput).toMatch(/--root/)
+  expect(helpOutput).toMatch(/Repository root or any path inside the repository/)
+  expect(helpOutput).toMatch(/--message/)
+  expect(helpOutput).toMatch(/\[message\]/)
+  expect(helpOutput).toMatch(/overrides the positional message/)
+  expect(helpOutput).toMatch(
     /Feature request that may require creating a new project or new workspace packages/,
   )
-  assert.equal(processExit.mock.calls.length, 4)
+  expect(processExit).toHaveBeenCalledTimes(4)
 })

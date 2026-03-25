@@ -21,9 +21,9 @@ const { permissionsBySessionId, permissionsByToken, sessionStates, sessions } = 
 }))
 
 vi.mock(
-  "@goddard-ai/storage",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
-    const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+  "../../../daemon/src/persistence/index.ts",
+  async (importOriginal): Promise<typeof import("../../../daemon/src/persistence/index.ts")> => {
+    const actual = await importOriginal<typeof import("../../../daemon/src/persistence/index.ts")>()
 
     return {
       ...actual,
@@ -140,9 +140,14 @@ vi.mock(
 )
 
 vi.mock(
-  "@goddard-ai/storage/session-permissions",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => {
-    const actual = await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()
+  "../../../daemon/src/persistence/session-permissions.ts",
+  async (
+    importOriginal,
+  ): Promise<typeof import("../../../daemon/src/persistence/session-permissions.ts")> => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../daemon/src/persistence/session-permissions.ts")
+      >()
 
     return {
       ...actual,
@@ -264,6 +269,22 @@ async function startTestDaemon(): Promise<DaemonServer> {
 
   const daemon = await startDaemonServer(
     {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({
           number: 1,

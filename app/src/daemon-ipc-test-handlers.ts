@@ -8,6 +8,11 @@ import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
  */
 export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcSchema> {
   let nextSessionId = 0
+  let authSession = {
+    token: "tok_test",
+    githubUsername: "alec",
+    githubUserId: 42,
+  }
   const workforceRoots = new Set<string>()
   const sessionHistory = new Map<
     string,
@@ -152,6 +157,25 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
 
   return {
     health: async () => ({ ok: true }),
+    authDeviceStart: async () => ({
+      deviceCode: "dev_1",
+      userCode: "ABCD-1234",
+      verificationUri: "https://github.com/login/device",
+      expiresIn: 900,
+      interval: 5,
+    }),
+    authDeviceComplete: async ({ githubUsername }) => ({
+      ...authSession,
+      githubUsername,
+    }),
+    authWhoami: async () => authSession,
+    authLogout: async () => {
+      authSession = {
+        ...authSession,
+        token: "",
+      }
+      return { success: true as const }
+    },
     prSubmit: async () => ({ number: 1, url: "https://github.com/example/repo/pull/1" }),
     prReply: async () => ({ success: true }),
     sessionCreate: async () => {
@@ -245,6 +269,12 @@ export function createDaemonSessionTestIpcHandlers(): Handlers<typeof daemonIpcS
       return { accepted: true }
     },
     sessionResolveToken: async () => ({ id: "daemon-session-0" }),
+    actionRun: async () => {
+      const id = `daemon-session-${nextSessionId++}`
+      const acpId = `acp-session-${nextSessionId}`
+      sessionHistory.set(id, { acpId, history: [] })
+      return getSessionResponse(id)
+    },
     loopStart: async ({ rootDir, loopName }) => getLoopResponse(rootDir, loopName),
     loopGet: async ({ rootDir, loopName }) => getLoopResponse(rootDir, loopName),
     loopList: async () => ({

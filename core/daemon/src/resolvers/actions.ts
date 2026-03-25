@@ -1,19 +1,19 @@
 import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
-import { ActionConfig, InlineSessionParams } from "@goddard-ai/schema/config"
+import { ActionConfig, type InlineSessionParams } from "@goddard-ai/schema/config"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
-import { join } from "node:path"
-import { runAgent } from "../daemon/session/client.ts"
+import { join, resolve } from "node:path"
 import { readActionConfig, readMergedRootConfig } from "./config.ts"
 
 /** A resolved named action prompt and merged persisted config. */
-export type ResolvedAgentAction = {
+export type ResolvedDaemonAction = {
   prompt: string
   config: ActionConfig
   path: string
 }
 
+/** Rejects legacy prompt frontmatter that now belongs in JSON config. */
 function detectLegacyFrontmatter(content: string, path: string): void {
   if (content.startsWith("---\n") || content.startsWith("---\r\n")) {
     throw new Error(
@@ -22,6 +22,7 @@ function detectLegacyFrontmatter(content: string, path: string): void {
   }
 }
 
+/** Validates that one parsed action config is an object when present. */
 function ensureActionConfig(value: ActionConfig | undefined, path: string): ActionConfig {
   if (!value) {
     return {}
@@ -34,13 +35,15 @@ function ensureActionConfig(value: ActionConfig | undefined, path: string): Acti
   return value
 }
 
+/** Loads one markdown prompt file and rejects legacy frontmatter. */
 async function loadMarkdownPrompt(path: string): Promise<string> {
   const content = await readFile(path, "utf-8")
   detectLegacyFrontmatter(content, path)
   return content
 }
 
-async function loadPromptOnlyAction(path: string): Promise<ResolvedAgentAction> {
+/** Loads one prompt-only action package. */
+async function loadPromptOnlyAction(path: string): Promise<ResolvedDaemonAction> {
   return {
     prompt: await loadMarkdownPrompt(path),
     config: {},
@@ -48,7 +51,8 @@ async function loadPromptOnlyAction(path: string): Promise<ResolvedAgentAction> 
   }
 }
 
-async function loadPackagedAction(path: string): Promise<ResolvedAgentAction> {
+/** Loads one packaged action directory and validates its required files. */
+async function loadPackagedAction(path: string): Promise<ResolvedDaemonAction> {
   const promptPath = join(path, "prompt.md")
   const configPath = join(path, "config.json")
 
@@ -67,10 +71,11 @@ async function loadPackagedAction(path: string): Promise<ResolvedAgentAction> {
   }
 }
 
+/** Resolves one action name from a specific `.goddard` root. */
 async function resolveActionFromRoot(
   actionName: string,
   goddardRoot: string,
-): Promise<ResolvedAgentAction | null> {
+): Promise<ResolvedDaemonAction | null> {
   const promptPath = join(goddardRoot, "actions", `${actionName}.md`)
   const folderPath = join(goddardRoot, "actions", actionName)
   const hasPromptFile = existsSync(promptPath)
@@ -93,30 +98,13 @@ async function resolveActionFromRoot(
   return null
 }
 
-/** Builds daemon session params for a resolved action plus runtime overrides. */
-export function buildActionSessionParams(
-  action: ResolvedAgentAction,
-  params?: InlineSessionParams,
-): SessionParams & { oneShot: true } {
-  const sessionConfig = action.config.session ?? {}
-
-  return {
-    agent: sessionConfig.agent ?? "pi-acp",
-    cwd: process.cwd(),
-    mcpServers: [],
-    ...sessionConfig,
-    ...params,
-    oneShot: true as const,
-    initialPrompt: action.prompt,
-  }
-}
-
-/** Resolves a named action from local or global config roots. */
-export async function resolveAction(
+/** Resolves one named action from local or global config roots. */
+export async function resolveNamedAction(
   actionName: string,
-  cwd: string = process.cwd(),
-): Promise<ResolvedAgentAction> {
-  const { config, globalRoot, localRoot } = await readMergedRootConfig(cwd)
+  cwd: string,
+): Promise<ResolvedDaemonAction> {
+  const resolvedCwd = resolve(cwd)
+  const { config, globalRoot, localRoot } = await readMergedRootConfig(resolvedCwd)
   const localAction = await resolveActionFromRoot(actionName, localRoot)
   const globalAction = localAction ? null : await resolveActionFromRoot(actionName, globalRoot)
   const action = localAction ?? globalAction
@@ -142,8 +130,24 @@ export async function resolveAction(
   }
 }
 
-/** Runs a named action through the daemon-backed session client. */
-export async function runAgentAction(actionName: string, params: InlineSessionParams = {}) {
-  const action = await resolveAction(actionName, params.cwd)
-  return runAgent(buildActionSessionParams(action, params))
+/** Builds daemon session params for one resolved action plus runtime overrides. */
+export function buildNamedActionSessionParams(
+  action: ResolvedDaemonAction,
+  cwd: string,
+  params: InlineSessionParams = {},
+): SessionParams & { oneShot: true } {
+  const sessionConfig = action.config.session ?? {}
+
+  return {
+    agent: params.agent ?? sessionConfig.agent ?? "pi-acp",
+    cwd: resolve(params.cwd ?? cwd),
+    mcpServers: params.mcpServers ?? sessionConfig.mcpServers ?? [],
+    env: params.env ?? sessionConfig.env,
+    systemPrompt: params.systemPrompt,
+    repository: params.repository,
+    prNumber: params.prNumber,
+    metadata: params.metadata,
+    oneShot: true as const,
+    initialPrompt: action.prompt,
+  }
 }

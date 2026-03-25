@@ -1,16 +1,14 @@
 import { agentBinaryPlatforms } from "@goddard-ai/schema/session-server"
-import { access } from "node:fs/promises"
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import * as tarFs from "tar-fs"
 import { createGzip } from "node:zlib"
+import * as tarFs from "tar-fs"
 import { afterEach, expect, test, vi } from "vitest"
 import {
   detectBinaryTargetPayloadFormat,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
-  resolveInstalledBinaryRoot,
 } from "../src/session/archive.ts"
 import { resolveAgentProcessSpec } from "../src/session/manager.ts"
 

@@ -11,10 +11,10 @@
 
 | Import | Owns | Does not own |
 | --- | --- | --- |
-| `@goddard-ai/sdk` | Backend HTTP API access, auth, PR operations, unified stream subscription | Daemon session lifecycle, runtime loop helpers |
+| `@goddard-ai/sdk` | Daemon-backed auth | Direct backend HTTP ownership, PR operations, stream subscription |
 | `@goddard-ai/sdk/daemon` | Daemon-backed agent sessions (`runAgent`, `AgentSession`) | Low-level daemon URL parsing and IPC transport factories |
 | `@goddard-ai/sdk/loop` | Daemon-backed loop lifecycle control | Backend HTTP API access, host-specific IPC wiring |
-| `@goddard-ai/sdk/node` | Node composition helpers and env-driven conveniences | Cross-environment transport ownership |
+| `@goddard-ai/sdk/node` | Node-side daemon request shaping for actions, loops, and workforce | Local config loading, repo initialization ownership |
 
 ## `daemon-client` vs `sdk/daemon`
 
@@ -42,9 +42,9 @@ Fresh daemon-backed sessions keep the original `cwd` by default, even inside git
 - Node convenience path: omit options and rely on `GODDARD_DAEMON_URL` when the host process provides it.
 - App path: pass an explicit `daemonUrl` and injected `createClient` factory. Do not rely on Node defaults in the app.
 
-## Configuration Layout
+## Configuration Ownership
 
-Node helpers resolve persisted config from JSON only:
+The daemon resolves persisted JSON config, packaged actions, and packaged loops from disk. `@goddard-ai/sdk/node` does not read those files locally.
 
 - Global defaults: `~/.goddard/config.json`
 - Local defaults: `<repo>/.goddard/config.json`
@@ -52,18 +52,15 @@ Node helpers resolve persisted config from JSON only:
 - Packaged actions: `.goddard/actions/<name>/prompt.md` + `.goddard/actions/<name>/config.json`
 - Packaged loops: `.goddard/loops/<name>/prompt.js` + `.goddard/loops/<name>/config.json`
 
-Persisted prompt frontmatter is not supported. Loop `nextPrompt` logic comes from `prompt.js`, not JSON.
-Started loops are daemon-owned background runtimes, so the initiating SDK host process may exit after startup without stopping the loop.
-
 ## Examples
 
-Backend-only SDK usage:
+Top-level SDK auth usage:
 
 ```ts
 import { GoddardSdk } from "@goddard-ai/sdk"
 
 const sdk = new GoddardSdk({
-  backendUrl: "https://api.example.com",
+  daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
 })
 
 const session = await sdk.auth.login({
@@ -73,13 +70,8 @@ const session = await sdk.auth.login({
   },
 })
 
-const pr = await sdk.pr.create({
-  owner: "acme",
-  repo: "widgets",
-  title: "Ship the SDK contract",
-  head: "feat/sdk-contract",
-  base: "main",
-})
+const me = await sdk.auth.whoami()
+console.log(me.githubUsername)
 ```
 
 Daemon session client usage:
@@ -114,11 +106,8 @@ const loop = await startDaemonLoop(
   {
     rootDir: process.cwd(),
     loopName: "triage",
-    promptModulePath: "/workspace/.goddard/loops/triage/prompt.js",
     session: {
-      agent: "pi",
       cwd: process.cwd(),
-      mcpServers: [],
       systemPrompt: "Follow repository conventions.",
     },
     rateLimits: {
@@ -145,12 +134,9 @@ console.log(loop.sessionId)
 Node convenience usage:
 
 ```ts
-import { FileTokenStorage, GoddardSdk } from "@goddard-ai/sdk/node"
+import { GoddardSdk } from "@goddard-ai/sdk/node"
 
-const sdk = new GoddardSdk({
-  backendUrl: "https://api.example.com",
-  tokenStorage: new FileTokenStorage(),
-})
+const sdk = new GoddardSdk()
 
 await sdk.actions.run("review", {
   cwd: process.cwd(),

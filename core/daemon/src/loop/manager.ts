@@ -1,6 +1,10 @@
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
 import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
 import { createDaemonLogger } from "../logging.ts"
+import {
+  resolveNamedLoopStartRequest,
+  type ResolvedDaemonLoopStartRequest,
+} from "../resolvers/loops.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
 import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
 
@@ -8,7 +12,13 @@ const logger = createDaemonLogger()
 
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
 export interface LoopManagerDeps extends LoopRuntimeDeps {
-  createRuntime?: (input: StartDaemonLoopRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
+  createRuntime?: (
+    input: ResolvedDaemonLoopStartRequest,
+    deps: LoopRuntimeDeps,
+  ) => Promise<LoopRuntime>
+  resolveLoopStartRequest?: (
+    input: StartDaemonLoopRequest,
+  ) => Promise<ResolvedDaemonLoopStartRequest>
 }
 
 /** Daemon-owned loop runtime registry keyed by normalized repository root and loop name. */
@@ -31,7 +41,10 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
 
   return {
     async startLoop(input: StartDaemonLoopRequest): Promise<DaemonLoop> {
-      const identity = await normalizeLoopIdentity(input.rootDir, input.loopName)
+      const resolvedInput = await (deps.resolveLoopStartRequest ?? resolveNamedLoopStartRequest)(
+        input,
+      )
+      const identity = await normalizeLoopIdentity(resolvedInput.rootDir, resolvedInput.loopName)
       const key = `${identity.rootDir}::${identity.loopName}`
       const existing = runtimes.get(key)
       if (existing) {
@@ -44,7 +57,7 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
 
       const runtime = await (deps.createRuntime ?? LoopRuntime.start)(
         {
-          ...input,
+          ...resolvedInput,
           rootDir: identity.rootDir,
           loopName: identity.loopName,
         },

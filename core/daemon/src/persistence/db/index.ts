@@ -1,20 +1,20 @@
 import Database from "better-sqlite3"
+import { getDatabasePath, getGoddardGlobalDir } from "@goddard-ai/paths"
 import { BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3"
 import { migrate } from "drizzle-orm/better-sqlite3/migrator"
 import fs from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { getDatabasePath, getGoddardGlobalDir } from "../paths.ts"
 import * as schema from "./schema.ts"
 
-/** Drizzle database handle for storage-owned SQLite persistence. */
-export type StorageDatabase = BetterSQLite3Database<typeof schema>
+/** Drizzle database handle for daemon-owned SQLite persistence. */
+export type DaemonDatabase = BetterSQLite3Database<typeof schema>
 
-/** Returns the storage database after opening the file and applying schema migrations. */
+/** Returns the daemon database after opening the file and applying schema migrations. */
 export const getDatabaseInstance = (() => {
-  let databasePromise: Promise<StorageDatabase> | null = null
+  let databasePromise: Promise<DaemonDatabase> | null = null
 
-  return (): Promise<StorageDatabase> => {
+  return (): Promise<DaemonDatabase> => {
     databasePromise ??= initializeDatabase().catch((error) => {
       databasePromise = null
       throw error
@@ -24,11 +24,11 @@ export const getDatabaseInstance = (() => {
 })()
 
 /** Opens the SQLite database and synchronizes it to the declared Drizzle schema. */
-async function initializeDatabase(): Promise<StorageDatabase> {
+async function initializeDatabase(): Promise<DaemonDatabase> {
   fs.mkdirSync(getGoddardGlobalDir(), { recursive: true })
 
   const client = new Database(getDatabasePath())
-  const database: StorageDatabase = drizzle({
+  const database: DaemonDatabase = drizzle({
     client,
     schema,
   })
@@ -43,8 +43,8 @@ async function initializeDatabase(): Promise<StorageDatabase> {
 }
 
 /** Applies checked-in SQL migrations to the live SQLite database. */
-function applySchemaMigrations(database: StorageDatabase): void {
+function applySchemaMigrations(database: DaemonDatabase): void {
   migrate(database, {
-    migrationsFolder: resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle"),
+    migrationsFolder: resolve(dirname(fileURLToPath(import.meta.url)), "../../../drizzle"),
   })
 }

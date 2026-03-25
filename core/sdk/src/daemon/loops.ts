@@ -3,10 +3,17 @@ import type {
   DaemonLoopStatus,
   StartDaemonLoopRequest,
 } from "@goddard-ai/schema/daemon"
+import { resolve } from "node:path"
 import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
 
 /** Shared daemon connection options for loop lifecycle helpers. */
 export type LoopClientOptions = DaemonClientOptions
+
+/** Runtime overrides accepted when starting one packaged daemon-owned loop. */
+export type AgentLoopRuntimeOverrides = Pick<
+  StartDaemonLoopRequest,
+  "session" | "rateLimits" | "retries"
+>
 
 /** Starts or reuses one daemon-managed loop runtime. */
 export async function startDaemonLoop(
@@ -45,4 +52,45 @@ export async function shutdownDaemonLoop(
   const client = resolveDaemonClient(options)
   const response = await client.send("loopShutdown", { rootDir, loopName })
   return response.success
+}
+
+/** Starts a new named background loop managed by the daemon. */
+export async function startNamedLoop(
+  loopName: string,
+  overrides?: AgentLoopRuntimeOverrides,
+  options?: LoopClientOptions,
+): Promise<DaemonLoop> {
+  return startDaemonLoop(
+    {
+      rootDir: resolve(overrides?.session?.cwd ?? process.cwd()),
+      loopName,
+      session: overrides?.session,
+      rateLimits: overrides?.rateLimits,
+      retries: overrides?.retries,
+    },
+    options,
+  )
+}
+
+/** Fetches one daemon-owned loop runtime for the given repository root and loop name. */
+export async function getLoop(
+  rootDir: string,
+  loopName: string,
+  options?: LoopClientOptions,
+): Promise<DaemonLoop> {
+  return getDaemonLoop(resolve(rootDir), loopName, options)
+}
+
+/** Lists all daemon-owned loop runtimes currently running in the daemon. */
+export async function listLoops(options?: LoopClientOptions): Promise<DaemonLoopStatus[]> {
+  return listDaemonLoops(options)
+}
+
+/** Stops one daemon-owned loop runtime for the given repository root and loop name. */
+export async function stopLoop(
+  rootDir: string,
+  loopName: string,
+  options?: LoopClientOptions,
+): Promise<boolean> {
+  return shutdownDaemonLoop(resolve(rootDir), loopName, options)
 }
