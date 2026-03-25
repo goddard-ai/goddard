@@ -19,14 +19,17 @@ import {
 } from "@goddard-ai/sdk/node"
 
 /** Formats one discovered package for the workforce init selection prompt. */
-function formatPackageLabel(pkg: DiscoveredWorkforcePackage): string {
+export function formatPackageLabel(pkg: DiscoveredWorkforcePackage): string {
   return pkg.relativeDir === "."
     ? `${pkg.name} (repository root)`
     : `${pkg.name} (${pkg.relativeDir})`
 }
 
 /** Resolves the effective request message from the flag or positional argument. */
-function resolveCommandMessage(input: { message?: string; positionalMessage?: string }): string {
+export function resolveCommandMessage(input: {
+  message?: string
+  positionalMessage?: string
+}): string {
   const message = input.message ?? input.positionalMessage
   if (message) {
     return message

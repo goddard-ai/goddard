@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, test } from "vitest"
 
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {
@@ -134,7 +134,7 @@ test("daemon run subscribes once, handles events across repositories, and passes
     },
   }
 
-  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+  const { logs, result: exitCode } = await captureDaemonLogs((io) =>
     runDaemon(
       {
         baseUrl: "",
@@ -142,7 +142,10 @@ test("daemon run subscribes once, handles events across repositories, and passes
         agentBinDir: "/tmp/custom-agent-bin",
         logMode: "json",
       },
-      deps,
+      {
+        ...deps,
+        io,
+      },
     ),
   )
 
@@ -185,7 +188,7 @@ test("daemon run can start only the IPC server when stream is disabled", async (
   let subCalls = 0
   const startIpcCalls: Array<{ socketPath: string; agentBinDir: string }> = []
 
-  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+  const { logs, result: exitCode } = await captureDaemonLogs((io) =>
     runDaemon(
       {
         baseUrl: "",
@@ -196,6 +199,7 @@ test("daemon run can start only the IPC server when stream is disabled", async (
         logMode: "json",
       },
       {
+        io,
         createBackendClient: async () => ({
           auth: {
             startDeviceFlow: async () => ({
@@ -265,7 +269,7 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   const runOneShotCalls: any[] = []
   const startIpcCalls: any[] = []
 
-  const { logs, result: exitCode } = await captureDaemonLogs(async () =>
+  const { logs, result: exitCode } = await captureDaemonLogs((io) =>
     runDaemon(
       {
         baseUrl: "",
@@ -274,6 +278,7 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
         logMode: "json",
       },
       {
+        io,
         createBackendClient: async () => ({
           auth: {
             startDeviceFlow: async () => ({
@@ -492,26 +497,22 @@ function runGit(cwd: string, args: string[]): void {
 }
 
 async function captureDaemonLogs<T>(
-  action: () => Promise<T>,
+  action: (io: { stdout: (line: string) => void; stderr: (line: string) => void }) => Promise<T>,
 ): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
   const output: string[] = []
-  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"))
-    return true
-  }) as typeof process.stdout.write)
+  const io = {
+    stdout: (line: string) => {
+      output.push(line)
+    },
+    stderr: () => {},
+  }
 
-  try {
-    const result = await action()
-    return {
-      logs: output
-        .flatMap((chunk) => chunk.split("\n"))
-        .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>),
-      result,
-    }
-  } finally {
-    stdout.mockRestore()
+  const result = await action(io)
+  return {
+    logs: output
+      .flatMap((chunk) => chunk.split("\n"))
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>),
+    result,
   }
 }
