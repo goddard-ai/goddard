@@ -5,12 +5,12 @@ import {
   getGoddardGlobalDir,
   getGoddardLocalDir,
   getLocalConfigPath,
-} from "@goddard-ai/storage"
+} from "@goddard-ai/paths"
 import { constants as fsConstants } from "node:fs"
 import { access, readFile, writeFile } from "node:fs/promises"
 import { z } from "zod"
 
-/** Paths and merged root config for a single node config resolution request. */
+/** Paths and merged root config for one daemon-side config resolution request. */
 export type ResolvedConfigRoots = {
   globalRoot: string
   localRoot: string
@@ -30,7 +30,7 @@ export async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-/** Reads and validates a JSON config document when the file exists. */
+/** Reads and validates one JSON config document when the file exists. */
 export async function readJsonConfig<T>(
   path: string,
   schema: z.ZodType<T>,
@@ -41,7 +41,7 @@ export async function readJsonConfig<T>(
     return undefined
   }
 
-  let parsed: any
+  let parsed: unknown
 
   try {
     parsed = JSON.parse(await readFile(path, "utf-8"))
@@ -51,18 +51,29 @@ export async function readJsonConfig<T>(
 
   if (typeof parsed === "object" && parsed !== null && !("$schema" in parsed)) {
     try {
-      parsed.$schema = new URL(schemaReference, SCHEMA_BASE_URL).toString()
-      await writeFile(path, JSON.stringify(parsed, null, 2))
-    } catch (e) {
-      // Ignore errors if the schema file cannot be resolved or written
+      await writeFile(
+        path,
+        `${JSON.stringify(
+          {
+            ...parsed,
+            $schema: new URL(schemaReference, SCHEMA_BASE_URL).toString(),
+          },
+          null,
+          2,
+        )}\n`,
+        "utf-8",
+      )
+    } catch {
+      // Best-effort normalization only.
     }
   }
 
-  let normalized = parsed
-  if (typeof parsed === "object" && parsed !== null && "$schema" in parsed) {
-    normalized = { ...parsed }
-    delete (normalized as any).$schema
-  }
+  const normalized =
+    typeof parsed === "object" && parsed !== null && "$schema" in parsed
+      ? Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(([key]) => key !== "$schema"),
+        )
+      : parsed
 
   const result = schema.safeParse(normalized)
   if (!result.success) {
@@ -72,7 +83,7 @@ export async function readJsonConfig<T>(
   return result.data
 }
 
-/** Reads and merges the global and local root config documents for the given cwd. */
+/** Reads and merges the global and local root config documents for one working directory. */
 export async function readMergedRootConfig(
   cwd: string = process.cwd(),
 ): Promise<ResolvedConfigRoots> {
@@ -89,12 +100,12 @@ export async function readMergedRootConfig(
   }
 }
 
-/** Reads and validates a packaged action config document. */
+/** Reads and validates one packaged action config document. */
 export async function readActionConfig(path: string): Promise<ActionConfig | undefined> {
   return readJsonConfig(path, ActionConfig, "Action config", "action.json")
 }
 
-/** Reads and validates a packaged loop config document. */
+/** Reads and validates one packaged loop config document. */
 export async function readLoopConfig(path: string): Promise<LoopConfig | undefined> {
   return readJsonConfig(path, LoopConfig, "Loop config", "loop.json")
 }

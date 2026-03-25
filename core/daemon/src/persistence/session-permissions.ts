@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getSessionPermissionsPath } from "./paths.ts"
+import { getSessionPermissionsPath } from "@goddard-ai/paths"
 
+/** Durable authorization record that scopes one daemon session's repo access. */
 export type SessionPermissionsRecord = {
   sessionId: string
   token: string
@@ -11,10 +12,12 @@ export type SessionPermissionsRecord = {
   createdAt: string
 }
 
+/** JSON file shape used to persist daemon session permission grants. */
 type SessionPermissionsFile = {
   sessions: Record<string, SessionPermissionsRecord>
 }
 
+/** JSON-backed persistence for daemon session permission grants. */
 export namespace SessionPermissionsStorage {
   export async function create(record: Omit<SessionPermissionsRecord, "createdAt">) {
     const data = await readPermissionsFile()

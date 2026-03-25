@@ -26,6 +26,22 @@ test("SDK daemon IPC client can submit PR through the daemon request map", async
   const createCalls: Array<Record<string, unknown>> = []
   const daemon = await startTestDaemon({
     sdk: {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         create: async (input) => {
           createCalls.push(input)
@@ -86,6 +102,22 @@ test("SDK daemon IPC client can reply to allowed PRs through the daemon request 
   const replyCalls: Array<Record<string, unknown>> = []
   const daemon = await startTestDaemon({
     sdk: {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         reply: async (input) => {
           replyCalls.push(input)
@@ -154,6 +186,22 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
 
   const daemon = await startDaemonServer(
     {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         create:
           options.sdk?.pr?.create ??

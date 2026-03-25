@@ -1,21 +1,20 @@
 import { z } from "zod"
-import { ResolvedLoopRateLimits, ResolvedLoopRetries } from "../config.ts"
+import { LoopRateLimits, LoopRetryPolicy } from "../config.ts"
 import { CreateDaemonSessionRequest } from "./sessions.ts"
 
-/** Fully resolved session settings used to start one daemon-owned loop runtime. */
-const DaemonLoopSessionConfig = CreateDaemonSessionRequest.omit({
+/** Runtime loop overrides accepted from a daemon client before local package resolution. */
+const DaemonLoopSessionOverrides = CreateDaemonSessionRequest.omit({
   initialPrompt: true,
   oneShot: true,
-})
+}).partial()
 
 /** Request payload used to start or reuse one daemon-owned loop runtime. */
 export const StartDaemonLoopRequest = z.object({
   rootDir: z.string().min(1),
   loopName: z.string().min(1),
-  promptModulePath: z.string().min(1),
-  session: DaemonLoopSessionConfig,
-  rateLimits: ResolvedLoopRateLimits,
-  retries: ResolvedLoopRetries,
+  session: DaemonLoopSessionOverrides.optional(),
+  rateLimits: LoopRateLimits.optional(),
+  retries: LoopRetryPolicy.optional(),
 })
 
 /** Type shape for one loop start or reuse request routed over daemon IPC. */

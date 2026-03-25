@@ -9,23 +9,23 @@ import type {
   StreamMessage,
 } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
-import { InMemoryTokenStorage, type TokenStorage } from "@goddard-ai/storage"
 import { createClient } from "rouzer"
 
-/** Fetch implementation consumed by the backend client. */
+/** Fetch implementation consumed by the daemon's backend client. */
 type FetchLike = typeof fetch
 
-/** Listener signature used by backend stream subscriptions. */
+/** Listener signature used by daemon-owned backend stream subscriptions. */
 type StreamHandler = (event?: unknown) => void
 
-/** Constructor options for the backend client. */
-type BackendClientOptions = {
+/** Constructor options for the daemon's direct backend client. */
+export type BackendClientOptions = {
   baseUrl: string
-  tokenStorage?: TokenStorage
   fetchImpl?: FetchLike
+  getAuthorizationHeader?: () => Promise<string | null> | string | null
+  clearAuthorization?: () => Promise<void> | void
 }
 
-/** Disposable SSE subscription returned by the backend client. */
+/** Disposable SSE subscription returned by the daemon's backend client. */
 export type StreamSubscription = {
   on: (eventName: string, handler: StreamHandler) => StreamSubscription
   off: (eventName: string, handler: StreamHandler) => StreamSubscription
@@ -34,7 +34,7 @@ export type StreamSubscription = {
   isClosed: () => boolean
 }
 
-/** Public backend client surface shared by the daemon and SDK. */
+/** Direct backend client surface owned privately by the daemon. */
 export type BackendClient = {
   auth: {
     startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>
@@ -52,6 +52,7 @@ export type BackendClient = {
   }
 }
 
+/** In-memory SSE subscription wrapper used for daemon-owned repo stream listeners. */
 class BackendStreamSubscription implements StreamSubscription {
   #dispose: () => void
   #listeners = new Map<string, Set<StreamHandler>>()
@@ -92,9 +93,8 @@ class BackendStreamSubscription implements StreamSubscription {
   }
 }
 
-/** Creates a backend client that owns auth, PR, and stream HTTP behavior. */
+/** Creates the daemon's direct rouzer-backed client for backend auth, PR, and stream routes. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
-  const tokenStorage = options.tokenStorage ?? new InMemoryTokenStorage()
   const rouzerClient = createClient({
     baseURL: options.baseUrl,
     fetch: options.fetchImpl ?? fetch,
@@ -103,54 +103,50 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
 
   return {
     auth: {
-      startDeviceFlow: async (input = {}) => {
-        return rouzerClient.authDeviceStartRoute.POST({ body: input })
-      },
-      completeDeviceFlow: async (input) => {
-        const session = await rouzerClient.authDeviceCompleteRoute.POST({ body: input })
-        await tokenStorage.setToken(session.token)
-        return session
-      },
+      startDeviceFlow: async (input = {}) =>
+        rouzerClient.authDeviceStartRoute.POST({ body: input }),
+      completeDeviceFlow: async (input) =>
+        rouzerClient.authDeviceCompleteRoute.POST({ body: input }),
       whoami: async () => {
-        const token = await requireToken(tokenStorage)
+        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         return rouzerClient.authSessionRoute.GET({
-          headers: { authorization: `Bearer ${token}` },
+          headers: { authorization },
         })
       },
       logout: async () => {
-        await tokenStorage.clearToken()
+        await options.clearAuthorization?.()
       },
     },
     pr: {
       create: async (input) => {
-        const token = await requireToken(tokenStorage)
+        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         return rouzerClient.prCreateRoute.POST({
-          headers: { authorization: `Bearer ${token}` },
+          headers: { authorization },
           body: input,
         })
       },
       isManaged: async ({ owner, repo, prNumber }) => {
-        const token = await requireToken(tokenStorage)
+        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         const result = await rouzerClient.prManagedRoute.GET({
-          headers: { authorization: `Bearer ${token}` },
+          headers: { authorization },
           query: { owner, repo, prNumber },
         })
         return result.managed
       },
       reply: async (input) => {
-        const token = await requireToken(tokenStorage)
+        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         return rouzerClient.prReplyRoute.POST({
-          headers: { authorization: `Bearer ${token}` },
+          headers: { authorization },
           body: input,
         })
       },
     },
     stream: {
       subscribe: async () => {
-        const token = await requireToken(tokenStorage)
+        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         const abortController = new AbortController()
         const response = await rouzerClient.repoStreamRoute.GET({
-          headers: { authorization: `Bearer ${token}` },
+          headers: { authorization },
           signal: abortController.signal,
         })
 
@@ -177,14 +173,16 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
   }
 }
 
-/** Resolves the stored auth token or fails when the client is unauthenticated. */
-async function requireToken(tokenStorage: TokenStorage): Promise<string> {
-  const token = await tokenStorage.getToken()
-  if (!token) {
+/** Resolves the injected auth header or fails when the daemon is unauthenticated. */
+async function requireAuthorizationHeader(
+  getAuthorizationHeader: BackendClientOptions["getAuthorizationHeader"],
+): Promise<string> {
+  const authorization = await getAuthorizationHeader?.()
+  if (!authorization) {
     throw new Error("Not authenticated. Run login first.")
   }
 
-  return token
+  return authorization
 }
 
 /** Reads the backend SSE response stream until the subscription closes or the stream ends. */
@@ -221,7 +219,7 @@ async function consumeSseResponse(
   }
 }
 
-/** Emits complete SSE messages from the buffered stream content and preserves any trailing partial frame. */
+/** Emits complete SSE messages from buffered stream content and preserves trailing partial frames. */
 function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription): string {
   let remaining = buffer
 
@@ -260,9 +258,13 @@ function parseSseData(chunk: string): string | null {
     }
 
     if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trimStart())
+      dataLines.push(line.slice(5).trimStart())
     }
   }
 
-  return dataLines.length > 0 ? dataLines.join("\n") : null
+  if (dataLines.length === 0) {
+    return null
+  }
+
+  return dataLines.join("\n")
 }

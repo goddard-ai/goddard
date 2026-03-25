@@ -28,9 +28,9 @@ const { createDaemonIpcClientFromEnvMock, sendMock, updateMock } = vi.hoisted(()
 }))
 
 vi.mock(
-  "@goddard-ai/storage",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => {
-    const actual = await importOriginal<typeof import("@goddard-ai/storage")>()
+  "../src/persistence/session.ts",
+  async (importOriginal): Promise<typeof import("../src/persistence/session.ts")> => {
+    const actual = await importOriginal<typeof import("../src/persistence/session.ts")>()
     return {
       ...actual,
       SessionStorage: {

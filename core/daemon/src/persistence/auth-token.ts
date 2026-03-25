@@ -1,16 +1,17 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
-import type { TokenStorage } from "./interfaces.ts"
-import { getGoddardGlobalDir } from "./paths.ts"
+import { dirname } from "node:path"
+import { getAuthTokenPath } from "@goddard-ai/paths"
 
+/** JSON shape persisted for daemon-owned backend auth state. */
 type ConfigFile = {
   token?: string
 }
 
-export class FileTokenStorage implements TokenStorage {
+/** Private daemon store for the backend auth token. */
+export class DaemonAuthTokenStore {
   readonly #path: string
 
-  constructor(path = join(getGoddardGlobalDir(), "credentials.json")) {
+  constructor(path = getAuthTokenPath()) {
     this.#path = path
   }
 

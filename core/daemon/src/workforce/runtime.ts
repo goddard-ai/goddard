@@ -25,6 +25,8 @@ import { buildWorkforcePaths } from "./paths.ts"
 
 const logger = createDaemonLogger()
 
+type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never
+
 /** Optional authenticated agent context derived from the calling daemon session. */
 export interface WorkforceActorContext {
   sessionId: string | null
@@ -658,7 +660,7 @@ export class WorkforceRuntime {
   }
 
   private async appendEvent(
-    event: Omit<WorkforceLedgerEvent, "id"> & { id?: string },
+    event: DistributiveOmit<WorkforceLedgerEvent, "id"> & { id?: string },
   ): Promise<void> {
     const eventWithId = { ...event, id: event.id ?? uuidv7() } as WorkforceLedgerEvent
     await appendWorkforceLedgerEvent(this.#rootDir, eventWithId)

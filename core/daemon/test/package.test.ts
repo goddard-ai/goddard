@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { expect, test } from "vitest"
 
-test("daemon package does not depend on @goddard-ai/sdk", async () => {
+test("daemon package does not depend on removed higher-level packages", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf-8"),
   ) as {
@@ -9,4 +9,5 @@ test("daemon package does not depend on @goddard-ai/sdk", async () => {
   }
 
   expect(packageJson.dependencies?.["@goddard-ai/sdk"]).toBeUndefined()
+  expect(packageJson.dependencies?.["@goddard-ai/backend-client"]).toBeUndefined()
 })

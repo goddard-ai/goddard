@@ -1,20 +1,11 @@
 import { GoddardSdk as BaseGoddardSdk } from "../sdk.ts"
-import * as actions from "./actions.ts"
-import * as agents from "./agents.ts"
-import * as loops from "./loops.ts"
+import * as actions from "../daemon/actions.ts"
+import * as loops from "../daemon/loops.ts"
 import * as workforce from "./workforce.ts"
-export { FileTokenStorage } from "@goddard-ai/storage"
 export * from "./workforce.ts"
 
-/** Goddard SDK entry point extended for local Node.js environments with file access and daemon management. */
+/** Goddard SDK entry point extended for local Node.js environments with daemon-oriented conveniences. */
 export class GoddardSdk extends BaseGoddardSdk {
-  get agents() {
-    return {
-      /** Initializes a new agent implementation in the specified repository root. */
-      init: agents.init,
-    }
-  }
-
   get actions() {
     return {
       /** Runs an isolated, one-shot action agent for short-lived queries or tasks. */
@@ -24,8 +15,6 @@ export class GoddardSdk extends BaseGoddardSdk {
 
   get loop() {
     return {
-      /** Resolves the runtime configuration for a daemon-managed loop. */
-      resolve: loops.resolveLoop,
       /** Starts a new named background loop managed by the daemon. */
       start: loops.startNamedLoop,
       /** Retrieves the current status of a daemon-managed background loop. */
@@ -39,12 +28,6 @@ export class GoddardSdk extends BaseGoddardSdk {
 
   get workforce() {
     return {
-      /** Finds the nearest valid repository root containing a `.git` or `.gitrepo` directory. */
-      resolveRepositoryRoot: workforce.resolveRepositoryRoot,
-      /** Discovers valid target agents that can be initialized within the workforce. */
-      discoverInitCandidates: workforce.discoverWorkforceInitCandidates,
-      /** Initializes a new agent workforce structure in the repository root. */
-      initialize: workforce.initializeWorkforce,
       /** Starts the primary daemon-managed workforce runtime for a repository. */
       start: workforce.startWorkforce,
       /** Retrieves the status of the daemon-managed workforce for a repository. */

@@ -1,27 +1,31 @@
 #!/usr/bin/env node
 import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts"
+import {
+  discoverWorkforceInitCandidates,
+  initializeWorkforce,
+  resolveRepositoryRoot,
+  type DiscoveredWorkforcePackage,
+} from "@goddard-ai/daemon/workforce"
 import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 import {
   cancelWorkforceRequest,
   createWorkforceRequest,
-  discoverWorkforceInitCandidates,
   getWorkforce,
-  initializeWorkforce,
   listWorkforces,
-  resolveRepositoryRoot,
   startWorkforce,
   stopWorkforce,
   truncateWorkforce,
   updateWorkforceRequest,
-  type DiscoveredWorkforcePackage,
 } from "@goddard-ai/sdk/node"
 
+/** Formats one discovered package for the workforce init selection prompt. */
 function formatPackageLabel(pkg: DiscoveredWorkforcePackage): string {
   return pkg.relativeDir === "."
     ? `${pkg.name} (repository root)`
     : `${pkg.name} (${pkg.relativeDir})`
 }
 
+/** Resolves the effective request message from the flag or positional argument. */
 function resolveCommandMessage(input: { message?: string; positionalMessage?: string }): string {
   const message = input.message ?? input.positionalMessage
   if (message) {
@@ -31,6 +35,7 @@ function resolveCommandMessage(input: { message?: string; positionalMessage?: st
   throw new Error("A message is required. Pass --message or provide it positionally.")
 }
 
+/** Prompts the operator to choose which repository packages should become workforce domains. */
 export async function promptForWorkforcePackages(
   candidates: DiscoveredWorkforcePackage[],
 ): Promise<string[] | null> {
@@ -52,6 +57,7 @@ export async function promptForWorkforcePackages(
   return selected
 }
 
+/** Initializes repo-local workforce files after resolving the repository root and selected domains. */
 export async function runInitCommand(args: { root: string }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
   const candidates = await discoverWorkforceInitCandidates(repositoryRoot)
@@ -71,6 +77,7 @@ export async function runInitCommand(args: { root: string }): Promise<void> {
   outro(`Initialized workforce config at ${initialized.configPath}.`)
 }
 
+/** Starts the daemon-managed workforce runtime for the resolved repository root. */
 export async function runStartCommand(args: { root: string; daemonUrl?: string }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
   const workforce = await startWorkforce(repositoryRoot, {
@@ -79,6 +86,7 @@ export async function runStartCommand(args: { root: string; daemonUrl?: string }
   console.log(`Started workforce for ${workforce.rootDir}.`)
 }
 
+/** Prints the current daemon-managed workforce state for the resolved repository root. */
 export async function runStatusCommand(args: { root: string; daemonUrl?: string }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
   const workforce = await getWorkforce(repositoryRoot, {
@@ -87,6 +95,7 @@ export async function runStatusCommand(args: { root: string; daemonUrl?: string 
   console.log(JSON.stringify(workforce, null, 2))
 }
 
+/** Lists all daemon-managed workforce runtimes currently known to the daemon. */
 export async function runListCommand(args: { daemonUrl?: string }): Promise<void> {
   const workforces = await listWorkforces({
     daemonUrl: args.daemonUrl,
@@ -94,6 +103,7 @@ export async function runListCommand(args: { daemonUrl?: string }): Promise<void
   console.log(JSON.stringify(workforces, null, 2))
 }
 
+/** Queues one workforce request for an explicit target agent. */
 export async function runRequestCommand(args: {
   root: string
   targetAgentId: string
@@ -115,6 +125,7 @@ export async function runRequestCommand(args: {
   console.log(`Queued workforce request ${response.requestId ?? "unknown"}.`)
 }
 
+/** Queues one create-intent request for the repository root agent. */
 export async function runCreateCommand(args: {
   root: string
   message?: string
@@ -139,6 +150,7 @@ export async function runCreateCommand(args: {
   console.log(`Queued create request ${response.requestId ?? "unknown"}.`)
 }
 
+/** Updates the user-facing input on one queued or suspended workforce request. */
 export async function runUpdateCommand(args: {
   root: string
   requestId: string
@@ -160,6 +172,7 @@ export async function runUpdateCommand(args: {
   console.log(`Updated workforce request ${args.requestId}.`)
 }
 
+/** Cancels one existing workforce request. */
 export async function runCancelCommand(args: {
   root: string
   requestId: string
@@ -180,6 +193,7 @@ export async function runCancelCommand(args: {
   console.log(`Cancelled workforce request ${args.requestId}.`)
 }
 
+/** Truncates pending workforce work for one repository or one agent queue. */
 export async function runTruncateCommand(args: {
   root: string
   agentId?: string
@@ -200,6 +214,7 @@ export async function runTruncateCommand(args: {
   console.log(`Truncated workforce queue for ${repositoryRoot}.`)
 }
 
+/** Stops the daemon-managed workforce runtime for the resolved repository root. */
 export async function runStopCommand(args: { root: string; daemonUrl?: string }): Promise<void> {
   const repositoryRoot = await resolveRepositoryRoot(args.root)
   await stopWorkforce(repositoryRoot, {
@@ -208,6 +223,7 @@ export async function runStopCommand(args: { root: string; daemonUrl?: string })
   console.log(`Stopped workforce for ${repositoryRoot}.`)
 }
 
+/** Runs the workforce CLI entrypoint against one argv payload. */
 export async function main(argv: string[]) {
   const daemonUrl = option({
     type: optional(string),

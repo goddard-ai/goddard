@@ -1,187 +1,120 @@
-import { InMemoryTokenStorage } from "@goddard-ai/storage"
-import { expect, test } from "vitest"
+import { expect, test, vi } from "vitest"
 import { GoddardSdk } from "../src/sdk.ts"
 
-test("device flow stores token and whoami uses auth header", async () => {
-  const storage = new InMemoryTokenStorage()
-
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input)
-    if (url.endsWith("/auth/device/start")) {
-      return jsonResponse(200, {
+test("sdk auth delegates device-flow lifecycle to daemon IPC", async () => {
+  const send = vi.fn(async (method: string, payload: unknown) => {
+    if (method === "authDeviceStart") {
+      expect(payload).toEqual({ githubUsername: "alec" })
+      return {
         deviceCode: "dev_1",
         userCode: "ABCD-1234",
         verificationUri: "https://github.com/login/device",
         expiresIn: 900,
         interval: 5,
-      })
+      }
     }
 
-    if (url.endsWith("/auth/device/complete")) {
-      return jsonResponse(200, {
+    if (method === "authDeviceComplete") {
+      expect(payload).toEqual({
+        deviceCode: "dev_1",
+        githubUsername: "alec",
+      })
+      return {
         token: "tok_1",
         githubUsername: "alec",
         githubUserId: 42,
-      })
+      }
     }
 
-    if (url.endsWith("/auth/session")) {
-      expect(init?.headers && (init.headers as Record<string, string>).authorization).toBe(
-        "Bearer tok_1",
-      )
-      return jsonResponse(200, {
-        token: "tok_1",
-        githubUsername: "alec",
-        githubUserId: 42,
-      })
-    }
-
-    return jsonResponse(404, { error: "not found" })
-  }
-
-  const sdk = new GoddardSdk({
-    backendUrl: "http://127.0.0.1:8787",
-    tokenStorage: storage,
-    fetch: fetchImpl,
+    throw new Error(`Unexpected daemon method: ${method}`)
   })
 
-  const start = await sdk.auth.startDeviceFlow()
+  const sdk = new GoddardSdk({
+    client: { send } as never,
+  })
+
+  const start = await sdk.auth.startDeviceFlow({ githubUsername: "alec" })
   expect(start.deviceCode).toBe("dev_1")
 
   const session = await sdk.auth.completeDeviceFlow({
     deviceCode: start.deviceCode,
     githubUsername: "alec",
   })
-  expect(session.githubUsername).toBe("alec")
-  expect(await storage.getToken()).toBe("tok_1")
-
-  const me = await sdk.auth.whoami()
-  expect(me.githubUserId).toBe(42)
+  expect(session.githubUserId).toBe(42)
 })
 
-test("pr create requires authentication", async () => {
-  const storage = new InMemoryTokenStorage()
-
-  const fetchImpl: typeof fetch = async (input) => {
-    const url = String(input)
-    if (url.endsWith("/pr/create")) {
-      return jsonResponse(200, {
-        id: 1,
-        number: 1,
-        owner: "org",
-        repo: "repo",
-        title: "demo",
-        body: "body",
-        head: "feat",
-        base: "main",
-        url: "https://github.com/org/repo/pull/1",
-        createdBy: "alec",
-        createdAt: new Date().toISOString(),
-      })
+test("sdk login polls through daemon auth methods until completion", async () => {
+  let completionAttempts = 0
+  const send = vi.fn(async (method: string) => {
+    if (method === "authDeviceStart") {
+      return {
+        deviceCode: "dev_1",
+        userCode: "ABCD-1234",
+        verificationUri: "https://github.com/login/device",
+        expiresIn: 900,
+        interval: 0,
+      }
     }
 
-    return jsonResponse(404, { error: "not found" })
-  }
+    if (method === "authDeviceComplete") {
+      completionAttempts += 1
+      if (completionAttempts === 1) {
+        throw new Error("authorization_pending")
+      }
 
-  const sdk = new GoddardSdk({
-    backendUrl: "http://127.0.0.1:8787",
-    tokenStorage: storage,
-    fetch: fetchImpl,
-  })
-
-  await expect(() =>
-    sdk.pr.create({ owner: "org", repo: "repo", title: "demo", head: "feat", base: "main" }),
-  ).rejects.toThrow()
-
-  await storage.setToken("tok_2")
-
-  const pr = await sdk.pr.create({
-    owner: "org",
-    repo: "repo",
-    title: "demo",
-    head: "feat",
-    base: "main",
-  })
-  expect(pr.number).toBe(1)
-})
-
-test("pr.isManaged returns managed status", async () => {
-  const storage = new InMemoryTokenStorage()
-  await storage.setToken("tok_pr")
-
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input)
-    if (url.includes("/pr/managed?")) {
-      expect(init?.headers && (init.headers as Record<string, string>).authorization).toBe(
-        "Bearer tok_pr",
-      )
-      return jsonResponse(200, { managed: true })
-    }
-    return jsonResponse(404, { error: "not found" })
-  }
-
-  const sdk = new GoddardSdk({
-    backendUrl: "http://127.0.0.1:8787",
-    tokenStorage: storage,
-    fetch: fetchImpl,
-  })
-
-  const managed = await sdk.pr.isManaged({ owner: "org", repo: "repo", prNumber: 12 })
-  expect(managed).toBe(true)
-})
-
-test("stream emits error event for malformed payloads", async () => {
-  const storage = new InMemoryTokenStorage()
-  await storage.setToken("tok_stream")
-
-  const encoder = new TextEncoder()
-  let controller: ReadableStreamDefaultController<Uint8Array> | undefined
-
-  const fetchImpl: typeof fetch = async (input) => {
-    const url = String(input)
-    if (url.endsWith("/stream")) {
-      const stream = new ReadableStream<Uint8Array>({
-        start(ctrl) {
-          controller = ctrl
-        },
-      })
-
-      return new Response(stream, {
-        status: 200,
-        headers: {
-          "content-type": "text/event-stream",
-        },
-      })
+      return {
+        token: "tok_1",
+        githubUsername: "alec",
+        githubUserId: 42,
+      }
     }
 
-    return jsonResponse(404, { error: "not found" })
-  }
+    throw new Error(`Unexpected daemon method: ${method}`)
+  })
 
   const sdk = new GoddardSdk({
-    backendUrl: "http://127.0.0.1:8787",
-    tokenStorage: storage,
-    fetch: fetchImpl,
+    client: { send } as never,
   })
 
-  const sub = await sdk.stream.subscribe()
-
-  let errorMessage = ""
-  sub.on("error", (error) => {
-    errorMessage = error instanceof Error ? error.message : String(error)
-  })
-
-  controller?.enqueue(encoder.encode("data: {\n\n"))
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  expect(errorMessage).toMatch(/Invalid stream payload/)
-  sub.close()
-})
-
-function jsonResponse(status: number, payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: {
-      "content-type": "application/json",
+  let prompt: { verificationUri: string; userCode: string } | null = null
+  const session = await sdk.auth.login({
+    githubUsername: "alec",
+    onPrompt(verificationUri, userCode) {
+      prompt = { verificationUri, userCode }
     },
   })
-}
+
+  expect(prompt).toEqual({
+    verificationUri: "https://github.com/login/device",
+    userCode: "ABCD-1234",
+  })
+  expect(session.githubUsername).toBe("alec")
+  expect(completionAttempts).toBe(2)
+})
+
+test("sdk auth whoami and logout use daemon IPC", async () => {
+  const send = vi.fn(async (method: string) => {
+    if (method === "authWhoami") {
+      return {
+        token: "tok_1",
+        githubUsername: "alec",
+        githubUserId: 42,
+      }
+    }
+
+    if (method === "authLogout") {
+      return { success: true }
+    }
+
+    throw new Error(`Unexpected daemon method: ${method}`)
+  })
+
+  const sdk = new GoddardSdk({
+    client: { send } as never,
+  })
+
+  await expect(sdk.auth.whoami()).resolves.toMatchObject({ githubUserId: 42 })
+  await expect(sdk.auth.logout()).resolves.toBeUndefined()
+  expect(send).toHaveBeenNthCalledWith(1, "authWhoami", {})
+  expect(send).toHaveBeenNthCalledWith(2, "authLogout", {})
+})

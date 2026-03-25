@@ -4,7 +4,7 @@ The Goddard Core repository houses shared packages and utilities that are used a
 
 Core packages included here:
 - `schema`: Defines strict Zod validation schemas and backend API routes using the `rouzer` library.
-- `storage`: Centralizes file resolution, local credential management, and token storage logic.
+- `paths`: Resolves shared `.goddard` filesystem paths without owning persistence.
 - `config`: Shared configuration definitions.
 
 ## Issues & Feature Requests

@@ -32,20 +32,21 @@ describe("daemon loop client", () => {
     createDaemonIpcClientFromEnvMock.mockClear()
   })
 
-  test("starts, lists, and shuts down daemon-managed loops", async () => {
+  test("starts named loops and delegates lifecycle helpers to daemon IPC", async () => {
     sendMock
+      .mockResolvedValueOnce({ loop: { rootDir: "/repo", loopName: "review" } })
+      .mockResolvedValueOnce({ loop: { rootDir: "/repo", loopName: "review" } })
       .mockResolvedValueOnce({ loop: { rootDir: "/repo", loopName: "review" } })
       .mockResolvedValueOnce({ loops: [{ rootDir: "/repo", loopName: "review" }] })
       .mockResolvedValueOnce({ success: true })
 
-    const { listDaemonLoops, shutdownDaemonLoop, startDaemonLoop } =
+    const { getLoop, listLoops, startDaemonLoop, startNamedLoop, stopLoop } =
       await import("../../src/daemon/loops.ts")
 
     await expect(
       startDaemonLoop({
         rootDir: "/repo",
         loopName: "review",
-        promptModulePath: "/repo/.goddard/loops/review/prompt.js",
         session: {
           agent: "pi-acp",
           cwd: "/repo",
@@ -68,13 +69,27 @@ describe("daemon loop client", () => {
       rootDir: "/repo",
       loopName: "review",
     })
-    await expect(listDaemonLoops()).resolves.toEqual([{ rootDir: "/repo", loopName: "review" }])
-    await expect(shutdownDaemonLoop("/repo", "review")).resolves.toBe(true)
+    await expect(
+      startNamedLoop("review", {
+        session: {
+          cwd: "/repo",
+          systemPrompt: "Use the loop checklist.",
+        },
+      }),
+    ).resolves.toEqual({
+      rootDir: "/repo",
+      loopName: "review",
+    })
+    await expect(getLoop("/repo", "review")).resolves.toEqual({
+      rootDir: "/repo",
+      loopName: "review",
+    })
+    await expect(listLoops()).resolves.toEqual([{ rootDir: "/repo", loopName: "review" }])
+    await expect(stopLoop("/repo", "review")).resolves.toBe(true)
 
     expect(sendMock).toHaveBeenNthCalledWith(1, "loopStart", {
       rootDir: "/repo",
       loopName: "review",
-      promptModulePath: "/repo/.goddard/loops/review/prompt.js",
       session: {
         agent: "pi-acp",
         cwd: "/repo",
@@ -93,8 +108,22 @@ describe("daemon loop client", () => {
         jitterRatio: 0.2,
       },
     })
-    expect(sendMock).toHaveBeenNthCalledWith(2, "loopList", {})
-    expect(sendMock).toHaveBeenNthCalledWith(3, "loopShutdown", {
+    expect(sendMock).toHaveBeenNthCalledWith(2, "loopStart", {
+      rootDir: "/repo",
+      loopName: "review",
+      session: {
+        cwd: "/repo",
+        systemPrompt: "Use the loop checklist.",
+      },
+      rateLimits: undefined,
+      retries: undefined,
+    })
+    expect(sendMock).toHaveBeenNthCalledWith(3, "loopGet", {
+      rootDir: "/repo",
+      loopName: "review",
+    })
+    expect(sendMock).toHaveBeenNthCalledWith(4, "loopList", {})
+    expect(sendMock).toHaveBeenNthCalledWith(5, "loopShutdown", {
       rootDir: "/repo",
       loopName: "review",
     })

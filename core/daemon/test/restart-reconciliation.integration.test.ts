@@ -45,7 +45,7 @@ test("real storage reconciliation marks interrupted sessions as archived history
   const [{ startDaemonServer }, { createDaemonIpcClient }, storage] = await Promise.all([
     import("../src/ipc.ts"),
     import("@goddard-ai/daemon-client"),
-    import("@goddard-ai/storage"),
+    import("../src/persistence/index.ts"),
   ])
 
   const sessionId = "real-restart-session-1"
@@ -85,6 +85,22 @@ test("real storage reconciliation marks interrupted sessions as archived history
 
   const daemon = await startDaemonServer(
     {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
       pr: {
         create: async () => ({
           number: 1,

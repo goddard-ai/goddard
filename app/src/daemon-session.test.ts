@@ -59,9 +59,9 @@ function createNodeAgent(agentPath: string) {
 }
 
 vi.mock(
-  "@goddard-ai/storage",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage")> => ({
-    ...(await importOriginal<typeof import("@goddard-ai/storage")>()),
+  "../../core/daemon/src/persistence/index.ts",
+  async (importOriginal): Promise<typeof import("../../core/daemon/src/persistence/index.ts")> => ({
+    ...(await importOriginal<typeof import("../../core/daemon/src/persistence/index.ts")>()),
     SessionStorage: {
       create: vi.fn(async (record: any) => {
         const now = new Date()
@@ -154,9 +154,13 @@ vi.mock(
 )
 
 vi.mock(
-  "@goddard-ai/storage/session-permissions",
-  async (importOriginal): Promise<typeof import("@goddard-ai/storage/session-permissions")> => ({
-    ...(await importOriginal<typeof import("@goddard-ai/storage/session-permissions")>()),
+  "../../core/daemon/src/persistence/session-permissions.ts",
+  async (
+    importOriginal,
+  ): Promise<typeof import("../../core/daemon/src/persistence/session-permissions.ts")> => ({
+    ...(await importOriginal<
+      typeof import("../../core/daemon/src/persistence/session-permissions.ts")
+    >()),
     SessionPermissionsStorage: {
       create: vi.fn(async (record: any) => {
         const created = { ...record, createdAt: new Date().toISOString() }

@@ -1,6 +1,12 @@
+import type {
+  AuthSession,
+  DeviceFlowComplete,
+  DeviceFlowSession,
+  DeviceFlowStart,
+} from "@goddard-ai/schema/backend"
 import type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "@goddard-ai/schema/daemon"
-import type { ManagedPrLocationRecord } from "@goddard-ai/storage/managed-pr-locations"
-import type { SessionPermissionsRecord } from "@goddard-ai/storage/session-permissions"
+import type { ManagedPrLocationRecord } from "../persistence/managed-pr-locations.ts"
+import type { SessionPermissionsRecord } from "../persistence/session-permissions.ts"
 import type { LoopManager } from "../loop/index.ts"
 import type { SessionManager } from "../session/index.ts"
 import type { WorkforceManager } from "../workforce/index.ts"
@@ -24,6 +30,12 @@ export type PrReplyInput = {
 }
 
 export type BackendPrClient = {
+  auth: {
+    startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>
+    completeDeviceFlow: (input: DeviceFlowComplete) => Promise<AuthSession>
+    whoami: () => Promise<AuthSession>
+    logout: () => Promise<void>
+  }
   pr: {
     create: (input: PrCreateInput) => Promise<{ number: number; url: string }>
     reply: (input: PrReplyInput) => Promise<{ success: boolean }>

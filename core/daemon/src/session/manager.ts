@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { getGoddardGlobalDir } from "@goddard-ai/paths"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
@@ -20,26 +21,25 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
+import treeKill from "@goddard-ai/tree-kill"
+import type { WorktreePlugin } from "@goddard-ai/worktree"
+import { spawn, type ChildProcessByStdio } from "node:child_process"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
+import { constants as fsConstants } from "node:fs"
+import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { Readable, Writable } from "node:stream"
+import { prependAgentBinToPath } from "../config.ts"
+import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
-  fileExists,
-  getGoddardGlobalDir,
+  SessionPermissionsStorage,
   SessionStateStorage,
   SessionStorage,
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
   type SQLSessionListCursor,
   type SQLSessionUpdate,
-} from "@goddard-ai/storage"
-import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
-import treeKill from "@goddard-ai/tree-kill"
-import type { WorktreePlugin } from "@goddard-ai/worktree"
-import { spawn, type ChildProcessByStdio } from "node:child_process"
-import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { Readable, Writable } from "node:stream"
-import { prependAgentBinToPath } from "../config.ts"
-import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
+} from "../persistence/index.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -68,6 +68,16 @@ function getPackageVersion(): string {
 }
 
 const logger = createDaemonLogger()
+
+/** Returns true when one filesystem path currently exists. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, fsConstants.F_OK)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Tracks in-flight client requests so agent responses can be correlated back to session state. */
 type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
@@ -454,7 +464,7 @@ async function resolveBinaryCommand(
   const installDir = getBinaryInstallDir(agent, binaryTarget)
   const installMarkerPath = join(installDir, binaryInstallMarkerFileName)
 
-  if (!(await fileExists(installMarkerPath))) {
+  if (!(await pathExists(installMarkerPath))) {
     await installBinaryArchive(
       agent.id,
       binaryTarget.target.archive,
@@ -516,7 +526,7 @@ async function cleanupOtherAgentBinaryInstalls(
   activeInstallDir: string,
 ): Promise<void> {
   const binariesDir = join(getGoddardGlobalDir(), "binaries")
-  if (!(await fileExists(binariesDir))) {
+  if (!(await pathExists(binariesDir))) {
     return
   }
 

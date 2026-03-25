@@ -9,6 +9,7 @@ export type {
   ShutdownDaemonLoopRequest,
   StartDaemonLoopRequest,
 } from "./daemon/loops.ts"
+export type { RunNamedDaemonActionRequest } from "./daemon/actions.ts"
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.ts"
 export type { DaemonSessionMetadata, SessionWorktreeMetadata } from "./daemon/session-metadata.ts"
 export type {

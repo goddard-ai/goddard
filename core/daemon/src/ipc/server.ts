@@ -1,18 +1,22 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { createServer } from "@goddard-ai/ipc"
+import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type {
   CreateDaemonSessionRequest,
   ListDaemonSessionsRequest,
+  RunNamedDaemonActionRequest,
   StartDaemonLoopRequest,
 } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-import { SessionStorage } from "@goddard-ai/storage"
-import { ManagedPrLocationStorage } from "@goddard-ai/storage/managed-pr-locations"
-import { SessionPermissionsStorage } from "@goddard-ai/storage/session-permissions"
 import { once } from "node:events"
 import { resolveDaemonRuntimeConfig } from "../config.ts"
 import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager } from "../loop/index.ts"
+import { DaemonAuthTokenStore } from "../persistence/auth-token.ts"
+import { ManagedPrLocationStorage } from "../persistence/managed-pr-locations.ts"
+import { SessionPermissionsStorage } from "../persistence/session-permissions.ts"
+import { SessionStorage } from "../persistence/session.ts"
+import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { createSessionManager } from "../session/manager.ts"
 import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
@@ -36,6 +40,7 @@ export async function startDaemonServer(
   const getSessionByToken = deps.getSessionByToken ?? SessionPermissionsStorage.getByToken
   const addAllowedPrToSession = deps.addAllowedPrToSession ?? SessionPermissionsStorage.addAllowedPr
   const recordManagedPrLocation = deps.recordManagedPrLocation ?? ManagedPrLocationStorage.upsert
+  const authTokens = new DaemonAuthTokenStore()
 
   await prepareSocketPath(socketPath)
 
@@ -146,6 +151,27 @@ export async function startDaemonServer(
   // When new daemon IPC methods are added here, update the app test stub as well.
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
     health: withRequestLogging<{}, { ok: true }>("health", async () => ({ ok: true })),
+    authDeviceStart: withRequestLogging<
+      DeviceFlowStart,
+      Awaited<ReturnType<typeof client.auth.startDeviceFlow>>
+    >("authDeviceStart", async (payload) => client.auth.startDeviceFlow(payload)),
+    authDeviceComplete: withRequestLogging<
+      DeviceFlowComplete,
+      Awaited<ReturnType<typeof client.auth.completeDeviceFlow>>
+    >("authDeviceComplete", async (payload) => {
+      const session = await client.auth.completeDeviceFlow(payload)
+      await authTokens.setToken(session.token)
+      return session
+    }),
+    authWhoami: withRequestLogging<{}, Awaited<ReturnType<typeof client.auth.whoami>>>(
+      "authWhoami",
+      async () => client.auth.whoami(),
+    ),
+    authLogout: withRequestLogging<{}, { success: true }>("authLogout", async () => {
+      await client.auth.logout()
+      await authTokens.clearToken()
+      return { success: true as const }
+    }),
     prSubmit: withRequestLogging<
       {
         token: string
@@ -299,6 +325,26 @@ export async function startDaemonServer(
         }
       },
     ),
+    actionRun: withRequestLogging<
+      RunNamedDaemonActionRequest,
+      { session: Awaited<ReturnType<typeof sessionManager.createSession>> }
+    >("actionRun", async (payload, context) => {
+      const action = await resolveNamedAction(payload.actionName, payload.cwd)
+      const session = await sessionManager.createSession(
+        buildNamedActionSessionParams(action, payload.cwd, {
+          cwd: payload.cwd,
+          agent: payload.agent,
+          mcpServers: payload.mcpServers,
+          env: payload.env,
+          systemPrompt: payload.systemPrompt,
+          repository: payload.repository,
+          prNumber: payload.prNumber,
+          metadata: payload.metadata,
+        }),
+      )
+      context.setSessionId(session.id)
+      return { session }
+    }),
     loopStart: withRequestLogging<
       StartDaemonLoopRequest,
       { loop: Awaited<ReturnType<typeof loopManager.startLoop>> }
