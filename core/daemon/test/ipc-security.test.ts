@@ -2,7 +2,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, test } from "vitest"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
@@ -332,13 +332,12 @@ async function captureDaemonLogs(
   action: () => Promise<void>,
 ): Promise<{ logs: Array<Record<string, unknown>> }> {
   const output: string[] = []
-  const restoreLogging = configureDaemonLogging({ mode: "json" })
-  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"))
-    return true
-  }) as typeof process.stdout.write)
+  const restoreLogging = configureDaemonLogging({
+    mode: "json",
+    writeLine: (line) => {
+      output.push(line)
+    },
+  })
 
   try {
     await action()
@@ -349,7 +348,6 @@ async function captureDaemonLogs(
         .map((line) => JSON.parse(line) as Record<string, unknown>),
     }
   } finally {
-    stdout.mockRestore()
     restoreLogging()
   }
 }

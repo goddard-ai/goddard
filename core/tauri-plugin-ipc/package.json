@@ -17,7 +17,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@goddard-ai/ipc": "workspace:^",

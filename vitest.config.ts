@@ -8,6 +8,7 @@ export default defineConfig({
     globals: true,
     silent: "passed-only",
     reporters: ["dot"],
+    passWithNoTests: true,
   },
   resolve: {
     alias: workspaceAliases,
