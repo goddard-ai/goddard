@@ -78,6 +78,7 @@ test("installBinaryTargetPayload writes raw binaries to the declared command pat
   const installDir = await mkdtemp(join(tmpdir(), "goddard-agent-install-"))
   cleanupDirs.push(installDir)
 
+  // Explicit exception: remote archive downloads cross a non-local third-party boundary.
   const fetchMock = vi.fn(async () => new Response("#!/bin/sh\nexit 0\n", { status: 200 }))
   vi.stubGlobal("fetch", fetchMock)
 

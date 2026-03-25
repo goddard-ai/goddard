@@ -281,17 +281,32 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     "utf-8",
   )
 
+  const newSessionCalls: unknown[] = []
+  const promptSessionCalls: unknown[] = []
+  const shutdownSessionCalls: unknown[] = []
+  let promptResultIndex = 0
+  const promptResults = [
+    { stopReason: "max_tokens" },
+    { stopReason: "max_tokens" },
+    { stopReason: "end_turn" },
+  ]
+
   const sessionManager = {
-    newSession: vi.fn(async () => ({
-      id: "session-1",
-      acpId: "acp-1",
-    })),
-    promptSession: vi
-      .fn()
-      .mockResolvedValueOnce({ stopReason: "max_tokens" })
-      .mockResolvedValueOnce({ stopReason: "max_tokens" })
-      .mockResolvedValueOnce({ stopReason: "end_turn" }),
-    shutdownSession: vi.fn(async () => true),
+    async newSession(input: unknown) {
+      newSessionCalls.push(input)
+      return {
+        id: "session-1",
+        acpId: "acp-1",
+      }
+    },
+    async promptSession(...args: unknown[]) {
+      promptSessionCalls.push(args)
+      return promptResults[promptResultIndex++] ?? { stopReason: "end_turn" }
+    },
+    async shutdownSession(sessionId: string) {
+      shutdownSessionCalls.push(sessionId)
+      return true
+    },
   }
 
   const runtime = await LoopRuntime.start(
@@ -324,16 +339,16 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   )
 
   await vi.waitFor(() => {
-    expect(sessionManager.promptSession).toHaveBeenCalledTimes(3)
+    expect(promptSessionCalls).toHaveLength(3)
   })
-  expect(sessionManager.newSession).toHaveBeenCalledWith(
+  expect(newSessionCalls[0]).toEqual(
     expect.objectContaining({
       cwd: rootDir,
       worktree: { enabled: true },
     }),
   )
   await vi.waitFor(() => {
-    expect(sessionManager.shutdownSession).toHaveBeenCalledWith("session-1")
+    expect(shutdownSessionCalls).toContain("session-1")
   })
 
   expect(runtime.getStatus()).toEqual(
