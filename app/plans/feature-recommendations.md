@@ -1,0 +1,129 @@
+# Feature Recommendations
+
+- Context:
+  - The current plan set covers the shell, navigation, tabs, session list and chat, inbox, pull request detail, diffs, MDX documents, terminal, and browser preview.
+  - The root spec makes the desktop app the primary human-facing workspace, so anything the removed interactive CLI used to cover must now exist here or in SDK-backed app workflows.
+  - The recommendations below focus on the highest-impact gaps implied by `spec/app.md`, `spec/core/data-flows.md`, `spec/configuration.md`, `spec/daemon/*.md`, and the active ADRs.
+  - The existing terminal and preview plans still need product alignment because they depend on custom Rust while `spec/app.md` and `app/AGENTS.md` currently describe a plugin-only app boundary.
+
+- 1. Lazy Authentication and Identity Workspace
+  - Spec drivers:
+    - `spec/app.md` lazy authentication flow
+    - `spec/core/data-flows.md` authentication sequence
+    - `spec/core/architecture.md` app uses SDK contracts for daemon-backed auth
+    - `spec/adr/004-sse-repo-stream.md` user-scoped realtime identity
+  - Gap:
+    - No plan exists for auth status, device-flow prompting, protected-action gating, logout, or degraded local-only mode.
+  - Recommended follow-up plans:
+    - Components: `AuthStatusPanel`, `ProtectedActionGate`, `DeviceFlowDialog`
+    - State: `AuthState`
+  - Why it matters:
+    - This is foundational for PR actions, realtime subscriptions, and any app-hosted automation that depends on authenticated ownership.
+
+- 2. Session Launch and Work Preparation
+  - Spec drivers:
+    - `spec/app.md` session steering includes initiation, not just monitoring
+    - `spec/core/data-flows.md` treats session-backed work as a first-class user flow
+    - `spec/adr/001-sdk-first-architecture.md` says capabilities should surface through shared SDK contracts
+  - Gap:
+    - Current plans only list and reconnect to existing sessions. There is no user flow for starting a new session, choosing repository context, or applying runtime overrides.
+  - Recommended follow-up plans:
+    - Components: `NewSessionDialog`, `SessionLaunchForm`, `SessionPromptPresetPicker`
+    - State: `SessionLaunchState`
+  - Why it matters:
+    - Without a launch surface, the app cannot fully own “session steering” and remains a passive observer instead of the primary workspace.
+
+- 3. Managed Pull Request Queue, Submission, and Reply
+  - Spec drivers:
+    - `spec/app.md` pull request review is a core capability
+    - `spec/core/data-flows.md` includes app-initiated PR creation
+    - `spec/README.md` and `spec/core/architecture.md` position managed PR operations as a platform capability
+  - Gap:
+    - The current plans include pull request detail viewing only. There is no PR queue, PR creation flow, reply workflow, or “managed vs unmanaged” distinction.
+  - Recommended follow-up plans:
+    - Components: `PullRequestsPage`, `PullRequestList`, `CreatePullRequestDialog`, `PullRequestReplyComposer`
+    - State: `PullRequestIndexState`, `PullRequestComposeState`
+  - Why it matters:
+    - Review without triage and authoring leaves a large part of the core product loop outside the app.
+
+- 4. Global Search and Command Palette
+  - Spec drivers:
+    - `spec/app.md` global discovery across sessions, pull requests, specs, and tasks
+    - `spec/app.md` shared data includes user workspace preferences and recents
+  - Gap:
+    - No current plan covers cross-domain search, quick-open, recent items, or keyboard-first discovery.
+  - Recommended follow-up plans:
+    - Components: `GlobalSearchPalette`, `SearchResultsView`, `RecentItemsList`
+    - State: `GlobalSearchState`
+  - Why it matters:
+    - Discovery is one of the explicit app capabilities and becomes more important as the tabbed workspace grows.
+
+- 5. Spec and Page Explorer
+  - Spec drivers:
+    - `spec/app.md` specification management is a core capability
+    - `spec/app.md` shared data includes spec file metadata and page metadata/content
+    - `spec/cli/interactive.md` says specification workflows belong in the desktop app
+  - Gap:
+    - The current plan has an MDX surface, but no way to browse repositories, navigate spec trees, or open page records intentionally.
+  - Recommended follow-up plans:
+    - Components: `SpecsPage`, `SpecTree`, `PageExplorer`, `DocumentBreadcrumbs`
+    - State: `RepositoryContentState`
+  - Why it matters:
+    - A document editor without a discovery and selection layer does not satisfy the app’s spec-management intent.
+
+- 6. Task and Roadmap Prioritization Surfaces
+  - Spec drivers:
+    - `spec/app.md` task and roadmap prioritization is a named core capability
+    - `spec/app.md` shared data includes task and roadmap proposal records
+  - Gap:
+    - No current plan covers task queues, proposal details, prioritization controls, or status summaries.
+  - Recommended follow-up plans:
+    - Components: `TasksPage`, `TaskDetailView`, `RoadmapPage`, `ProposalDetailView`
+    - State: `TaskBoardState`, `RoadmapState`
+  - Why it matters:
+    - This is one of the largest explicit gaps between the spec and the current UI plan set.
+
+- 7. Automation Control Center
+  - Spec drivers:
+    - `spec/README.md` background automation is a first-class usage mode
+    - `spec/daemon.md`, `spec/daemon/pr-feedback.md`, and `spec/daemon/workforce.md` define daemon-owned runtime domains
+    - `spec/cli/loop.md` and `spec/cli/operational.md` shift control responsibility toward app or SDK-supervised hosts
+  - Gap:
+    - The current plans expose sessions but not the daemon-managed runtime domains that operators need to start, inspect, and recover.
+  - Recommended follow-up plans:
+    - Components: `AutomationDashboard`, `PrFeedbackRuntimePanel`, `LoopRuntimePanel`, `WorkforceRuntimePanel`
+    - State: `PrFeedbackRuntimeState`, `LoopRuntimeState`, `WorkforceRuntimeState`
+  - Why it matters:
+    - The app is expected to host or supervise unattended execution, but there is no operator surface for doing so yet.
+
+- 8. Repository Context and Multi-Repository Workspace Management
+  - Spec drivers:
+    - `spec/app.md` primary actor manages one or more repositories
+    - `spec/configuration.md` local overrides are repository-scoped
+    - `spec/daemon/workforce.md` workforce runtime ownership is repository-scoped
+  - Gap:
+    - Current plans show repository identity inside rows, but there is no active repository model, switcher, or repository home context.
+  - Recommended follow-up plans:
+    - Components: `RepositorySwitcher`, `RepositoryHomeView`, `RepositoryStatusBar`
+    - State: `RepositoryContextState`
+  - Why it matters:
+    - Multi-repo operation becomes awkward without a first-class workspace context, and several spec domains are explicitly repository-scoped.
+
+- 9. Configuration and Preferences Management
+  - Spec drivers:
+    - `spec/configuration.md` defines a four-level configuration hierarchy
+    - `spec/app.md` shared data includes user workspace preferences
+    - `spec/adr/001-sdk-first-architecture.md` and root `AGENTS.md` forbid a parallel app-only model
+  - Gap:
+    - Current plans persist tab state and filters incidentally, but there is no planned surface for viewing or editing global, local, entity, or runtime configuration.
+  - Recommended follow-up plans:
+    - Components: `SettingsPage`, `ConfigScopeSwitcher`, `JsonConfigEditor`, `WorkspacePreferencesPanel`
+    - State: `ConfigurationState`, `WorkspacePreferencesState`
+  - Why it matters:
+    - The app needs a coherent operator-facing configuration surface that stays aligned with the shared JSON model instead of scattering settings across isolated feature UIs.
+
+- 10. Lower-Priority but Spec-Backed Follow-Ups
+  - `ExtensionCatalogState` plus an `ExtensionsPage`
+    - `spec/app.md` lists extension metadata as shared data, but nothing in the current plans exposes it yet.
+  - `ConnectivityState` plus connection banners and diagnostics
+    - The app must handle streaming high-churn views gracefully, and a dedicated connectivity model will likely become necessary once auth and automation controls exist.

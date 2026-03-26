@@ -1,0 +1,6 @@
+# State Module: TerminalSessionState
+- **Responsibility:** Own PTY-backed terminal session lifecycle, byte transport, resize coordination, and restoration across cached tab mounts.
+- **Data Shape:** One map keyed by terminal session id containing PTY handle metadata, title, cwd, connection state, rows, columns, scrollback bytes or decoded chunks, pending input queue, exit metadata, and cached viewport preferences.
+- **Mutations/Actions:** `createTerminal`; `attachViewport`; `detachViewport`; `writeInput`; `resizeTerminal`; `clearScrollback`; `restartTerminal`; `closeTerminal`; `appendOutputChunk`; `markTerminalExited`.
+- **Scope & Hoisting:** Hoisted into a shared provider keyed by terminal session id so terminal tabs can remain alive when hidden and recover quickly when restored.
+- **Side Effects:** Invokes Tauri commands such as `terminal.create`, `terminal.write`, `terminal.resize`, and `terminal.close`; listens to streamed PTY output events emitted from a background Rust thread; must forward `xterm.js` fit-calculated rows and columns back to Rust so `portable-pty` can call `resize`. This requires custom Rust behavior and therefore conflicts with the current plugin-only guidance in `spec/app.md` and `app/AGENTS.md`, so implementation should wait for spec alignment.
