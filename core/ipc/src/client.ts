@@ -8,6 +8,13 @@ import {
 } from "./schema.ts"
 import { type IpcTransport } from "./transport.ts"
 
+/**
+ * Creates an IPC client for the given application schema and transport.
+ *
+ * @param schema - The IPC application schema defining the valid requests and streams.
+ * @param transport - The transport layer to use for sending requests and subscribing to streams.
+ * @returns An object with strongly-typed `send` and `subscribe` methods.
+ */
 export function createClient<S extends AppSchema>(schema: S, transport: IpcTransport) {
   async function send<K extends ReqName<S>>(
     name: K,

@@ -9,6 +9,9 @@ import {
   type StrPayload,
 } from "./schema.ts"
 
+/**
+ * Defines the request handlers for an IPC server based on its application schema.
+ */
 export type Handlers<S extends AppSchema> = {
   [K in ReqName<S>]: (payload: ReqPayload<S, K>) => Promise<ResType<S, K>> | ResType<S, K>
 }
@@ -49,6 +52,14 @@ function safeUnlink(socketPath: string) {
   }
 }
 
+/**
+ * Creates an IPC server listening on a Unix domain socket.
+ *
+ * @param socketPath - The path to the Unix domain socket.
+ * @param schema - The IPC application schema defining the valid requests and streams.
+ * @param handlers - The implementation of the request handlers defined in the schema.
+ * @returns An object containing the HTTP server instance and a strongly-typed `publish` function for streams.
+ */
 export function createServer<S extends AppSchema>(
   socketPath: string,
   schema: S,
