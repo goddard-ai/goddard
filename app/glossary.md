@@ -1,0 +1,26 @@
+# App Glossary
+
+- Scope:
+  - This glossary defines app-specific UI and workspace terms used across the planning docs.
+  - Shared data-model terms such as `Daemon Session` still belong in [`core/schema/glossary.md`](../core/schema/glossary.md).
+- `Primary Workbench View`
+  - The non-closable main surface whose content is selected by the left sidebar.
+  - Why: so sidebar navigation and detail tabs stay separate concepts.
+- `Detail Tab`
+  - One closable tab opened from a drill-down action such as opening a session chat, diff, pull request, terminal, or preview.
+  - Why: so reusable work surfaces can coexist without replacing the primary view.
+- `Tab Cache`
+  - The in-memory record that keeps recently closed or hidden tab state available for fast restoration.
+  - Why: so tab eviction can satisfy the cap without making every reopen a cold start.
+- `Inbox Item`
+  - One actionable notification in the coding-agent inbox, linked to a session, pull request, diff, or repository event.
+  - Why: so inbox workflows operate on stable records instead of ad hoc UI rows.
+- `Preview Session`
+  - The browser-preview state attached to one preview tab, including navigation history and console output.
+  - Why: so iframe navigation and console observability can be restored independently per tab.
+- `Display Status`
+  - The user-facing label shown in the UI for a raw backend lifecycle state.
+  - Why: so the app can render `done` as `completed` without changing shared schema contracts.
+- `Realtime Activity Stream`
+  - The shared authenticated event feed that updates sessions, inbox items, and pull requests.
+  - Why: so feature areas do not create overlapping subscriptions to the same backend activity.
