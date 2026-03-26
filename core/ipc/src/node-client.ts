@@ -20,6 +20,12 @@ function getErrorMessage(body: string) {
   return body
 }
 
+/**
+ * Creates an IPC transport for Node.js over Unix domain sockets.
+ *
+ * @param socketPath - The path to the Unix domain socket.
+ * @returns An `IpcTransport` implementation.
+ */
 export function createNodeTransport(socketPath: string): IpcTransport {
   async function send(name: string, payload: unknown): Promise<unknown> {
     const wireData = JSON.stringify({ name, payload })
@@ -135,6 +141,13 @@ export function createNodeTransport(socketPath: string): IpcTransport {
   return { send, subscribe }
 }
 
+/**
+ * Creates a complete IPC client for Node.js connecting to the given socket.
+ *
+ * @param socketPath - The path to the Unix domain socket.
+ * @param schema - The IPC application schema defining the valid requests and streams.
+ * @returns An object with strongly-typed `send` and `subscribe` methods.
+ */
 export function createNodeClient<S extends AppSchema>(socketPath: string, schema: S) {
   return createClient(schema, createNodeTransport(socketPath))
 }
