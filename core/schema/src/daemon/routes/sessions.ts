@@ -5,7 +5,7 @@ import type {
   GetDaemonSessionResponse,
   ListDaemonSessionsResponse,
   ShutdownDaemonSessionResponse,
-} from "../../daemon.ts"
+} from "../sessions.ts"
 import {
   CreateDaemonSessionRequest,
   DaemonSessionPathParams,
