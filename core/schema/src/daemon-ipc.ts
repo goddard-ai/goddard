@@ -3,39 +3,46 @@ import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } f
 import { z } from "zod"
 import { DaemonSessionIdParams } from "./common/params.ts"
 import type {
-  CreateDaemonSessionResponse,
   DaemonHealth,
-  GetDaemonLoopResponse,
-  GetDaemonSessionDiagnosticsResponse,
-  GetDaemonSessionHistoryResponse,
-  GetDaemonSessionResponse,
-  GetDaemonWorkforceResponse,
-  ListDaemonLoopsResponse,
-  ListDaemonSessionsResponse,
-  ListDaemonWorkforcesResponse,
-  MutateDaemonWorkforceResponse,
-  ReplyPrDaemonResponse,
-  ShutdownDaemonLoopResponse,
-  ShutdownDaemonSessionResponse,
-  ShutdownDaemonWorkforceResponse,
-  StartDaemonLoopResponse,
-  StartDaemonWorkforceResponse,
-  SubmitPrDaemonResponse,
-} from "./daemon.ts"
+} from "./daemon/health.ts"
+import { GetDaemonHealthRequest } from "./daemon/health.ts"
 import { RunNamedDaemonActionRequest } from "./daemon/actions.ts"
 import {
+  type GetDaemonLoopResponse,
   GetDaemonLoopRequest,
+  type ListDaemonLoopsResponse,
+  type ShutdownDaemonLoopResponse,
   ShutdownDaemonLoopRequest,
+  type StartDaemonLoopResponse,
   StartDaemonLoopRequest,
 } from "./daemon/loops.ts"
-import { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./daemon/pull-requests.ts"
-import { CreateDaemonSessionRequest, ListDaemonSessionsRequest } from "./daemon/sessions.ts"
+import {
+  type ReplyPrDaemonResponse,
+  ReplyPrDaemonRequest,
+  type SubmitPrDaemonResponse,
+  SubmitPrDaemonRequest,
+} from "./daemon/pull-requests.ts"
+import {
+  type CreateDaemonSessionResponse,
+  CreateDaemonSessionRequest,
+  type GetDaemonSessionDiagnosticsResponse,
+  type GetDaemonSessionHistoryResponse,
+  type GetDaemonSessionResponse,
+  type ListDaemonSessionsResponse,
+  ListDaemonSessionsRequest,
+  type ShutdownDaemonSessionResponse,
+} from "./daemon/sessions.ts"
 import {
   CancelDaemonWorkforceRequest,
   CreateDaemonWorkforceRequestRequest,
+  type GetDaemonWorkforceResponse,
   GetDaemonWorkforceRequest,
+  type ListDaemonWorkforcesResponse,
+  type MutateDaemonWorkforceResponse,
   RespondDaemonWorkforceRequest,
+  type ShutdownDaemonWorkforceResponse,
   ShutdownDaemonWorkforceRequest,
+  type StartDaemonWorkforceResponse,
   StartDaemonWorkforceRequest,
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
@@ -47,7 +54,7 @@ export const daemonIpcSchema = {
   client: {
     requests: {
       health: {
-        payload: z.object({}),
+        payload: GetDaemonHealthRequest,
         response: $type<DaemonHealth>(),
       },
       authDeviceStart: {

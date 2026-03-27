@@ -1,4 +1,5 @@
 import { z } from "zod"
+import type { WorkforceConfig, WorkforceProjectionSummary } from "../workforce.ts"
 
 /** Stable request intents supported by workforce mutation APIs. */
 export const WorkforceRequestIntent = z.enum(["default", "create"])
@@ -91,3 +92,46 @@ export const SuspendDaemonWorkforceRequest = z.object({
 })
 
 export type SuspendDaemonWorkforceRequest = z.infer<typeof SuspendDaemonWorkforceRequest>
+
+/** Stable runtime states reported for daemon-managed workforce hosts. */
+export type DaemonWorkforceRuntimeState = "running"
+
+/** Workforce status summary exposed over daemon IPC. */
+export type DaemonWorkforceStatus = WorkforceProjectionSummary & {
+  state: DaemonWorkforceRuntimeState
+  rootDir: string
+  configPath: string
+  ledgerPath: string
+}
+
+/** One daemon-managed workforce runtime addressed by repository root. */
+export type DaemonWorkforce = DaemonWorkforceStatus & {
+  config: WorkforceConfig
+}
+
+/** Response payload returned when one workforce runtime is fetched. */
+export type GetDaemonWorkforceResponse = {
+  workforce: DaemonWorkforce
+}
+
+/** Response payload returned when one workforce runtime is started. */
+export type StartDaemonWorkforceResponse = {
+  workforce: DaemonWorkforce
+}
+
+/** Response payload returned when all running workforce runtimes are listed. */
+export type ListDaemonWorkforcesResponse = {
+  workforces: DaemonWorkforceStatus[]
+}
+
+/** Response payload returned after one workforce runtime is stopped. */
+export type ShutdownDaemonWorkforceResponse = {
+  rootDir: string
+  success: boolean
+}
+
+/** Response payload returned after one workforce request mutation. */
+export type MutateDaemonWorkforceResponse = {
+  workforce: DaemonWorkforceStatus
+  requestId: string | null
+}

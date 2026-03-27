@@ -11,6 +11,12 @@ export const SubmitPrDaemonRequest = z.object({
 
 export type SubmitPrDaemonRequest = z.infer<typeof SubmitPrDaemonRequest>
 
+/** Response payload returned after one pull request submission. */
+export type SubmitPrDaemonResponse = {
+  number: number
+  url: string
+}
+
 /** Request payload used to reply to one pull request through the daemon. */
 export const ReplyPrDaemonRequest = z.object({
   cwd: z.string(),
@@ -19,3 +25,8 @@ export const ReplyPrDaemonRequest = z.object({
 })
 
 export type ReplyPrDaemonRequest = z.infer<typeof ReplyPrDaemonRequest>
+
+/** Response payload returned after one pull request reply. */
+export type ReplyPrDaemonResponse = {
+  success: boolean
+}

@@ -34,3 +34,62 @@ export const ShutdownDaemonLoopRequest = GetDaemonLoopRequest
 
 /** Type shape for one loop shutdown request routed over daemon IPC. */
 export type ShutdownDaemonLoopRequest = z.infer<typeof ShutdownDaemonLoopRequest>
+
+/** Stable runtime states reported for daemon-managed loop hosts. */
+export type DaemonLoopRuntimeState = "running"
+
+/** Resolved session and pacing config owned by one daemon-managed loop runtime. */
+export type DaemonLoopConfig = {
+  promptModulePath: string
+  session: Omit<CreateDaemonSessionRequest, "initialPrompt" | "oneShot">
+  rateLimits: {
+    cycleDelay: string
+    maxOpsPerMinute: number
+    maxCyclesBeforePause: number
+  }
+  retries: {
+    maxAttempts: number
+    initialDelayMs: number
+    maxDelayMs: number
+    backoffFactor: number
+    jitterRatio: number
+  }
+}
+
+/** Loop status summary exposed over daemon IPC. */
+export type DaemonLoopStatus = {
+  state: DaemonLoopRuntimeState
+  rootDir: string
+  loopName: string
+  promptModulePath: string
+  startedAt: string
+  sessionId: string
+  acpId: string
+  cycleCount: number
+  lastPromptAt: string | null
+}
+
+/** One daemon-managed loop runtime addressed by repository root and loop name. */
+export type DaemonLoop = DaemonLoopStatus & DaemonLoopConfig
+
+/** Response payload returned when one loop runtime is fetched. */
+export type GetDaemonLoopResponse = {
+  loop: DaemonLoop
+}
+
+/** Response payload returned when one loop runtime is started. */
+export type StartDaemonLoopResponse = {
+  loop: DaemonLoop
+}
+
+/** Response payload returned when all running loop runtimes are listed. */
+export type ListDaemonLoopsResponse = {
+  loops: DaemonLoopStatus[]
+}
+
+/** Response payload returned after one loop runtime is stopped. */
+export type ShutdownDaemonLoopResponse = {
+  rootDir: string
+  loopName: string
+  success: boolean
+}
