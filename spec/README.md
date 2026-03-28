@@ -4,7 +4,7 @@
 
 Goddard unifies local repository workflows with GitHub operations and extends that bridge to autonomous AI execution.
 
-> Goddard provides a framework-agnostic TypeScript SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can create pull requests, observe managed pull request events, and act from shared local context.
+> Goddard provides a framework-agnostic TypeScript daemon control-plane SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can control local automation and act from shared local context.
 
 ## The Problem
 
@@ -18,8 +18,8 @@ Goddard addresses:
 
 | # | Pillar | Meaning |
 |---|--------|---------|
-| 1 | SDK-first | Capabilities live in `@goddard-ai/sdk`; consumers stay thin. |
-| 2 | Real-time | Managed pull request events stream to desktop workspaces and SDK consumers with low latency. |
+| 1 | SDK-first | Daemon control capabilities live in `@goddard-ai/sdk`; consumers stay thin. |
+| 2 | Real-time | Managed pull request events stream to desktop workspaces and background runtime hosts with low latency. |
 | 3 | Delegated identity | `goddard[bot]` acts on behalf of authenticated developers. |
 | 4 | Autonomous control | Built-in orchestration runs `pi-coding-agent` with safety limits. |
 | 5 | Type safety | APIs are TypeScript-first, while configuration remains machine-readable and validated at runtime. |
@@ -29,7 +29,7 @@ Goddard addresses:
 ## Usage Modes
 
 ### 1) SDK Integrations
-A developer or product integration uses `@goddard-ai/sdk` directly to authenticate, create pull requests, subscribe to managed pull request events, and embed Goddard capabilities into custom hosts.
+A developer or product integration uses `@goddard-ai/sdk` directly to authenticate through the daemon, control daemon-managed sessions and automation, and embed local control surfaces into custom hosts.
 
 ### 2) Desktop Workspace
 A human developer uses a unified, IDE-like desktop surface to monitor sessions, review pull requests, browse specs, and manage roadmap context without hopping across multiple tools.
@@ -44,7 +44,7 @@ A local runtime hosted by the desktop app or another supervised local process ha
 ### 4) Operational CLI
 A thin operator-focused CLI may initialize repository-local automation intent and inspect or control supported daemon-backed runtimes without becoming a parallel primary UX.
 
-All modes consume the same SDK and backend authority model.
+All modes share the same backend authority model, with the SDK serving as the daemon control plane where programmatic control is needed.
 
 ## Encapsulated Sub-Specs
 

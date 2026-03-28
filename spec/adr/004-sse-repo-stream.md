@@ -18,13 +18,13 @@ Each subscriber opens one long-lived stream for the current Goddard user. The ba
 ## Rationale
 
 - **Matches the automation actor:** Background automation is owned by an authenticated developer, not by a repository subscription list.
-- **Reduces client coordination:** SDK consumers and daemons maintain one stream instead of tracking repository-by-repository subscriptions.
+- **Reduces client coordination:** Desktop and background runtime hosts maintain one stream instead of tracking repository-by-repository subscriptions.
 - **Preserves isolation:** User-scoped routing prevents managed pull request feedback from leaking between Goddard users.
 - **Keeps the transport simple:** The stream remains one-way server-to-client traffic, so SSE continues to fit the delivery model.
 
 ## Consequences
 
 - The backend must persist managed pull request ownership when a pull request is created so later feedback can be routed correctly.
-- SDK, desktop, and daemon consumers subscribe once per authenticated user session rather than once per repository.
+- Desktop and daemon-hosted runtime consumers subscribe once per authenticated user session rather than once per repository.
 - Unmanaged pull requests are not delivered on the managed stream.
 - Delivery guarantees apply to managed pull requests whose ownership was recorded under this routing model; older records outside that guarantee boundary are not promised stream delivery.
