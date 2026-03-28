@@ -1,8 +1,8 @@
 # Component: MdxDocumentToolbar
-- **Minimum Viable Component:** Toolbar for MDX mode switching, save/revert actions, and document metadata display.
-- **Props Interface:** `document: { title, pathOrKey, updatedAt }`; `mode: "view" | "edit"`; `isDirty: boolean`; `isSaving: boolean`; `readOnly: boolean`; `onModeChange: (mode) => void`; `onSave: () => void`; `onRevert: () => void`.
-- **Sub-components:** None.
+- **Minimum Viable Component:** Toolbar for MDX mode switching, save or revert actions, contextual actions, and document metadata display.
+- **Props Interface:** `document: { title, pathOrKey, updatedAt }`; `mode: "view" | "edit"`; `isDirty: boolean`; `isSaving: boolean`; `readOnly: boolean`; `currentTabContext?: { kind, repositoryId?, entityRef? } | null`; `onModeChange: (mode) => void`; `onSave: () => void`; `onRevert: () => void`; `onActionSelect?: (actionId) => void`.
+- **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Simple UI-only menu and disabled-state presentation.
-- **Required Context:** None.
+- **Required Context:** `ActionCatalogContext` when the contextual action menu is connected here.
 - **Tauri IPC:** None.
-- **Interactions & Events:** Switches modes; saves pending edits; reverts to the last persisted revision.
+- **Interactions & Events:** Switches modes; saves pending edits; reverts to the last persisted revision; launches a contextual action from the current document tab.
