@@ -7,7 +7,7 @@ Provide a unified desktop workspace for Goddard operations so developers can run
 We believe that consolidating sessions, pull requests, specs, tasks, and roadmap context into one desktop app will reduce context switching and speed up AI-assisted delivery.
 
 ## Big Picture
-The desktop app is the primary human-facing interface to the Goddard runtime. It is not a forked product surface with separate logic. The app should reflect the same SDK-backed source of truth for identity, repository context, and real-time activity used by other platform consumers.
+The desktop app is the primary human-facing interface to the Goddard runtime. It is not a forked product surface with separate logic. The app should reflect the same daemon-backed control surfaces and backend-owned real-time activity used by other platform consumers.
 
 ## Primary Actors
 - Developer/operator managing one or more repositories

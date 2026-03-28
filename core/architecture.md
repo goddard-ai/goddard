@@ -14,7 +14,7 @@
 ## Platform Components
 - **Control Plane** — worker-hosted authority for sessions, managed pull request state, and user-scoped event fan-out.
 - **GitHub Integration** — delegated GitHub identity and webhook-facing integration behavior.
-- **SDK** — framework-agnostic platform client for programmatic and embedded hosts.
+- **SDK** — framework-agnostic daemon control-plane client for programmatic and embedded hosts.
 - **Desktop Workspace** — Tauri desktop app and primary human-facing surface.
 - **Background Runtime** — supervised local automation host for unattended execution, including daemon-managed runtimes where appropriate.
 - **Operational CLI** — thin terminal control surface for initializing or controlling daemon-backed local automation without becoming a parallel primary UX.
@@ -35,8 +35,9 @@ Boundary:
 - Real-time delivery follows authenticated managed pull request ownership rather than repository-scoped subscription state.
 
 ### SDK
-Design rule: platform capabilities live here first.
+Design rule: daemon control capabilities live here first.
 - Expose typed operations for daemon-backed authentication and daemon-backed local automation control.
+- Serve as the thin programmatic control plane for daemon-managed local behavior rather than as a general real-time backend client.
 - Keep backend auth state out of SDK-owned persistence and route user auth through the daemon boundary.
 
 ### Desktop Workspace
@@ -49,7 +50,7 @@ Boundary:
 - Must not fork platform behavior away from SDK contracts.
 
 ### Background Runtime
-- Subscribe to authenticated managed pull request streams via SDK.
+- Own authenticated managed pull request stream consumption as part of supervised local automation behavior.
 - Launch daemon-managed one-shot reactions for managed pull request feedback.
 - Host or cooperate with daemon-managed workforce orchestration for repository-scoped delegation.
 - Operate as background automation rather than a user-facing command surface.
