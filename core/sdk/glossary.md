@@ -10,14 +10,11 @@
   - The legacy SDK API for direct backend HTTP operations.
   - Why: this concept is intentionally being reduced so durable auth and other backend ownership move behind the daemon boundary.
 - `Daemon Surface`
-  - The SDK API for daemon-managed agent sessions and workforce interactions.
+  - The SDK API for daemon-managed agent sessions, explicit loop lifecycle control, and workforce interactions.
   - Why: so consumers can use daemon capabilities through stable client abstractions instead of raw IPC messages.
-- `Loop Surface`
-  - The SDK API for repeated prompting workflows built on daemon sessions.
-  - Why: so long-running agent behavior can be reused as a contract instead of reimplemented ad hoc by each caller.
 - `Node Surface`
-  - The SDK layer that adds Node-specific convenience over the more general SDK contracts.
-  - Why: so daemon request shaping and environment resolution do not leak into cross-environment APIs.
+  - The SDK layer that adds Node-specific defaults and convenience helpers over the daemon surface.
+  - Why: so env resolution, cwd defaults, and named-loop helpers do not leak into cross-environment APIs.
 - `Daemon-Backed Session`
   - An agent interaction whose lifecycle is owned by the daemon but consumed through the SDK.
   - Why: so callers can work with durable daemon sessions through a higher-level client abstraction.

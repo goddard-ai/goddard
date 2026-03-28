@@ -105,9 +105,6 @@ importers:
         specifier: ^2.4.1
         version: 2.4.1(react@19.2.4)
     devDependencies:
-      '@goddard-ai/ipc':
-        specifier: workspace:^
-        version: link:../core/ipc
       '@preact/preset-vite':
         specifier: ^2.10.3
         version: 2.10.3(@babel/core@7.29.0)(preact@10.28.4)(rollup@4.59.0)(vite@7.3.1(@types/node@25.5.0)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
@@ -252,7 +249,11 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
 
-  core/paths: {}
+  core/paths:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.10.1
+        version: 2.10.1
 
   core/schema:
     dependencies:
@@ -274,18 +275,12 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.15.0
         version: 0.15.0(zod@4.3.6)
-      '@goddard-ai/config':
-        specifier: workspace:^
-        version: link:../config
       '@goddard-ai/daemon-client':
         specifier: workspace:^
         version: link:../daemon/client
       '@goddard-ai/schema':
         specifier: workspace:^
         version: link:../schema
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
     devDependencies:
       '@goddard-ai/daemon':
         specifier: workspace:^

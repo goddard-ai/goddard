@@ -8,7 +8,7 @@ export type WorkforceClientOptions = DaemonClientOptions
 /** Starts or reuses the daemon-managed workforce runtime for a repository root. */
 export async function startDaemonWorkforce(
   rootDir: string,
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<DaemonWorkforce> {
   const client = resolveDaemonClient(options)
   const response = await client.send("workforceStart", { rootDir })
@@ -18,7 +18,7 @@ export async function startDaemonWorkforce(
 /** Returns the daemon-managed workforce state for a repository root. */
 export async function getDaemonWorkforce(
   rootDir: string,
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<DaemonWorkforce> {
   const client = resolveDaemonClient(options)
   const response = await client.send("workforceGet", { rootDir })
@@ -27,7 +27,7 @@ export async function getDaemonWorkforce(
 
 /** Lists all workforce runtimes currently known to the daemon. */
 export async function listDaemonWorkforces(
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<DaemonWorkforceStatus[]> {
   const client = resolveDaemonClient(options)
   const response = await client.send("workforceList", {})
@@ -37,7 +37,7 @@ export async function listDaemonWorkforces(
 /** Shuts down the daemon-managed workforce runtime for a repository root. */
 export async function shutdownDaemonWorkforce(
   rootDir: string,
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<boolean> {
   const client = resolveDaemonClient(options)
   const response = await client.send("workforceShutdown", { rootDir })
@@ -52,7 +52,7 @@ export async function createDaemonWorkforceRequest(
     message: string
     intent?: WorkforceRequestIntent
   },
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }> {
   const client = resolveDaemonClient(options)
   return client.send("workforceRequest", {
@@ -70,7 +70,7 @@ export async function updateDaemonWorkforceRequest(
     requestId: string
     message: string
   },
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }> {
   const client = resolveDaemonClient(options)
   return client.send("workforceUpdate", {
@@ -87,7 +87,7 @@ export async function cancelDaemonWorkforceRequest(
     requestId: string
     reason?: string
   },
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }> {
   const client = resolveDaemonClient(options)
   return client.send("workforceCancel", input)
@@ -100,7 +100,7 @@ export async function truncateDaemonWorkforce(
     agentId?: string
     reason?: string
   },
-  options?: WorkforceClientOptions,
+  options: WorkforceClientOptions,
 ): Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }> {
   const client = resolveDaemonClient(options)
   return client.send("workforceTruncate", input)

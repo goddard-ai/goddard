@@ -1,11 +1,19 @@
 import { GoddardSdk as BaseGoddardSdk } from "../sdk.ts"
-import * as actions from "../daemon/actions.ts"
-import * as loops from "../daemon/loops.ts"
+import * as actions from "./actions.ts"
+import { resolveNodeDaemonClient, type NodeDaemonClientOptions } from "./client.ts"
+import * as loops from "./loops.ts"
 import * as workforce from "./workforce.ts"
+export * from "./actions.ts"
+export * from "./client.ts"
+export * from "./loops.ts"
 export * from "./workforce.ts"
 
 /** Goddard SDK entry point extended for local Node.js environments with daemon-oriented conveniences. */
 export class GoddardSdk extends BaseGoddardSdk {
+  constructor(options: NodeDaemonClientOptions = {}) {
+    super({ client: resolveNodeDaemonClient(options) })
+  }
+
   get actions() {
     return {
       /** Runs an isolated, one-shot action agent for short-lived queries or tasks. */

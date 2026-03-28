@@ -1,5 +1,5 @@
 import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { getGoddardGlobalDir } from "@goddard-ai/paths"
+import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { mkdir, rm } from "node:fs/promises"
 import { request as httpRequest } from "node:http"
 import * as path from "node:path"

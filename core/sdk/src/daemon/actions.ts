@@ -2,16 +2,16 @@ import type { InlineSessionParams } from "@goddard-ai/schema/config"
 import { resolveDaemonClient } from "./client.ts"
 import type { DaemonClientOptions } from "./client.ts"
 
-/** Runs one named action through the daemon without resolving local config in the SDK. */
-export async function runAgentAction(
+/** Runs one named action through the daemon without applying any local Node defaults. */
+export async function runDaemonAction(
   actionName: string,
-  params: InlineSessionParams = {},
-  options?: DaemonClientOptions,
+  params: InlineSessionParams,
+  options: DaemonClientOptions,
 ): Promise<null> {
   const client = resolveDaemonClient(options)
   await client.send("actionRun", {
     actionName,
-    cwd: params.cwd ?? process.cwd(),
+    cwd: params.cwd,
     agent: params.agent,
     mcpServers: params.mcpServers,
     env: params.env,

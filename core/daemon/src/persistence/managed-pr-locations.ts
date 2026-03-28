@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getManagedPrLocationsPath } from "@goddard-ai/paths"
+import { getManagedPrLocationsPath } from "@goddard-ai/paths/node"
 
 /** Durable local checkout metadata for one managed pull request. */
 export type ManagedPrLocationRecord = {

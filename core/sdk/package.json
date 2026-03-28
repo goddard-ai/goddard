@@ -18,13 +18,6 @@
       },
       "import": "./dist/daemon/index.mjs"
     },
-    "./loop": {
-      "types": {
-        "source": "./src/loop/index.ts",
-        "default": "./dist/loop/index.d.mts"
-      },
-      "import": "./dist/loop/index.mjs"
-    },
     "./node": {
       "types": {
         "source": "./src/node/index.ts",
@@ -42,10 +35,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
-    "@goddard-ai/config": "workspace:^",
     "@goddard-ai/daemon-client": "workspace:^",
-    "@goddard-ai/schema": "workspace:^",
-    "zod": "^4.3.6"
+    "@goddard-ai/schema": "workspace:^"
   },
   "devDependencies": {
     "@goddard-ai/daemon": "workspace:^"

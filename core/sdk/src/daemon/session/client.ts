@@ -133,30 +133,53 @@ async function createMessageOutputTransport(
 /** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams & { oneShot: true },
-  handler?: acp.Client,
-  options?: RunAgentOptions,
+  options: RunAgentOptions,
+): Promise<null>
+
+/** Starts or attaches to a daemon-backed ACP agent session. */
+export async function runAgent(
+  params: SessionParams & { oneShot: true },
+  handler: acp.Client | undefined,
+  options: RunAgentOptions,
 ): Promise<null>
 
 /** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams & { oneShot?: undefined },
-  handler?: acp.Client,
-  options?: RunAgentOptions,
+  options: RunAgentOptions,
+): Promise<AgentSession>
+
+/** Starts or attaches to a daemon-backed ACP agent session. */
+export async function runAgent(
+  params: SessionParams & { oneShot?: undefined },
+  handler: acp.Client | undefined,
+  options: RunAgentOptions,
 ): Promise<AgentSession>
 
 /** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams,
-  handler?: acp.Client,
-  options?: RunAgentOptions,
+  options: RunAgentOptions,
 ): Promise<AgentSession | null>
 
 /** Starts or attaches to a daemon-backed ACP agent session. */
 export async function runAgent(
   params: SessionParams,
-  handler?: acp.Client,
-  options?: RunAgentOptions,
+  handler: acp.Client | undefined,
+  options: RunAgentOptions,
+): Promise<AgentSession | null>
+
+/** Starts or attaches to a daemon-backed ACP agent session. */
+export async function runAgent(
+  params: SessionParams,
+  handlerOrOptions: acp.Client | RunAgentOptions | undefined,
+  maybeOptions?: RunAgentOptions,
 ): Promise<AgentSession | null> {
+  const handler = isRunAgentOptions(handlerOrOptions) ? undefined : handlerOrOptions
+  const options = isRunAgentOptions(handlerOrOptions) ? handlerOrOptions : maybeOptions
+  if (!options) {
+    throw new Error("Pass explicit daemon connection options to runAgent.")
+  }
   const client = resolveDaemonClient(options)
 
   const connectedSession =
@@ -209,10 +232,17 @@ export async function runAgent(
   )
 }
 
+/** Detects whether the second `runAgent` argument is daemon client options. */
+function isRunAgentOptions(
+  value: acp.Client | RunAgentOptions | undefined,
+): value is RunAgentOptions {
+  return typeof value === "object" && value !== null && ("client" in value || "daemonUrl" in value)
+}
+
 /** Returns the current daemon-side session record for the given session id. */
 export async function getDaemonSession(
   id: string,
-  options?: GetDaemonSessionOptions,
+  options: GetDaemonSessionOptions,
 ): Promise<DaemonSession> {
   const client = resolveDaemonClient(options)
   const response = await client.send("sessionGet", { id })
@@ -222,7 +252,7 @@ export async function getDaemonSession(
 /** Returns one page of daemon-managed sessions in stable recency order. */
 export async function listDaemonSessions(
   params: ListDaemonSessionsRequest = {},
-  options?: GetDaemonSessionOptions,
+  options: GetDaemonSessionOptions,
 ): Promise<ListDaemonSessionsResponse> {
   const client = resolveDaemonClient(options)
   return client.send("sessionList", params)

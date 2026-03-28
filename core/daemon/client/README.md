@@ -2,24 +2,33 @@
 
 Low-level daemon connection helpers shared by Node, the app, and SDK composition layers.
 
-Use this package when you need to:
+## Package Surfaces
 
-- Resolve `GODDARD_DAEMON_URL`.
-- Derive `GODDARD_DAEMON_URL` from `GODDARD_DAEMON_SOCKET_PATH` when the launcher passes only a socket path.
+- `@goddard-ai/daemon-client`
+  - Explicit daemon URL parsing and host-injected client creation.
+- `@goddard-ai/daemon-client/node`
+  - Node env/default helpers and the default socket transport.
+
+Use `@goddard-ai/daemon-client` when you need to:
+
 - Create a daemon IPC client with a host-specific transport factory.
 - Parse or construct the daemon URL format.
+
+Use `@goddard-ai/daemon-client/node` when you need to:
+
+- Resolve `GODDARD_DAEMON_URL`.
+- Derive `GODDARD_DAEMON_URL` from `GODDARD_DAEMON_SOCKET_PATH`.
+- Create the default Node socket client.
 
 Use `@goddard-ai/sdk/daemon` instead when you need daemon-backed agent sessions and ACP prompt/history/shutdown helpers.
 
 ```ts
-import { createDaemonIpcClient, resolveDaemonConnectionFromEnv } from "@goddard-ai/daemon-client"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 
-const { daemonUrl } = resolveDaemonConnectionFromEnv()
-
 const client = createDaemonIpcClient({
-  daemonUrl,
+  daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
   createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
 })
 ```

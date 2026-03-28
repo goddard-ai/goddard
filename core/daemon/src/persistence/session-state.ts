@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import { getSessionStateDir, getSessionStatePath } from "@goddard-ai/paths"
+import { getSessionStateDir, getSessionStatePath } from "@goddard-ai/paths/node"
 import * as fs from "node:fs/promises"
 import { dirname, join } from "node:path"
 

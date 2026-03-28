@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getSessionPermissionsPath } from "@goddard-ai/paths"
+import { getSessionPermissionsPath } from "@goddard-ai/paths/node"
 
 /** Durable authorization record that scopes one daemon session's repo access. */
 export type SessionPermissionsRecord = {

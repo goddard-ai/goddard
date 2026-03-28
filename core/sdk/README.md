@@ -5,24 +5,26 @@
 ## Related Docs
 
 - [SDK Glossary](./glossary.md)
-- [Agent Loop Domain Concepts](./src/loop/run-agent-loop.md)
 
 ## Package Surfaces
 
 | Import | Owns | Does not own |
 | --- | --- | --- |
 | `@goddard-ai/sdk` | Daemon-backed auth | Direct backend HTTP ownership, PR operations, stream subscription |
-| `@goddard-ai/sdk/daemon` | Daemon-backed agent sessions (`runAgent`, `AgentSession`) | Low-level daemon URL parsing and IPC transport factories |
-| `@goddard-ai/sdk/loop` | Daemon-backed loop lifecycle control | Backend HTTP API access, host-specific IPC wiring |
-| `@goddard-ai/sdk/node` | Node-side daemon request shaping for actions, loops, and workforce | Local config loading, repo initialization ownership |
+| `@goddard-ai/sdk/daemon` | Daemon-backed agent sessions, explicit loop lifecycle control, and workforce operations | Low-level daemon URL parsing and IPC transport factories |
+| `@goddard-ai/sdk/node` | Node-side daemon defaults for auth, actions, loops, and workforce | Local config loading, repo initialization ownership |
 
 ## `daemon-client` vs `sdk/daemon`
 
 Use `@goddard-ai/daemon-client` when you need to:
 
-- Resolve daemon connection settings from environment variables.
 - Parse or construct daemon URLs.
 - Bind a host-specific IPC client implementation such as Node sockets or Tauri IPC.
+
+Use `@goddard-ai/daemon-client/node` when you need to:
+
+- Resolve daemon connection settings from environment variables.
+- Use the default Node socket transport.
 
 Use `@goddard-ai/sdk/daemon` when you need to:
 
@@ -30,17 +32,19 @@ Use `@goddard-ai/sdk/daemon` when you need to:
 - Send prompts through ACP.
 - Read daemon-managed session history.
 - Shut sessions down through the daemon contract.
+- Start, inspect, list, or stop daemon-managed loops.
+- Start, inspect, list, or stop daemon-managed workforce runtimes.
 
 Fresh daemon-backed sessions keep the original `cwd` by default, even inside git repositories. Set `worktree: { enabled: true }` to opt into isolated worktree execution for that session.
 
-`daemon-client` owns transport setup. `sdk/daemon` owns session semantics.
+`daemon-client` owns transport setup. `sdk/daemon` owns daemon-facing higher-level semantics.
 
 ## Environment Behavior
 
-`@goddard-ai/sdk/daemon` and `@goddard-ai/sdk/loop` accept explicit daemon connection options for non-Node hosts.
+`@goddard-ai/sdk/daemon` accepts explicit daemon connection options for non-Node hosts.
 
-- Node convenience path: omit options and rely on `GODDARD_DAEMON_URL` when the host process provides it.
-- App path: pass an explicit `daemonUrl` and injected `createClient` factory. Do not rely on Node defaults in the app.
+- Node convenience path: use `@goddard-ai/sdk/node` when you want env-based defaults.
+- App path: pass an explicit client or an explicit `{ daemonUrl, createClient }` pair. Do not rely on Node defaults in the app.
 
 ## Configuration Ownership
 
@@ -57,10 +61,16 @@ The daemon resolves persisted JSON config, packaged actions, and packaged loops 
 Top-level SDK auth usage:
 
 ```ts
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
 
 const sdk = new GoddardSdk({
-  daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
+  client: createDaemonIpcClient({
+    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
+    createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
+  }),
 })
 
 const session = await sdk.auth.login({
@@ -77,6 +87,9 @@ console.log(me.githubUsername)
 Daemon session client usage:
 
 ```ts
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
 import { runAgent } from "@goddard-ai/sdk/daemon"
 
 const session = await runAgent(
@@ -86,9 +99,11 @@ const session = await runAgent(
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   },
-  undefined,
   {
-    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
+    client: createDaemonIpcClient({
+      daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
+      createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
+    }),
   },
 )
 
@@ -100,7 +115,10 @@ await session.stop()
 Loop daemon lifecycle usage:
 
 ```ts
-import { startDaemonLoop } from "@goddard-ai/sdk/loop"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
+import { startDaemonLoop } from "@goddard-ai/sdk/daemon"
 
 const loop = await startDaemonLoop(
   {
@@ -124,7 +142,10 @@ const loop = await startDaemonLoop(
     },
   },
   {
-    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
+    client: createDaemonIpcClient({
+      daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
+      createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
+    }),
   },
 )
 
@@ -156,6 +177,7 @@ await sdk.loop.stop(process.cwd(), "triage")
 App/Tauri daemon binding:
 
 ```ts
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { runAgent } from "@goddard-ai/sdk/daemon"
@@ -166,10 +188,11 @@ await runAgent(
     cwd: "/workspace",
     mcpServers: [],
   },
-  undefined,
   {
-    daemonUrl,
-    createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
+    client: createDaemonIpcClient({
+      daemonUrl,
+      createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
+    }),
   },
 )
 ```

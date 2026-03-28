@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { createServer } from "@goddard-ai/ipc"
+import { createServer } from "@goddard-ai/ipc/node"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type {
   CreateDaemonSessionRequest,
@@ -147,8 +147,6 @@ export async function startDaemonServer(
     }
   }
 
-  // Keep app/src/daemon-ipc-test-handlers.ts in sync with this handler list.
-  // When new daemon IPC methods are added here, update the app test stub as well.
   const ipcServer = createServer(socketPath, daemonIpcSchema, {
     health: withRequestLogging<{}, { ok: true }>("health", async () => ({ ok: true })),
     authDeviceStart: withRequestLogging<

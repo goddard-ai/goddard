@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client"
+import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
 import { command, option, optional, run, string, subcommands } from "cmd-ts"
 import * as fs from "node:fs/promises"
 

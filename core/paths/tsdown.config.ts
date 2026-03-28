@@ -3,7 +3,7 @@ import { defineConfig } from "tsdown"
 const isDebug = process.env.DEBUG === "true"
 
 export default defineConfig({
-  entry: ["./src/index.ts"],
+  entry: ["./src/index.ts", "./src/node/index.ts", "./src/tauri/index.ts"],
   format: "esm",
   target: "node18",
   clean: true,

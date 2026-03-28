@@ -1,9 +1,10 @@
 import * as http from "node:http"
-import { createClient } from "./client.ts"
-import { type AppSchema } from "./schema.ts"
-import { type IpcTransport } from "./transport.ts"
+import { createClient } from "../client.ts"
+import { type AppSchema } from "../schema.ts"
+import { type IpcTransport } from "../transport.ts"
 
-function getErrorMessage(body: string) {
+/** Normalizes one failed IPC response body into a human-readable error message. */
+function getErrorMessage(body: string): string {
   if (!body) {
     return "IPC request failed"
   }
@@ -20,12 +21,7 @@ function getErrorMessage(body: string) {
   return body
 }
 
-/**
- * Creates an IPC transport for Node.js over Unix domain sockets.
- *
- * @param socketPath - The path to the Unix domain socket.
- * @returns An `IpcTransport` implementation.
- */
+/** Creates the Node HTTP-over-socket transport for one daemon socket path. */
 export function createNodeTransport(socketPath: string): IpcTransport {
   async function send(name: string, payload: unknown): Promise<unknown> {
     const wireData = JSON.stringify({ name, payload })
@@ -40,10 +36,10 @@ export function createNodeTransport(socketPath: string): IpcTransport {
             "Content-Length": Buffer.byteLength(wireData),
           },
         },
-        (res) => {
+        (res: http.IncomingMessage) => {
           let body = ""
           res.setEncoding("utf8")
-          res.on("data", (chunk) => {
+          res.on("data", (chunk: string) => {
             body += chunk
           })
           res.on("end", () => {
@@ -82,12 +78,12 @@ export function createNodeTransport(socketPath: string): IpcTransport {
           path: `/stream?name=${encodeURIComponent(name)}`,
           method: "GET",
         },
-        (res) => {
+        (res: http.IncomingMessage) => {
           response = res
 
           if (res.statusCode !== 200) {
             res.setEncoding("utf8")
-            res.on("data", (chunk) => {
+            res.on("data", (chunk: string) => {
               errorBody += chunk
             })
             res.on("end", () => {
@@ -109,7 +105,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
 
           let buffer = ""
           res.setEncoding("utf8")
-          res.on("data", (chunk) => {
+          res.on("data", (chunk: string) => {
             buffer += chunk
             const lines = buffer.split("\n")
             buffer = lines.pop() ?? ""
@@ -128,7 +124,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
         },
       )
 
-      req.on("error", (error) => {
+      req.on("error", (error: Error) => {
         if (!settled) {
           settled = true
           reject(error)
@@ -141,13 +137,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
   return { send, subscribe }
 }
 
-/**
- * Creates a complete IPC client for Node.js connecting to the given socket.
- *
- * @param socketPath - The path to the Unix domain socket.
- * @param schema - The IPC application schema defining the valid requests and streams.
- * @returns An object with strongly-typed `send` and `subscribe` methods.
- */
+/** Creates the typed IPC client backed by the Node socket transport. */
 export function createNodeClient<S extends AppSchema>(socketPath: string, schema: S) {
   return createClient(schema, createNodeTransport(socketPath))
 }

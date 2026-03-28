@@ -11,12 +11,12 @@
       },
       "import": "./dist/index.mjs"
     },
-    "./*": {
+    "./node": {
       "types": {
-        "source": "./src/*.ts",
-        "default": "./dist/*.d.mts"
+        "source": "./src/node/index.ts",
+        "default": "./dist/node/index.d.mts"
       },
-      "import": "./dist/*.mjs"
+      "import": "./dist/node/index.mjs"
     }
   },
   "scripts": {

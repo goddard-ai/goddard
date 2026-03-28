@@ -1,4 +1,4 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"

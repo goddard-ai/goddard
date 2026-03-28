@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { getGoddardGlobalDir } from "@goddard-ai/paths"
+import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {

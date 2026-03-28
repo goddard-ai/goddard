@@ -11,6 +11,20 @@
         "default": "./dist/index.d.mts"
       },
       "import": "./dist/index.mjs"
+    },
+    "./node": {
+      "types": {
+        "source": "./src/node/index.ts",
+        "default": "./dist/node/index.d.mts"
+      },
+      "import": "./dist/node/index.mjs"
+    },
+    "./tauri": {
+      "types": {
+        "source": "./src/tauri/index.ts",
+        "default": "./dist/tauri/index.d.mts"
+      },
+      "import": "./dist/tauri/index.mjs"
     }
   },
   "scripts": {
@@ -19,5 +33,8 @@
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
   }
 }

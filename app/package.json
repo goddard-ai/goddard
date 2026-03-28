@@ -33,7 +33,6 @@
     "swr": "^2.4.1"
   },
   "devDependencies": {
-    "@goddard-ai/ipc": "workspace:^",
     "@preact/preset-vite": "^2.10.3",
     "@tauri-apps/cli": "^2.10.1",
     "vite": "^7.3.1"

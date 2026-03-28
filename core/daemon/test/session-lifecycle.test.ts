@@ -1,4 +1,4 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { createRequire } from "node:module"
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"

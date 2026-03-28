@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getAuthTokenPath } from "@goddard-ai/paths"
+import { getAuthTokenPath } from "@goddard-ai/paths/node"
 
 /** JSON shape persisted for daemon-owned backend auth state. */
 type ConfigFile = {

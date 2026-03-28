@@ -18,7 +18,7 @@ export type GoddardSdkOptions = DaemonClientOptions
 export class GoddardSdk {
   readonly #options: DaemonClientOptions
 
-  constructor(options: GoddardSdkOptions = {}) {
+  constructor(options: GoddardSdkOptions) {
     this.#options = options
   }
 

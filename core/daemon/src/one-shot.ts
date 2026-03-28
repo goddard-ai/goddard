@@ -1,4 +1,4 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { prependAgentBinToPath } from "./config.ts"

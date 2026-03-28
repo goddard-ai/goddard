@@ -11,3 +11,6 @@
 - `Derived Path`
   - A deterministic child path under a global or local `.goddard` root.
   - Why: so path construction stays pure while persistence ownership stays in higher-level packages.
+- `Host Path Surface`
+  - One runtime-specific entry point that resolves the same Goddard path concepts for a specific host.
+  - Why: so Node and Tauri can share filenames and directory names without sharing incompatible runtime APIs.

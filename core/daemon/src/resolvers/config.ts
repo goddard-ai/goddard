@@ -5,7 +5,7 @@ import {
   getGoddardGlobalDir,
   getGoddardLocalDir,
   getLocalConfigPath,
-} from "@goddard-ai/paths"
+} from "@goddard-ai/paths/node"
 import { constants as fsConstants } from "node:fs"
 import { access, readFile, writeFile } from "node:fs/promises"
 import { z } from "zod"

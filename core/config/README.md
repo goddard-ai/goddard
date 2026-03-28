@@ -1,6 +1,6 @@
 # `@goddard-ai/config`
 
-Canonical home for Goddard's model constants and persisted-config merge helpers.
+Canonical home for Goddard's persisted-config merge helpers.
 
 Persisted config is JSON-only:
 

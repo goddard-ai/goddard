@@ -1,1 +1,1 @@
-export * from "./paths.ts"
+export * from "./constants.ts"
