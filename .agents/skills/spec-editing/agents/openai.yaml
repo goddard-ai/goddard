@@ -1,0 +1,7 @@
+interface:
+  display_name: "Spec Editing"
+  short_description: "Updates the canonical spec tree"
+  default_prompt: "Use $spec-editing to update the spec tree for this product change."
+
+policy:
+  allow_implicit_invocation: true
