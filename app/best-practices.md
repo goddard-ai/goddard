@@ -20,6 +20,23 @@
   - Why:
     - The planned app has many cross-cutting concerns such as auth, repository registry, tab caching, realtime activity, and action applicability. Those become brittle quickly if they leak into view components.
 
+- Keep hook usage deliberate.
+  - What:
+    - Avoid `useMemo` and `useCallback` by default. Use them only for known hot paths or real identity-sensitive APIs.
+    - Use `useEffect` for lifecycle-bound setup or cleanup and narrow bridge or bootstrap work, not for prop mirroring, derived state, generic watch-and-sync logic, or routine fetch-on-render.
+    - Prefer event-driven updates and explicit actions over reactive synchronization.
+    - Use refs for imperative DOM or resource access, not as a hidden state store.
+  - Why:
+    - The app favors explicit state modules, semantic actions, and render-time derivation. Overusing hooks turns straightforward flows into lifecycle-driven synchronization.
+
+- Model UI state from minimal truth.
+  - What:
+    - Keep state local when possible and store the minimal source of truth.
+    - Derive cheap display values during render instead of duplicating them in state.
+    - Prefer explicit status fields or discriminated unions over piles of booleans, and model non-trivial transitions explicitly.
+  - Why:
+    - Minimal, explicit state keeps impossible states harder to represent and makes tab-heavy UI flows easier to reason about.
+
 - Normalize shared records by stable identity.
   - What:
     - Store shared entities in maps keyed by durable ids or refs, then derive ordered lists, filters, and view models from that normalized state.
@@ -40,6 +57,14 @@
     - Do not have components manually orchestrate multi-step flows across auth, tabs, repositories, actions, and realtime state.
   - Why:
     - The most important app flows are cross-domain by design: auth gates PR actions, session launch depends on repositories and actions, and search opens tabs across many domains.
+
+- Keep async work out of presentational components.
+  - What:
+    - Prefer state modules, semantic actions, or the established app data-loading layer over fetch-on-render inside view components.
+    - Keep presentational components focused on rendering props and invoking actions.
+    - Handle loading, empty, error, and success states explicitly, and account for cancellation or races when user input can trigger overlapping requests.
+  - Why:
+    - Async behavior in views quickly turns into stale-data and interleaving bugs. Centralizing it keeps ownership, retries, and identity clearer.
 
 - Keep the app thin over shared contracts.
   - What:
