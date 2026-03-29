@@ -33,5 +33,10 @@
   },
   "files.readonlyInclude": {
     "core/schema/src/acp-adapters.ts": true
+  },
+  "files.exclude": {
+    "**/.husky": true,
+    "**/.turbo": true,
+    "**/node_modules": true
   }
 }

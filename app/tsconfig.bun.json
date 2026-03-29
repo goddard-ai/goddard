@@ -9,5 +9,5 @@
     "rootDir": ".",
     "types": ["bun"]
   },
-  "include": ["electrobun.config.ts", "src/bun/**/*.ts", "src/**/*.d.ts"]
+  "include": ["electrobun.config.ts", "src/bun", "src/**/*.d.ts", "src/shared"]
 }

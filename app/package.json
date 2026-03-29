@@ -19,6 +19,7 @@
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/sdk": "workspace:^",
     "@preact/signals": "^2.8.1",
+    "@tanstack/preact-query": "^5.95.2",
     "electrobun": "^1.16.0",
     "preact": "11.0.0-beta.1",
     "preact-in-motion": "^0.2.9",
