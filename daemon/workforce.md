@@ -34,7 +34,6 @@ We believe that making the daemon the single authority for workforce runtime sta
 - Requests for the same agent must never be handled concurrently.
 - Agent-issued changes must be validated and committed by the workforce runtime before queue advancement.
 - Workforce orchestration and PR-feedback handling remain separate daemon runtime domains even when hosted by the same daemon process.
-- This slice remains headless; it does not require a dedicated app UI.
 
 ## Failure Handling Expectations
 - Daemon restart should recover workforce state without losing operator-visible progress.
