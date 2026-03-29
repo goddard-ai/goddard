@@ -6,8 +6,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, test } from "vitest"
 import { z } from "zod"
 import { $type, type AppSchema } from "../src/index.ts"
-import { createNodeClient } from "../src/node-client.ts"
-import { createServer } from "../src/server.ts"
+import { createNodeClient } from "../src/node/client.ts"
+import { createServer } from "../src/node/server.ts"
 
 const schema = {
   client: {
