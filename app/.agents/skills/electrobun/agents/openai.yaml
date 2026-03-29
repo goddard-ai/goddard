@@ -1,0 +1,4 @@
+interface:
+  display_name: "Electrobun"
+  short_description: "Guidance for building Electrobun desktop apps"
+  default_prompt: "Use $electrobun to build or debug an Electrobun desktop app with typed RPC, windows, webviews, menus, or native integrations."

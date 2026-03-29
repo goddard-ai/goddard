@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "electrobun": {
+      "source": "/Users/alec/dev/skills/packages",
+      "sourceType": "local",
+      "computedHash": "ebd0eb971afd1d0f3bef3005259835bd57b1d103bc38d627692710b6f54bd6e2"
+    },
+    "panda-css": {
+      "source": "/Users/alec/dev/skills/packages",
+      "sourceType": "local",
+      "computedHash": "58982aae9f068cfddc3fffd4cf259caa3803a36f3b921a36c1fda97f26d98515"
+    },
+    "preact-sigma": {
+      "source": "/Users/alec/dev/skills/packages",
+      "sourceType": "local",
+      "computedHash": "70028595aae0f8da76993392b23c97c8184b9d679dba00eb36579f6af084da18"
+    }
+  }
+}

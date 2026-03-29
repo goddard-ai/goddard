@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Webview Tag Playground</title>
+    <script src="views://playgrounds/webviewtag/index.js"></script>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      h1 {
+        margin: 0 0 10px 0;
+      }
+      h2 {
+        margin: 20px 0 10px 0;
+        font-size: 16px;
+        color: #555;
+      }
+      .controls {
+        margin: 10px 0;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button {
+        padding: 8px 14px;
+        cursor: pointer;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+      }
+      button:hover {
+        background: #f0f0f0;
+      }
+      .element-to-mask {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: white;
+        z-index: 100;
+      }
+      electrobun-webview {
+        border: 2px solid #333;
+      }
+      .drag-box {
+        padding: 10px;
+        width: 100px;
+        height: 80px;
+        border: 3px dashed #333;
+        background: #fff8dc;
+        cursor: move;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <button
+      id="doneBtn"
+      style="
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 9999;
+        padding: 10px 24px;
+        font-size: 14px;
+        font-weight: 600;
+        background: #4ade80;
+        border: none;
+        border-radius: 6px;
+        color: #1a1a2e;
+        cursor: pointer;
+      "
+    >
+      Done
+    </button>
+
+    <h1>Webview Tag Playground</h1>
+    <p>Test OOPIF webview with masks, passthrough, and navigation controls.</p>
+
+    <h2>Navigation & Display Controls</h2>
+    <div class="controls">
+      <button onclick="document.querySelector('electrobun-webview').goBack()">Go Back</button>
+      <button onclick="document.querySelector('electrobun-webview').goForward()">Go Forward</button>
+      <button onclick="document.querySelector('electrobun-webview').reload()">Reload</button>
+      <button
+        onclick="
+          document.querySelector('electrobun-webview').setAttribute('src', 'https://eggbun.sh')
+        "
+      >
+        eggbun.sh
+      </button>
+      <button
+        onclick="
+          document
+            .querySelector('electrobun-webview')
+            .setAttribute('src', 'https://github.com/blackboardsh/electrobun')
+        "
+      >
+        GitHub
+      </button>
+      <button onclick="checkNavState()">Check Nav State</button>
+      <span id="navState" style="font-size: 12px; color: #666"></span>
+    </div>
+
+    <h2>Find in Page</h2>
+    <div class="controls">
+      <input
+        type="text"
+        id="findInput"
+        placeholder="Search text..."
+        style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 150px"
+      />
+      <button onclick="findInPage()">Find</button>
+      <button onclick="findNext()">Find Next</button>
+      <button onclick="findPrev()">Find Prev</button>
+      <button onclick="stopFind()">Stop Find</button>
+    </div>
+
+    <h2>Developer Tools</h2>
+    <div class="controls">
+      <button onclick="openDevTools()">Open DevTools</button>
+      <button onclick="closeDevTools()">Close DevTools</button>
+      <button onclick="toggleDevTools()">Toggle DevTools</button>
+      <span id="devToolsStatus" style="margin-left: 10px; font-size: 12px; color: #666"></span>
+    </div>
+
+    <h2>Mask & Passthrough Controls</h2>
+    <div class="controls">
+      <button onclick="document.querySelector('electrobun-webview').toggleTransparent()">
+        Toggle Transparent
+      </button>
+      <button onclick="document.querySelector('electrobun-webview').togglePassthrough()">
+        Toggle Passthrough
+      </button>
+      <button onclick="document.querySelector('electrobun-webview').toggleHidden()">
+        Toggle Hidden
+      </button>
+      <button
+        onclick="document.querySelector('electrobun-webview').addMaskSelector('.element-to-mask')"
+      >
+        Add Mask Selector
+      </button>
+      <button
+        onclick="
+          document.querySelector('electrobun-webview').removeMaskSelector('.element-to-mask')
+        "
+      >
+        Remove Mask Selector
+      </button>
+    </div>
+
+    <div style="position: relative; margin-top: 15px">
+      <div
+        class="element-to-mask"
+        style="top: 20px; left: 450px; width: 150px; height: 100px; background: rgba(0, 0, 0, 0.8)"
+      >
+        Mask Overlay 1
+      </div>
+      <div
+        class="element-to-mask"
+        style="
+          top: 20px;
+          left: 300px;
+          width: 140px;
+          height: 100px;
+          background: rgba(0, 128, 0, 0.8);
+        "
+      >
+        Mask Overlay 2
+      </div>
+      <electrobun-webview
+        style="width: 600px; height: 350px"
+        src="https://electrobun.dev"
+        renderer="cef"
+      ></electrobun-webview>
+    </div>
+
+    <div style="margin-top: 15px">
+      <div class="drag-box" draggable="true">
+        Drag me into the webview when passthrough is enabled
+      </div>
+      <span id="draginfo" style="margin-left: 10px; color: #666"></span>
+    </div>
+
+    <h2>Webview with Inline HTML</h2>
+    <electrobun-webview
+      renderer="cef"
+      style="width: 600px; height: 100px"
+      preload="window.onload = () => { document.body.innerHTML += '<br>Hello from preload script!'; }"
+      html="<html><body style='font-family: sans-serif; padding: 10px;'><h3>Webview with inline HTML</h3><p>This webview was created with the html attribute instead of src.</p></body></html>"
+    >
+    </electrobun-webview>
+
+    <h2>Test: Bundled Asset via views:// Scheme</h2>
+    <p>This image is loaded from <code>views://playgrounds/webviewtag/electrobun.png</code>:</p>
+    <img
+      src="views://playgrounds/webviewtag/electrobun.png"
+      style="max-width: 200px; border: 1px solid #ccc"
+    />
+
+    <script>
+      // Drag info display
+      document.body.ondragover = (e) => {
+        document.getElementById("draginfo").innerHTML =
+          "Drag position: " + e.clientX + ", " + e.clientY
+      }
+
+      // Navigation state check
+      async function checkNavState() {
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        try {
+          const canBack = await wv.canGoBack()
+          const canForward = await wv.canGoForward()
+          document.getElementById("navState").textContent =
+            `canGoBack: ${canBack}, canGoForward: ${canForward}`
+        } catch (e) {
+          document.getElementById("navState").textContent = "Error: " + e.message
+        }
+      }
+
+      // Find in page functions
+      function findInPage() {
+        const text = document.getElementById("findInput").value
+        if (!text) return
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        wv.findInPage(text)
+      }
+
+      function findNext() {
+        const text = document.getElementById("findInput").value
+        if (!text) return
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        wv.findInPage(text, { forward: true })
+      }
+
+      function findPrev() {
+        const text = document.getElementById("findInput").value
+        if (!text) return
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        wv.findInPage(text, { forward: false })
+      }
+
+      function stopFind() {
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        wv.stopFindInPage()
+      }
+
+      // DevTools functions
+      function openDevTools() {
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        try {
+          wv.openDevTools()
+          document.getElementById("devToolsStatus").textContent = "DevTools opened"
+          setTimeout(() => (document.getElementById("devToolsStatus").textContent = ""), 2000)
+        } catch (e) {
+          document.getElementById("devToolsStatus").textContent = "Error: " + e.message
+        }
+      }
+
+      function closeDevTools() {
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        try {
+          wv.closeDevTools()
+          document.getElementById("devToolsStatus").textContent = "DevTools closed"
+          setTimeout(() => (document.getElementById("devToolsStatus").textContent = ""), 2000)
+        } catch (e) {
+          document.getElementById("devToolsStatus").textContent = "Error: " + e.message
+        }
+      }
+
+      function toggleDevTools() {
+        const wv = document.querySelector("electrobun-webview")
+        if (!wv) return
+        try {
+          wv.toggleDevTools()
+          document.getElementById("devToolsStatus").textContent = "DevTools toggled"
+          setTimeout(() => (document.getElementById("devToolsStatus").textContent = ""), 2000)
+        } catch (e) {
+          document.getElementById("devToolsStatus").textContent = "Error: " + e.message
+        }
+      }
+
+      // Webview event listeners
+      const webview = document.querySelector("electrobun-webview")
+      if (webview) {
+        webview.on("did-navigate", () => console.log("did-navigate"))
+        webview.on("did-navigate-in-page", () => console.log("did-navigate-in-page"))
+        webview.on("did-commit-navigation", () => console.log("did-commit-navigation"))
+        webview.on("dom-ready", (e) => console.log("dom-ready", e.detail))
+        webview.on("new-window-open", (e) => console.log("new-window-open", e.detail))
+      }
+    </script>
+  </body>
+</html>
