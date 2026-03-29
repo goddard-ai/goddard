@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pretext"
+  short_description: "Guidance for Pretext text layout"
+  default_prompt: "Use $pretext to implement or debug DOM-free text measurement, manual line layout, or obstacle-aware text flow."
