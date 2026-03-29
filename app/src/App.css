@@ -37,11 +37,83 @@
 }
 
 .container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 2rem;
-  width: 100%;
-  box-sizing: border-box;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 3rem 1.5rem;
+  background:
+    radial-gradient(circle at top, rgba(88, 166, 255, 0.12), transparent 35%),
+    linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(13, 17, 23, 1));
+}
+
+.status-panel {
+  width: min(720px, 100%);
+  padding: 2.5rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 20px;
+  background: rgba(22, 27, 34, 0.88);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.eyebrow {
+  margin-bottom: 0.85rem;
+  color: var(--accent-color);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.lede {
+  margin-bottom: 2rem;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.status-card {
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(88, 166, 255, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(48, 54, 61, 0.36), rgba(22, 27, 34, 0.86));
+}
+
+.status-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.status-value {
+  color: var(--text-primary);
+  font-size: 1.1rem;
+}
+
+.helper-text {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.helper-text code {
+  color: var(--text-primary);
+}
+
+.error-text {
+  margin-top: 1rem;
+  color: var(--danger-color);
+  font-size: 0.95rem;
 }
 
 h1,
@@ -56,8 +128,8 @@ h5 {
 }
 
 h1 {
-  font-size: 2rem;
-  margin-bottom: 2rem;
+  font-size: clamp(2rem, 5vw, 3.3rem);
+  margin-bottom: 1rem;
   background: linear-gradient(135deg, #fff 0%, #8b949e 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -123,6 +195,12 @@ ul {
   list-style: none;
   padding: 0;
   margin: 0;
+}
+
+@media (max-width: 640px) {
+  .status-panel {
+    padding: 1.5rem;
+  }
 }
 
 /* Scrollbar styling */

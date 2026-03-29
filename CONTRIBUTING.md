@@ -30,14 +30,28 @@
 
 ## Code Style
 
+- Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task explicitly requires refactoring, and do not silently broaden scope.
+- Prefer readability and local reasoning over new abstractions. Introduce helpers, utilities, or new layers only when they clearly remove repeated complexity or define a boundary the code already needs.
 - Inline values instead of introducing single-use variables unless the variable materially improves readability or avoids repeating a complex expression.
 - Every exported module declaration must have a human-readable `/** ... */` description comment.
 - Every TypeScript type alias and interface, whether exported or internal, must have a human-readable `/** ... */` description comment, except when the type is inferred from a same-name Zod schema.
 - Every non-trivial top-level function must have a human-readable `/** ... */` description comment.
 - These comments should explain the non-obvious what and, when useful, the why.
 - Strange coding patterns must have a brief `//` comment stating what they are doing and why they are necessary.
+- Avoid comments that restate the code. Reserve comments for non-obvious constraints, invariants, rationale, or external quirks.
 - Do not add JSDoc tag boilerplate such as `@param` or `@returns`.
 - Do not document the obvious or describe line-by-line implementation mechanics.
+
+## Patch Discipline
+
+- Minimize churn: touch as few files as possible, avoid unrelated formatting or cleanup, and do not rename or move files unless necessary.
+- If refactoring is required for correctness, keep it mechanical and separate from behavior changes when possible.
+- When uncertain, prefer the existing local pattern and the option with the lowest architectural impact.
+
+## Dependencies
+
+- Do not add dependencies lightly. Prefer existing platform APIs, workspace packages, and project utilities.
+- If a new dependency is truly warranted, choose the smallest one that fits the repository style and explain why it is needed.
 
 ## Git
 
@@ -50,6 +64,8 @@
 
 ## Testing
 
+- Add or update tests when behavior changes, unless a deeper `CONTRIBUTING.md` narrows that subtree.
+- Prefer small tests around observable behavior. Do not rewrite tests solely to match refactors or introduce a large new testing pattern in a narrow area.
 - Keep the rest of the test suite lean and intentional.
 - Do not use repository-local Vitest mocking or stubbing APIs such as `vi.mock`, `vi.doMock`, `vi.hoisted`, `vi.fn`, `vi.spyOn`, `vi.mocked`, `vi.stubGlobal`, `vi.stubEnv`, `vi.unstubAllGlobals`, or `vi.unstubAllEnvs`, or similar helper methods such as `mockImplementation`, `mockResolvedValue`, or `mockReturnValue`, except at explicit non-local third-party integration boundaries.
 - Treat first-party packages, local modules, Node stdlib seams, prompt libraries, Tauri host APIs, `console`, `process`, and local daemon or client wrappers as non-exception cases.

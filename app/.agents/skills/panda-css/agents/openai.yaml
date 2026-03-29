@@ -1,0 +1,4 @@
+interface:
+  display_name: "Panda CSS"
+  short_description: "Guidance for Panda CSS styling"
+  default_prompt: "Use $panda-css to implement or debug Panda CSS setup, recipes, tokens, or static-extraction issues."

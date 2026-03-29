@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        padding: 20px;
+        background: #1a1a2e;
+        color: #eee;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      h2 {
+        margin-bottom: 20px;
+        color: #fff;
+      }
+      .status-section {
+        margin-top: auto;
+      }
+      .status-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 0;
+        border-bottom: 1px solid #333;
+      }
+      .status-item:last-child {
+        border-bottom: none;
+      }
+      .indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #444;
+      }
+      .indicator.detected {
+        background: #4ade80;
+      }
+      .status-text {
+        color: #888;
+      }
+      .status-text.detected {
+        color: #4ade80;
+      }
+      .done-message {
+        margin-top: 15px;
+        padding: 15px;
+        background: #166534;
+        border-radius: 8px;
+        text-align: center;
+        display: none;
+      }
+      .done-message.show {
+        display: block;
+      }
+      button {
+        margin-top: 15px;
+        padding: 10px 20px;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button:hover {
+        background: #2563eb;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Window Blur & Focus Events Detection</h2>
+
+    <div class="status-section">
+      <div class="status-item">
+        <div class="indicator" id="blur-indicator"></div>
+        <span class="status-text" id="blur-status">Blur: Focus another window...</span>
+      </div>
+      <div class="status-item">
+        <div class="indicator" id="focus-indicator"></div>
+        <span class="status-text" id="focus-status">Focus: Focus this window...</span>
+      </div>
+    </div>
+
+    <div class="done-message" id="done-message">Both events detected! Closing in 2 seconds...</div>
+
+    <button id="closeBtn">Close Window</button>
+    <script src="index.js"></script>
+  </body>
+</html>

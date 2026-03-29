@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "rootDir": ".",
+    "types": ["bun"]
+  },
+  "include": ["electrobun.config.ts", "src/bun", "src/**/*.d.ts", "src/shared"]
+}
