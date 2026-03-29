@@ -23,6 +23,7 @@
   - Why: so the runtime can track a task's lifecycle independently from any one session attempt.
 - `Actor Context`
   - The identity context for whoever initiated a workforce mutation.
+  - Includes the daemon session id, bound workforce root, acting agent id, and attached request id when available.
   - Why: so the runtime can enforce which requests an operator, root agent, or requesting agent is allowed to change.
 - `Request Intent`
   - The requester's declared expectation about the shape of the work.

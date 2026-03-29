@@ -135,6 +135,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
       mutation: WorkforceManagerMutation,
       actor: WorkforceActorContext = {
         sessionId: null,
+        rootDir: null,
         agentId: null,
         requestId: null,
       },
