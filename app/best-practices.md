@@ -2,7 +2,7 @@
 
 - Scope:
   - These practices are derived from the current app plans, `spec/`, and the app glossary.
-  - They are written for future implementation work in the Tauri app, not for backend or SDK packages.
+  - They are written for future implementation work in the Electrobun app, not for backend or SDK packages.
 
 - Keep the workspace tab-first.
   - What:
@@ -102,14 +102,14 @@
 
 - Put side effects behind adapters.
   - What:
-    - Encapsulate Tauri plugins, daemon clients, filesystem reads, store persistence, and other host effects behind injected service or adapter boundaries.
+    - Encapsulate daemon clients, filesystem reads, store persistence, and other host effects behind injected service or adapter boundaries.
     - Keep view and state modules independent of raw transport setup wherever possible.
   - Why:
     - Adapter boundaries improve testability, make future host changes less invasive, and keep state modules focused on domain behavior.
 
-- Do not let UI components call Tauri directly.
+- Do not let UI components call desktop host APIs directly.
   - What:
-    - Trigger IPC, store writes, dialog opens, and daemon operations from state modules or service adapters.
+    - Trigger host RPC, store writes, dialog opens, and daemon operations from state modules or service adapters.
     - Keep component props declarative and callback-based.
   - Why:
     - Direct host calls from arbitrary components make it much harder to reason about lifecycle, retries, gating, and persistence.
@@ -118,7 +118,7 @@
   - What:
     - If a planned feature conflicts with `spec/app.md`, `app/AGENTS.md`, or shared contracts, document the conflict clearly before adding implementation code.
     - Current example:
-      - Terminal and browser preview plans still assume custom Rust capabilities that the current app spec does not yet allow.
+      - Terminal and browser preview plans still assume host capabilities that the current app runtime does not yet expose.
   - Why:
     - Silent divergence is expensive. The app is still pre-alpha, so alignment is cheaper than cleanup.
 
