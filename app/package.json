@@ -12,7 +12,7 @@
     "build": "electrobun build",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "test": "vitest run -c ../vitest.config.ts",
+    "test": "vitest run -c ../vitest.config.ts ./",
     "pretypecheck": "pnpm run panda:sync",
     "typecheck": "tsgo -p . --noEmit",
     "electrobun:watch": "electrobun dev --watch",
