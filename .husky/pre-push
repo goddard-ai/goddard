@@ -1,7 +1,41 @@
 #!/usr/bin/env sh
 
+current_branch=$(git branch --show-current)
+
+if [ -z "$current_branch" ]; then
+  exit 0
+fi
+
+is_pushing_current_branch=0
+
 while read local_ref local_sha remote_ref remote_sha; do
-  if [ "$1" = "origin" ] && [ "$remote_ref" = "refs/heads/main" ]; then
-    pnpm install && pnpm check || exit 1
+  if [ "$local_ref" = "refs/heads/$current_branch" ]; then
+    is_pushing_current_branch=1
+    break
   fi
 done
+
+if [ "$is_pushing_current_branch" -ne 1 ]; then
+  exit 0
+fi
+
+if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+  pnpm install && pnpm check || exit 1
+  exit 0
+fi
+
+branch_point=$(git merge-base HEAD origin/main)
+
+if [ -z "$branch_point" ]; then
+  pnpm install && pnpm check || exit 1
+  exit 0
+fi
+
+changed_files=$(git diff --name-only "$branch_point"..HEAD)
+
+# Run the full repo check only when the branch changed files that affect it.
+if printf '%s\n' "$changed_files" | grep -Eq \
+  '(^|/)src/.*\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$|(^|/).*\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$|(^|/)tsconfig(\.[^/]+)?\.json$|(^|/)package\.json$|(^|/)tsdown\.config\.ts$'
+then
+  pnpm install && pnpm check || exit 1
+fi
