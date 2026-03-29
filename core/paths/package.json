@@ -34,7 +34,12 @@
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
     "test": "vitest run"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@tauri-apps/api": "^2.10.1"
+  },
+  "peerDependenciesMeta": {
+    "@tauri-apps/api": {
+      "optional": true
+    }
   }
 }
