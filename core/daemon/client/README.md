@@ -20,7 +20,7 @@ Use `@goddard-ai/daemon-client/node` when you need to:
 - Derive `GODDARD_DAEMON_URL` from `GODDARD_DAEMON_SOCKET_PATH`.
 - Create the default Node socket client.
 
-Use `@goddard-ai/sdk/daemon` instead when you need daemon-backed agent sessions and ACP prompt/history/shutdown helpers.
+Use `@goddard-ai/sdk` for explicit browser-safe daemon calls, or `@goddard-ai/sdk/node` when you want the same SDK surface with Node daemon-client injection.
 
 ```ts
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client"

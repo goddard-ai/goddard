@@ -1,80 +1,193 @@
+import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
-import { resolveDaemonClient, type DaemonClientOptions } from "./daemon/client.ts"
+import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
+import type {
+  CancelDaemonWorkforceRequest,
+  CreateDaemonSessionRequest,
+  CreateDaemonWorkforceRequestRequest,
+  GetDaemonLoopRequest,
+  GetDaemonWorkforceRequest,
+  ListDaemonSessionsRequest,
+  ReplyPrDaemonRequest,
+  RespondDaemonWorkforceRequest,
+  RunNamedDaemonActionRequest,
+  ShutdownDaemonLoopRequest,
+  ShutdownDaemonWorkforceRequest,
+  StartDaemonLoopRequest,
+  StartDaemonWorkforceRequest,
+  SubmitPrDaemonRequest,
+  SuspendDaemonWorkforceRequest,
+  TruncateDaemonWorkforceRequest,
+  UpdateDaemonWorkforceRequest,
+} from "@goddard-ai/schema/daemon"
+import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
 
-/** Detects the OAuth polling response that means the user has not finished approving yet. */
-function isAuthorizationPendingError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("authorization_pending")
+/** Request payload used to resolve one daemon session id from a session token. */
+type ResolveDaemonSessionTokenRequest = {
+  token: string
 }
 
-/** Detects the OAuth polling response that asks the client to slow its polling cadence. */
-function isSlowDownError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("slow_down")
+/** Request payload used to forward one raw session message through daemon IPC. */
+type SendDaemonSessionMessageRequest = {
+  id: string
+  message: unknown
 }
 
-/** Constructor options for the daemon-backed SDK facade. */
+/** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardSdkOptions = DaemonClientOptions
 
-/** Public SDK facade for daemon-backed authentication. */
+/** Caches one namespace on first access by replacing the instance getter with the concrete value. */
+function defineCachedNamespace<TValue>(owner: object, key: string, value: TValue): TValue {
+  Object.defineProperty(owner, key, {
+    configurable: true,
+    value,
+  })
+  return value
+}
+
+/** Builds the health namespace with one thin method per daemon health IPC action. */
+function createDaemonNamespace(client: DaemonIpcClient) {
+  return {
+    /** Probes daemon liveness without adding SDK-specific behavior. */
+    health: async (input: {}) => client.send("health", input),
+  }
+}
+
+/** Builds the auth namespace with one thin method per daemon auth IPC action. */
+function createAuthNamespace(client: DaemonIpcClient) {
+  return {
+    /** Starts one GitHub device flow through the daemon auth contract. */
+    startDeviceFlow: async (input: DeviceFlowStart) => client.send("authDeviceStart", input),
+    /** Completes one pending GitHub device flow through the daemon auth contract. */
+    completeDeviceFlow: async (input: DeviceFlowComplete) =>
+      client.send("authDeviceComplete", input),
+    /** Reads the current daemon-owned auth session as-is. */
+    whoami: async (input: {}) => client.send("authWhoami", input),
+    /** Clears the current daemon-owned auth session as-is. */
+    logout: async (input: {}) => client.send("authLogout", input),
+  }
+}
+
+/** Builds the pull request namespace with one thin method per daemon PR IPC action. */
+function createPrNamespace(client: DaemonIpcClient) {
+  return {
+    /** Submits one pull request through the daemon PR contract. */
+    submit: async (input: SubmitPrDaemonRequest & { token: string }) =>
+      client.send("prSubmit", input),
+    /** Posts one pull request reply through the daemon PR contract. */
+    reply: async (input: ReplyPrDaemonRequest & { token: string }) => client.send("prReply", input),
+  }
+}
+
+/** Builds the session namespace with one thin method per daemon session IPC action. */
+function createSessionNamespace(client: DaemonIpcClient) {
+  return {
+    /** Creates one daemon-managed session record. */
+    create: async (input: CreateDaemonSessionRequest) => client.send("sessionCreate", input),
+    /** Lists daemon-managed sessions and pagination state. */
+    list: async (input: ListDaemonSessionsRequest) => client.send("sessionList", input),
+    /** Fetches one daemon-managed session record. */
+    get: async (input: DaemonSessionIdParams) => client.send("sessionGet", input),
+    /** Reconnects to one daemon-managed session record. */
+    connect: async (input: DaemonSessionIdParams) => client.send("sessionConnect", input),
+    /** Reads one daemon-managed session history with session identity and connection state. */
+    history: async (input: DaemonSessionIdParams) => client.send("sessionHistory", input),
+    /** Reads one daemon-managed session diagnostics with event history and connection state. */
+    diagnostics: async (input: DaemonSessionIdParams) => client.send("sessionDiagnostics", input),
+    /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
+    shutdown: async (input: DaemonSessionIdParams) => client.send("sessionShutdown", input),
+    /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
+    send: async (input: SendDaemonSessionMessageRequest) => client.send("sessionSend", input),
+    /** Resolves one daemon session token to its daemon session id. */
+    resolveToken: async (input: ResolveDaemonSessionTokenRequest) =>
+      client.send("sessionResolveToken", input),
+  }
+}
+
+/** Builds the action namespace with one thin method per daemon action IPC call. */
+function createActionNamespace(client: DaemonIpcClient) {
+  return {
+    /** Runs one named daemon action and creates the resulting daemon session. */
+    run: async (input: RunNamedDaemonActionRequest) => client.send("actionRun", input),
+  }
+}
+
+/** Builds the loop namespace with one thin method per daemon loop IPC action. */
+function createLoopNamespace(client: DaemonIpcClient) {
+  return {
+    /** Starts or reuses one daemon loop runtime. */
+    start: async (input: StartDaemonLoopRequest) => client.send("loopStart", input),
+    /** Fetches one daemon loop runtime and its resolved config. */
+    get: async (input: GetDaemonLoopRequest) => client.send("loopGet", input),
+    /** Lists daemon loop runtime summaries. */
+    list: async (input: {}) => client.send("loopList", input),
+    /** Shuts down one daemon loop and reports whether shutdown succeeded. */
+    shutdown: async (input: ShutdownDaemonLoopRequest) => client.send("loopShutdown", input),
+  }
+}
+
+/** Builds the workforce namespace with one thin method per daemon workforce IPC action. */
+function createWorkforceNamespace(client: DaemonIpcClient) {
+  return {
+    /** Starts or reuses one daemon workforce runtime. */
+    start: async (input: StartDaemonWorkforceRequest) => client.send("workforceStart", input),
+    /** Fetches one daemon workforce runtime and its resolved config. */
+    get: async (input: GetDaemonWorkforceRequest) => client.send("workforceGet", input),
+    /** Lists daemon workforce runtime summaries. */
+    list: async (input: {}) => client.send("workforceList", input),
+    /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
+    shutdown: async (input: ShutdownDaemonWorkforceRequest) =>
+      client.send("workforceShutdown", input),
+    /** Enqueues one workforce request and includes the updated workforce projection. */
+    request: async (input: CreateDaemonWorkforceRequestRequest) =>
+      client.send("workforceRequest", input),
+    /** Updates one workforce request and includes the updated workforce projection. */
+    update: async (input: UpdateDaemonWorkforceRequest) => client.send("workforceUpdate", input),
+    /** Cancels one workforce request and includes the updated workforce projection. */
+    cancel: async (input: CancelDaemonWorkforceRequest) => client.send("workforceCancel", input),
+    /** Truncates one workforce queue and includes the updated workforce projection. */
+    truncate: async (input: TruncateDaemonWorkforceRequest) =>
+      client.send("workforceTruncate", input),
+    /** Responds to one active workforce request and includes the updated workforce projection. */
+    respond: async (input: RespondDaemonWorkforceRequest) => client.send("workforceRespond", input),
+    /** Suspends one active workforce request and includes the updated workforce projection. */
+    suspend: async (input: SuspendDaemonWorkforceRequest) => client.send("workforceSuspend", input),
+  }
+}
+
+/** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
 export class GoddardSdk {
-  readonly #options: DaemonClientOptions
+  readonly #client: DaemonIpcClient
 
   constructor(options: GoddardSdkOptions) {
-    this.#options = options
+    this.#client = resolveDaemonClient(options)
+  }
+
+  get daemon() {
+    return defineCachedNamespace(this, "daemon", createDaemonNamespace(this.#client))
   }
 
   get auth() {
-    return {
-      /** Initiates a new GitHub device authorization flow through the daemon. */
-      startDeviceFlow: async (input: DeviceFlowStart = {}) => {
-        return resolveDaemonClient(this.#options).send("authDeviceStart", input)
-      },
-      /** Polls or finalizes a previously started device authorization flow through the daemon. */
-      completeDeviceFlow: async (input: DeviceFlowComplete) => {
-        return resolveDaemonClient(this.#options).send("authDeviceComplete", input)
-      },
-      /** High-level helper that manages the full daemon-backed device flow lifecycle. */
-      login: async ({
-        githubUsername,
-        onPrompt,
-      }: {
-        githubUsername: string
-        onPrompt: (verificationUri: string, userCode: string) => void
-      }) => {
-        const start = await this.auth.startDeviceFlow({ githubUsername })
-        onPrompt(start.verificationUri, start.userCode)
+    return defineCachedNamespace(this, "auth", createAuthNamespace(this.#client))
+  }
 
-        const expiresAt = Date.now() + start.expiresIn * 1000
-        let delay = start.interval * 1000
+  get pr() {
+    return defineCachedNamespace(this, "pr", createPrNamespace(this.#client))
+  }
 
-        while (Date.now() < expiresAt) {
-          try {
-            return await this.auth.completeDeviceFlow({
-              deviceCode: start.deviceCode,
-              githubUsername,
-            })
-          } catch (error: unknown) {
-            if (!isAuthorizationPendingError(error) && !isSlowDownError(error)) {
-              throw error
-            }
+  get session() {
+    return defineCachedNamespace(this, "session", createSessionNamespace(this.#client))
+  }
 
-            if (isSlowDownError(error)) {
-              delay += 5000
-            }
-          }
+  get action() {
+    return defineCachedNamespace(this, "action", createActionNamespace(this.#client))
+  }
 
-          await new Promise((resolve) => setTimeout(resolve, delay))
-        }
+  get loop() {
+    return defineCachedNamespace(this, "loop", createLoopNamespace(this.#client))
+  }
 
-        throw new Error("Device flow authentication timed out.")
-      },
-      /** Retrieves the currently authenticated user's identity from the daemon-owned auth state. */
-      whoami: async () => {
-        return resolveDaemonClient(this.#options).send("authWhoami", {})
-      },
-      /** Clears daemon-owned authentication state. */
-      logout: async () => {
-        await resolveDaemonClient(this.#options).send("authLogout", {})
-      },
-    }
+  get workforce() {
+    return defineCachedNamespace(this, "workforce", createWorkforceNamespace(this.#client))
   }
 }

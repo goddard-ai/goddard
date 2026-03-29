@@ -15,7 +15,7 @@ export type ExplicitDaemonClientFactoryOptions = {
   createClient: DaemonIpcClientFactory
 }
 
-/** Shared explicit connection options for SDK helpers that talk to the daemon over IPC. */
+/** Shared explicit connection options for SDK calls that talk to the daemon over IPC. */
 export type DaemonClientOptions = InjectedDaemonClientOptions | ExplicitDaemonClientFactoryOptions
 
 /** Resolves the daemon IPC client from explicit browser-safe connection inputs. */

@@ -10,20 +10,14 @@
   - The legacy SDK API for direct backend HTTP operations.
   - Why: this concept is intentionally being reduced so durable auth and other backend ownership move behind the daemon boundary.
 - `Daemon Surface`
-  - The SDK API for daemon-managed agent sessions, explicit loop lifecycle control, and workforce interactions.
-  - Why: so consumers can use daemon capabilities through stable client abstractions instead of raw IPC messages.
+  - The browser-safe SDK API that mirrors daemon IPC actions through thin namespace methods.
+  - Why: so every host sees one stable SDK shape instead of separate wrapper layers for the same daemon contract.
 - `Node Surface`
-  - The SDK layer that adds Node-specific defaults and convenience helpers over the daemon surface.
-  - Why: so env resolution, cwd defaults, and named-loop helpers do not leak into cross-environment APIs.
-- `Daemon-Backed Session`
-  - An agent interaction whose lifecycle is owned by the daemon but consumed through the SDK.
-  - Why: so callers can work with durable daemon sessions through a higher-level client abstraction.
-- `Agent Session`
-  - The SDK object that represents one usable daemon-backed conversation.
-  - Why: so prompting, history access, and shutdown can be exposed as coherent client operations.
+  - The SDK layer that injects a Node-resolved daemon client into the browser-safe daemon surface.
+  - Why: so env and socket defaults stay host-specific without changing the SDK method signatures.
 - `Loop Runtime`
-  - The SDK-owned execution of repeated agent cycles over one session.
-  - Why: so pacing, retries, and cleanup are handled consistently across loop consumers.
+  - One daemon-managed repeated agent execution cycle addressed through SDK loop methods.
+  - Why: so loop lifecycle remains part of the shared daemon IPC surface instead of Node-only helpers.
 - `Retry Policy`
   - The caller-defined rule set that decides whether a failed loop cycle should be retried.
   - Why: so recovery behavior can be adapted to the caller's tolerance for transient failures.

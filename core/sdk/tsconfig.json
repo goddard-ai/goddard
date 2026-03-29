@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["raw.d.ts", "src/**/*.ts", "test/**/*.ts"],
+  "include": ["raw.d.ts", "src", "test"],
   "compilerOptions": {
     "types": ["node"]
   }
