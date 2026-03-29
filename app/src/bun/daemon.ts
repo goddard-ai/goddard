@@ -1,7 +1,6 @@
 import { createDaemonIpcClientFromEnv, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type {
   DaemonRequestName,
-  DaemonRequestPayload,
   DaemonRequestResponse,
   DaemonSendInput,
 } from "../shared/desktop-rpc"
