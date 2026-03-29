@@ -8,6 +8,7 @@ export default {
     version: pkg.version,
   },
   build: {
+    watch: ["styled-system"],
     bun: {
       entrypoint: "src/bun/index.ts",
     },

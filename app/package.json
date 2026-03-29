@@ -5,12 +5,19 @@
   "license": "AGPL-3.0",
   "type": "module",
   "scripts": {
-    "dev": "electrobun dev",
+    "prepare": "pnpm run panda:sync",
+    "predev": "pnpm run panda:sync",
+    "dev": "picorun 'pnpm panda:watch' 'pnpm electrobun:watch' --names=panda,electrobun",
+    "prebuild": "pnpm run panda:sync",
     "build": "electrobun build",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "test": "vitest run -c ../vitest.config.ts",
-    "typecheck": "tsgo -p . --noEmit"
+    "pretypecheck": "pnpm run panda:sync",
+    "typecheck": "tsgo -p . --noEmit",
+    "electrobun:watch": "electrobun dev --watch",
+    "panda:sync": "panda codegen && panda cssgen",
+    "panda:watch": "panda --watch"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.3",
@@ -28,6 +35,8 @@
     "react-virtuoso": "^4.18.3"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.11"
+    "@pandacss/dev": "^1.9.1",
+    "@types/bun": "^1.3.11",
+    "picorun": "^0.1.5"
   }
 }
