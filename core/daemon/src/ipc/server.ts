@@ -19,6 +19,7 @@ import { SessionStorage } from "../persistence/session.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { createSessionManager } from "../session/manager.ts"
 import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
+import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
 import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
@@ -50,11 +51,13 @@ export async function startDaemonServer(
 
   async function resolveWorkforceActor(
     token: string | undefined,
+    requestedRootDir: string,
     context: { setSessionId: (sessionId: string) => void },
   ): Promise<WorkforceActorContext> {
     if (!token) {
       return {
         sessionId: null,
+        rootDir: null,
         agentId: null,
         requestId: null,
       }
@@ -72,6 +75,7 @@ export async function startDaemonServer(
       sessionRecord && typeof sessionRecord.metadata === "object" && sessionRecord.metadata !== null
         ? (sessionRecord.metadata as {
             workforce?: {
+              rootDir?: string
               agentId?: string
               requestId?: string
             }
@@ -82,8 +86,24 @@ export async function startDaemonServer(
       throw new Error("Session is not attached to a workforce request")
     }
 
+    if (typeof metadata.workforce.rootDir !== "string") {
+      throw new Error("Session is not attached to a workforce root")
+    }
+
+    const [sessionRootDir, normalizedRequestedRootDir] = await Promise.all([
+      normalizeWorkforceRootDir(metadata.workforce.rootDir),
+      normalizeWorkforceRootDir(requestedRootDir),
+    ])
+
+    if (sessionRootDir !== normalizedRequestedRootDir) {
+      throw new Error(
+        `Session workforce root ${sessionRootDir} does not match requested root ${normalizedRequestedRootDir}`,
+      )
+    }
+
     return {
       sessionId: session.sessionId,
+      rootDir: sessionRootDir,
       agentId: metadata.workforce.agentId,
       requestId:
         typeof metadata.workforce.requestId === "string" ? metadata.workforce.requestId : null,
@@ -420,9 +440,9 @@ export async function startDaemonServer(
       },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceRequest", async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, context)
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
       return workforceManager.appendWorkforceEvent(
-        payload.rootDir,
+        actor.rootDir ?? payload.rootDir,
         {
           type: "request",
           targetAgentId: payload.targetAgentId,
@@ -436,9 +456,9 @@ export async function startDaemonServer(
       { rootDir: string; requestId: string; input: string; token?: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceUpdate", async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, context)
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
       return workforceManager.appendWorkforceEvent(
-        payload.rootDir,
+        actor.rootDir ?? payload.rootDir,
         {
           type: "update",
           requestId: payload.requestId,
@@ -451,9 +471,9 @@ export async function startDaemonServer(
       { rootDir: string; requestId: string; reason?: string; token?: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceCancel", async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, context)
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
       return workforceManager.appendWorkforceEvent(
-        payload.rootDir,
+        actor.rootDir ?? payload.rootDir,
         {
           type: "cancel",
           requestId: payload.requestId,
@@ -466,9 +486,9 @@ export async function startDaemonServer(
       { rootDir: string; agentId?: string; reason?: string; token?: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceTruncate", async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, context)
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
       return workforceManager.appendWorkforceEvent(
-        payload.rootDir,
+        actor.rootDir ?? payload.rootDir,
         {
           type: "truncate",
           agentId: payload.agentId ?? null,
@@ -481,9 +501,9 @@ export async function startDaemonServer(
       { rootDir: string; output: string; token: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceRespond", async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, context)
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
       return workforceManager.appendWorkforceEvent(
-        payload.rootDir,
+        actor.rootDir ?? payload.rootDir,
         {
           type: "respond",
           requestId: requireActorRequestId(actor),
@@ -496,9 +516,9 @@ export async function startDaemonServer(
       { rootDir: string; reason: string; token: string },
       Awaited<ReturnType<typeof workforceManager.appendWorkforceEvent>>
     >("workforceSuspend", async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, context)
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
       return workforceManager.appendWorkforceEvent(
-        payload.rootDir,
+        actor.rootDir ?? payload.rootDir,
         {
           type: "suspend",
           requestId: requireActorRequestId(actor),

@@ -30,6 +30,7 @@ type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : n
 /** Optional authenticated agent context derived from the calling daemon session. */
 export interface WorkforceActorContext {
   sessionId: string | null
+  rootDir: string | null
   agentId: string | null
   requestId: string | null
 }
