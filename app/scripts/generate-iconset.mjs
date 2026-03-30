@@ -1,16 +1,18 @@
 #!/usr/bin/env bun
 
-import { access, mkdir, rm } from "node:fs/promises"
+import { access, mkdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import pngToIco from "png-to-ico"
 import sharp from "sharp"
 
-const inputPath = new URL("../icon.png", import.meta.url)
-const outputDirUrl = new URL("../icon.iconset/", import.meta.url)
-const windowsIconPath = new URL("../icon.windows.png", import.meta.url)
-const linuxIconPath = new URL("../icon.linux.png", import.meta.url)
+const assetDirUrl = new URL("../assets/", import.meta.url)
+const inputPath = new URL("./icon.png", assetDirUrl)
+const outputDirUrl = new URL("./icon.iconset/", assetDirUrl)
+const windowsIcoPath = new URL("./icon.ico", assetDirUrl)
 const inputFilePath = fileURLToPath(inputPath)
 const outputDirPath = path.resolve(fileURLToPath(outputDirUrl))
+const assetDirPath = path.resolve(fileURLToPath(assetDirUrl))
 
 const iconFiles = [
   { fileName: "icon_16x16.png", size: 16 },
@@ -23,11 +25,6 @@ const iconFiles = [
   { fileName: "icon_256x256@2x.png", size: 512 },
   { fileName: "icon_512x512.png", size: 512 },
   { fileName: "icon_512x512@2x.png", size: 1024 },
-]
-
-const platformIcons = [
-  { label: "Windows", outputPath: windowsIconPath, size: 256 },
-  { label: "Linux", outputPath: linuxIconPath, size: 512 },
 ]
 
 /** Warn when the source icon is undersized for the largest output. */
@@ -51,7 +48,7 @@ async function assertSourceIconExists() {
   } catch {
     throw new Error(
       `Missing source icon: ${fileURLToPath(inputPath)}. ` +
-        "Add icon.png in the app root and rerun the generator.",
+        "Add icon.png in app/assets and rerun the generator.",
     )
   }
 }
@@ -65,8 +62,10 @@ async function main() {
 
   warnIfSourceIsSmall(metadata)
 
+  await mkdir(assetDirPath, { recursive: true })
   await rm(outputDirPath, { force: true, recursive: true })
   await mkdir(outputDirPath, { recursive: true })
+  await rm(fileURLToPath(windowsIcoPath), { force: true })
 
   await Promise.all(
     iconFiles.map(({ fileName, size }) =>
@@ -80,23 +79,13 @@ async function main() {
     ),
   )
 
-  await Promise.all(
-    platformIcons.map(({ outputPath, size }) =>
-      sharp(inputFilePath)
-        .resize(size, size, {
-          fit: "contain",
-          background: { r: 0, g: 0, b: 0, alpha: 0 },
-        })
-        .png()
-        .toFile(fileURLToPath(outputPath)),
-    ),
+  await writeFile(
+    fileURLToPath(windowsIcoPath),
+    await pngToIco(path.join(outputDirPath, "icon_256x256.png")),
   )
 
   console.log(`Generated ${iconFiles.length} icons in ${outputDirPath}`)
-
-  for (const { label, outputPath, size } of platformIcons) {
-    console.log(`Generated ${label} icon ${size}x${size} at ${fileURLToPath(outputPath)}`)
-  }
+  console.log(`Generated Windows ICO at ${fileURLToPath(windowsIcoPath)}`)
 }
 
 await main()

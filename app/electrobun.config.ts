@@ -9,12 +9,6 @@ export default {
   },
   build: {
     watch: ["styled-system"],
-    win: {
-      icon: "icon.windows.png",
-    },
-    linux: {
-      icon: "icon.linux.png",
-    },
     bun: {
       entrypoint: "src/bun/index.ts",
     },
@@ -30,6 +24,15 @@ export default {
     copy: {
       "src/main/index.html": "views/main/index.html",
       "src/main/index.css": "views/main/index.css",
+    },
+    mac: {
+      icons: "assets/icon.iconset",
+    },
+    win: {
+      icon: "assets/icon.ico",
+    },
+    linux: {
+      icon: "assets/icon.png",
     },
   },
 } satisfies ElectrobunConfig
