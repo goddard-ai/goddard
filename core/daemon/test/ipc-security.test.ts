@@ -2,16 +2,32 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test } from "vitest"
+import { afterAll, afterEach, expect, test } from "vitest"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
+import { SessionPermissionsStorage, SessionStorage } from "../src/persistence/index.ts"
+import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 
 const cleanup: Array<() => Promise<void>> = []
+const originalHome = process.env.HOME
+let sharedHomeDir: string | null = null
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
+  }
+})
+
+afterAll(async () => {
+  if (originalHome === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = originalHome
+  }
+
+  if (sharedHomeDir) {
+    await rm(sharedHomeDir, { recursive: true, force: true })
   }
 })
 
@@ -230,8 +246,177 @@ test("daemon reply request records managed PR checkout locations", async () => {
   ])
 })
 
+test("daemon workforce request binds token-backed mutations to the session workforce root", async () => {
+  await useTempHome()
+  const sessionId = "workforce-session-match"
+  const token = "workforce-token-match"
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-match-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await seedWorkforceSession({
+    sessionId,
+    token,
+    rootDir,
+    requestId: "req-match",
+  })
+
+  const calls: Array<{ rootDir: string; mutationType: string; actorRootDir: string | null }> = []
+  const daemon = await startTestDaemon({
+    createWorkforceManager: () =>
+      createStaticWorkforceManager((rootDir, mutation, actor) => {
+        calls.push({
+          rootDir,
+          mutationType: mutation.type,
+          actorRootDir: actor.rootDir,
+        })
+      }),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const response = await client.send("workforceRequest", {
+    rootDir,
+    targetAgentId: "root",
+    input: "Ship it.",
+    token,
+  })
+
+  const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
+  expect(response.requestId).toBe("req-1")
+  expect(calls).toEqual([
+    {
+      rootDir: normalizedRootDir,
+      mutationType: "request",
+      actorRootDir: normalizedRootDir,
+    },
+  ])
+})
+
+test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {
+  await useTempHome()
+  const sessionId = "workforce-session-mismatch"
+  const token = "workforce-token-mismatch"
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-a-"))
+  const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-b-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  cleanup.push(() => rm(otherRootDir, { recursive: true, force: true }))
+  await seedWorkforceSession({
+    sessionId,
+    token,
+    rootDir,
+    requestId: "req-mismatch",
+  })
+
+  const calls: Array<{ rootDir: string }> = []
+  const daemon = await startTestDaemon({
+    createWorkforceManager: () =>
+      createStaticWorkforceManager((rootDir) => {
+        calls.push({ rootDir })
+      }),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await expect(
+    client.send("workforceRequest", {
+      rootDir: otherRootDir,
+      targetAgentId: "root",
+      input: "Ship it.",
+      token,
+    }),
+  ).rejects.toThrow(/does not match requested root/i)
+
+  expect(calls).toEqual([])
+})
+
+test("daemon workforce respond rejects mismatched roots for token-backed sessions", async () => {
+  await useTempHome()
+  const sessionId = "workforce-session-respond"
+  const token = "workforce-token-respond"
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-c-"))
+  const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-d-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  cleanup.push(() => rm(otherRootDir, { recursive: true, force: true }))
+  await seedWorkforceSession({
+    sessionId,
+    token,
+    rootDir,
+    requestId: "req-respond",
+  })
+
+  const daemon = await startTestDaemon({
+    createWorkforceManager: () => createStaticWorkforceManager(() => {}),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await expect(
+    client.send("workforceRespond", {
+      rootDir: otherRootDir,
+      output: "done",
+      token,
+    }),
+  ).rejects.toThrow(/does not match requested root/i)
+})
+
+test("daemon workforce request rejects token-backed sessions without a workforce root", async () => {
+  await useTempHome()
+  const sessionId = "workforce-session-no-root"
+  const token = "workforce-token-no-root"
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-e-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  await seedWorkforceSession({
+    sessionId,
+    token,
+    rootDir,
+    requestId: "req-no-root",
+    includeRootDir: false,
+  })
+
+  const daemon = await startTestDaemon({
+    createWorkforceManager: () => createStaticWorkforceManager(() => {}),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await expect(
+    client.send("workforceRequest", {
+      rootDir,
+      targetAgentId: "root",
+      input: "Ship it.",
+      token,
+    }),
+  ).rejects.toThrow(/not attached to a workforce root/i)
+})
+
+test("daemon workforce request preserves operator mutations without a token", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-operator-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  const calls: Array<{ rootDir: string; actorRootDir: string | null }> = []
+  const daemon = await startTestDaemon({
+    createWorkforceManager: () =>
+      createStaticWorkforceManager((rootDir, _mutation, actor) => {
+        calls.push({ rootDir, actorRootDir: actor.rootDir })
+      }),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await client.send("workforceRequest", {
+    rootDir,
+    targetAgentId: "root",
+    input: "Ship it.",
+  })
+
+  expect(calls).toEqual([{ rootDir, actorRootDir: null }])
+})
+
 type StartTestDaemonOptions = {
+  useExistingHome?: boolean
+  createWorkforceManager?: NonNullable<
+    Parameters<typeof startDaemonServer>[2]
+  >["createWorkforceManager"]
   sdk?: {
+    auth?: {
+      startDeviceFlow?: () => Promise<Record<string, unknown>>
+      completeDeviceFlow?: () => Promise<Record<string, unknown>>
+      whoami?: () => Promise<Record<string, unknown>>
+      logout?: () => Promise<void>
+    }
     pr?: {
       create?: (input: any) => Promise<{ number: number; url: string }>
       reply?: (input: any) => Promise<{ success: boolean }>
@@ -263,26 +448,36 @@ type StartTestDaemonOptions = {
 }
 
 async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<DaemonServer> {
+  if (!options.useExistingHome) {
+    await useTempHome()
+  }
+
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-"))
   const socketPath = join(socketDir, "daemon.sock")
 
   const daemon = await startDaemonServer(
     {
       auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
-        logout: async () => {},
+        startDeviceFlow:
+          options.sdk?.auth?.startDeviceFlow ??
+          (async () => ({
+            deviceCode: "dev_1",
+            userCode: "ABCD-1234",
+            verificationUri: "https://github.com/login/device",
+            expiresIn: 900,
+            interval: 5,
+          })),
+        completeDeviceFlow:
+          options.sdk?.auth?.completeDeviceFlow ??
+          (async () => ({
+            token: "tok_1",
+            githubUsername: "alec",
+            githubUserId: 42,
+          })),
+        whoami:
+          options.sdk?.auth?.whoami ??
+          (async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 })),
+        logout: options.sdk?.auth?.logout ?? (async () => {}),
       },
       pr: {
         create:
@@ -317,6 +512,7 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
       getSessionByToken: options.auth?.getSessionByToken,
       addAllowedPrToSession: options.auth?.addAllowedPr,
       recordManagedPrLocation: options.recordManagedPrLocation,
+      createWorkforceManager: options.createWorkforceManager,
     },
   )
 
@@ -326,6 +522,94 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
   })
 
   return daemon
+}
+
+async function useTempHome(): Promise<void> {
+  sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-home-"))
+  process.env.HOME = sharedHomeDir
+}
+
+async function seedWorkforceSession(input: {
+  sessionId: string
+  token: string
+  rootDir: string
+  requestId: string
+  includeRootDir?: boolean
+}): Promise<void> {
+  await SessionStorage.create({
+    id: input.sessionId,
+    acpId: `acp-${input.sessionId}`,
+    status: "active",
+    agentName: "pi",
+    cwd: input.rootDir,
+    mcpServers: [],
+    metadata: {
+      workforce: {
+        ...(input.includeRootDir === false ? {} : { rootDir: input.rootDir }),
+        agentId: "root",
+        requestId: input.requestId,
+      },
+    },
+  })
+  await SessionPermissionsStorage.create({
+    sessionId: input.sessionId,
+    token: input.token,
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+}
+
+function createStaticWorkforceManager(
+  onAppend: (
+    rootDir: string,
+    mutation: { type: string },
+    actor: { rootDir: string | null },
+  ) => void,
+) {
+  return {
+    startWorkforce: async (rootDir: string) => buildWorkforce(rootDir),
+    getWorkforce: async (rootDir: string) => buildWorkforce(rootDir),
+    listWorkforces: async () => [],
+    shutdownWorkforce: async () => true,
+    appendWorkforceEvent: async (
+      rootDir: string,
+      mutation: { type: string; requestId?: string },
+      actor: { rootDir: string | null },
+    ) => {
+      onAppend(rootDir, mutation, actor)
+      return {
+        workforce: buildWorkforceStatus(rootDir),
+        requestId: mutation.type === "request" ? "req-1" : (mutation.requestId ?? null),
+      }
+    },
+    close: async () => {},
+  }
+}
+
+function buildWorkforce(rootDir: string) {
+  return {
+    ...buildWorkforceStatus(rootDir),
+    config: {
+      version: 1 as const,
+      defaultAgent: "pi",
+      rootAgentId: "root",
+      agents: [],
+    },
+  }
+}
+
+function buildWorkforceStatus(rootDir: string) {
+  return {
+    state: "running" as const,
+    rootDir,
+    configPath: `${rootDir}/.goddard/workforce.json`,
+    ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
+    activeRequestCount: 0,
+    queuedRequestCount: 0,
+    suspendedRequestCount: 0,
+    failedRequestCount: 0,
+  }
 }
 
 async function captureDaemonLogs(

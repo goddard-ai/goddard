@@ -1,0 +1,26 @@
+# Daemon IPC Server Concepts
+
+- Scope:
+  - This document explains the local authority and routing concepts that matter in [`core/daemon/src/ipc/server.ts`](./server.ts).
+  - It focuses on daemon IPC trust boundaries and does not repeat broader session or workforce runtime concepts.
+- `Operator Mutation`
+  - A daemon IPC call made without a workforce session token.
+  - Why: so approved local clients can still start, inspect, and mutate daemon-owned state directly.
+- `Session-Bound Mutation`
+  - A daemon IPC call made with a daemon session token that resolves to one specific live or persisted session.
+  - Why: so daemon-owned automation can act with narrower authority than a general operator client.
+- `Workforce Actor`
+  - The session-derived identity used for workforce mutations.
+  - Includes the session id, workforce root, agent id, and attached request id when available.
+  - Why: so workforce mutations can be validated against repository and request ownership before they reach the runtime.
+- `Bound Workforce Root`
+  - The repository root recorded on a workforce-attached session.
+  - Token-backed workforce mutations must target this root exactly after normalization.
+  - Why: so one workforce session cannot redirect its authority to another repository by changing the IPC payload.
+- Current Rule:
+  - `workforce request`, `update`, `cancel`, `truncate`, `respond`, and `suspend` reject token-backed calls whose requested root does not match the session's bound workforce root.
+  - Token-omitted operator calls keep their existing behavior.
+- Broader Hardening Path:
+  - Evaluate whether operator-by-omission remains acceptable for workforce mutation routes.
+  - Consider formalizing workforce session metadata in shared schema instead of relying on daemon-local casting.
+  - Consider splitting explicit operator controls from agent/session controls if the daemon needs stronger local authorization boundaries later.

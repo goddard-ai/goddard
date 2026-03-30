@@ -221,6 +221,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
           reason: "Need a root decision.",
           actor: {
             sessionId: "session-1",
+            rootDir: null,
             agentId: "root",
             requestId: request.id,
           },
@@ -237,6 +238,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
         output: `completed:${request.input}`,
         actor: {
           sessionId: "session-1",
+          rootDir: null,
           agentId: "root",
           requestId: request.id,
         },
@@ -247,17 +249,17 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
   await runtime.createRequest({
     targetAgentId: "root",
     payload: "complete me",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
   await runtime.createRequest({
     targetAgentId: "root",
     payload: "suspend me",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
   await runtime.createRequest({
     targetAgentId: "root",
     payload: "fail me",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await waitFor(async () => {
@@ -325,6 +327,7 @@ test("domain agents can update and cancel requests they originally sent", async 
     payload: "Implement the dialog.",
     actor: {
       sessionId: "session-api",
+      rootDir: null,
       agentId: "api",
       requestId: "req-api-parent",
     },
@@ -335,6 +338,7 @@ test("domain agents can update and cancel requests they originally sent", async 
     payload: "Use the shared modal primitives.",
     actor: {
       sessionId: "session-api",
+      rootDir: null,
       agentId: "api",
       requestId: "req-api-parent",
     },
@@ -346,6 +350,7 @@ test("domain agents can update and cancel requests they originally sent", async 
       reason: "Wrong owner for this work.",
       actor: {
         sessionId: "session-root",
+        rootDir: null,
         agentId: "ui",
         requestId: "req-ui-parent",
       },
@@ -359,6 +364,7 @@ test("domain agents can update and cancel requests they originally sent", async 
     reason: "Wrong owner for this work.",
     actor: {
       sessionId: "session-api",
+      rootDir: null,
       agentId: "api",
       requestId: "req-api-parent",
     },
@@ -435,6 +441,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
           output: "ok",
           actor: {
             sessionId: "session-1",
+            rootDir: null,
             agentId: metadata.agentId,
             requestId: metadata.requestId,
           },
@@ -448,13 +455,13 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
   await runtime.createRequest({
     targetAgentId: "root",
     payload: "Do root work.",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await runtime.createRequest({
     targetAgentId: "lib",
     payload: "Do lib work.",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
@@ -535,6 +542,7 @@ test("create-intent requests target the root agent and specialize the root sessi
           output: "created",
           actor: {
             sessionId: "session-1",
+            rootDir: null,
             agentId: metadata.agentId,
             requestId: metadata.requestId,
           },
@@ -548,7 +556,7 @@ test("create-intent requests target the root agent and specialize the root sessi
   await runtime.createRequest({
     targetAgentId: "root",
     payload: "Review the existing workspace boundaries.",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await expect(
@@ -556,7 +564,7 @@ test("create-intent requests target the root agent and specialize the root sessi
       targetAgentId: "lib",
       payload: "Create a new package for scheduling jobs.",
       intent: "create",
-      actor: { sessionId: null, agentId: null, requestId: null },
+      actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
     }),
   ).rejects.toThrow("Create requests must target the root workforce agent")
 
@@ -564,7 +572,7 @@ test("create-intent requests target the root agent and specialize the root sessi
     targetAgentId: "root",
     payload: "Create a new package for scheduling jobs.",
     intent: "create",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
@@ -646,6 +654,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
           output: "done",
           actor: {
             sessionId: "session-1",
+            rootDir: null,
             agentId: metadata.agentId,
             requestId: metadata.requestId,
           },
@@ -659,7 +668,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
   await runtime.createRequest({
     targetAgentId: "api",
     payload: "Implement the endpoint.",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
@@ -720,6 +729,7 @@ test("workforce runtime logs request-to-session correlation for launched session
             output: "done",
             actor: {
               sessionId: "daemon-session-1",
+              rootDir: null,
               agentId: metadata.agentId,
               requestId: metadata.requestId,
             },
@@ -737,7 +747,7 @@ test("workforce runtime logs request-to-session correlation for launched session
     await runtime.createRequest({
       targetAgentId: "root",
       payload: "Ship the logging changes.",
-      actor: { sessionId: null, agentId: null, requestId: null },
+      actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
     })
 
     await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
@@ -799,7 +809,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
   const requestId = await runtime.createRequest({
     targetAgentId: "root",
     payload: "complete me",
-    actor: { sessionId: null, agentId: null, requestId: null },
+    actor: { sessionId: null, rootDir: null, agentId: null, requestId: null },
   })
 
   await waitFor(() => runtime.getStatus().activeRequestCount === 1)
@@ -810,6 +820,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
       output: "completed",
       actor: {
         sessionId: "session-1",
+        rootDir: null,
         agentId: "root",
         requestId: "req-other",
       },
@@ -822,6 +833,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
       reason: "Need help.",
       actor: {
         sessionId: "session-1",
+        rootDir: null,
         agentId: "root",
         requestId: "req-other",
       },
