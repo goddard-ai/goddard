@@ -47,8 +47,11 @@
     - Never destructure component props; read values from the `props` object.
     - Define component prop types inline instead of introducing `Props` aliases or interfaces.
     - Use inline Panda `css(...)` calls by default and only hoist a class when the same class value is reused in multiple places.
+    - Keep feature components and their sigma modules together under `src/components/<Feature>/...`, using Pascal-cased file names and an optional `state/` directory.
+    - Do not add barrel modules for component feature folders.
+    - Do not bake rollout labels such as `sprint-1` into API descriptions, code-facing comments, or durable implementation names.
   - Why:
-    - These conventions keep small Preact components easier to scan and reduce the amount of naming and indirection needed around straightforward view code.
+    - These conventions keep small Preact components easier to scan, keep feature ownership local in the tree, and reduce the amount of naming and indirection needed around straightforward view code.
 
 - Normalize shared records by stable identity.
   - What:
