@@ -11,6 +11,9 @@ function createMainWindow(): BrowserWindow<typeof appRpc> {
     titleBarStyle: "hiddenInset",
     url: "views://main/index.html",
     rpc: appRpc,
+    styleMask: {
+      FullSizeContentView: false,
+    },
   })
 
   window.show()

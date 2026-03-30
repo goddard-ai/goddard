@@ -29,7 +29,7 @@ export default {
       icons: "assets/icon.iconset",
     },
     win: {
-      icon: "assets/icon.ico",
+      icon: "assets/icon.png",
     },
     linux: {
       icon: "assets/icon.png",

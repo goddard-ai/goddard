@@ -1,18 +1,15 @@
 #!/usr/bin/env bun
 
-import { access, mkdir, rm, writeFile } from "node:fs/promises"
+import { access, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import pngToIco from "png-to-ico"
 import sharp from "sharp"
 
 const assetDirUrl = new URL("../assets/", import.meta.url)
 const inputPath = new URL("./icon.png", assetDirUrl)
 const outputDirUrl = new URL("./icon.iconset/", assetDirUrl)
-const windowsIcoPath = new URL("./icon.ico", assetDirUrl)
 const inputFilePath = fileURLToPath(inputPath)
 const outputDirPath = path.resolve(fileURLToPath(outputDirUrl))
-const assetDirPath = path.resolve(fileURLToPath(assetDirUrl))
 
 const iconFiles = [
   { fileName: "icon_16x16.png", size: 16 },
@@ -62,10 +59,8 @@ async function main() {
 
   warnIfSourceIsSmall(metadata)
 
-  await mkdir(assetDirPath, { recursive: true })
   await rm(outputDirPath, { force: true, recursive: true })
   await mkdir(outputDirPath, { recursive: true })
-  await rm(fileURLToPath(windowsIcoPath), { force: true })
 
   await Promise.all(
     iconFiles.map(({ fileName, size }) =>
@@ -79,13 +74,7 @@ async function main() {
     ),
   )
 
-  await writeFile(
-    fileURLToPath(windowsIcoPath),
-    await pngToIco(path.join(outputDirPath, "icon_256x256.png")),
-  )
-
   console.log(`Generated ${iconFiles.length} icons in ${outputDirPath}`)
-  console.log(`Generated Windows ICO at ${fileURLToPath(windowsIcoPath)}`)
 }
 
 await main()

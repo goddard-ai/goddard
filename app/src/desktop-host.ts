@@ -12,6 +12,9 @@ import type {
 } from "./shared/desktop-rpc"
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
+  // Native dialogs and host-side daemon work can legitimately outlive Electrobun's
+  // default 1s request timeout, so the app bridge must wait for the host response.
+  maxRequestTime: Infinity,
   handlers: {
     requests: {},
     messages: {},

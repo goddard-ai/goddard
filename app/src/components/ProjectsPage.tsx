@@ -159,7 +159,7 @@ export function ProjectsPage() {
     : null
 
   const projectValidation = useMutation({
-    mutationFn: async (path: string) => await validateProjectPath(path),
+    mutationFn: validateProjectPath,
     onSuccess: (project) => {
       draftPath.value = project.path
 
