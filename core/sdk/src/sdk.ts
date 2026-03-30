@@ -1,3 +1,4 @@
+import type * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
@@ -20,7 +21,9 @@ import type {
   TruncateDaemonWorkforceRequest,
   UpdateDaemonWorkforceRequest,
 } from "@goddard-ai/schema/daemon"
+import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
+import { runSession } from "./daemon/session/client.ts"
 
 /** Request payload used to resolve one daemon session id from a session token. */
 type ResolveDaemonSessionTokenRequest = {
@@ -82,6 +85,8 @@ function createPrNamespace(client: DaemonIpcClient) {
 /** Builds the session namespace with one thin method per daemon session IPC action. */
 function createSessionNamespace(client: DaemonIpcClient) {
   return {
+    /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
+    run: async (input: SessionParams, handler?: acp.Client) => runSession(client, input, handler),
     /** Creates one daemon-managed session record. */
     create: async (input: CreateDaemonSessionRequest) => client.send("sessionCreate", input),
     /** Lists daemon-managed sessions and pagination state. */

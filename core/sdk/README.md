@@ -30,6 +30,8 @@ Use `@goddard-ai/sdk` when you need to:
 - Call daemon IPC actions through one stable SDK instance.
 - Work from a browser-safe or Tauri host with an explicit daemon client.
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
+- Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
+- Keep a stable `AgentSession` object for prompts, cancellation, history, shutdown, and model changes.
 
 Use `@goddard-ai/sdk/node` when you need to:
 
@@ -39,6 +41,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 ## API Shape
 
 - The SDK mirrors the daemon IPC contract through namespace getters.
+- `sdk.session.run(...)` is the object-backed exception used for live agent session interaction.
 - Each namespace method takes one plain object payload.
 - Each namespace method exposes the daemon response shape directly.
 - The namespace getters are cached after first access.

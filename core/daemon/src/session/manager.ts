@@ -314,6 +314,7 @@ async function toDaemonSession(
     blockedReason: record.blockedReason,
     initiative: record.initiative,
     lastAgentMessage: record.lastAgentMessage,
+    models: record.models ?? null,
   }
 }
 
@@ -559,6 +560,7 @@ async function initializeSession(
     isFirstPrompt: boolean
     history: acp.AnyMessage[]
     acpId: string
+    models?: acp.SessionModelState | null
   }
 > {
   const history: acp.AnyMessage[] = []
@@ -590,6 +592,7 @@ async function initializeSession(
     let status: SessionStatus = "active"
     let isFirstPrompt = true
     let acpId: string
+    let models: acp.SessionModelState | null | undefined
 
     if (
       params.resumeAcpId !== undefined &&
@@ -605,6 +608,7 @@ async function initializeSession(
     } else {
       const newSession = await agent.newSession(params)
       acpId = newSession.sessionId
+      models = newSession.models
     }
 
     if (params.initialPrompt !== undefined) {
@@ -645,6 +649,7 @@ async function initializeSession(
       isFirstPrompt,
       history,
       acpId,
+      models,
     }
   } finally {
     await stream.readable.cancel().catch(() => {})
@@ -1109,6 +1114,7 @@ export function createSessionManager(input: {
           repository: scope.repository,
           prNumber: scope.prNumber,
           metadata: metadata ?? null,
+          models: initialized.models ?? existingSession.models ?? null,
           errorMessage: null,
           blockedReason: null,
           initiative: null,
@@ -1125,6 +1131,7 @@ export function createSessionManager(input: {
           repository: scope.repository,
           prNumber: scope.prNumber,
           metadata: metadata ?? null,
+          models: initialized.models ?? null,
         })
       }
       await emitDiagnostic(id, "session_created", {

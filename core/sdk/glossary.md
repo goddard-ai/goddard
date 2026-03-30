@@ -10,8 +10,11 @@
   - The legacy SDK API for direct backend HTTP operations.
   - Why: this concept is intentionally being reduced so durable auth and other backend ownership move behind the daemon boundary.
 - `Daemon Surface`
-  - The browser-safe SDK API that mirrors daemon IPC actions through thin namespace methods.
+  - The browser-safe SDK API that mirrors daemon IPC actions through namespace methods and owns the live session wrapper entrypoint.
   - Why: so every host sees one stable SDK shape instead of separate wrapper layers for the same daemon contract.
+- `Agent Session Wrapper`
+  - The object-backed SDK helper returned by `sdk.session.run(...)` that keeps one live daemon-backed ACP session behind a stable `AgentSession` instance.
+  - Why: so callers that need interactive session semantics do not have to rebuild transport wiring on top of the root SDK session namespace.
 - `Node Surface`
   - The SDK layer that injects a Node-resolved daemon client into the browser-safe daemon surface.
   - Why: so env and socket defaults stay host-specific without changing the SDK method signatures.
