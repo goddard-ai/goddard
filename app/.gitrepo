@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/goddard-ai/goddard-app.git
 	branch = main
-	commit = 585d50e09c5288005dfb2cbf61bb04f2e6c7eb94
-	parent = 18ab7655c37e5ed76478193c0627c0a92913bb1b
+	commit = d5e85af176548b8f0658290f35e24446fb3e7f5a
+	parent = f9fc4ec2d6a694ca09405842bc3b54ace16df3db
 	method = merge
 	cmdver = 0.4.9
