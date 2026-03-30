@@ -11,7 +11,6 @@
 | Import | Owns | Does not own |
 | --- | --- | --- |
 | `@goddard-ai/sdk` | Browser-safe daemon IPC methods exposed through one SDK instance | Host-specific daemon URL defaults and socket transport setup |
-| `@goddard-ai/sdk/daemon` | Stable daemon session helpers that return an object-backed live agent session | Root-level namespace wrappers for non-session daemon IPC |
 | `@goddard-ai/sdk/node` | The same SDK surface with Node daemon-client injection | Local config loading or extra Node-only wrapper methods |
 
 ## Relationship To `daemon-client`
@@ -31,12 +30,8 @@ Use `@goddard-ai/sdk` when you need to:
 - Call daemon IPC actions through one stable SDK instance.
 - Work from a browser-safe or Tauri host with an explicit daemon client.
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
-
-Use `@goddard-ai/sdk/daemon` when you need to:
-
-- Create or reconnect one live daemon-backed agent session.
+- Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, cancellation, history, shutdown, and model changes.
-- Avoid rebuilding ACP transport wiring in each caller.
 
 Use `@goddard-ai/sdk/node` when you need to:
 
@@ -46,6 +41,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 ## API Shape
 
 - The SDK mirrors the daemon IPC contract through namespace getters.
+- `sdk.session.run(...)` is the object-backed exception used for live agent session interaction.
 - Each namespace method takes one plain object payload.
 - Each namespace method exposes the daemon response shape directly.
 - The namespace getters are cached after first access.
