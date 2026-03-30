@@ -17,7 +17,7 @@ The desktop app now runs on Electrobun with a Bun-owned host layer and a Preact 
 
 - `app/src/bun/index.ts` owns the desktop host runtime.
 - Browser code talks to the host through Electrobun RPC rather than Tauri APIs.
-- Third-party platform docs live under `docs/third_party/`.
+- Read the relevant upstream platform docs directly when app work depends on third-party APIs or platform constraints.
 
 ## License
 

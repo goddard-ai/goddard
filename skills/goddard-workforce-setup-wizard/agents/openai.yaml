@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goddard Workforce Setup Wizard"
+  short_description: "Guide repo workforce init, config, and launch"
+  default_prompt: "Use $goddard-workforce-setup-wizard to initialize or troubleshoot workforce for this repository."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goddard App Sprint Planner"
+  short_description: "Sequence app work into MVP-first sprints"
+  default_prompt: "Use $goddard-app-sprint-planner to update the Goddard app sprint plan based on current features, dependencies, and MVP priorities."
