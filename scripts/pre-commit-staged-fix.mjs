@@ -18,6 +18,6 @@ if (stagedFiles.length === 0) {
   process.exit(0)
 }
 
-run("pnpm", ["exec", "oxfmt", "--no-error-on-unmatched-pattern", ...stagedFiles])
-run("pnpm", ["exec", "oxlint", "--fix", ...stagedFiles])
+run("bunx", ["oxfmt", "--no-error-on-unmatched-pattern", ...stagedFiles])
+run("bunx", ["oxlint", "--fix", ...stagedFiles])
 run("git", ["add", "--", ...stagedFiles])

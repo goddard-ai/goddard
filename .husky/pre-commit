@@ -1,1 +1,1 @@
-pnpm run precommit:staged-fix
+bun run precommit:staged-fix
