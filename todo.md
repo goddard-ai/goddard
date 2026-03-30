@@ -2,7 +2,7 @@
 
 ## Remaining Human Requirements (Manual Setup)
 
-### 2. Infrastructure & Production Secrets
+### Infrastructure & Production Secrets
 - [ ] Provision a **Turso** database for the production control plane.
 - [ ] Configure production secrets for the Cloudflare Worker:
   - `TURSO_DB_URL`
@@ -14,6 +14,14 @@
 
 ## Technical Debt & Feature Gaps
 
+### Workforce
+- [ ] Add daemon-enforced workforce git controls for handled sessions in the shared working tree.
+- [ ] Preserve per-request git attribution, validation baselines, and audit data durably enough to survive daemon restart.
+- [ ] Make `workforce respond` validate owned-path dirty state and attributed commits, suspending ownership violations for human review.
+- [ ] Implement `workforce update` steering for active requests without requeueing the live session.
+- [ ] Make workforce shutdown quiescent and expose richer runtime/request inspection plus lifecycle states beyond `running`.
+- [ ] Tighten workforce config validation for duplicate agent ids, invalid root-agent topology, and overlapping ownership.
+
 ### SDK & Architecture
 - [ ] Implement `GoddardSdk.loop.spec` and `propose` in `@goddard-ai/sdk` (remove direct `pi` spawns in CLI).
 
@@ -24,10 +32,9 @@
 ### Testing & Stability
 - [ ] Resolve Vitest path mapping for workspace packages (ensure `pnpm test` works globally).
 - [ ] Add end-to-end integration tests for the `goddard login` and `whoami` flow.
-- [ ] Implement a local "Mock" mode for the backend to allow development without Turso.
 
-## Why these remain
+## Status Notes
 
-- This local agent environment cannot create GitHub secrets or provision external repositories.
+- Local backend development already has an in-memory control plane fallback when `DATABASE_URL` is unset.
 - Production infrastructure (Turso/Cloudflare) and GitHub App configuration require human credentials and dashboard access.
-- External repository URLs were not provided, so `.gitrepo` metadata could not be finalized.
+- Workforce runtime scaffolding exists today; the main gaps are git enforcement, validation, lifecycle hardening, and operator visibility.
