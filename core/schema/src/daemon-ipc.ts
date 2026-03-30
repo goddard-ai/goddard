@@ -23,11 +23,14 @@ import {
 import {
   type CreateDaemonSessionResponse,
   CreateDaemonSessionRequest,
+  DaemonSessionMessageEvent,
   type GetDaemonSessionDiagnosticsResponse,
   type GetDaemonSessionHistoryResponse,
   type GetDaemonSessionResponse,
   type ListDaemonSessionsResponse,
   ListDaemonSessionsRequest,
+  ResolveDaemonSessionTokenRequest,
+  SendDaemonSessionMessageRequest,
   type ShutdownDaemonSessionResponse,
 } from "./daemon/sessions.ts"
 import {
@@ -112,14 +115,11 @@ export const daemonIpcSchema = {
         response: $type<ShutdownDaemonSessionResponse>(),
       },
       sessionSend: {
-        payload: z.object({
-          id: z.string(),
-          message: z.unknown(),
-        }),
+        payload: SendDaemonSessionMessageRequest,
         response: $type<{ accepted: true }>(),
       },
       sessionResolveToken: {
-        payload: z.object({ token: z.string() }),
+        payload: ResolveDaemonSessionTokenRequest,
         response: $type<{ id: string }>(),
       },
       actionRun: {
@@ -186,10 +186,10 @@ export const daemonIpcSchema = {
   },
   server: {
     streams: {
-      sessionMessage: z.object({
-        id: z.string(),
-        message: z.unknown(),
-      }),
+      sessionMessage: {
+        payload: DaemonSessionMessageEvent,
+        subscription: DaemonSessionIdParams,
+      },
     },
   },
 }

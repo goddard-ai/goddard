@@ -83,6 +83,7 @@ async fn subscribe<R: Runtime>(
     subscriptions: State<'_, SubscriptionStore>,
     socket_path: String,
     name: String,
+    subscription: Option<serde_json::Value>,
 ) -> Result<String, String> {
     let subscription_id = subscriptions
         .next_id
@@ -92,6 +93,7 @@ async fn subscribe<R: Runtime>(
     let task_subscription_id = subscription_id.clone();
     let task_socket_path = socket_path.clone();
     let task_name = name.clone();
+    let task_subscription = subscription.clone();
 
     let task = tauri::async_runtime::spawn(async move {
         let mut stream = match UnixStream::connect(&task_socket_path).await {
@@ -99,9 +101,22 @@ async fn subscribe<R: Runtime>(
             Err(_) => return,
         };
 
+        let query = if let Some(subscription) = task_subscription {
+            match serde_json::to_string(&subscription) {
+                Ok(raw_subscription) => format!(
+                    "/stream?name={}&subscription={}",
+                    urlencoding::encode(&task_name),
+                    urlencoding::encode(&raw_subscription)
+                ),
+                Err(_) => return,
+            }
+        } else {
+            format!("/stream?name={}", urlencoding::encode(&task_name))
+        };
+
         let request = format!(
-            "GET /stream?name={} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-            urlencoding::encode(&task_name)
+            "GET {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            query
         );
 
         if stream.write_all(request.as_bytes()).await.is_err() {

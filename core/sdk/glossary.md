@@ -13,8 +13,11 @@
   - The browser-safe SDK API that mirrors daemon IPC actions through namespace methods and owns the live session wrapper entrypoint.
   - Why: so every host sees one stable SDK shape instead of separate wrapper layers for the same daemon contract.
 - `Agent Session Wrapper`
-  - The object-backed SDK helper returned by `sdk.session.run(...)` that keeps one live daemon-backed ACP session behind a stable `AgentSession` instance.
-  - Why: so callers that need interactive session semantics do not have to rebuild transport wiring on top of the root SDK session namespace.
+  - The minimal object-backed SDK helper returned by `sdk.session.run(...)` for one live daemon-backed ACP session.
+  - Why: so callers that need interactive session semantics can prompt, cancel, inspect history, stop the session, and set the active model without rebuilding transport wiring on top of the root SDK session namespace.
+- `Session Update Subscription`
+  - The SDK helper exposed through `sdk.session.subscribe(...)` that subscribes to daemon-filtered session stream events for one session id.
+  - Why: so hosts can observe live agent output without manually subscribing to the raw daemon stream and filtering envelopes themselves.
 - `Node Surface`
   - The SDK layer that injects a Node-resolved daemon client into the browser-safe daemon surface.
   - Why: so env and socket defaults stay host-specific without changing the SDK method signatures.

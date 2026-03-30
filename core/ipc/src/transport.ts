@@ -3,5 +3,9 @@
  */
 export type IpcTransport = {
   send(name: string, payload: unknown): Promise<unknown>
-  subscribe(name: string, onMessage: (payload: unknown) => void): Promise<() => void> | (() => void)
+  subscribe(
+    name: string,
+    subscription: unknown,
+    onMessage: (payload: unknown) => void,
+  ): Promise<() => void> | (() => void)
 }

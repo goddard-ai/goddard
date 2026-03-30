@@ -10,6 +10,9 @@ type ResponseMarker<T = unknown> = {
   __unchecked__: T
 }
 
+/** Declares one server stream payload schema with optional subscription params. */
+type StreamDefinition = z.ZodTypeAny | { payload: z.ZodTypeAny; subscription?: z.ZodTypeAny }
+
 /** Declares the request and stream contract for one typed IPC application boundary. */
 export type AppSchema = {
   client: {
@@ -22,9 +25,19 @@ export type AppSchema = {
     >
   }
   server: {
-    streams: Record<string, z.ZodTypeAny>
+    streams: Record<string, StreamDefinition>
   }
 }
+
+/** Resolves one stream definition into its payload schema. */
+type StreamPayloadSchema<T extends StreamDefinition> = T extends z.ZodTypeAny ? T : T["payload"]
+
+/** Resolves one stream definition into its optional subscription schema. */
+type StreamSubscriptionSchema<T extends StreamDefinition> = T extends {
+  subscription: infer TSchema extends z.ZodTypeAny
+}
+  ? TSchema
+  : z.ZodVoid
 
 /** Extracts the valid client request names from one IPC schema. */
 export type ReqName<S extends AppSchema> = keyof S["client"]["requests"] & string
@@ -45,5 +58,10 @@ export type StrName<S extends AppSchema> = keyof S["server"]["streams"] & string
 
 /** Infers the payload type for one server stream in the IPC schema. */
 export type StrPayload<S extends AppSchema, K extends StrName<S>> = z.infer<
-  S["server"]["streams"][K]
+  StreamPayloadSchema<S["server"]["streams"][K]>
+>
+
+/** Infers the optional subscription params for one server stream in the IPC schema. */
+export type StrSubscription<S extends AppSchema, K extends StrName<S>> = z.infer<
+  StreamSubscriptionSchema<S["server"]["streams"][K]>
 >

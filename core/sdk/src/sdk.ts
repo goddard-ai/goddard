@@ -10,8 +10,10 @@ import type {
   GetDaemonWorkforceRequest,
   ListDaemonSessionsRequest,
   ReplyPrDaemonRequest,
+  ResolveDaemonSessionTokenRequest,
   RespondDaemonWorkforceRequest,
   RunNamedDaemonActionRequest,
+  SendDaemonSessionMessageRequest,
   ShutdownDaemonLoopRequest,
   ShutdownDaemonWorkforceRequest,
   StartDaemonLoopRequest,
@@ -24,17 +26,6 @@ import type {
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
 import { runSession } from "./daemon/session/client.ts"
-
-/** Request payload used to resolve one daemon session id from a session token. */
-type ResolveDaemonSessionTokenRequest = {
-  token: string
-}
-
-/** Request payload used to forward one raw session message through daemon IPC. */
-type SendDaemonSessionMessageRequest = {
-  id: string
-  message: unknown
-}
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardSdkOptions = DaemonClientOptions
@@ -103,6 +94,15 @@ function createSessionNamespace(client: DaemonIpcClient) {
     shutdown: async (input: DaemonSessionIdParams) => client.send("sessionShutdown", input),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
     send: async (input: SendDaemonSessionMessageRequest) => client.send("sessionSend", input),
+    /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
+    subscribe: async (
+      input: DaemonSessionIdParams,
+      onMessage: (message: acp.AnyMessage) => void,
+    ): Promise<() => void> => {
+      return client.subscribe("sessionMessage", input, (payload) => {
+        onMessage(payload.message)
+      })
+    },
     /** Resolves one daemon session token to its daemon session id. */
     resolveToken: async (input: ResolveDaemonSessionTokenRequest) =>
       client.send("sessionResolveToken", input),
