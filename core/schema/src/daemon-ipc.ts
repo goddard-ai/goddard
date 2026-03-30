@@ -2,9 +2,7 @@ import { $type } from "@goddard-ai/ipc"
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { z } from "zod"
 import { DaemonSessionIdParams } from "./common/params.ts"
-import type {
-  DaemonHealth,
-} from "./daemon/health.ts"
+import type { DaemonHealth } from "./daemon/health.ts"
 import { GetDaemonHealthRequest } from "./daemon/health.ts"
 import { RunNamedDaemonActionRequest } from "./daemon/actions.ts"
 import {

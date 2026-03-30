@@ -15,7 +15,7 @@
     "./json/*": "./json/*"
   },
   "scripts": {
-    "build": "tsdown && pnpm run generate-schemas",
+    "build": "tsdown && bun run generate-schemas",
     "generate-schemas": "node scripts/generate-json-schemas.ts && oxfmt json/",
     "lint": "oxlint",
     "fmt": "oxfmt",

@@ -8,7 +8,7 @@ function run(label, command, args) {
   })
 }
 
-run("TypeScript: core/sdk workforce surface", "pnpm", [
+run("TypeScript: core/sdk workforce surface", "bun", [
   "exec",
   "tsgo",
   "-p",
@@ -16,7 +16,7 @@ run("TypeScript: core/sdk workforce surface", "pnpm", [
   "--noEmit",
 ])
 
-run("TypeScript: workforce CLI", "pnpm", [
+run("TypeScript: workforce CLI", "bun", [
   "exec",
   "tsgo",
   "-p",
@@ -24,7 +24,7 @@ run("TypeScript: workforce CLI", "pnpm", [
   "--noEmit",
 ])
 
-run("Vitest: workforce smoke suites", "pnpm", [
+run("Vitest: workforce smoke suites", "bun", [
   "exec",
   "vitest",
   "run",

@@ -5,6 +5,7 @@
   "license": "MIT",
   "workspaces": [
     "app",
+    "app/styled-system",
     "core/*",
     "core/daemon/client",
     "workforce"
@@ -14,13 +15,13 @@
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
     "docs:third-party:sync": "node ./app/scripts/sync-third-party-llms.mjs --commit",
     "build": "turbo run build",
-    "fmt": "pnpm -r run fmt",
+    "fmt": "bun -r run fmt",
     "fmt:diff": "oxfmt --no-error-on-unmatched-pattern $(git diff --name-only origin/main)",
     "typecheck": "turbo run typecheck --output-logs=errors-only",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
+    "check": "bun run typecheck && bun run lint && bun run test"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
@@ -40,14 +41,5 @@
     "unplugin-unused": "^0.5.7",
     "vitest": "^4.0.18"
   },
-  "packageManager": "pnpm@10.32.1",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "turbo",
-      "better-sqlite3",
-      "esbuild",
-      "sharp",
-      "workerd"
-    ]
-  }
+  "packageManager": "bun@1.3.11"
 }
