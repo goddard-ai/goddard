@@ -1,21 +1,21 @@
 #!/usr/bin/env sh
 
-current_branch=$(git branch --show-current)
+remote_name=$1
 
-if [ -z "$current_branch" ]; then
+if [ "$remote_name" != "origin" ]; then
   exit 0
 fi
 
-is_pushing_current_branch=0
+pushed_sha=
 
 while read local_ref local_sha remote_ref remote_sha; do
-  if [ "$local_ref" = "refs/heads/$current_branch" ]; then
-    is_pushing_current_branch=1
+  if [ "$remote_ref" = "refs/heads/main" ] && [ "$local_ref" != "(delete)" ]; then
+    pushed_sha=$local_sha
     break
   fi
 done
 
-if [ "$is_pushing_current_branch" -ne 1 ]; then
+if [ -z "$pushed_sha" ]; then
   exit 0
 fi
 
@@ -24,14 +24,14 @@ if ! git rev-parse --verify --quiet origin/main >/dev/null; then
   exit 0
 fi
 
-branch_point=$(git merge-base HEAD origin/main)
+branch_point=$(git merge-base "$pushed_sha" origin/main)
 
 if [ -z "$branch_point" ]; then
   bun install && bun check || exit 1
   exit 0
 fi
 
-changed_files=$(git diff --name-only "$branch_point"..HEAD)
+changed_files=$(git diff --name-only "$branch_point".."$pushed_sha")
 
 # Run the full repo check only when the branch changed files that affect it.
 if printf '%s\n' "$changed_files" | grep -Eq \
