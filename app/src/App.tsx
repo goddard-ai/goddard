@@ -1,7 +1,7 @@
 import { AppShell } from "./components/AppShell"
-import { AppStateProvider } from "./state/app-context"
+import { AppStateProvider } from "./components/state/AppStateContext"
 
-/** Boots the sprint-1 shell within the shared app-state context providers. */
+/** Boots the app shell within the shared app-state context providers. */
 function App() {
   return (
     <AppStateProvider>

@@ -1,8 +1,8 @@
+import { css } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { useMutation } from "@tanstack/preact-query"
 import { useEffect } from "preact/hooks"
-import { css } from "../../styled-system/css"
-import { token } from "../../styled-system/tokens"
 import { useProjectRegistry, useWorkbenchTabSet } from "../state/app-context"
 import { lookupProject, type ProjectRecord } from "../state/project-registry"
 import { pickProjectPath, validateProjectPath } from "../support/project-service"
@@ -175,10 +175,13 @@ export function ProjectsPage() {
     projectValidation.data && projectValidation.data.path === draftPath.value.trim()
       ? projectValidation.data
       : null
+  const mutationError: unknown = projectValidation.error
   const validationError =
-    projectValidation.error instanceof Error
-      ? projectValidation.error.message
-      : (projectValidation.error?.toString() ?? null)
+    mutationError instanceof Error
+      ? mutationError.message
+      : mutationError
+        ? String(mutationError)
+        : null
   const canAddProject =
     !projectValidation.isPending &&
     validatedProject !== null &&

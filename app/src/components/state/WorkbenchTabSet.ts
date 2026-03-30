@@ -1,10 +1,10 @@
 import { SigmaType } from "preact-sigma"
-import type { ShellIconName } from "../support/shell-icons"
-import { readJsonStorage, writeJsonStorage } from "../support/workspace-storage"
+import type { ShellIconName } from "../../support/shell-icons"
+import { readJsonStorage, writeJsonStorage } from "../../support/workspace-storage"
 
 const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v2"
 
-/** The supported detail-tab kinds available during sprint 1. */
+/** The supported detail-tab kinds available in the shell. */
 export type WorkbenchDetailTabKind = "project"
 
 /** Payload used by a project detail tab. */

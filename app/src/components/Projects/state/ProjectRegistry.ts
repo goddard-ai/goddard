@@ -1,5 +1,5 @@
 import { SigmaType } from "preact-sigma"
-import { readJsonStorage, writeJsonStorage } from "../support/workspace-storage"
+import { readJsonStorage, writeJsonStorage } from "../../../support/workspace-storage"
 
 const PROJECT_REGISTRY_STORAGE_KEY = "goddard.app.projects.v1"
 

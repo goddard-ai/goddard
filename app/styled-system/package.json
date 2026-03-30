@@ -5,12 +5,31 @@
   "license": "AGPL-3.0",
   "type": "module",
   "exports": {
-    "./css": "./css/index.d.ts",
-    "./tokens": "./tokens/index.d.ts",
-    "./types": "./types/index.d.ts",
-    "./patterns": "./patterns/index.d.ts",
-    "./recipes": "./recipes/index.d.ts",
-    "./jsx": "./jsx/index.d.ts"
+    "./styles.css": "./styles.css",
+    "./css": {
+      "types": "./css/index.d.ts",
+      "import": "./css/index.mjs"
+    },
+    "./tokens": {
+      "types": "./tokens/index.d.ts",
+      "import": "./tokens/index.mjs"
+    },
+    "./types": {
+      "types": "./types/index.d.ts",
+      "import": "./types/index.mjs"
+    },
+    "./patterns": {
+      "types": "./patterns/index.d.ts",
+      "import": "./patterns/index.mjs"
+    },
+    "./recipes": {
+      "types": "./recipes/index.d.ts",
+      "import": "./recipes/index.mjs"
+    },
+    "./jsx": {
+      "types": "./jsx/index.d.ts",
+      "import": "./jsx/index.mjs"
+    }
   },
   "devDependencies": {
     "@pandacss/dev": "^1.9.1"

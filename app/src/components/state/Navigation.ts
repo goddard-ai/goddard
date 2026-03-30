@@ -1,6 +1,6 @@
 import { SigmaType } from "preact-sigma"
-import type { ShellIconName } from "../support/shell-icons"
-import { readJsonStorage, writeJsonStorage } from "../support/workspace-storage"
+import type { ShellIconName } from "../../support/shell-icons"
+import { readJsonStorage, writeJsonStorage } from "../../support/workspace-storage"
 
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
 
@@ -61,10 +61,7 @@ export const Navigation = new SigmaType<NavigationShape>("Navigation")
 
     /** Returns the currently selected primary navigation item. */
     selectedItem() {
-      return (
-        defaultNavigationItems.find((item) => item.id === this.selectedNavId) ??
-        defaultNavigationItems[0]
-      )
+      return this.items.find((item) => item.id === this.selectedNavId) ?? this.items[0]
     },
   })
   .actions({
@@ -92,7 +89,7 @@ export const Navigation = new SigmaType<NavigationShape>("Navigation")
       )
       const selectedNavId = snapshot.selectedNavId
 
-      if (selectedNavId && defaultNavigationItems.some((item) => item.id === selectedNavId)) {
+      if (selectedNavId && this.items.some((item) => item.id === selectedNavId)) {
         this.selectedNavId = selectedNavId
       }
     },

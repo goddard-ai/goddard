@@ -2,9 +2,9 @@ import type { ComponentChildren } from "preact"
 import { createContext } from "preact"
 import { useContext, useEffect } from "preact/hooks"
 import { useSigma } from "preact-sigma"
-import { Navigation } from "./navigation-state"
-import { ProjectRegistry } from "./project-registry"
-import { WorkbenchTabSet } from "./workbench-tabs-state"
+import { ProjectRegistry } from "../Projects/state/ProjectRegistry"
+import { Navigation } from "./Navigation"
+import { WorkbenchTabSet } from "./WorkbenchTabSet"
 
 const navigationContext = createContext<Navigation | null>(null)
 const projectRegistryContext = createContext<ProjectRegistry | null>(null)

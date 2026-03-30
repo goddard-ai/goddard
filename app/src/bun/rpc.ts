@@ -3,8 +3,10 @@ import type { AppDesktopRpc } from "../shared/desktop-rpc"
 import { daemonSend } from "./daemon"
 import { browseForProject, inspectProject } from "./projects"
 
+type AppRpc = ReturnType<typeof BrowserView.defineRPC<AppDesktopRpc>>
+
 /** Shared Bun-side Electrobun RPC handlers for the desktop app. */
-export const appRpc = BrowserView.defineRPC<AppDesktopRpc>({
+export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
   handlers: {
     requests: {
       runtimeInfo: async () => ({ runtime: "electrobun" }),
