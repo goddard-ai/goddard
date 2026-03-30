@@ -1,4 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -130,6 +131,85 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   expect(listed.workforces).toHaveLength(1)
   expect(requested.requestId).toBe("req-1")
   expect(stopped.success).toBe(true)
+})
+
+test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
+  const packageDir = join(repoDir, "packages", "ui")
+  const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-ipc-"))
+  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+
+  await mkdir(packageDir, { recursive: true })
+  await writeFile(
+    join(repoDir, "package.json"),
+    JSON.stringify({ name: "@repo/root", private: true }, null, 2),
+    "utf-8",
+  )
+  await writeFile(
+    join(packageDir, "package.json"),
+    JSON.stringify({ name: "@repo/ui", private: true }, null, 2),
+    "utf-8",
+  )
+  expect(spawnSync("git", ["init"], { cwd: repoDir }).status).toBe(0)
+
+  const daemon = await startDaemonServer(
+    {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
+      pr: {
+        create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
+        reply: async () => ({ success: true }),
+      },
+    },
+    {
+      socketPath: join(socketDir, "daemon.sock"),
+    },
+  )
+  cleanup.push(async () => {
+    await daemon.close()
+    await rm(socketDir, { recursive: true, force: true })
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const discovered = await client.send("workforceDiscoverCandidates", {
+    rootDir: packageDir,
+  })
+  const normalizedRootDir = await normalizeWorkforceRootDir(repoDir)
+
+  expect(discovered.rootDir).toBe(normalizedRootDir)
+  expect(discovered.candidates.map((candidate) => candidate.relativeDir)).toEqual([
+    ".",
+    "packages/ui",
+  ])
+
+  const initialized = await client.send("workforceInitialize", {
+    rootDir: packageDir,
+    packageDirs: discovered.candidates.map((candidate) => candidate.rootDir),
+  })
+
+  const config = JSON.parse(await readFile(initialized.initialized.configPath, "utf-8")) as {
+    rootAgentId: string
+    agents: Array<{ id: string; cwd: string }>
+  }
+
+  expect(initialized.initialized.rootDir).toBe(normalizedRootDir)
+  expect(config.rootAgentId).toBe("root")
+  expect(config.agents.map((agent) => agent.cwd)).toEqual([".", "packages/ui"])
+  await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
 })
 
 test("workforce manager reuses one runtime per normalized repository root", async () => {

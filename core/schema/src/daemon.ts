@@ -39,12 +39,18 @@ export type {
 } from "./daemon/sessions.ts"
 export type {
   CancelDaemonWorkforceRequest,
+  DaemonWorkforceInitCandidate,
   CreateDaemonWorkforceRequestRequest,
   DaemonWorkforce,
   DaemonWorkforceRuntimeState,
   DaemonWorkforceStatus,
+  DiscoverDaemonWorkforceCandidatesRequest,
+  DiscoverDaemonWorkforceCandidatesResponse,
   GetDaemonWorkforceRequest,
   GetDaemonWorkforceResponse,
+  InitializeDaemonWorkforceRequest,
+  InitializeDaemonWorkforceResponse,
+  InitializedDaemonWorkforce,
   ListDaemonWorkforcesResponse,
   MutateDaemonWorkforceResponse,
   RespondDaemonWorkforceRequest,
