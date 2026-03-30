@@ -37,7 +37,7 @@ export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow |
 
   ApplicationMenu.setApplicationMenu([
     {
-      submenu: [{ label: "Quit", role: "quit" }],
+      submenu: [{ label: "Quit", role: "quit", accelerator: "cmd+q" }],
     },
     {
       label: "Edit",
