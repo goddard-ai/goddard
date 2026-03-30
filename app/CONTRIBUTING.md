@@ -6,7 +6,7 @@
 - Read before substantial app work:
   - Read `app/best-practices.md` for app architecture and implementation patterns.
   - Read `app/glossary.md` before naming or changing app-local concepts, states, or user-facing nouns.
-  - Read `docs/third_party/` when working with third-party package APIs or patterns that already have synced upstream docs.
+  - Read the relevant upstream package or platform docs when working with third-party APIs or patterns.
 
 - Architecture:
   - Treat `app/` as an Electrobun desktop app with a Bun-owned host layer and a frontend-heavy TypeScript webview.

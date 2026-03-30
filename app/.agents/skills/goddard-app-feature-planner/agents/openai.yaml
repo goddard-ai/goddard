@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goddard App Feature Planner"
+  short_description: "Shape app feature plans from spec and docs"
+  default_prompt: "Use $goddard-app-feature-planner to draft or update a Goddard app feature plan that matches the current spec, glossary, and planning docs."
