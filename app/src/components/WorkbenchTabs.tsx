@@ -10,7 +10,6 @@ export function WorkbenchTabs(props: {
   primaryTab: WorkbenchPrimaryTab
   detailTabs: readonly WorkbenchDetailTab[]
   activeTabId: string
-  detailTabLimit: number
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onReorder: (fromId: string, toId: string) => void
@@ -65,23 +64,6 @@ export function WorkbenchTabs(props: {
             tab={tab}
           />
         ))}
-      </div>
-      <div
-        class={css({
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 18px 14px",
-          color: "muted",
-          fontSize: "0.82rem",
-        })}
-      >
-        <span>
-          {props.detailTabs.length === 0
-            ? "No detail tabs open yet."
-            : `${props.detailTabs.length} detail tabs open`}
-        </span>
-        <span>{props.detailTabLimit} tab limit</span>
       </div>
     </div>
   )

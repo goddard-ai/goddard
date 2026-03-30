@@ -190,6 +190,7 @@ function SidebarNavItem(props: {
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
+            pointerEvents: "none",
             padding: "8px 12px",
             borderRadius: "12px",
             border: "1px solid",

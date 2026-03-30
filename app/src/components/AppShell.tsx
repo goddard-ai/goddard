@@ -5,7 +5,7 @@ import { lookupProject } from "./Projects/state/ProjectRegistry"
 import { SidebarNav } from "./SidebarNav"
 import { ShellIcon } from "../support/shell-icons"
 import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
-import { WORKBENCH_DETAIL_TAB_LIMIT, WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
+import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 import { WorkbenchTabs } from "./WorkbenchTabs"
 
 const placeholderPageClass = css({
@@ -106,7 +106,6 @@ function WorkbenchTabsConnected() {
   return (
     <WorkbenchTabs
       activeTabId={workbenchTabSet.activeTabId}
-      detailTabLimit={WORKBENCH_DETAIL_TAB_LIMIT}
       detailTabs={workbenchTabSet.detailTabList}
       onClose={(id) => {
         workbenchTabSet.closeTab(id)
