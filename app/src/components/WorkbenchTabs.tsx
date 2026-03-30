@@ -1,9 +1,11 @@
+import { css } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
-import { css } from "../../styled-system/css"
-import type { WorkbenchDetailTab, WorkbenchPrimaryTab } from "../state/workbench-tabs-state"
+import { X } from "lucide-react"
 import { ShellIcon } from "../support/shell-icons"
+import type { WorkbenchDetailTab, WorkbenchPrimaryTab } from "./state/WorkbenchTabSet"
 
-/** Renders the sprint-1 primary tab plus any closable detail tabs. */
+/** Renders the primary tab plus any closable detail tabs. */
 export function WorkbenchTabs(props: {
   primaryTab: WorkbenchPrimaryTab
   detailTabs: readonly WorkbenchDetailTab[]
@@ -22,7 +24,7 @@ export function WorkbenchTabs(props: {
         flexDirection: "column",
         borderBottom: "1px solid",
         borderColor: "border",
-        backgroundColor: "panel",
+        background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.surface")} 100%)`,
       })}
     >
       <div
@@ -30,7 +32,7 @@ export function WorkbenchTabs(props: {
           display: "flex",
           alignItems: "stretch",
           gap: "8px",
-          padding: "10px 14px 0",
+          padding: "14px 16px 0",
           overflowX: "auto",
         })}
         role="tablist"
@@ -69,7 +71,7 @@ export function WorkbenchTabs(props: {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "10px 16px 12px",
+          padding: "12px 18px 14px",
           color: "muted",
           fontSize: "0.82rem",
         })}
@@ -104,24 +106,32 @@ function WorkbenchTab(props: {
         gap: "10px",
         minWidth: "0",
         maxWidth: "280px",
-        height: "42px",
+        height: "44px",
         paddingInline: "14px",
         border: "1px solid",
         borderColor: "border",
-        borderTopLeftRadius: "14px",
-        borderTopRightRadius: "14px",
+        borderTopLeftRadius: "16px",
+        borderTopRightRadius: "16px",
         borderBottomWidth: "0",
-        backgroundColor: "surface",
+        background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
         color: "muted",
         cursor: "pointer",
-        transition: "background-color 140ms ease, color 140ms ease, border-color 140ms ease",
-        _hover: {
-          color: "text",
+        transition:
+          "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+        _active: {
+          transform: "scale(0.985)",
+        },
+        "@media (hover: hover) and (pointer: fine)": {
+          _hover: {
+            color: "text",
+            borderColor: "accent",
+          },
         },
         "&[data-active='true']": {
           backgroundColor: "background",
           color: "text",
           borderColor: "accent",
+          boxShadow: `0 14px 28px color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent)`,
         },
       })}
       data-active={props.isActive}
@@ -183,16 +193,23 @@ function WorkbenchTab(props: {
             class={css({
               display: "grid",
               placeItems: "center",
-              width: "22px",
-              height: "22px",
+              width: "24px",
+              height: "24px",
               borderRadius: "999px",
               border: "none",
               backgroundColor: "transparent",
               color: "muted",
               cursor: "pointer",
-              _hover: {
-                backgroundColor: "surface",
-                color: "text",
+              transition:
+                "background-color 140ms cubic-bezier(0.23, 1, 0.32, 1), color 140ms cubic-bezier(0.23, 1, 0.32, 1), transform 140ms cubic-bezier(0.23, 1, 0.32, 1)",
+              _active: {
+                transform: "scale(0.94)",
+              },
+              "@media (hover: hover) and (pointer: fine)": {
+                _hover: {
+                  backgroundColor: "background",
+                  color: "text",
+                },
               },
             })}
             type="button"
@@ -201,7 +218,7 @@ function WorkbenchTab(props: {
               props.onClose?.(props.tab.id)
             }}
           >
-            ×
+            <X size={14} strokeWidth={2.1} />
           </button>
         </span>
       ) : null}

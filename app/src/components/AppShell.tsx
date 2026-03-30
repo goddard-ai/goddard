@@ -1,9 +1,11 @@
-import { css } from "../../styled-system/css"
-import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "../state/app-context"
-import { lookupProject } from "../state/project-registry"
-import { WORKBENCH_DETAIL_TAB_LIMIT, WORKBENCH_PRIMARY_TAB } from "../state/workbench-tabs-state"
-import { ProjectsPage } from "./ProjectsPage"
+import { css } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
+import { ProjectsPage } from "./Projects/ProjectsPage"
+import { lookupProject } from "./Projects/state/ProjectRegistry"
 import { SidebarNav } from "./SidebarNav"
+import { ShellIcon } from "../support/shell-icons"
+import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
+import { WORKBENCH_DETAIL_TAB_LIMIT, WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 import { WorkbenchTabs } from "./WorkbenchTabs"
 
 const placeholderPageClass = css({
@@ -11,38 +13,41 @@ const placeholderPageClass = css({
   placeItems: "center",
   height: "100%",
   padding: "32px",
-  backgroundColor: "background",
+  background:
+    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent), transparent 34%), ` +
+    `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
 })
 
 const placeholderCardClass = css({
-  width: "min(640px, 100%)",
-  padding: "36px",
-  borderRadius: "24px",
+  width: "min(680px, 100%)",
+  padding: "40px",
+  borderRadius: "28px",
   border: "1px solid",
   borderColor: "border",
-  backgroundColor: "panel",
-  boxShadow: "0 20px 56px rgba(133, 149, 170, 0.08)",
+  background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
+  boxShadow: "0 28px 80px rgba(121, 138, 160, 0.14)",
 })
 
 const placeholderTitleClass = css({
-  marginBottom: "14px",
+  marginBottom: "12px",
   color: "text",
-  fontSize: "1.5rem",
-  fontWeight: "700",
+  fontSize: "1.7rem",
+  fontWeight: "750",
   letterSpacing: "-0.02em",
 })
 
 const placeholderBodyClass = css({
   color: "muted",
-  lineHeight: "1.65",
+  lineHeight: "1.72",
+  maxWidth: "50ch",
 })
 
 const detailBodyClass = css({
   color: "muted",
-  lineHeight: "1.7",
+  lineHeight: "1.72",
 })
 
-/** Renders the sprint-1 tab-first shell and its primary workbench view. */
+/** Renders the tab-first shell and its primary workbench view. */
 export function AppShell() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -54,10 +59,13 @@ export function AppShell() {
   return (
     <div
       class={css({
+        position: "relative",
         display: "grid",
-        gridTemplateColumns: "84px minmax(0, 1fr)",
+        gridTemplateColumns: "92px minmax(0, 1fr)",
         minHeight: "100vh",
-        backgroundColor: "background",
+        background:
+          `radial-gradient(circle at top left, color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), transparent 28%), ` +
+          `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
         color: "text",
       })}
     >
@@ -74,6 +82,7 @@ export function AppShell() {
           display: "grid",
           gridTemplateRows: "auto minmax(0, 1fr)",
           minWidth: "0",
+          minHeight: "100vh",
         })}
       >
         <WorkbenchTabsConnected />
@@ -91,6 +100,7 @@ export function AppShell() {
 
 /** Connects the shell's tab state to the rendered tab strip. */
 function WorkbenchTabsConnected() {
+  const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
 
   return (
@@ -107,7 +117,11 @@ function WorkbenchTabsConnected() {
       onSelect={(id) => {
         workbenchTabSet.activateTab(id)
       }}
-      primaryTab={WORKBENCH_PRIMARY_TAB}
+      primaryTab={{
+        ...WORKBENCH_PRIMARY_TAB,
+        title: navigation.selectedItem.label,
+        icon: navigation.selectedItem.icon,
+      }}
     />
   )
 }
@@ -123,18 +137,35 @@ function MainWorkbenchView() {
   return (
     <div class={placeholderPageClass}>
       <div class={placeholderCardClass}>
+        <div
+          class={css({
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "48px",
+            height: "48px",
+            marginBottom: "20px",
+            borderRadius: "16px",
+            backgroundColor: "surface",
+            color: "accentStrong",
+            boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
+          })}
+        >
+          <span class={css({ width: "20px", height: "20px" })}>
+            <ShellIcon name={navigation.selectedItem.icon} />
+          </span>
+        </div>
         <h1 class={placeholderTitleClass}>{navigation.selectedItem.label}</h1>
         <p class={placeholderBodyClass}>
-          Sprint 1 establishes the tab-first shell and machine-wide project registry first. This
-          primary view is scaffolded so the sidebar and main tab model are already stable before the
-          next sprint lands.
+          This primary view is scaffolded so the sidebar and main tab model stay stable while the
+          rest of the workbench surfaces are filled in.
         </p>
       </div>
     </div>
   )
 }
 
-/** Renders the active sprint-1 detail tab panel. */
+/** Renders the active detail tab panel. */
 function WorkbenchTabPanel() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -174,25 +205,33 @@ function WorkbenchTabPanel() {
         class={css({
           display: "flex",
           flexDirection: "column",
-          gap: "16px",
+          gap: "18px",
           height: "100%",
           padding: "28px",
-          backgroundColor: "background",
+          background:
+            `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), transparent 32%), ` +
+            `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
         })}
       >
         <section
           class={css({
             maxWidth: "880px",
-            padding: "28px",
-            borderRadius: "24px",
+            padding: "32px",
+            borderRadius: "28px",
             border: "1px solid",
             borderColor: "border",
-            backgroundColor: "panel",
-            boxShadow: "0 20px 56px rgba(133, 149, 170, 0.08)",
+            background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
+            boxShadow: "0 28px 80px rgba(121, 138, 160, 0.14)",
           })}
         >
           <div
             class={css({
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 12px",
+              borderRadius: "999px",
+              backgroundColor: "surface",
               marginBottom: "10px",
               color: "accentStrong",
               fontSize: "0.72rem",
@@ -201,6 +240,9 @@ function WorkbenchTabPanel() {
               textTransform: "uppercase",
             })}
           >
+            <span class={css({ width: "14px", height: "14px" })}>
+              <ShellIcon name="projects" />
+            </span>
             Detail Tab
           </div>
           <h1
@@ -214,9 +256,9 @@ function WorkbenchTabPanel() {
             {project.name}
           </h1>
           <p class={detailBodyClass}>
-            This project detail tab proves the sprint-1 shell can keep the primary workbench view
-            and closable detail tabs alive side by side. Later sprints can replace this summary with
-            richer project-scoped surfaces such as sessions, specs, tasks, and pull requests.
+            This project detail tab keeps the primary workbench view and closable detail tabs alive
+            side by side. It can later be replaced with richer project-scoped surfaces such as
+            sessions, specs, tasks, and pull requests.
           </p>
           <p class={detailBodyClass}>Path: {project.path}</p>
         </section>
