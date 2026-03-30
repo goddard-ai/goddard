@@ -2,7 +2,7 @@ name: Generate ACP Adapters
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Run nightly at midnight UTC
+    - cron: "0 0 * * *" # Run nightly at midnight UTC
   workflow_dispatch: # Allow manual runs
 
 permissions:

@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - 'spec/**'
+      - "spec/**"
 
 concurrency:
   group: sync-spec-branch
@@ -47,4 +47,3 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             /repos/goddard-ai/roadmap/actions/workflows/sync-spec.yml/dispatches \
             -f "ref=main"
-
