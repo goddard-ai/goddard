@@ -1,5 +1,6 @@
 import type { ElectrobunConfig } from "electrobun"
 import pkg from "./package.json" with { type: "json" }
+import { svgIconBuildPlugin } from "./src/bun/plugins/svg-icon-build-plugin"
 
 export default {
   app: {
@@ -8,9 +9,10 @@ export default {
     version: pkg.version,
   },
   build: {
-    watch: ["styled-system"],
+    watch: ["styled-system", "public"],
     bun: {
       entrypoint: "src/bun/index.ts",
+      plugins: [svgIconBuildPlugin()],
     },
     views: {
       main: {

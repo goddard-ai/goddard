@@ -5,5 +5,5 @@
     "rootDir": ".."
   },
   "include": ["./", "../shared", "../**/*.d.ts"],
-  "exclude": []
+  "exclude": ["./plugins/*.template.tsx"]
 }
