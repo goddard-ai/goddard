@@ -1,4 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { randomUUID } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -17,18 +18,21 @@ afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
-})
 
-afterAll(async () => {
+  if (sharedHomeDir) {
+    await rm(sharedHomeDir, { recursive: true, force: true })
+    sharedHomeDir = null
+  }
+
   if (originalHome === undefined) {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
   }
+})
 
-  if (sharedHomeDir) {
-    await rm(sharedHomeDir, { recursive: true, force: true })
-  }
+afterAll(async () => {
+  // Per-test cleanup above already restores HOME and removes shared temp directories.
 })
 
 test("daemon submit request requires a valid session token", async () => {
@@ -248,7 +252,7 @@ test("daemon reply request records managed PR checkout locations", async () => {
 
 test("daemon workforce request binds token-backed mutations to the session workforce root", async () => {
   await useTempHome()
-  const sessionId = "workforce-session-match"
+  const sessionId = `workforce-session-match-${randomUUID()}`
   const token = "workforce-token-match"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-match-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
@@ -261,6 +265,18 @@ test("daemon workforce request binds token-backed mutations to the session workf
 
   const calls: Array<{ rootDir: string; mutationType: string; actorRootDir: string | null }> = []
   const daemon = await startTestDaemon({
+    auth: {
+      getSessionByToken: async (candidateToken) =>
+        candidateToken === token
+          ? {
+              sessionId,
+              owner: "trusted",
+              repo: "widgets",
+              allowedPrNumbers: [],
+            }
+          : null,
+      addAllowedPr: async () => undefined,
+    },
     createWorkforceManager: () =>
       createStaticWorkforceManager((rootDir, mutation, actor) => {
         calls.push({
@@ -292,7 +308,7 @@ test("daemon workforce request binds token-backed mutations to the session workf
 
 test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {
   await useTempHome()
-  const sessionId = "workforce-session-mismatch"
+  const sessionId = `workforce-session-mismatch-${randomUUID()}`
   const token = "workforce-token-mismatch"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-a-"))
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-b-"))
@@ -307,6 +323,18 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
   const calls: Array<{ rootDir: string }> = []
   const daemon = await startTestDaemon({
+    auth: {
+      getSessionByToken: async (candidateToken) =>
+        candidateToken === token
+          ? {
+              sessionId,
+              owner: "trusted",
+              repo: "widgets",
+              allowedPrNumbers: [],
+            }
+          : null,
+      addAllowedPr: async () => undefined,
+    },
     createWorkforceManager: () =>
       createStaticWorkforceManager((rootDir) => {
         calls.push({ rootDir })
@@ -328,7 +356,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
 test("daemon workforce respond rejects mismatched roots for token-backed sessions", async () => {
   await useTempHome()
-  const sessionId = "workforce-session-respond"
+  const sessionId = `workforce-session-respond-${randomUUID()}`
   const token = "workforce-token-respond"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-c-"))
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-d-"))
@@ -342,6 +370,18 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
   })
 
   const daemon = await startTestDaemon({
+    auth: {
+      getSessionByToken: async (candidateToken) =>
+        candidateToken === token
+          ? {
+              sessionId,
+              owner: "trusted",
+              repo: "widgets",
+              allowedPrNumbers: [],
+            }
+          : null,
+      addAllowedPr: async () => undefined,
+    },
     createWorkforceManager: () => createStaticWorkforceManager(() => {}),
   })
 
@@ -357,7 +397,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
 
 test("daemon workforce request rejects token-backed sessions without a workforce root", async () => {
   await useTempHome()
-  const sessionId = "workforce-session-no-root"
+  const sessionId = `workforce-session-no-root-${randomUUID()}`
   const token = "workforce-token-no-root"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-e-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
@@ -370,6 +410,18 @@ test("daemon workforce request rejects token-backed sessions without a workforce
   })
 
   const daemon = await startTestDaemon({
+    auth: {
+      getSessionByToken: async (candidateToken) =>
+        candidateToken === token
+          ? {
+              sessionId,
+              owner: "trusted",
+              repo: "widgets",
+              allowedPrNumbers: [],
+            }
+          : null,
+      addAllowedPr: async () => undefined,
+    },
     createWorkforceManager: () => createStaticWorkforceManager(() => {}),
   })
 

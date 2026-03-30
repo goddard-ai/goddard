@@ -1,5 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { spawnSync } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
@@ -98,10 +99,11 @@ test("daemon persists repository context into durable session storage", async ()
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {
   await useTempHome()
 
-  const sessionId = "session-restart-1"
+  const sessionId = `session-restart-${randomUUID()}`
+  const acpId = `acp-restart-${randomUUID()}`
   await SessionStorage.create({
     id: sessionId,
-    acpId: "acp-restart-1",
+    acpId,
     status: "active",
     agentName: "node",
     cwd: process.cwd(),
@@ -110,7 +112,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   })
   await SessionStateStorage.create({
     sessionId,
-    acpId: "acp-restart-1",
+    acpId,
     connectionMode: "live",
     history: [{ jsonrpc: "2.0", method: "session/update", params: { value: "persisted" } }],
     diagnostics: [],

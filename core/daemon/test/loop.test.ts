@@ -366,7 +366,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   )
 
   await waitForExpectation(() => {
-    expect(sessionManager.promptSession).toHaveBeenCalledTimes(3)
+    expect(promptSessionCalls).toHaveLength(3)
   })
   expect(newSessionCalls[0]).toEqual(
     expect.objectContaining({
@@ -375,7 +375,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     }),
   )
   await waitForExpectation(() => {
-    expect(sessionManager.shutdownSession).toHaveBeenCalledWith("session-1")
+    expect(shutdownSessionCalls).toContain("session-1")
   })
 
   expect(runtime.getStatus()).toEqual(
