@@ -15,10 +15,11 @@
 - Keep shared state out of components.
   - What:
     - Put every complex domain in a dedicated `preact-sigma` state module.
+    - Expose shared sigma instances through Preact Context hooks instead of threading them through intermediate component props.
     - Let components render props and call semantic actions; do not let them own cross-tab data, persistence, or IPC.
     - Use local component state only for short-lived UI concerns such as hover, focus, popovers, and splitter sizes.
   - Why:
-    - The planned app has many cross-cutting concerns such as auth, repository registry, tab caching, realtime activity, and action applicability. Those become brittle quickly if they leak into view components.
+    - The planned app has many cross-cutting concerns such as auth, project scope, tab caching, realtime activity, and action applicability. Those become brittle quickly if they leak into view components.
 
 - Keep hook usage deliberate.
   - What:
@@ -34,19 +35,31 @@
     - Keep state local when possible and store the minimal source of truth.
     - Derive cheap display values during render instead of duplicating them in state.
     - Prefer explicit status fields or discriminated unions over piles of booleans, and model non-trivial transitions explicitly.
+    - Do not keep state that no rendered component currently uses.
+    - Remove sigma fields and actions that only support unused UI paths.
+    - Do not mint separate ids when a stable source value already exists.
+    - Trim path strings at input boundaries, not inside shared domain state.
   - Why:
     - Minimal, explicit state keeps impossible states harder to represent and makes tab-heavy UI flows easier to reason about.
+
+- Keep component APIs literal and direct.
+  - What:
+    - Never destructure component props; read values from the `props` object.
+    - Define component prop types inline instead of introducing `Props` aliases or interfaces.
+    - Use inline Panda `css(...)` calls by default and only hoist a class when the same class value is reused in multiple places.
+  - Why:
+    - These conventions keep small Preact components easier to scan and reduce the amount of naming and indirection needed around straightforward view code.
 
 - Normalize shared records by stable identity.
   - What:
     - Store shared entities in maps keyed by durable ids or refs, then derive ordered lists, filters, and view models from that normalized state.
     - Keep raw contract values intact and derive UI-only labels separately.
   - Why:
-    - The same session, pull request, task, proposal, repository, or action may appear in multiple pages, search results, and tabs at once. Normalization prevents drift and makes cross-view updates predictable.
+    - The same session, pull request, task, proposal, project, or action may appear in multiple pages, search results, and tabs at once. Normalization prevents drift and makes cross-view updates predictable.
 
 - Use semantic actions, never ad hoc setters.
   - What:
-    - Expose intentful actions such as `openOrFocusTab`, `submitLaunch`, `startDeviceFlow`, `addManagedRepository`, or `submitPullRequest`.
+    - Expose intentful actions such as `openOrFocusTab`, `submitLaunch`, `startDeviceFlow`, `addProject`, or `submitPullRequest`.
     - Avoid generic setters that force callers to know internal state shape.
   - Why:
     - Semantic actions make state modules easier to change without breaking callers and communicate the real domain transition being requested.
@@ -54,15 +67,16 @@
 - Coordinate domains through explicit state actions.
   - What:
     - Let one state module call another through well-defined actions or injected adapters when a workflow crosses boundaries.
-    - Do not have components manually orchestrate multi-step flows across auth, tabs, repositories, actions, and realtime state.
+    - Do not have components manually orchestrate multi-step flows across auth, tabs, projects, actions, and realtime state.
   - Why:
-    - The most important app flows are cross-domain by design: auth gates PR actions, session launch depends on repositories and actions, and search opens tabs across many domains.
+    - The most important app flows are cross-domain by design: auth gates PR actions, session launch depends on projects and actions, and search opens tabs across many domains.
 
 - Keep async work out of presentational components.
   - What:
     - Prefer state modules, semantic actions, or the established app data-loading layer over fetch-on-render inside view components.
     - Keep presentational components focused on rendering props and invoking actions.
     - Handle loading, empty, error, and success states explicitly, and account for cancellation or races when user input can trigger overlapping requests.
+    - Let `@tanstack/preact-query` own loading and error state for async reads instead of mirroring those flags in sigma modules.
   - Why:
     - Async behavior in views quickly turns into stale-data and interleaving bugs. Centralizing it keeps ownership, retries, and identity clearer.
 
@@ -73,12 +87,13 @@
   - Why:
     - The repository is explicitly SDK-first. The app should be a control surface and renderer, not a parallel product logic layer.
 
-- Treat managed repositories as the app’s machine-wide scope.
+- Treat projects as the app’s machine-wide scope.
   - What:
-    - Only operate on repositories the user explicitly adds to the repository registry.
-    - Pass repository identity through state and tab payloads whenever a workflow is repository-scoped.
+    - Only operate on local roots the user explicitly adds to the app’s project scope.
+    - Use `project` for app-level nouns and state unless a feature specifically requires git behavior.
+    - Pass project identity through state and tab payloads whenever a workflow is project-scoped.
   - Why:
-    - The app is intentionally machine-wide, but it still needs a bounded, explicit set of repositories for discovery, actions, loops, specs, tasks, and roadmap work.
+    - The app is intentionally machine-wide, but it still needs a bounded, explicit set of local projects for discovery, actions, loops, specs, tasks, and roadmap work.
 
 - Make auth lazy and protected-action based.
   - What:
@@ -105,7 +120,7 @@
 
 - Prefer list-first pages for operator workflows.
   - What:
-    - Use sortable, filterable lists for tasks, roadmap proposals, pull requests, repositories, actions, and loops.
+    - Use sortable, filterable lists for tasks, roadmap proposals, pull requests, projects, actions, and loops.
     - Avoid board-specific abstractions unless the product direction changes.
   - Why:
     - The current MVP direction is list-first, and the planned pages already lean on left-side filters plus full-width list layouts.
@@ -120,7 +135,7 @@
 
 - Keep creation and launch flows modal when the plan says so.
   - What:
-    - Use modal flows for session launch, device auth, repository add, loop start, and PR or action creation where the current plans already define them that way.
+    - Use modal flows for session launch, device auth, project add, loop start, and PR or action creation where the current plans already define them that way.
     - Do not smuggle those flows into inline composers or ephemeral header controls.
   - Why:
     - These workflows need validation, intent confirmation, and sometimes protected-action gating. A modal boundary keeps them explicit and reusable.
@@ -156,14 +171,16 @@
 
 - Prefer clear names that match user-facing nouns.
   - What:
-    - Use names like `RepositoriesPage`, `SessionLaunchState`, `ContextActionDropdown`, or `PullRequestComposeState`.
+    - Use names like `ProjectsPage`, `SessionLaunch`, `ContextActionDropdown`, or `PullRequestCompose`.
     - Avoid generic buckets such as `manager`, `store`, or `utils` when the module owns a real domain concept.
+    - Do not suffix sigma modules with `State`.
+    - When a sigma instance type is just `InstanceType<typeof MySigma>`, export it as a same-name interface instead of a differently named alias.
   - Why:
     - The plans are intentionally domain-shaped. Matching the code to those nouns makes ownership easier to recover later.
 
 - Build MVP flows end-to-end before layering deferred features.
   - What:
-    - Prioritize the planned MVP surfaces first: auth, repositories, sessions, actions, pull requests, specs, tasks, roadmap, loops, search, inbox, diff, MDX, and the shell itself.
-    - Leave deferred work such as dedicated PR-feedback UI, workforce UI, settings, extension catalog, and richer repository dashboards in the recommendation backlog until the core flows exist.
+    - Prioritize the planned MVP surfaces first: auth, projects, sessions, actions, pull requests, specs, tasks, roadmap, loops, search, inbox, diff, MDX, and the shell itself.
+    - Leave deferred work such as dedicated PR-feedback UI, workforce UI, settings, extension catalog, and richer project dashboards in the recommendation backlog until the core flows exist.
   - Why:
     - The app has a wide surface area already. Finishing the thin vertical slices is more valuable than widening the backlog further.

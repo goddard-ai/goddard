@@ -1,6 +1,6 @@
 # Component: ActionEditorView
 - **Minimum Viable Component:** Detail-tab editor for one action definition, including metadata, prompt content, scope, and save workflow.
-- **Props Interface:** `actionId: string`; `mode?: "edit" | "create"`; `sourceContext?: { repositoryId?: string | null }`.
+- **Props Interface:** `actionId: string`; `mode?: "edit" | "create"`; `sourceContext?: { projectPath?: string | null }`.
 - **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Simple local editor layout state; the actual draft, validation, and persistence workflow belong in `ActionDraftState`.
 - **Required Context:** `ActionDraftContext`, `ActionCatalogContext`.

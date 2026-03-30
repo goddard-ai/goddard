@@ -1,6 +1,6 @@
 # Component: ActionListRow
-- **Minimum Viable Component:** One row in the action catalog showing the action name, scope, repository applicability, and quick launch or edit actions.
-- **Props Interface:** `action: { id, name, scope, repositoryLabel?, applicabilitySummary, updatedAt }`; `isSelected: boolean`; `onSelect: (id) => void`; `onOpenEditor: (id) => void`; `onLaunchWithAction: (id) => void`.
+- **Minimum Viable Component:** One row in the action catalog showing the action name, scope, project applicability, and quick launch or edit actions.
+- **Props Interface:** `action: { id, name, scope, projectLabel?, applicabilitySummary, updatedAt }`; `isSelected: boolean`; `onSelect: (id) => void`; `onOpenEditor: (id) => void`; `onLaunchWithAction: (id) => void`.
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only hover and action visibility state.
 - **Required Context:** None.

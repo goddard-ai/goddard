@@ -1,6 +1,6 @@
 import { defineConfig } from "@pandacss/dev"
 
-/** Minimal Panda CSS setup for the app with custom color tokens only. */
+/** Minimal Panda CSS setup with a white canvas and restrained bluish-gray accents by default. */
 export default defineConfig({
   preflight: true,
   presets: [],
@@ -11,13 +11,15 @@ export default defineConfig({
   theme: {
     tokens: {
       colors: {
-        background: { value: "#0d1117" },
-        surface: { value: "#161b22" },
-        border: { value: "#30363d" },
-        text: { value: "#c9d1d9" },
-        muted: { value: "#8b949e" },
-        accent: { value: "#58a6ff" },
-        danger: { value: "#f85149" },
+        background: { value: "#ffffff" },
+        surface: { value: "#f5f7fa" },
+        panel: { value: "#fbfcfe" },
+        border: { value: "#d8e0ea" },
+        text: { value: "#18212b" },
+        muted: { value: "#66758a" },
+        accent: { value: "#8fa2b8" },
+        accentStrong: { value: "#6f8298" },
+        danger: { value: "#d45d5d" },
       },
     },
   },

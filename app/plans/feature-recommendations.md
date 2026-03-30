@@ -2,7 +2,7 @@
 
 - Context:
   - This file now tracks intentionally deferred follow-up work that is not yet represented by dedicated plan files.
-  - MVP plans now exist for auth, repository management, session launch, actions, pull request triage and compose, global search, spec discovery, task lists, roadmap lists, and loop management.
+  - MVP plans now exist for auth, project management, session launch, actions, pull request triage and compose, global search, spec discovery, task lists, roadmap lists, and loop management.
 
 - 1. Dedicated PR-Feedback Runtime Surface
   - Why deferred:
@@ -18,12 +18,12 @@
     - Components: `WorkforcePage`, `WorkforceRequestList`, `WorkforceRequestDetailView`
     - State: `WorkforceRuntimeState`
 
-- 3. Expanded Repository UX Beyond the Registry
+- 3. Expanded Project UX Beyond the Registry
   - Why deferred:
-    - The app now has a repository management page, but repository home pages, status bars, or richer per-repository dashboards remain undefined.
+    - The app now has a project management page, but project home pages, status bars, or richer per-project dashboards remain undefined.
   - Potential future plans:
-    - Components: `RepositoryHomeView`, `RepositoryStatusBar`
-    - State: `RepositoryContextState`
+    - Components: `ProjectHomeView`, `ProjectStatusBar`
+    - State: `ProjectContextState`
 
 - 4. Configuration and Settings Editing
   - Why deferred:

@@ -6,20 +6,20 @@
   - All currently planned components and state modules are assigned below, including explicitly blocked work.
 
 - Sequencing rules:
-  - Build shell, repository registry, and tab persistence before feature pages.
+  - Build shell, project registry, and tab persistence before feature pages.
   - Delay auth and auth-dependent workflows as long as possible so early implementation stays local-first.
   - Build domain state before connected page components in the same sprint.
   - Land cross-domain features such as search only after enough domains exist to index meaningfully.
   - Keep explicitly deferred or spec-blocked work out of the active MVP sequence.
 
-## Sprint 1: Shell and Repository Registry
+## Sprint 1: Shell and Project Registry
 
 - Goal:
-  - Make the app boot into a stable tab-first shell and establish the machine-wide repository registry.
+  - Make the app boot into a stable tab-first shell and establish the machine-wide project registry.
 - State:
   - `NavigationState`
   - `WorkbenchTabsState`
-  - `RepositoryRegistryState`
+  - `ProjectRegistry`
 - Components:
   - `AppShell`
   - `SidebarNav`
@@ -28,12 +28,12 @@
   - `WorkbenchTabs`
   - `WorkbenchTab`
   - `WorkbenchTabPanel`
-  - `RepositoriesPage`
-  - `RepositoryList`
-  - `RepositoryListRow`
-  - `AddRepositoryDialog`
+  - `ProjectsPage`
+  - `ProjectList`
+  - `ProjectListRow`
+  - `AddProjectDialog`
 - Why here:
-  - Every later feature depends on app-wide navigation, persistent tabs, and an explicit repository working set.
+  - Every later feature depends on app-wide navigation, persistent tabs, and an explicit project scope.
 
 ## Sprint 2: Sessions and Session Launch
 
@@ -89,9 +89,9 @@
 ## Sprint 5: Specs and MDX Document Workflows
 
 - Goal:
-  - Add repository-scoped document discovery and editable MDX document tabs for specification management.
+  - Add project-scoped document discovery and editable MDX document tabs for specification management.
 - State:
-  - `RepositoryContentState`
+  - `ProjectContentState`
   - `MdxDocumentState`
 - Components:
   - `SpecsPage`
@@ -102,7 +102,7 @@
   - `MdxDocumentToolbar`
   - `MdxEditorSurface`
 - Why here:
-  - Specification management depends on the repository registry and tab system, but does not need pull request or roadmap work to exist first.
+  - Specification management depends on the project registry and tab system, but does not need pull request or roadmap work to exist first.
 
 ## Sprint 6: Tasks and Roadmap Lists
 
@@ -123,7 +123,7 @@
   - `ProposalListRow`
   - `ProposalDetailView`
 - Why here:
-  - These pages reuse the list, tab, repository, and action patterns established earlier, but they are not prerequisites for the core session and pull request loop.
+  - These pages reuse the list, tab, project, and action patterns established earlier, but they are not prerequisites for the core session and pull request loop.
 
 ## Sprint 7: Global Search and Loop Operations
 
@@ -142,7 +142,7 @@
   - `LoopListRow`
   - `StartLoopDialog`
 - Why here:
-  - Search quality improves after most domains exist, and loop control is valuable once the app already has repositories, sessions, and actions in place.
+  - Search quality improves after most domains exist, and loop control is valuable once the app already has projects, sessions, and actions in place.
 
 ## Sprint 8: Auth, Pull Requests, Inbox, and Realtime Review
 

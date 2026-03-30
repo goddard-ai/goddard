@@ -7,6 +7,7 @@ import type {
   DaemonRequestPayload,
   DaemonRequestResponse,
   DaemonSendInput,
+  ProjectInspection,
   RuntimeInfo,
 } from "./shared/desktop-rpc"
 
@@ -23,6 +24,12 @@ let electroview: Electroview<typeof rpc> | undefined
 export interface DesktopHostBridge {
   /** Returns the active desktop runtime reported by the Bun host. */
   getRuntimeInfo(): Promise<RuntimeInfo>
+
+  /** Opens one native directory picker and returns the chosen project root when present. */
+  browseForProject(): Promise<string | null>
+
+  /** Validates one local project path through the Bun host. */
+  inspectProjectPath(path: string): Promise<ProjectInspection>
 
   /** Forwards one daemon IPC request through the Bun host's default daemon client. */
   daemonSend<Name extends DaemonRequestName>(
@@ -54,6 +61,17 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   return await rpc.request.runtimeInfo({})
 }
 
+/** Opens one native directory picker for project selection. */
+export async function browseForProject(): Promise<string | null> {
+  const response = await rpc.request.browseForProject({})
+  return response.path
+}
+
+/** Validates one project path through the Bun host. */
+export async function inspectProjectPath(path: string): Promise<ProjectInspection> {
+  return await rpc.request.inspectProject({ path })
+}
+
 /** Forwards one daemon IPC request through the Bun host. */
 export async function daemonSend<Name extends DaemonRequestName>(
   name: Name,
@@ -66,6 +84,8 @@ export async function daemonSend<Name extends DaemonRequestName>(
 /** Shared browser-side desktop host adapter for the current webview. */
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
+  browseForProject,
+  inspectProjectPath,
   daemonSend,
   sdk: goddardSdk,
 }

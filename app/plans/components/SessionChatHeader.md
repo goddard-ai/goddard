@@ -1,6 +1,6 @@
 # Component: SessionChatHeader
-- **Minimum Viable Component:** Summary header for a chat tab showing the session title, repository context, lifecycle status, contextual actions, and quick navigation actions.
-- **Props Interface:** `session: { id, title, repositorySlug, rawStatus, displayStatusLabel, updatedAt, initiative, blockedReason }`; `connection: { mode, reconnectable }`; `currentTabContext?: { kind, repositoryId?, entityRef? } | null`; `onReconnect: () => void`; `onStop: () => void`; `onOpenDiff: () => void`; `onOpenPullRequest: () => void`; `onActionSelect?: (actionId) => void`.
+- **Minimum Viable Component:** Summary header for a chat tab showing the session title, project context, lifecycle status, contextual actions, and quick navigation actions.
+- **Props Interface:** `session: { id, title, repositorySlug, rawStatus, displayStatusLabel, updatedAt, initiative, blockedReason }`; `connection: { mode, reconnectable }`; `currentTabContext?: { kind, projectPath?, entityRef? } | null`; `onReconnect: () => void`; `onStop: () => void`; `onOpenDiff: () => void`; `onOpenPullRequest: () => void`; `onActionSelect?: (actionId) => void`.
 - **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Simple UI-only button disabled states and overflow menu presentation.
 - **Required Context:** `ActionCatalogContext` when the contextual action menu is connected here.

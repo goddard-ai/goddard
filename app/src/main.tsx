@@ -1,11 +1,19 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/preact-query"
 import { render } from "preact"
 import App from "./App"
 import { desktopHost, initializeDesktopHost } from "./desktop-host"
-import "./App.css"
+import "../styled-system/styles.css"
+
+const queryClient = new QueryClient()
 
 initializeDesktopHost()
 
 // Expose the desktop bridge for manual smoke checks until real flows consume it.
 window.__goddardDesktop = desktopHost
 
-render(<App />, document.getElementById("root")!)
+render(
+  <QueryClientProvider client={queryClient}>
+    <App />
+  </QueryClientProvider>,
+  document.getElementById("root")!,
+)

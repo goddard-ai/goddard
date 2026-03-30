@@ -13,7 +13,7 @@
   - The in-memory record that keeps recently closed or hidden tab state available for fast restoration.
   - Why: so tab eviction can satisfy the cap without making every reopen a cold start.
 - `Inbox Item`
-  - One actionable notification in the coding-agent inbox, linked to a session, pull request, diff, or repository event.
+  - One actionable notification in the coding-agent inbox, linked to a session, pull request, diff, or project-linked event.
   - Why: so inbox workflows operate on stable records instead of ad hoc UI rows.
 - `Preview Session`
   - The browser-preview state attached to one preview tab, including navigation history and console output.
@@ -25,17 +25,20 @@
   - The shared authenticated event feed that updates sessions, inbox items, and pull requests.
   - Why: so feature areas do not create overlapping subscriptions to the same backend activity.
 - `Action`
-  - A named reusable prompt-driven workflow that can be global or repository-scoped and can prefill one session launch or other tab-aware action flow.
+  - A named reusable prompt-driven workflow that can be global or project-scoped and can prefill one session launch or other tab-aware action flow.
   - Why: so preset behavior is managed as a first-class app and configuration concept instead of informal prompt snippets.
 - `Applicable Action`
-  - An action considered relevant to the current tab context, such as the active repository, pull request, session, or document.
+  - An action considered relevant to the current tab context, such as the active project, pull request, session, or document.
   - Why: so the action dropdown can mix globally available actions with context-sensitive ones predictably.
-- `Managed Repository`
-  - One repository root the user has explicitly added to the desktop workspace for discovery, automation, and review workflows.
-  - Why: so the app can operate across the whole machine without treating every git checkout as implicitly in scope.
+- `Project`
+  - One local root the user has explicitly added to the desktop workspace for discovery, automation, and review workflows, whether or not it is a git repository.
+  - Why: so the app can operate across the whole machine without treating every local checkout or folder as implicitly in scope.
+- `Repository`
+  - A git-specific project context.
+  - Why: so app-level naming can stay broader than git when the workflow only needs a local project root.
 - `Protected Action`
   - One UI action that requires authenticated backend or GitHub identity before it can proceed.
   - Why: so lazy authentication can gate only the workflows that actually need external identity.
 - `Loop Runtime`
-  - One daemon-managed autonomous loop instance addressed by repository root and loop name.
+  - One daemon-managed autonomous loop instance addressed by project root and loop name.
   - Why: so operators can inspect and control repeated automation separately from ordinary daemon sessions.
