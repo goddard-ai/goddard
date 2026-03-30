@@ -32,6 +32,7 @@ Use `@goddard-ai/sdk` when you need to:
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, cancellation, history, shutdown, and model changes.
+- Subscribe to live daemon-filtered session updates through `sdk.session.subscribe(...)`.
 
 Use `@goddard-ai/sdk/node` when you need to:
 
@@ -42,6 +43,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 
 - The SDK mirrors the daemon IPC contract through namespace getters.
 - `sdk.session.run(...)` is the object-backed exception used for live agent session interaction.
+- `sdk.session.subscribe(...)` is the callback-based exception used for live daemon session updates.
 - Each namespace method takes one plain object payload.
 - Each namespace method exposes the daemon response shape directly.
 - The namespace getters are cached after first access.
@@ -82,6 +84,11 @@ const loop = await sdk.loop.get({
   rootDir: "/workspace",
   loopName: "triage",
 })
+const unsubscribe = await sdk.session.subscribe({ id: "session-1" }, (message) => {
+  console.log(message)
+})
+
+unsubscribe()
 ```
 
 Node usage:

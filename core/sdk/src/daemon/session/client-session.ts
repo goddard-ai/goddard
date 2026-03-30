@@ -1,11 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
 
 /** Managed agent session connected to the daemon over IPC. */
 export class AgentSession {
   public readonly sessionId: string
-  public readonly session: DaemonSession
 
   private readonly acpSessionId: string
   private readonly acpClient: acp.ClientSideConnection
@@ -15,14 +13,12 @@ export class AgentSession {
   constructor(
     sessionId: string,
     acpSessionId: string,
-    session: DaemonSession,
     acpClient: acp.ClientSideConnection,
     daemonClient: DaemonIpcClient,
     closeStream: () => Promise<void> | void,
   ) {
     this.sessionId = sessionId
     this.acpSessionId = acpSessionId
-    this.session = session
     this.acpClient = acpClient
     this.daemonClient = daemonClient
     this.closeStream = closeStream
@@ -43,19 +39,6 @@ export class AgentSession {
 
   /** Sets the active model for the connected agent session. */
   async setAgentModel(modelId: string) {
-    const models = this.session.models
-
-    if (models) {
-      if (models.currentModelId === modelId) {
-        return
-      }
-
-      const isModelAvailable = models.availableModels.some((m) => m.modelId === modelId)
-      if (!isModelAvailable) {
-        throw new Error(`Model ${modelId} is not available for this session`)
-      }
-    }
-
     await this.acpClient.unstable_setSessionModel({
       sessionId: this.acpSessionId,
       modelId,

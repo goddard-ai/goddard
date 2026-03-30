@@ -1,6 +1,12 @@
 import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
-import { type AppSchema, type ReqName, type StrName, type StrPayload } from "../schema.ts"
+import {
+  type AppSchema,
+  type ReqName,
+  type StrName,
+  type StrPayload,
+  type StrSubscription,
+} from "../schema.ts"
 import { type Handlers } from "../types.ts"
 
 /** Converts one unknown thrown value into a stable IPC error string. */
@@ -38,6 +44,42 @@ function safeUnlink(socketPath: string): void {
   }
 }
 
+/** Normalizes shorthand and object stream definitions into payload and optional subscription schemas. */
+function getStreamSchemas<S extends AppSchema, K extends StrName<S>>(schema: S, name: K) {
+  const definition = schema.server.streams[name]
+  if ("safeParse" in definition) {
+    return {
+      payload: definition,
+      subscription: undefined,
+    }
+  }
+
+  return {
+    payload: definition.payload,
+    subscription: definition.subscription,
+  }
+}
+
+/** Matches one validated stream payload against one validated subscription filter. */
+function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boolean {
+  if (subscription === undefined) {
+    return true
+  }
+
+  if (
+    typeof subscription !== "object" ||
+    subscription === null ||
+    typeof payload !== "object" ||
+    payload === null
+  ) {
+    return Object.is(subscription, payload)
+  }
+
+  return Object.entries(subscription).every(([key, value]) =>
+    Object.is((payload as Record<string, unknown>)[key], value),
+  )
+}
+
 /** Creates the Node IPC server for one socket-backed application schema. */
 export function createServer<S extends AppSchema>(
   socketPath: string,
@@ -46,15 +88,22 @@ export function createServer<S extends AppSchema>(
 ) {
   const streamClients = new Set<{
     name: string
+    subscription: unknown
     res: http.ServerResponse
   }>()
 
   function publish<K extends StrName<S>>(name: K, payload: StrPayload<S, K>) {
-    const validPayload = schema.server.streams[name].parse(payload)
+    const { payload: payloadSchema } = getStreamSchemas(schema, name)
+    const validPayload = payloadSchema.parse(payload)
     const chunk = JSON.stringify({ name, payload: validPayload }) + "\n"
 
     for (const client of streamClients) {
-      if (client.name === name && !client.res.destroyed && !client.res.writableEnded) {
+      if (
+        client.name === name &&
+        matchesSubscriptionFilter(client.subscription, validPayload) &&
+        !client.res.destroyed &&
+        !client.res.writableEnded
+      ) {
         client.res.write(chunk)
       }
     }
@@ -101,6 +150,26 @@ export function createServer<S extends AppSchema>(
           return
         }
 
+        let subscription: StrSubscription<S, StrName<S>> | undefined
+        try {
+          const { subscription: subscriptionSchema } = getStreamSchemas(schema, name as StrName<S>)
+          const rawSubscription = url.searchParams.get("subscription")
+          if (rawSubscription && !subscriptionSchema) {
+            throw new Error(`Stream ${name} does not accept subscription params`)
+          }
+          subscription =
+            rawSubscription && subscriptionSchema
+              ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as StrSubscription<
+                  S,
+                  StrName<S>
+                >)
+              : undefined
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "text/plain" })
+          res.end(getErrorMessage(error))
+          return
+        }
+
         res.writeHead(200, {
           "Content-Type": "application/x-ndjson",
           "Cache-Control": "no-cache",
@@ -108,7 +177,7 @@ export function createServer<S extends AppSchema>(
         })
         res.flushHeaders()
 
-        const client = { name, res }
+        const client = { name, subscription, res }
         streamClients.add(client)
 
         const removeClient = () => {

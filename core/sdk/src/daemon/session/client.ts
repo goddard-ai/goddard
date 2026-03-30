@@ -87,9 +87,8 @@ async function createMessageOutputTransport(
   const writer = stream.writable.getWriter()
   let closed = false
 
-  const unsubscribe = await client.subscribe("sessionMessage", ({ id: messageId, message }) => {
+  const unsubscribe = await client.subscribe("sessionMessage", { id }, ({ message }) => {
     if (
-      messageId !== id ||
       closed ||
       (typeof message === "object" &&
         message !== null &&
@@ -202,12 +201,5 @@ export async function runSession(
     acp.ndJsonStream(agentInput, agentOutput.readable),
   )
 
-  return new AgentSession(
-    daemonSessionId,
-    acpSessionId,
-    connectedSession.session,
-    acpClient,
-    client,
-    agentOutput.close,
-  )
+  return new AgentSession(daemonSessionId, acpSessionId, acpClient, client, agentOutput.close)
 }

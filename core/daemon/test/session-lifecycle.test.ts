@@ -163,16 +163,20 @@ test("multiple clients can observe the same live session stream independently", 
 
   const clientAMessages: unknown[] = []
   const clientBMessages: unknown[] = []
-  const unsubscribeA = await clientA.subscribe("sessionMessage", (payload) => {
-    if (payload.id === created.session.id) {
+  const unsubscribeA = await clientA.subscribe(
+    "sessionMessage",
+    { id: created.session.id },
+    (payload) => {
       clientAMessages.push(payload.message)
-    }
-  })
-  const unsubscribeB = await clientB.subscribe("sessionMessage", (payload) => {
-    if (payload.id === created.session.id) {
+    },
+  )
+  const unsubscribeB = await clientB.subscribe(
+    "sessionMessage",
+    { id: created.session.id },
+    (payload) => {
       clientBMessages.push(payload.message)
-    }
-  })
+    },
+  )
 
   await clientA.send("sessionSend", {
     id: created.session.id,

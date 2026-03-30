@@ -48,6 +48,38 @@ export const DaemonSessionPathParams = DaemonSessionIdParams
 
 export type DaemonSessionPathParams = z.infer<typeof DaemonSessionPathParams>
 
+/** Request payload used to forward one raw ACP message to a daemon-managed session. */
+export const SendDaemonSessionMessageRequest = z.object({
+  id: z.string(),
+  message: z.unknown(),
+})
+
+/** Compile-time shape of one raw ACP message forwarded to a daemon-managed session. */
+export interface SendDaemonSessionMessageRequest {
+  id: string
+  message: acp.AnyMessage
+}
+
+/** Request payload used to resolve one daemon session token into its daemon session id. */
+export const ResolveDaemonSessionTokenRequest = z.object({
+  token: z.string(),
+})
+
+/** Compile-time shape used to resolve one daemon session token into its daemon session id. */
+export type ResolveDaemonSessionTokenRequest = z.infer<typeof ResolveDaemonSessionTokenRequest>
+
+/** Stream payload emitted for one daemon-managed ACP session message. */
+export const DaemonSessionMessageEvent = z.object({
+  id: z.string(),
+  message: z.unknown(),
+})
+
+/** Compile-time shape of one daemon-managed ACP session message event. */
+export interface DaemonSessionMessageEvent {
+  id: string
+  message: acp.AnyMessage
+}
+
 /** Runtime environment variables injected into one daemon-managed session. */
 export type DaemonSessionRuntimeEnv = {
   GODDARD_SESSION_TOKEN: string

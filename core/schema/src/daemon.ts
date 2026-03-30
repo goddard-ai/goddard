@@ -23,6 +23,7 @@ export type { DaemonSessionMetadata, SessionWorktreeMetadata } from "./daemon/se
 export type {
   CreateDaemonSessionRequest,
   CreateDaemonSessionResponse,
+  DaemonSessionMessageEvent,
   DaemonDiagnosticEvent,
   DaemonSession,
   DaemonSessionConnection,
@@ -35,6 +36,8 @@ export type {
   GetDaemonSessionResponse,
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
+  ResolveDaemonSessionTokenRequest,
+  SendDaemonSessionMessageRequest,
   ShutdownDaemonSessionResponse,
 } from "./daemon/sessions.ts"
 export type {
