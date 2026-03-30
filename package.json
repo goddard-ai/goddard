@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "workspaces": [
+    "app",
+    "core/*",
+    "core/daemon/client",
+    "workforce"
+  ],
   "scripts": {
     "prepare": "husky",
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",

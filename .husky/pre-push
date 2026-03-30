@@ -20,14 +20,14 @@ if [ "$is_pushing_current_branch" -ne 1 ]; then
 fi
 
 if ! git rev-parse --verify --quiet origin/main >/dev/null; then
-  pnpm install && pnpm check || exit 1
+  bun install && bun check || exit 1
   exit 0
 fi
 
 branch_point=$(git merge-base HEAD origin/main)
 
 if [ -z "$branch_point" ]; then
-  pnpm install && pnpm check || exit 1
+  bun install && bun check || exit 1
   exit 0
 fi
 
@@ -37,5 +37,5 @@ changed_files=$(git diff --name-only "$branch_point"..HEAD)
 if printf '%s\n' "$changed_files" | grep -Eq \
   '(^|/)src/.*\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$|(^|/).*\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$|(^|/)tsconfig(\.[^/]+)?\.json$|(^|/)package\.json$|(^|/)tsdown\.config\.ts$'
 then
-  pnpm install && pnpm check || exit 1
+  bun install && bun check || exit 1
 fi

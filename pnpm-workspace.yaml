@@ -1,5 +1,0 @@
-packages:
-  - "app"
-  - "core/*"
-  - "core/daemon/client"
-  - "workforce"
