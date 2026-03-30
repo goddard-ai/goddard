@@ -8,6 +8,7 @@ let mainWindow: BrowserWindow<typeof appRpc> | null = null
 function createMainWindow(): BrowserWindow<typeof appRpc> {
   const window = new BrowserWindow({
     title: "Goddard",
+    titleBarStyle: "hiddenInset",
     url: "views://main/index.html",
     rpc: appRpc,
   })

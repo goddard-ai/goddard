@@ -9,6 +9,7 @@ import type { NavigationItem, NavigationItemId } from "./state/Navigation"
 
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {
+  className?: string
   items: Array<NavigationItem & { badgeCount?: number }>
   selectedItemId: NavigationItemId
   onSelect: (id: NavigationItemId) => void
@@ -23,16 +24,19 @@ export function SidebarNav(props: {
     <Tooltip.Provider delayDuration={450} skipDelayDuration={80}>
       <nav
         aria-label="Primary"
-        class={css({
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-          width: "92px",
-          padding: "18px 16px",
-          borderRight: "1px solid",
-          borderColor: "border",
-          background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
-        })}
+        class={[
+          css({
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            width: "92px",
+            padding: "18px 16px",
+            borderRight: "1px solid",
+            borderColor: "border",
+            background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
+          }),
+          props.className,
+        ].join(" ")}
       >
         <div
           class={css({

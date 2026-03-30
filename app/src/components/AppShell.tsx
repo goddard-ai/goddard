@@ -47,6 +47,14 @@ const detailBodyClass = css({
   lineHeight: "1.72",
 })
 
+const windowDragRegionClass = css({
+  height: "36px",
+  minHeight: "36px",
+  borderBottom: "1px solid",
+  borderColor: "border",
+  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
+})
+
 /** Renders the tab-first shell and its primary workbench view. */
 export function AppShell() {
   const navigation = useNavigation()
@@ -62,6 +70,7 @@ export function AppShell() {
         position: "relative",
         display: "grid",
         gridTemplateColumns: "92px minmax(0, 1fr)",
+        gridTemplateRows: "36px minmax(0, 1fr)",
         minHeight: "100vh",
         background:
           `radial-gradient(circle at top left, color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), transparent 28%), ` +
@@ -69,7 +78,10 @@ export function AppShell() {
         color: "text",
       })}
     >
+      <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
+      <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
       <SidebarNav
+        className={css({ gridRow: "2" })}
         items={navigationItems}
         onSelect={(id) => {
           navigation.selectNavItem(id)
@@ -79,10 +91,11 @@ export function AppShell() {
       />
       <div
         class={css({
+          gridRow: "2",
           display: "grid",
           gridTemplateRows: "auto minmax(0, 1fr)",
           minWidth: "0",
-          minHeight: "100vh",
+          minHeight: "0",
         })}
       >
         <WorkbenchTabsConnected />
