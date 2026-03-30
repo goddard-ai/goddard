@@ -1,0 +1,18 @@
+{
+  "name": "@goddard-ai/styled-system",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "exports": {
+    "./css": "./css/index.d.ts",
+    "./tokens": "./tokens/index.d.ts",
+    "./types": "./types/index.d.ts",
+    "./patterns": "./patterns/index.d.ts",
+    "./recipes": "./recipes/index.d.ts",
+    "./jsx": "./jsx/index.d.ts"
+  },
+  "devDependencies": {
+    "@pandacss/dev": "^1.9.1"
+  }
+}

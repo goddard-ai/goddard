@@ -25,6 +25,7 @@
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/sdk": "workspace:^",
+    "@goddard-ai/styled-system": "link:styled-system",
     "@preact/signals": "^2.8.1",
     "@tanstack/preact-query": "^5.95.2",
     "electrobun": "^1.16.0",

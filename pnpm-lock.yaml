@@ -74,6 +74,9 @@ importers:
       '@goddard-ai/sdk':
         specifier: workspace:^
         version: link:../core/sdk
+      '@goddard-ai/styled-system':
+        specifier: link:styled-system
+        version: link:styled-system
       '@preact/signals':
         specifier: ^2.8.1
         version: 2.8.1(preact@11.0.0-beta.1)
