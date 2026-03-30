@@ -15,7 +15,7 @@
     "fmt": "oxfmt",
     "test": "vitest run -c ../vitest.config.ts",
     "pretypecheck": "bun run panda:sync",
-    "typecheck": "tsgo -p tsconfig.bun.json --noEmit && tsgo -p tsconfig.dom.json --noEmit",
+    "typecheck": "picorun 'tsgo -p src/bun --noEmit' 'tsgo --noEmit' --names='tsgo:src/bun',tsgo",
     "electrobun:watch": "electrobun dev --watch",
     "panda:sync": "panda codegen && panda cssgen",
     "panda:watch": "panda --watch"

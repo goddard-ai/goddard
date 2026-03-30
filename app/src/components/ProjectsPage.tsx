@@ -3,9 +3,9 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { useMutation } from "@tanstack/preact-query"
 import { useEffect } from "preact/hooks"
-import { useProjectRegistry, useWorkbenchTabSet } from "../state/app-context"
-import { lookupProject, type ProjectRecord } from "../state/project-registry"
 import { pickProjectPath, validateProjectPath } from "../support/project-service"
+import { lookupProject, type ProjectRecord } from "./Projects/state/ProjectRegistry"
+import { useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
 
 const cardClass = css({
   display: "flex",

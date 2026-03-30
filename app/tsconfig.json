@@ -12,6 +12,6 @@
       "react-dom": ["./node_modules/preact/compat"]
     }
   },
-  "include": ["src", "node_modules"],
+  "include": ["src"],
   "exclude": ["src/bun"]
 }
