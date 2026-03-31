@@ -12,7 +12,7 @@ export function SidebarNav(props: {
   className?: string
   items: Array<NavigationItem & { badgeCount?: number }>
   selectedItemId: NavigationItemId
-  onSelect: (id: NavigationItemId) => void
+  onSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
 }) {
   const focusedIndex = useSignal(props.items.findIndex((item) => item.id === props.selectedItemId))
 
@@ -99,7 +99,7 @@ function SidebarNavItem(props: {
   isFocused: boolean
   onFocus: () => void
   onMoveFocus: (delta: number) => void
-  onSelect: (id: NavigationItemId) => void
+  onSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
 }) {
   return (
     <Tooltip.Root>
@@ -142,8 +142,8 @@ function SidebarNavItem(props: {
           })}
           data-selected={props.isSelected}
           type="button"
-          onClick={() => {
-            props.onSelect(props.item.id)
+          onClick={(event) => {
+            props.onSelect(props.item.id, { openInTab: event.metaKey })
           }}
           onFocus={props.onFocus}
           onKeyDown={(event) => {

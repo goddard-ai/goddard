@@ -1,15 +1,15 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import type { FunctionComponent } from "preact"
+import { Suspense } from "preact/compat"
 import { ProjectsPage } from "./Projects/ProjectsPage"
-import { lookupProject } from "./Projects/state/ProjectRegistry"
 import { SidebarNav } from "./SidebarNav"
 import { ShellIcon } from "../support/shell-icons"
-import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
+import type { NavigationItemId } from "./state/Navigation"
+import { useNavigation, useWorkbenchTabSet } from "./state/AppStateContext"
+import { getWorkbenchTabComponent, type WorkbenchTab } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 import { WorkbenchTabs } from "./WorkbenchTabs"
-import { useEffect } from "preact/hooks"
-import { DEBUG_MENU_EVENT_NAME, DebugMenuEventDetail } from "../shared/debug-menu"
-import { useListener } from "preact-sigma"
 
 const placeholderPageClass = css({
   display: "grid",
@@ -45,11 +45,6 @@ const placeholderBodyClass = css({
   maxWidth: "50ch",
 })
 
-const detailBodyClass = css({
-  color: "muted",
-  lineHeight: "1.72",
-})
-
 const windowDragRegionClass = css({
   height: "36px",
   minHeight: "36px",
@@ -57,6 +52,26 @@ const windowDragRegionClass = css({
   borderColor: "border",
   background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
 })
+
+/** Creates one stable closable tab for a primary navigation surface when supported. */
+function createPrimaryWorkbenchTab(
+  navId: NavigationItemId,
+  title: string,
+  icon: WorkbenchTab["icon"],
+): WorkbenchTab | null {
+  if (navId === "projects") {
+    return {
+      id: "primary:projects",
+      kind: "projects",
+      title,
+      icon,
+      payload: {},
+      dirty: false,
+    }
+  }
+
+  return null
+}
 
 /** Renders the tab-first shell and its primary workbench view. */
 export function AppShell() {
@@ -66,20 +81,6 @@ export function AppShell() {
     ...item,
     badgeCount: navigation.badgeCounts[item.id],
   }))
-
-  useListener(window, DEBUG_MENU_EVENT_NAME, (event) => {
-    const detail = event.detail as DebugMenuEventDetail
-    workbenchTabSet.openOrFocusTab({
-      id: "debug:session-chat-transcript",
-      kind: "sessionChatTranscriptDebug",
-      title: "Transcript Debug",
-      icon: "sessions",
-      payload: {
-        surface: detail.surface as any,
-      },
-      dirty: false,
-    })
-  })
 
   return (
     <div
@@ -100,7 +101,21 @@ export function AppShell() {
       <SidebarNav
         className={css({ gridRow: "2" })}
         items={navigationItems}
-        onSelect={(id) => {
+        onSelect={(id, options) => {
+          if (options?.openInTab) {
+            const tab = createPrimaryWorkbenchTab(
+              id,
+              navigation.items.find((item) => item.id === id)?.label ??
+                navigation.selectedItem.label,
+              navigation.items.find((item) => item.id === id)?.icon ?? navigation.selectedItem.icon,
+            )
+
+            if (tab) {
+              workbenchTabSet.openOrFocusTab(tab)
+              return
+            }
+          }
+
           navigation.selectNavItem(id)
           workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
         }}
@@ -136,7 +151,7 @@ function WorkbenchTabsConnected() {
   return (
     <WorkbenchTabs
       activeTabId={workbenchTabSet.activeTabId}
-      detailTabs={workbenchTabSet.detailTabList}
+      tabs={workbenchTabSet.tabList}
       onClose={(id) => {
         workbenchTabSet.closeTab(id)
       }}
@@ -194,106 +209,38 @@ function MainWorkbenchView() {
   )
 }
 
-/** Renders the active detail tab panel. */
+/** Renders the active closable workbench tab panel. */
 function WorkbenchTabPanel() {
-  const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const activeDetailTab = workbenchTabSet.activeDetailTab
+  const activeTab = workbenchTabSet.activeTab
 
-  if (!activeDetailTab) {
+  if (!activeTab) {
     return (
       <div class={placeholderPageClass}>
         <div class={placeholderCardClass}>
-          <h1 class={placeholderTitleClass}>No detail tab selected</h1>
-          <p class={placeholderBodyClass}>
-            Open one project into a detail tab to reuse the shell flow.
-          </p>
+          <h1 class={placeholderTitleClass}>No tab selected</h1>
+          <p class={placeholderBodyClass}>Open one project into a tab to reuse the shell flow.</p>
         </div>
       </div>
     )
   }
 
-  if (activeDetailTab.kind === "project") {
-    const project = lookupProject(projectRegistry, activeDetailTab.payload.projectPath)
+  const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind) as FunctionComponent<{
+    tab: WorkbenchTab
+  }>
 
-    if (!project) {
-      return (
+  return (
+    <Suspense
+      fallback={
         <div class={placeholderPageClass}>
           <div class={placeholderCardClass}>
-            <h1 class={placeholderTitleClass}>Project unavailable</h1>
-            <p class={placeholderBodyClass}>
-              The project record for this tab is no longer in the machine-wide project registry.
-            </p>
+            <h1 class={placeholderTitleClass}>Loading tab</h1>
+            <p class={placeholderBodyClass}>The selected detail surface is being prepared.</p>
           </div>
         </div>
-      )
-    }
-
-    return (
-      <div
-        class={css({
-          display: "flex",
-          flexDirection: "column",
-          gap: "18px",
-          height: "100%",
-          padding: "28px",
-          background:
-            `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), transparent 32%), ` +
-            `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
-        })}
-      >
-        <section
-          class={css({
-            maxWidth: "880px",
-            padding: "32px",
-            borderRadius: "28px",
-            border: "1px solid",
-            borderColor: "border",
-            background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-            boxShadow: "0 28px 80px rgba(121, 138, 160, 0.14)",
-          })}
-        >
-          <div
-            class={css({
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "8px 12px",
-              borderRadius: "999px",
-              backgroundColor: "surface",
-              marginBottom: "10px",
-              color: "accentStrong",
-              fontSize: "0.72rem",
-              fontWeight: "700",
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-            })}
-          >
-            <span class={css({ width: "14px", height: "14px" })}>
-              <ShellIcon name="projects" />
-            </span>
-            Detail Tab
-          </div>
-          <h1
-            class={css({
-              marginBottom: "12px",
-              color: "text",
-              fontSize: "1.4rem",
-              fontWeight: "700",
-            })}
-          >
-            {project.name}
-          </h1>
-          <p class={detailBodyClass}>
-            This project detail tab keeps the primary workbench view and closable detail tabs alive
-            side by side. It can later be replaced with richer project-scoped surfaces such as
-            sessions, specs, tasks, and pull requests.
-          </p>
-          <p class={detailBodyClass}>Path: {project.path}</p>
-        </section>
-      </div>
-    )
-  }
-
-  return null
+      }
+    >
+      <ActiveTabComponent tab={activeTab} />
+    </Suspense>
+  )
 }
