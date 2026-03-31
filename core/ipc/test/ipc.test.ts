@@ -10,33 +10,29 @@ import { createNodeClient } from "../src/node/client.ts"
 import { createServer } from "../src/node/server.ts"
 
 const schema = {
-  client: {
-    requests: {
-      echo: {
-        payload: z.object({ text: z.string() }),
-        response: $type<{ echoed: string }>(),
-      },
-      add: {
-        payload: z.object({ a: z.number(), b: z.number() }),
-        response: $type<{ sum: number }>(),
-      },
+  requests: {
+    ping: {
+      response: $type<{ ok: true }>(),
+    },
+    echo: {
+      payload: z.object({ text: z.string() }),
+      response: $type<{ echoed: string }>(),
+    },
+    add: {
+      payload: z.object({ a: z.number(), b: z.number() }),
+      response: $type<{ sum: number }>(),
     },
   },
-  server: {
-    streams: {
-      systemAlert: z.object({
-        message: z.string(),
-        level: z.enum(["info", "warn", "error"]),
+  streams: {
+    systemAlert: $type<{ message: string; level: "info" | "warn" | "error" }>(),
+    userAlert: {
+      payload: $type<{
+        userId: string
+        message: string
+      }>(),
+      subscription: z.object({
+        userId: z.string(),
       }),
-      userAlert: {
-        payload: z.object({
-          userId: z.string(),
-          message: z.string(),
-        }),
-        subscription: z.object({
-          userId: z.string(),
-        }),
-      },
     },
   },
 } satisfies AppSchema
@@ -53,6 +49,7 @@ async function createFixture() {
   const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-"))
   const socketPath = join(directory, "ipc.sock")
   const ipcServer = createServer(socketPath, schema, {
+    ping: () => ({ ok: true }),
     echo: ({ text }) => ({ echoed: text }),
     add: ({ a, b }) => ({ sum: a + b }),
   })
@@ -118,6 +115,7 @@ describe("core/ipc", () => {
   test("sends validated request/response messages over a unix socket", async () => {
     const { client } = await createFixture()
 
+    await expect(client.send("ping")).resolves.toEqual({ ok: true })
     await expect(client.send("echo", { text: "hello" })).resolves.toEqual({ echoed: "hello" })
     await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
   })

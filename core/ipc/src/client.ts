@@ -1,26 +1,25 @@
 import {
   type AppSchema,
-  type ReqName,
-  type ReqPayload,
-  type ResType,
-  type StrName,
-  type StrPayload,
-  type StrSubscription,
+  type InferRequestPayload,
+  type InferResponseType,
+  type InferStreamPayload,
+  type InferStreamSubscription,
+  type RequestArguments,
+  type ValidRequestName,
+  type ValidStreamName,
 } from "./schema.ts"
 import { type IpcTransport } from "./transport.ts"
 
-/** Normalizes shorthand and object stream definitions into payload and optional subscription schemas. */
-function getStreamSchemas<S extends AppSchema, K extends StrName<S>>(schema: S, name: K) {
-  const definition = schema.server.streams[name]
-  if ("safeParse" in definition) {
+/** Normalizes shorthand and object stream definitions into optional subscription schemas. */
+function getStreamSchemas<S extends AppSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
+  const definition = schema.streams[name]
+  if (!("payload" in definition)) {
     return {
-      payload: definition,
       subscription: undefined,
     }
   }
 
   return {
-    payload: definition.payload,
     subscription: definition.subscription,
   }
 }
@@ -33,33 +32,40 @@ function getStreamSchemas<S extends AppSchema, K extends StrName<S>>(schema: S, 
  * @returns An object with strongly-typed `send` and `subscribe` methods.
  */
 export function createClient<S extends AppSchema>(schema: S, transport: IpcTransport) {
-  async function send<K extends ReqName<S>>(
+  async function send<K extends ValidRequestName<S>>(
     name: K,
-    payload: ReqPayload<S, K>,
-  ): Promise<ResType<S, K>> {
-    const validPayload = schema.client.requests[name].payload.parse(payload)
-    return (await transport.send(name, validPayload)) as ResType<S, K>
+    ...args: RequestArguments<S, K>
+  ): Promise<InferResponseType<S, K>> {
+    const definition = schema.requests[name]
+    if (!("payload" in definition)) {
+      return (await transport.send(name, undefined)) as InferResponseType<S, K>
+    }
+
+    const validPayload = definition.payload.parse(args[0] as InferRequestPayload<S, K>)
+    return (await transport.send(name, validPayload)) as InferResponseType<S, K>
   }
 
-  async function subscribe<K extends StrName<S>>(
+  async function subscribe<K extends ValidStreamName<S>>(
     name: K,
-    onMessage: (payload: StrPayload<S, K>) => void,
+    onMessage: (payload: InferStreamPayload<S, K>) => void,
   ): Promise<() => void>
-  async function subscribe<K extends StrName<S>>(
+  async function subscribe<K extends ValidStreamName<S>>(
     name: K,
-    subscription: StrSubscription<S, K>,
-    onMessage: (payload: StrPayload<S, K>) => void,
+    subscription: InferStreamSubscription<S, K>,
+    onMessage: (payload: InferStreamPayload<S, K>) => void,
   ): Promise<() => void>
-  async function subscribe<K extends StrName<S>>(
+  async function subscribe<K extends ValidStreamName<S>>(
     name: K,
-    subscriptionOrHandler: StrSubscription<S, K> | ((payload: StrPayload<S, K>) => void),
-    maybeHandler?: (payload: StrPayload<S, K>) => void,
+    subscriptionOrHandler:
+      | InferStreamSubscription<S, K>
+      | ((payload: InferStreamPayload<S, K>) => void),
+    maybeHandler?: (payload: InferStreamPayload<S, K>) => void,
   ): Promise<() => void> {
-    if (!Object.hasOwn(schema.server.streams, name)) {
+    if (!Object.hasOwn(schema.streams, name)) {
       throw new Error(`Invalid stream: ${name}`)
     }
 
-    const { payload, subscription } = getStreamSchemas(schema, name)
+    const { subscription } = getStreamSchemas(schema, name)
     const onMessage =
       typeof subscriptionOrHandler === "function" ? subscriptionOrHandler : maybeHandler
 
@@ -78,8 +84,7 @@ export function createClient<S extends AppSchema>(schema: S, transport: IpcTrans
 
     return await Promise.resolve(
       transport.subscribe(name, validSubscription, (streamPayload) => {
-        const validPayload = payload.parse(streamPayload) as StrPayload<S, K>
-        onMessage(validPayload)
+        onMessage(streamPayload as InferStreamPayload<S, K>)
       }),
     )
   }

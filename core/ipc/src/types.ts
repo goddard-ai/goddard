@@ -1,6 +1,8 @@
-import type { AppSchema, ReqName, ReqPayload, ResType } from "./schema.ts"
+import type { AppSchema, InferResponseType, RequestArguments, ValidRequestName } from "./schema.ts"
 
 /** Maps one IPC schema's request names to their corresponding request handlers. */
 export type Handlers<S extends AppSchema> = {
-  [K in ReqName<S>]: (payload: ReqPayload<S, K>) => Promise<ResType<S, K>> | ResType<S, K>
+  [K in ValidRequestName<S>]: (
+    ...args: RequestArguments<S, K>
+  ) => Promise<InferResponseType<S, K>> | InferResponseType<S, K>
 }

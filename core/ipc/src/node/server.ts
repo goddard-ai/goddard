@@ -2,10 +2,13 @@ import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
 import {
   type AppSchema,
-  type ReqName,
-  type StrName,
-  type StrPayload,
-  type StrSubscription,
+  type InferRequestPayload,
+  type InferResponseType,
+  type InferStreamPayload,
+  type InferStreamSubscription,
+  type RequestArguments,
+  type ValidRequestName,
+  type ValidStreamName,
 } from "../schema.ts"
 import { type Handlers } from "../types.ts"
 
@@ -44,23 +47,21 @@ function safeUnlink(socketPath: string): void {
   }
 }
 
-/** Normalizes shorthand and object stream definitions into payload and optional subscription schemas. */
-function getStreamSchemas<S extends AppSchema, K extends StrName<S>>(schema: S, name: K) {
-  const definition = schema.server.streams[name]
-  if ("safeParse" in definition) {
+/** Normalizes shorthand and object stream definitions into optional subscription schemas. */
+function getStreamSchemas<S extends AppSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
+  const definition = schema.streams[name]
+  if (!("payload" in definition)) {
     return {
-      payload: definition,
       subscription: undefined,
     }
   }
 
   return {
-    payload: definition.payload,
     subscription: definition.subscription,
   }
 }
 
-/** Matches one validated stream payload against one validated subscription filter. */
+/** Matches one published stream payload against one validated subscription filter. */
 function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boolean {
   if (subscription === undefined) {
     return true
@@ -92,15 +93,13 @@ export function createServer<S extends AppSchema>(
     res: http.ServerResponse
   }>()
 
-  function publish<K extends StrName<S>>(name: K, payload: StrPayload<S, K>) {
-    const { payload: payloadSchema } = getStreamSchemas(schema, name)
-    const validPayload = payloadSchema.parse(payload)
-    const chunk = JSON.stringify({ name, payload: validPayload }) + "\n"
+  function publish<K extends ValidStreamName<S>>(name: K, payload: InferStreamPayload<S, K>) {
+    const chunk = JSON.stringify({ name, payload }) + "\n"
 
     for (const client of streamClients) {
       if (
         client.name === name &&
-        matchesSubscriptionFilter(client.subscription, validPayload) &&
+        matchesSubscriptionFilter(client.subscription, payload) &&
         !client.res.destroyed &&
         !client.res.writableEnded
       ) {
@@ -123,16 +122,26 @@ export function createServer<S extends AppSchema>(
               throw new Error("Request name must be a string")
             }
 
-            const routeDef = schema.client.requests[message.name]
+            const routeDef = schema.requests[message.name]
             if (!routeDef) {
               throw new Error(`Unknown request: ${message.name}`)
             }
 
-            const validPayload = routeDef.payload.parse(message.payload)
-            const handler = handlers[message.name as ReqName<S>] as (
-              payload: typeof validPayload,
-            ) => unknown
-            const responseData = await handler(validPayload)
+            const requestName = message.name as ValidRequestName<S>
+            const handler = handlers[requestName] as (
+              ...args: RequestArguments<S, typeof requestName>
+            ) =>
+              | Promise<InferResponseType<S, typeof requestName>>
+              | InferResponseType<S, typeof requestName>
+            const responseData =
+              "payload" in routeDef
+                ? await handler(
+                    routeDef.payload.parse(message.payload) as InferRequestPayload<
+                      S,
+                      typeof requestName
+                    >,
+                  )
+                : await handler()
 
             sendJson(res, 200, responseData)
           } catch (error) {
@@ -144,24 +153,27 @@ export function createServer<S extends AppSchema>(
 
       if (req.method === "GET" && url.pathname === "/stream") {
         const name = url.searchParams.get("name")
-        if (!name || !Object.hasOwn(schema.server.streams, name)) {
+        if (!name || !Object.hasOwn(schema.streams, name)) {
           res.writeHead(400, { "Content-Type": "text/plain" })
           res.end("Invalid stream name")
           return
         }
 
-        let subscription: StrSubscription<S, StrName<S>> | undefined
+        let subscription: InferStreamSubscription<S, ValidStreamName<S>> | undefined
         try {
-          const { subscription: subscriptionSchema } = getStreamSchemas(schema, name as StrName<S>)
+          const { subscription: subscriptionSchema } = getStreamSchemas(
+            schema,
+            name as ValidStreamName<S>,
+          )
           const rawSubscription = url.searchParams.get("subscription")
           if (rawSubscription && !subscriptionSchema) {
             throw new Error(`Stream ${name} does not accept subscription params`)
           }
           subscription =
             rawSubscription && subscriptionSchema
-              ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as StrSubscription<
+              ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
                   S,
-                  StrName<S>
+                  ValidStreamName<S>
                 >)
               : undefined
         } catch (error) {

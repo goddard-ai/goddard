@@ -3,7 +3,6 @@ import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } f
 import { z } from "zod"
 import { DaemonSessionIdParams } from "./common/params.ts"
 import type { DaemonHealth } from "./daemon/health.ts"
-import { GetDaemonHealthRequest } from "./daemon/health.ts"
 import { RunNamedDaemonActionRequest } from "./daemon/actions.ts"
 import {
   type GetDaemonLoopResponse,
@@ -56,152 +55,143 @@ import {
 
 /** IPC contract map shared by the daemon client and server. */
 export const daemonIpcSchema = {
-  client: {
-    requests: {
-      health: {
-        payload: GetDaemonHealthRequest,
-        response: $type<DaemonHealth>(),
-      },
-      authDeviceStart: {
-        payload: DeviceFlowStart,
-        response: $type<DeviceFlowSession>(),
-      },
-      authDeviceComplete: {
-        payload: DeviceFlowComplete,
-        response: $type<AuthSession>(),
-      },
-      authWhoami: {
-        payload: z.object({}),
-        response: $type<AuthSession>(),
-      },
-      authLogout: {
-        payload: z.object({}),
-        response: $type<{ success: true }>(),
-      },
-      prSubmit: {
-        payload: SubmitPrDaemonRequest.extend({
-          token: z.string(),
-        }),
-        response: $type<SubmitPrDaemonResponse>(),
-      },
-      prReply: {
-        payload: ReplyPrDaemonRequest.extend({
-          token: z.string(),
-        }),
-        response: $type<ReplyPrDaemonResponse>(),
-      },
-      sessionCreate: {
-        payload: CreateDaemonSessionRequest,
-        response: $type<CreateDaemonSessionResponse>(),
-      },
-      sessionList: {
-        payload: ListDaemonSessionsRequest,
-        response: $type<ListDaemonSessionsResponse>(),
-      },
-      sessionGet: {
-        payload: DaemonSessionIdParams,
-        response: $type<GetDaemonSessionResponse>(),
-      },
-      sessionConnect: {
-        payload: DaemonSessionIdParams,
-        response: $type<GetDaemonSessionResponse>(),
-      },
-      sessionHistory: {
-        payload: DaemonSessionIdParams,
-        response: $type<GetDaemonSessionHistoryResponse>(),
-      },
-      sessionDiagnostics: {
-        payload: DaemonSessionIdParams,
-        response: $type<GetDaemonSessionDiagnosticsResponse>(),
-      },
-      sessionShutdown: {
-        payload: DaemonSessionIdParams,
-        response: $type<ShutdownDaemonSessionResponse>(),
-      },
-      sessionSend: {
-        payload: SendDaemonSessionMessageRequest,
-        response: $type<{ accepted: true }>(),
-      },
-      sessionResolveToken: {
-        payload: ResolveDaemonSessionTokenRequest,
-        response: $type<{ id: string }>(),
-      },
-      actionRun: {
-        payload: RunNamedDaemonActionRequest,
-        response: $type<CreateDaemonSessionResponse>(),
-      },
-      loopStart: {
-        payload: StartDaemonLoopRequest,
-        response: $type<StartDaemonLoopResponse>(),
-      },
-      loopGet: {
-        payload: GetDaemonLoopRequest,
-        response: $type<GetDaemonLoopResponse>(),
-      },
-      loopList: {
-        payload: z.object({}),
-        response: $type<ListDaemonLoopsResponse>(),
-      },
-      loopShutdown: {
-        payload: ShutdownDaemonLoopRequest,
-        response: $type<ShutdownDaemonLoopResponse>(),
-      },
-      workforceStart: {
-        payload: StartDaemonWorkforceRequest,
-        response: $type<StartDaemonWorkforceResponse>(),
-      },
-      workforceDiscoverCandidates: {
-        payload: DiscoverDaemonWorkforceCandidatesRequest,
-        response: $type<DiscoverDaemonWorkforceCandidatesResponse>(),
-      },
-      workforceInitialize: {
-        payload: InitializeDaemonWorkforceRequest,
-        response: $type<InitializeDaemonWorkforceResponse>(),
-      },
-      workforceGet: {
-        payload: GetDaemonWorkforceRequest,
-        response: $type<GetDaemonWorkforceResponse>(),
-      },
-      workforceList: {
-        payload: z.object({}),
-        response: $type<ListDaemonWorkforcesResponse>(),
-      },
-      workforceShutdown: {
-        payload: ShutdownDaemonWorkforceRequest,
-        response: $type<ShutdownDaemonWorkforceResponse>(),
-      },
-      workforceRequest: {
-        payload: CreateDaemonWorkforceRequestRequest,
-        response: $type<MutateDaemonWorkforceResponse>(),
-      },
-      workforceUpdate: {
-        payload: UpdateDaemonWorkforceRequest,
-        response: $type<MutateDaemonWorkforceResponse>(),
-      },
-      workforceCancel: {
-        payload: CancelDaemonWorkforceRequest,
-        response: $type<MutateDaemonWorkforceResponse>(),
-      },
-      workforceTruncate: {
-        payload: TruncateDaemonWorkforceRequest,
-        response: $type<MutateDaemonWorkforceResponse>(),
-      },
-      workforceRespond: {
-        payload: RespondDaemonWorkforceRequest,
-        response: $type<MutateDaemonWorkforceResponse>(),
-      },
-      workforceSuspend: {
-        payload: SuspendDaemonWorkforceRequest,
-        response: $type<MutateDaemonWorkforceResponse>(),
-      },
+  requests: {
+    health: {
+      response: $type<DaemonHealth>(),
+    },
+    authDeviceStart: {
+      payload: DeviceFlowStart,
+      response: $type<DeviceFlowSession>(),
+    },
+    authDeviceComplete: {
+      payload: DeviceFlowComplete,
+      response: $type<AuthSession>(),
+    },
+    authWhoami: {
+      response: $type<AuthSession>(),
+    },
+    authLogout: {
+      response: $type<{ success: true }>(),
+    },
+    prSubmit: {
+      payload: SubmitPrDaemonRequest.extend({
+        token: z.string(),
+      }),
+      response: $type<SubmitPrDaemonResponse>(),
+    },
+    prReply: {
+      payload: ReplyPrDaemonRequest.extend({
+        token: z.string(),
+      }),
+      response: $type<ReplyPrDaemonResponse>(),
+    },
+    sessionCreate: {
+      payload: CreateDaemonSessionRequest,
+      response: $type<CreateDaemonSessionResponse>(),
+    },
+    sessionList: {
+      payload: ListDaemonSessionsRequest,
+      response: $type<ListDaemonSessionsResponse>(),
+    },
+    sessionGet: {
+      payload: DaemonSessionIdParams,
+      response: $type<GetDaemonSessionResponse>(),
+    },
+    sessionConnect: {
+      payload: DaemonSessionIdParams,
+      response: $type<GetDaemonSessionResponse>(),
+    },
+    sessionHistory: {
+      payload: DaemonSessionIdParams,
+      response: $type<GetDaemonSessionHistoryResponse>(),
+    },
+    sessionDiagnostics: {
+      payload: DaemonSessionIdParams,
+      response: $type<GetDaemonSessionDiagnosticsResponse>(),
+    },
+    sessionShutdown: {
+      payload: DaemonSessionIdParams,
+      response: $type<ShutdownDaemonSessionResponse>(),
+    },
+    sessionSend: {
+      payload: SendDaemonSessionMessageRequest,
+      response: $type<{ accepted: true }>(),
+    },
+    sessionResolveToken: {
+      payload: ResolveDaemonSessionTokenRequest,
+      response: $type<{ id: string }>(),
+    },
+    actionRun: {
+      payload: RunNamedDaemonActionRequest,
+      response: $type<CreateDaemonSessionResponse>(),
+    },
+    loopStart: {
+      payload: StartDaemonLoopRequest,
+      response: $type<StartDaemonLoopResponse>(),
+    },
+    loopGet: {
+      payload: GetDaemonLoopRequest,
+      response: $type<GetDaemonLoopResponse>(),
+    },
+    loopList: {
+      response: $type<ListDaemonLoopsResponse>(),
+    },
+    loopShutdown: {
+      payload: ShutdownDaemonLoopRequest,
+      response: $type<ShutdownDaemonLoopResponse>(),
+    },
+    workforceStart: {
+      payload: StartDaemonWorkforceRequest,
+      response: $type<StartDaemonWorkforceResponse>(),
+    },
+    workforceDiscoverCandidates: {
+      payload: DiscoverDaemonWorkforceCandidatesRequest,
+      response: $type<DiscoverDaemonWorkforceCandidatesResponse>(),
+    },
+    workforceInitialize: {
+      payload: InitializeDaemonWorkforceRequest,
+      response: $type<InitializeDaemonWorkforceResponse>(),
+    },
+    workforceGet: {
+      payload: GetDaemonWorkforceRequest,
+      response: $type<GetDaemonWorkforceResponse>(),
+    },
+    workforceList: {
+      response: $type<ListDaemonWorkforcesResponse>(),
+    },
+    workforceShutdown: {
+      payload: ShutdownDaemonWorkforceRequest,
+      response: $type<ShutdownDaemonWorkforceResponse>(),
+    },
+    workforceRequest: {
+      payload: CreateDaemonWorkforceRequestRequest,
+      response: $type<MutateDaemonWorkforceResponse>(),
+    },
+    workforceUpdate: {
+      payload: UpdateDaemonWorkforceRequest,
+      response: $type<MutateDaemonWorkforceResponse>(),
+    },
+    workforceCancel: {
+      payload: CancelDaemonWorkforceRequest,
+      response: $type<MutateDaemonWorkforceResponse>(),
+    },
+    workforceTruncate: {
+      payload: TruncateDaemonWorkforceRequest,
+      response: $type<MutateDaemonWorkforceResponse>(),
+    },
+    workforceRespond: {
+      payload: RespondDaemonWorkforceRequest,
+      response: $type<MutateDaemonWorkforceResponse>(),
+    },
+    workforceSuspend: {
+      payload: SuspendDaemonWorkforceRequest,
+      response: $type<MutateDaemonWorkforceResponse>(),
     },
   },
-  server: {
-    streams: {
-      sessionMessage: {
-        payload: DaemonSessionMessageEvent,
-        subscription: DaemonSessionIdParams,
-      },
+  streams: {
+    sessionMessage: {
+      payload: $type<DaemonSessionMessageEvent>(),
+      subscription: DaemonSessionIdParams,
     },
   },
 }

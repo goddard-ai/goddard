@@ -79,7 +79,7 @@ const authSession = await sdk.auth.startDeviceFlow({
   githubUsername: "alec",
 })
 
-const me = await sdk.auth.whoami({})
+const me = await sdk.auth.whoami()
 const loop = await sdk.loop.get({
   rootDir: "/workspace",
   loopName: "triage",
@@ -102,7 +102,7 @@ const started = await sdk.workforce.start({
   rootDir: process.cwd(),
 })
 
-const listed = await sdk.workforce.list({})
+const listed = await sdk.workforce.list()
 
 await sdk.workforce.request({
   rootDir: started.workforce.rootDir,

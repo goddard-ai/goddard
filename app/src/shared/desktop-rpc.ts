@@ -1,4 +1,4 @@
-import type { ReqName, ReqPayload, ResType } from "@goddard-ai/ipc"
+import type { InferRequestPayload, InferResponseType, ValidRequestName } from "@goddard-ai/ipc"
 import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import type { RPCSchema } from "electrobun/bun"
 
@@ -6,19 +6,15 @@ import type { RPCSchema } from "electrobun/bun"
 type DaemonSchema = typeof daemonIpcSchema
 
 /** Valid daemon IPC request names forwarded through the desktop host. */
-export type DaemonRequestName = ReqName<DaemonSchema>
+export type DaemonRequestName = ValidRequestName<DaemonSchema>
 
 /** Payload type for one forwarded daemon IPC request. */
-export type DaemonRequestPayload<Name extends DaemonRequestName = DaemonRequestName> = ReqPayload<
-  DaemonSchema,
-  Name
->
+export type DaemonRequestPayload<Name extends DaemonRequestName = DaemonRequestName> =
+  InferRequestPayload<DaemonSchema, Name>
 
 /** Response type for one forwarded daemon IPC request. */
-export type DaemonRequestResponse<Name extends DaemonRequestName = DaemonRequestName> = ResType<
-  DaemonSchema,
-  Name
->
+export type DaemonRequestResponse<Name extends DaemonRequestName = DaemonRequestName> =
+  InferResponseType<DaemonSchema, Name>
 
 /** Bun-host RPC payload for forwarding one daemon IPC request. */
 export type DaemonSendInput<Name extends DaemonRequestName = DaemonRequestName> = {

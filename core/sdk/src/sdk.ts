@@ -45,7 +45,7 @@ function defineCachedNamespace<TValue>(owner: object, key: string, value: TValue
 function createDaemonNamespace(client: DaemonIpcClient) {
   return {
     /** Probes daemon liveness without adding SDK-specific behavior. */
-    health: async (input: {}) => client.send("health", input),
+    health: async () => client.send("health"),
   }
 }
 
@@ -58,9 +58,9 @@ function createAuthNamespace(client: DaemonIpcClient) {
     completeDeviceFlow: async (input: DeviceFlowComplete) =>
       client.send("authDeviceComplete", input),
     /** Reads the current daemon-owned auth session as-is. */
-    whoami: async (input: {}) => client.send("authWhoami", input),
+    whoami: async () => client.send("authWhoami"),
     /** Clears the current daemon-owned auth session as-is. */
-    logout: async (input: {}) => client.send("authLogout", input),
+    logout: async () => client.send("authLogout"),
   }
 }
 
@@ -127,7 +127,7 @@ function createLoopNamespace(client: DaemonIpcClient) {
     /** Fetches one daemon loop runtime and its resolved config. */
     get: async (input: GetDaemonLoopRequest) => client.send("loopGet", input),
     /** Lists daemon loop runtime summaries. */
-    list: async (input: {}) => client.send("loopList", input),
+    list: async () => client.send("loopList"),
     /** Shuts down one daemon loop and reports whether shutdown succeeded. */
     shutdown: async (input: ShutdownDaemonLoopRequest) => client.send("loopShutdown", input),
   }
@@ -147,7 +147,7 @@ function createWorkforceNamespace(client: DaemonIpcClient) {
     /** Fetches one daemon workforce runtime and its resolved config. */
     get: async (input: GetDaemonWorkforceRequest) => client.send("workforceGet", input),
     /** Lists daemon workforce runtime summaries. */
-    list: async (input: {}) => client.send("workforceList", input),
+    list: async () => client.send("workforceList"),
     /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
     shutdown: async (input: ShutdownDaemonWorkforceRequest) =>
       client.send("workforceShutdown", input),

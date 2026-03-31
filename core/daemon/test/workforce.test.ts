@@ -118,7 +118,7 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const started = await client.send("workforceStart", { rootDir: "/repo" })
   const fetched = await client.send("workforceGet", { rootDir: "/repo" })
-  const listed = await client.send("workforceList", {})
+  const listed = await client.send("workforceList")
   const requested = await client.send("workforceRequest", {
     rootDir: "/repo",
     targetAgentId: "api",

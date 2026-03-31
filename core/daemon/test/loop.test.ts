@@ -167,7 +167,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
     },
   })
   const fetched = await client.send("loopGet", { rootDir: "/repo", loopName: "review" })
-  const listed = await client.send("loopList", {})
+  const listed = await client.send("loopList")
   const stopped = await client.send("loopShutdown", { rootDir: "/repo", loopName: "review" })
 
   expect(started.loop.loopName).toBe("review")
