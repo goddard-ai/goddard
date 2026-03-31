@@ -7,6 +7,9 @@ import { ShellIcon } from "../support/shell-icons"
 import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 import { WorkbenchTabs } from "./WorkbenchTabs"
+import { useEffect } from "preact/hooks"
+import { DEBUG_MENU_EVENT_NAME, DebugMenuEventDetail } from "../shared/debug-menu"
+import { useListener } from "preact-sigma"
 
 const placeholderPageClass = css({
   display: "grid",
@@ -63,6 +66,20 @@ export function AppShell() {
     ...item,
     badgeCount: navigation.badgeCounts[item.id],
   }))
+
+  useListener(window, DEBUG_MENU_EVENT_NAME, (event) => {
+    const detail = event.detail as DebugMenuEventDetail
+    workbenchTabSet.openOrFocusTab({
+      id: "debug:session-chat-transcript",
+      kind: "sessionChatTranscriptDebug",
+      title: "Transcript Debug",
+      icon: "sessions",
+      payload: {
+        surface: detail.surface as any,
+      },
+      dirty: false,
+    })
+  })
 
   return (
     <div

@@ -5,15 +5,42 @@ import { readJsonStorage, writeJsonStorage } from "../../support/workspace-stora
 const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v2"
 
 /** The supported detail-tab kinds available in the shell. */
-export type WorkbenchDetailTabKind = "project"
+export type WorkbenchDetailTabKind = "project" | "sessionChatTranscriptDebug"
 
 /** Payload used by a project detail tab. */
 export type ProjectWorkbenchTabPayload = {
   projectPath: string
 }
 
+/** Payload used by the standalone transcript debug tab. */
+export type SessionChatTranscriptDebugWorkbenchTabPayload = {
+  surface: "sessionChatTranscript"
+}
+
 /** Union payload carried by one detail tab. */
-export type WorkbenchDetailTabPayload = ProjectWorkbenchTabPayload
+export type WorkbenchDetailTabPayload =
+  | ProjectWorkbenchTabPayload
+  | SessionChatTranscriptDebugWorkbenchTabPayload
+
+/** Shared fields carried by every closable detail tab. */
+type WorkbenchDetailTabBase = {
+  id: string
+  title: string
+  icon: ShellIconName
+  dirty: boolean
+}
+
+/** One project-backed detail tab tracked by the shell. */
+type ProjectWorkbenchDetailTab = WorkbenchDetailTabBase & {
+  kind: "project"
+  payload: ProjectWorkbenchTabPayload
+}
+
+/** One standalone transcript debug tab tracked by the shell. */
+type SessionChatTranscriptDebugWorkbenchDetailTab = WorkbenchDetailTabBase & {
+  kind: "sessionChatTranscriptDebug"
+  payload: SessionChatTranscriptDebugWorkbenchTabPayload
+}
 
 /** Immutable descriptor for the always-present primary tab. */
 export type WorkbenchPrimaryTab = {
@@ -23,14 +50,9 @@ export type WorkbenchPrimaryTab = {
 }
 
 /** One closable detail tab tracked by the shell. */
-export type WorkbenchDetailTab = {
-  id: string
-  kind: WorkbenchDetailTabKind
-  title: string
-  icon: ShellIconName
-  payload: WorkbenchDetailTabPayload
-  dirty: boolean
-}
+export type WorkbenchDetailTab =
+  | ProjectWorkbenchDetailTab
+  | SessionChatTranscriptDebugWorkbenchDetailTab
 
 /** Persisted snapshot for open workbench detail tabs. */
 type WorkbenchTabsSnapshot = {
