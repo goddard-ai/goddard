@@ -14,7 +14,7 @@ export interface PreparedSessionWorktree {
 /**
  * Creates one daemon-owned worktree and maps the requested cwd into the cloned workspace.
  */
-export function prepareSessionWorktree(
+export async function prepareSessionWorktree(
   sessionId: string,
   cwd: string,
   params: {
@@ -36,9 +36,9 @@ export function prepareSessionWorktree(
      */
     defaultWorktreesFolder?: string
   } = {},
-): PreparedSessionWorktree | null {
+): Promise<PreparedSessionWorktree | null> {
   const requestedCwd = resolve(realpathSync.native(cwd))
-  const repoRoot = resolveGitRepoRoot(requestedCwd)
+  const repoRoot = await resolveGitRepoRoot(requestedCwd)
   if (!repoRoot) {
     return null
   }
@@ -55,9 +55,9 @@ export function prepareSessionWorktree(
   const { worktreeDir, branchName } = existingFolder
     ? {
         worktreeDir: existingFolder,
-        branchName: resolveExistingWorktreeBranchName(existingFolder),
+        branchName: await resolveExistingWorktreeBranchName(existingFolder),
       }
-    : worktree.setup(params.branchNameOverride || `goddard-${sessionId}`)
+    : await worktree.setup(params.branchNameOverride || `goddard-${sessionId}`)
   const effectiveCwd = join(worktreeDir, relativeCwd)
 
   return {
@@ -81,7 +81,7 @@ export function prepareSessionWorktree(
 /**
  * Removes one daemon session worktree using the metadata recorded at creation time.
  */
-export function cleanupSessionWorktree(
+export async function cleanupSessionWorktree(
   metadata: SessionWorktreeMetadata,
   params: {
     /**
@@ -89,30 +89,24 @@ export function cleanupSessionWorktree(
      */
     worktreePlugins?: WorktreePlugin[]
   } = {},
-): boolean {
+): Promise<boolean> {
   const worktree = new Worktree({
     cwd: metadata.repoRoot,
     plugins: params.worktreePlugins,
   })
-  return worktree.cleanup(metadata.worktreeDir, metadata.branchName)
+  return await worktree.cleanup(metadata.worktreeDir, metadata.branchName)
 }
 
 /**
  * Resolves the containing git repository root for one requested session cwd when one exists.
  */
-function resolveGitRepoRoot(cwd: string): string | null {
-  const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-
-  if (!result.success) {
+async function resolveGitRepoRoot(cwd: string): Promise<string | null> {
+  const { success, stdout } = await runGit(cwd, ["rev-parse", "--show-toplevel"])
+  if (!success) {
     return null
   }
 
-  const repoRoot = Buffer.from(result.stdout).toString("utf8").trim()
+  const repoRoot = stdout.trim()
   if (!repoRoot) {
     return null
   }
@@ -123,22 +117,38 @@ function resolveGitRepoRoot(cwd: string): string | null {
 /**
  * Resolves the active branch name for one existing worktree folder.
  */
-function resolveExistingWorktreeBranchName(cwd: string): string {
-  const result = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-
-  if (!result.success) {
+async function resolveExistingWorktreeBranchName(cwd: string): Promise<string> {
+  const { success, stdout } = await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+  if (!success) {
     throw new Error(`Existing worktree folder must be a git worktree: ${cwd}`)
   }
 
-  const branchName = Buffer.from(result.stdout).toString("utf8").trim()
+  const branchName = stdout.trim()
   if (!branchName) {
     throw new Error(`Existing worktree folder must have a readable branch name: ${cwd}`)
   }
 
   return branchName
+}
+
+/**
+ * Runs one git subprocess asynchronously using Bun's native subprocess API.
+ */
+async function runGit(
+  cwd: string,
+  args: string[],
+): Promise<{ success: boolean; stdout: string }> {
+  const result = Bun.spawn(["git", ...args], {
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+
+  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
+  await result.exited
+  return {
+    success: result.exitCode === 0,
+    stdout,
+  }
 }

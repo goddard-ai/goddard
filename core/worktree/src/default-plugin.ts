@@ -1,8 +1,10 @@
-import { spawnSync } from "node:child_process"
 import * as crypto from "node:crypto"
 import * as fs from "node:fs"
+import { cp, mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
+import { constants as fsConstants } from "node:fs"
+import { runCommand } from "./process.ts"
 import type { WorktreePlugin, WorktreeSetupOptions } from "./types.ts"
 
 export const defaultPlugin: WorktreePlugin = {
@@ -12,7 +14,7 @@ export const defaultPlugin: WorktreePlugin = {
     return true
   },
 
-  setup(options: WorktreeSetupOptions): string | null {
+  async setup(options: WorktreeSetupOptions): Promise<string | null> {
     let agentsDirPath: string
 
     if (options.defaultDirName) {
@@ -25,7 +27,7 @@ export const defaultPlugin: WorktreePlugin = {
       // Use system temp directory if no specific directory is present, appending hash to prevent collisions
       const hash = crypto.createHash("sha256").update(options.cwd).digest("hex").substring(0, 7)
       agentsDirPath = path.join(
-        os.homedir(),
+        resolveHomeDir(),
         ".goddard",
         "worktrees",
         `${path.basename(options.cwd)}-${hash}`,
@@ -35,40 +37,31 @@ export const defaultPlugin: WorktreePlugin = {
     const worktreeDir = path.join(agentsDirPath, `${options.branchName}-${Date.now()}`)
 
     if (!fs.existsSync(agentsDirPath)) {
-      spawnSync("mkdir", ["-p", agentsDirPath])
+      await mkdir(agentsDirPath, { recursive: true })
     }
 
     // Use copy-on-write clone to create the workspace instantly based on OS
     try {
-      let cpArgs = ["-R", options.cwd + "/", worktreeDir]
-      if (process.platform === "darwin") {
-        cpArgs = ["-cR", options.cwd + "/", worktreeDir]
-      } else if (process.platform === "linux") {
-        cpArgs = ["--reflink=auto", "-R", options.cwd + "/", worktreeDir]
-      }
+      let cloneSucceeded = await cloneWorkspace(options.cwd, worktreeDir)
 
-      let cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
-
-      if (cloneResult.status !== 0) {
+      if (!cloneSucceeded) {
         // Fallback to git worktree
-        const wtResult = spawnSync("git", ["worktree", "add", "--detach", worktreeDir], {
+        const wtResult = await runCommand("git", ["worktree", "add", "--detach", worktreeDir], {
           cwd: options.cwd,
-          encoding: "utf8",
-          stdio: "ignore",
+          stdin: "ignore",
         })
 
         if (wtResult.status !== 0) {
           // Fallback to regular copy if git worktree fails
-          cpArgs = ["-R", options.cwd + "/", worktreeDir]
-          cloneResult = spawnSync("cp", cpArgs, { encoding: "utf8" })
+          cloneSucceeded = await cloneWorkspace(options.cwd, worktreeDir, false)
 
-          if (cloneResult.status !== 0) {
-            throw new Error(`cp command exited with code ${cloneResult.status}`)
+          if (!cloneSucceeded) {
+            throw new Error(`Workspace copy failed for ${worktreeDir}`)
           }
         }
       }
     } catch (err) {
-      if (err instanceof Error && err.message.includes("cp command exited with code")) {
+      if (err instanceof Error && err.message.includes("Workspace copy failed")) {
         throw err
       }
       throw new Error(
@@ -81,19 +74,19 @@ export const defaultPlugin: WorktreePlugin = {
     try {
       const prNumberMatch = options.branchName.match(/^pr-(\d+)$/)
       if (prNumberMatch) {
-        spawnSync(
+        await runCommand(
           "git",
           ["fetch", "origin", `pull/${prNumberMatch[1]}/head:${options.branchName}`],
           {
             cwd: worktreeDir,
-            stdio: "ignore",
+            stdin: "ignore",
           },
         )
       }
 
-      spawnSync("git", ["checkout", options.branchName], {
+      await runCommand("git", ["checkout", options.branchName], {
         cwd: worktreeDir,
-        stdio: "ignore",
+        stdin: "ignore",
       })
     } catch {
       // Ignore error
@@ -102,24 +95,57 @@ export const defaultPlugin: WorktreePlugin = {
     return worktreeDir
   },
 
-  cleanup(worktreeDir: string, _branchName: string): boolean {
+  async cleanup(worktreeDir: string, _branchName: string): Promise<boolean> {
     try {
       // First try to clean up if it was a git worktree
-      const wtResult = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
-        encoding: "utf8",
-        stdio: "ignore",
+      const wtResult = await runCommand("git", ["worktree", "remove", "--force", worktreeDir], {
+        stdin: "ignore",
       })
 
       if (wtResult.status !== 0) {
         // Fallback to rm -rf if it wasn't a git worktree or remove failed
-        spawnSync("rm", ["-rf", worktreeDir], {
-          encoding: "utf8",
-          stdio: "ignore",
-        })
+        await rm(worktreeDir, { recursive: true, force: true })
       }
       return true
     } catch {
       return false
     }
   },
+}
+
+/**
+ * Copies one repository into a new worktree directory, preferring copy-on-write when supported.
+ */
+async function cloneWorkspace(
+  sourceDir: string,
+  targetDir: string,
+  preferCopyOnWrite = true,
+): Promise<boolean> {
+  try {
+    await cp(sourceDir, targetDir, {
+      recursive: true,
+      mode: preferCopyOnWrite ? reflinkModeForPlatform() : 0,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Returns the `fs.cp` mode used to request reflink copies on platforms that support them.
+ */
+function reflinkModeForPlatform(): number {
+  if (process.platform === "darwin" || process.platform === "linux") {
+    return fsConstants.COPYFILE_FICLONE
+  }
+
+  return 0
+}
+
+/**
+ * Resolves the home directory used for global worktree storage in a testable way.
+ */
+function resolveHomeDir(): string {
+  return process.env.HOME || os.homedir()
 }

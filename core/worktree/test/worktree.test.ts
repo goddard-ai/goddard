@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { afterEach, expect, test } from "vitest"
 import { Worktree } from "../src/index.ts"
 import { defaultPlugin } from "../src/default-plugin.ts"
@@ -34,12 +34,12 @@ test("default worktree setup creates and cleans up a workspace inside an explici
     defaultPluginDirName: ".custom-dir",
   })
 
-  const created = worktree.setup("feature-1")
+  const created = await worktree.setup("feature-1")
 
   expect(created.worktreeDir).toMatch(/\.custom-dir\/feature-1-\d+$/)
   expect(existsSync(created.worktreeDir)).toBe(true)
 
-  expect(worktree.cleanup(created.worktreeDir, created.branchName)).toBe(true)
+  expect(await worktree.cleanup(created.worktreeDir, created.branchName)).toBe(true)
   expect(existsSync(created.worktreeDir)).toBe(false)
 })
 
@@ -49,7 +49,7 @@ test("default plugin uses the global worktree directory when the repository has 
   process.env.HOME = homeDir
 
   const repoDir = await createRepoFixture()
-  const created = defaultPlugin.setup({
+  const created = await defaultPlugin.setup({
     cwd: repoDir,
     branchName: "feature-1",
   })
@@ -57,7 +57,7 @@ test("default plugin uses the global worktree directory when the repository has 
   expect(created).toMatch(new RegExp(`${escapeRegExp(join(homeDir, ".goddard", "worktrees"))}`))
   expect(existsSync(created!)).toBe(true)
 
-  expect(defaultPlugin.cleanup(created!, "feature-1")).toBe(true)
+  expect(await defaultPlugin.cleanup(created!, "feature-1")).toBe(true)
   expect(existsSync(created!)).toBe(false)
 })
 
@@ -66,12 +66,12 @@ test("worktree setup maps repository subdirectories into the created workspace",
   const requestedCwd = join(repoDir, "src")
 
   const worktree = new Worktree({ cwd: repoDir })
-  const created = worktree.setup("feature-1")
+  const created = await worktree.setup("feature-1")
   const effectiveCwd = join(created.worktreeDir, "src")
 
   expect(existsSync(effectiveCwd)).toBe(true)
 
-  expect(worktree.cleanup(created.worktreeDir, created.branchName)).toBe(true)
+  expect(await worktree.cleanup(created.worktreeDir, created.branchName)).toBe(true)
 })
 
 async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {
@@ -89,19 +89,26 @@ async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promis
     await writeFile(join(repoDir, "src", "index.ts"), "export const ready = true\n", "utf-8")
   }
 
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "user.email", "bot@example.com"])
-  runGit(repoDir, ["config", "user.name", "Bot"])
-  runGit(repoDir, ["add", "."])
-  runGit(repoDir, ["commit", "-m", "init"])
+  await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  await runGit(repoDir, ["config", "user.name", "Bot"])
+  await runGit(repoDir, ["add", "."])
+  await runGit(repoDir, ["commit", "-m", "init"])
 
   return repoDir
 }
 
-function runGit(cwd: string, args: string[]) {
-  const result = spawnSync("git", args, {
-    cwd,
-    encoding: "utf-8",
+async function runGit(cwd: string, args: string[]) {
+  const result = await new Promise<{ status: number | null }>((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd,
+      stdio: "ignore",
+    })
+
+    child.on("error", reject)
+    child.on("close", (status: number | null) => {
+      resolve({ status })
+    })
   })
 
   expect(result.status).toBe(0)
