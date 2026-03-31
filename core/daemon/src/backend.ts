@@ -162,6 +162,8 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         const reader = response.body.getReader()
         const subscription = new BackendStreamSubscription(() => {
           abortController.abort()
+          // Different runtimes observe SSE teardown at different layers; cancel all of them so
+          // long-lived stream responses do not keep tests or local daemon shutdowns alive.
           void body.cancel().catch(() => {})
           void reader.cancel().catch(() => {})
         })

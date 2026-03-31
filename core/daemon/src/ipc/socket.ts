@@ -48,6 +48,7 @@ async function requestDaemonSocket(socketPath: string, pathname: string): Promis
     unix: socketPath,
   })
 
+  // This probe only cares that the daemon accepted the socket request, not the payload body.
   await response.body?.cancel()
 }
 

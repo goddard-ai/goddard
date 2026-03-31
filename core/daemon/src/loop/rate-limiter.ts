@@ -49,6 +49,7 @@ function resolveWallclockDelay(delay: string): number {
   try {
     return Bun.cron.parse(delay).getTime() - Date.now()
   } catch {
+    // Treat invalid cron syntax as a soft configuration error and retry on a safe default cadence.
     return 60 * 1000
   }
 }

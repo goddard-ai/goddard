@@ -414,6 +414,7 @@ export async function startDaemonServer(
       { rootDir: string },
       { rootDir: string; candidates: Awaited<ReturnType<typeof discoverWorkforceInitCandidates>> }
     >("workforceDiscoverCandidates", async ({ rootDir }) => {
+      // Canonicalize the repo root inside the daemon so SDK and CLI callers cannot drift.
       const repositoryRoot = await resolveRepositoryRoot(rootDir)
       return {
         rootDir: repositoryRoot,
@@ -424,6 +425,7 @@ export async function startDaemonServer(
       { rootDir: string; packageDirs: string[] },
       { initialized: Awaited<ReturnType<typeof initializeWorkforce>> }
     >("workforceInitialize", async ({ rootDir, packageDirs }) => {
+      // Re-resolve here for the same reason as discovery: the daemon owns the canonical root.
       const repositoryRoot = await resolveRepositoryRoot(rootDir)
       return {
         initialized: await initializeWorkforce(repositoryRoot, packageDirs),
