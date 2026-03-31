@@ -174,7 +174,7 @@ function buildInitializedWorkforceConfig(packages: DiscoveredWorkforcePackage[])
 /** Reads and validates one repo-local workforce config file. */
 export async function readWorkforceConfig(rootDir: string): Promise<WorkforceConfig> {
   const paths = buildWorkforcePaths(rootDir)
-  const parsed = JSON.parse(await readFile(paths.configPath, "utf-8")) as unknown
+  const parsed = JSON.parse(await Bun.file(paths.configPath).text()) as unknown
 
   if (!isRecord(parsed) || parsed.version !== 1) {
     throw new Error(`Invalid workforce config at ${paths.configPath}`)
@@ -205,9 +205,9 @@ export async function ensureWorkforceFiles(rootDir: string): Promise<void> {
   await mkdir(paths.goddardDir, { recursive: true })
 
   try {
-    await readFile(paths.ledgerPath, "utf-8")
+    await Bun.file(paths.ledgerPath).text()
   } catch {
-    await writeFile(paths.ledgerPath, "", "utf-8")
+    await Bun.write(paths.ledgerPath, "")
   }
 }
 

@@ -5,6 +5,12 @@ import { createDaemonLogger } from "../logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
 
+/** Agent stdin shape supported across Node-compatible and Bun-native subprocesses. */
+export type AgentInputStream = Writable | FileSink
+
+/** Agent stdout shape supported across Node-compatible and Bun-native subprocesses. */
+export type AgentOutputStream = Readable | ReadableStream<Uint8Array>
+
 /** Optional callbacks used to observe raw agent stream traffic. */
 export type AgentStreamHooks = {
   onChunk?: (chunk: Uint8Array) => void
@@ -29,8 +35,8 @@ export function getAcpMessageResult<T>(message: acp.AnyMessage): T | null {
 }
 
 export function createAgentConnection(
-  stdin: Writable,
-  stdout: Readable,
+  stdin: AgentInputStream,
+  stdout: AgentOutputStream,
   hooks: AgentStreamHooks = {},
 ) {
   const logger = createDaemonLogger()
@@ -73,11 +79,11 @@ export function createAgentConnection(
 }
 
 export function createAgentMessageStream(
-  stdin: Writable,
-  stdout: Readable,
+  stdin: AgentInputStream,
+  stdout: AgentOutputStream,
   hooks: AgentStreamHooks = {},
 ) {
-  const readable = Readable.toWeb(stdout) as ReadableStream<Uint8Array>
+  const readable = toReadableStream(stdout)
   const instrumentedReadable = hooks.onChunk
     ? readable.pipeThrough(
         new TransformStream<Uint8Array, Uint8Array>({
@@ -89,5 +95,31 @@ export function createAgentMessageStream(
       )
     : readable
 
-  return acp.ndJsonStream(Writable.toWeb(stdin), instrumentedReadable)
+  return acp.ndJsonStream(toWritableStream(stdin), instrumentedReadable)
+}
+
+/** Normalizes agent stdin into a web writable stream for ACP NDJSON framing. */
+function toWritableStream(input: AgentInputStream): WritableStream<Uint8Array> {
+  if (input instanceof Writable) {
+    return Writable.toWeb(input)
+  }
+
+  return new WritableStream<Uint8Array>({
+    write(chunk) {
+      return input.write(chunk)
+    },
+    close() {
+      return input.end()
+    },
+    abort() {
+      return input.end()
+    },
+  })
+}
+
+/** Normalizes agent stdout into a web readable stream for ACP NDJSON framing. */
+function toReadableStream(output: AgentOutputStream): ReadableStream<Uint8Array> {
+  return output instanceof Readable
+    ? (Readable.toWeb(output) as ReadableStream<Uint8Array>)
+    : output
 }

@@ -18,12 +18,56 @@ export const StartDaemonWorkforceRequest = z.object({
 
 export type StartDaemonWorkforceRequest = z.infer<typeof StartDaemonWorkforceRequest>
 
+/** One package candidate that can become a workforce domain during initialization. */
+export type DaemonWorkforceInitCandidate = {
+  rootDir: string
+  relativeDir: string
+  manifestPath: string
+  name: string
+}
+
+/** One initialized workforce file set created under a repository root. */
+export type InitializedDaemonWorkforce = {
+  rootDir: string
+  configPath: string
+  ledgerPath: string
+  createdPaths: string[]
+}
+
+/** Request payload used to discover workforce initialization candidates for one repository. */
+export const DiscoverDaemonWorkforceCandidatesRequest = z.object({
+  rootDir: z.string(),
+})
+
+export type DiscoverDaemonWorkforceCandidatesRequest = z.infer<
+  typeof DiscoverDaemonWorkforceCandidatesRequest
+>
+
+/** Request payload used to initialize one repository workforce config and ledger. */
+export const InitializeDaemonWorkforceRequest = z.object({
+  rootDir: z.string(),
+  packageDirs: z.array(z.string()),
+})
+
+export type InitializeDaemonWorkforceRequest = z.infer<typeof InitializeDaemonWorkforceRequest>
+
 /** Request payload used to fetch one daemon-owned workforce runtime. */
 export const GetDaemonWorkforceRequest = z.object({
   rootDir: z.string(),
 })
 
 export type GetDaemonWorkforceRequest = z.infer<typeof GetDaemonWorkforceRequest>
+
+/** Response payload returned after workforce initialization candidates are discovered. */
+export type DiscoverDaemonWorkforceCandidatesResponse = {
+  rootDir: string
+  candidates: DaemonWorkforceInitCandidate[]
+}
+
+/** Response payload returned after one repository workforce is initialized. */
+export type InitializeDaemonWorkforceResponse = {
+  initialized: InitializedDaemonWorkforce
+}
 
 /** Request payload used to stop one daemon-owned workforce runtime. */
 export const ShutdownDaemonWorkforceRequest = z.object({

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { splitRepo } from "../utils.ts"
 import type {
   PrCreateInput,
@@ -76,14 +75,17 @@ function inferPrNumberFromGit(cwd: string): number {
 }
 
 function runGit(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, {
+  const result = Bun.spawnSync(["git", ...args], {
     cwd,
-    encoding: "utf-8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
 
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed in ${cwd}`)
+  if (!result.success) {
+    const stderr = Buffer.from(result.stderr).toString("utf8").trim()
+    throw new Error(stderr || `git ${args.join(" ")} failed in ${cwd}`)
   }
 
-  return result.stdout.trim()
+  return Buffer.from(result.stdout).toString("utf8").trim()
 }

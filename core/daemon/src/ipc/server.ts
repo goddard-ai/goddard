@@ -19,6 +19,11 @@ import { SessionStorage } from "../persistence/session.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { createSessionManager } from "../session/manager.ts"
 import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
+import {
+  discoverWorkforceInitCandidates,
+  initializeWorkforce,
+  resolveRepositoryRoot,
+} from "../workforce/config.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
@@ -403,6 +408,27 @@ export async function startDaemonServer(
     >("workforceStart", async ({ rootDir }) => {
       return {
         workforce: await workforceManager.startWorkforce(rootDir),
+      }
+    }),
+    workforceDiscoverCandidates: withRequestLogging<
+      { rootDir: string },
+      { rootDir: string; candidates: Awaited<ReturnType<typeof discoverWorkforceInitCandidates>> }
+    >("workforceDiscoverCandidates", async ({ rootDir }) => {
+      // Canonicalize the repo root inside the daemon so SDK and CLI callers cannot drift.
+      const repositoryRoot = await resolveRepositoryRoot(rootDir)
+      return {
+        rootDir: repositoryRoot,
+        candidates: await discoverWorkforceInitCandidates(repositoryRoot),
+      }
+    }),
+    workforceInitialize: withRequestLogging<
+      { rootDir: string; packageDirs: string[] },
+      { initialized: Awaited<ReturnType<typeof initializeWorkforce>> }
+    >("workforceInitialize", async ({ rootDir, packageDirs }) => {
+      // Re-resolve here for the same reason as discovery: the daemon owns the canonical root.
+      const repositoryRoot = await resolveRepositoryRoot(rootDir)
+      return {
+        initialized: await initializeWorkforce(repositoryRoot, packageDirs),
       }
     }),
     workforceGet: withRequestLogging<

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { expect, test } from "vitest"
+import { expect, test } from "bun:test"
 
 test("daemon package does not depend on removed higher-level packages", async () => {
   const packageJson = JSON.parse(

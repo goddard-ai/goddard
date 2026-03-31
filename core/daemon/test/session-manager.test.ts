@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createGzip } from "node:zlib"
 import * as tarFs from "tar-fs"
-import { afterEach, expect, test, vi } from "vitest"
+import { afterEach, expect, test, vi } from "bun:test"
 import {
   detectBinaryTargetPayloadFormat,
   installBinaryTargetPayload,
@@ -14,11 +14,12 @@ import { resolveAgentProcessSpec } from "../src/session/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME
+const originalFetch = globalThis.fetch
 const testZipArchiveBase64 =
   "UEsDBAoAAAAAAKeSdlzihkXDEQAAABEAAAAIABwAb3BlbmNvZGVVVAkAA1prwGlaa8BpdXgLAAEE9QEAAAQUAAAAIyEvYmluL3NoCmV4aXQgMApQSwECHgMKAAAAAACnknZc4oZFwxEAAAARAAAACAAYAAAAAAABAAAA7YEAAAAAb3BlbmNvZGVVVAUAA1prwGl1eAsAAQT1AQAABBQAAABQSwUGAAAAAAEAAQBOAAAAUwAAAAAA"
 
 afterEach(async () => {
-  vi.unstubAllGlobals()
+  globalThis.fetch = originalFetch
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -80,7 +81,7 @@ test("installBinaryTargetPayload writes raw binaries to the declared command pat
 
   // Explicit exception: remote archive downloads cross a non-local third-party boundary.
   const fetchMock = vi.fn(async () => new Response("#!/bin/sh\nexit 0\n", { status: 200 }))
-  vi.stubGlobal("fetch", fetchMock)
+  globalThis.fetch = fetchMock as typeof fetch
 
   await installBinaryTargetPayload({
     archiveUrl:
@@ -92,7 +93,7 @@ test("installBinaryTargetPayload writes raw binaries to the declared command pat
   const commandPath = await resolveInstalledBinaryCommand(installDir, "bin/agent")
 
   expect(fetchMock).toHaveBeenCalledTimes(1)
-  await expect(access(commandPath)).resolves.toBeUndefined()
+  await expect(stat(commandPath)).resolves.toBeTruthy()
 })
 
 test("installBinaryTargetPayload restores executability for zip payload commands", async () => {
@@ -102,7 +103,7 @@ test("installBinaryTargetPayload restores executability for zip payload commands
   const fetchMock = vi.fn(
     async () => new Response(Buffer.from(testZipArchiveBase64, "base64"), { status: 200 }),
   )
-  vi.stubGlobal("fetch", fetchMock)
+  globalThis.fetch = fetchMock as typeof fetch
 
   await installBinaryTargetPayload({
     archiveUrl: "https://example.com/opencode-darwin-arm64.zip",
@@ -124,7 +125,7 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
 
   const archiveBody = await createTestTarGzArchive()
   const fetchMock = vi.fn(async () => new Response(archiveBody, { status: 200 }))
-  vi.stubGlobal("fetch", fetchMock)
+  globalThis.fetch = fetchMock as typeof fetch
 
   const binaryTarget = {
     archive:
@@ -157,5 +158,5 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
   expect(firstSpec.env).toEqual({ FOO: "bar" })
   expect(firstSpec.cmd.startsWith(join(homeDir, ".goddard", "binaries"))).toBe(true)
   expect(firstSpec.cmd.endsWith(join("node-agent", "bin", "agent"))).toBe(true)
-  await expect(access(firstSpec.cmd)).resolves.toBeUndefined()
+  await expect(stat(firstSpec.cmd)).resolves.toBeTruthy()
 })

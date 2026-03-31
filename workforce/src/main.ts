@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts"
-import {
-  discoverWorkforceInitCandidates,
-  initializeWorkforce,
-  resolveRepositoryRoot,
-  type DiscoveredWorkforcePackage,
-} from "@goddard-ai/daemon/workforce"
 import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+
+const execFileAsync = promisify(execFile)
+
+/** Workforce package metadata displayed during the CLI initialization flow. */
+type WorkforceInitCandidate = {
+  rootDir: string
+  relativeDir: string
+  manifestPath: string
+  name: string
+}
 
 /** Creates one Node SDK instance for the provided daemon connection override. */
 function getSdk(daemonUrl?: string): GoddardSdk {
@@ -17,7 +23,7 @@ function getSdk(daemonUrl?: string): GoddardSdk {
 }
 
 /** Formats one discovered package for the workforce init selection prompt. */
-export function formatPackageLabel(pkg: DiscoveredWorkforcePackage): string {
+export function formatPackageLabel(pkg: WorkforceInitCandidate): string {
   return pkg.relativeDir === "."
     ? `${pkg.name} (repository root)`
     : `${pkg.name} (${pkg.relativeDir})`
@@ -38,7 +44,7 @@ export function resolveCommandMessage(input: {
 
 /** Prompts the operator to choose which repository packages should become workforce domains. */
 async function promptForWorkforcePackages(
-  candidates: DiscoveredWorkforcePackage[],
+  candidates: WorkforceInitCandidate[],
 ): Promise<string[] | null> {
   const selected = await multiselect({
     message: "Select packages to include as workforce domains.",
@@ -56,6 +62,22 @@ async function promptForWorkforcePackages(
   }
 
   return selected
+}
+
+/** Resolves the nearest git repository root from one starting directory. */
+async function resolveRepositoryRoot(startDir: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: startDir,
+    })
+    return stdout.trim()
+  } catch (error) {
+    throw new Error(
+      `Unable to resolve the repository root from ${startDir}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  }
 }
 
 /** Runs the workforce CLI entrypoint against one argv payload. */
@@ -79,24 +101,29 @@ export async function main(argv: string[]) {
       init: command({
         name: "init",
         description: "Create repo-local workforce config and ledger files",
-        args: { root },
-        handler: async ({ root }) => {
-          const repositoryRoot = await resolveRepositoryRoot(root)
-          const candidates = await discoverWorkforceInitCandidates(repositoryRoot)
+        args: { root, daemonUrl },
+        handler: async ({ root, daemonUrl }) => {
+          const sdk = getSdk(daemonUrl)
+          const discovery = await sdk.workforce.discoverCandidates({
+            rootDir: root,
+          })
 
-          if (candidates.length === 0) {
-            console.log(`No workforce candidates found under ${repositoryRoot}.`)
+          if (discovery.candidates.length === 0) {
+            console.log(`No workforce candidates found under ${discovery.rootDir}.`)
             return
           }
 
-          intro(`Initializing workforce in ${repositoryRoot}`)
-          const selectedPackageDirs = await promptForWorkforcePackages(candidates)
+          intro(`Initializing workforce in ${discovery.rootDir}`)
+          const selectedPackageDirs = await promptForWorkforcePackages(discovery.candidates)
           if (selectedPackageDirs === null) {
             return
           }
 
-          const initialized = await initializeWorkforce(repositoryRoot, selectedPackageDirs)
-          outro(`Initialized workforce config at ${initialized.configPath}.`)
+          const response = await sdk.workforce.initialize({
+            rootDir: discovery.rootDir,
+            packageDirs: selectedPackageDirs,
+          })
+          outro(`Initialized workforce config at ${response.initialized.configPath}.`)
         },
       }),
       start: command({

@@ -36,8 +36,12 @@ import {
 import {
   CancelDaemonWorkforceRequest,
   CreateDaemonWorkforceRequestRequest,
+  DiscoverDaemonWorkforceCandidatesRequest,
+  type DiscoverDaemonWorkforceCandidatesResponse,
   type GetDaemonWorkforceResponse,
   GetDaemonWorkforceRequest,
+  InitializeDaemonWorkforceRequest,
+  type InitializeDaemonWorkforceResponse,
   type ListDaemonWorkforcesResponse,
   type MutateDaemonWorkforceResponse,
   RespondDaemonWorkforceRequest,
@@ -145,6 +149,14 @@ export const daemonIpcSchema = {
       workforceStart: {
         payload: StartDaemonWorkforceRequest,
         response: $type<StartDaemonWorkforceResponse>(),
+      },
+      workforceDiscoverCandidates: {
+        payload: DiscoverDaemonWorkforceCandidatesRequest,
+        response: $type<DiscoverDaemonWorkforceCandidatesResponse>(),
+      },
+      workforceInitialize: {
+        payload: InitializeDaemonWorkforceRequest,
+        response: $type<InitializeDaemonWorkforceResponse>(),
       },
       workforceGet: {
         payload: GetDaemonWorkforceRequest,

@@ -6,8 +6,10 @@ import type {
   CancelDaemonWorkforceRequest,
   CreateDaemonSessionRequest,
   CreateDaemonWorkforceRequestRequest,
+  DiscoverDaemonWorkforceCandidatesRequest,
   GetDaemonLoopRequest,
   GetDaemonWorkforceRequest,
+  InitializeDaemonWorkforceRequest,
   ListDaemonSessionsRequest,
   ReplyPrDaemonRequest,
   ResolveDaemonSessionTokenRequest,
@@ -136,6 +138,12 @@ function createWorkforceNamespace(client: DaemonIpcClient) {
   return {
     /** Starts or reuses one daemon workforce runtime. */
     start: async (input: StartDaemonWorkforceRequest) => client.send("workforceStart", input),
+    /** Discovers package candidates for one repository workforce initialization flow. */
+    discoverCandidates: async (input: DiscoverDaemonWorkforceCandidatesRequest) =>
+      client.send("workforceDiscoverCandidates", input),
+    /** Initializes one repository workforce config and ledger through the daemon. */
+    initialize: async (input: InitializeDaemonWorkforceRequest) =>
+      client.send("workforceInitialize", input),
     /** Fetches one daemon workforce runtime and its resolved config. */
     get: async (input: GetDaemonWorkforceRequest) => client.send("workforceGet", input),
     /** Lists daemon workforce runtime summaries. */

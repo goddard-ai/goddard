@@ -28,7 +28,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsdown --no-minify --clean --unused --log-level error",
-    "test": "vitest run"
+    "test": "bun run ./scripts/test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",
@@ -39,9 +39,7 @@
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/tree-kill": "workspace:^",
     "@goddard-ai/worktree": "workspace:^",
-    "better-sqlite3": "^12.6.2",
     "cmd-ts": "^0.15.0",
-    "cron-parser": "^5.5.0",
     "drizzle-orm": "1.0.0-beta.16-ea816b6",
     "kleur": "^4.1.5",
     "node-stream-zip": "^1.15.0",
@@ -54,7 +52,6 @@
   },
   "devDependencies": {
     "@goddard-ai/backend": "workspace:^",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/tar-fs": "^2.0.4",
     "@types/unbzip2-stream": "^1.4.3"
   }
