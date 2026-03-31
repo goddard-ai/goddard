@@ -1,5 +1,4 @@
 import {
-  type InferRequestPayload,
   type InferResponseType,
   type InferStreamPayload,
   type InferStreamSubscription,
@@ -37,12 +36,8 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
     ...args: RequestArguments<S, K>
   ): Promise<InferResponseType<S, K>> {
     const definition = schema.requests[name]
-    if (!("payload" in definition)) {
-      return (await transport.send(name, undefined)) as InferResponseType<S, K>
-    }
-
-    const validPayload = definition.payload.parse(args[0] as InferRequestPayload<S, K>)
-    return (await transport.send(name, validPayload)) as InferResponseType<S, K>
+    const validPayload = definition.payload?.parse(args[0])
+    return await transport.send(name, validPayload)
   }
 
   async function subscribe<K extends ValidStreamName<S>>(
