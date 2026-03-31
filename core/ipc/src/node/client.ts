@@ -1,6 +1,6 @@
 import * as http from "node:http"
 import { createClient } from "../client.ts"
-import { type AppSchema } from "../schema.ts"
+import { type IpcSchema } from "../schema.ts"
 import { type IpcTransport } from "../transport.ts"
 
 /** Normalizes one failed IPC response body into a human-readable error message. */
@@ -143,6 +143,6 @@ export function createNodeTransport(socketPath: string): IpcTransport {
 }
 
 /** Creates the typed IPC client backed by the Node socket transport. */
-export function createNodeClient<S extends AppSchema>(socketPath: string, schema: S) {
+export function createNodeClient<S extends IpcSchema>(socketPath: string, schema: S) {
   return createClient(schema, createNodeTransport(socketPath))
 }

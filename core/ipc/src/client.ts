@@ -1,9 +1,9 @@
 import {
-  type AppSchema,
   type InferRequestPayload,
   type InferResponseType,
   type InferStreamPayload,
   type InferStreamSubscription,
+  type IpcSchema,
   type RequestArguments,
   type ValidRequestName,
   type ValidStreamName,
@@ -11,7 +11,7 @@ import {
 import { type IpcTransport } from "./transport.ts"
 
 /** Normalizes shorthand and object stream definitions into optional subscription schemas. */
-function getStreamSchemas<S extends AppSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
+function getStreamSchemas<S extends IpcSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
   const definition = schema.streams[name]
   if (!("payload" in definition)) {
     return {
@@ -31,7 +31,7 @@ function getStreamSchemas<S extends AppSchema, K extends ValidStreamName<S>>(sch
  * @param transport - The transport layer to use for sending requests and subscribing to streams.
  * @returns An object with strongly-typed `send` and `subscribe` methods.
  */
-export function createClient<S extends AppSchema>(schema: S, transport: IpcTransport) {
+export function createClient<S extends IpcSchema>(schema: S, transport: IpcTransport) {
   async function send<K extends ValidRequestName<S>>(
     name: K,
     ...args: RequestArguments<S, K>

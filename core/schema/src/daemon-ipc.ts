@@ -1,52 +1,52 @@
-import { $type } from "@goddard-ai/ipc"
-import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
+import { $type, IpcSchema } from "@goddard-ai/ipc"
 import { z } from "zod"
+import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { DaemonSessionIdParams } from "./common/params.ts"
-import type { DaemonHealth } from "./daemon/health.ts"
 import { RunNamedDaemonActionRequest } from "./daemon/actions.ts"
+import type { DaemonHealth } from "./daemon/health.ts"
 import {
   type GetDaemonLoopResponse,
-  GetDaemonLoopRequest,
   type ListDaemonLoopsResponse,
   type ShutdownDaemonLoopResponse,
-  ShutdownDaemonLoopRequest,
   type StartDaemonLoopResponse,
+  GetDaemonLoopRequest,
+  ShutdownDaemonLoopRequest,
   StartDaemonLoopRequest,
 } from "./daemon/loops.ts"
 import {
   type ReplyPrDaemonResponse,
-  ReplyPrDaemonRequest,
   type SubmitPrDaemonResponse,
+  ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
 } from "./daemon/pull-requests.ts"
 import {
   type CreateDaemonSessionResponse,
-  CreateDaemonSessionRequest,
-  DaemonSessionMessageEvent,
   type GetDaemonSessionDiagnosticsResponse,
   type GetDaemonSessionHistoryResponse,
   type GetDaemonSessionResponse,
   type ListDaemonSessionsResponse,
+  type ShutdownDaemonSessionResponse,
+  CreateDaemonSessionRequest,
+  DaemonSessionMessageEvent,
   ListDaemonSessionsRequest,
   ResolveDaemonSessionTokenRequest,
   SendDaemonSessionMessageRequest,
-  type ShutdownDaemonSessionResponse,
 } from "./daemon/sessions.ts"
 import {
-  CancelDaemonWorkforceRequest,
-  CreateDaemonWorkforceRequestRequest,
-  DiscoverDaemonWorkforceCandidatesRequest,
   type DiscoverDaemonWorkforceCandidatesResponse,
   type GetDaemonWorkforceResponse,
-  GetDaemonWorkforceRequest,
-  InitializeDaemonWorkforceRequest,
   type InitializeDaemonWorkforceResponse,
   type ListDaemonWorkforcesResponse,
   type MutateDaemonWorkforceResponse,
-  RespondDaemonWorkforceRequest,
   type ShutdownDaemonWorkforceResponse,
-  ShutdownDaemonWorkforceRequest,
   type StartDaemonWorkforceResponse,
+  CancelDaemonWorkforceRequest,
+  CreateDaemonWorkforceRequestRequest,
+  DiscoverDaemonWorkforceCandidatesRequest,
+  GetDaemonWorkforceRequest,
+  InitializeDaemonWorkforceRequest,
+  RespondDaemonWorkforceRequest,
+  ShutdownDaemonWorkforceRequest,
   StartDaemonWorkforceRequest,
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
@@ -194,4 +194,4 @@ export const daemonIpcSchema = {
       subscription: DaemonSessionIdParams,
     },
   },
-}
+} satisfies IpcSchema

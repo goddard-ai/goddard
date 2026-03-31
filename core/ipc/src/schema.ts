@@ -24,7 +24,7 @@ type StreamSchemaWithSubscription = {
 type StreamSchema = TypeMarker | StreamSchemaWithSubscription
 
 /** Declares the request and stream contract for one typed IPC application boundary. */
-export type AppSchema = {
+export type IpcSchema = {
   requests: Record<string, RequestSchema>
   streams: Record<string, StreamSchema>
 }
@@ -44,17 +44,17 @@ type StreamSubscriptionSchema<T extends StreamSchema> = T extends {
   : z.ZodVoid
 
 /** Extracts the valid client request names from one IPC schema. */
-export type ValidRequestName<S extends AppSchema> = keyof S["requests"] & string
+export type ValidRequestName<S extends IpcSchema> = keyof S["requests"] & string
 
 /** Expands one request into the argument tuple accepted by typed send and handler functions. */
 export type RequestArguments<
-  S extends AppSchema,
+  S extends IpcSchema,
   K extends ValidRequestName<S>,
 > = S["requests"][K] extends { payload: z.ZodType } ? [payload: InferRequestPayload<S, K>] : []
 
 /** Infers the payload type for one client request in the IPC schema. */
 export type InferRequestPayload<
-  S extends AppSchema,
+  S extends IpcSchema,
   K extends ValidRequestName<S>,
 > = S["requests"][K] extends {
   payload: infer TSchema extends z.ZodType
@@ -64,20 +64,20 @@ export type InferRequestPayload<
 
 /** Extracts the declared response type for one client request in the IPC schema. */
 export type InferResponseType<
-  S extends AppSchema,
+  S extends IpcSchema,
   K extends ValidRequestName<S>,
 > = S["requests"][K]["response"]["__unchecked__"]
 
 /** Extracts the valid server stream names from one IPC schema. */
-export type ValidStreamName<S extends AppSchema> = keyof S["streams"] & string
+export type ValidStreamName<S extends IpcSchema> = keyof S["streams"] & string
 
 /** Infers the payload type for one server stream in the IPC schema. */
 export type InferStreamPayload<
-  S extends AppSchema,
+  S extends IpcSchema,
   K extends ValidStreamName<S>,
 > = StreamPayloadMarker<S["streams"][K]>["__unchecked__"]
 
 /** Infers the optional subscription params for one server stream in the IPC schema. */
-export type InferStreamSubscription<S extends AppSchema, K extends ValidStreamName<S>> = z.infer<
+export type InferStreamSubscription<S extends IpcSchema, K extends ValidStreamName<S>> = z.infer<
   StreamSubscriptionSchema<S["streams"][K]>
 >

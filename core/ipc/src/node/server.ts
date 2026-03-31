@@ -1,11 +1,11 @@
 import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
 import {
-  type AppSchema,
   type InferRequestPayload,
   type InferResponseType,
   type InferStreamPayload,
   type InferStreamSubscription,
+  type IpcSchema,
   type RequestArguments,
   type ValidRequestName,
   type ValidStreamName,
@@ -48,7 +48,7 @@ function safeUnlink(socketPath: string): void {
 }
 
 /** Normalizes shorthand and object stream definitions into optional subscription schemas. */
-function getStreamSchemas<S extends AppSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
+function getStreamSchemas<S extends IpcSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
   const definition = schema.streams[name]
   if (!("payload" in definition)) {
     return {
@@ -82,7 +82,7 @@ function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boo
 }
 
 /** Creates the Node IPC server for one socket-backed application schema. */
-export function createServer<S extends AppSchema>(
+export function createServer<S extends IpcSchema>(
   socketPath: string,
   schema: S,
   handlers: Handlers<S>,

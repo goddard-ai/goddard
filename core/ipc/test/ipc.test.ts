@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { z } from "zod"
-import { $type, type AppSchema } from "../src/index.ts"
+import { $type, type IpcSchema } from "../src/index.ts"
 import { createNodeClient } from "../src/node/client.ts"
 import { createServer } from "../src/node/server.ts"
 
@@ -35,7 +35,7 @@ const schema = {
       }),
     },
   },
-} satisfies AppSchema
+} satisfies IpcSchema
 
 const cleanups: Array<() => Promise<void>> = []
 
