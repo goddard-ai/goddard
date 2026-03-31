@@ -1,8 +1,15 @@
+import {
+  layoutWithLines,
+  prepareWithSegments,
+  type LayoutLine,
+  type PrepareOptions,
+  type PreparedTextWithSegments,
+} from "@chenglou/pretext"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { useMemo } from "preact/hooks"
 import {
   VirtualizedPretextParagraphList,
-  type PretextParagraphMeasurement,
   type VirtualizedPretextParagraphRow,
 } from "../Pretext/VirtualizedPretextParagraphList"
 
@@ -28,9 +35,8 @@ const loadingStateClass = css({
 })
 
 const rowClass = css({
-  position: "absolute",
-  insetInline: "0",
   paddingInline: "4px",
+  paddingBottom: "18px",
 })
 
 const rowInnerClass = css({
@@ -38,11 +44,15 @@ const rowInnerClass = css({
   width: "100%",
 })
 
+const rowColumnClass = css({
+  display: "grid",
+  gap: "8px",
+})
+
 const metaRowClass = css({
   display: "flex",
   alignItems: "center",
   gap: "10px",
-  marginBottom: "8px",
   color: "muted",
   fontSize: "0.73rem",
   fontWeight: "680",
@@ -109,12 +119,23 @@ const systemLineClass = css({
 
 const BODY_FONT = '450 15px "SF Pro Text", "Segoe UI", sans-serif'
 const BODY_LINE_HEIGHT = 24
-const META_HEIGHT = 26
+const META_HEIGHT = 32
 const BUBBLE_PADDING_X = 32
 const BUBBLE_PADDING_Y = 28
 const ROW_GAP = 18
 const VIRTUAL_OVERSCAN_PX = 420
 const MIN_TEXT_WIDTH = 144
+const DEFAULT_ROW_HEIGHT = 132
+
+const preparedParagraphCache = new Map<string, PreparedTextWithSegments>()
+
+/** One measured paragraph produced from Pretext layout. */
+type PretextParagraphMeasurement = {
+  lines: readonly LayoutLine[]
+  lineCount: number
+  height: number
+  maxLineWidth: number
+}
 
 /** One transcript message rendered in the dumb visual transcript surface. */
 export type SessionChatTranscriptMessage = {
@@ -133,9 +154,38 @@ export type SessionChatTranscriptProps = {
   scrollCacheKey?: string
 }
 
-/** Extra row data carried alongside one virtualized transcript paragraph. */
-type TranscriptRowData = {
-  bubbleWidth: number
+/** Returns the cached prepared representation for one transcript paragraph. */
+function prepareParagraph(
+  text: string,
+  font: string,
+  whiteSpace?: PrepareOptions["whiteSpace"],
+): PreparedTextWithSegments {
+  const cacheKey = `${font}::${whiteSpace ?? "normal"}::${text}`
+  const cachedPrepared = preparedParagraphCache.get(cacheKey)
+
+  if (cachedPrepared) {
+    return cachedPrepared
+  }
+
+  const prepared = prepareWithSegments(text, font, {
+    whiteSpace,
+  })
+  preparedParagraphCache.set(cacheKey, prepared)
+  return prepared
+}
+
+/** Measures one transcript paragraph for the current width budget. */
+function measureParagraph(text: string, maxWidth: number): PretextParagraphMeasurement {
+  const prepared = prepareParagraph(text, BODY_FONT, "pre-wrap")
+  const lineLayout = layoutWithLines(prepared, maxWidth, BODY_LINE_HEIGHT)
+  const maxLineWidth = lineLayout.lines.reduce((widest, line) => Math.max(widest, line.width), 0)
+
+  return {
+    lines: lineLayout.lines,
+    lineCount: lineLayout.lineCount,
+    height: lineLayout.height,
+    maxLineWidth,
+  }
 }
 
 /** Returns the maximum bubble width available for one message role at the current viewport width. */
@@ -165,44 +215,51 @@ function getTranscriptTextWidth(
   return Math.max(MIN_TEXT_WIDTH, bubbleMaxWidth - BUBBLE_PADDING_X)
 }
 
-/** Builds the transcript bubble metrics from one measured paragraph. */
-function getTranscriptRowData(
+/** Builds the rendered transcript bubble width from one measured paragraph. */
+function getTranscriptBubbleWidth(
   message: SessionChatTranscriptMessage,
   viewportWidth: number,
   paragraph: PretextParagraphMeasurement,
-): TranscriptRowData {
+): number {
   const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message.role)
-  const bubbleWidth = Math.max(
+
+  return Math.max(
     Math.min(bubbleMaxWidth, paragraph.maxLineWidth + BUBBLE_PADDING_X),
     Math.min(bubbleMaxWidth, 196),
   )
-
-  return {
-    bubbleWidth,
-  }
 }
 
-/** Renders the visible window of one chat transcript using Pretext-driven row layout. */
+/** Rough row estimate used by Virtuoso before the real transcript row is measured. */
+function estimateTranscriptRowHeight(
+  message: SessionChatTranscriptMessage,
+  viewportWidth: number,
+): number {
+  const textWidth = getTranscriptTextWidth(message, viewportWidth)
+  const approximateCharactersPerLine = Math.max(12, Math.floor(textWidth / 7.6))
+  const normalizedLength = message.text.replace(/\s+/g, " ").trim().length
+  const explicitBreakCount = Math.max(0, message.text.split("\n").length - 1)
+  const approximateLineCount = Math.max(
+    1,
+    Math.ceil(normalizedLength / approximateCharactersPerLine) + explicitBreakCount,
+  )
+
+  return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP
+}
+
+/** Renders one chat transcript using Pretext paragraphs inside a Virtuoso row virtualizer. */
 export function SessionChatTranscript(props: SessionChatTranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
 
   return (
     <div class={cx(transcriptViewportClass, props.class)}>
-      <VirtualizedPretextParagraphList<SessionChatTranscriptMessage, TranscriptRowData>
-        getParagraphSpec={(message, _index, viewportWidth) => ({
-          key: message.id,
-          text: message.text,
-          font: BODY_FONT,
-          lineHeight: BODY_LINE_HEIGHT,
-          maxWidth: getTranscriptTextWidth(message, viewportWidth),
-          whiteSpace: "pre-wrap",
-        })}
+      <VirtualizedPretextParagraphList<SessionChatTranscriptMessage>
+        defaultRowHeight={DEFAULT_ROW_HEIGHT}
+        estimateRowHeight={(message, _index, viewportWidth) =>
+          estimateTranscriptRowHeight(message, viewportWidth)
+        }
+        getItemKey={(message) => message.id}
         initialScrollPosition={effectiveInitialScroll}
         items={props.messages}
-        layoutRow={({ item, paragraph, viewportWidth }) => ({
-          height: META_HEIGHT + BUBBLE_PADDING_Y + paragraph.height + ROW_GAP,
-          data: getTranscriptRowData(item, viewportWidth, paragraph),
-        })}
         loadingFallback={<div class={loadingStateClass}>Preparing transcript layout...</div>}
         overscanPx={VIRTUAL_OVERSCAN_PX}
         renderRow={(row) => <TranscriptRow row={row} />}
@@ -212,49 +269,56 @@ export function SessionChatTranscript(props: SessionChatTranscriptProps) {
   )
 }
 
-/** Renders one positioned transcript row with manual line rendering that matches Pretext layout. */
+/** Renders one transcript row with manual line rendering that matches Pretext layout. */
 function TranscriptRow(props: {
-  row: VirtualizedPretextParagraphRow<SessionChatTranscriptMessage, TranscriptRowData>
+  row: VirtualizedPretextParagraphRow<SessionChatTranscriptMessage>
 }) {
+  const message = props.row.item
+  const paragraphMaxWidth = getTranscriptTextWidth(message, props.row.viewportWidth)
+  const paragraph = useMemo(
+    () => measureParagraph(message.text, paragraphMaxWidth),
+    [message.text, paragraphMaxWidth],
+  )
+  const bubbleWidth = getTranscriptBubbleWidth(message, props.row.viewportWidth, paragraph)
   const alignmentStyle =
-    props.row.item.role === "user"
+    message.role === "user"
       ? { justifyContent: "flex-end" }
-      : props.row.item.role === "system"
+      : message.role === "system"
         ? { justifyContent: "center" }
         : { justifyContent: "flex-start" }
 
   const metaAlignmentStyle =
-    props.row.item.role === "user"
+    message.role === "user"
       ? { justifyContent: "flex-end" }
-      : props.row.item.role === "system"
+      : message.role === "system"
         ? { justifyContent: "center" }
         : { justifyContent: "flex-start" }
 
   const bubbleClass =
-    props.row.item.role === "user"
+    message.role === "user"
       ? userBubbleClass
-      : props.row.item.role === "system"
+      : message.role === "system"
         ? systemBubbleClass
         : assistantBubbleClass
 
   const lineClass =
-    props.row.item.role === "user"
+    message.role === "user"
       ? userLineClass
-      : props.row.item.role === "system"
+      : message.role === "system"
         ? systemLineClass
         : assistantLineClass
 
   return (
-    <article class={rowClass} style={{ top: `${props.row.top}px` }}>
+    <article class={rowClass}>
       <div class={rowInnerClass} style={alignmentStyle}>
-        <div style={{ width: `${props.row.data.bubbleWidth}px` }}>
+        <div class={rowColumnClass} style={{ width: `${bubbleWidth}px` }}>
           <div class={metaRowClass} style={metaAlignmentStyle}>
-            <span class={metaAuthorClass}>{props.row.item.authorName}</span>
-            <span class={metaTimestampClass}>{props.row.item.timestampLabel}</span>
+            <span class={metaAuthorClass}>{message.authorName}</span>
+            <span class={metaTimestampClass}>{message.timestampLabel}</span>
           </div>
           <div class={cx(bubbleFrameClass, bubbleClass)}>
-            {props.row.paragraph.lines.map((line, index) => (
-              <div key={`${props.row.item.id}:${index}`} class={cx(transcriptLineClass, lineClass)}>
+            {paragraph.lines.map((line, index) => (
+              <div key={`${message.id}:${index}`} class={cx(transcriptLineClass, lineClass)}>
                 {line.text.length > 0 ? line.text : "\u00a0"}
               </div>
             ))}

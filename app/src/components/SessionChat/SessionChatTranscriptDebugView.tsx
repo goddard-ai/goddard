@@ -81,7 +81,7 @@ export function SessionChatTranscriptDebugView(props: SessionChatTranscriptDebug
         <h1 class={debugTitleClass}>SessionChatTranscript</h1>
         <p class={debugBodyClass}>
           This view renders a dumb transcript with injected fixture data, Pretext-based line layout,
-          and a small custom virtualizer. It is intentionally disconnected from live session state
+          and Virtuoso row virtualization. It is intentionally disconnected from live session state
           so spacing and message rhythm can be tuned in isolation first.
         </p>
       </section>
