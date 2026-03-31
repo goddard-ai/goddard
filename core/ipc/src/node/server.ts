@@ -1,13 +1,9 @@
 import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
 import {
-  type InferRequestPayload,
-  type InferResponseType,
   type InferStreamPayload,
   type InferStreamSubscription,
   type IpcSchema,
-  type RequestArguments,
-  type ValidRequestName,
   type ValidStreamName,
 } from "../schema.ts"
 import { type Handlers } from "../types.ts"
@@ -127,21 +123,10 @@ export function createServer<S extends IpcSchema>(
               throw new Error(`Unknown request: ${message.name}`)
             }
 
-            const requestName = message.name as ValidRequestName<S>
-            const handler = handlers[requestName] as (
-              ...args: RequestArguments<S, typeof requestName>
-            ) =>
-              | Promise<InferResponseType<S, typeof requestName>>
-              | InferResponseType<S, typeof requestName>
-            const responseData =
-              "payload" in routeDef
-                ? await handler(
-                    routeDef.payload.parse(message.payload) as InferRequestPayload<
-                      S,
-                      typeof requestName
-                    >,
-                  )
-                : await handler()
+            const handler: (...args: any[]) => any = handlers[message.name]
+            const responseData = routeDef.payload
+              ? await handler(routeDef.payload.parse(message.payload))
+              : await handler()
 
             sendJson(res, 200, responseData)
           } catch (error) {

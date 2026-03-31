@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts"
-import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
+import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 
@@ -158,7 +158,7 @@ export async function main(argv: string[]) {
         args: { daemonUrl },
         handler: async ({ daemonUrl }) => {
           const sdk = getSdk(daemonUrl)
-          const response = await sdk.workforce.list({})
+          const response = await sdk.workforce.list()
           console.log(JSON.stringify(response.workforces, null, 2))
         },
       }),
