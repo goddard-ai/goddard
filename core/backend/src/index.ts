@@ -56,8 +56,10 @@ export async function startBackendServer(
   })
 
   const httpServer = createNodeServer(router)
-  const sockets = new Set<Socket>()
 
+  // Track raw sockets so tests can force-close long-lived stream connections on runtimes
+  // where server.close() does not drain them promptly.
+  const sockets = new Set<Socket>()
   httpServer.on("connection", (socket) => {
     sockets.add(socket)
     socket.on("close", () => {
@@ -65,18 +67,21 @@ export async function startBackendServer(
     })
   })
 
-  await new Promise<void>((resolve) => httpServer.listen(port, host, () => resolve()))
+  await new Promise<void>((resolve) => httpServer.listen(port, host, resolve))
 
   return {
     port: Number((httpServer.address() as { port: number }).port),
     close: async () => {
       await new Promise<void>((resolve, reject) => {
         const handleClose = (error?: Error | null) => {
-          if (error && "code" in error && error.code === "ERR_SERVER_NOT_RUNNING") {
-            resolve()
-            return
-          }
           if (error) {
+            // Bun/Node shutdown races can report "not running" after connections were
+            // already torn down; treat that as an idempotent close instead of a real
+            // failure.
+            if ("code" in error && error.code === "ERR_SERVER_NOT_RUNNING") {
+              resolve()
+              return
+            }
             reject(error)
             return
           }
@@ -84,13 +89,14 @@ export async function startBackendServer(
         }
 
         try {
-          httpServer.close((error) => {
-            handleClose(error)
-          })
+          httpServer.close(handleClose)
         } catch (error) {
           handleClose(error instanceof Error ? error : new Error(String(error)))
         }
 
+        // Use the native bulk-close when the current runtime exposes it, but keep the
+        // for-loop fallback so this can still shut down cleanly on partial Node-compat
+        // surfaces.
         httpServer.closeAllConnections?.()
         for (const socket of sockets) {
           socket.destroy()

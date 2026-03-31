@@ -9,7 +9,7 @@
     "source.fixAll.oxc": "explicit"
   },
   "typescript.preferences.importModuleSpecifierEnding": "js",
-  "rewrap.wrappingColumn": 75,
+  "rewrap.wrappingColumn": 90,
   "[javascript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
