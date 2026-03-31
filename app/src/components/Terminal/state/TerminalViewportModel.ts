@@ -1,6 +1,6 @@
 import { Terminal, type ITheme } from "@xterm/headless"
 import type { CSSProperties, TargetedKeyboardEvent } from "preact"
-import { ref, SigmaType } from "preact-sigma"
+import { type SigmaRef, SigmaType } from "preact-sigma"
 
 const VIEWPORT_PADDING_PX = 18
 const DEFAULT_MINIMUM_COLS = 40
@@ -75,7 +75,7 @@ type TerminalViewportShape = {
   theme: Readonly<ITheme>
   minimumCols: number
   minimumRows: number
-  terminal: TerminalRef | null
+  terminal: SigmaRef<Terminal> | null
   viewportElement: HTMLDivElement | null
   resizeObserver: ResizeObserver | null
   processedChunkCount: number
@@ -90,7 +90,6 @@ type TerminalViewportEvents = {
 }
 
 type TerminalCell = ReturnType<Terminal["buffer"]["active"]["getNullCell"]>
-type TerminalRef = ReturnType<typeof ref<Terminal>>
 
 /** Long-lived terminal model that can outlive any single viewport mount. */
 export const TerminalViewportModel = new SigmaType<TerminalViewportShape, TerminalViewportEvents>(
@@ -128,18 +127,16 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
         return
       }
 
-      this.terminal = ref(
-        new Terminal({
-          cols: Math.max(this.minimumCols, 1),
-          rows: Math.max(this.minimumRows, 1),
-          convertEol: true,
-          cursorBlink: true,
-          lineHeight: this.lineHeight,
-          letterSpacing: this.letterSpacing,
-          scrollback: 5000,
-          theme: cloneTheme(this.theme),
-        }),
-      )
+      this.terminal = new Terminal({
+        cols: Math.max(this.minimumCols, 1),
+        rows: Math.max(this.minimumRows, 1),
+        convertEol: true,
+        cursorBlink: true,
+        lineHeight: this.lineHeight,
+        letterSpacing: this.letterSpacing,
+        scrollback: 5000,
+        theme: cloneTheme(this.theme),
+      })
 
       this.refreshSnapshot()
     },
@@ -398,7 +395,7 @@ export function translateKeyboardEvent(
 
 async function syncTerminalChunks(
   terminalViewport: {
-    terminal: TerminalRef | null
+    terminal: SigmaRef<Terminal> | null
     writeVersion: number
     finishChunkSync: (chunksLength: number) => void
   },
