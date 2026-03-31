@@ -308,18 +308,10 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
     })
 
     return [
-      () => {
-        disposeScroll.dispose()
-      },
-      () => {
-        disposeWriteParsed.dispose()
-      },
-      () => {
-        disposeResize.dispose()
-      },
-      () => {
-        disposeTitleChange.dispose()
-      },
+      disposeScroll,
+      disposeWriteParsed,
+      disposeResize,
+      disposeTitleChange,
       () => {
         this.disposeTerminal()
       },
