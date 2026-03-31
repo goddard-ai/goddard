@@ -1,0 +1,533 @@
+diff --git a/app/src/bun/menu.ts b/app/src/bun/menu.ts
+index 0af5c1c..79ef38f 100644
+--- a/app/src/bun/menu.ts
++++ b/app/src/bun/menu.ts
+@@ -1,7 +1,9 @@
+ import { ApplicationMenu, type BrowserWindow } from "electrobun/bun"
++import { createDebugMenuDispatchScript } from "../shared/debug-menu"
+ 
+ const reloadViewAction = "view:reload"
+ const inspectElementAction = "view:inspect-element"
++const debugSessionChatTranscriptAction = "debug:session-chat-transcript"
+ 
+ function reloadWindow(window: BrowserWindow): void {
+   window.webview.executeJavascript("window.location.reload()")
+@@ -11,12 +13,30 @@ function inspectWindow(window: BrowserWindow): void {
+   window.webview.openDevTools()
+ }
+ 
++/** Dispatches one development-menu surface request into the active webview. */
++function openDebugSurface(window: BrowserWindow): void {
++  window.webview.executeJavascript(
++    createDebugMenuDispatchScript({ surface: "sessionChatTranscript" }),
++  )
++}
++
++/** Returns whether the current Bun runtime should expose development-only menu items. */
++function isDevelopmentRuntime(): boolean {
++  return (
++    process.env.NODE_ENV === "development" ||
++    Bun.env.NODE_ENV === "development" ||
++    Bun.argv.some((argument) => argument === "--watch" || argument === "dev")
++  )
++}
++
+ /** Installs the standard macOS Edit menu so native text shortcuts work in webviews. */
+ export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
+   if (process.platform !== "darwin") {
+     return
+   }
+ 
++  const showDebugMenu = isDevelopmentRuntime()
++
+   ApplicationMenu.on("application-menu-clicked", (event) => {
+     const menuEvent = event as { data?: { action?: string } }
+     const mainWindow = getMainWindow()
+@@ -32,6 +52,11 @@ export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow |
+ 
+     if (menuEvent.data?.action === inspectElementAction) {
+       inspectWindow(mainWindow)
++      return
++    }
++
++    if (showDebugMenu && menuEvent.data?.action === debugSessionChatTranscriptAction) {
++      openDebugSurface(mainWindow)
+     }
+   })
+ 
+@@ -73,5 +98,19 @@ export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow |
+         },
+       ],
+     },
++    ...(showDebugMenu
++      ? [
++          {
++            label: "Debug",
++            submenu: [
++              {
++                label: "SessionChatTranscript",
++                action: debugSessionChatTranscriptAction,
++                accelerator: "cmd+alt+9",
++              },
++            ],
++          },
++        ]
++      : []),
+   ])
+ }
+diff --git a/app/src/components/AppShell.tsx b/app/src/components/AppShell.tsx
+index 74e1b9e..6a53a37 100644
+--- a/app/src/components/AppShell.tsx
++++ b/app/src/components/AppShell.tsx
+@@ -1,12 +1,17 @@
+ import { css } from "@goddard-ai/styled-system/css"
+ import { token } from "@goddard-ai/styled-system/tokens"
++import type { ComponentChildren } from "preact"
++import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
++import { PretextViewportProvider } from "./Pretext/PretextViewport"
+ import { ProjectsPage } from "./Projects/ProjectsPage"
++import { SessionChatTranscriptDebugView } from "./SessionChat/SessionChatTranscriptDebugView"
+ import { lookupProject } from "./Projects/state/ProjectRegistry"
+ import { SidebarNav } from "./SidebarNav"
+ import { ShellIcon } from "../support/shell-icons"
+ import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
+ import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
+ import { WorkbenchTabs } from "./WorkbenchTabs"
++import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "../shared/debug-menu"
+ 
+ const placeholderPageClass = css({
+   display: "grid",
+@@ -55,6 +60,19 @@ const windowDragRegionClass = css({
+   background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
+ })
+ 
++const workbenchPanelScrollerClass = css({
++  minHeight: "0",
++  height: "100%",
++  overflowY: "auto",
++  overscrollBehavior: "contain",
++})
++
++const workbenchPanelBodyClass = css({
++  minHeight: "100%",
++})
++
++const panelScrollCache = new Map<string, number>()
++
+ /** Renders the tab-first shell and its primary workbench view. */
+ export function AppShell() {
+   const navigation = useNavigation()
+@@ -64,6 +82,33 @@ export function AppShell() {
+     badgeCount: navigation.badgeCounts[item.id],
+   }))
+ 
++  useEffect(() => {
++    const handleDebugMenuEvent = (event: Event) => {
++      const detail = (event as CustomEvent<DebugMenuEventDetail>).detail
++
++      if (detail.surface !== "sessionChatTranscript") {
++        return
++      }
++
++      workbenchTabSet.openOrFocusTab({
++        id: "debug:session-chat-transcript",
++        kind: "sessionChatTranscriptDebug",
++        title: "Transcript Debug",
++        icon: "sessions",
++        payload: {
++          surface: "sessionChatTranscript",
++        },
++        dirty: false,
++      })
++    }
++
++    window.addEventListener(DEBUG_MENU_EVENT_NAME, handleDebugMenuEvent as EventListener)
++
++    return () => {
++      window.removeEventListener(DEBUG_MENU_EVENT_NAME, handleDebugMenuEvent as EventListener)
++    }
++  }, [workbenchTabSet])
++
+   return (
+     <div
+       class={css({
+@@ -71,7 +116,10 @@ export function AppShell() {
+         display: "grid",
+         gridTemplateColumns: "92px minmax(0, 1fr)",
+         gridTemplateRows: "36px minmax(0, 1fr)",
+-        minHeight: "100vh",
++        width: "100%",
++        height: "100vh",
++        maxHeight: "100vh",
++        overflow: "hidden",
+         background:
+           `radial-gradient(circle at top left, color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), transparent 28%), ` +
+           `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
+@@ -81,7 +129,7 @@ export function AppShell() {
+       <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
+       <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
+       <SidebarNav
+-        className={css({ gridRow: "2" })}
++        className={css({ gridRow: "2", minHeight: "0" })}
+         items={navigationItems}
+         onSelect={(id) => {
+           navigation.selectNavItem(id)
+@@ -96,14 +144,19 @@ export function AppShell() {
+           gridTemplateRows: "auto minmax(0, 1fr)",
+           minWidth: "0",
+           minHeight: "0",
++          overflow: "hidden",
+         })}
+       >
+         <WorkbenchTabsConnected />
+-        <div class={css({ minHeight: "0" })}>
++        <div class={css({ minHeight: "0", overflow: "hidden" })}>
+           {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
+-            <MainWorkbenchView />
++            <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
++              <MainWorkbenchView />
++            </WorkbenchScrollPanel>
+           ) : (
+-            <WorkbenchTabPanel />
++            <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
++              <WorkbenchTabPanel />
++            </WorkbenchScrollPanel>
+           )}
+         </div>
+       </div>
+@@ -111,6 +164,40 @@ export function AppShell() {
+   )
+ }
+ 
++/** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
++function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChildren }) {
++  const scrollerRef = useRef<HTMLDivElement | null>(null)
++  const [scrollTop, setScrollTop] = useState(panelScrollCache.get(props.scrollKey) ?? 0)
++
++  useLayoutEffect(() => {
++    const scrollerElement = scrollerRef.current
++
++    if (!scrollerElement) {
++      return
++    }
++
++    const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
++    scrollerElement.scrollTop = restoredScrollTop
++    setScrollTop(restoredScrollTop)
++  }, [props.scrollKey])
++
++  return (
++    <PretextViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
++      <div
++        ref={scrollerRef}
++        class={workbenchPanelScrollerClass}
++        onScroll={(event) => {
++          const nextScrollTop = event.currentTarget.scrollTop
++          panelScrollCache.set(props.scrollKey, nextScrollTop)
++          setScrollTop(nextScrollTop)
++        }}
++      >
++        <div class={workbenchPanelBodyClass}>{props.children}</div>
++      </div>
++    </PretextViewportProvider>
++  )
++}
++
+ /** Connects the shell's tab state to the rendered tab strip. */
+ function WorkbenchTabsConnected() {
+   const navigation = useNavigation()
+@@ -278,5 +365,20 @@ function WorkbenchTabPanel() {
+     )
+   }
+ 
+-  return null
++  if (activeDetailTab.kind === "sessionChatTranscriptDebug") {
++    return (
++      <SessionChatTranscriptDebugView scrollCacheKey={`detail:${activeDetailTab.id}:transcript`} />
++    )
++  }
++
++  return (
++    <div class={placeholderPageClass}>
++      <div class={placeholderCardClass}>
++        <h1 class={placeholderTitleClass}>Unsupported detail tab</h1>
++        <p class={placeholderBodyClass}>
++          The requested detail tab kind is not wired into the shell yet.
++        </p>
++      </div>
++    </div>
++  )
+ }
+diff --git a/app/src/components/SessionChat/SessionChatTranscriptDebugData.ts b/app/src/components/SessionChat/SessionChatTranscriptDebugData.ts
+new file mode 100644
+index 0000000..0ac885f
+--- /dev/null
++++ b/app/src/components/SessionChat/SessionChatTranscriptDebugData.ts
+@@ -0,0 +1,77 @@
++import type { SessionChatTranscriptMessage } from "./SessionChatTranscript"
++
++const assistantMessageBodies = [
++  "I mapped the shell layout and the current state modules. The next clean seam is the transcript itself, because it can be pinned down visually before any live session transport exists.",
++  "I'd keep the chrome quiet and let the bubble width carry the hierarchy. The assistant replies can stay slightly narrower than the full column so long paragraphs still feel readable when the window gets wide.",
++  "I ran through the likely message shapes we need to survive: short acknowledgements, long planning paragraphs, code-adjacent prose, and occasional hard line breaks when the model is outlining next steps.\n\nThat means the renderer needs stable line breaking and predictable row heights before we wire any real data.",
++  "For virtualization, the important part is avoiding hidden DOM probes on every resize. Precomputing line wraps in JavaScript lets the transcript stay fast even when the fixture has hundreds of messages.",
++  "This fixture is intentionally repetitive in structure but varied in length. It is here to expose spacing problems, not to simulate a perfect model transcript.",
++  "One thing to watch in the layout pass is how single-line replies sit next to denser blocks. If the short bubbles look too lightweight, we can tighten the corner radius or slightly raise the bubble contrast.",
++]
++
++const userMessageBodies = [
++  "Keep going on the transcript surface.",
++  "Make the user bubbles feel a little more deliberate, not just a mirrored version of the assistant.",
++  "We don't need live streaming yet. I just want the spacing, rhythm, and virtualization model locked down so future state work has a stable target.",
++  "Can we bias the debug fixture toward medium and long messages instead of lots of tiny back-and-forth turns?",
++  "Make sure I can pass a fake `messages` prop directly so the component stays dumb while we experiment.",
++]
++
++const systemMessageBodies = [
++  "Debug preset: transcript-only surface with synthetic messages.",
++  "Viewport resized. Pretext line layout recomputed for the current width.",
++]
++
++/** Formats one deterministic clock label for the transcript fixture. */
++function formatFixtureTimestamp(totalMinutes: number): string {
++  const dayMinutes = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60)
++  const hours = Math.floor(dayMinutes / 60)
++  const minutes = dayMinutes % 60
++  const suffix = hours >= 12 ? "PM" : "AM"
++  const hour12 = hours % 12 || 12
++  return `${hour12}:${String(minutes).padStart(2, "0")} ${suffix}`
++}
++
++/** Builds a long deterministic transcript fixture that makes virtualization visible during debugging. */
++function buildDebugMessages(): SessionChatTranscriptMessage[] {
++  const messages: SessionChatTranscriptMessage[] = [
++    {
++      id: "system:opening",
++      role: "system",
++      authorName: "Debug Surface",
++      timestampLabel: "9:10 AM",
++      text: systemMessageBodies[0],
++    },
++  ]
++
++  let minuteCursor = 9 * 60 + 12
++
++  for (let index = 0; index < 96; index += 1) {
++    const role = index % 11 === 0 ? "system" : index % 2 === 0 ? "assistant" : "user"
++    const authorName = role === "assistant" ? "Goddard" : role === "user" ? "Alec" : "Runtime"
++    const body =
++      role === "assistant"
++        ? assistantMessageBodies[index % assistantMessageBodies.length]
++        : role === "user"
++          ? userMessageBodies[index % userMessageBodies.length]
++          : systemMessageBodies[index % systemMessageBodies.length]
++
++    messages.push({
++      id: `${role}:${index}`,
++      role,
++      authorName,
++      timestampLabel: formatFixtureTimestamp(minuteCursor),
++      text:
++        role === "assistant" && index % 5 === 2
++          ? `${body}\n\nWorking note ${index + 1}: preserve readable gutters, keep row heights predictable, and let the transcript stay dumb until real session wiring arrives.`
++          : body,
++    })
++
++    minuteCursor += role === "assistant" ? 4 : role === "user" ? 2 : 1
++  }
++
++  return messages
++}
++
++/** Stable fake transcript data used by the debug transcript tab. */
++export const SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES = buildDebugMessages()
+diff --git a/app/src/components/SessionChat/SessionChatTranscriptDebugView.tsx b/app/src/components/SessionChat/SessionChatTranscriptDebugView.tsx
+new file mode 100644
+index 0000000..9cd6381
+--- /dev/null
++++ b/app/src/components/SessionChat/SessionChatTranscriptDebugView.tsx
+@@ -0,0 +1,96 @@
++import { css } from "@goddard-ai/styled-system/css"
++import { token } from "@goddard-ai/styled-system/tokens"
++import { SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES } from "./SessionChatTranscriptDebugData"
++import { SessionChatTranscript, type SessionChatTranscriptMessage } from "./SessionChatTranscript"
++
++const debugPageClass = css({
++  display: "grid",
++  gridTemplateRows: "auto minmax(0, 1fr)",
++  gap: "18px",
++  height: "100%",
++  padding: "24px",
++  background:
++    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), transparent 30%), ` +
++    `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
++})
++
++const debugHeaderClass = css({
++  display: "grid",
++  gap: "10px",
++  padding: "24px 26px",
++  borderRadius: "26px",
++  border: "1px solid",
++  borderColor: "border",
++  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
++  boxShadow: "0 22px 56px rgba(118, 133, 150, 0.12)",
++})
++
++const debugEyebrowClass = css({
++  display: "inline-flex",
++  alignItems: "center",
++  width: "fit-content",
++  padding: "7px 11px",
++  borderRadius: "999px",
++  backgroundColor: "surface",
++  color: "accentStrong",
++  fontSize: "0.72rem",
++  fontWeight: "720",
++  letterSpacing: "0.15em",
++  textTransform: "uppercase",
++})
++
++const debugTitleClass = css({
++  color: "text",
++  fontSize: "1.6rem",
++  fontWeight: "760",
++  letterSpacing: "-0.03em",
++  lineHeight: "1.08",
++})
++
++const debugBodyClass = css({
++  maxWidth: "72ch",
++  color: "muted",
++  fontSize: "0.95rem",
++  lineHeight: "1.72",
++})
++
++const debugCanvasClass = css({
++  minHeight: "0",
++  overflow: "hidden",
++  borderRadius: "28px",
++  border: "1px solid",
++  borderColor: "border",
++  backgroundColor: "background",
++  boxShadow: "0 28px 64px rgba(118, 133, 150, 0.14)",
++})
++
++/** Props for the standalone transcript debug view. */
++export type SessionChatTranscriptDebugViewProps = {
++  messages?: readonly SessionChatTranscriptMessage[]
++  scrollCacheKey?: string
++}
++
++/** Renders the standalone transcript-debug surface used by the native development menu. */
++export function SessionChatTranscriptDebugView(props: SessionChatTranscriptDebugViewProps) {
++  const messages = props.messages ?? SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES
++
++  return (
++    <div class={debugPageClass}>
++      <section class={debugHeaderClass}>
++        <div class={debugEyebrowClass}>Debug Surface</div>
++        <h1 class={debugTitleClass}>SessionChatTranscript</h1>
++        <p class={debugBodyClass}>
++          This view renders a dumb transcript with injected fixture data, Pretext-based line layout,
++          and a small custom virtualizer. It is intentionally disconnected from live session state
++          so spacing and message rhythm can be tuned in isolation first.
++        </p>
++      </section>
++      <section class={debugCanvasClass}>
++        <SessionChatTranscript
++          messages={messages}
++          scrollCacheKey={props.scrollCacheKey ?? "debug:session-chat-transcript"}
++        />
++      </section>
++    </div>
++  )
++}
+diff --git a/app/src/components/state/WorkbenchTabSet.ts b/app/src/components/state/WorkbenchTabSet.ts
+index a850f00..3e0cf66 100644
+--- a/app/src/components/state/WorkbenchTabSet.ts
++++ b/app/src/components/state/WorkbenchTabSet.ts
+@@ -5,15 +5,42 @@ import { readJsonStorage, writeJsonStorage } from "../../support/workspace-stora
+ const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v2"
+ 
+ /** The supported detail-tab kinds available in the shell. */
+-export type WorkbenchDetailTabKind = "project"
++export type WorkbenchDetailTabKind = "project" | "sessionChatTranscriptDebug"
+ 
+ /** Payload used by a project detail tab. */
+ export type ProjectWorkbenchTabPayload = {
+   projectPath: string
+ }
+ 
++/** Payload used by the standalone transcript debug tab. */
++export type SessionChatTranscriptDebugWorkbenchTabPayload = {
++  surface: "sessionChatTranscript"
++}
++
+ /** Union payload carried by one detail tab. */
+-export type WorkbenchDetailTabPayload = ProjectWorkbenchTabPayload
++export type WorkbenchDetailTabPayload =
++  | ProjectWorkbenchTabPayload
++  | SessionChatTranscriptDebugWorkbenchTabPayload
++
++/** Shared fields carried by every closable detail tab. */
++type WorkbenchDetailTabBase = {
++  id: string
++  title: string
++  icon: ShellIconName
++  dirty: boolean
++}
++
++/** One project-backed detail tab tracked by the shell. */
++type ProjectWorkbenchDetailTab = WorkbenchDetailTabBase & {
++  kind: "project"
++  payload: ProjectWorkbenchTabPayload
++}
++
++/** One standalone transcript debug tab tracked by the shell. */
++type SessionChatTranscriptDebugWorkbenchDetailTab = WorkbenchDetailTabBase & {
++  kind: "sessionChatTranscriptDebug"
++  payload: SessionChatTranscriptDebugWorkbenchTabPayload
++}
+ 
+ /** Immutable descriptor for the always-present primary tab. */
+ export type WorkbenchPrimaryTab = {
+@@ -23,14 +50,9 @@ export type WorkbenchPrimaryTab = {
+ }
+ 
+ /** One closable detail tab tracked by the shell. */
+-export type WorkbenchDetailTab = {
+-  id: string
+-  kind: WorkbenchDetailTabKind
+-  title: string
+-  icon: ShellIconName
+-  payload: WorkbenchDetailTabPayload
+-  dirty: boolean
+-}
++export type WorkbenchDetailTab =
++  | ProjectWorkbenchDetailTab
++  | SessionChatTranscriptDebugWorkbenchDetailTab
+ 
+ /** Persisted snapshot for open workbench detail tabs. */
+ type WorkbenchTabsSnapshot = {
+diff --git a/app/src/shared/debug-menu.ts b/app/src/shared/debug-menu.ts
+new file mode 100644
+index 0000000..357a7d1
+--- /dev/null
++++ b/app/src/shared/debug-menu.ts
+@@ -0,0 +1,15 @@
++/** Debug surfaces that the native development menu can request inside the webview. */
++export type DebugMenuSurface = "sessionChatTranscript"
++
++/** Custom browser event name dispatched when the native debug menu requests a surface. */
++export const DEBUG_MENU_EVENT_NAME = "goddard:debug-menu"
++
++/** Detail payload carried by one native debug-menu event. */
++export type DebugMenuEventDetail = {
++  surface: DebugMenuSurface
++}
++
++/** Serializes one debug-menu request into JavaScript that Bun can inject into the webview. */
++export function createDebugMenuDispatchScript(detail: DebugMenuEventDetail): string {
++  return `window.dispatchEvent(new CustomEvent(${JSON.stringify(DEBUG_MENU_EVENT_NAME)}, { detail: ${JSON.stringify(detail)} }));`
++}

@@ -123,6 +123,13 @@ const ROW_GAP = 18
 const VIRTUAL_OVERSCAN_PX = 420
 const MIN_TEXT_WIDTH = 144
 const DEFAULT_ROW_HEIGHT = 132
+const NARROW_BUBBLE_WIDTH_BREAKPOINT = 520
+const WIDE_BUBBLE_WIDTH_BREAKPOINT = 760
+
+/** Linearly interpolates one value within an inclusive range. */
+function lerp(start: number, end: number, progress: number): number {
+  return start + (end - start) * progress
+}
 
 const preparedParagraphCache = new Map<string, PreparedTextWithSegments>()
 
@@ -196,11 +203,22 @@ function getBubbleMaxWidth(
     return Math.max(240, Math.min(560, safeViewportWidth - 56))
   }
 
-  if (safeViewportWidth < 720) {
-    return Math.max(220, safeViewportWidth - 22)
+  const narrowWidth = Math.max(220, safeViewportWidth - 22)
+  const wideWidth = Math.max(320, Math.min(720, Math.round(safeViewportWidth * 0.72)))
+
+  if (safeViewportWidth <= NARROW_BUBBLE_WIDTH_BREAKPOINT) {
+    return narrowWidth
   }
 
-  return Math.max(320, Math.min(720, Math.round(safeViewportWidth * 0.72)))
+  if (safeViewportWidth >= WIDE_BUBBLE_WIDTH_BREAKPOINT) {
+    return wideWidth
+  }
+
+  const progress =
+    (safeViewportWidth - NARROW_BUBBLE_WIDTH_BREAKPOINT) /
+    (WIDE_BUBBLE_WIDTH_BREAKPOINT - NARROW_BUBBLE_WIDTH_BREAKPOINT)
+
+  return Math.round(lerp(narrowWidth, wideWidth, progress))
 }
 
 /** Returns the maximum text width available inside one transcript bubble. */
