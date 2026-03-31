@@ -294,24 +294,19 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
       return []
     }
 
-    const disposeScroll = this.terminal.onScroll(() => {
-      this.refreshSnapshot()
-    })
-    const disposeWriteParsed = this.terminal.onWriteParsed(() => {
-      this.refreshSnapshot()
-    })
-    const disposeResize = this.terminal.onResize((nextSize: { cols: number; rows: number }) => {
-      this.handleTerminalResize(nextSize.cols, nextSize.rows)
-    })
-    const disposeTitleChange = this.terminal.onTitleChange(() => {
-      this.refreshSnapshot()
-    })
-
     return [
-      disposeScroll,
-      disposeWriteParsed,
-      disposeResize,
-      disposeTitleChange,
+      this.terminal.onScroll(() => {
+        this.refreshSnapshot()
+      }),
+      this.terminal.onWriteParsed(() => {
+        this.refreshSnapshot()
+      }),
+      this.terminal.onResize((nextSize: { cols: number; rows: number }) => {
+        this.handleTerminalResize(nextSize.cols, nextSize.rows)
+      }),
+      this.terminal.onTitleChange(() => {
+        this.refreshSnapshot()
+      }),
       () => {
         this.disposeTerminal()
       },
