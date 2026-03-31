@@ -80,6 +80,34 @@ async function resolveRepositoryRoot(startDir: string): Promise<string> {
   }
 }
 
+/** Keeps the current process alive until the operator interrupts the tail command. */
+async function waitForTerminationSignal(unsubscribe: () => void): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let finished = false
+
+    const cleanup = () => {
+      process.off("SIGINT", handleSignal)
+      process.off("SIGTERM", handleSignal)
+    }
+    const finish = () => {
+      if (finished) {
+        return
+      }
+
+      finished = true
+      cleanup()
+      unsubscribe()
+      resolve()
+    }
+    const handleSignal = () => {
+      finish()
+    }
+
+    process.on("SIGINT", handleSignal)
+    process.on("SIGTERM", handleSignal)
+  })
+}
+
 /** Runs the workforce CLI entrypoint against one argv payload. */
 export async function main(argv: string[]) {
   const daemonUrl = option({
@@ -160,6 +188,25 @@ export async function main(argv: string[]) {
           const sdk = getSdk(daemonUrl)
           const response = await sdk.workforce.list()
           console.log(JSON.stringify(response.workforces, null, 2))
+        },
+      }),
+      tail: command({
+        name: "tail",
+        description: "Stream live workforce ledger events for one repository",
+        args: { root, daemonUrl },
+        handler: async ({ root, daemonUrl }) => {
+          const sdk = getSdk(daemonUrl)
+          const repositoryRoot = await resolveRepositoryRoot(root)
+          const unsubscribe = await sdk.workforce.subscribe(
+            {
+              rootDir: repositoryRoot,
+            },
+            (event) => {
+              process.stdout.write(`${JSON.stringify(event)}\n`)
+            },
+          )
+
+          await waitForTerminationSignal(unsubscribe)
         },
       }),
       request: command({

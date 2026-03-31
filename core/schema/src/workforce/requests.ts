@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { WorkforceConfig, WorkforceProjectionSummary } from "../workforce.ts"
+import type { WorkforceLedgerEvent } from "../workforce.ts"
 
 /** Stable request intents supported by workforce mutation APIs. */
 export const WorkforceRequestIntent = z.enum(["default", "create"])
@@ -57,6 +58,16 @@ export const GetDaemonWorkforceRequest = z.object({
 })
 
 export type GetDaemonWorkforceRequest = z.infer<typeof GetDaemonWorkforceRequest>
+
+/** Request payload used to subscribe to live daemon-published workforce events for one repo. */
+export const SubscribeDaemonWorkforceEventsRequest = z.object({
+  rootDir: z.string(),
+})
+
+/** Compile-time shape used to subscribe to live daemon-published workforce events for one repo. */
+export type SubscribeDaemonWorkforceEventsRequest = z.infer<
+  typeof SubscribeDaemonWorkforceEventsRequest
+>
 
 /** Response payload returned after workforce initialization candidates are discovered. */
 export type DiscoverDaemonWorkforceCandidatesResponse = {
@@ -151,6 +162,12 @@ export type DaemonWorkforceStatus = WorkforceProjectionSummary & {
 /** One daemon-managed workforce runtime addressed by repository root. */
 export type DaemonWorkforce = DaemonWorkforceStatus & {
   config: WorkforceConfig
+}
+
+/** Stream payload emitted for one workforce ledger event from one active repository runtime. */
+export interface DaemonWorkforceEvent {
+  rootDir: string
+  event: WorkforceLedgerEvent
 }
 
 /** Response payload returned when one workforce runtime is fetched. */

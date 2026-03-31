@@ -6,6 +6,7 @@ import type {
   CancelDaemonWorkforceRequest,
   CreateDaemonSessionRequest,
   CreateDaemonWorkforceRequestRequest,
+  DaemonWorkforceEvent,
   DiscoverDaemonWorkforceCandidatesRequest,
   GetDaemonLoopRequest,
   GetDaemonWorkforceRequest,
@@ -20,6 +21,7 @@ import type {
   ShutdownDaemonWorkforceRequest,
   StartDaemonLoopRequest,
   StartDaemonWorkforceRequest,
+  SubscribeDaemonWorkforceEventsRequest,
   SubmitPrDaemonRequest,
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
@@ -148,6 +150,15 @@ function createWorkforceNamespace(client: DaemonIpcClient) {
     get: async (input: GetDaemonWorkforceRequest) => client.send("workforceGet", input),
     /** Lists daemon workforce runtime summaries. */
     list: async () => client.send("workforceList"),
+    /** Subscribes to live daemon-published workforce ledger events for one repository root. */
+    subscribe: async (
+      input: SubscribeDaemonWorkforceEventsRequest,
+      onEvent: (event: DaemonWorkforceEvent["event"]) => void,
+    ): Promise<() => void> => {
+      return client.subscribe("workforceEvent", input, (payload) => {
+        onEvent(payload.event)
+      })
+    },
     /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
     shutdown: async (input: ShutdownDaemonWorkforceRequest) =>
       client.send("workforceShutdown", input),

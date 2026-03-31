@@ -20,6 +20,190 @@ afterEach(async () => {
 
 test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-ipc-"))
+  let publishEvent:
+    | ((payload: {
+        rootDir: string
+        event: {
+          id: string
+          at: string
+          type: "request"
+          requestId: string
+          toAgentId: string
+          fromAgentId: string | null
+          intent: "default"
+          input: string
+        }
+      }) => void)
+    | null = null
+  const daemon = await startDaemonServer(
+    {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
+      pr: {
+        create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
+        reply: async () => ({ success: true }),
+      },
+    },
+    {
+      socketPath: join(socketDir, "daemon.sock"),
+    },
+    {
+      createWorkforceManager: (input) => {
+        publishEvent = input.publishEvent as typeof publishEvent
+        return {
+          startWorkforce: async (rootDir: string) => ({
+            state: "running",
+            rootDir,
+            configPath: `${rootDir}/.goddard/workforce.json`,
+            ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
+            activeRequestCount: 0,
+            queuedRequestCount: 0,
+            suspendedRequestCount: 0,
+            failedRequestCount: 0,
+            config: {
+              version: 1,
+              defaultAgent: "pi",
+              rootAgentId: "root",
+              agents: [],
+            },
+          }),
+          getWorkforce: async (rootDir: string) => ({
+            state: "running",
+            rootDir,
+            configPath: `${rootDir}/.goddard/workforce.json`,
+            ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
+            activeRequestCount: 0,
+            queuedRequestCount: 0,
+            suspendedRequestCount: 0,
+            failedRequestCount: 0,
+            config: {
+              version: 1,
+              defaultAgent: "pi",
+              rootAgentId: "root",
+              agents: [],
+            },
+          }),
+          listWorkforces: async () => [
+            {
+              state: "running",
+              rootDir: "/repo",
+              configPath: "/repo/.goddard/workforce.json",
+              ledgerPath: "/repo/.goddard/ledger.jsonl",
+              activeRequestCount: 0,
+              queuedRequestCount: 0,
+              suspendedRequestCount: 0,
+              failedRequestCount: 0,
+            },
+          ],
+          shutdownWorkforce: async () => true,
+          appendWorkforceEvent: async () => ({
+            workforce: {
+              state: "running",
+              rootDir: "/repo",
+              configPath: "/repo/.goddard/workforce.json",
+              ledgerPath: "/repo/.goddard/ledger.jsonl",
+              activeRequestCount: 0,
+              queuedRequestCount: 1,
+              suspendedRequestCount: 0,
+              failedRequestCount: 0,
+            },
+            requestId: "req-1",
+          }),
+          close: async () => {},
+        }
+      },
+    },
+  )
+  cleanup.push(async () => {
+    await daemon.close()
+    await rm(socketDir, { recursive: true, force: true })
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const started = await client.send("workforceStart", { rootDir: "/repo" })
+  const fetched = await client.send("workforceGet", { rootDir: "/repo" })
+  const listed = await client.send("workforceList")
+  let resolveStreamEvent:
+    | ((payload: {
+        id: string
+        at: string
+        type: "request"
+        requestId: string
+        toAgentId: string
+        fromAgentId: string | null
+        intent: "default"
+        input: string
+      }) => void)
+    | null = null
+  const streamedEvent = new Promise<{
+    id: string
+    at: string
+    type: "request"
+    requestId: string
+    toAgentId: string
+    fromAgentId: string | null
+    intent: "default"
+    input: string
+  }>((resolve) => {
+    resolveStreamEvent = resolve
+  })
+  const unsubscribe = await client.subscribe("workforceEvent", { rootDir: "/repo" }, (payload) => {
+    resolveStreamEvent?.(payload.event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribe()).catch(() => {})
+  })
+  const requested = await client.send("workforceRequest", {
+    rootDir: "/repo",
+    targetAgentId: "api",
+    input: "Ship it.",
+  })
+
+  publishEvent?.({
+    rootDir: "/repo",
+    event: {
+      id: "evt-1",
+      at: new Date().toISOString(),
+      type: "request",
+      requestId: "req-stream-1",
+      toAgentId: "api",
+      fromAgentId: null,
+      intent: "default",
+      input: "Tail this request.",
+    },
+  })
+  const stopped = await client.send("workforceShutdown", { rootDir: "/repo" })
+
+  expect(started.workforce.rootDir).toBe("/repo")
+  expect(fetched.workforce.rootDir).toBe("/repo")
+  expect(listed.workforces).toHaveLength(1)
+  await expect(streamedEvent).resolves.toMatchObject({
+    id: "evt-1",
+    type: "request",
+    requestId: "req-stream-1",
+    toAgentId: "api",
+    input: "Tail this request.",
+  })
+  expect(requested.requestId).toBe("req-1")
+  expect(stopped.success).toBe(true)
+})
+
+test("daemon workforce event stream rejects inactive repositories", async () => {
+  const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
   const daemon = await startDaemonServer(
     {
       auth: {
@@ -48,64 +232,17 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
     },
     {
       createWorkforceManager: () => ({
-        startWorkforce: async (rootDir: string) => ({
-          state: "running",
-          rootDir,
-          configPath: `${rootDir}/.goddard/workforce.json`,
-          ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
-          activeRequestCount: 0,
-          queuedRequestCount: 0,
-          suspendedRequestCount: 0,
-          failedRequestCount: 0,
-          config: {
-            version: 1,
-            defaultAgent: "pi",
-            rootAgentId: "root",
-            agents: [],
-          },
-        }),
-        getWorkforce: async (rootDir: string) => ({
-          state: "running",
-          rootDir,
-          configPath: `${rootDir}/.goddard/workforce.json`,
-          ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
-          activeRequestCount: 0,
-          queuedRequestCount: 0,
-          suspendedRequestCount: 0,
-          failedRequestCount: 0,
-          config: {
-            version: 1,
-            defaultAgent: "pi",
-            rootAgentId: "root",
-            agents: [],
-          },
-        }),
-        listWorkforces: async () => [
-          {
-            state: "running",
-            rootDir: "/repo",
-            configPath: "/repo/.goddard/workforce.json",
-            ledgerPath: "/repo/.goddard/ledger.jsonl",
-            activeRequestCount: 0,
-            queuedRequestCount: 0,
-            suspendedRequestCount: 0,
-            failedRequestCount: 0,
-          },
-        ],
-        shutdownWorkforce: async () => true,
-        appendWorkforceEvent: async () => ({
-          workforce: {
-            state: "running",
-            rootDir: "/repo",
-            configPath: "/repo/.goddard/workforce.json",
-            ledgerPath: "/repo/.goddard/ledger.jsonl",
-            activeRequestCount: 0,
-            queuedRequestCount: 1,
-            suspendedRequestCount: 0,
-            failedRequestCount: 0,
-          },
-          requestId: "req-1",
-        }),
+        startWorkforce: async () => {
+          throw new Error("not used")
+        },
+        getWorkforce: async (rootDir: string) => {
+          throw new Error(`No workforce is running for ${rootDir}`)
+        },
+        listWorkforces: async () => [],
+        shutdownWorkforce: async () => false,
+        appendWorkforceEvent: async () => {
+          throw new Error("not used")
+        },
         close: async () => {},
       }),
     },
@@ -116,21 +253,10 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const started = await client.send("workforceStart", { rootDir: "/repo" })
-  const fetched = await client.send("workforceGet", { rootDir: "/repo" })
-  const listed = await client.send("workforceList")
-  const requested = await client.send("workforceRequest", {
-    rootDir: "/repo",
-    targetAgentId: "api",
-    input: "Ship it.",
-  })
-  const stopped = await client.send("workforceShutdown", { rootDir: "/repo" })
 
-  expect(started.workforce.rootDir).toBe("/repo")
-  expect(fetched.workforce.rootDir).toBe("/repo")
-  expect(listed.workforces).toHaveLength(1)
-  expect(requested.requestId).toBe("req-1")
-  expect(stopped.success).toBe(true)
+  await expect(client.subscribe("workforceEvent", { rootDir: "/repo" }, () => {})).rejects.toThrow(
+    "No workforce is running for /repo",
+  )
 })
 
 test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {

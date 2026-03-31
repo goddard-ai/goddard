@@ -42,6 +42,7 @@ export type {
 } from "./daemon/sessions.ts"
 export type {
   CancelDaemonWorkforceRequest,
+  DaemonWorkforceEvent,
   DaemonWorkforceInitCandidate,
   CreateDaemonWorkforceRequestRequest,
   DaemonWorkforce,
@@ -61,6 +62,7 @@ export type {
   ShutdownDaemonWorkforceResponse,
   StartDaemonWorkforceRequest,
   StartDaemonWorkforceResponse,
+  SubscribeDaemonWorkforceEventsRequest,
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
   UpdateDaemonWorkforceRequest,

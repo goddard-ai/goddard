@@ -118,6 +118,50 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenNthCalledWith(2, "sessionShutdown", { id: "daemon-session-1" })
   })
 
+  test("workforce.subscribe passes the root filter and unwraps ledger events", async () => {
+    const { sdk, subscribe } = createSdkWithClient()
+    const onEvent = vi.fn()
+    const unsubscribe = vi.fn()
+
+    subscribe.mockImplementationOnce(async (_name, subscription, handler) => {
+      expect(subscription).toEqual({ rootDir: "/repo" })
+      handler({
+        rootDir: "/repo",
+        event: {
+          id: "evt-1",
+          at: "2026-03-31T00:00:00.000Z",
+          type: "request",
+          requestId: "req-1",
+          toAgentId: "root",
+          fromAgentId: null,
+          intent: "default",
+          input: "Review the queue.",
+        },
+      })
+      return unsubscribe
+    })
+
+    const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
+
+    expect(subscribe).toHaveBeenCalledWith(
+      "workforceEvent",
+      { rootDir: "/repo" },
+      expect.any(Function),
+    )
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledWith({
+      id: "evt-1",
+      at: "2026-03-31T00:00:00.000Z",
+      type: "request",
+      requestId: "req-1",
+      toAgentId: "root",
+      fromAgentId: null,
+      intent: "default",
+      input: "Review the queue.",
+    })
+    expect(result).toBe(unsubscribe)
+  })
+
   test("AgentSession.setAgentModel forwards the requested model id through ACP", async () => {
     const setModelMock = vi.fn()
     const session = new AgentSession(

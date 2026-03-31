@@ -4,7 +4,11 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/schema/backend"
-import type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonWorkforceEvent,
+  ReplyPrDaemonRequest,
+  SubmitPrDaemonRequest,
+} from "@goddard-ai/schema/daemon"
 import type { ManagedPrLocationRecord } from "../persistence/managed-pr-locations.ts"
 import type { SessionPermissionsRecord } from "../persistence/session-permissions.ts"
 import type { LoopManager } from "../loop/index.ts"
@@ -62,5 +66,8 @@ export type DaemonServerDeps = {
     record: Omit<ManagedPrLocationRecord, "updatedAt">,
   ) => Promise<ManagedPrLocationRecord>
   createLoopManager?: (input: { sessionManager: SessionManager }) => LoopManager
-  createWorkforceManager?: (input: { sessionManager: SessionManager }) => WorkforceManager
+  createWorkforceManager?: (input: {
+    sessionManager: SessionManager
+    publishEvent?: (payload: DaemonWorkforceEvent) => void
+  }) => WorkforceManager
 }

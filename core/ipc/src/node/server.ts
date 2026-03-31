@@ -77,11 +77,20 @@ function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boo
   )
 }
 
+/** Optional hooks that run when one client subscribes to a server-published stream. */
+type CreateServerOptions<S extends IpcSchema> = {
+  onSubscribe?: (input: {
+    name: ValidStreamName<S>
+    subscription: InferStreamSubscription<S, ValidStreamName<S>> | undefined
+  }) => Promise<void> | void
+}
+
 /** Creates the Node IPC server for one socket-backed application schema. */
 export function createServer<S extends IpcSchema>(
   socketPath: string,
   schema: S,
   handlers: Handlers<S>,
+  options: CreateServerOptions<S> = {},
 ) {
   const streamClients = new Set<{
     name: string
@@ -137,52 +146,65 @@ export function createServer<S extends IpcSchema>(
       }
 
       if (req.method === "GET" && url.pathname === "/stream") {
-        const name = url.searchParams.get("name")
-        if (!name || !Object.hasOwn(schema.streams, name)) {
-          res.writeHead(400, { "Content-Type": "text/plain" })
-          res.end("Invalid stream name")
-          return
-        }
-
-        let subscription: InferStreamSubscription<S, ValidStreamName<S>> | undefined
-        try {
-          const { subscription: subscriptionSchema } = getStreamSchemas(
-            schema,
-            name as ValidStreamName<S>,
-          )
-          const rawSubscription = url.searchParams.get("subscription")
-          if (rawSubscription && !subscriptionSchema) {
-            throw new Error(`Stream ${name} does not accept subscription params`)
+        void (async () => {
+          const name = url.searchParams.get("name")
+          if (!name || !Object.hasOwn(schema.streams, name)) {
+            res.writeHead(400, { "Content-Type": "text/plain" })
+            res.end("Invalid stream name")
+            return
           }
-          subscription =
-            rawSubscription && subscriptionSchema
-              ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
-                  S,
-                  ValidStreamName<S>
-                >)
-              : undefined
-        } catch (error) {
-          res.writeHead(400, { "Content-Type": "text/plain" })
-          res.end(getErrorMessage(error))
-          return
-        }
 
-        res.writeHead(200, {
-          "Content-Type": "application/x-ndjson",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        })
-        res.flushHeaders()
+          let subscription: InferStreamSubscription<S, ValidStreamName<S>> | undefined
+          try {
+            const { subscription: subscriptionSchema } = getStreamSchemas(
+              schema,
+              name as ValidStreamName<S>,
+            )
+            const rawSubscription = url.searchParams.get("subscription")
+            if (rawSubscription && !subscriptionSchema) {
+              throw new Error(`Stream ${name} does not accept subscription params`)
+            }
+            subscription =
+              rawSubscription && subscriptionSchema
+                ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
+                    S,
+                    ValidStreamName<S>
+                  >)
+                : undefined
+          } catch (error) {
+            res.writeHead(400, { "Content-Type": "text/plain" })
+            res.end(getErrorMessage(error))
+            return
+          }
 
-        const client = { name, subscription, res }
-        streamClients.add(client)
+          try {
+            await options.onSubscribe?.({
+              name: name as ValidStreamName<S>,
+              subscription,
+            })
+          } catch (error) {
+            res.writeHead(400, { "Content-Type": "text/plain" })
+            res.end(getErrorMessage(error))
+            return
+          }
 
-        const removeClient = () => {
-          streamClients.delete(client)
-        }
+          res.writeHead(200, {
+            "Content-Type": "application/x-ndjson",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          })
+          res.flushHeaders()
 
-        req.on("close", removeClient)
-        res.on("close", removeClient)
+          const client = { name, subscription, res }
+          streamClients.add(client)
+
+          const removeClient = () => {
+            streamClients.delete(client)
+          }
+
+          req.on("close", removeClient)
+          res.on("close", removeClient)
+        })()
         return
       }
 

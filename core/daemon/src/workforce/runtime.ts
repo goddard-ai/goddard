@@ -1,4 +1,8 @@
-import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonWorkforce,
+  DaemonWorkforceEvent,
+  DaemonWorkforceStatus,
+} from "@goddard-ai/schema/daemon"
 import type {
   WorkforceAgentConfig,
   WorkforceConfig,
@@ -51,6 +55,7 @@ export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promis
 export interface WorkforceRuntimeDeps {
   sessionManager: SessionManager
   runSession?: WorkforceSessionRunner
+  publishEvent?: (payload: DaemonWorkforceEvent) => void
 }
 
 /** Collects the most relevant recent ledger activity for the agent about to handle a request. */
@@ -672,6 +677,10 @@ export class WorkforceRuntime {
       queues: buildWorkforceQueues(this.#projection.requests),
       summary: summarizeWorkforceProjection(this.#projection.requests),
     }
+    this.#deps.publishEvent?.({
+      rootDir: this.#rootDir,
+      event: eventWithId,
+    })
 
     this.scheduleDrainForAllAgents()
   }

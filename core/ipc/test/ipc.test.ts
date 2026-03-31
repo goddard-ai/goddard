@@ -48,11 +48,22 @@ afterEach(async () => {
 async function createFixture() {
   const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-"))
   const socketPath = join(directory, "ipc.sock")
-  const ipcServer = createServer(socketPath, schema, {
-    ping: () => ({ ok: true }),
-    echo: ({ text }) => ({ echoed: text }),
-    add: ({ a, b }) => ({ sum: a + b }),
-  })
+  const ipcServer = createServer(
+    socketPath,
+    schema,
+    {
+      ping: () => ({ ok: true }),
+      echo: ({ text }) => ({ echoed: text }),
+      add: ({ a, b }) => ({ sum: a + b }),
+    },
+    {
+      onSubscribe: ({ name, subscription }) => {
+        if (name === "userAlert" && subscription?.userId === "blocked-user") {
+          throw new Error("User alerts are disabled for blocked-user")
+        }
+      },
+    },
+  )
 
   await once(ipcServer.server, "listening")
 
@@ -175,5 +186,13 @@ describe("core/ipc", () => {
 
     expect(onMessage).toHaveBeenCalledTimes(1)
     expect(onMessage).toHaveBeenCalledWith({ userId: "user-1", message: "deliver me" })
+  })
+
+  test("rejects stream subscriptions when the server-side validator fails", async () => {
+    const { client } = await createFixture()
+
+    await expect(
+      client.subscribe("userAlert", { userId: "blocked-user" }, () => {}),
+    ).rejects.toThrow("User alerts are disabled for blocked-user")
   })
 })

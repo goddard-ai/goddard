@@ -34,6 +34,7 @@ import {
 } from "./daemon/sessions.ts"
 import {
   type DiscoverDaemonWorkforceCandidatesResponse,
+  type DaemonWorkforceEvent,
   type GetDaemonWorkforceResponse,
   type InitializeDaemonWorkforceResponse,
   type ListDaemonWorkforcesResponse,
@@ -48,6 +49,7 @@ import {
   RespondDaemonWorkforceRequest,
   ShutdownDaemonWorkforceRequest,
   StartDaemonWorkforceRequest,
+  SubscribeDaemonWorkforceEventsRequest,
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
   UpdateDaemonWorkforceRequest,
@@ -192,6 +194,10 @@ export const daemonIpcSchema = {
     sessionMessage: {
       payload: $type<DaemonSessionMessageEvent>(),
       subscription: DaemonSessionIdParams,
+    },
+    workforceEvent: {
+      payload: $type<DaemonWorkforceEvent>(),
+      subscription: SubscribeDaemonWorkforceEventsRequest,
     },
   },
 } satisfies IpcSchema
