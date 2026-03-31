@@ -1,0 +1,15 @@
+# Component: PretextMarkdown
+- **Goal:** Render long markdown documents inside detail tabs with Pretext-owned paragraph layout so the app can virtualize prose-heavy surfaces by default without per-paragraph DOM measurement.
+- **Why now:** `SessionChatTranscript` is already establishing a shared Pretext viewport context and virtualized paragraph pipeline. A separate markdown surface should reuse that same viewport ownership instead of inventing a second measurement path for spec and document tabs.
+- **Minimum Viable Component:** A markdown document renderer that tokenizes markdown into block records, routes every paragraph-like block through Pretext, virtualizes the visible block window, and renders non-paragraph chrome such as headings, lists, quotes, code fences, and rules around the measured paragraph output.
+- **Props Interface:** `documentId: string`; `source: string`; `scrollCacheKey?: string`; `initialScrollPosition?: "top" | "anchor"`; `onLinkSelect?: (href: string) => void`; `onHeadingVisible?: (slug: string | null) => void`.
+- **Required Shared Context:** `PretextViewportContext` so one `ResizeObserver` and one viewport width snapshot can drive all paragraph layout inside the current tab.
+- **Sub-components:** `PretextMarkdownViewport`; `PretextMarkdownBlockList`; `PretextMarkdownParagraph`; `PretextMarkdownHeading`; `PretextMarkdownCodeBlock`; `PretextMarkdownListBlock`.
+- **State Complexity:** Purely presentational for MVP. Parsing, outline state, heading visibility, and anchor restoration should stay in a dedicated document state module rather than local component state once real documents are wired in.
+- **Virtualization Model:** Virtualize block rows by default. Paragraph rows, list items with wrapped prose, and block quotes should use Pretext measurement. Non-text blocks can provide fixed or content-derived heights through the same row-layout contract.
+- **Dependencies:** The markdown surface should reuse the shared `PretextViewport` and `VirtualizedPretextParagraphList` primitives, and stay thin over the existing document or MDX ownership in app state instead of inventing app-only storage.
+- **Likely Sprint Fit:** After the existing spec and MDX workflow sprint, as a follow-on that replaces or extends the current document rendering path once the shared Pretext primitives have stabilized.
+- **Open Questions:**
+  - Should markdown parsing stay markdown-only for MVP, or should it align with the planned MDX document path from day one?
+  - Which block types must participate in anchor restoration and heading tracking immediately versus later?
+  - Should code blocks stay unvirtualized within one row, or should very large fenced blocks gain their own inner virtualization path?

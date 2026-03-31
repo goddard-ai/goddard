@@ -30,6 +30,11 @@
       "source": "/Users/alec/dev/skills/packages",
       "sourceType": "local",
       "computedHash": "14fea450423ec973878ae19dc5bc6c2ee7d503f5295c120eba9821d635ac94e1"
+    },
+    "react-virtuoso": {
+      "source": "/Users/alec/dev/skills/packages",
+      "sourceType": "local",
+      "computedHash": "0ad8839072da56a0ce9e13544c328a5d51059cf03da4e7a337d624c404b6d901"
     }
   }
 }

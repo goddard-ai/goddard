@@ -1,6 +1,6 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { createAppMenuDispatchScript, type AppMenuAction } from "../shared/app-menu"
-import { createDebugMenuDispatchScript, DebugMenuSurface } from "../shared/debug-menu"
+import { createDebugMenuDispatchScript, type DebugMenuSurface } from "../shared/debug-menu"
 
 const withParams =
   <T>(action: string) =>
@@ -40,31 +40,47 @@ function openDebugSurface(surface: DebugMenuSurface) {
   }
 }
 
+/** Returns whether the current Bun runtime should expose development-only menu items. */
+function isDevelopmentRuntime(): boolean {
+  return (
+    process.env.NODE_ENV === "development" ||
+    Bun.env.NODE_ENV === "development" ||
+    Bun.argv.some((argument) => argument === "--watch" || argument === "dev")
+  )
+}
+
 /** Installs the standard macOS Edit menu so native text shortcuts work in webviews. */
 export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
   if (process.platform !== "darwin") {
     return
   }
 
-  const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
+  const actions: Record<string, (window: BrowserWindow, params: unknown) => void> = {
     [closeTabAction]: dispatchAppMenuAction("closeTab"),
     [closeWindowAction]: closeWindow,
     [reloadViewAction]: reloadWindow,
     [inspectElementAction]: inspectWindow,
   }
+  const showDebugMenu = isDevelopmentRuntime()
 
   const debugMenu: ApplicationMenuItemConfig[] = []
-  if (Bun.env.NODE_ENV === "development") {
-    const surfaces: { label: string; surface: DebugMenuSurface }[] = [
+  if (showDebugMenu) {
+    const surfaces: { label: string; surface: DebugMenuSurface; accelerator?: string }[] = [
       { label: "Terminal", surface: "terminal" },
+      {
+        label: "SessionChatTranscript",
+        surface: "sessionChatTranscript",
+        accelerator: "cmd+alt+9",
+      },
     ]
     debugMenu.push(
-      ...surfaces.map(({ label, surface }): ApplicationMenuItemConfig => {
+      ...surfaces.map(({ label, surface, accelerator }): ApplicationMenuItemConfig => {
         const action = debugNavigateAction(surface)
         actions[action] = openDebugSurface(surface)
         return {
           label,
           action,
+          accelerator,
         }
       }),
     )

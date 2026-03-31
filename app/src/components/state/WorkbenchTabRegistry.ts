@@ -8,6 +8,9 @@ type WorkbenchTabPayloadByKind = {
     projectPath: string
   }
   projects: Record<string, never>
+  sessionChatTranscriptDebug: {
+    surface: "sessionChatTranscript"
+  }
 }
 
 /** One lazily loaded closable tab component keyed by its payload props. */
@@ -22,6 +25,7 @@ type LooseWorkbenchTabComponent = FunctionComponent<any>
 export const workbenchTabComponents: WorkbenchTabComponentByKind = {
   project: lazy(() => import("../Projects/ProjectPage")),
   projects: lazy(() => import("../Projects/ProjectsPage")),
+  sessionChatTranscriptDebug: lazy(() => import("../SessionChat/SessionChatTranscriptDebugView")),
 }
 
 /** The supported closable workbench tab kinds available in the shell. */

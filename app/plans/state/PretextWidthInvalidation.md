@@ -1,0 +1,18 @@
+# State Module: PretextWidthInvalidation
+- **Goal:** Keep paragraph-heavy transcript and markdown surfaces responsive when the window width changes, without forcing eager Pretext relayout for offscreen content.
+- **Why now:** `SessionChatTranscript` is moving to `react-virtuoso` for row virtualization, which leaves paragraph measurement and width invalidation as the shared problem to solve across transcript-like surfaces.
+- **Responsibility:** Own the shared width-invalidation epoch, paragraph measurement registry, and read-then-write batching used by `PretextViewport`, `SessionChatTranscript`, and future `PretextMarkdown` surfaces.
+- **Scope & Hoisting:** Hoisted above tab-local transcript and markdown components so width invalidation rules stay consistent while the actual paragraphs and rows can still unmount with their tabs.
+- **Invalidation Trigger:** Width invalidation advances only when `window.innerWidth` changes. Viewport height changes affect virtualization range math, but do not mark paragraph layouts dirty on their own.
+- **Dirtying Policy:** When the width epoch advances, mark every paragraph layout record stale. Only rows in the active virtualized range should relayout immediately; offscreen rows stay stale until they enter the active range.
+- **Measurement Model:** Each mounted paragraph owns its actual wrap box and measures that DOM width directly. The shared coordinator batches paragraph reads first, then writes the next widths into paragraph-local signals so Pretext relayout can skip parent JSX reconciliation.
+- **Virtualization Split:** `react-virtuoso` owns row virtualization, visible range tracking, and row-height correction. Shared Pretext code owns paragraph width measurement, width invalidation, and local `layoutWithLines(...)` recomputation inside visible rows.
+- **Chat Semantics:** Keep transcript geometry top-down and chronological. Width invalidation and row-height correction should preserve either bottom pinning or history anchoring based on whether the user is currently reading the newest messages or browsing older history.
+- **MVP Behavior:** Relayout the active range immediately after width invalidation, allow stale offscreen rows to reuse their last measured height until mounted again, and do not add idle prewarming in this slice so layout shift remains observable during debugging.
+- **Dependencies:** `@chenglou/pretext`; `@preact/signals`; `react-virtuoso`; the shared `WorkbenchScrollPanel` scroller; transcript and future markdown paragraph leaf components.
+- **Likely Consumers:** `SessionChatTranscript`; `PretextMarkdown`; any future long-form activity or document surface that renders many wrapped paragraphs inside a detail tab.
+- **Deferred Follow-ons:** Width-keyed paragraph layout caches, idle prewarming ahead of the visible range, richer anchor compensation tuning, and performance diagnostics can wait until the Virtuoso-based transcript is stable.
+- **Open Questions:**
+  - Should the width invalidation coordinator live directly inside `PretextViewport`, or behind a narrower injected service so non-transcript surfaces can adopt it incrementally?
+  - How much anchor compensation is needed during width invalidation before visible layout shift becomes acceptable in long transcripts?
+  - Which non-paragraph blocks in `PretextMarkdown` should participate in the same dirtying and row-height correction path from day one?

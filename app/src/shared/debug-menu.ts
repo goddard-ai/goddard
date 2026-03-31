@@ -1,5 +1,5 @@
 /** Debug surfaces that the native development menu can request inside the webview. */
-export type DebugMenuSurface = "terminal"
+export type DebugMenuSurface = "terminal" | "sessionChatTranscript"
 
 /** Custom browser event name dispatched when the native debug menu requests a surface. */
 export const DEBUG_MENU_EVENT_NAME = "goddard:debug-menu"
