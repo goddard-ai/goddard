@@ -8,10 +8,7 @@ import {
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useMemo } from "preact/hooks"
-import {
-  VirtualizedPretextParagraphList,
-  type VirtualizedPretextParagraphRow,
-} from "../Pretext/VirtualizedPretextParagraphList"
+import { SessionChatMessageList, type SessionChatMessageListRow } from "./SessionChatMessageList"
 
 const transcriptViewportClass = css({
   position: "relative",
@@ -252,7 +249,7 @@ export function SessionChatTranscript(props: SessionChatTranscriptProps) {
 
   return (
     <div class={cx(transcriptViewportClass, props.class)}>
-      <VirtualizedPretextParagraphList<SessionChatTranscriptMessage>
+      <SessionChatMessageList<SessionChatTranscriptMessage>
         defaultRowHeight={DEFAULT_ROW_HEIGHT}
         estimateRowHeight={(message, _index, viewportWidth) =>
           estimateTranscriptRowHeight(message, viewportWidth)
@@ -270,9 +267,7 @@ export function SessionChatTranscript(props: SessionChatTranscriptProps) {
 }
 
 /** Renders one transcript row with manual line rendering that matches Pretext layout. */
-function TranscriptRow(props: {
-  row: VirtualizedPretextParagraphRow<SessionChatTranscriptMessage>
-}) {
+function TranscriptRow(props: { row: SessionChatMessageListRow<SessionChatTranscriptMessage> }) {
   const message = props.row.item
   const paragraphMaxWidth = getTranscriptTextWidth(message, props.row.viewportWidth)
   const paragraph = useMemo(

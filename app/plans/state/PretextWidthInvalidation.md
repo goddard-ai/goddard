@@ -1,7 +1,7 @@
 # State Module: PretextWidthInvalidation
 - **Goal:** Keep paragraph-heavy transcript and markdown surfaces responsive when the window width changes, without forcing eager Pretext relayout for offscreen content.
 - **Why now:** `SessionChatTranscript` is moving to `react-virtuoso` for row virtualization, which leaves paragraph measurement and width invalidation as the shared problem to solve across transcript-like surfaces.
-- **Responsibility:** Own the shared width-invalidation epoch, paragraph measurement registry, and read-then-write batching used by `PretextViewport`, `SessionChatTranscript`, and future `PretextMarkdown` surfaces.
+- **Responsibility:** Own the shared width-invalidation epoch, paragraph measurement registry, and read-then-write batching used by `TabViewport`, `SessionChatTranscript`, and future `PretextMarkdown` surfaces.
 - **Scope & Hoisting:** Hoisted above tab-local transcript and markdown components so width invalidation rules stay consistent while the actual paragraphs and rows can still unmount with their tabs.
 - **Invalidation Trigger:** Width invalidation advances only when `window.innerWidth` changes. Viewport height changes affect virtualization range math, but do not mark paragraph layouts dirty on their own.
 - **Dirtying Policy:** When the width epoch advances, mark every paragraph layout record stale. Only rows in the active virtualized range should relayout immediately; offscreen rows stay stale until they enter the active range.
@@ -13,6 +13,6 @@
 - **Likely Consumers:** `SessionChatTranscript`; `PretextMarkdown`; any future long-form activity or document surface that renders many wrapped paragraphs inside a detail tab.
 - **Deferred Follow-ons:** Width-keyed paragraph layout caches, idle prewarming ahead of the visible range, richer anchor compensation tuning, and performance diagnostics can wait until the Virtuoso-based transcript is stable.
 - **Open Questions:**
-  - Should the width invalidation coordinator live directly inside `PretextViewport`, or behind a narrower injected service so non-transcript surfaces can adopt it incrementally?
+  - Should the width invalidation coordinator live directly beside `TabViewport`, or behind a narrower injected service so non-transcript surfaces can adopt it incrementally?
   - How much anchor compensation is needed during width invalidation before visible layout shift becomes acceptable in long transcripts?
   - Which non-paragraph blocks in `PretextMarkdown` should participate in the same dirtying and row-height correction path from day one?

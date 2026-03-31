@@ -2,8 +2,8 @@ import type { ComponentChildren, RefObject } from "preact"
 import { createContext } from "preact"
 import { useContext, useEffect, useState } from "preact/hooks"
 
-/** Shared viewport metrics exposed to Pretext-driven paragraph renderers. */
-export type PretextViewportSnapshot = {
+/** Shared viewport metrics exposed to detail-tab surfaces that render inside one scroller. */
+export type TabViewportSnapshot = {
   viewportRef: RefObject<HTMLDivElement | null>
   width: number
   height: number
@@ -11,9 +11,9 @@ export type PretextViewportSnapshot = {
   fontsReady: boolean
 }
 
-const pretextViewportContext = createContext<PretextViewportSnapshot | null>(null)
+const tabViewportContext = createContext<TabViewportSnapshot | null>(null)
 
-/** Throws when a shared Pretext viewport consumer renders outside its provider. */
+/** Throws when a shared tab viewport consumer renders outside its provider. */
 function requireContext<Value>(value: Value | null, name: string): Value {
   if (!value) {
     throw new Error(`${name} is missing.`)
@@ -49,15 +49,15 @@ function useFontsReady(): boolean {
   return fontsReady
 }
 
-/** Props accepted by the shared Pretext viewport provider. */
-export type PretextViewportProviderProps = {
+/** Props accepted by the shared tab viewport provider. */
+export type TabViewportProviderProps = {
   children: ComponentChildren
   viewportRef: RefObject<HTMLDivElement | null>
   scrollTop: number
 }
 
-/** Publishes one externally owned scroller into the shared Pretext viewport context. */
-export function PretextViewportProvider(props: PretextViewportProviderProps) {
+/** Publishes one externally owned scroller into the shared tab viewport context. */
+export function TabViewportProvider(props: TabViewportProviderProps) {
   const fontsReady = useFontsReady()
   const [viewport, setViewport] = useState({
     width: 0,
@@ -97,7 +97,7 @@ export function PretextViewportProvider(props: PretextViewportProviderProps) {
   }, [props.viewportRef])
 
   return (
-    <pretextViewportContext.Provider
+    <tabViewportContext.Provider
       value={{
         viewportRef: props.viewportRef,
         width: viewport.width,
@@ -107,11 +107,11 @@ export function PretextViewportProvider(props: PretextViewportProviderProps) {
       }}
     >
       {props.children}
-    </pretextViewportContext.Provider>
+    </tabViewportContext.Provider>
   )
 }
 
-/** Returns the shared viewport metrics for the nearest Pretext viewport provider. */
-export function usePretextViewport(): PretextViewportSnapshot {
-  return requireContext(useContext(pretextViewportContext), "pretextViewportContext")
+/** Returns the shared viewport metrics for the nearest tab viewport provider. */
+export function useTabViewport(): TabViewportSnapshot {
+  return requireContext(useContext(tabViewportContext), "tabViewportContext")
 }

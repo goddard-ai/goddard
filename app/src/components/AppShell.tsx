@@ -4,9 +4,9 @@ import type { ComponentChildren } from "preact"
 import { Suspense } from "preact/compat"
 import { useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
-import { PretextViewportProvider } from "./Pretext/PretextViewport"
 import { ProjectsPage } from "./Projects/ProjectsPage"
 import { SidebarNav } from "./SidebarNav"
+import { TabViewportProvider } from "./TabViewport"
 import { ShellIcon } from "../support/shell-icons"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "../shared/app-menu"
 import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "../shared/debug-menu"
@@ -214,7 +214,7 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChi
   }, [props.scrollKey])
 
   return (
-    <PretextViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
+    <TabViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
       <div
         ref={scrollerRef}
         class={workbenchPanelScrollerClass}
@@ -226,7 +226,7 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChi
       >
         <div class={workbenchPanelBodyClass}>{props.children}</div>
       </div>
-    </PretextViewportProvider>
+    </TabViewportProvider>
   )
 }
 

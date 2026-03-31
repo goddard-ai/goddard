@@ -2,7 +2,7 @@ import { css } from "@goddard-ai/styled-system/css"
 import type { ComponentChild } from "preact"
 import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
-import { usePretextViewport } from "./PretextViewport"
+import { useTabViewport } from "../TabViewport"
 
 const loadingOverlayClass = css({
   display: "grid",
@@ -14,17 +14,17 @@ const loadingOverlayClass = css({
   pointerEvents: "none",
 })
 
-const virtuosoStateCache = new Map<string, StateSnapshot>()
+const messageListStateCache = new Map<string, StateSnapshot>()
 
-/** One visible virtualized row handed to a Pretext-heavy row renderer. */
-export type VirtualizedPretextParagraphRow<Item> = {
+/** One visible message row handed to a session-chat row renderer. */
+export type SessionChatMessageListRow<Item> = {
   item: Item
   index: number
   viewportWidth: number
 }
 
-/** Props accepted by the shared Virtuoso-backed row virtualizer for Pretext-heavy surfaces. */
-export type VirtualizedPretextParagraphListProps<Item> = {
+/** Props accepted by the SessionChat-owned Virtuoso wrapper. */
+export type SessionChatMessageListProps<Item> = {
   items: readonly Item[]
   overscanPx?: number
   initialScrollPosition?: "top" | "bottom"
@@ -33,7 +33,7 @@ export type VirtualizedPretextParagraphListProps<Item> = {
   defaultRowHeight?: number
   getItemKey?: (item: Item, index: number) => string
   estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number
-  renderRow: (row: VirtualizedPretextParagraphRow<Item>) => ComponentChild
+  renderRow: (row: SessionChatMessageListRow<Item>) => ComponentChild
 }
 
 /** Returns the first mount position for a list that should open from the top or bottom. */
@@ -56,16 +56,14 @@ function getInitialTopMostItemIndex<Item>(
   return 0
 }
 
-/** Renders a Virtuoso list inside the nearest shared Pretext viewport provider. */
-export function VirtualizedPretextParagraphList<Item>(
-  props: VirtualizedPretextParagraphListProps<Item>,
-) {
-  const viewport = usePretextViewport()
+/** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
+export function SessionChatMessageList<Item>(props: SessionChatMessageListProps<Item>) {
+  const viewport = useTabViewport()
   const virtuosoRef = useRef<VirtuosoHandle | null>(null)
   const scrollCacheKey = props.scrollCacheKey
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
-  const restoreState = scrollCacheKey ? virtuosoStateCache.get(scrollCacheKey) : undefined
+  const restoreState = scrollCacheKey ? messageListStateCache.get(scrollCacheKey) : undefined
 
   useEffect(() => {
     return () => {
@@ -74,7 +72,7 @@ export function VirtualizedPretextParagraphList<Item>(
       }
 
       virtuosoRef.current?.getState((state) => {
-        virtuosoStateCache.set(scrollCacheKey, state)
+        messageListStateCache.set(scrollCacheKey, state)
       })
     }
   }, [scrollCacheKey])
