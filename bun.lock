@@ -8,7 +8,6 @@
         "@cloudflare/workers-types": "^4.20260307.1",
         "@goddard-ai/daemon": "workspace:^",
         "@goddard-ai/workforce": "workspace:^",
-        "@types/bun": "^1.3.2",
         "@types/node": "^25.3.5",
         "@typescript/native-preview": "7.0.0-dev.20260317.1",
         "drizzle-kit": "1.0.0-beta.18-7eb39f0",
@@ -120,6 +119,7 @@
       },
       "devDependencies": {
         "@goddard-ai/backend": "workspace:^",
+        "@types/bun": "^1.3.11",
         "@types/tar-fs": "^2.0.4",
         "@types/unbzip2-stream": "^1.4.3",
       },
@@ -196,7 +196,6 @@
       },
       "dependencies": {
         "@clack/prompts": "^0.11.0",
-        "@goddard-ai/daemon": "workspace:^",
         "@goddard-ai/sdk": "workspace:^",
         "cmd-ts": "^0.15.0",
       },
