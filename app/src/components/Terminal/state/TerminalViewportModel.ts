@@ -1,6 +1,6 @@
 import { Terminal, type ITheme } from "@xterm/headless"
 import type { CSSProperties, TargetedKeyboardEvent } from "preact"
-import { type SigmaRef, SigmaType } from "preact-sigma"
+import { ref, SigmaType } from "preact-sigma"
 
 const VIEWPORT_PADDING_PX = 18
 const DEFAULT_MINIMUM_COLS = 40
@@ -75,7 +75,7 @@ type TerminalViewportShape = {
   theme: Readonly<ITheme>
   minimumCols: number
   minimumRows: number
-  terminal: (Terminal & SigmaRef) | null
+  terminal: TerminalRef | null
   viewportElement: HTMLDivElement | null
   resizeObserver: ResizeObserver | null
   processedChunkCount: number
@@ -90,6 +90,7 @@ type TerminalViewportEvents = {
 }
 
 type TerminalCell = ReturnType<Terminal["buffer"]["active"]["getNullCell"]>
+type TerminalRef = ReturnType<typeof ref<Terminal>>
 
 /** Long-lived terminal model that can outlive any single viewport mount. */
 export const TerminalViewportModel = new SigmaType<TerminalViewportShape, TerminalViewportEvents>(
@@ -127,32 +128,32 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
         return
       }
 
-      this.terminal = new Terminal({
-        cols: Math.max(this.minimumCols, 1),
-        rows: Math.max(this.minimumRows, 1),
-        convertEol: true,
-        cursorBlink: true,
-        lineHeight: this.lineHeight,
-        letterSpacing: this.letterSpacing,
-        scrollback: 5000,
-        theme: cloneTheme(this.theme),
-      })
+      this.terminal = ref(
+        new Terminal({
+          cols: Math.max(this.minimumCols, 1),
+          rows: Math.max(this.minimumRows, 1),
+          convertEol: true,
+          cursorBlink: true,
+          lineHeight: this.lineHeight,
+          letterSpacing: this.letterSpacing,
+          scrollback: 5000,
+          theme: cloneTheme(this.theme),
+        }),
+      )
 
       this.refreshSnapshot()
     },
 
     /** Rebuilds the renderable rows from the current terminal buffer. */
     refreshSnapshot() {
-      const terminal = readTerminal(this.terminal)
-
-      if (!terminal) {
+      if (!this.terminal) {
         this.cols = 0
         this.rows = 0
         this.viewRows = []
         return
       }
 
-      const nextSnapshot = buildViewportSnapshot(terminal, this.theme)
+      const nextSnapshot = buildViewportSnapshot(this.terminal, this.theme)
       this.cols = nextSnapshot.cols
       this.rows = nextSnapshot.rows
       this.viewRows = nextSnapshot.viewRows
@@ -191,9 +192,7 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
 
     /** Recomputes terminal dimensions from the current viewport box. */
     fitViewport() {
-      const terminal = readTerminal(this.terminal)
-
-      if (!terminal || !this.viewportElement) {
+      if (!this.terminal || !this.viewportElement) {
         return
       }
 
@@ -208,24 +207,22 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
         this.minimumRows,
       )
 
-      if (nextSize.cols !== terminal.cols || nextSize.rows !== terminal.rows) {
-        terminal.resize(nextSize.cols, nextSize.rows)
+      if (nextSize.cols !== this.terminal.cols || nextSize.rows !== this.terminal.rows) {
+        this.terminal.resize(nextSize.cols, nextSize.rows)
       }
     },
 
     /** Streams append-only PTY output chunks into the terminal. */
     syncChunks(chunks: readonly TerminalViewportChunk[]) {
-      const terminal = readTerminal(this.terminal)
-
-      if (!terminal) {
+      if (!this.terminal) {
         return
       }
 
       if (chunks.length < this.processedChunkCount) {
         this.processedChunkCount = 0
         this.writeVersion += 1
-        terminal.reset()
-        terminal.clear()
+        this.terminal.reset()
+        this.terminal.clear()
         this.refreshSnapshot()
       }
 
@@ -257,9 +254,7 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
 
     /** Scrolls the visible viewport using one wheel delta. */
     scrollViewport(deltaY: number, deltaMode: number) {
-      const terminal = readTerminal(this.terminal)
-
-      if (!terminal) {
+      if (!this.terminal) {
         return
       }
 
@@ -272,18 +267,16 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
         return
       }
 
-      terminal.scrollLines(lines)
+      this.terminal.scrollLines(lines)
       this.refreshSnapshot()
     },
 
     /** Tears down the headless terminal and any viewport-local observer. */
     disposeTerminal() {
-      const terminal = readTerminal(this.terminal)
-
       this.resizeObserver?.disconnect()
       this.resizeObserver = null
 
-      terminal?.dispose()
+      this.terminal?.dispose()
       this.terminal = null
       this.viewportElement = null
       this.processedChunkCount = 0
@@ -300,22 +293,20 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
   .setup(function (config: TerminalViewportSetup) {
     this.initializeSetup(config)
 
-    const terminal = readTerminal(this.terminal)
-
-    if (!terminal) {
+    if (!this.terminal) {
       return []
     }
 
-    const disposeScroll = terminal.onScroll(() => {
+    const disposeScroll = this.terminal.onScroll(() => {
       this.refreshSnapshot()
     })
-    const disposeWriteParsed = terminal.onWriteParsed(() => {
+    const disposeWriteParsed = this.terminal.onWriteParsed(() => {
       this.refreshSnapshot()
     })
-    const disposeResize = terminal.onResize((nextSize) => {
+    const disposeResize = this.terminal.onResize((nextSize: { cols: number; rows: number }) => {
       this.handleTerminalResize(nextSize.cols, nextSize.rows)
     })
-    const disposeTitleChange = terminal.onTitleChange(() => {
+    const disposeTitleChange = this.terminal.onTitleChange(() => {
       this.refreshSnapshot()
     })
 
@@ -407,7 +398,7 @@ export function translateKeyboardEvent(
 
 async function syncTerminalChunks(
   terminalViewport: {
-    terminal: unknown
+    terminal: TerminalRef | null
     writeVersion: number
     finishChunkSync: (chunksLength: number) => void
   },
@@ -415,14 +406,12 @@ async function syncTerminalChunks(
   startIndex: number,
   writeVersion: number,
 ): Promise<void> {
-  const terminal = readTerminal(terminalViewport.terminal)
-
-  if (!terminal) {
+  if (!terminalViewport.terminal) {
     return
   }
 
   for (const chunk of chunks.slice(startIndex)) {
-    await writeToTerminal(terminal, chunk.data)
+    await writeToTerminal(terminalViewport.terminal, chunk.data)
 
     if (terminalViewport.writeVersion !== writeVersion) {
       return
@@ -701,8 +690,4 @@ function writeToTerminal(terminal: Terminal, data: string | Uint8Array): Promise
       resolve()
     })
   })
-}
-
-function readTerminal(terminal: unknown): Terminal | null {
-  return (terminal as Terminal | null) ?? null
 }
