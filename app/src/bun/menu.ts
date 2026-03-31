@@ -1,4 +1,5 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
+import { createAppMenuDispatchScript, type AppMenuAction } from "../shared/app-menu"
 import { createDebugMenuDispatchScript, DebugMenuSurface } from "../shared/debug-menu"
 
 const withParams =
@@ -8,6 +9,8 @@ const withParams =
 
 const reloadViewAction = "view:reload"
 const inspectElementAction = "view:inspect-element"
+const closeTabAction = "file:close-tab"
+const closeWindowAction = "file:close-window"
 const debugNavigateAction = withParams<DebugMenuSurface>("debug:navigate")
 
 function reloadWindow(window: BrowserWindow): void {
@@ -16,6 +19,18 @@ function reloadWindow(window: BrowserWindow): void {
 
 function inspectWindow(window: BrowserWindow): void {
   window.webview.openDevTools()
+}
+
+/** Dispatches one app menu action into the active webview. */
+function dispatchAppMenuAction(action: AppMenuAction) {
+  return (window: BrowserWindow): void => {
+    window.webview.executeJavascript(createAppMenuDispatchScript({ action }))
+  }
+}
+
+/** Closes the current native window. */
+function closeWindow(window: BrowserWindow): void {
+  window.close()
 }
 
 /** Dispatches one development-menu surface request into the active webview. */
@@ -32,6 +47,8 @@ export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow |
   }
 
   const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
+    [closeTabAction]: dispatchAppMenuAction("closeTab"),
+    [closeWindowAction]: closeWindow,
     [reloadViewAction]: reloadWindow,
     [inspectElementAction]: inspectWindow,
   }
@@ -56,6 +73,21 @@ export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow |
   const menu: ApplicationMenuItemConfig[] = [
     {
       submenu: [{ label: "Quit", role: "quit", accelerator: "cmd+q" }],
+    },
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Close Tab",
+          action: closeTabAction,
+          accelerator: "cmd+w",
+        },
+        {
+          label: "Close Window",
+          action: closeWindowAction,
+          accelerator: "cmd+shift+w",
+        },
+      ],
     },
     {
       label: "Edit",
