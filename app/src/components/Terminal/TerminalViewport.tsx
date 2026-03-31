@@ -1,14 +1,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import type { ITheme } from "@xterm/headless"
 import { useEffect, useRef } from "preact/hooks"
-import { useSigma } from "preact-sigma"
-import {
-  TerminalViewportModel,
-  translateKeyboardEvent,
-  type TerminalViewportChunk,
-  type TerminalViewportFont,
-} from "./state/TerminalViewportModel"
+import { translateKeyboardEvent, type TerminalViewportModel } from "./state/TerminalViewportModel"
 
 const VIEWPORT_PADDING_PX = 18
 
@@ -47,62 +40,18 @@ const rowClass = css({
 })
 
 export function TerminalViewport(props: {
-  sessionId: string
-  chunks?: readonly TerminalViewportChunk[]
-  theme?: ITheme
-  font?: TerminalViewportFont
-  minimumCols?: number
-  minimumRows?: number
-  onReady?: () => void
-  onResize?: (cols: number, rows: number) => void
-  onInput?: (data: string) => void
-  onPaste?: (data: string) => void
-  onFocus?: () => void
+  terminal: TerminalViewportModel
   class?: string
   ariaLabel?: string
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
-  const terminalViewport = useSigma(() => new TerminalViewportModel())
-  const themeKey = JSON.stringify(props.theme ?? {})
-  const fontKey = JSON.stringify(props.font ?? {})
 
   useEffect(() => {
-    terminalViewport.attachViewport(viewportRef.current)
+    props.terminal.attachViewport(viewportRef.current)
     return () => {
-      terminalViewport.attachViewport(null)
+      props.terminal.attachViewport(null)
     }
-  }, [terminalViewport])
-
-  useEffect(() => {
-    terminalViewport.configureViewport({
-      sessionId: props.sessionId,
-      theme: props.theme,
-      font: props.font,
-      minimumCols: props.minimumCols,
-      minimumRows: props.minimumRows,
-      onReady: props.onReady,
-      onResize: props.onResize,
-      onInput: props.onInput,
-      onPaste: props.onPaste,
-      onFocus: props.onFocus,
-    })
-  }, [
-    fontKey,
-    props.minimumCols,
-    props.minimumRows,
-    props.onFocus,
-    props.onInput,
-    props.onPaste,
-    props.onReady,
-    props.onResize,
-    props.sessionId,
-    terminalViewport,
-    themeKey,
-  ])
-
-  useEffect(() => {
-    terminalViewport.syncChunks(props.chunks ?? [])
-  }, [props.chunks, terminalViewport])
+  }, [props.terminal])
 
   return (
     <div class={cx(frameClass, props.class)}>
@@ -110,7 +59,7 @@ export function TerminalViewport(props: {
         aria-label={props.ariaLabel ?? "Terminal viewport"}
         class={viewportClass}
         onFocus={() => {
-          terminalViewport.notifyFocus()
+          props.terminal.notifyFocus()
         }}
         onKeyDown={(event) => {
           const input = translateKeyboardEvent(event)
@@ -120,7 +69,7 @@ export function TerminalViewport(props: {
           }
 
           event.preventDefault()
-          terminalViewport.forwardInput(input)
+          props.terminal.forwardInput(input)
         }}
         onPaste={(event) => {
           const pasted = event.clipboardData?.getData("text")
@@ -130,26 +79,26 @@ export function TerminalViewport(props: {
           }
 
           event.preventDefault()
-          terminalViewport.forwardPaste(pasted)
+          props.terminal.forwardPaste(pasted)
         }}
         onWheel={(event) => {
           event.preventDefault()
-          terminalViewport.scrollViewport(event.deltaY, event.deltaMode)
+          props.terminal.scrollViewport(event.deltaY, event.deltaMode)
         }}
         ref={viewportRef}
         role="region"
         style={{
-          backgroundColor: terminalViewport.theme.background,
-          color: terminalViewport.theme.foreground,
-          fontFamily: terminalViewport.fontFamily,
-          fontSize: `${terminalViewport.fontSize}px`,
+          backgroundColor: props.terminal.theme.background,
+          color: props.terminal.theme.foreground,
+          fontFamily: props.terminal.fontFamily,
+          fontSize: props.terminal.fontSize,
           fontVariantLigatures: "none",
-          letterSpacing: `${terminalViewport.letterSpacing}px`,
-          lineHeight: String(terminalViewport.lineHeight),
+          letterSpacing: props.terminal.letterSpacing,
+          lineHeight: props.terminal.lineHeight,
         }}
         tabIndex={0}
       >
-        {terminalViewport.viewRows.map((row) => (
+        {props.terminal.viewRows.map((row) => (
           <div class={rowClass} key={row.key}>
             {row.segments.length === 0 ? " " : null}
             {row.segments.map((segment) => (
