@@ -3,6 +3,7 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { useMutation } from "@tanstack/preact-query"
 import { useEffect } from "preact/hooks"
+import { useListener } from "preact-sigma"
 import { pickProjectPath, validateProjectPath } from "../support/project-service"
 import { lookupProject, type ProjectRecord } from "./Projects/state/ProjectRegistry"
 import { useProjectRegistry, useWorkbenchTabSet } from "./state/AppStateContext"
@@ -197,22 +198,11 @@ export function ProjectsPage() {
     }
   }, [projectRegistry, projects, selectedProjectPath])
 
-  useEffect(() => {
-    if (!isAddDialogOpen.value) {
-      return
+  useListener(window, "keydown", (event) => {
+    if (isAddDialogOpen.value && event.key === "Escape") {
+      closeAddDialog()
     }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeAddDialog()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [isAddDialogOpen.value])
+  })
 
   function resetDraft(): void {
     draftPath.value = ""

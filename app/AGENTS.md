@@ -7,4 +7,5 @@
 - The only sanctioned file references here are `app/CONTRIBUTING.md`, `app/best-practices.md`, and `app/glossary.md`.
 - Read `app/CONTRIBUTING.md` before substantial work in `app/`.
 - When a human asks for a new task, commit any app work from the previous task before starting. If that work is unfinished, include `Next step: ...` in the commit message body.
+- In components, prefer `useListener` from `preact-sigma` over manual `addEventListener`/`removeEventListener` wiring.
 - When guidance outgrows this file, move the detail into one of the sanctioned docs instead of expanding this file indefinitely.

@@ -2,7 +2,7 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { FunctionComponent } from "preact"
 import { Suspense } from "preact/compat"
-import { useEffect } from "preact/hooks"
+import { useListener } from "preact-sigma"
 import { ProjectsPage } from "./Projects/ProjectsPage"
 import { SidebarNav } from "./SidebarNav"
 import { ShellIcon } from "../support/shell-icons"
@@ -84,23 +84,13 @@ export function AppShell() {
     badgeCount: navigation.badgeCounts[item.id],
   }))
 
-  useEffect(() => {
-    const handleAppMenuAction = (event: Event) => {
-      const detail = (event as CustomEvent<AppMenuEventDetail>).detail
+  useListener(window, APP_MENU_EVENT_NAME, (event) => {
+    const detail = (event as CustomEvent<AppMenuEventDetail>).detail
 
-      if (
-        detail.action === "closeTab" &&
-        workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id
-      ) {
-        workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
-      }
+    if (detail.action === "closeTab" && workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
+      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
     }
-
-    window.addEventListener(APP_MENU_EVENT_NAME, handleAppMenuAction)
-    return () => {
-      window.removeEventListener(APP_MENU_EVENT_NAME, handleAppMenuAction)
-    }
-  }, [workbenchTabSet])
+  })
 
   return (
     <div
