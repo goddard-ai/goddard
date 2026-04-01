@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only focus trap and validation message display; draft creation belongs in `ActionDraftState`.
 - **Required Context:** `ActionDraftContext`, `ProjectRegistryContext`.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Captures a new action’s name and scope; creates the draft; closes or advances into the editor tab.

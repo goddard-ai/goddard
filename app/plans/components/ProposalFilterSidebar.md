@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only filter control state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Adjusts proposal filters; narrows the roadmap list to one project or owner; clears filters back to the default prioritization view.

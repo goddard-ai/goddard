@@ -4,5 +4,5 @@
 - **Sub-components:** `TerminalToolbar`, `TerminalViewport`.
 - **State Complexity:** Simple local pane sizing only; PTY lifecycle, byte streaming, resize coordination, and restart behavior belong in `TerminalSessionState`.
 - **Required Context:** `TerminalSessionContext`.
-- **Tauri IPC:** None directly; terminal IPC should be owned by `TerminalSessionState`.
+- **Electrobun RPC:** None directly; terminal IPC should be owned by `TerminalSessionState`.
 - **Interactions & Events:** Starts or reconnects a terminal session; forwards toolbar actions; keeps the viewport bound to a live PTY while the tab remains cached.

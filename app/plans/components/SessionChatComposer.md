@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only textarea sizing and keyboard shortcut handling.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Typing updates the draft; Enter or button click sends the prompt; modifier-aware shortcuts preserve multiline editing; optional cancel stops an in-flight send.

@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only scroll pinning and viewport restoration.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Scrolls through history; auto-pins to the newest message while the user remains at the bottom; requests older history when needed.

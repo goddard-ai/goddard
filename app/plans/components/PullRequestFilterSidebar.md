@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only checkbox, select, and focus state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Adjusts the visible PR list; narrows the list to one repository or author; filters to managed pull requests only when desired.

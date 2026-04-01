@@ -4,5 +4,5 @@
 - **Sub-components:** `LoopListRow`.
 - **State Complexity:** Simple UI-only selection and empty-state handling.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects a loop; starts or stops a runtime; opens the currently attached session when one exists.

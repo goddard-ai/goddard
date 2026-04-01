@@ -4,5 +4,5 @@
 - **Sub-components:** `LoopFilterSidebar`, `LoopList`, `StartLoopDialog`.
 - **State Complexity:** Simple local empty-state and sidebar sizing; runtime list and lifecycle actions belong in `LoopRuntimeState`.
 - **Required Context:** `LoopRuntimeContext`, `ProjectRegistryContext`.
-- **Tauri IPC:** None directly; loop lifecycle calls should route through `LoopRuntimeState`.
+- **Electrobun RPC:** None directly; loop lifecycle calls should route through `LoopRuntimeState`.
 - **Interactions & Events:** Filters loops; starts one loop; stops one loop; opens linked sessions when a running loop exposes them.

@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only textarea sizing and keyboard shortcut state; reply draft state belongs in `PullRequestComposeState`.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Edits the reply body; submits one managed reply; cancels or clears the draft when desired.

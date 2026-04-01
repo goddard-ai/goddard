@@ -4,5 +4,5 @@
 - **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Simple UI-only menu and disabled-state presentation.
 - **Required Context:** `ActionCatalogContext` when the contextual action menu is connected here.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Switches modes; saves pending edits; reverts to the last persisted revision; launches a contextual action from the current document tab.

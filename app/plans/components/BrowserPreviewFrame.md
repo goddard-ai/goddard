@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only iframe lifecycle and window message subscription.
 - **Required Context:** None.
-- **Tauri IPC:** None directly; the Rust-defined custom protocol and header rewriting happen outside the component boundary.
+- **Electrobun RPC:** None directly; the Bun-hosted preview protocol and header rewriting happen outside the component boundary.
 - **Interactions & Events:** Loads the current preview URL; listens for injected console telemetry; emits committed navigation and error events.

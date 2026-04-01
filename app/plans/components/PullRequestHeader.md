@@ -4,5 +4,5 @@
 - **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Simple UI-only button and overflow presentation.
 - **Required Context:** `ActionCatalogContext` when the contextual action menu is connected here.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Opens the canonical PR URL; refreshes the current PR data; optionally jumps to the linked session chat tab; launches a contextual action from the current pull request tab.

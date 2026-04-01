@@ -4,5 +4,5 @@
 - **Sub-components:** `ProposalListRow`.
 - **State Complexity:** Simple UI-only keyboard focus and list virtualization state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects a proposal; opens the proposal detail tab; preserves current roadmap filters while navigating.

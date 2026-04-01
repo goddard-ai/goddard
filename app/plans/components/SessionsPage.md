@@ -4,5 +4,5 @@
 - **Sub-components:** `SessionListToolbar`, `SessionList`, `NewSessionDialog`.
 - **State Complexity:** Simple local focus and empty-state presentation; data loading, sorting, selection, and tab opening stay in `SessionIndexState`, while the launch dialog owns its own draft and validation state.
 - **Required Context:** `SessionIndexContext`, `WorkbenchTabsContext`.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Refreshes sessions; opens the launch dialog; opens an existing or new chat tab on row click; opens diff and PR tabs from row actions; archives selected sessions from the toolbar.

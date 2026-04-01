@@ -4,5 +4,5 @@
 - **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Pure form rendering plus lightweight focus and disclosure state; the parent dialog owns the editable draft, validation, and submit lifecycle.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects project scope; filters and chooses an action; edits the initial prompt; toggles worktree or cwd settings; submits or cancels the launch.

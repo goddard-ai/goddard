@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only highlighted-row and scroll-into-view state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Highlights one result; opens it in the appropriate page or tab; reflects search ranking updates as the query changes.

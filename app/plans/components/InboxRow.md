@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only hover state for action visibility.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Checkbox toggles selection; clicking the row opens the linked work; hovering reveals snooze, archive, and delegate buttons; action clicks do not trigger row-open by default.

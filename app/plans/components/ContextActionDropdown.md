@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only popover, query, and highlighted-option state; action resolution and applicability filtering belong in `ActionCatalogState`.
 - **Required Context:** `ActionCatalogContext`.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Filters actions by typed query; groups global and contextual actions; selects one action; optionally opens the full actions management page.

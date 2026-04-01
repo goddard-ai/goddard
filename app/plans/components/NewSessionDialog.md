@@ -4,5 +4,5 @@
 - **Sub-components:** `SessionLaunchForm`, `ContextActionDropdown`.
 - **State Complexity:** Owns its draft, validation, submit-pending, and reset-on-open behavior locally; only cross-surface launch defaults may be coordinated elsewhere.
 - **Required Context:** `ProjectRegistryContext`, `ActionCatalogContext`.
-- **Tauri IPC:** None directly; session creation should route through shared SDK adapters or one small launch helper, not a dedicated form-state provider.
+- **Electrobun RPC:** None directly; session creation should route through shared SDK adapters or one small launch helper, not a dedicated form-state provider.
 - **Interactions & Events:** Opens from the sessions page or a contextual action; edits launch inputs; submits a new session request; closes on success or cancellation.

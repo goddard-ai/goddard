@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only modal and validation message state; lifecycle and submission belong in `LoopRuntimeState`.
 - **Required Context:** `LoopRuntimeContext`, `ProjectRegistryContext`.
-- **Tauri IPC:** None directly; loop start requests route through `LoopRuntimeState`.
+- **Electrobun RPC:** None directly; loop start requests route through `LoopRuntimeState`.
 - **Interactions & Events:** Selects a project and loop definition; overrides runtime limits when allowed; starts the loop runtime; closes on success or cancellation.

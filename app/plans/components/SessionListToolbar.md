@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only input focus and popover state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Typing updates the query; selecting a filter updates the visible set; clicking bulk archive emits one action for the selected ids; refresh requests a data reload.
