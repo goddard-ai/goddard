@@ -213,7 +213,6 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
             event,
             prompt,
             daemonUrl: activeIpcServer.daemonUrl,
-            agentBinDir: runtime.agentBinDir,
           })
 
           if (sessionId) {

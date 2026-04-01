@@ -8,6 +8,7 @@ export type ManagedPrLocationRecord = {
   repo: string
   prNumber: number
   cwd: string
+  creatorSessionId?: string
   updatedAt: string
 }
 
@@ -23,8 +24,11 @@ export namespace ManagedPrLocationStorage {
   ): Promise<ManagedPrLocationRecord> {
     const data = await readLocationsFile()
     const key = getLocationKey(record.owner, record.repo, record.prNumber)
+    const existingRecord = data.locations[key]
     data.locations[key] = {
+      ...existingRecord,
       ...record,
+      creatorSessionId: record.creatorSessionId ?? existingRecord?.creatorSessionId,
       updatedAt: new Date().toISOString(),
     }
     await writeLocationsFile(data)

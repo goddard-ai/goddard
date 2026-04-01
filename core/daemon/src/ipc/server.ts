@@ -229,6 +229,7 @@ export async function startDaemonServer(
         repo: session.repo,
         prNumber: pr.number,
         cwd: payload.cwd,
+        creatorSessionId: session.sessionId,
       })
       return { number: pr.number, url: pr.url }
     }),
@@ -272,6 +273,43 @@ export async function startDaemonServer(
         cwd: payload.cwd,
       })
       return response
+    }),
+    prFeedbackResume: withRequestLogging<
+      {
+        owner: string
+        repo: string
+        prNumber: number
+        prompt: string
+      },
+      { sessionId: string }
+    >("prFeedbackResume", async (payload, context) => {
+      const record = await ManagedPrLocationStorage.get(
+        payload.owner,
+        payload.repo,
+        payload.prNumber,
+      )
+      if (!record?.creatorSessionId) {
+        throw new Error(
+          `PR ${payload.owner}/${payload.repo}#${payload.prNumber} does not have a recorded creator session`,
+        )
+      }
+
+      context.setSessionId(record.creatorSessionId)
+      const session = await SessionStorage.get(record.creatorSessionId)
+      if (!session) {
+        throw new Error(`Creator session ${record.creatorSessionId} no longer exists`)
+      }
+
+      if (session.repository !== `${payload.owner}/${payload.repo}`) {
+        throw new Error(
+          `Creator session ${record.creatorSessionId} is not scoped to ${payload.owner}/${payload.repo}`,
+        )
+      }
+
+      await sessionManager.resumeSession(record.creatorSessionId, payload.prompt, {
+        allowedPrNumber: payload.prNumber,
+      })
+      return { sessionId: record.creatorSessionId }
     }),
     sessionCreate: withRequestLogging<
       CreateDaemonSessionRequest,

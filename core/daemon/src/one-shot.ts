@@ -1,95 +1,35 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { resolveDefaultAgent } from "@goddard-ai/config"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createDaemonLogger } from "./logging.ts"
-import { ManagedPrLocationStorage } from "./persistence/managed-pr-locations.ts"
-import * as prompts from "./prompts/index.ts"
 
+/** Input required to route one feedback event back into its original PR creator session. */
 export type OneShotInput = {
   event: FeedbackEvent
   prompt: string
   daemonUrl: string
-  agentBinDir: string
-  env?: Record<string, string>
-  resolveProjectDir?: (event: FeedbackEvent) => Promise<string | null> | string | null
-}
-
-function buildOneShotEnv(
-  agentBinDir: string,
-  inputEnv?: Record<string, string>,
-): Record<string, string> {
-  return prependAgentBinToPath(agentBinDir, inputEnv)
-}
-
-function renderPrompt(template: string, variables: Record<string, string>): string {
-  const usedVariables = new Set<string>()
-  const renderResult = template.replace(/\${(\w+)}/g, (_, key) => {
-    const value = variables[key]
-    if (typeof value !== "string") {
-      throw new Error(`Prompt variable "${key}" is not a string`)
-    }
-    usedVariables.add(key)
-    return value
-  })
-
-  if (usedVariables.size !== Object.keys(variables).length) {
-    const unusedVariables = Object.keys(variables).filter((key) => !usedVariables.has(key))
-    throw new Error(`Prompt variables were defined but never used: ${unusedVariables.join(", ")}`)
-  }
-
-  return renderResult
-}
-
-function buildBackgroundSystemPrompt(): string {
-  return renderPrompt(prompts.BACKGROUND, {
-    declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
-    report_blocker: prompts.CMD_REPORT_BLOCKER,
-    global_rules: prompts.GLOBAL_RULES,
-  })
 }
 
 export async function runOneShot(input: OneShotInput): Promise<string | null> {
   const logger = createDaemonLogger()
-  const projectDir =
-    (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(input.event))
-  if (!projectDir) {
-    logger.log("one_shot.repository_lookup_failed", {
-      repository: `${input.event.owner}/${input.event.repo}`,
-      prNumber: input.event.prNumber,
-    })
-    return null
-  }
 
   try {
     readSocketPathFromDaemonUrl(input.daemonUrl)
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
-    const session = await client.send("sessionCreate", {
-      agent: await resolveDefaultAgent(),
-      cwd: projectDir,
-      worktree: { enabled: true },
-      mcpServers: [],
-      initialPrompt: input.prompt,
-      oneShot: true,
-      systemPrompt: buildBackgroundSystemPrompt(),
-      repository: `${input.event.owner}/${input.event.repo}`,
+    const response = await client.send("prFeedbackResume", {
+      owner: input.event.owner,
+      repo: input.event.repo,
       prNumber: input.event.prNumber,
-      env: buildOneShotEnv(input.agentBinDir, input.env),
+      prompt: input.prompt,
     })
-    return session.session.id
+    return response.sessionId
   } catch (error) {
-    logger.log("one_shot.session_create_failed", {
+    logger.log("one_shot.resume_failed", {
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
       daemonUrl: input.daemonUrl,
-      cwd: projectDir,
       errorMessage: error instanceof Error ? error.message : String(error),
     })
     return null
   }
-}
-
-async function resolveProjectDir(event: FeedbackEvent): Promise<string | null> {
-  return (await ManagedPrLocationStorage.get(event.owner, event.repo, event.prNumber))?.cwd ?? null
 }

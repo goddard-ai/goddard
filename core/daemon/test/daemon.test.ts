@@ -168,7 +168,6 @@ test("daemon run subscribes once, handles events across repositories, and passes
   expect(runOneShotCalls[0].daemonUrl).toBe(
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
   )
-  expect(runOneShotCalls[0].agentBinDir).toBe("/tmp/custom-agent-bin")
   expect(runOneShotCalls[0].prompt).toMatch(/goddard reply-pr --message-file/)
   expect(runOneShotCalls[0].prompt).not.toMatch(/goddard pr reply --body/)
 

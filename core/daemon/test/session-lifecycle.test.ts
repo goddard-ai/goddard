@@ -8,6 +8,7 @@ import { join } from "node:path"
 import { afterAll, afterEach, expect, test } from "vitest"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import {
+  ManagedPrLocationStorage,
   SessionPermissionsStorage,
   SessionStateStorage,
   SessionStorage,
@@ -91,6 +92,96 @@ test("daemon persists repository context into durable session storage", async ()
       workforce: { agentId: "reviewer", requestId: "req-1" },
     },
   })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("managed PR location updates preserve the original creator session id", async () => {
+  await useTempHome()
+
+  await ManagedPrLocationStorage.upsert({
+    owner: "acme",
+    repo: "widgets",
+    prNumber: 12,
+    cwd: "/tmp/pr-12",
+    creatorSessionId: "session-creator-1",
+  })
+  await ManagedPrLocationStorage.upsert({
+    owner: "acme",
+    repo: "widgets",
+    prNumber: 12,
+    cwd: "/tmp/pr-12-updated",
+  })
+
+  await expect(ManagedPrLocationStorage.get("acme", "widgets", 12)).resolves.toMatchObject({
+    cwd: "/tmp/pr-12-updated",
+    creatorSessionId: "session-creator-1",
+  })
+})
+
+test("daemon resumes the original PR creator session for feedback and restores PR reply access", async () => {
+  const daemon = await startTestDaemon()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture()
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    env: {
+      GODDARD_TEST_FLAG: "1",
+    },
+    repository: "acme/widgets",
+  })
+
+  await ManagedPrLocationStorage.upsert({
+    owner: "acme",
+    repo: "widgets",
+    prNumber: 12,
+    cwd: repoDir,
+    creatorSessionId: created.session.id,
+  })
+
+  const launchState = await SessionStateStorage.get(created.session.id)
+  expect(launchState?.launchConfig).toMatchObject({
+    repository: "acme/widgets",
+    systemPrompt: "Keep responses short.",
+    env: {
+      GODDARD_TEST_FLAG: "1",
+    },
+  })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+
+  await waitFor(async () => {
+    const session = await client.send("sessionGet", { id: created.session.id })
+    return session.session.connection.reconnectable === false
+  })
+
+  const historyBefore = await client.send("sessionHistory", { id: created.session.id })
+
+  const resumed = await client.send("prFeedbackResume", {
+    owner: "acme",
+    repo: "widgets",
+    prNumber: 12,
+    prompt: "Respond to the PR feedback in one short sentence.",
+  })
+
+  expect(resumed.sessionId).toBe(created.session.id)
+
+  await waitFor(async () => {
+    const session = await client.send("sessionGet", { id: created.session.id })
+    return session.session.connection.reconnectable
+  })
+
+  const permissions = await SessionPermissionsStorage.get(created.session.id)
+  expect(permissions?.allowedPrNumbers).toContain(12)
+
+  const historyAfter = await client.send("sessionHistory", { id: created.session.id })
+  expect(historyAfter.history.length).toBeGreaterThan(historyBefore.history.length)
 
   await client.send("sessionShutdown", { id: created.session.id })
 })

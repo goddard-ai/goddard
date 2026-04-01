@@ -16,6 +16,8 @@ export type {
 export type {
   ReplyPrDaemonRequest,
   ReplyPrDaemonResponse,
+  ResumePrFeedbackDaemonRequest,
+  ResumePrFeedbackDaemonResponse,
   SubmitPrDaemonRequest,
   SubmitPrDaemonResponse,
 } from "./daemon/pull-requests.ts"
@@ -35,6 +37,7 @@ export type {
   GetDaemonSessionResponse,
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
+  SessionWorktreeParams,
   ShutdownDaemonSessionResponse,
 } from "./daemon/sessions.ts"
 export type {

@@ -37,6 +37,7 @@ import {
   SessionStorage,
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
+  type SessionLaunchConfig,
   type SQLSessionListCursor,
   type SQLSessionUpdate,
 } from "../persistence/index.ts"
@@ -150,6 +151,11 @@ interface LoadSessionParams extends SessionLaunchParams {
 export type SessionManager = {
   newSession: (params: NewSessionParams) => Promise<DaemonSession>
   loadSession: (params: LoadSessionParams) => Promise<DaemonSession>
+  resumeSession: (
+    id: string,
+    prompt: string | acp.ContentBlock[],
+    options?: { allowedPrNumber?: number },
+  ) => Promise<DaemonSession>
   listSessions: (params: ListDaemonSessionsRequest) => Promise<ListDaemonSessionsResponse>
   connectSession: (id: string) => Promise<DaemonSession>
   getSession: (id: string) => Promise<DaemonSession>
@@ -191,6 +197,22 @@ function createInitialPromptRequest(params: {
   return params.isFirstPrompt
     ? injectSystemPrompt(promptRequest, params.systemPrompt)
     : promptRequest
+}
+
+/** Captures the durable launch settings needed to recreate one session later. */
+function toSessionLaunchConfig(params: SessionLaunchParams): SessionLaunchConfig {
+  return {
+    agent: params.agent,
+    cwd: params.cwd,
+    worktree: params.worktree,
+    mcpServers: params.mcpServers,
+    systemPrompt: params.systemPrompt,
+    env: params.env,
+    repository: params.repository,
+    prNumber: params.prNumber,
+    metadata: params.metadata,
+    oneShot: params.oneShot,
+  }
 }
 
 /** Maps client-originated ACP messages to any immediate session status changes they imply. */
@@ -1079,11 +1101,13 @@ export function createSessionManager(input: {
           : [...existingState.history, ...initialized.history]
         : [...initialized.history]
       const initialDiagnostics = existingState?.diagnostics ?? []
+      const launchConfig = toSessionLaunchConfig(params)
 
       if (existingState) {
         await SessionStateStorage.update(id, {
           acpId: initialized.acpId,
           connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+          launchConfig,
           history: initialHistory,
           diagnostics: initialDiagnostics,
           activeDaemonSession: !shouldExitAfterInitialPrompt(params),
@@ -1093,6 +1117,7 @@ export function createSessionManager(input: {
           sessionId: id,
           acpId: initialized.acpId,
           connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+          launchConfig,
           history: initialHistory,
           diagnostics: initialDiagnostics,
           activeDaemonSession: !shouldExitAfterInitialPrompt(params),
@@ -1281,6 +1306,63 @@ export function createSessionManager(input: {
     return launchSession(params, existingSession)
   }
 
+  /** Reuses one existing session identity for a follow-up prompt, reloading it when needed. */
+  async function resumeSession(
+    id: string,
+    prompt: string | acp.ContentBlock[],
+    options: { allowedPrNumber?: number } = {},
+  ): Promise<DaemonSession> {
+    await ready
+
+    if (activeSessions.has(id)) {
+      if (typeof options.allowedPrNumber === "number") {
+        await SessionPermissionsStorage.addAllowedPr(id, options.allowedPrNumber)
+      }
+
+      await emitDiagnostic(id, "session_resumed", {
+        mode: "live",
+        allowedPrNumber: options.allowedPrNumber,
+      })
+      await promptSession(id, prompt)
+      return getSession(id)
+    }
+
+    const session = await SessionStorage.get(id)
+    if (!session) {
+      throw new Error(`Cannot resume unknown session: ${id}`)
+    }
+
+    const state = await SessionStateStorage.get(id)
+    if (!state?.launchConfig) {
+      throw new Error(`Session ${id} does not have a durable launch config for resumption`)
+    }
+
+    await emitDiagnostic(id, "session_resumed", {
+      mode: "reload",
+      allowedPrNumber: options.allowedPrNumber,
+    })
+
+    const resumedSession = await loadSession({
+      ...state.launchConfig,
+      id,
+      initialPrompt: prompt,
+      metadata: session.metadata ?? state.launchConfig.metadata,
+      repository: session.repository ?? state.launchConfig.repository,
+      prNumber:
+        typeof options.allowedPrNumber === "number"
+          ? options.allowedPrNumber
+          : typeof session.prNumber === "number"
+            ? session.prNumber
+            : state.launchConfig.prNumber,
+    })
+
+    if (typeof options.allowedPrNumber === "number") {
+      await SessionPermissionsStorage.addAllowedPr(id, options.allowedPrNumber)
+    }
+
+    return resumedSession
+  }
+
   async function getSession(id: string): Promise<DaemonSession> {
     await ready
     return toDaemonSession(await SessionStorage.get(id))
@@ -1466,6 +1548,7 @@ export function createSessionManager(input: {
   return {
     newSession,
     loadSession,
+    resumeSession,
     listSessions,
     connectSession,
     getSession,

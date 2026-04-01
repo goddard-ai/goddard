@@ -67,6 +67,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     repo: string
     prNumber: number
     cwd: string
+    creatorSessionId?: string
   }> = []
 
   const daemon = await startTestDaemon({
@@ -156,6 +157,7 @@ test("daemon submit request enforces trusted repo context and records created PR
       repo: "widgets",
       prNumber: 42,
       cwd: process.cwd(),
+      creatorSessionId: "session-42",
     },
   ])
 
@@ -436,11 +438,13 @@ type StartTestDaemonOptions = {
     repo: string
     prNumber: number
     cwd: string
+    creatorSessionId?: string
   }) => Promise<{
     owner: string
     repo: string
     prNumber: number
     cwd: string
+    creatorSessionId?: string
     updatedAt: string
   }>
   resolveSubmitRequest?: (input: any) => Promise<any>

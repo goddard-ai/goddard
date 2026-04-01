@@ -30,3 +30,18 @@ export type ReplyPrDaemonRequest = z.infer<typeof ReplyPrDaemonRequest>
 export type ReplyPrDaemonResponse = {
   success: boolean
 }
+
+/** Request payload used to resume the original PR session for feedback handling. */
+export const ResumePrFeedbackDaemonRequest = z.object({
+  owner: z.string(),
+  repo: z.string(),
+  prNumber: z.number().int().positive(),
+  prompt: z.string(),
+})
+
+export type ResumePrFeedbackDaemonRequest = z.infer<typeof ResumePrFeedbackDaemonRequest>
+
+/** Response payload returned after resuming one PR creator session for feedback. */
+export type ResumePrFeedbackDaemonResponse = {
+  sessionId: string
+}

@@ -69,6 +69,9 @@
 - `System Prompt`
   - The daemon-supplied instruction layer attached to the first prompt sent into the session.
   - Why: so the daemon can enforce the behavioral frame expected for all sessions.
+- `Launch Config`
+  - The durable session settings needed to recreate a session with the same runnable and operating context later.
+  - Why: so daemon-owned automation can resume the original session identity after interruptions or later pull-request feedback.
 - `First Prompt`
   - The special prompt boundary where the daemon injects its governing instruction layer.
   - Why: so the system prompt is applied exactly once instead of wrapping later messages repeatedly.

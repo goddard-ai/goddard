@@ -24,6 +24,9 @@
 - `One-Shot Run`
   - A daemon-triggered session intended to finish after a single initial prompt.
   - Why: so the daemon can perform background automation without treating every task as an interactive conversation.
+- `PR Creator Session`
+  - The daemon session whose work created a managed pull request.
+  - Why: so later pull-request feedback can resume the original agent context instead of switching to a different default session.
 - `Background Prompt`
   - The daemon-owned instruction frame used for automated, non-interactive work.
   - Why: so background sessions follow a different operating context from foreground user-driven sessions.

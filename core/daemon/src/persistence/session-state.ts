@@ -1,5 +1,8 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { getSessionStateDir, getSessionStatePath } from "@goddard-ai/paths/node"
+import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
+import type { DaemonSessionMetadata, SessionWorktreeParams } from "@goddard-ai/schema/daemon"
+import type { AgentDistribution } from "@goddard-ai/schema/session-server"
 import * as fs from "node:fs/promises"
 import { dirname, join } from "node:path"
 
@@ -14,11 +17,26 @@ export type SessionDiagnosticEvent = {
   detail?: Record<string, unknown>
 }
 
+/** Durable launch config needed to reload one daemon session with the same runtime settings. */
+export type SessionLaunchConfig = {
+  agent: ACPAdapterName | AgentDistribution
+  cwd: string
+  worktree?: SessionWorktreeParams
+  mcpServers: acp.McpServer[]
+  systemPrompt: string
+  env?: Record<string, string>
+  repository?: string
+  prNumber?: number
+  metadata?: DaemonSessionMetadata
+  oneShot?: boolean
+}
+
 /** Durable daemon-owned session state that supplements the SQL session row. */
 export type SessionStateRecord = {
   sessionId: string
   acpId: string
   connectionMode: SessionConnectionMode
+  launchConfig?: SessionLaunchConfig
   history: acp.AnyMessage[]
   diagnostics: SessionDiagnosticEvent[]
   activeDaemonSession: boolean
