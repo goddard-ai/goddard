@@ -67,6 +67,7 @@
 - Add or update tests when behavior changes, unless a deeper `CONTRIBUTING.md` narrows that subtree.
 - Prefer small tests around observable behavior. Do not rewrite tests solely to match refactors or introduce a large new testing pattern in a narrow area.
 - Keep the rest of the test suite lean and intentional.
+- Do not add a new test by default for one-off packaging, wiring, or execution issues that are cheap to verify manually. Add coverage when it protects an important contract, a likely recurrence, or behavior that is difficult to check reliably by hand.
 - Do not use repository-local Vitest mocking or stubbing APIs such as `vi.mock`, `vi.doMock`, `vi.hoisted`, `vi.fn`, `vi.spyOn`, `vi.mocked`, `vi.stubGlobal`, `vi.stubEnv`, `vi.unstubAllGlobals`, or `vi.unstubAllEnvs`, or similar helper methods such as `mockImplementation`, `mockResolvedValue`, or `mockReturnValue`, except at explicit non-local third-party integration boundaries.
 - Treat first-party packages, local modules, Node stdlib seams, prompt libraries, Tauri host APIs, `console`, `process`, and local daemon or client wrappers as non-exception cases.
 - Prefer real temp directories, temp `HOME`, copied fixtures, real git repositories, real worktrees, real daemon servers, subprocess-based CLI tests, and real ACP fixture processes over fake layers.
