@@ -52,6 +52,7 @@
         "@types/bun": "^1.3.11",
         "@types/react": "file:overrides/react",
         "@types/react-dom": "file:overrides/react",
+        "bun-plugin-raw": "^0.1.0",
         "picorun": "^0.1.5",
         "react": "file:overrides/react",
         "react-dom": "file:overrides/react",
@@ -1100,6 +1101,8 @@
     "buffer": ["buffer@5.7.1", "", { "dependencies": { "base64-js": "^1.3.1", "ieee754": "^1.1.13" } }, "sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ=="],
 
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
+
+    "bun-plugin-raw": ["bun-plugin-raw@0.1.0", "", {}, "sha512-scIHyUn3a1yNEv2oMzwgnpBJFMUCfchHIu+fKm0yV1R2RSNUzigaWQZ0Sf5a+vD2oyjY4/qW2UOthUjq+fUiBQ=="],
 
     "bun-types": ["bun-types@1.3.11", "", { "dependencies": { "@types/node": "*" } }, "sha512-1KGPpoxQWl9f6wcZh57LvrPIInQMn2TQ7jsgxqpRzg+l0QPOFvJVH7HmvHo/AiPgwXy+/Thf6Ov3EdVn1vOabg=="],
 
