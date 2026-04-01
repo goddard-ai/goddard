@@ -290,14 +290,6 @@ export function ProjectsPage() {
     resetDraft()
   }
 
-  function clearSuggestedName(): void {
-    if (draftName.value === lastSuggestedName.value) {
-      draftName.value = ""
-    }
-
-    lastSuggestedName.value = null
-  }
-
   async function browseForProject(): Promise<void> {
     const selectedPath = await browseForProjectPath()
 
