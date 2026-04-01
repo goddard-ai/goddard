@@ -166,7 +166,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
         const startedAt = Date.now()
         let requestName: ValidRequestName<TSchema> | undefined
         let payload: unknown
-        let context = undefined as TContext
+        let context: TContext | undefined
 
         try {
           const body = await readBody(req)
@@ -182,34 +182,39 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
             throw new Error(`Unknown request: ${requestName}`)
           }
 
-          const hasPayload = routeDef.payload !== undefined
-          payload = hasPayload ? routeDef.payload.parse(message.payload) : undefined
-          context =
-            options.createRequestContext?.({
+          if (routeDef.payload) {
+            payload = routeDef.payload.parse(message.payload)
+          }
+
+          context = options.createRequestContext?.({
+            name: requestName,
+            payload,
+          })
+
+          if (context)
+            await options.onRequestReceived?.({
               name: requestName,
               payload,
-            }) ?? (undefined as TContext)
-
-          await options.onRequestReceived?.({
-            name: requestName,
-            payload,
-            context,
-          })
+              context,
+            })
 
           const handler: (...args: any[]) => any = handlers[requestName]
-          const responseData = hasPayload ? await handler(payload, context) : await handler(context)
+          const responseData = routeDef.payload
+            ? await handler(payload, context)
+            : await handler(context)
 
-          await options.onResponseSent?.({
-            name: requestName,
-            payload,
-            response: responseData,
-            context,
-            durationMs: Date.now() - startedAt,
-          })
+          if (context)
+            await options.onResponseSent?.({
+              name: requestName,
+              payload,
+              response: responseData,
+              context,
+              durationMs: Date.now() - startedAt,
+            })
 
           sendJson(res, 200, responseData)
         } catch (error) {
-          if (requestName) {
+          if (context && requestName)
             await options.onRequestFailed?.({
               name: requestName,
               payload,
@@ -217,7 +222,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
               context,
               durationMs: Date.now() - startedAt,
             })
-          }
+
           sendJson(res, 400, { error: getErrorMessage(error) })
         }
       })()
