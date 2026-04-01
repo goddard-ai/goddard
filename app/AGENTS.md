@@ -10,7 +10,9 @@
 ## App Rules
 
 - Treat `app/` as an Electrobun desktop app with a Bun-owned host layer and a frontend-heavy TypeScript webview.
-- Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code.
+- Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code. UI components should render props and invoke actions, not call host APIs.
+- Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
+- Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
 - In `app/src/components`, keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there.
 - In components, prefer `useListener` from `preact-sigma` over manual `addEventListener` and `removeEventListener` wiring.
 - Prefer the `class` JSX prop over `className`.

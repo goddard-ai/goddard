@@ -25,6 +25,7 @@
 
 - Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task requires refactoring.
 - Prefer readability and local reasoning over new abstractions.
+- Do not declare explicit function return types.
 - Add human-readable `/** ... */` description comments to:
   - exported modules
   - non-trivial top-level functions
