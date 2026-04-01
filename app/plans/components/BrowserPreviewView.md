@@ -4,5 +4,5 @@
 - **Sub-components:** `BrowserPreviewToolbar`, `BrowserPreviewFrame`, `BrowserPreviewConsole`.
 - **State Complexity:** Simple local splitter sizing only; navigation history, loading state, and console capture belong in `BrowserPreviewState`.
 - **Required Context:** `BrowserPreviewContext`.
-- **Tauri IPC:** None directly; preview navigation and protocol integration should be mediated by `BrowserPreviewState`.
+- **Electrobun RPC:** None directly; preview navigation and protocol integration should be mediated by `BrowserPreviewState`.
 - **Interactions & Events:** Navigates to URLs; toggles or resizes the console pane; refreshes and traverses history; keeps preview state alive while the tab remains cached.

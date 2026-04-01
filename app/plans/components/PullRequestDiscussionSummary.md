@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only collapsed and expanded presentation.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Toggles full-discussion reveal; anchors into the diff or header when users navigate between discussion and code review.

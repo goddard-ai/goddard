@@ -4,5 +4,5 @@
 - **Sub-components:** `PullRequestListRow`.
 - **State Complexity:** Simple UI-only keyboard focus and list virtualization state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects one pull request; opens a pull request detail tab; preserves the current filter context while navigating.

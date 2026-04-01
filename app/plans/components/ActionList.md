@@ -4,5 +4,5 @@
 - **Sub-components:** `ActionListRow`.
 - **State Complexity:** Simple UI-only keyboard focus and empty-state handling.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects actions; opens an editor tab; starts a session launch flow prefilled with one action.

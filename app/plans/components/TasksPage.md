@@ -4,5 +4,5 @@
 - **Sub-components:** `TaskFilterSidebar`, `TaskList`.
 - **State Complexity:** Simple local empty-state and sidebar sizing; task data, ordering, and filters belong in `TaskListState`.
 - **Required Context:** `TaskListContext`, `ProjectRegistryContext`, `WorkbenchTabsContext`.
-- **Tauri IPC:** None directly; task reads and writes should route through shared task state.
+- **Electrobun RPC:** None directly; task reads and writes should route through shared task state.
 - **Interactions & Events:** Filters and sorts tasks; opens a task detail tab; updates task status or priority through row or detail actions.

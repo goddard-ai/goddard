@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only input and disclosure state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Adjusts task list filters; narrows visible tasks to one project or assignee; clears filters back to the default prioritized view.

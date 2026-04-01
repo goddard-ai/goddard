@@ -4,5 +4,5 @@
 - **Sub-components:** `RecentItemsList`, `GlobalSearchResults`.
 - **State Complexity:** Simple UI-only dialog focus trap and highlighted-result state; search indexing and result ranking belong in `GlobalSearchState`.
 - **Required Context:** `GlobalSearchContext`.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Opens from a global shortcut; filters by domain; navigates results with keyboard input; opens a result in the correct page or detail tab.

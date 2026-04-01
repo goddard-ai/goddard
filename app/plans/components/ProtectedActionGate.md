@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only pending-intent presentation; queued protected action intent belongs in `AuthState`.
 - **Required Context:** `AuthContext`.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Intercepts click or submit events; opens auth flow when needed; replays the deferred callback after successful authentication.

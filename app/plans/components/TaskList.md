@@ -4,5 +4,5 @@
 - **Sub-components:** `TaskListRow`.
 - **State Complexity:** Simple UI-only keyboard focus and list virtualization state.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects a task; opens the task detail tab; preserves list filters while navigating.

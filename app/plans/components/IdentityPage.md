@@ -4,5 +4,5 @@
 - **Sub-components:** `ProtectedActionGate`, `DeviceFlowDialog`.
 - **State Complexity:** Simple UI-only section expansion and empty-state presentation; auth lifecycle state belongs in `AuthState`.
 - **Required Context:** `AuthContext`.
-- **Tauri IPC:** None directly; auth operations should route through `AuthState`.
+- **Electrobun RPC:** None directly; auth operations should route through `AuthState`.
 - **Interactions & Events:** Starts device-flow auth; retries the most recent protected action after login; logs out; shows whether realtime and managed PR features are available.

@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple local file-pane scrolling and viewport restoration; diff loading and normalization belong in `CodeDiffState`.
 - **Required Context:** `CodeDiffContext` when connected; otherwise none.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects files or hunks when a file navigator exists; changes presentation mode if supported; preserves scroll when reopened from tab cache.

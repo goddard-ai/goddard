@@ -1,6 +1,6 @@
 # State Module: SessionLaunchState
-- **Responsibility:** Manage the modal-only session launch workflow, including project selection, action-prefill, initial prompt text, validation, and submission.
-- **Data Shape:** Dialog open state; launch draft fields; current tab context; resolved applicable actions; validation errors; submission status; created session id; transient launch error.
-- **Mutations/Actions:** `openLaunchDialog`; `closeLaunchDialog`; `setLaunchDraft`; `prefillFromAction`; `prefillFromTabContext`; `validateLaunchDraft`; `submitLaunch`; `clearLaunchError`.
-- **Scope & Hoisting:** Hoisted into a shared provider because the launch modal can be opened from the sessions page, action management, and contextual tab-level action menus.
-- **Side Effects:** Resolves project and action defaults from other state modules; creates daemon-backed sessions through shared SDK adapters; opens the resulting session chat tab through `WorkbenchTabsState`.
+- **Responsibility:** Coordinate cross-surface requests to open one shared session-launch dialog with project, action, or tab-context defaults. Do not own the dialog’s editable form draft.
+- **Data Shape:** Dialog open state; launch source metadata; `defaultProjectPath`; `defaultActionId`; `currentTabContext`; one reset token or equivalent so reopening with new defaults can replace the local dialog draft cleanly.
+- **Mutations/Actions:** `openLaunchDialog`; `closeLaunchDialog`; `setLaunchDefaults`; `clearLaunchDefaults`.
+- **Scope & Hoisting:** Optional and intentionally thin. Only hoist this if multiple surfaces need to target one shared dialog host; keep prompt text, validation errors, and submit-pending state inside `NewSessionDialog`.
+- **Side Effects:** None required for the MVP beyond surfacing one normalized open request to the dialog host.

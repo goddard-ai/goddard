@@ -4,5 +4,5 @@
 - **Sub-components:** `SessionListRow`.
 - **State Complexity:** Simple UI-only range selection and keyboard focus management.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Scrolls through sessions; toggles multi-select checkboxes; opens chat on row click; triggers diff or PR actions from row-level controls.

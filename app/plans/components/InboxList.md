@@ -4,5 +4,5 @@
 - **Sub-components:** `InboxRow`.
 - **State Complexity:** Simple UI-only range selection and keyboard focus behavior.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Selects one or many rows; opens an inbox item’s linked work surface; exposes per-row snooze, archive, and delegate actions.

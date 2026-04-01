@@ -4,5 +4,5 @@
 - **Sub-components:** None.
 - **State Complexity:** Simple UI-only hover state for action visibility.
 - **Required Context:** None.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Checkbox toggles selection; clicking the row opens the chat tab; hovering reveals quick actions; action buttons open recent diff or recent PR tabs without changing selection semantics.

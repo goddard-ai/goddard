@@ -4,5 +4,5 @@
 - **Sub-components:** `ContextActionDropdown`.
 - **State Complexity:** Simple UI-only input editing and focus state.
 - **Required Context:** `ActionCatalogContext` when the contextual action menu is connected here.
-- **Tauri IPC:** None.
+- **Electrobun RPC:** None.
 - **Interactions & Events:** Navigates back or forward; refreshes the current page; commits a new URL; optionally stops an in-flight navigation; launches a contextual action from the current preview tab.

@@ -41,6 +41,6 @@
 
 - 6. Terminal and Browser Preview Architecture Alignment
   - Why deferred:
-    - The existing terminal and preview plans still assume custom Rust support, while `spec/app.md` and `app/AGENTS.md` currently describe a plugin-only host boundary.
+    - The existing terminal and preview plans still assume bespoke host support that has not yet been aligned with the current Electrobun boundary described in `spec/app.md` and `app/AGENTS.md`.
   - Potential future plans:
-    - Either update the spec to explicitly allow the required Rust host capabilities or redesign those features around the current Tauri boundary before implementation begins.
+    - Either update the spec to explicitly allow the required Electrobun host capabilities or redesign those features around the current Electrobun boundary before implementation begins.
