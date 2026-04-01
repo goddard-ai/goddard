@@ -1106,11 +1106,9 @@
 
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
 
-<<<<<<< HEAD
     "bun-plugin-raw": ["bun-plugin-raw@0.1.0", "", {}, "sha512-scIHyUn3a1yNEv2oMzwgnpBJFMUCfchHIu+fKm0yV1R2RSNUzigaWQZ0Sf5a+vD2oyjY4/qW2UOthUjq+fUiBQ=="],
-=======
+
     "bun-pty": ["bun-pty@0.4.8", "", {}, "sha512-rO70Mrbr13+jxHHHu2YBkk2pNqrJE5cJn29WE++PUr+GFA0hq/VgtQPZANJ8dJo6d7XImvBk37Innt8GM7O28w=="],
->>>>>>> 8f061c6 (Add standalone terminal viewport scaffold)
 
     "bun-types": ["bun-types@1.3.11", "", { "dependencies": { "@types/node": "*" } }, "sha512-1KGPpoxQWl9f6wcZh57LvrPIInQMn2TQ7jsgxqpRzg+l0QPOFvJVH7HmvHo/AiPgwXy+/Thf6Ov3EdVn1vOabg=="],
 

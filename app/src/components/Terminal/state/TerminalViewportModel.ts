@@ -113,34 +113,6 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
     writeVersion: 0,
   })
   .actions({
-    /** Applies one static setup config before resources are created. */
-    initializeSetup(config: TerminalViewportSetup) {
-      this.fontFamily = config.font?.family ?? DEFAULT_FONT_FAMILY
-      this.fontSize = config.font?.size ?? DEFAULT_FONT_SIZE
-      this.lineHeight = config.font?.lineHeight ?? DEFAULT_LINE_HEIGHT
-      this.letterSpacing = config.font?.letterSpacing ?? DEFAULT_LETTER_SPACING
-      this.theme = mergeTerminalTheme(config.theme)
-      this.minimumCols = config.minimumCols ?? DEFAULT_MINIMUM_COLS
-      this.minimumRows = config.minimumRows ?? DEFAULT_MINIMUM_ROWS
-
-      if (this.terminal) {
-        return
-      }
-
-      this.terminal = new Terminal({
-        cols: Math.max(this.minimumCols, 1),
-        rows: Math.max(this.minimumRows, 1),
-        convertEol: true,
-        cursorBlink: true,
-        lineHeight: this.lineHeight,
-        letterSpacing: this.letterSpacing,
-        scrollback: 5000,
-        theme: cloneTheme(this.theme),
-      })
-
-      this.refreshSnapshot()
-    },
-
     /** Rebuilds the renderable rows from the current terminal buffer. */
     refreshSnapshot() {
       if (!this.terminal) {
@@ -154,13 +126,6 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
       this.cols = nextSnapshot.cols
       this.rows = nextSnapshot.rows
       this.viewRows = nextSnapshot.viewRows
-    },
-
-    /** Emits one resize event after refreshing terminal dimensions. */
-    handleTerminalResize(cols: number, rows: number) {
-      this.refreshSnapshot()
-      this.commit()
-      this.emit("resize", { cols, rows })
     },
 
     /** Attaches or detaches one DOM viewport without affecting terminal lifetime. */
@@ -268,19 +233,6 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
       this.refreshSnapshot()
     },
 
-    /** Tears down the headless terminal and any viewport-local observer. */
-    disposeTerminal() {
-      this.resizeObserver?.disconnect()
-      this.resizeObserver = null
-
-      this.terminal?.dispose()
-      this.terminal = null
-      this.viewportElement = null
-      this.processedChunkCount = 0
-      this.writeVersion += 1
-      this.refreshSnapshot()
-    },
-
     /** Finalizes one successful async chunk sync on the public model state. */
     finishChunkSync(chunksLength: number) {
       this.processedChunkCount = chunksLength
@@ -288,7 +240,32 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
     },
   })
   .setup(function (config: TerminalViewportSetup) {
-    this.initializeSetup(config)
+    this.act(function () {
+      this.fontFamily = config.font?.family ?? DEFAULT_FONT_FAMILY
+      this.fontSize = config.font?.size ?? DEFAULT_FONT_SIZE
+      this.lineHeight = config.font?.lineHeight ?? DEFAULT_LINE_HEIGHT
+      this.letterSpacing = config.font?.letterSpacing ?? DEFAULT_LETTER_SPACING
+      this.theme = mergeTerminalTheme(config.theme)
+      this.minimumCols = config.minimumCols ?? DEFAULT_MINIMUM_COLS
+      this.minimumRows = config.minimumRows ?? DEFAULT_MINIMUM_ROWS
+
+      if (this.terminal) {
+        return
+      }
+
+      this.terminal = new Terminal({
+        cols: Math.max(this.minimumCols, 1),
+        rows: Math.max(this.minimumRows, 1),
+        convertEol: true,
+        cursorBlink: true,
+        lineHeight: this.lineHeight,
+        letterSpacing: this.letterSpacing,
+        scrollback: 5000,
+        theme: cloneTheme(this.theme),
+      })
+
+      this.refreshSnapshot()
+    })
 
     if (!this.terminal) {
       return []
@@ -302,13 +279,27 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
         this.refreshSnapshot()
       }),
       this.terminal.onResize((nextSize: { cols: number; rows: number }) => {
-        this.handleTerminalResize(nextSize.cols, nextSize.rows)
+        this.act(function () {
+          this.refreshSnapshot()
+          this.commit()
+          this.emit("resize", { cols: nextSize.cols, rows: nextSize.rows })
+        })
       }),
       this.terminal.onTitleChange(() => {
         this.refreshSnapshot()
       }),
       () => {
-        this.disposeTerminal()
+        this.act(function () {
+          this.resizeObserver?.disconnect()
+          this.resizeObserver = null
+
+          this.terminal?.dispose()
+          this.terminal = null
+          this.viewportElement = null
+          this.processedChunkCount = 0
+          this.writeVersion += 1
+          this.refreshSnapshot()
+        })
       },
     ]
   })
