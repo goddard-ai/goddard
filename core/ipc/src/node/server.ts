@@ -158,137 +158,145 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     }
   }
 
+  async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const startedAt = Date.now()
+    let requestName: ValidRequestName<TSchema> | undefined
+    let payload: unknown
+    let context: TContext | undefined
+
+    try {
+      const body = await readBody(req)
+      const message = JSON.parse(body) as { name?: unknown; payload?: unknown }
+
+      if (typeof message.name !== "string") {
+        throw new Error("Request name must be a string")
+      }
+
+      requestName = message.name as ValidRequestName<TSchema>
+      const routeDef = schema.requests[requestName]
+      if (!routeDef) {
+        throw new Error(`Unknown request: ${requestName}`)
+      }
+
+      if (routeDef.payload) {
+        payload = routeDef.payload.parse(message.payload)
+      }
+
+      context = options.createRequestContext?.({
+        name: requestName,
+        payload,
+      })
+
+      if (context)
+        await options.onRequestReceived?.({
+          name: requestName,
+          payload,
+          context,
+        })
+
+      const handler: (...args: any[]) => any = handlers[requestName]
+      const responseData = routeDef.payload
+        ? await handler(payload, context)
+        : await handler(context)
+
+      if (context)
+        await options.onResponseSent?.({
+          name: requestName,
+          payload,
+          response: responseData,
+          context,
+          durationMs: Date.now() - startedAt,
+        })
+
+      sendJson(res, 200, responseData)
+    } catch (error) {
+      if (context && requestName)
+        await options.onRequestFailed?.({
+          name: requestName,
+          payload,
+          error,
+          context,
+          durationMs: Date.now() - startedAt,
+        })
+
+      sendJson(res, 400, { error: getErrorMessage(error) })
+    }
+  }
+
+  async function handleStream(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL,
+  ): Promise<void> {
+    const name = url.searchParams.get("name")
+    if (!name || !Object.hasOwn(schema.streams, name)) {
+      res.writeHead(400, { "Content-Type": "text/plain" })
+      res.end("Invalid stream name")
+      return
+    }
+
+    let subscription: InferStreamSubscription<TSchema, ValidStreamName<TSchema>> | undefined
+    try {
+      const { subscription: subscriptionSchema } = getStreamSchemas(
+        schema,
+        name as ValidStreamName<TSchema>,
+      )
+      const rawSubscription = url.searchParams.get("subscription")
+      if (rawSubscription && !subscriptionSchema) {
+        throw new Error(`Stream ${name} does not accept subscription params`)
+      }
+      subscription =
+        rawSubscription && subscriptionSchema
+          ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
+              TSchema,
+              ValidStreamName<TSchema>
+            >)
+          : undefined
+    } catch (error) {
+      res.writeHead(400, { "Content-Type": "text/plain" })
+      res.end(getErrorMessage(error))
+      return
+    }
+
+    try {
+      await options.onSubscribe?.({
+        name: name as ValidStreamName<TSchema>,
+        subscription,
+      })
+    } catch (error) {
+      res.writeHead(400, { "Content-Type": "text/plain" })
+      res.end(getErrorMessage(error))
+      return
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    })
+    res.flushHeaders()
+
+    const client = { name, subscription, res }
+    streamClients.add(client)
+
+    const removeClient = () => {
+      streamClients.delete(client)
+    }
+
+    req.on("close", removeClient)
+    res.on("close", removeClient)
+  }
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost")
 
     if (req.method === "POST" && url.pathname === "/") {
-      void (async () => {
-        const startedAt = Date.now()
-        let requestName: ValidRequestName<TSchema> | undefined
-        let payload: unknown
-        let context: TContext | undefined
-
-        try {
-          const body = await readBody(req)
-          const message = JSON.parse(body) as { name?: unknown; payload?: unknown }
-
-          if (typeof message.name !== "string") {
-            throw new Error("Request name must be a string")
-          }
-
-          requestName = message.name as ValidRequestName<TSchema>
-          const routeDef = schema.requests[requestName]
-          if (!routeDef) {
-            throw new Error(`Unknown request: ${requestName}`)
-          }
-
-          if (routeDef.payload) {
-            payload = routeDef.payload.parse(message.payload)
-          }
-
-          context = options.createRequestContext?.({
-            name: requestName,
-            payload,
-          })
-
-          if (context)
-            await options.onRequestReceived?.({
-              name: requestName,
-              payload,
-              context,
-            })
-
-          const handler: (...args: any[]) => any = handlers[requestName]
-          const responseData = routeDef.payload
-            ? await handler(payload, context)
-            : await handler(context)
-
-          if (context)
-            await options.onResponseSent?.({
-              name: requestName,
-              payload,
-              response: responseData,
-              context,
-              durationMs: Date.now() - startedAt,
-            })
-
-          sendJson(res, 200, responseData)
-        } catch (error) {
-          if (context && requestName)
-            await options.onRequestFailed?.({
-              name: requestName,
-              payload,
-              error,
-              context,
-              durationMs: Date.now() - startedAt,
-            })
-
-          sendJson(res, 400, { error: getErrorMessage(error) })
-        }
-      })()
+      void handleRequest(req, res)
       return
     }
 
     if (req.method === "GET" && url.pathname === "/stream") {
-      void (async () => {
-        const name = url.searchParams.get("name")
-        if (!name || !Object.hasOwn(schema.streams, name)) {
-          res.writeHead(400, { "Content-Type": "text/plain" })
-          res.end("Invalid stream name")
-          return
-        }
-
-        let subscription: InferStreamSubscription<TSchema, ValidStreamName<TSchema>> | undefined
-        try {
-          const { subscription: subscriptionSchema } = getStreamSchemas(
-            schema,
-            name as ValidStreamName<TSchema>,
-          )
-          const rawSubscription = url.searchParams.get("subscription")
-          if (rawSubscription && !subscriptionSchema) {
-            throw new Error(`Stream ${name} does not accept subscription params`)
-          }
-          subscription =
-            rawSubscription && subscriptionSchema
-              ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
-                  TSchema,
-                  ValidStreamName<TSchema>
-                >)
-              : undefined
-        } catch (error) {
-          res.writeHead(400, { "Content-Type": "text/plain" })
-          res.end(getErrorMessage(error))
-          return
-        }
-
-        try {
-          await options.onSubscribe?.({
-            name: name as ValidStreamName<TSchema>,
-            subscription,
-          })
-        } catch (error) {
-          res.writeHead(400, { "Content-Type": "text/plain" })
-          res.end(getErrorMessage(error))
-          return
-        }
-
-        res.writeHead(200, {
-          "Content-Type": "application/x-ndjson",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        })
-        res.flushHeaders()
-
-        const client = { name, subscription, res }
-        streamClients.add(client)
-
-        const removeClient = () => {
-          streamClients.delete(client)
-        }
-
-        req.on("close", removeClient)
-        res.on("close", removeClient)
-      })()
+      void handleStream(req, res, url)
       return
     }
 
