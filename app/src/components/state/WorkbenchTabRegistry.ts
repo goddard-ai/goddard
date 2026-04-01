@@ -37,6 +37,8 @@ type WorkbenchTabByKind = {
     kind: "main"
     title: string
     icon: ShellIconName
+    dirty?: undefined
+    payload?: undefined
   }
 } & {
   [TKind in WorkbenchDetailTabKind]: {
