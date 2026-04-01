@@ -8,10 +8,11 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
     "paths": {
+      "~/*": ["./src/*"],
       "react": ["./node_modules/preact/compat"],
       "react-dom": ["./node_modules/preact/compat"]
     }
   },
-  "include": ["src"],
-  "exclude": ["src/bun"]
+  "include": ["src", "src/bun/plugins/*.template.tsx"],
+  "exclude": ["src/bun/**/*.ts"]
 }

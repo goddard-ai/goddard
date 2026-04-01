@@ -7,24 +7,27 @@ const SYMBOL_ID_PREFIX = "goddard-svg-icon"
 
 const svgSources = {} as const
 
+/** Identifiers for SVG assets generated from SVG files under the public directory. */
 export type SvgIconName = keyof typeof svgSources
+
+/** A SvgIcon source can be a generated icon name or an inline SVG string. */
+type SvgIconSource = { name: SvgIconName; data?: never } | { data: string; name?: never }
 
 const mountedSymbols = new Set<string>()
 let parser: DOMParser | null = null
 let spriteRoot: SVGSVGElement | null = null
 
-export function SvgIcon(
-  props: { name: SvgIconName; title?: string } & JSX.IntrinsicElements["svg"],
-) {
-  const { name, title, ...svgProps } = props
-  const symbolId = ensureSymbolMounted(name)
+/** Renders a named or inline SVG icon through the shared sprite root. */
+export function SvgIcon(props: SvgIconSource & { title?: string } & JSX.IntrinsicElements["svg"]) {
+  const symbolId = ensureSymbolMounted(props)
+  const { data: _data, name: _name, title, ...svgProps } = props
 
   return (
     <svg
       {...svgProps}
       aria-hidden={title ? undefined : true}
       aria-label={title}
-      data-svg-icon={name}
+      data-svg-icon={getDebugName(props, symbolId)}
       role={title ? "img" : undefined}
     >
       {title ? <title>{title}</title> : null}
@@ -33,10 +36,11 @@ export function SvgIcon(
   )
 }
 
-function ensureSymbolMounted(name: SvgIconName) {
-  const symbolId = getSymbolId(name)
+/** Mounts the requested SVG source into the shared sprite and returns its symbol id. */
+function ensureSymbolMounted(source: SvgIconSource) {
+  const symbolId = getSymbolId(source)
 
-  if (mountedSymbols.has(name)) {
+  if (mountedSymbols.has(symbolId)) {
     return symbolId
   }
 
@@ -47,15 +51,17 @@ function ensureSymbolMounted(name: SvgIconName) {
   }
 
   if (document.getElementById(symbolId)) {
-    mountedSymbols.add(name)
+    mountedSymbols.add(symbolId)
     return symbolId
   }
 
-  const parsedDocument = getParser().parseFromString(svgSources[name], "image/svg+xml")
+  const parsedDocument = getParser().parseFromString(getSvgMarkup(source), "image/svg+xml")
   const sourceSvg = parsedDocument.documentElement as unknown as SVGSVGElement
 
   if (sourceSvg.tagName.toLowerCase() !== "svg") {
-    throw new Error(`Expected ${JSON.stringify(name)} to parse into an <svg> root element.`)
+    throw new Error(
+      `Expected ${JSON.stringify(getDebugName(source, symbolId))} to parse into an <svg> root element.`,
+    )
   }
 
   rewriteLocalIds(sourceSvg, symbolId)
@@ -77,11 +83,30 @@ function ensureSymbolMounted(name: SvgIconName) {
 
   symbol.innerHTML = sourceSvg.innerHTML
   sprite.append(symbol)
-  mountedSymbols.add(name)
+  mountedSymbols.add(symbolId)
 
   return symbolId
 }
 
+/** Returns the SVG markup string for the requested icon source. */
+function getSvgMarkup(source: SvgIconSource) {
+  if (source.data !== undefined) {
+    return source.data
+  }
+
+  return svgSources[source.name]
+}
+
+/** Returns a readable identifier for diagnostics and DOM inspection. */
+function getDebugName(source: SvgIconSource, symbolId: string) {
+  if (source.data !== undefined) {
+    return symbolId
+  }
+
+  return source.name
+}
+
+/** Lazily creates the XML parser used for SVG source strings. */
 function getParser() {
   if (!parser) {
     parser = new DOMParser()
@@ -90,6 +115,7 @@ function getParser() {
   return parser
 }
 
+/** Creates or reuses the hidden sprite root used by every mounted icon symbol. */
 function getSpriteRoot(): SVGSVGElement | null {
   if (typeof document === "undefined") {
     return null
@@ -123,6 +149,7 @@ function getSpriteRoot(): SVGSVGElement | null {
   return spriteRoot
 }
 
+/** Rewrites local SVG ids so multiple mounted symbols cannot collide in the DOM. */
 function rewriteLocalIds(sourceSvg: SVGSVGElement, symbolId: string) {
   const idMap = new Map<string, string>()
 
@@ -170,9 +197,39 @@ function rewriteLocalIds(sourceSvg: SVGSVGElement, symbolId: string) {
   }
 }
 
-function getSymbolId(name: string) {
+/** Returns the sprite symbol id for either a named icon or inline SVG data. */
+function getSymbolId(source: SvgIconSource) {
+  if (source.data !== undefined) {
+    return `${SYMBOL_ID_PREFIX}-data-${hashSvgData(source.data)}`
+  }
+
+  return getNamedSymbolId(source.name)
+}
+
+/** Returns the sprite symbol id used for generated icons. */
+function getNamedSymbolId(name: string) {
   return `${SYMBOL_ID_PREFIX}-${name
     .replaceAll(/[^a-zA-Z0-9]+/g, "-")
     .replaceAll(/^-+|-+$/g, "")
     .toLowerCase()}`
+}
+
+/** Generates a compact stable hash for inline SVG strings. */
+function hashSvgData(data: string) {
+  let hash1 = 0xdeadbeef ^ data.length
+  let hash2 = 0x41c6ce57 ^ data.length
+
+  for (let index = 0; index < data.length; index += 1) {
+    const codePoint = data.charCodeAt(index)
+
+    hash1 = Math.imul(hash1 ^ codePoint, 2654435761)
+    hash2 = Math.imul(hash2 ^ codePoint, 1597334677)
+  }
+
+  hash1 =
+    Math.imul(hash1 ^ (hash1 >>> 16), 2246822507) ^ Math.imul(hash2 ^ (hash2 >>> 13), 3266489909)
+  hash2 =
+    Math.imul(hash2 ^ (hash2 >>> 16), 2246822507) ^ Math.imul(hash1 ^ (hash1 >>> 13), 3266489909)
+
+  return (4294967296 * (2097151 & hash2) + (hash1 >>> 0)).toString(36)
 }

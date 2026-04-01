@@ -4,6 +4,6 @@
     "types": ["bun"],
     "rootDir": ".."
   },
-  "include": ["./", "../shared", "../**/*.d.ts"],
+  "include": ["./**/*.ts", "../shared", "../**/*.d.ts"],
   "exclude": ["./plugins/*.template.tsx"]
 }
