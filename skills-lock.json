@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "agent-client-protocol": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "de68702ac1ded1902c4a6e687f6faae3032ad395573780c1b384bdbcd1b05668"
+    }
+  }
+}
