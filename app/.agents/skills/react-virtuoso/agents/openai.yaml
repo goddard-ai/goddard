@@ -1,0 +1,4 @@
+interface:
+  display_name: "React Virtuoso"
+  short_description: "Guidance for React Virtuoso virtualization"
+  default_prompt: "Use $react-virtuoso to implement or debug a virtualized React list, grid, table, or chat view."

@@ -1,11 +1,15 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import type { ComponentChildren } from "preact"
 import { Suspense } from "preact/compat"
+import { useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
 import { ProjectsPage } from "./Projects/ProjectsPage"
 import { SidebarNav } from "./SidebarNav"
+import { TabViewportProvider } from "./TabViewport"
 import { ShellIcon } from "../support/shell-icons"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "../shared/app-menu"
+import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "../shared/debug-menu"
 import type { NavigationItemId } from "./state/Navigation"
 import { useNavigation, useWorkbenchTabSet } from "./state/AppStateContext"
 import { getWorkbenchTabComponent, type WorkbenchTab } from "./state/WorkbenchTabRegistry"
@@ -58,7 +62,7 @@ const windowDragRegionClass = css({
 function createPrimaryWorkbenchTab(
   navId: NavigationItemId,
   title: string,
-  icon: WorkbenchTab["icon"],
+  icon: WorkbenchTab<"projects">["icon"],
 ): WorkbenchTab<"projects"> | null {
   if (navId === "projects") {
     return {
@@ -73,6 +77,19 @@ function createPrimaryWorkbenchTab(
 
   return null
 }
+
+const workbenchPanelScrollerClass = css({
+  minHeight: "0",
+  height: "100%",
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+})
+
+const workbenchPanelBodyClass = css({
+  minHeight: "100%",
+})
+
+const panelScrollCache = new Map<string, number>()
 
 /** Renders the tab-first shell and its primary workbench view. */
 export function AppShell() {
@@ -91,6 +108,25 @@ export function AppShell() {
     }
   })
 
+  useListener(window, DEBUG_MENU_EVENT_NAME, (event) => {
+    const detail = (event as CustomEvent<DebugMenuEventDetail>).detail
+
+    if (detail.surface !== "sessionChatTranscript") {
+      return
+    }
+
+    workbenchTabSet.openOrFocusTab({
+      id: "debug:session-chat-transcript",
+      kind: "sessionChatTranscriptDebug",
+      title: "Transcript Debug",
+      icon: "sessions",
+      payload: {
+        surface: "sessionChatTranscript",
+      },
+      dirty: false,
+    })
+  })
+
   return (
     <div
       class={css({
@@ -98,7 +134,10 @@ export function AppShell() {
         display: "grid",
         gridTemplateColumns: "92px minmax(0, 1fr)",
         gridTemplateRows: "36px minmax(0, 1fr)",
-        minHeight: "100vh",
+        width: "100%",
+        height: "100vh",
+        maxHeight: "100vh",
+        overflow: "hidden",
         background:
           `radial-gradient(circle at top left, color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), transparent 28%), ` +
           `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
@@ -108,7 +147,7 @@ export function AppShell() {
       <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
       <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
       <SidebarNav
-        className={css({ gridRow: "2" })}
+        className={css({ gridRow: "2", minHeight: "0" })}
         items={navigationItems}
         onSelect={(id, options) => {
           if (options?.openInTab) {
@@ -137,18 +176,57 @@ export function AppShell() {
           gridTemplateRows: "auto minmax(0, 1fr)",
           minWidth: "0",
           minHeight: "0",
+          overflow: "hidden",
         })}
       >
         <WorkbenchTabsConnected />
-        <div class={css({ minHeight: "0" })}>
+        <div class={css({ minHeight: "0", overflow: "hidden" })}>
           {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
-            <MainWorkbenchView />
+            <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
+              <MainWorkbenchView />
+            </WorkbenchScrollPanel>
           ) : (
-            <WorkbenchTabPanel />
+            <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
+              <WorkbenchTabPanel />
+            </WorkbenchScrollPanel>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+/** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
+function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChildren }) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const [scrollTop, setScrollTop] = useState(panelScrollCache.get(props.scrollKey) ?? 0)
+
+  useLayoutEffect(() => {
+    const scrollerElement = scrollerRef.current
+
+    if (!scrollerElement) {
+      return
+    }
+
+    const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
+    scrollerElement.scrollTop = restoredScrollTop
+    setScrollTop(restoredScrollTop)
+  }, [props.scrollKey])
+
+  return (
+    <TabViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
+      <div
+        ref={scrollerRef}
+        class={workbenchPanelScrollerClass}
+        onScroll={(event) => {
+          const nextScrollTop = event.currentTarget.scrollTop
+          panelScrollCache.set(props.scrollKey, nextScrollTop)
+          setScrollTop(nextScrollTop)
+        }}
+      >
+        <div class={workbenchPanelBodyClass}>{props.children}</div>
+      </div>
+    </TabViewportProvider>
   )
 }
 

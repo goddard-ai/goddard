@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "agent-client-protocol": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "de68702ac1ded1902c4a6e687f6faae3032ad395573780c1b384bdbcd1b05668"
+    },
     "electrobun": {
       "source": "/Users/alec/dev/skills/packages",
       "sourceType": "local",
@@ -30,6 +35,11 @@
       "source": "/Users/alec/dev/skills/packages",
       "sourceType": "local",
       "computedHash": "14fea450423ec973878ae19dc5bc6c2ee7d503f5295c120eba9821d635ac94e1"
+    },
+    "react-virtuoso": {
+      "source": "/Users/alec/dev/skills/packages",
+      "sourceType": "local",
+      "computedHash": "0ad8839072da56a0ce9e13544c328a5d51059cf03da4e7a337d624c404b6d901"
     }
   }
 }
