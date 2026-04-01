@@ -38,11 +38,11 @@
 ## Sprint 2: Sessions and Session Launch
 
 - Goal:
-  - Make session steering real: browse sessions, launch new ones through the modal flow, and work inside session chat tabs.
+  - Make session steering real: browse sessions, launch new ones through a modal-local form flow, and work inside session chat tabs.
 - State:
   - `SessionIndexState`
-  - `SessionLaunchState`
   - `SessionChatState`
+  - Optional thin `SessionLaunchState` only if multiple surfaces need one shared dialog launcher; keep launch draft and validation local to `NewSessionDialog`.
 - Components:
   - `SessionsPage`
   - `SessionListToolbar`
