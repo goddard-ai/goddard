@@ -4,6 +4,7 @@ import {
   type InferStreamPayload,
   type InferStreamSubscription,
   type IpcSchema,
+  type ValidRequestName,
   type ValidStreamName,
 } from "../schema.ts"
 import { type Handlers } from "../types.ts"
@@ -44,7 +45,10 @@ function safeUnlink(socketPath: string): void {
 }
 
 /** Normalizes shorthand and object stream definitions into optional subscription schemas. */
-function getStreamSchemas<S extends IpcSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
+function getStreamSchemas<TSchema extends IpcSchema, K extends ValidStreamName<TSchema>>(
+  schema: TSchema,
+  name: K,
+) {
   const definition = schema.streams[name]
   if (!("payload" in definition)) {
     return {
@@ -78,19 +82,57 @@ function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boo
 }
 
 /** Optional hooks that run when one client subscribes to a server-published stream. */
-type CreateServerOptions<S extends IpcSchema> = {
-  onSubscribe?: (input: {
-    name: ValidStreamName<S>
-    subscription: InferStreamSubscription<S, ValidStreamName<S>> | undefined
-  }) => Promise<void> | void
+type SubscribeHookInput<TSchema extends IpcSchema> = {
+  name: ValidStreamName<TSchema>
+  subscription: InferStreamSubscription<TSchema, ValidStreamName<TSchema>> | undefined
+}
+
+/** Request payload made available to per-request context factories. */
+type CreateRequestContextInput<TSchema extends IpcSchema> = {
+  name: ValidRequestName<TSchema>
+  payload: unknown
+}
+
+/** Lifecycle data passed to request-received hooks. */
+type RequestReceivedHookInput<TSchema extends IpcSchema, TContext> = {
+  name: ValidRequestName<TSchema>
+  payload: unknown
+  context: TContext
+}
+
+/** Lifecycle data passed to request-response hooks. */
+type ResponseSentHookInput<TSchema extends IpcSchema, TContext> = {
+  name: ValidRequestName<TSchema>
+  payload: unknown
+  response: unknown
+  context: TContext
+  durationMs: number
+}
+
+/** Lifecycle data passed to request-failed hooks. */
+type RequestFailedHookInput<TSchema extends IpcSchema, TContext> = {
+  name: ValidRequestName<TSchema>
+  payload: unknown
+  error: unknown
+  context: TContext
+  durationMs: number
+}
+
+/** Optional hooks that run during request and subscription handling. */
+type CreateServerOptions<TSchema extends IpcSchema, TContext> = {
+  createRequestContext?: (input: CreateRequestContextInput<TSchema>) => TContext
+  onRequestReceived?: (input: RequestReceivedHookInput<TSchema, TContext>) => Promise<void> | void
+  onResponseSent?: (input: ResponseSentHookInput<TSchema, TContext>) => Promise<void> | void
+  onRequestFailed?: (input: RequestFailedHookInput<TSchema, TContext>) => Promise<void> | void
+  onSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
 }
 
 /** Creates the Node IPC server for one socket-backed application schema. */
-export function createServer<S extends IpcSchema>(
+export function createServer<TSchema extends IpcSchema, TContext = undefined>(
   socketPath: string,
-  schema: S,
-  handlers: Handlers<S>,
-  options: CreateServerOptions<S> = {},
+  schema: TSchema,
+  handlers: Handlers<TSchema, TContext>,
+  options: CreateServerOptions<TSchema, TContext> = {},
 ) {
   const streamClients = new Set<{
     name: string
@@ -98,7 +140,10 @@ export function createServer<S extends IpcSchema>(
     res: http.ServerResponse
   }>()
 
-  function publish<K extends ValidStreamName<S>>(name: K, payload: InferStreamPayload<S, K>) {
+  function publish<K extends ValidStreamName<TSchema>>(
+    name: K,
+    payload: InferStreamPayload<TSchema, K>,
+  ) {
     const chunk = JSON.stringify({ name, payload }) + "\n"
 
     for (const client of streamClients) {
@@ -113,105 +158,138 @@ export function createServer<S extends IpcSchema>(
     }
   }
 
-  const server: http.Server = http.createServer(
-    (req: http.IncomingMessage, res: http.ServerResponse) => {
-      const url = new URL(req.url ?? "/", "http://localhost")
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost")
 
-      if (req.method === "POST" && url.pathname === "/") {
-        void (async () => {
-          try {
-            const body = await readBody(req)
-            const message = JSON.parse(body) as { name?: unknown; payload?: unknown }
+    if (req.method === "POST" && url.pathname === "/") {
+      void (async () => {
+        const startedAt = Date.now()
+        let requestName: ValidRequestName<TSchema> | undefined
+        let payload: unknown
+        let context = undefined as TContext
 
-            if (typeof message.name !== "string") {
-              throw new Error("Request name must be a string")
-            }
+        try {
+          const body = await readBody(req)
+          const message = JSON.parse(body) as { name?: unknown; payload?: unknown }
 
-            const routeDef = schema.requests[message.name]
-            if (!routeDef) {
-              throw new Error(`Unknown request: ${message.name}`)
-            }
-
-            const handler: (...args: any[]) => any = handlers[message.name]
-            const responseData = routeDef.payload
-              ? await handler(routeDef.payload.parse(message.payload))
-              : await handler()
-
-            sendJson(res, 200, responseData)
-          } catch (error) {
-            sendJson(res, 400, { error: getErrorMessage(error) })
-          }
-        })()
-        return
-      }
-
-      if (req.method === "GET" && url.pathname === "/stream") {
-        void (async () => {
-          const name = url.searchParams.get("name")
-          if (!name || !Object.hasOwn(schema.streams, name)) {
-            res.writeHead(400, { "Content-Type": "text/plain" })
-            res.end("Invalid stream name")
-            return
+          if (typeof message.name !== "string") {
+            throw new Error("Request name must be a string")
           }
 
-          let subscription: InferStreamSubscription<S, ValidStreamName<S>> | undefined
-          try {
-            const { subscription: subscriptionSchema } = getStreamSchemas(
-              schema,
-              name as ValidStreamName<S>,
-            )
-            const rawSubscription = url.searchParams.get("subscription")
-            if (rawSubscription && !subscriptionSchema) {
-              throw new Error(`Stream ${name} does not accept subscription params`)
-            }
-            subscription =
-              rawSubscription && subscriptionSchema
-                ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
-                    S,
-                    ValidStreamName<S>
-                  >)
-                : undefined
-          } catch (error) {
-            res.writeHead(400, { "Content-Type": "text/plain" })
-            res.end(getErrorMessage(error))
-            return
+          requestName = message.name as ValidRequestName<TSchema>
+          const routeDef = schema.requests[requestName]
+          if (!routeDef) {
+            throw new Error(`Unknown request: ${requestName}`)
           }
 
-          try {
-            await options.onSubscribe?.({
-              name: name as ValidStreamName<S>,
-              subscription,
-            })
-          } catch (error) {
-            res.writeHead(400, { "Content-Type": "text/plain" })
-            res.end(getErrorMessage(error))
-            return
-          }
+          const hasPayload = routeDef.payload !== undefined
+          payload = hasPayload ? routeDef.payload.parse(message.payload) : undefined
+          context =
+            options.createRequestContext?.({
+              name: requestName,
+              payload,
+            }) ?? (undefined as TContext)
 
-          res.writeHead(200, {
-            "Content-Type": "application/x-ndjson",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
+          await options.onRequestReceived?.({
+            name: requestName,
+            payload,
+            context,
           })
-          res.flushHeaders()
 
-          const client = { name, subscription, res }
-          streamClients.add(client)
+          const handler: (...args: any[]) => any = handlers[requestName]
+          const responseData = hasPayload ? await handler(payload, context) : await handler(context)
 
-          const removeClient = () => {
-            streamClients.delete(client)
+          await options.onResponseSent?.({
+            name: requestName,
+            payload,
+            response: responseData,
+            context,
+            durationMs: Date.now() - startedAt,
+          })
+
+          sendJson(res, 200, responseData)
+        } catch (error) {
+          if (requestName) {
+            await options.onRequestFailed?.({
+              name: requestName,
+              payload,
+              error,
+              context,
+              durationMs: Date.now() - startedAt,
+            })
           }
+          sendJson(res, 400, { error: getErrorMessage(error) })
+        }
+      })()
+      return
+    }
 
-          req.on("close", removeClient)
-          res.on("close", removeClient)
-        })()
-        return
-      }
+    if (req.method === "GET" && url.pathname === "/stream") {
+      void (async () => {
+        const name = url.searchParams.get("name")
+        if (!name || !Object.hasOwn(schema.streams, name)) {
+          res.writeHead(400, { "Content-Type": "text/plain" })
+          res.end("Invalid stream name")
+          return
+        }
 
-      res.writeHead(404)
-      res.end()
-    },
-  )
+        let subscription: InferStreamSubscription<TSchema, ValidStreamName<TSchema>> | undefined
+        try {
+          const { subscription: subscriptionSchema } = getStreamSchemas(
+            schema,
+            name as ValidStreamName<TSchema>,
+          )
+          const rawSubscription = url.searchParams.get("subscription")
+          if (rawSubscription && !subscriptionSchema) {
+            throw new Error(`Stream ${name} does not accept subscription params`)
+          }
+          subscription =
+            rawSubscription && subscriptionSchema
+              ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
+                  TSchema,
+                  ValidStreamName<TSchema>
+                >)
+              : undefined
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "text/plain" })
+          res.end(getErrorMessage(error))
+          return
+        }
+
+        try {
+          await options.onSubscribe?.({
+            name: name as ValidStreamName<TSchema>,
+            subscription,
+          })
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "text/plain" })
+          res.end(getErrorMessage(error))
+          return
+        }
+
+        res.writeHead(200, {
+          "Content-Type": "application/x-ndjson",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        })
+        res.flushHeaders()
+
+        const client = { name, subscription, res }
+        streamClients.add(client)
+
+        const removeClient = () => {
+          streamClients.delete(client)
+        }
+
+        req.on("close", removeClient)
+        res.on("close", removeClient)
+      })()
+      return
+    }
+
+    res.writeHead(404)
+    res.end()
+  })
 
   safeUnlink(socketPath)
   server.listen(socketPath)

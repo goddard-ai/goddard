@@ -146,6 +146,89 @@ describe("core/ipc", () => {
     })
   })
 
+  test("creates request context and fires request lifecycle hooks", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-hooks-"))
+    const socketPath = join(directory, "ipc.sock")
+    const received: Array<{ name: string; payload: unknown; traceId: string }> = []
+    const responded: Array<{
+      name: string
+      payload: unknown
+      response: unknown
+      durationMs: number
+      traceId: string
+    }> = []
+    const handlerContexts: string[] = []
+    let requestCount = 0
+    const ipcServer = createServer(
+      socketPath,
+      schema,
+      {
+        ping: (context) => {
+          handlerContexts.push(context.traceId)
+          return { ok: true }
+        },
+        echo: ({ text }, context) => {
+          handlerContexts.push(context.traceId)
+          return { echoed: `${text}:${context.traceId}` }
+        },
+        add: ({ a, b }, context) => {
+          handlerContexts.push(context.traceId)
+          return { sum: a + b }
+        },
+      },
+      {
+        createRequestContext: ({ name }) => ({
+          traceId: `${name}-${String(++requestCount)}`,
+        }),
+        onRequestReceived: ({ name, payload, context }) => {
+          received.push({ name, payload, traceId: context.traceId })
+        },
+        onResponseSent: ({ name, payload, response, durationMs, context }) => {
+          responded.push({ name, payload, response, durationMs, traceId: context.traceId })
+        },
+      },
+    )
+
+    await once(ipcServer.server, "listening")
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+      await rm(directory, { recursive: true, force: true })
+    })
+
+    const client = createNodeClient(socketPath, schema)
+    await expect(client.send("ping")).resolves.toEqual({ ok: true })
+    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({
+      echoed: "hello:echo-2",
+    })
+
+    expect(received).toEqual([
+      { name: "ping", payload: undefined, traceId: "ping-1" },
+      { name: "echo", payload: { text: "hello" }, traceId: "echo-2" },
+    ])
+    expect(responded[0]).toMatchObject({
+      name: "ping",
+      payload: undefined,
+      response: { ok: true },
+      traceId: "ping-1",
+    })
+    expect(responded[1]).toMatchObject({
+      name: "echo",
+      payload: { text: "hello" },
+      response: { echoed: "hello:echo-2" },
+      traceId: "echo-2",
+    })
+    expect(responded.every((entry) => entry.durationMs >= 0)).toBe(true)
+    expect(handlerContexts).toEqual(["ping-1", "echo-2"])
+  })
+
   test("streams ndjson events to subscribed node clients", async () => {
     const { client, publish } = await createFixture()
 
@@ -194,5 +277,66 @@ describe("core/ipc", () => {
     await expect(
       client.subscribe("userAlert", { userId: "blocked-user" }, () => {}),
     ).rejects.toThrow("User alerts are disabled for blocked-user")
+  })
+
+  test("fires request-failed hooks when a handler throws", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-errors-"))
+    const socketPath = join(directory, "ipc.sock")
+    const failures: Array<{
+      name: string
+      payload: unknown
+      errorMessage: string
+      durationMs: number
+      traceId: string
+    }> = []
+    const ipcServer = createServer(
+      socketPath,
+      schema,
+      {
+        ping: () => ({ ok: true }),
+        echo: ({ text }) => ({ echoed: text }),
+        add: () => {
+          throw new Error("handler exploded")
+        },
+      },
+      {
+        createRequestContext: () => ({ traceId: "trace-add" }),
+        onRequestFailed: ({ name, payload, error, durationMs, context }) => {
+          failures.push({
+            name,
+            payload,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            durationMs,
+            traceId: context.traceId,
+          })
+        },
+      },
+    )
+
+    await once(ipcServer.server, "listening")
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+      await rm(directory, { recursive: true, force: true })
+    })
+
+    const client = createNodeClient(socketPath, schema)
+    await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("handler exploded")
+
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({
+      name: "add",
+      payload: { a: 1, b: 2 },
+      errorMessage: "handler exploded",
+      traceId: "trace-add",
+    })
+    expect(failures[0]?.durationMs).toBeGreaterThanOrEqual(0)
   })
 })
