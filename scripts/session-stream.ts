@@ -34,51 +34,6 @@ function installSignalHandlers(stopSession: () => Promise<void>) {
   }
 }
 
-/** Starts a daemon-backed SDK session, subscribes to its stream, and sends one prompt. */
-async function runSessionStream(input: { agent?: string; prompt?: string }) {
-  const prompt = resolvePrompt(input.prompt)
-  const agent = input.agent?.trim() || undefined
-  const sdk = new GoddardSdk()
-  const session = await sdk.session.run({
-    agent,
-    cwd: process.cwd(),
-    mcpServers: [],
-  })
-
-  process.stderr.write(
-    `[session:stream] started session ${session.sessionId}${agent ? ` with agent ${agent}` : ""}\n`,
-  )
-
-  const unsubscribe = await sdk.session.subscribe({ id: session.sessionId }, (message) => {
-    logStreamMessage(message)
-  })
-
-  let stopped = false
-
-  /** Stops the daemon session once even if multiple shutdown paths race. */
-  const stopSession = async () => {
-    if (stopped) {
-      return
-    }
-
-    stopped = true
-    unsubscribe()
-    await session.stop()
-  }
-
-  const removeSignalHandlers = installSignalHandlers(stopSession)
-
-  try {
-    const result = await session.prompt(prompt)
-    process.stderr.write(
-      `[session:stream] prompt completed with stop reason ${result.stopReason}\n`,
-    )
-  } finally {
-    removeSignalHandlers()
-    await stopSession()
-  }
-}
-
 const app = command({
   name: "session-stream",
   description: "Start a daemon-backed agent session and print streamed ACP messages",
@@ -89,20 +44,74 @@ const app = command({
       short: "A",
       description: "Agent id to start instead of using the daemon default",
     }),
+    model: option({
+      type: optional(string),
+      long: "model",
+      short: "m",
+      description: "Model id to apply to the session before sending the prompt",
+    }),
     prompt: positional({
       type: optional(string),
       displayName: "prompt",
       description: "Prompt to send after the session starts",
     }),
   },
-  handler: async ({ agent, prompt }) => {
-    await runSessionStream({ agent, prompt })
+  handler: async ({ agent, model, prompt }) => {
+    const resolvedPrompt = resolvePrompt(prompt)
+    const resolvedAgent = agent?.trim() || undefined
+    const resolvedModel = model?.trim() || undefined
+    const sdk = new GoddardSdk()
+    const session = await sdk.session.run({
+      agent: resolvedAgent,
+      cwd: process.cwd(),
+      mcpServers: [],
+    })
+
+    process.stderr.write(
+      `[session:stream] started session ${session.sessionId}${
+        resolvedAgent ? ` with agent ${resolvedAgent}` : ""
+      }\n`,
+    )
+
+    const unsubscribe = await sdk.session.subscribe({ id: session.sessionId }, (message) => {
+      logStreamMessage(message)
+    })
+
+    let stopped = false
+
+    /** Stops the daemon session once even if multiple shutdown paths race. */
+    const stopSession = async () => {
+      if (stopped) {
+        return
+      }
+
+      stopped = true
+      unsubscribe()
+      await session.stop()
+    }
+
+    const removeSignalHandlers = installSignalHandlers(stopSession)
+
+    try {
+      if (resolvedModel) {
+        await session.setAgentModel(resolvedModel)
+        process.stderr.write(`[session:stream] set session model to ${resolvedModel}\n`)
+      }
+
+      const result = await session.prompt(resolvedPrompt)
+      process.stderr.write(
+        `[session:stream] prompt completed with stop reason ${result.stopReason}\n`,
+      )
+    } finally {
+      removeSignalHandlers()
+      await stopSession()
+    }
   },
 })
 
 await run(app, process.argv.slice(2)).catch((error) => {
   process.stderr.write(
-    `[session:stream] ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`,
+    `[session:stream] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
   )
   process.exit(1)
 })
