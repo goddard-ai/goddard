@@ -1,0 +1,7 @@
+interface:
+  display_name: "Goddard Contributor"
+  short_description: "Loads repo-specific contribution guidance"
+  default_prompt: "Use $goddard-contributor to load Goddard-specific contribution guidance before editing this repository."
+
+policy:
+  allow_implicit_invocation: true
