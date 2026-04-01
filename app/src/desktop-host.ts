@@ -7,7 +7,6 @@ import type {
   DaemonRequestPayload,
   DaemonRequestResponse,
   DaemonSendInput,
-  ProjectInspection,
   RuntimeInfo,
 } from "./shared/desktop-rpc"
 
@@ -30,9 +29,6 @@ export interface DesktopHostBridge {
 
   /** Opens one native directory picker and returns the chosen project root when present. */
   browseForProject(): Promise<string | null>
-
-  /** Validates one local project path through the Bun host. */
-  inspectProjectPath(path: string): Promise<ProjectInspection>
 
   /** Forwards one daemon IPC request through the Bun host's default daemon client. */
   daemonSend<Name extends DaemonRequestName>(
@@ -70,11 +66,6 @@ export async function browseForProject(): Promise<string | null> {
   return response.path
 }
 
-/** Validates one project path through the Bun host. */
-export async function inspectProjectPath(path: string): Promise<ProjectInspection> {
-  return await rpc.request.inspectProject({ path })
-}
-
 /** Forwards one daemon IPC request through the Bun host. */
 export async function daemonSend<Name extends DaemonRequestName>(
   name: Name,
@@ -88,7 +79,6 @@ export async function daemonSend<Name extends DaemonRequestName>(
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
   browseForProject,
-  inspectProjectPath,
   daemonSend,
   sdk: goddardSdk,
 }

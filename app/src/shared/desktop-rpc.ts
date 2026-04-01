@@ -27,12 +27,6 @@ export type RuntimeInfo = {
   runtime: "electrobun"
 }
 
-/** Result returned after validating one candidate project root on the Bun side. */
-export type ProjectInspection = {
-  path: string
-  name: string
-}
-
 /** Shared Electrobun RPC contract between the Bun host and the browser view. */
 export type AppDesktopRpc = {
   bun: RPCSchema<{
@@ -44,10 +38,6 @@ export type AppDesktopRpc = {
       browseForProject: {
         params: {}
         response: { path: string | null }
-      }
-      inspectProject: {
-        params: { path: string }
-        response: ProjectInspection
       }
       daemonSend: {
         params: DaemonSendInput

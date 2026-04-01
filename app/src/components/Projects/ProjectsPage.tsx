@@ -2,9 +2,7 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import * as Dialog from "@radix-ui/react-dialog"
-import { useMutation } from "@tanstack/preact-query"
 import {
-  AlertCircle,
   ArrowUpRight,
   BadgeCheck,
   CheckCircle2,
@@ -13,14 +11,13 @@ import {
   FolderSearch2,
   PencilLine,
   Plus,
-  Search,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react"
 import type { ComponentChild } from "preact"
 import { useEffect } from "preact/hooks"
-import { browseForProject as browseForProjectPath, inspectProjectPath } from "../../desktop-host"
+import { browseForProject as browseForProjectPath } from "../../desktop-host"
 import { useProjectRegistry, useWorkbenchTabSet } from "../state/AppStateContext"
 import { lookupProject, type ProjectRecord } from "./state/ProjectRegistry"
 
@@ -237,6 +234,18 @@ const textInputClass = css({
   },
 })
 
+/** Derives a default project name from the last path segment when present. */
+function deriveProjectName(path: string): string {
+  const trimmedPath = path.trim().replace(/[\\/]+$/, "")
+
+  if (trimmedPath.length === 0) {
+    return ""
+  }
+
+  const segments = trimmedPath.split(/[\\/]/)
+  return segments.at(-1) ?? ""
+}
+
 /** Renders the projects page plus its local add-project modal flow. */
 export function ProjectsPage() {
   const projectRegistry = useProjectRegistry()
@@ -250,34 +259,10 @@ export function ProjectsPage() {
   const selectedProject = selectedProjectPath.value
     ? lookupProject(projectRegistry, selectedProjectPath.value)
     : null
-  const projectValidation = useMutation({
-    mutationFn: async (path: string) => await inspectProjectPath(path),
-    onSuccess: (project) => {
-      draftPath.value = project.path
-
-      if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
-        draftName.value = project.name
-      }
-
-      lastSuggestedName.value = project.name
-    },
-  })
-
-  const validatedProject =
-    projectValidation.data && projectValidation.data.path === draftPath.value.trim()
-      ? projectValidation.data
-      : null
-  const mutationError: unknown = projectValidation.error
-  const validationError =
-    mutationError instanceof Error
-      ? mutationError.message
-      : mutationError
-        ? String(mutationError)
-        : null
+  const derivedProjectName = deriveProjectName(draftPath.value)
   const canAddProject =
-    !projectValidation.isPending &&
-    validatedProject !== null &&
-    (draftName.value.trim().length > 0 || validatedProject.name.length > 0)
+    draftPath.value.trim().length > 0 &&
+    (draftName.value.trim().length > 0 || derivedProjectName.length > 0)
 
   useEffect(() => {
     if (!selectedProjectPath.value && projects[0]) {
@@ -293,7 +278,6 @@ export function ProjectsPage() {
     draftPath.value = ""
     draftName.value = ""
     lastSuggestedName.value = null
-    projectValidation.reset()
   }
 
   function openAddDialog(): void {
@@ -314,20 +298,6 @@ export function ProjectsPage() {
     lastSuggestedName.value = null
   }
 
-  async function inspectDraftPath(rawPath: string): Promise<void> {
-    const trimmedPath = rawPath.trim()
-
-    if (trimmedPath.length === 0) {
-      projectValidation.reset()
-      clearSuggestedName()
-      return
-    }
-
-    try {
-      await projectValidation.mutateAsync(trimmedPath)
-    } catch {}
-  }
-
   async function browseForProject(): Promise<void> {
     const selectedPath = await browseForProjectPath()
 
@@ -336,7 +306,13 @@ export function ProjectsPage() {
     }
 
     draftPath.value = selectedPath
-    await inspectDraftPath(selectedPath)
+    const suggestedName = deriveProjectName(selectedPath)
+
+    if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
+      draftName.value = suggestedName
+    }
+
+    lastSuggestedName.value = suggestedName
   }
 
   function openProjectTab(projectPath: string): void {
@@ -357,16 +333,23 @@ export function ProjectsPage() {
   }
 
   function addProject(): void {
-    if (!validatedProject) {
+    const projectPath = draftPath.value.trim()
+
+    if (projectPath.length === 0) {
       return
     }
 
-    const projectName = draftName.value.trim() || validatedProject.name
+    const projectName = draftName.value.trim() || deriveProjectName(projectPath)
+
+    if (projectName.length === 0) {
+      return
+    }
+
     projectRegistry.addProject({
-      path: validatedProject.path,
+      path: projectPath,
       name: projectName,
     })
-    selectedProjectPath.value = validatedProject.path
+    selectedProjectPath.value = projectPath
     closeAddDialog()
   }
 
@@ -546,19 +529,20 @@ export function ProjectsPage() {
         closeAddDialog={closeAddDialog}
         draftName={draftName.value}
         draftPath={draftPath.value}
-        inspectDraftPath={inspectDraftPath}
         isAddDialogOpen={isAddDialogOpen.value}
-        isValidating={projectValidation.isPending}
         onDraftNameInput={(value) => {
           draftName.value = value
         }}
         onDraftPathInput={(value) => {
           draftPath.value = value
-          projectValidation.reset()
-          clearSuggestedName()
+          const suggestedName = deriveProjectName(value)
+
+          if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
+            draftName.value = suggestedName
+          }
+
+          lastSuggestedName.value = suggestedName
         }}
-        validatedProject={validatedProject}
-        validationError={validationError}
       />
     </div>
   )
@@ -782,13 +766,9 @@ function AddProjectDialog(props: {
   isAddDialogOpen: boolean
   draftPath: string
   draftName: string
-  isValidating: boolean
-  validatedProject: { path: string; name: string } | null
-  validationError: string | null
   canAddProject: boolean
   closeAddDialog: () => void
   browseForProject: () => Promise<void>
-  inspectDraftPath: (rawPath: string) => Promise<void>
   onDraftPathInput: (value: string) => void
   onDraftNameInput: (value: string) => void
   addProject: () => void
@@ -828,8 +808,7 @@ function AddProjectDialog(props: {
                 <div class={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
                   <Dialog.Title class={titleClass}>Choose one local root</Dialog.Title>
                   <Dialog.Description class={bodyClass}>
-                    Validation stays local to this dialog. The shared project registry only stores
-                    the path and display name.
+                    The shared project registry only stores the path and display name.
                   </Dialog.Description>
                 </div>
               </div>
@@ -880,17 +859,6 @@ function AddProjectDialog(props: {
                 <FolderSearch2 size={15} strokeWidth={2.1} />
                 Browse
               </button>
-              <button
-                class={cx(buttonBaseClass, secondaryButtonClass)}
-                disabled={props.draftPath.trim().length === 0 || props.isValidating}
-                type="button"
-                onClick={() => {
-                  void props.inspectDraftPath(props.draftPath)
-                }}
-              >
-                <Search size={15} strokeWidth={2.1} />
-                {props.isValidating ? "Validating..." : "Validate"}
-              </button>
             </div>
 
             <label
@@ -914,70 +882,6 @@ function AddProjectDialog(props: {
                 }}
               />
             </label>
-
-            {props.validationError || props.validatedProject ? (
-              <div
-                class={css({
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                  padding: "16px",
-                  borderRadius: "22px",
-                  border: "1px solid",
-                  borderColor: "border",
-                  backgroundColor: "surface",
-                })}
-              >
-                {props.validationError ? (
-                  <div
-                    class={css({
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      color: "danger",
-                      fontSize: "0.88rem",
-                      fontWeight: "620",
-                    })}
-                  >
-                    <AlertCircle size={16} strokeWidth={2.1} />
-                    {props.validationError}
-                  </div>
-                ) : null}
-                {props.validatedProject ? (
-                  <div
-                    class={css({
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "8px",
-                    })}
-                  >
-                    <div
-                      class={css({
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                        color: "accentStrong",
-                        fontSize: "0.86rem",
-                        fontWeight: "650",
-                      })}
-                    >
-                      <CheckCircle2 size={16} strokeWidth={2.1} />
-                      Validated directory
-                    </div>
-                    <span
-                      class={css({
-                        color: "text",
-                        fontWeight: "620",
-                        lineHeight: "1.55",
-                        wordBreak: "break-word",
-                      })}
-                    >
-                      {props.validatedProject.path}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
 
             <div
               class={css({
