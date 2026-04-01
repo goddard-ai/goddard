@@ -1,7 +1,7 @@
-import * as Dialog from "@radix-ui/react-dialog"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
+import * as Dialog from "@radix-ui/react-dialog"
 import { useMutation } from "@tanstack/preact-query"
 import {
   AlertCircle,
@@ -564,6 +564,8 @@ export function ProjectsPage() {
     </div>
   )
 }
+
+export default ProjectsPage
 
 /** Renders the machine-wide project list. */
 function ProjectList(props: {

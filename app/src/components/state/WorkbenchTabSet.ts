@@ -1,22 +1,18 @@
 import { SigmaType } from "preact-sigma"
-import type { ShellIconName } from "../../support/shell-icons"
 import { readJsonStorage, writeJsonStorage } from "../../support/workspace-storage"
 import {
-  isWorkbenchTabKind,
+  isWorkbenchDetailTabKind,
   type WorkbenchTab,
+  type WorkbenchDetailTabKind,
   type WorkbenchTabKind,
 } from "./WorkbenchTabRegistry"
 
 const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v3"
 
-/** Immutable descriptor for the always-present primary tab. */
-export type WorkbenchPrimaryTab = {
-  id: "main"
-  title: string
-  icon: ShellIconName
-}
-
 export type { WorkbenchTab, WorkbenchTabKind }
+
+/** One closable workbench tab tracked by the shell. */
+type WorkbenchDetailTab = WorkbenchTab<WorkbenchDetailTabKind>
 
 /** One unvalidated closable tab restored from persisted workspace storage. */
 type StoredWorkbenchTab = {
@@ -37,15 +33,16 @@ type WorkbenchTabsSnapshot = {
 
 /** Top-level public state owned by the workbench tab model. */
 type WorkbenchTabSetShape = {
-  tabs: Record<string, WorkbenchTab>
+  tabs: Record<string, WorkbenchDetailTab>
   orderedTabIds: string[]
   activeTabId: string
   recency: string[]
 }
 
 /** Immutable runtime value for the always-present primary workbench tab. */
-export const WORKBENCH_PRIMARY_TAB: WorkbenchPrimaryTab = {
+export const WORKBENCH_PRIMARY_TAB: WorkbenchTab<"main"> = {
   id: "main",
+  kind: "main",
   title: "Main",
   icon: "main",
 }
@@ -54,14 +51,14 @@ export const WORKBENCH_PRIMARY_TAB: WorkbenchPrimaryTab = {
 export const WORKBENCH_TAB_LIMIT = 20
 
 /** Returns whether one stored record still matches a registered closable tab kind. */
-function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchTab {
+function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchDetailTab {
   return (
     typeof tab.id === "string" &&
     typeof tab.title === "string" &&
     typeof tab.icon === "string" &&
     typeof tab.dirty === "boolean" &&
     typeof tab.kind === "string" &&
-    isWorkbenchTabKind(tab.kind)
+    isWorkbenchDetailTabKind(tab.kind)
   )
 }
 
@@ -70,7 +67,7 @@ function persistTabs(state: WorkbenchTabSetShape): void {
   writeJsonStorage(WORKBENCH_TABS_STORAGE_KEY, {
     tabs: state.orderedTabIds
       .map((tabId) => state.tabs[tabId])
-      .filter((tab): tab is WorkbenchTab => Boolean(tab)),
+      .filter((tab): tab is WorkbenchDetailTab => Boolean(tab)),
     activeTabId: state.activeTabId,
     recency: state.recency,
   })
@@ -89,7 +86,7 @@ export const WorkbenchTabSet = new SigmaType<WorkbenchTabSetShape>("WorkbenchTab
     tabList() {
       return this.orderedTabIds
         .map((tabId) => this.tabs[tabId])
-        .filter((tab): tab is WorkbenchTab => Boolean(tab))
+        .filter((tab): tab is WorkbenchDetailTab => Boolean(tab))
     },
 
     /** Returns the active closable tab, when one is selected. */
@@ -101,7 +98,7 @@ export const WorkbenchTabSet = new SigmaType<WorkbenchTabSetShape>("WorkbenchTab
   })
   .actions({
     /** Opens one closable tab or focuses the existing tab with the same stable id. */
-    openOrFocusTab(tab: WorkbenchTab) {
+    openOrFocusTab(tab: WorkbenchDetailTab) {
       if (this.tabs[tab.id]) {
         this.tabs[tab.id] = { ...this.tabs[tab.id], ...tab }
         this.activateTab(tab.id)

@@ -2,7 +2,6 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { ShellIcon } from "../../support/shell-icons"
 import { useProjectRegistry } from "../state/AppStateContext"
-import type { WorkbenchTabComponentProps } from "../state/WorkbenchTabRegistry"
 import { lookupProject } from "./state/ProjectRegistry"
 
 const pageClass = css({
@@ -54,11 +53,9 @@ const bodyClass = css({
 })
 
 /** Renders one project-backed closable workbench tab. */
-export default function ProjectPage(
-  props: WorkbenchTabComponentProps<"project", { projectPath: string }>,
-) {
+export function ProjectPage(props: { projectPath: string }) {
   const projectRegistry = useProjectRegistry()
-  const project = lookupProject(projectRegistry, props.tab.payload.projectPath)
+  const project = lookupProject(projectRegistry, props.projectPath)
 
   if (!project) {
     return (
@@ -93,3 +90,5 @@ export default function ProjectPage(
     </div>
   )
 }
+
+export default ProjectPage

@@ -1,6 +1,5 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import type { FunctionComponent } from "preact"
 import { Suspense } from "preact/compat"
 import { useListener } from "preact-sigma"
 import { ProjectsPage } from "./Projects/ProjectsPage"
@@ -60,7 +59,7 @@ function createPrimaryWorkbenchTab(
   navId: NavigationItemId,
   title: string,
   icon: WorkbenchTab["icon"],
-): WorkbenchTab | null {
+): WorkbenchTab<"projects"> | null {
   if (navId === "projects") {
     return {
       id: "primary:projects",
@@ -235,9 +234,7 @@ function WorkbenchTabPanel() {
     )
   }
 
-  const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind) as FunctionComponent<{
-    tab: WorkbenchTab
-  }>
+  const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
   return (
     <Suspense
@@ -250,7 +247,7 @@ function WorkbenchTabPanel() {
         </div>
       }
     >
-      <ActiveTabComponent tab={activeTab} />
+      <ActiveTabComponent {...activeTab.payload} />
     </Suspense>
   )
 }

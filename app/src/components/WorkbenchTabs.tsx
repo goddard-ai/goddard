@@ -3,12 +3,12 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { X } from "lucide-react"
 import { ShellIcon } from "../support/shell-icons"
-import type { WorkbenchPrimaryTab, WorkbenchTab } from "./state/WorkbenchTabSet"
+import type { WorkbenchTab } from "./state/WorkbenchTabSet"
 
 /** Renders the primary tab plus any closable workbench tabs. */
 export function WorkbenchTabs(props: {
-  primaryTab: WorkbenchPrimaryTab
-  tabs: readonly WorkbenchTab[]
+  primaryTab: WorkbenchTab<"main">
+  tabs: readonly Exclude<WorkbenchTab, WorkbenchTab<"main">>[]
   activeTabId: string
   onSelect: (id: string) => void
   onClose: (id: string) => void
@@ -71,7 +71,7 @@ export function WorkbenchTabs(props: {
 
 /** Renders one workbench tab chip, including close and drag affordances for closable tabs. */
 function WorkbenchTab(props: {
-  tab: WorkbenchPrimaryTab | WorkbenchTab
+  tab: WorkbenchTab
   isActive: boolean
   isPrimary: boolean
   onSelect: (id: string) => void
@@ -150,7 +150,7 @@ function WorkbenchTab(props: {
       >
         {props.tab.title}
       </span>
-      {"dirty" in props.tab ? (
+      {props.tab.kind !== "main" ? (
         <span
           class={css({
             display: "inline-flex",
