@@ -20,7 +20,7 @@ import {
 } from "lucide-react"
 import type { ComponentChild } from "preact"
 import { useEffect } from "preact/hooks"
-import { pickProjectPath, validateProjectPath } from "../../support/project-service"
+import { browseForProject as browseForProjectPath, inspectProjectPath } from "../../desktop-host"
 import { useProjectRegistry, useWorkbenchTabSet } from "../state/AppStateContext"
 import { lookupProject, type ProjectRecord } from "./state/ProjectRegistry"
 
@@ -250,9 +250,8 @@ export function ProjectsPage() {
   const selectedProject = selectedProjectPath.value
     ? lookupProject(projectRegistry, selectedProjectPath.value)
     : null
-
   const projectValidation = useMutation({
-    mutationFn: async (path: string) => await validateProjectPath(path),
+    mutationFn: async (path: string) => await inspectProjectPath(path),
     onSuccess: (project) => {
       draftPath.value = project.path
 
@@ -330,7 +329,7 @@ export function ProjectsPage() {
   }
 
   async function browseForProject(): Promise<void> {
-    const selectedPath = await pickProjectPath()
+    const selectedPath = await browseForProjectPath()
 
     if (!selectedPath) {
       return
