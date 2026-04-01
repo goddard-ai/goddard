@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import {
   command,
   flag,
@@ -9,7 +11,6 @@ import {
   string,
   subcommands,
 } from "cmd-ts"
-import { runDaemon } from "./daemon.ts"
 
 declare const __VERSION__: string
 
@@ -24,6 +25,7 @@ function getPackageVersion(): string {
   }
 }
 
+/** Maps positional feature arguments into the daemon runtime feature toggles. */
 function resolveRunFeatureFlags(features: readonly (typeof daemonRunFeatures)[number][]) {
   if (features.length === 0) {
     return {
@@ -39,6 +41,7 @@ function resolveRunFeatureFlags(features: readonly (typeof daemonRunFeatures)[nu
   }
 }
 
+/** Chooses the structured logging renderer requested by the CLI flags. */
 function resolveLogMode(options: { json: boolean; verbose: boolean }) {
   if (options.verbose) {
     return "verbose" as const
@@ -94,6 +97,8 @@ export async function main(argv = process.argv.slice(2)) {
           }),
         },
         handler: async (args) => {
+          // Load the runtime only when executing `run` so `--help` stays side-effect free.
+          const { runDaemon } = await import("./daemon.ts")
           const featureFlags = resolveRunFeatureFlags(args.features)
           const exitCode = await runDaemon({
             baseUrl: args.baseUrl,
