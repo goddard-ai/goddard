@@ -6,3 +6,4 @@ node_modules
 patch_*.js
 core/**/src/**/*.d.ts
 core/**/src/**/*.d.ts.map
+app/**/svg-icon.tsx
