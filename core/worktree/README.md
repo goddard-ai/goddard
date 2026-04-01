@@ -16,14 +16,14 @@ const worktree = new Worktree({
 });
 
 // Setup a new worktree for a branch
-const { worktreeDir, branchName } = worktree.setup('feature-branch');
+const { worktreeDir, branchName } = await worktree.setup('feature-branch');
 
 console.log(`Worktree created at: ${worktreeDir}`);
 
 // ... perform operations in worktreeDir ...
 
 // Clean up when finished
-worktree.cleanup(worktreeDir, branchName);
+await worktree.cleanup(worktreeDir, branchName);
 ```
 
 ## License

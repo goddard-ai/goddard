@@ -1099,7 +1099,7 @@ export function createSessionManager(input: {
     const existingWorktree = existingSession?.metadata?.worktree
     const worktree =
       existingWorktree != null || params.worktree?.enabled === true
-        ? prepareSessionWorktree(id, params.cwd, {
+        ? await prepareSessionWorktree(id, params.cwd, {
             branchNameOverride:
               typeof params.prNumber === "number" ? `pr-${params.prNumber}` : undefined,
             worktreePlugins: params.worktreePlugins,

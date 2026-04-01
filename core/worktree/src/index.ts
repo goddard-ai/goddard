@@ -42,9 +42,19 @@ export class Worktree {
   readonly defaultPluginDirName?: string
 
   /**
+   * Candidate plugins evaluated before falling back to the default plugin.
+   */
+  readonly plugins: WorktreePlugin[]
+
+  /**
    * The active plugin being used to manage worktrees.
    */
   plugin: WorktreePlugin
+
+  /**
+   * Tracks whether plugin applicability has already been resolved.
+   */
+  private pluginResolved = false
 
   /**
    * Creates a new Worktree instance.
@@ -60,8 +70,8 @@ export class Worktree {
       throw new Error(`Not a git repository: ${this.cwd}`)
     }
 
-    const candidates = [...(options.plugins || []), worktrunkPlugin]
-    this.plugin = candidates.find((p) => p.isApplicable(this.cwd)) || defaultPlugin
+    this.plugins = [...(options.plugins || []), worktrunkPlugin]
+    this.plugin = defaultPlugin
   }
 
   /**
@@ -78,18 +88,20 @@ export class Worktree {
    * @returns An object containing the path to the created worktree directory and the branch name.
    * @throws {Error} If the default plugin fails to set up the workspace.
    */
-  setup(branchName: string): { worktreeDir: string; branchName: string } {
+  async setup(branchName: string): Promise<{ worktreeDir: string; branchName: string }> {
     const setupOptions: WorktreeSetupOptions = {
       cwd: this.cwd,
       branchName,
       defaultDirName: this.defaultPluginDirName,
     }
 
+    await this.ensurePlugin()
+
     // Evaluate the initially selected custom plugin or worktrunkPlugin
     if (this.plugin !== defaultPlugin) {
       let worktreeDir: string | null = null
       try {
-        worktreeDir = this.plugin.setup(setupOptions)
+        worktreeDir = await this.plugin.setup(setupOptions)
       } catch {
         // Suppress console output; default plugin handles fallback
       }
@@ -108,7 +120,7 @@ export class Worktree {
     // Evaluate the default fallback
     let worktreeDir: string | null = null
     try {
-      worktreeDir = defaultPlugin.setup(setupOptions)
+      worktreeDir = await defaultPlugin.setup(setupOptions)
     } catch (err) {
       throw new Error(
         `Default worktree plugin failed to setup the workspace: ${err instanceof Error ? err.message : String(err)}`,
@@ -133,7 +145,28 @@ export class Worktree {
    * @param branchName - The name of the branch associated with the worktree.
    * @returns `true` if the cleanup was successful, `false` otherwise.
    */
-  cleanup(worktreeDir: string, branchName: string): boolean {
+  async cleanup(worktreeDir: string, branchName: string): Promise<boolean> {
+    await this.ensurePlugin()
     return this.plugin.cleanup(worktreeDir, branchName)
+  }
+
+  /**
+   * Resolves the first applicable plugin once and reuses it for later operations.
+   */
+  private async ensurePlugin(): Promise<void> {
+    if (this.pluginResolved) {
+      return
+    }
+
+    for (const candidate of this.plugins) {
+      if (await candidate.isApplicable(this.cwd)) {
+        this.plugin = candidate
+        this.pluginResolved = true
+        return
+      }
+    }
+
+    this.plugin = defaultPlugin
+    this.pluginResolved = true
   }
 }

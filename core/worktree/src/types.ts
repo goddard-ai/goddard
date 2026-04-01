@@ -33,7 +33,7 @@ export interface WorktreePlugin {
    * @param cwd - The current working directory of the original repository.
    * @returns `true` if the plugin is applicable, `false` otherwise.
    */
-  isApplicable(cwd: string): boolean
+  isApplicable(cwd: string): boolean | Promise<boolean>
 
   /**
    * Sets up a new worktree.
@@ -41,7 +41,7 @@ export interface WorktreePlugin {
    * @param options - Options for setting up the worktree.
    * @returns The path to the created worktree directory, or `null` if setup failed.
    */
-  setup(options: WorktreeSetupOptions): string | null
+  setup(options: WorktreeSetupOptions): Promise<string | null>
 
   /**
    * Cleans up an existing worktree.
@@ -50,5 +50,5 @@ export interface WorktreePlugin {
    * @param branchName - The name of the branch associated with the worktree.
    * @returns `true` if the cleanup was successful, `false` otherwise.
    */
-  cleanup(worktreeDir: string, branchName: string): boolean
+  cleanup(worktreeDir: string, branchName: string): Promise<boolean>
 }
