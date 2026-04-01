@@ -10,6 +10,7 @@
         "@goddard-ai/workforce": "workspace:^",
         "@types/node": "^25.3.5",
         "@typescript/native-preview": "7.0.0-dev.20260317.1",
+        "cmd-ts": "^0.15.0",
         "drizzle-kit": "1.0.0-beta.18-7eb39f0",
         "husky": "^9.1.7",
         "oxfmt": "^0.36.0",

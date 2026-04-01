@@ -21,6 +21,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
+    "session:stream": "bun run ./scripts/session-stream.ts",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "devDependencies": {
@@ -29,6 +30,7 @@
     "@goddard-ai/workforce": "workspace:^",
     "@types/node": "^25.3.5",
     "@typescript/native-preview": "7.0.0-dev.20260317.1",
+    "cmd-ts": "^0.15.0",
     "drizzle-kit": "1.0.0-beta.18-7eb39f0",
     "husky": "^9.1.7",
     "oxfmt": "^0.36.0",
