@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type { UserConfig } from "@goddard-ai/schema/config"
@@ -293,7 +294,7 @@ async function toDaemonSession(
   record: Awaited<ReturnType<typeof SessionStorage.get>>,
 ): Promise<DaemonSession> {
   if (!record) {
-    throw new Error("Session not found")
+    throw new IpcClientError("Session not found")
   }
 
   const state = await SessionStateStorage.get(record.id)
@@ -928,20 +929,24 @@ function decodeSessionListCursor(cursor?: string): SQLSessionListCursor | undefi
     }
 
     if (typeof decoded.updatedAt !== "string" || typeof decoded.id !== "string") {
-      throw new Error("Invalid cursor payload")
+      throw new IpcClientError("Invalid cursor payload")
     }
 
     const updatedAt = new Date(decoded.updatedAt)
     if (Number.isNaN(updatedAt.valueOf())) {
-      throw new Error("Invalid cursor timestamp")
+      throw new IpcClientError("Invalid cursor timestamp")
     }
 
     return {
       updatedAt,
       id: decoded.id,
     }
-  } catch {
-    throw new Error("Invalid session cursor")
+  } catch (error) {
+    if (error instanceof IpcClientError) {
+      throw error
+    }
+
+    throw new IpcClientError("Invalid session cursor")
   }
 }
 
@@ -1372,7 +1377,7 @@ export function createSessionManager(input: {
     await ready
     const existingSession = await SessionStorage.get(params.id)
     if (!existingSession) {
-      throw new Error(`Cannot load unknown session: ${params.id}`)
+      throw new IpcClientError(`Cannot load unknown session: ${params.id}`)
     }
 
     return launchSession(params, existingSession)
@@ -1406,7 +1411,7 @@ export function createSessionManager(input: {
     await ready
     if (!activeSessions.has(id)) {
       const session = await getSession(id)
-      throw new Error(
+      throw new IpcClientError(
         session.connection.historyAvailable
           ? `Session ${id} is archived and no longer reconnectable`
           : `Session ${id} is not reconnectable`,
@@ -1445,7 +1450,7 @@ export function createSessionManager(input: {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
-      throw new Error(`Session ${id} is not active`)
+      throw new IpcClientError(`Session ${id} is not active`)
     }
 
     if (
@@ -1498,7 +1503,7 @@ export function createSessionManager(input: {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
-      throw new Error(`Session ${id} is not active`)
+      throw new IpcClientError(`Session ${id} is not active`)
     }
 
     const requestId = randomUUID()
@@ -1542,7 +1547,7 @@ export function createSessionManager(input: {
     await ready
     const record = await SessionPermissionsStorage.getByToken(token)
     if (!record) {
-      throw new Error("Invalid session token")
+      throw new IpcClientError("Invalid session token")
     }
 
     return record.sessionId

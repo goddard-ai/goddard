@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { createServer } from "@goddard-ai/ipc/node"
+import { IpcClientError, createServer } from "@goddard-ai/ipc/node"
 import type { SubscribeDaemonWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { once } from "node:events"
@@ -71,7 +71,7 @@ export async function startDaemonServer(
 
     const session = await getSessionByToken(token)
     if (!session) {
-      throw new Error("Invalid session token")
+      throw new IpcClientError("Invalid session token")
     }
 
     context.setSessionId(session.sessionId)
@@ -89,11 +89,11 @@ export async function startDaemonServer(
         : null
 
     if (!metadata?.workforce || typeof metadata.workforce.agentId !== "string") {
-      throw new Error("Session is not attached to a workforce request")
+      throw new IpcClientError("Session is not attached to a workforce request")
     }
 
     if (typeof metadata.workforce.rootDir !== "string") {
-      throw new Error("Session is not attached to a workforce root")
+      throw new IpcClientError("Session is not attached to a workforce root")
     }
 
     const [sessionRootDir, normalizedRequestedRootDir] = await Promise.all([
@@ -102,7 +102,7 @@ export async function startDaemonServer(
     ])
 
     if (sessionRootDir !== normalizedRequestedRootDir) {
-      throw new Error(
+      throw new IpcClientError(
         `Session workforce root ${sessionRootDir} does not match requested root ${normalizedRequestedRootDir}`,
       )
     }
@@ -118,7 +118,7 @@ export async function startDaemonServer(
 
   function requireActorRequestId(actor: WorkforceActorContext): string {
     if (!actor.requestId) {
-      throw new Error("Session is not attached to an active workforce request")
+      throw new IpcClientError("Session is not attached to an active workforce request")
     }
 
     return actor.requestId
@@ -144,11 +144,11 @@ export async function startDaemonServer(
       prSubmit: async (payload, context) => {
         const session = await getSessionByToken(payload.token)
         if (!session) {
-          throw new Error("Invalid session token")
+          throw new IpcClientError("Invalid session token")
         }
         context.setSessionId(session.sessionId)
         if (!session.owner || !session.repo) {
-          throw new Error("Session is not scoped to a repository")
+          throw new IpcClientError("Session is not scoped to a repository")
         }
 
         const resolvedInput = await resolveSubmitRequest({
@@ -176,11 +176,11 @@ export async function startDaemonServer(
       prReply: async (payload, context) => {
         const session = await getSessionByToken(payload.token)
         if (!session) {
-          throw new Error("Invalid session token")
+          throw new IpcClientError("Invalid session token")
         }
         context.setSessionId(session.sessionId)
         if (!session.owner || !session.repo) {
-          throw new Error("Session is not scoped to a repository")
+          throw new IpcClientError("Session is not scoped to a repository")
         }
 
         const resolvedInput = await resolveReplyRequest({
@@ -190,7 +190,9 @@ export async function startDaemonServer(
         })
 
         if (!session.allowedPrNumbers.includes(resolvedInput.prNumber)) {
-          throw new Error(`PR #${resolvedInput.prNumber} is not allowed for this session`)
+          throw new IpcClientError(
+            `PR #${resolvedInput.prNumber} is not allowed for this session`,
+          )
         }
 
         const response = await client.pr.reply({
@@ -442,7 +444,7 @@ export async function startDaemonServer(
 
         const request = subscription as SubscribeDaemonWorkforceEventsRequest | undefined
         if (!request) {
-          throw new Error("Missing workforce event subscription filter")
+          throw new IpcClientError("Missing workforce event subscription filter")
         }
 
         await workforceManager.getWorkforce(request.rootDir)

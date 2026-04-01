@@ -1,3 +1,4 @@
+import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
 import { createDaemonLogger } from "../logging.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"
@@ -70,7 +71,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
     const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
     const runtime = runtimes.get(normalizedRootDir)
     if (!runtime) {
-      throw new Error(`No workforce is running for ${normalizedRootDir}`)
+      throw new IpcClientError(`No workforce is running for ${normalizedRootDir}`)
     }
 
     return {

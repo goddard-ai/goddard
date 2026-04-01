@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
+import { IpcClientError } from "@goddard-ai/ipc"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
@@ -236,7 +237,7 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
           throw new Error("not used")
         },
         getWorkforce: async (rootDir: string) => {
-          throw new Error(`No workforce is running for ${rootDir}`)
+          throw new IpcClientError(`No workforce is running for ${rootDir}`)
         },
         listWorkforces: async () => [],
         shutdownWorkforce: async () => false,

@@ -63,6 +63,52 @@ test("daemon submit request requires a valid session token", async () => {
   expect(failed?.requestName).toBe("prSubmit")
 })
 
+test("daemon hides unexpected handler crashes from IPC clients", async () => {
+  const daemon = await startTestDaemon({
+    sdk: {
+      pr: {
+        create: async () => {
+          throw new Error("github exploded")
+        },
+        reply: async () => ({ success: true }),
+      },
+    },
+    auth: {
+      getSessionByToken: async () => ({
+        sessionId: "session-crash",
+        owner: "trusted",
+        repo: "widgets",
+        allowedPrNumbers: [],
+      }),
+      addAllowedPr: async () => undefined,
+    },
+    resolveSubmitRequest: async () => ({
+      owner: "trusted",
+      repo: "widgets",
+      title: "Ship daemon security",
+      body: "Done.",
+      head: "feature/secure-daemon",
+      base: "main",
+    }),
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const { logs } = await captureDaemonLogs(async () => {
+    await expect(
+      client.send("prSubmit", {
+        token: "tok_session",
+        cwd: process.cwd(),
+        title: "Ship daemon security",
+        body: "Done.",
+      }),
+    ).rejects.toThrow(/internal server error/i)
+  })
+
+  const failed = logs.find((entry) => entry.event === "ipc.request_failed")
+  expect(failed?.requestName).toBe("prSubmit")
+  expect(failed?.errorMessage).toBe("github exploded")
+})
+
 test("daemon submit request enforces trusted repo context and records created PR access", async () => {
   const createCalls: Array<Record<string, unknown>> = []
   const recordedPrs: Array<{ sessionId: string; prNumber: number }> = []

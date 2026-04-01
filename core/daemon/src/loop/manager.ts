@@ -1,3 +1,4 @@
+import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
 import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
 import { createDaemonLogger } from "../logging.ts"
@@ -77,7 +78,7 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
     async getLoop(rootDir: string, loopName: string): Promise<DaemonLoop> {
       const runtime = runtimes.get(await buildKey(rootDir, loopName))
       if (!runtime) {
-        throw new Error(`No loop is running for ${loopName} in ${rootDir}`)
+        throw new IpcClientError(`No loop is running for ${loopName} in ${rootDir}`)
       }
 
       return runtime.getLoop()

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { z } from "zod"
-import { $type, type IpcSchema } from "../src/index.ts"
+import { $type, IpcClientError, type IpcSchema } from "../src/index.ts"
 import { createNodeClient } from "../src/node/client.ts"
 import { createServer } from "../src/node/server.ts"
 
@@ -59,7 +59,7 @@ async function createFixture() {
     {
       onSubscribe: ({ name, subscription }) => {
         if (name === "userAlert" && subscription?.userId === "blocked-user") {
-          throw new Error("User alerts are disabled for blocked-user")
+          throw new IpcClientError("User alerts are disabled for blocked-user")
         }
       },
     },
@@ -328,7 +328,7 @@ describe("core/ipc", () => {
     })
 
     const client = createNodeClient(socketPath, schema)
-    await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("handler exploded")
+    await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Internal server error")
 
     expect(failures).toHaveLength(1)
     expect(failures[0]).toMatchObject({
@@ -338,5 +338,65 @@ describe("core/ipc", () => {
       traceId: "trace-add",
     })
     expect(failures[0]?.durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  test("returns client-visible handler failures unchanged", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-client-errors-"))
+    const socketPath = join(directory, "ipc.sock")
+    const ipcServer = createServer(socketPath, schema, {
+      ping: () => ({ ok: true }),
+      echo: ({ text }) => ({ echoed: text }),
+      add: () => {
+        throw new IpcClientError("Add is disabled")
+      },
+    })
+
+    await once(ipcServer.server, "listening")
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+      await rm(directory, { recursive: true, force: true })
+    })
+
+    const client = createNodeClient(socketPath, schema)
+    await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Add is disabled")
+  })
+
+  test("returns generic raw errors for unexpected handler failures", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-raw-errors-"))
+    const socketPath = join(directory, "ipc.sock")
+    const ipcServer = createServer(socketPath, schema, {
+      ping: () => ({ ok: true }),
+      echo: ({ text }) => ({ echoed: text }),
+      add: () => {
+        throw new Error("handler exploded")
+      },
+    })
+
+    await once(ipcServer.server, "listening")
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+      await rm(directory, { recursive: true, force: true })
+    })
+
+    await expect(postRaw(socketPath, { name: "add", payload: { a: 1, b: 2 } })).resolves.toEqual({
+      statusCode: 500,
+      body: JSON.stringify({ error: "Internal server error" }),
+    })
   })
 })

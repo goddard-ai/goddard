@@ -1,5 +1,7 @@
 import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
+import { z } from "zod"
+import { IpcClientError } from "../errors.ts"
 import {
   type InferStreamPayload,
   type InferStreamSubscription,
@@ -9,9 +11,30 @@ import {
 } from "../schema.ts"
 import { type Handlers } from "../types.ts"
 
-/** Converts one unknown thrown value into a stable IPC error string. */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
+
+/** Returns the safe client-facing status code and message for one IPC server failure. */
+function getErrorResponse(error: unknown): { statusCode: number; message: string } {
+  return error instanceof IpcClientError
+    ? { statusCode: 400, message: error.message }
+    : { statusCode: 500, message: INTERNAL_SERVER_ERROR_MESSAGE }
+}
+
+/** Re-classifies validation and parse failures as client-visible IPC errors. */
+function toClientError(error: unknown, fallbackMessage: string): IpcClientError {
+  if (error instanceof IpcClientError) {
+    return error
+  }
+
+  if (error instanceof z.ZodError) {
+    return new IpcClientError(z.prettifyError(error), { cause: error })
+  }
+
+  if (error instanceof Error) {
+    return new IpcClientError(fallbackMessage, { cause: error })
+  }
+
+  return new IpcClientError(fallbackMessage)
 }
 
 /** Writes one JSON response to the socket-backed HTTP response. */
@@ -166,20 +189,29 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
 
     try {
       const body = await readBody(req)
-      const message = JSON.parse(body) as { name?: unknown; payload?: unknown }
+      let message: { name?: unknown; payload?: unknown }
+      try {
+        message = JSON.parse(body) as { name?: unknown; payload?: unknown }
+      } catch (error) {
+        throw toClientError(error, "Request body must be valid JSON")
+      }
 
       if (typeof message.name !== "string") {
-        throw new Error("Request name must be a string")
+        throw new IpcClientError("Request name must be a string")
       }
 
       requestName = message.name as ValidRequestName<TSchema>
       const routeDef = schema.requests[requestName]
       if (!routeDef) {
-        throw new Error(`Unknown request: ${requestName}`)
+        throw new IpcClientError(`Unknown request: ${requestName}`)
       }
 
       if (routeDef.payload) {
-        payload = routeDef.payload.parse(message.payload)
+        try {
+          payload = routeDef.payload.parse(message.payload)
+        } catch (error) {
+          throw toClientError(error, "Request payload is invalid")
+        }
       }
 
       context = options.createRequestContext?.({
@@ -219,7 +251,8 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
           durationMs: Date.now() - startedAt,
         })
 
-      sendJson(res, 400, { error: getErrorMessage(error) })
+      const { statusCode, message } = getErrorResponse(error)
+      sendJson(res, statusCode, { error: message })
     }
   }
 
@@ -243,18 +276,33 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
       )
       const rawSubscription = url.searchParams.get("subscription")
       if (rawSubscription && !subscriptionSchema) {
-        throw new Error(`Stream ${name} does not accept subscription params`)
+        throw new IpcClientError(`Stream ${name} does not accept subscription params`)
       }
+
+      let parsedSubscription: unknown
+      if (rawSubscription) {
+        try {
+          parsedSubscription = JSON.parse(rawSubscription)
+        } catch (error) {
+          throw toClientError(error, "Stream subscription must be valid JSON")
+        }
+      }
+
       subscription =
         rawSubscription && subscriptionSchema
-          ? (subscriptionSchema.parse(JSON.parse(rawSubscription)) as InferStreamSubscription<
+          ? (subscriptionSchema.parse(parsedSubscription) as InferStreamSubscription<
               TSchema,
               ValidStreamName<TSchema>
             >)
           : undefined
     } catch (error) {
-      res.writeHead(400, { "Content-Type": "text/plain" })
-      res.end(getErrorMessage(error))
+      const { statusCode, message } = getErrorResponse(
+        error instanceof IpcClientError
+          ? error
+          : toClientError(error, "Stream subscription is invalid"),
+      )
+      res.writeHead(statusCode, { "Content-Type": "text/plain" })
+      res.end(message)
       return
     }
 
@@ -264,8 +312,9 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
         subscription,
       })
     } catch (error) {
-      res.writeHead(400, { "Content-Type": "text/plain" })
-      res.end(getErrorMessage(error))
+      const { statusCode, message } = getErrorResponse(error)
+      res.writeHead(statusCode, { "Content-Type": "text/plain" })
+      res.end(message)
       return
     }
 
