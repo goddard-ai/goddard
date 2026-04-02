@@ -21,7 +21,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
-    "session:stream": "bun run ./scripts/session-stream.ts",
+    "acp": "bun run ./scripts/acp-session.ts",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "devDependencies": {
