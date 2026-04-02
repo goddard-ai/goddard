@@ -5,14 +5,7 @@ import { readJsonStorage, writeJsonStorage } from "../../support/workspace-stora
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
 
 /** Stable ids for the primary workbench navigation items. */
-export type NavigationItemId =
-  | "projects"
-  | "sessions"
-  | "pullRequests"
-  | "specs"
-  | "tasks"
-  | "roadmap"
-  | "inbox"
+export type NavigationItemId = "inbox" | "sessions" | "search" | "specs" | "tasks" | "roadmap"
 
 /** One item rendered in the left navigation rail. */
 export type NavigationItem = {
@@ -32,19 +25,18 @@ type NavigationShape = {
 }
 
 const defaultNavigationItems: NavigationItem[] = [
-  { id: "projects", icon: "projects", label: "Projects", ariaLabel: "Projects" },
+  { id: "inbox", icon: "inbox", label: "Inbox", ariaLabel: "Inbox" },
   { id: "sessions", icon: "sessions", label: "Sessions", ariaLabel: "Sessions" },
-  { id: "pullRequests", icon: "pullRequests", label: "Pull Requests", ariaLabel: "Pull requests" },
+  { id: "search", icon: "search", label: "Search", ariaLabel: "Search" },
   { id: "specs", icon: "specs", label: "Specs", ariaLabel: "Specs" },
   { id: "tasks", icon: "tasks", label: "Tasks", ariaLabel: "Tasks" },
   { id: "roadmap", icon: "roadmap", label: "Roadmap", ariaLabel: "Roadmap" },
-  { id: "inbox", icon: "inbox", label: "Inbox", ariaLabel: "Inbox" },
 ]
 
 /** Sigma state for the app shell's primary navigation rail. */
 export const Navigation = new SigmaType<NavigationShape>("Navigation")
   .defaultState({
-    selectedNavId: "projects",
+    selectedNavId: "inbox",
     badgeCounts: {},
   })
   .computed({

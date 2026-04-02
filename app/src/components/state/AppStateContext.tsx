@@ -30,10 +30,6 @@ export function AppStateProvider(props: { children: ComponentChildren }) {
     projectRegistry.loadProjects()
   }, [navigation, projectRegistry, workbenchTabSet])
 
-  useEffect(() => {
-    navigation.setBadgeCount("projects", projectRegistry.projectList.length)
-  }, [navigation, projectRegistry.projectList.length])
-
   return (
     <navigationContext.Provider value={navigation}>
       <projectRegistryContext.Provider value={projectRegistry}>

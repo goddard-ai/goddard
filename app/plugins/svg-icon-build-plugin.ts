@@ -1,4 +1,5 @@
 import svgSpritemap from "@spiriit/vite-plugin-svg-spritemap"
+import chokidar, { type FSWatcher } from "chokidar"
 import { Dirent } from "node:fs"
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import path, { dirname, extname, join, relative } from "node:path"
@@ -14,38 +15,54 @@ const generatedBanner =
 
 /** Generates the SvgIcon support module from SVG assets under the public directory. */
 export default function svgIconBuildPlugin(): Plugin[] {
+  let fileWatcher: FSWatcher | null = null
+  let regenerateQueue = Promise.resolve()
+
   return [
     {
       name: "goddard-ai:svg-icon-build-plugin",
       async buildStart() {
         await generateSvgIconComponent()
-        this.addWatchFile(iconRoot)
-        this.addWatchFile(templatePath)
       },
       configureServer(server: ViteDevServer) {
-        server.watcher.add([iconRoot, templatePath])
+        const queueRegeneration = (filePath: string) => {
+          if (filePath !== templatePath && !isIconPath(filePath)) {
+            return
+          }
 
-        const handleFileChange = async (filePath: string) => {
-          if (filePath === templatePath || isIconPath(filePath)) {
+          regenerateQueue = regenerateQueue.then(async () => {
             await generateSvgIconComponent()
 
             const module = server.moduleGraph.getModuleById(outputPath)
             if (module) {
               server.moduleGraph.invalidateModule(module)
             }
+
             server.ws.send({ type: "full-reload" })
-          }
+          })
         }
 
-        server.watcher.on("add", handleFileChange)
-        server.watcher.on("change", handleFileChange)
-        server.watcher.on("unlink", handleFileChange)
+        fileWatcher?.close()
+        fileWatcher = chokidar.watch([iconRoot, templatePath], {
+          ignoreInitial: true,
+          awaitWriteFinish: {
+            stabilityThreshold: 50,
+            pollInterval: 10,
+          },
+        })
 
-        return () => {
-          server.watcher.off("add", handleFileChange)
-          server.watcher.off("change", handleFileChange)
-          server.watcher.off("unlink", handleFileChange)
-        }
+        fileWatcher.on("add", queueRegeneration)
+        fileWatcher.on("change", queueRegeneration)
+        fileWatcher.on("unlink", queueRegeneration)
+
+        server.httpServer?.once("close", () => {
+          fileWatcher?.close()
+          fileWatcher = null
+        })
+      },
+      async closeBundle() {
+        await fileWatcher?.close()
+        fileWatcher = null
       },
     },
     ...svgSpritemap("../icons/**/*.svg", {

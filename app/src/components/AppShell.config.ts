@@ -18,27 +18,21 @@ export type AppShellTopbarAction = "proposeTask" | "newSession" | "settings"
 type AppShellNavigationDescriptor = {
   group: "primary" | "secondary"
   icon: SvgIconName
-  primaryWorkbenchTab?: Pick<WorkbenchTab<"projects">, "id" | "kind" | "payload">
 }
 
 /** Declarative shell config for every left-rail navigation item. */
 export const navigationById: Record<NavigationItemId, AppShellNavigationDescriptor> = {
-  projects: {
+  inbox: {
     group: "primary",
-    icon: "tabs/projects",
-    primaryWorkbenchTab: {
-      id: "primary:projects",
-      kind: "projects",
-      payload: {},
-    },
+    icon: "tabs/inbox",
   },
   sessions: {
     group: "primary",
     icon: "tabs/sessions",
   },
-  pullRequests: {
+  search: {
     group: "primary",
-    icon: "tabs/pull-requests",
+    icon: "tabs/search",
   },
   specs: {
     group: "secondary",
@@ -52,26 +46,11 @@ export const navigationById: Record<NavigationItemId, AppShellNavigationDescript
     group: "secondary",
     icon: "tabs/roadmap",
   },
-  inbox: {
-    group: "secondary",
-    icon: "tabs/inbox",
-  },
 }
 
 /** Formats one compact rail badge count. */
 export function formatBadgeCount(count: number) {
   return count > 99 ? "99+" : `${count}`
-}
-
-/** Declarative tab-icon overrides keyed by the live shell icon names. */
-export const tabIconByShellIcon: Partial<Record<ShellIconName, AppShellIconSource>> = {
-  main: { svgName: "tabs/home" },
-  sessions: { svgName: "tabs/sessions" },
-  pullRequests: { svgName: "tabs/pull-requests" },
-  specs: { svgName: "tabs/spec" },
-  tasks: { svgName: "tabs/tasks" },
-  roadmap: { svgName: "tabs/roadmap" },
-  inbox: { svgName: "tabs/inbox" },
 }
 
 /** Placeholder top-bar handlers keyed by the rendered shell action ids. */
@@ -93,31 +72,34 @@ function createFallbackTabIcon(iconName: ShellIconName): AppShellIconSource {
   return { fallbackName: iconName }
 }
 
+/** Returns whether one shell tab icon name is backed by a navigation item icon. */
+function isNavigationBackedTabIcon(iconName: ShellIconName): iconName is NavigationItemId {
+  return iconName in navigationById
+}
+
 /** Creates one stable closable tab for a primary navigation surface when supported. */
 export function createPrimaryWorkbenchTab(
   navId: NavigationItemId,
   title: string,
   icon: WorkbenchTab<"projects">["icon"],
 ) {
-  const primaryWorkbenchTab = navigationById[navId].primaryWorkbenchTab
-
-  if (!primaryWorkbenchTab) {
-    return null
-  }
-
-  const tab: WorkbenchTab<"projects"> = {
-    ...primaryWorkbenchTab,
-    title,
-    icon,
-    dirty: false,
-  }
-
-  return tab
+  void navId
+  void title
+  void icon
+  return null
 }
 
 /** Maps one live tab icon onto the merged shell's icon set. */
 export function getTabIcon(iconName: ShellIconName): AppShellIconSource {
-  return tabIconByShellIcon[iconName] ?? createFallbackTabIcon(iconName)
+  if (iconName === "main") {
+    return { svgName: "tabs/home" }
+  }
+
+  if (isNavigationBackedTabIcon(iconName)) {
+    return { svgName: navigationById[iconName].icon }
+  }
+
+  return createFallbackTabIcon(iconName)
 }
 
 /** Handles the current placeholder top-bar actions without changing live state yet. */

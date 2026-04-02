@@ -1,11 +1,11 @@
 import {
   FileText,
   FolderKanban,
-  GitPullRequest,
   Inbox,
   LayoutPanelLeft,
   Map,
   MessageSquare,
+  Search,
   SquareCheckBig,
   type LucideIcon,
 } from "lucide-react"
@@ -15,7 +15,7 @@ export type ShellIconName =
   | "main"
   | "projects"
   | "sessions"
-  | "pullRequests"
+  | "search"
   | "specs"
   | "tasks"
   | "roadmap"
@@ -25,7 +25,7 @@ const shellIcons: Record<ShellIconName, LucideIcon> = {
   main: LayoutPanelLeft,
   projects: FolderKanban,
   sessions: MessageSquare,
-  pullRequests: GitPullRequest,
+  search: Search,
   specs: FileText,
   tasks: SquareCheckBig,
   roadmap: Map,

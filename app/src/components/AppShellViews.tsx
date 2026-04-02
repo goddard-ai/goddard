@@ -1,50 +1,12 @@
 /** Workbench content surfaces rendered inside the merged app shell chrome. */
 import { css } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
 import type { ComponentChildren } from "preact"
 import { Suspense } from "preact/compat"
 import { useLayoutEffect, useRef, useState } from "preact/hooks"
-import { SvgIcon } from "../support/svg-icon"
-import { navigationById } from "./AppShell.config"
-import { ProjectsPage } from "./Projects/ProjectsPage"
 import { TabViewportProvider } from "./TabViewport"
-import { useNavigation, useWorkbenchTabSet } from "./state/AppStateContext"
+import { useWorkbenchTabSet } from "./state/AppStateContext"
 import { getWorkbenchTabComponent } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
-
-const placeholderPageClass = css({
-  display: "grid",
-  placeItems: "center",
-  height: "100%",
-  padding: "32px",
-  background:
-    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent), transparent 34%), ` +
-    `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
-})
-
-const placeholderCardClass = css({
-  width: "min(680px, 100%)",
-  padding: "40px",
-  borderRadius: "28px",
-  border: "1px solid",
-  borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-  boxShadow: "0 28px 80px rgba(121, 138, 160, 0.14)",
-})
-
-const placeholderTitleClass = css({
-  marginBottom: "12px",
-  color: "text",
-  fontSize: "1.7rem",
-  fontWeight: "750",
-  letterSpacing: "-0.02em",
-})
-
-const placeholderBodyClass = css({
-  color: "muted",
-  lineHeight: "1.72",
-  maxWidth: "50ch",
-})
 
 const workbenchPanelScrollerClass = css({
   minHeight: "0",
@@ -108,45 +70,7 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChi
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
 function MainWorkbenchView() {
-  const navigation = useNavigation()
-
-  if (navigation.selectedNavId === "projects") {
-    return <ProjectsPage />
-  }
-
-  return (
-    <div class={placeholderPageClass}>
-      <div class={placeholderCardClass}>
-        <div
-          class={css({
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "48px",
-            height: "48px",
-            marginBottom: "20px",
-            borderRadius: "16px",
-            backgroundColor: "surface",
-            color: "accentStrong",
-            boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
-          })}
-        >
-          <span class={css({ width: "20px", height: "20px" })}>
-            <SvgIcon
-              name={navigationById[navigation.selectedItem.id].icon}
-              height="20px"
-              width="20px"
-            />
-          </span>
-        </div>
-        <h1 class={placeholderTitleClass}>{navigation.selectedItem.label}</h1>
-        <p class={placeholderBodyClass}>
-          This primary view is scaffolded so the sidebar and main tab model stay stable while the
-          rest of the workbench surfaces are filled in.
-        </p>
-      </div>
-    </div>
-  )
+  return <div />
 }
 
 /** Renders the active closable workbench tab panel. */
@@ -155,29 +79,13 @@ function WorkbenchTabPanel() {
   const activeTab = workbenchTabSet.activeTab
 
   if (!activeTab) {
-    return (
-      <div class={placeholderPageClass}>
-        <div class={placeholderCardClass}>
-          <h1 class={placeholderTitleClass}>No tab selected</h1>
-          <p class={placeholderBodyClass}>Open one project into a tab to reuse the shell flow.</p>
-        </div>
-      </div>
-    )
+    return <div />
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
   return (
-    <Suspense
-      fallback={
-        <div class={placeholderPageClass}>
-          <div class={placeholderCardClass}>
-            <h1 class={placeholderTitleClass}>Loading tab</h1>
-            <p class={placeholderBodyClass}>The selected detail surface is being prepared.</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<div />}>
       <ActiveTabComponent {...activeTab.payload} />
     </Suspense>
   )

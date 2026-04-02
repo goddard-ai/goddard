@@ -443,7 +443,7 @@ function SidebarItem(props: {
         props.onSelect({ openInTab: event.metaKey })
       }}
     >
-      <InlineSvgIcon icon={props.icon} size="22px 21px" />
+      <InlineSvgIcon icon={props.icon} size="22px 22px" />
       {props.badgeCount ? (
         <span
           aria-hidden="true"
@@ -662,7 +662,7 @@ function TabButton(props: {
               props.onClose?.(props.id)
             }}
           >
-            <InlineSvgIcon icon="tabs/close" size="9px" />
+            <InlineSvgIcon icon="close-tab" size="9px" />
           </button>
         </>
       )}
