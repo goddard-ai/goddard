@@ -1,6 +1,6 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { ShellIcon } from "../../support/shell-icons"
+import { SvgIcon } from "../../support/svg-icon"
 import { useProjectRegistry } from "../state/AppStateContext"
 import { lookupProject } from "./state/ProjectRegistry"
 
@@ -75,7 +75,7 @@ export function ProjectPage(props: { projectPath: string }) {
       <section class={cardClass}>
         <div class={badgeClass}>
           <span class={css({ width: "14px", height: "14px" })}>
-            <ShellIcon name="projects" />
+            <SvgIcon name="tabs/projects" height="14px" width="14px" />
           </span>
           Tab
         </div>

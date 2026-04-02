@@ -18,7 +18,6 @@ type WorkbenchDetailTab = WorkbenchTab<WorkbenchDetailTabKind>
 type StoredWorkbenchTab = {
   id?: unknown
   title?: unknown
-  icon?: unknown
   dirty?: unknown
   kind?: unknown
   payload?: unknown
@@ -44,7 +43,6 @@ export const WORKBENCH_PRIMARY_TAB: WorkbenchTab<"main"> = {
   id: "main",
   kind: "main",
   title: "Main",
-  icon: "main",
 }
 
 /** Maximum number of closable workbench tabs kept open at once. */
@@ -55,7 +53,6 @@ function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchDetailTa
   return (
     typeof tab.id === "string" &&
     typeof tab.title === "string" &&
-    typeof tab.icon === "string" &&
     typeof tab.dirty === "boolean" &&
     typeof tab.kind === "string" &&
     isWorkbenchDetailTabKind(tab.kind)

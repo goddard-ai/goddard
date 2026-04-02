@@ -2,16 +2,10 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
-import { ShellIcon } from "../support/shell-icons"
 import { SvgIcon, type SvgIconName } from "../support/svg-icon"
-import {
-  formatBadgeCount,
-  getTabIcon,
-  type AppShellIconSource,
-  type AppShellTopbarAction,
-} from "./AppShell.config"
+import { formatBadgeCount, type AppShellTopbarAction } from "./AppShell.config"
 import type { NavigationItemId } from "./state/Navigation"
-import type { WorkbenchTab } from "./state/WorkbenchTabRegistry"
+import { getWorkbenchTabIcon, type WorkbenchTab } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 
 const actionButtonClass = css({
@@ -282,7 +276,7 @@ export function AppShellChrome(props: {
           >
             <TabButton
               activeTabId={props.activeTabId}
-              icon={getTabIcon("main")}
+              icon={getWorkbenchTabIcon("main")}
               id={WORKBENCH_PRIMARY_TAB.id}
               isHome={true}
               onSelect={props.onTabSelect}
@@ -296,7 +290,7 @@ export function AppShellChrome(props: {
                 key={tab.id}
                 activeTabId={props.activeTabId}
                 dirty={tab.dirty}
-                icon={getTabIcon(tab.icon)}
+                icon={getWorkbenchTabIcon(tab.kind)}
                 id={tab.id}
                 onClose={props.onTabClose}
                 onDragEnd={props.onTabDragEnd}
@@ -443,7 +437,7 @@ function SidebarItem(props: {
         props.onSelect({ openInTab: event.metaKey })
       }}
     >
-      <InlineSvgIcon icon={props.icon} size="22px 22px" />
+      <InlineSvgIcon icon={props.icon} size="22px 21px" />
       {props.badgeCount ? (
         <span
           aria-hidden="true"
@@ -474,7 +468,7 @@ function SidebarItem(props: {
 function TabButton(props: {
   activeTabId: string
   dirty?: boolean
-  icon: AppShellIconSource
+  icon: SvgIconName
   id: string
   isHome?: boolean
   onClose?: (id: string) => void
@@ -585,7 +579,7 @@ function TabButton(props: {
             color: iconColor,
           }}
         >
-          <AppShellResolvedIcon icon={props.icon} size="14px" />
+          <InlineSvgIcon icon={props.icon} size="14px" />
         </span>
         <span
           class={css({
@@ -667,31 +661,6 @@ function TabButton(props: {
         </>
       )}
     </div>
-  )
-}
-
-/** Resolves one shell icon to either a named SVG sprite or the ShellIcon fallback set. */
-export function AppShellResolvedIcon(props: { icon: AppShellIconSource; size: string }) {
-  if (props.icon.svgName) {
-    return <InlineSvgIcon icon={props.icon.svgName} size={props.size} />
-  }
-
-  // TODO: Replace this ShellIcon fallback once the exported shell asset set covers this surface.
-  return (
-    <span
-      class={css({
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: "0",
-      })}
-      style={{
-        width: props.size.split(" ")[0] ?? props.size,
-        height: props.size.split(" ")[1] ?? props.size,
-      }}
-    >
-      <ShellIcon name={props.icon.fallbackName ?? "main"} />
-    </span>
   )
 }
 

@@ -1,5 +1,4 @@
 import { SigmaType } from "preact-sigma"
-import type { ShellIconName } from "../../support/shell-icons"
 import { readJsonStorage, writeJsonStorage } from "../../support/workspace-storage"
 
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
@@ -10,7 +9,6 @@ export type NavigationItemId = "inbox" | "sessions" | "search" | "specs" | "task
 /** One item rendered in the left navigation rail. */
 export type NavigationItem = {
   id: NavigationItemId
-  icon: ShellIconName
   label: string
   ariaLabel: string
 }
@@ -25,12 +23,12 @@ type NavigationShape = {
 }
 
 const defaultNavigationItems: NavigationItem[] = [
-  { id: "inbox", icon: "inbox", label: "Inbox", ariaLabel: "Inbox" },
-  { id: "sessions", icon: "sessions", label: "Sessions", ariaLabel: "Sessions" },
-  { id: "search", icon: "search", label: "Search", ariaLabel: "Search" },
-  { id: "specs", icon: "specs", label: "Specs", ariaLabel: "Specs" },
-  { id: "tasks", icon: "tasks", label: "Tasks", ariaLabel: "Tasks" },
-  { id: "roadmap", icon: "roadmap", label: "Roadmap", ariaLabel: "Roadmap" },
+  { id: "inbox", label: "Inbox", ariaLabel: "Inbox" },
+  { id: "sessions", label: "Sessions", ariaLabel: "Sessions" },
+  { id: "search", label: "Search", ariaLabel: "Search" },
+  { id: "specs", label: "Specs", ariaLabel: "Specs" },
+  { id: "tasks", label: "Tasks", ariaLabel: "Tasks" },
+  { id: "roadmap", label: "Roadmap", ariaLabel: "Roadmap" },
 ]
 
 /** Sigma state for the app shell's primary navigation rail. */

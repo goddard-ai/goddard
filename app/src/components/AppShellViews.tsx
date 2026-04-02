@@ -4,7 +4,7 @@ import type { ComponentChildren } from "preact"
 import { Suspense } from "preact/compat"
 import { useLayoutEffect, useRef, useState } from "preact/hooks"
 import { TabViewportProvider } from "./TabViewport"
-import { useWorkbenchTabSet } from "./state/AppStateContext"
+import { useNavigation, useWorkbenchTabSet } from "./state/AppStateContext"
 import { getWorkbenchTabComponent } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 
@@ -70,7 +70,10 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChi
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
 function MainWorkbenchView() {
-  return <div />
+  const navigation = useNavigation()
+  const ActiveNavigationComponent = getWorkbenchTabComponent(navigation.selectedNavId)
+
+  return <ActiveNavigationComponent />
 }
 
 /** Renders the active closable workbench tab panel. */
@@ -83,10 +86,11 @@ function WorkbenchTabPanel() {
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
+  const activeTabPayload = activeTab.payload as Record<string, unknown>
 
   return (
     <Suspense fallback={<div />}>
-      <ActiveTabComponent {...activeTab.payload} />
+      <ActiveTabComponent {...activeTabPayload} />
     </Suspense>
   )
 }

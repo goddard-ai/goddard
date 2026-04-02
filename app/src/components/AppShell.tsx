@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
 import { AppShellChrome } from "./AppShellChrome"
-import { createPrimaryWorkbenchTab, navigationById, handleTopbarAction } from "./AppShell.config"
-import type { SvgIconName } from "../support/svg-icon"
+import { appShellSections, type AppShellTopbarAction } from "./AppShell.config"
 import { AppShellWorkbenchContent } from "./AppShellViews"
 import { useNavigation, useWorkbenchTabSet } from "./state/AppStateContext"
+import { getWorkbenchTabIcon } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "../shared/app-menu"
 import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "../shared/debug-menu"
+import type { SvgIconName } from "../support/svg-icon"
 
 /** Tracks the shell tab strip's active-tab underline and drag state. */
 function useAppShellTabStrip(
@@ -91,13 +92,17 @@ export function AppShell() {
     id: (typeof navigation.items)[number]["id"]
     label: string
   }> = navigation.items.map((item) => {
-    const navigationConfig = navigationById[item.id]
+    const section = appShellSections.find((candidate) => candidate.tabKinds.includes(item.id))
+
+    if (!section) {
+      throw new Error(`Missing app shell section for navigation item ${item.id}.`)
+    }
 
     return {
       ...item,
       badgeCount: navigation.badgeCounts[item.id],
-      group: navigationConfig.group,
-      icon: navigationConfig.icon,
+      group: section.group,
+      icon: getWorkbenchTabIcon(item.id),
     }
   })
   const selectedNavigation =
@@ -122,13 +127,26 @@ export function AppShell() {
       id: "debug:session-chat-transcript",
       kind: "sessionChatTranscriptDebug",
       title: "Transcript Debug",
-      icon: "sessions",
       payload: {
         surface: "sessionChatTranscript",
       },
       dirty: false,
     })
   })
+
+  function handleTopbarAction(action: AppShellTopbarAction) {
+    if (action === "proposeTask") {
+      // TODO: Wire this button to the real propose-task flow once that surface exists.
+      return
+    }
+
+    if (action === "newSession") {
+      // TODO: Wire this button to the real new-session flow once that surface exists.
+      return
+    }
+
+    // TODO: Wire this button to the real settings/preferences surface once it exists.
+  }
 
   return (
     <AppShellChrome
@@ -140,16 +158,14 @@ export function AppShell() {
         if (options?.openInTab) {
           const nextNavigationItem =
             navigation.items.find((item) => item.id === id) ?? navigation.selectedItem
-          const tab = createPrimaryWorkbenchTab(
-            id,
-            nextNavigationItem.label,
-            nextNavigationItem.icon,
-          )
-
-          if (tab) {
-            workbenchTabSet.openOrFocusTab(tab)
-            return
-          }
+          workbenchTabSet.openOrFocusTab({
+            id: `surface:${id}`,
+            kind: id,
+            title: nextNavigationItem.label,
+            payload: {},
+            dirty: false,
+          })
+          return
         }
 
         navigation.selectNavItem(id)

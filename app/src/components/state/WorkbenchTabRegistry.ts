@@ -1,38 +1,67 @@
-import type { FunctionComponent } from "preact"
+import type { ComponentProps, FunctionComponent } from "preact"
 import { lazy } from "preact/compat"
-import type { ShellIconName } from "../../support/shell-icons"
+import type { SvgIconName } from "../../support/svg-icon"
 
-/** Payload props expected by each closable workbench tab component. */
-type WorkbenchTabPayloadByKind = {
-  project: {
-    projectPath: string
-  }
-  projects: Record<string, never>
-  sessionChatTranscriptDebug: {
-    surface: "sessionChatTranscript"
-  }
+/** One registered non-primary workbench tab definition. */
+type WorkbenchTabDefinition = {
+  component: FunctionComponent<any>
+  icon: SvgIconName
 }
 
-/** One lazily loaded closable tab component keyed by its payload props. */
-type WorkbenchTabComponentByKind = {
-  [TKind in keyof WorkbenchTabPayloadByKind]: FunctionComponent<WorkbenchTabPayloadByKind[TKind]>
-}
-
-/** One loosely typed lazily rendered closable tab component. */
+/** One loosely typed lazily rendered non-primary tab component. */
 type LooseWorkbenchTabComponent = FunctionComponent<any>
 
-/** Runtime registry for every closable workbench tab component. */
-export const workbenchTabComponents: WorkbenchTabComponentByKind = {
-  project: lazy(() => import("../Projects/ProjectPage")),
-  projects: lazy(() => import("../Projects/ProjectsPage")),
-  sessionChatTranscriptDebug: lazy(() => import("../SessionChat/SessionChatTranscriptDebugView")),
+/** Placeholder workbench surface used until a real implementation exists. */
+function PlaceholderWorkbenchTab() {
+  return null
 }
 
-/** The supported closable workbench tab kinds available in the shell. */
-export type WorkbenchDetailTabKind = keyof typeof workbenchTabComponents
+/** Runtime registry for every non-primary workbench tab component. */
+export const workbenchTabComponents = {
+  inbox: {
+    component: PlaceholderWorkbenchTab,
+    icon: "tabs/inbox",
+  },
+  sessions: {
+    component: PlaceholderWorkbenchTab,
+    icon: "tabs/sessions",
+  },
+  search: {
+    component: PlaceholderWorkbenchTab,
+    icon: "tabs/search",
+  },
+  specs: {
+    component: PlaceholderWorkbenchTab,
+    icon: "tabs/spec",
+  },
+  tasks: {
+    component: PlaceholderWorkbenchTab,
+    icon: "tabs/tasks",
+  },
+  roadmap: {
+    component: PlaceholderWorkbenchTab,
+    icon: "tabs/roadmap",
+  },
+  project: {
+    component: lazy(() => import("../Projects/ProjectPage")),
+    icon: "tabs/projects",
+  },
+  sessionChatTranscriptDebug: {
+    component: lazy(() => import("../SessionChat/SessionChatTranscriptDebugView")),
+    icon: "tabs/sessions",
+  },
+} satisfies Record<string, WorkbenchTabDefinition>
 
-/** Payload inferred from one registered closable workbench tab component. */
-type WorkbenchTabPayload<TKind extends WorkbenchDetailTabKind> = WorkbenchTabPayloadByKind[TKind]
+/** The supported non-primary workbench tab kinds available in the shell. */
+export type WorkbenchRegisteredTabKind = keyof typeof workbenchTabComponents
+
+/** The supported closable workbench tab kinds available in the shell. */
+export type WorkbenchDetailTabKind = WorkbenchRegisteredTabKind
+
+/** Payload inferred from one registered non-primary workbench tab component. */
+type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> = ComponentProps<
+  (typeof workbenchTabComponents)[TKind]["component"]
+>
 
 /** One workbench tab tracked by the shell, including the always-present main tab. */
 type WorkbenchTabByKind = {
@@ -40,16 +69,14 @@ type WorkbenchTabByKind = {
     id: "main"
     kind: "main"
     title: string
-    icon: ShellIconName
     dirty?: undefined
     payload?: undefined
   }
 } & {
-  [TKind in WorkbenchDetailTabKind]: {
+  [TKind in WorkbenchRegisteredTabKind]: {
     id: string
     kind: TKind
     title: string
-    icon: ShellIconName
     dirty: boolean
     payload: WorkbenchTabPayload<TKind>
   }
@@ -62,12 +89,19 @@ export type WorkbenchTabKind = keyof WorkbenchTabByKind
 export type WorkbenchTab<TKind extends WorkbenchTabKind = WorkbenchTabKind> =
   WorkbenchTabByKind[TKind]
 
-/** Returns the lazily loaded component registered for one closable workbench tab kind. */
-export function getWorkbenchTabComponent(kind: WorkbenchDetailTabKind): LooseWorkbenchTabComponent {
-  return workbenchTabComponents[kind]
+/** Returns the component registered for one non-primary workbench tab kind. */
+export function getWorkbenchTabComponent(
+  kind: WorkbenchRegisteredTabKind,
+): LooseWorkbenchTabComponent {
+  return workbenchTabComponents[kind].component
 }
 
-/** Returns whether one runtime string matches a registered closable workbench tab kind. */
+/** Returns the SVG icon registered for one workbench tab kind. */
+export function getWorkbenchTabIcon(kind: WorkbenchTabKind): SvgIconName {
+  return kind === "main" ? "tabs/home" : workbenchTabComponents[kind].icon
+}
+
+/** Returns whether one runtime string matches a registered closable tab kind. */
 export function isWorkbenchDetailTabKind(kind: string): kind is WorkbenchDetailTabKind {
   return kind in workbenchTabComponents
 }

@@ -2,8 +2,9 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { X } from "lucide-react"
-import { ShellIcon } from "../support/shell-icons"
+import { SvgIcon } from "../support/svg-icon"
 import type { WorkbenchTab } from "./state/WorkbenchTabSet"
+import { getWorkbenchTabIcon } from "./state/WorkbenchTabRegistry"
 
 /** Renders the primary tab plus any closable workbench tabs. */
 export function WorkbenchTabs(props: {
@@ -137,7 +138,7 @@ function WorkbenchTab(props: {
       }}
     >
       <span class={css({ width: "16px", height: "16px", flexShrink: "0" })}>
-        <ShellIcon name={props.tab.icon} />
+        <SvgIcon name={getWorkbenchTabIcon(props.tab.kind)} height="16px" width="16px" />
       </span>
       <span
         class={css({

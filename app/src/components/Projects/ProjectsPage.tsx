@@ -318,7 +318,6 @@ export function ProjectsPage() {
       id: `project:${encodeURIComponent(project.path)}`,
       kind: "project",
       title: project.name,
-      icon: "projects",
       payload: { projectPath: project.path },
       dirty: false,
     })

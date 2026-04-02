@@ -4,8 +4,9 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { ShellIcon } from "../support/shell-icons"
+import { SvgIcon } from "../support/svg-icon"
 import type { NavigationItem, NavigationItemId } from "./state/Navigation"
+import { getWorkbenchTabIcon } from "./state/WorkbenchTabRegistry"
 
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {
@@ -159,9 +160,12 @@ function SidebarNavItem(props: {
           }}
         >
           <span class={css({ width: "20px", height: "20px" })}>
-            <ShellIcon
-              name={props.item.icon}
-              title={props.isFocused ? props.item.label : undefined}
+            <SvgIcon
+              aria-hidden={props.isFocused ? undefined : true}
+              aria-label={props.isFocused ? props.item.label : undefined}
+              name={getWorkbenchTabIcon(props.item.id)}
+              height="20px"
+              width="20px"
             />
           </span>
           {props.item.badgeCount ? (
