@@ -1,4 +1,5 @@
 import { type JSX } from "preact"
+import { omit } from "radashi"
 /* SVG_ICON_IMPORTS */
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -12,27 +13,25 @@ const svgSources = {
 /** Identifiers for SVG assets generated from SVG files under the public directory. */
 export type SvgIconName = keyof typeof svgSources
 
+/** SVG data type for inline SVG strings. */
+export type SvgIconData = string & { _brand: "svg" }
+
 /** A SvgIcon source can be a generated icon name or an inline SVG string. */
-type SvgIconSource = { name: SvgIconName; data?: never } | { data: string; name?: never }
+type SvgIconSource = { name: SvgIconName; data?: never } | { data: SvgIconData; name?: never }
 
 const mountedSymbols = new Set<string>()
 let parser: DOMParser | null = null
 let spriteRoot: SVGSVGElement | null = null
 
+export type SvgIconProps = SvgIconSource & JSX.IntrinsicElements["svg"]
+
 /** Renders a named or inline SVG icon through the shared sprite root. */
-export function SvgIcon(props: SvgIconSource & { title?: string } & JSX.IntrinsicElements["svg"]) {
+export function SvgIcon(props: SvgIconProps) {
   const symbolId = ensureSymbolMounted(props)
-  const { data: _data, name: _name, title, ...svgProps } = props
+  const svgProps = omit(props, ["name", "data"])
 
   return (
-    <svg
-      {...svgProps}
-      aria-hidden={title ? undefined : true}
-      aria-label={title}
-      data-svg-icon={getDebugName(props, symbolId)}
-      role={title ? "img" : undefined}
-    >
-      {title ? <title>{title}</title> : null}
+    <svg {...svgProps}>
       <use href={`#${symbolId}`} />
     </svg>
   )
@@ -57,12 +56,17 @@ function ensureSymbolMounted(source: SvgIconSource) {
     return symbolId
   }
 
-  const parsedDocument = getParser().parseFromString(getSvgMarkup(source), "image/svg+xml")
+  parser ??= new DOMParser()
+
+  const parsedDocument = parser.parseFromString(
+    source.data !== undefined ? source.data : svgSources[source.name],
+    "image/svg+xml",
+  )
   const sourceSvg = parsedDocument.documentElement as unknown as SVGSVGElement
 
   if (sourceSvg.tagName.toLowerCase() !== "svg") {
     throw new Error(
-      `Expected ${JSON.stringify(getDebugName(source, symbolId))} to parse into an <svg> root element.`,
+      `Expected ${JSON.stringify(source.data !== undefined ? symbolId : source.name)} to parse into an <svg> root element.`,
     )
   }
 
@@ -88,33 +92,6 @@ function ensureSymbolMounted(source: SvgIconSource) {
   mountedSymbols.add(symbolId)
 
   return symbolId
-}
-
-/** Returns the SVG markup string for the requested icon source. */
-function getSvgMarkup(source: SvgIconSource) {
-  if (source.data !== undefined) {
-    return source.data
-  }
-
-  return svgSources[source.name]
-}
-
-/** Returns a readable identifier for diagnostics and DOM inspection. */
-function getDebugName(source: SvgIconSource, symbolId: string) {
-  if (source.data !== undefined) {
-    return symbolId
-  }
-
-  return source.name
-}
-
-/** Lazily creates the XML parser used for SVG source strings. */
-function getParser() {
-  if (!parser) {
-    parser = new DOMParser()
-  }
-
-  return parser
 }
 
 /** Creates or reuses the hidden sprite root used by every mounted icon symbol. */
@@ -205,11 +182,8 @@ function getSymbolId(source: SvgIconSource) {
     return `${SYMBOL_ID_PREFIX}-data-${hashSvgData(source.data)}`
   }
 
-  return getNamedSymbolId(source.name)
-}
+  const name = source.name as string
 
-/** Returns the sprite symbol id used for generated icons. */
-function getNamedSymbolId(name: string) {
   return `${SYMBOL_ID_PREFIX}-${name
     .replaceAll(/[^a-zA-Z0-9]+/g, "-")
     .replaceAll(/^-+|-+$/g, "")
