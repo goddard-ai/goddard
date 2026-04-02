@@ -12,10 +12,7 @@ export type NavigationItemId =
   | "specs"
   | "tasks"
   | "roadmap"
-  | "actions"
-  | "loops"
   | "inbox"
-  | "identity"
 
 /** One item rendered in the left navigation rail. */
 export type NavigationItem = {
@@ -41,10 +38,7 @@ const defaultNavigationItems: NavigationItem[] = [
   { id: "specs", icon: "specs", label: "Specs", ariaLabel: "Specs" },
   { id: "tasks", icon: "tasks", label: "Tasks", ariaLabel: "Tasks" },
   { id: "roadmap", icon: "roadmap", label: "Roadmap", ariaLabel: "Roadmap" },
-  { id: "actions", icon: "actions", label: "Actions", ariaLabel: "Actions" },
-  { id: "loops", icon: "loops", label: "Loops", ariaLabel: "Loops" },
   { id: "inbox", icon: "inbox", label: "Inbox", ariaLabel: "Inbox" },
-  { id: "identity", icon: "identity", label: "Identity", ariaLabel: "Identity" },
 ]
 
 /** Sigma state for the app shell's primary navigation rail. */

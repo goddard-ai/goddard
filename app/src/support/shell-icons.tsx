@@ -4,13 +4,9 @@ import {
   GitPullRequest,
   Inbox,
   LayoutPanelLeft,
-  ListTodo,
   Map,
   MessageSquare,
-  Orbit,
   SquareCheckBig,
-  UserRound,
-  WandSparkles,
   type LucideIcon,
 } from "lucide-react"
 
@@ -23,10 +19,7 @@ export type ShellIconName =
   | "specs"
   | "tasks"
   | "roadmap"
-  | "actions"
-  | "loops"
   | "inbox"
-  | "identity"
 
 const shellIcons: Record<ShellIconName, LucideIcon> = {
   main: LayoutPanelLeft,
@@ -36,10 +29,7 @@ const shellIcons: Record<ShellIconName, LucideIcon> = {
   specs: FileText,
   tasks: SquareCheckBig,
   roadmap: Map,
-  actions: WandSparkles,
-  loops: Orbit,
   inbox: Inbox,
-  identity: UserRound,
 }
 
 /** Renders one Lucide icon for the app shell. */
