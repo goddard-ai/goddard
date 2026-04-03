@@ -13,6 +13,7 @@
         "source": "./src/ipc.ts",
         "default": "./dist/ipc.d.mts"
       },
+      "bun": "./src/ipc.ts",
       "import": "./dist/ipc.mjs"
     },
     "./workforce": {
@@ -20,6 +21,7 @@
         "source": "./src/workforce/index.ts",
         "default": "./dist/workforce/index.d.mts"
       },
+      "bun": "./src/workforce/index.ts",
       "import": "./dist/workforce/index.mjs"
     }
   },

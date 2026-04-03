@@ -17,6 +17,7 @@
         "source": "./src/node/index.ts",
         "default": "./dist/node/index.d.mts"
       },
+      "bun": "./src/node/index.ts",
       "import": "./dist/node/index.mjs"
     }
   },
