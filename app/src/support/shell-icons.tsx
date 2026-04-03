@@ -8,6 +8,7 @@ import {
   Map,
   MessageSquare,
   Orbit,
+  Settings2,
   SquareCheckBig,
   UserRound,
   WandSparkles,
@@ -26,6 +27,7 @@ export type ShellIconName =
   | "actions"
   | "loops"
   | "inbox"
+  | "settings"
   | "identity"
 
 const shellIcons: Record<ShellIconName, LucideIcon> = {
@@ -39,6 +41,7 @@ const shellIcons: Record<ShellIconName, LucideIcon> = {
   actions: WandSparkles,
   loops: Orbit,
   inbox: Inbox,
+  settings: Settings2,
   identity: UserRound,
 }
 

@@ -58,6 +58,45 @@ const windowDragRegionClass = css({
   background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
 })
 
+const topBarClass = css({
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  height: "36px",
+  minHeight: "36px",
+  paddingInline: "12px",
+  borderBottom: "1px solid",
+  borderColor: "border",
+  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
+})
+
+const topBarButtonClass = css({
+  display: "grid",
+  placeItems: "center",
+  width: "28px",
+  height: "28px",
+  borderRadius: "10px",
+  border: "none",
+  backgroundColor: "transparent",
+  color: "muted",
+  cursor: "pointer",
+  transition:
+    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+  _active: {
+    transform: "scale(0.96)",
+  },
+  "@media (hover: hover) and (pointer: fine)": {
+    _hover: {
+      backgroundColor: "background",
+      color: "text",
+    },
+  },
+  _focusVisible: {
+    outline: `2px solid ${token.var("colors.accentStrong")}`,
+    outlineOffset: "2px",
+  },
+})
+
 /** Creates one stable closable tab for a primary navigation surface when supported. */
 function createPrimaryWorkbenchTab(
   navId: NavigationItemId,
@@ -127,6 +166,17 @@ export function AppShell() {
     })
   })
 
+  function openSettingsTab() {
+    workbenchTabSet.openOrFocusTab({
+      id: "surface:settings",
+      kind: "settings",
+      title: "Settings",
+      icon: "settings",
+      payload: {},
+      dirty: false,
+    })
+  }
+
   return (
     <div
       class={css({
@@ -145,7 +195,25 @@ export function AppShell() {
       })}
     >
       <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
-      <div class={`${windowDragRegionClass} electrobun-webkit-app-region-drag`} />
+      <header class={topBarClass}>
+        <div
+          class={`${css({ flex: "1", alignSelf: "stretch" })} electrobun-webkit-app-region-drag`}
+        />
+        <div class="electrobun-webkit-app-region-no-drag">
+          <button
+            aria-label="Settings"
+            class={topBarButtonClass}
+            type="button"
+            onClick={() => {
+              openSettingsTab()
+            }}
+          >
+            <span class={css({ width: "15px", height: "15px" })}>
+              <ShellIcon name="settings" title="Settings" />
+            </span>
+          </button>
+        </div>
+      </header>
       <SidebarNav
         className={css({ gridRow: "2", minHeight: "0" })}
         items={navigationItems}
