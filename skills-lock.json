@@ -5,6 +5,11 @@
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
       "computedHash": "de68702ac1ded1902c4a6e687f6faae3032ad395573780c1b384bdbcd1b05668"
+    },
+    "kindstore": {
+      "source": "alloc/kindstore",
+      "sourceType": "github",
+      "computedHash": "e6db7bdbed4029d4e108601b2a87b6517e88d045a06eaef639cf33a46dfc3e34"
     }
   }
 }
