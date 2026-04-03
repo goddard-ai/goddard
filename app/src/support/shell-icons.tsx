@@ -4,7 +4,6 @@ import {
   GitPullRequest,
   Inbox,
   LayoutPanelLeft,
-  ListTodo,
   Map,
   MessageSquare,
   Orbit,
