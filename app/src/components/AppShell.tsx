@@ -8,7 +8,7 @@ import { getWorkbenchTabIcon } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "../shared/app-menu"
 import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "../shared/debug-menu"
-import type { SvgIconName } from "../support/svg-icon"
+import type { SvgIconName } from "./SvgIcon"
 
 /** Tracks the shell tab strip's active-tab underline and drag state. */
 function useAppShellTabStrip(

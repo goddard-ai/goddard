@@ -1,6 +1,6 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { SvgIcon } from "../../support/svg-icon"
+import { SvgIcon } from "../SvgIcon"
 import { useProjectRegistry } from "../state/AppStateContext"
 import { lookupProject } from "./state/ProjectRegistry"
 

@@ -3,7 +3,7 @@ declare module "*.css"
 
 /** Allows importing SVG assets as raw markup strings. */
 declare module "*.svg?raw" {
-  const content: import("~/support/svg-icon").SvgIconData
+  const content: import("~/components/SvgIcon").SvgIconData
   export default content
 }
 

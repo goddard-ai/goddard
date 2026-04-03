@@ -2,7 +2,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
-import { SvgIcon, type SvgIconName } from "../support/svg-icon"
+import { SvgIcon, type SvgIconName } from "./SvgIcon"
 import { formatBadgeCount, type AppShellTopbarAction } from "./AppShell.config"
 import type { NavigationItemId } from "./state/Navigation"
 import { getWorkbenchTabIcon, type WorkbenchTab } from "./state/WorkbenchTabRegistry"

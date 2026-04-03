@@ -4,7 +4,7 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { SvgIcon } from "../support/svg-icon"
+import { SvgIcon } from "./SvgIcon"
 import type { NavigationItem, NavigationItemId } from "./state/Navigation"
 import { getWorkbenchTabIcon } from "./state/WorkbenchTabRegistry"
 
