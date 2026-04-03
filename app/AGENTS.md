@@ -32,4 +32,5 @@
 - Do not add automated tests for UI components unless explicitly asked.
 - Run formatting after modifying app files.
 - When a human asks for a new task, commit any app work from the previous task before starting. If that work is unfinished, include `Next step: ...` in the commit message body.
+- Do not add module-level first-line description comments or routine component description comments unless a comment explains non-obvious behavior that the code itself does not make clear.
 - Keep this file short, scannable, and app-local. Move longer explanations to `goddard-contributor`.
