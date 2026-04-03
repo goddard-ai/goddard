@@ -23,7 +23,7 @@ export const workbenchTabComponents = {
     icon: "tabs/inbox",
   },
   sessions: {
-    component: PlaceholderWorkbenchTab,
+    component: lazy(() => import("~/sessions/page.tsx")),
     icon: "tabs/sessions",
   },
   search: {
@@ -45,6 +45,10 @@ export const workbenchTabComponents = {
   project: {
     component: lazy(() => import("~/projects/project-page.tsx")),
     icon: "tabs/projects",
+  },
+  sessionChat: {
+    component: lazy(() => import("~/session-chat/view.tsx")),
+    icon: "tabs/sessions",
   },
   sessionChatTranscriptDebug: {
     component: lazy(() => import("~/session-chat/transcript-debug-view.tsx")),

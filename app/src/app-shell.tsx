@@ -2,16 +2,21 @@ import { useListener } from "preact-sigma"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu.ts"
 import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "~/shared/debug-menu.ts"
+import { Dialog as SessionDialog } from "~/sessions/dialog.tsx"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
-import { useNavigation, useWorkbenchTabSet } from "./app-state-context.tsx"
+import {
+  useNavigation,
+  useProjectRegistry,
+  useSessionLaunch,
+  useWorkbenchTabSet,
+} from "./app-state-context.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { GoodTooltipProvider } from "./lib/good-tooltip.tsx"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
 
-/** Tracks the shell tab strip's active-tab underline and drag state. */
 function useAppShellTabStrip(
   activeTabId: string,
   selectedNavigationId: string,
@@ -76,9 +81,10 @@ function useAppShellTabStrip(
   }
 }
 
-/** Renders the app shell by wiring shared app state into the presentational shell chrome. */
 export function AppShell() {
   const navigation = useNavigation()
+  const projectRegistry = useProjectRegistry()
+  const sessionLaunch = useSessionLaunch()
   const workbenchTabSet = useWorkbenchTabSet()
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
@@ -135,16 +141,13 @@ export function AppShell() {
 
   function handleTopbarAction(action: AppShellTopbarAction) {
     if (action === "proposeTask") {
-      // TODO: Wire this button to the real propose-task flow once that surface exists.
       return
     }
 
     if (action === "newSession") {
-      // TODO: Wire this button to the real new-session flow once that surface exists.
+      sessionLaunch.openDialog(projectRegistry.projectList[0]?.path ?? null)
       return
     }
-
-    // TODO: Wire this button to the real settings/preferences surface once it exists.
   }
 
   return (
@@ -201,6 +204,7 @@ export function AppShell() {
           selectedNavId={navigation.selectedNavId}
         />
       </AppShellChrome>
+      <SessionDialog />
     </GoodTooltipProvider>
   )
 }

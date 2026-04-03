@@ -9,6 +9,7 @@ import type {
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
+import { createSessionPromptMessage, type SessionPromptRequest } from "./session.ts"
 import type {
   ActionRunInput,
   LoopGetInput,
@@ -122,7 +123,12 @@ function createSessionNamespace(client: DaemonIpcClient) {
     steer: async (input: SteerDaemonSessionRequest) => client.send("sessionSteer", input),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
     send: async (input: SessionSendInput) => client.send("sessionSend", input),
-
+    /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
+    prompt: async (input: SessionPromptRequest) =>
+      client.send("sessionSend", {
+        id: input.id,
+        message: createSessionPromptMessage(input),
+      }),
     /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
     subscribe: async (
       input: DaemonSessionIdParams,
