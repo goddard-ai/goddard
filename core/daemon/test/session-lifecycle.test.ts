@@ -8,11 +8,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import {
-  SessionPermissionsStorage,
-  SessionStateStorage,
-  SessionStorage,
-} from "../src/persistence/index.ts"
+import { createSessionPermissionsRecord } from "../src/persistence/session-permissions.ts"
+import { createSessionStateRecord } from "../src/persistence/session-state.ts"
+import { fromStoredSession, normalizeSessionInsert } from "../src/persistence/session.ts"
+import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
 const cleanup: Array<() => Promise<void>> = []
@@ -31,6 +30,7 @@ afterAll(async () => {
   } else {
     process.env.HOME = originalHome
   }
+  resetDb()
 
   if (sharedHomeDir) {
     await rm(sharedHomeDir, { recursive: true, force: true })
@@ -50,17 +50,28 @@ test("daemon revokes session tokens when agent processes exit", async () => {
     systemPrompt: "Keep responses short.",
   })
 
-  const permissions = await SessionPermissionsStorage.get(created.session.id)
+  const permissions =
+    db.sessionPermissions.first({
+      where: { sessionId: created.session.id },
+    }) ?? null
   expect(permissions).toBeTruthy()
   expect(typeof permissions?.token).toBe("string")
 
   await client.send("sessionShutdown", { id: created.session.id })
 
   await waitFor(async () => {
-    return (await SessionPermissionsStorage.getByToken(permissions!.token)) === null
+    return (
+      db.sessionPermissions.first({
+        where: { token: permissions!.token },
+      }) === undefined
+    )
   })
 
-  expect(await SessionPermissionsStorage.getByToken(permissions!.token)).toBeNull()
+  expect(
+    db.sessionPermissions.first({
+      where: { token: permissions!.token },
+    }) ?? null,
+  ).toBeNull()
 })
 
 test("daemon persists repository context into durable session storage", async () => {
@@ -81,7 +92,11 @@ test("daemon persists repository context into durable session storage", async ()
     },
   })
 
-  const stored = await SessionStorage.get(created.session.id)
+  const storedRecord =
+    db.sessions.first({
+      where: { sessionId: created.session.id },
+    }) ?? null
+  const stored = storedRecord ? fromStoredSession(storedRecord) : null
 
   expect(created.session.repository).toBe("acme/widgets")
   expect(created.session.prNumber).toBe(12)
@@ -101,7 +116,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
 
   const sessionId = `session-restart-${randomUUID()}`
   const acpId = `acp-restart-${randomUUID()}`
-  await SessionStorage.create({
+  const sessionRecord = normalizeSessionInsert({
     id: sessionId,
     acpId,
     status: "active",
@@ -110,7 +125,8 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     mcpServers: [],
     metadata: null,
   })
-  await SessionStateStorage.create({
+  db.sessions.create(sessionRecord)
+  const stateRecord = createSessionStateRecord({
     sessionId,
     acpId,
     connectionMode: "live",
@@ -118,13 +134,15 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     diagnostics: [],
     activeDaemonSession: true,
   })
-  await SessionPermissionsStorage.create({
+  db.sessionStates.create(stateRecord)
+  const permissionRecord = createSessionPermissionsRecord({
     sessionId,
     token: "tok-restart-1",
     owner: "acme",
     repo: "widgets",
     allowedPrNumbers: [12],
   })
+  db.sessionPermissions.create(permissionRecord)
 
   const daemon = await startTestDaemon({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -276,6 +294,7 @@ async function startTestDaemon(options: { useExistingHome?: boolean } = {}): Pro
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-home-"))
   process.env.HOME = sharedHomeDir
+  resetDb()
 }
 
 async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {

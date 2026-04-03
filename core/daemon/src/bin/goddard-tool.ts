@@ -2,7 +2,8 @@
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
 import { command, option, run, string, subcommands } from "cmd-ts"
 import * as fs from "node:fs/promises"
-import { SessionStorage } from "../persistence/session.ts"
+import { applySessionUpdate } from "../persistence/session.ts"
+import { db } from "../persistence/store.ts"
 
 async function requireSessionId(): Promise<string> {
   const { client } = createDaemonIpcClientFromEnv()
@@ -15,26 +16,47 @@ function requireSessionToken(): string {
 }
 
 export async function declareInitiative(sessionId: string, title: string) {
-  await SessionStorage.update(sessionId, {
-    status: "active",
-    initiative: title,
-    blockedReason: null,
-  })
+  const record = db.sessions.first({ where: { sessionId } })
+  if (!record) {
+    throw new Error(`Unknown session: ${sessionId}`)
+  }
+
+  db.sessions.update(record.id, (current) =>
+    applySessionUpdate(current, {
+      status: "active",
+      initiative: title,
+      blockedReason: null,
+    }),
+  )
 }
 
 export async function reportBlocker(sessionId: string, reason: string) {
-  await SessionStorage.update(sessionId, {
-    status: "blocked",
-    blockedReason: reason,
-  })
+  const record = db.sessions.first({ where: { sessionId } })
+  if (!record) {
+    throw new Error(`Unknown session: ${sessionId}`)
+  }
+
+  db.sessions.update(record.id, (current) =>
+    applySessionUpdate(current, {
+      status: "blocked",
+      blockedReason: reason,
+    }),
+  )
 }
 
 export async function reportCompleted(sessionId: string) {
-  await SessionStorage.update(sessionId, {
-    status: "done",
-    initiative: null,
-    blockedReason: null,
-  })
+  const record = db.sessions.first({ where: { sessionId } })
+  if (!record) {
+    throw new Error(`Unknown session: ${sessionId}`)
+  }
+
+  db.sessions.update(record.id, (current) =>
+    applySessionUpdate(current, {
+      status: "done",
+      initiative: null,
+      blockedReason: null,
+    }),
+  )
 }
 
 export async function submitPr(sessionId: string, title: string, body: string) {
@@ -46,10 +68,17 @@ export async function submitPr(sessionId: string, title: string, body: string) {
     body,
   })
 
-  await SessionStorage.update(sessionId, {
-    status: "done",
-    lastAgentMessage: `PR Submitted: ${title}\n${pr.url}\n\n${body}`,
-  })
+  const record = db.sessions.first({ where: { sessionId } })
+  if (!record) {
+    throw new Error(`Unknown session: ${sessionId}`)
+  }
+
+  db.sessions.update(record.id, (current) =>
+    applySessionUpdate(current, {
+      status: "done",
+      lastAgentMessage: `PR Submitted: ${title}\n${pr.url}\n\n${body}`,
+    }),
+  )
 }
 
 export async function replyPr(sessionId: string, message: string) {
@@ -60,10 +89,17 @@ export async function replyPr(sessionId: string, message: string) {
     message,
   })
 
-  await SessionStorage.update(sessionId, {
-    status: "done",
-    lastAgentMessage: `PR Reply: ${message}`,
-  })
+  const record = db.sessions.first({ where: { sessionId } })
+  if (!record) {
+    throw new Error(`Unknown session: ${sessionId}`)
+  }
+
+  db.sessions.update(record.id, (current) =>
+    applySessionUpdate(current, {
+      status: "done",
+      lastAgentMessage: `PR Reply: ${message}`,
+    }),
+  )
 }
 
 export async function main(argv: string[]) {

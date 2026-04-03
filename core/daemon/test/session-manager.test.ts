@@ -10,6 +10,7 @@ import {
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "../src/session/archive.ts"
+import { resetDb } from "../src/persistence/store.ts"
 import { resolveAgentProcessSpec } from "../src/session/manager.ts"
 
 const cleanupDirs: string[] = []
@@ -26,6 +27,7 @@ afterEach(async () => {
   } else {
     process.env.HOME = originalHome
   }
+  resetDb()
 
   while (cleanupDirs.length > 0) {
     await rm(cleanupDirs.pop()!, { recursive: true, force: true })
@@ -122,6 +124,7 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-home-"))
   cleanupDirs.push(homeDir)
   process.env.HOME = homeDir
+  resetDb()
 
   const archiveBody = await createTestTarGzArchive()
   const fetchMock = vi.fn(async () => new Response(archiveBody, { status: 200 }))

@@ -31,15 +31,23 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { prependAgentBinToPath } from "../config.ts"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
+import { createSessionPermissionsRecord } from "../persistence/session-permissions.ts"
 import {
-  SessionPermissionsStorage,
-  SessionStateStorage,
-  SessionStorage,
+  applySessionStateUpdate,
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
+  createSessionStateRecord,
+} from "../persistence/session-state.ts"
+import {
+  applySessionUpdate,
+  fromStoredSession,
   type SQLSessionListCursor,
+  type SQLSessionRecord,
   type SQLSessionUpdate,
-} from "../persistence/index.ts"
+  normalizeSessionInsert,
+  toSessionSortKey,
+} from "../persistence/session.ts"
+import { db } from "../persistence/store.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -291,13 +299,16 @@ function mergeSessionMetadata(
 
 /** Hydrates a stored session record with derived state needed by daemon clients. */
 async function toDaemonSession(
-  record: Awaited<ReturnType<typeof SessionStorage.get>>,
+  record: SQLSessionRecord | null | undefined,
 ): Promise<DaemonSession> {
   if (!record) {
     throw new IpcClientError("Session not found")
   }
 
-  const state = await SessionStateStorage.get(record.id)
+  const state =
+    db.sessionStates.first({
+      where: { sessionId: record.id },
+    }) ?? null
   const diagnostics = state?.diagnostics ?? []
   const historyLength = state?.history.length ?? 0
 
@@ -978,12 +989,18 @@ export function createSessionManager(input: {
     detail?: Record<string, unknown>,
   ): Promise<void> {
     const active = activeSessions.get(id)
-    const previousStatus = active?.status ?? (await SessionStorage.get(id))?.status
+    const previousRecord =
+      db.sessions.first({
+        where: { sessionId: id },
+      }) ?? null
+    const previousStatus = active?.status ?? previousRecord?.status
     if (update.status && active) {
       active.status = update.status
     }
 
-    await SessionStorage.update(id, update)
+    if (previousRecord) {
+      db.sessions.update(previousRecord.id, (current) => applySessionUpdate(current, update))
+    }
     if (update.status && previousStatus && previousStatus !== update.status) {
       await emitDiagnostic(id, "session_status_changed", {
         previousStatus,
@@ -998,7 +1015,19 @@ export function createSessionManager(input: {
     if (active) {
       active.history.push(message)
     }
-    await SessionStateStorage.appendHistory(id, message)
+    const state =
+      db.sessionStates.first({
+        where: { sessionId: id },
+      }) ?? null
+    if (!state) {
+      return
+    }
+
+    db.sessionStates.update(state.id, (record) =>
+      applySessionStateUpdate(record, {
+        history: [...record.history, message],
+      }),
+    )
   }
 
   async function emitDiagnostic(
@@ -1008,7 +1037,19 @@ export function createSessionManager(input: {
   ): Promise<void> {
     const event = createDiagnosticEvent(sessionId, type, detail)
     logger.log(type, { sessionId, ...detail })
-    await SessionStateStorage.appendDiagnostic(sessionId, event)
+    const state =
+      db.sessionStates.first({
+        where: { sessionId },
+      }) ?? null
+    if (!state) {
+      return
+    }
+
+    db.sessionStates.update(state.id, (record) =>
+      applySessionStateUpdate(record, {
+        diagnostics: [...record.diagnostics, event],
+      }),
+    )
   }
 
   async function setConnectionMode(
@@ -1016,20 +1057,30 @@ export function createSessionManager(input: {
     mode: SessionConnectionMode,
     activeDaemonSession: boolean,
   ): Promise<void> {
-    await SessionStateStorage.update(sessionId, {
-      connectionMode: mode,
-      activeDaemonSession,
-    })
+    const state =
+      db.sessionStates.first({
+        where: { sessionId },
+      }) ?? null
+    if (!state) {
+      return
+    }
+
+    db.sessionStates.update(state.id, (record) =>
+      applySessionStateUpdate(record, {
+        connectionMode: mode,
+        activeDaemonSession,
+      }),
+    )
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
-    let persistedSessions: Awaited<ReturnType<typeof SessionStorage.listAll>>
-    let permissions: Awaited<ReturnType<typeof SessionPermissionsStorage.list>>
+    let persistedSessions: SQLSessionRecord[]
+    let permissions: ReturnType<typeof db.sessionPermissions.findMany>
 
     try {
       ;[persistedSessions, permissions] = await Promise.all([
-        SessionStorage.listAll(),
-        SessionPermissionsStorage.list(),
+        Promise.resolve(db.sessions.findMany().map(fromStoredSession)),
+        Promise.resolve(db.sessionPermissions.findMany()),
       ])
     } catch (error) {
       logger.log("session_reconciliation_failed", {
@@ -1043,14 +1094,17 @@ export function createSessionManager(input: {
     await Promise.all(
       permissions
         .filter((permission) => !sessionIds.has(permission.sessionId))
-        .map((permission) => SessionPermissionsStorage.revoke(permission.sessionId)),
+        .map((permission) => db.sessionPermissions.delete(permission.id)),
     )
 
     await Promise.all(
       persistedSessions.map(async (session) => {
-        const state = await SessionStateStorage.get(session.id)
+        const state =
+          db.sessionStates.first({
+            where: { sessionId: session.id },
+          }) ?? null
         if (!state) {
-          await SessionStateStorage.create({
+          const nextState = createSessionStateRecord({
             sessionId: session.id,
             acpId: session.acpId,
             connectionMode: "none",
@@ -1058,6 +1112,7 @@ export function createSessionManager(input: {
             diagnostics: [],
             activeDaemonSession: false,
           })
+          db.sessionStates.create(nextState)
         }
 
         if (
@@ -1065,15 +1120,29 @@ export function createSessionManager(input: {
           session.status === "blocked" ||
           session.status === "idle"
         ) {
-          await SessionStorage.update(session.id, {
-            status: "error",
-            errorMessage: "Session interrupted when the previous daemon exited unexpectedly.",
-          })
+          const sessionDocument =
+            db.sessions.first({
+              where: { sessionId: session.id },
+            }) ?? null
+          if (sessionDocument) {
+            db.sessions.update(sessionDocument.id, (record) =>
+              applySessionUpdate(record, {
+                status: "error",
+                errorMessage: "Session interrupted when the previous daemon exited unexpectedly.",
+              }),
+            )
+          }
           await setConnectionMode(session.id, "history", false)
           await emitDiagnostic(session.id, "session_reconciled_after_restart", {
             previousStatus: session.status,
           })
-          await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+          const permission =
+            db.sessionPermissions.first({
+              where: { sessionId: session.id },
+            }) ?? null
+          if (permission) {
+            await Promise.resolve(db.sessionPermissions.delete(permission.id)).catch(() => {})
+          }
           return
         }
 
@@ -1082,19 +1151,29 @@ export function createSessionManager(input: {
           archivedConnectionMode(state?.history.length ?? 0),
           false,
         )
-        await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+        const permission =
+          db.sessionPermissions.first({
+            where: { sessionId: session.id },
+          }) ?? null
+        if (permission) {
+          await Promise.resolve(db.sessionPermissions.delete(permission.id)).catch(() => {})
+        }
       }),
     )
   }
 
   async function launchSession(
     params: SessionLaunchParams,
-    existingSession: Awaited<ReturnType<typeof SessionStorage.get>> | null = null,
+    existingSession: SQLSessionRecord | null = null,
   ): Promise<DaemonSession> {
     await ready
     const id = existingSession?.id ?? randomUUID()
     const token = params.token ?? randomBytes(32).toString("hex")
-    const existingState = existingSession ? await SessionStateStorage.get(id) : null
+    const existingState = existingSession
+      ? (db.sessionStates.first({
+          where: { sessionId: id },
+        }) ?? null)
+      : null
 
     const existingWorktree = existingSession?.metadata?.worktree
     const worktree =
@@ -1133,13 +1212,22 @@ export function createSessionManager(input: {
 
     const scope = parseRepoScope(params)
 
-    await SessionPermissionsStorage.create({
+    const nextPermission = createSessionPermissionsRecord({
       sessionId: id,
       token,
       owner: scope.owner,
       repo: scope.repo,
       allowedPrNumbers: scope.allowedPrNumbers,
     })
+    const existingPermission =
+      db.sessionPermissions.first({
+        where: { sessionId: id },
+      }) ?? null
+    if (existingPermission) {
+      db.sessionPermissions.put(existingPermission.id, nextPermission)
+    } else {
+      db.sessionPermissions.create(nextPermission)
+    }
 
     try {
       logger.log("session.launch_requested", {
@@ -1181,15 +1269,18 @@ export function createSessionManager(input: {
       const initialDiagnostics = existingState?.diagnostics ?? []
 
       if (existingState) {
-        await SessionStateStorage.update(id, {
-          acpId: initialized.acpId,
-          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
-          history: initialHistory,
-          diagnostics: initialDiagnostics,
-          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
-        })
+        db.sessionStates.put(
+          existingState.id,
+          applySessionStateUpdate(existingState, {
+            acpId: initialized.acpId,
+            connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+            history: initialHistory,
+            diagnostics: initialDiagnostics,
+            activeDaemonSession: !shouldExitAfterInitialPrompt(params),
+          }),
+        )
       } else {
-        await SessionStateStorage.create({
+        const nextState = createSessionStateRecord({
           sessionId: id,
           acpId: initialized.acpId,
           connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
@@ -1197,26 +1288,37 @@ export function createSessionManager(input: {
           diagnostics: initialDiagnostics,
           activeDaemonSession: !shouldExitAfterInitialPrompt(params),
         })
+        db.sessionStates.create(nextState)
       }
 
       if (existingSession) {
-        await SessionStorage.update(id, {
-          acpId: initialized.acpId,
-          status: initialized.status,
-          agentName: agentNameFromInput(params.agent),
-          cwd,
-          mcpServers: params.mcpServers,
-          repository: scope.repository,
-          prNumber: scope.prNumber,
-          metadata: metadata ?? null,
-          models: initialized.models ?? existingSession.models ?? null,
-          errorMessage: null,
-          blockedReason: null,
-          initiative: null,
-          lastAgentMessage: null,
-        })
+        const existingDocument =
+          db.sessions.first({
+            where: { sessionId: id },
+          }) ?? null
+        if (!existingDocument) {
+          throw new IpcClientError(`Cannot update unknown session: ${id}`)
+        }
+
+        db.sessions.update(existingDocument.id, (record) =>
+          applySessionUpdate(record, {
+            acpId: initialized.acpId,
+            status: initialized.status,
+            agentName: agentNameFromInput(params.agent),
+            cwd,
+            mcpServers: params.mcpServers,
+            repository: scope.repository,
+            prNumber: scope.prNumber,
+            metadata: metadata ?? null,
+            models: initialized.models ?? existingSession.models ?? null,
+            errorMessage: null,
+            blockedReason: null,
+            initiative: null,
+            lastAgentMessage: null,
+          }),
+        )
       } else {
-        await SessionStorage.create({
+        const nextSession = normalizeSessionInsert({
           id,
           acpId: initialized.acpId,
           status: initialized.status,
@@ -1228,6 +1330,7 @@ export function createSessionManager(input: {
           metadata: metadata ?? null,
           models: initialized.models ?? null,
         })
+        db.sessions.create(nextSession)
       }
       await emitDiagnostic(id, "session_created", {
         status: initialized.status,
@@ -1248,8 +1351,18 @@ export function createSessionManager(input: {
         await setConnectionMode(id, "history", false)
         await emitDiagnostic(id, "session_completed_one_shot")
         await treeKill(agentProcess)
-        await SessionPermissionsStorage.revoke(id).catch(() => {})
-        return toDaemonSession(await SessionStorage.get(id))
+        const permission =
+          db.sessionPermissions.first({
+            where: { sessionId: id },
+          }) ?? null
+        if (permission) {
+          await Promise.resolve(db.sessionPermissions.delete(permission.id)).catch(() => {})
+        }
+        const sessionDocument =
+          db.sessions.first({
+            where: { sessionId: id },
+          }) ?? null
+        return toDaemonSession(sessionDocument ? fromStoredSession(sessionDocument) : null)
       }
 
       const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
@@ -1319,7 +1432,13 @@ export function createSessionManager(input: {
         )
         await activeSession.writer.close().catch(() => {})
         await activeSession.subscription.close().catch(() => {})
-        await SessionPermissionsStorage.revoke(activeSession.id).catch(() => {})
+        const permission =
+          db.sessionPermissions.first({
+            where: { sessionId: activeSession.id },
+          }) ?? null
+        if (permission) {
+          await Promise.resolve(db.sessionPermissions.delete(permission.id)).catch(() => {})
+        }
 
         const nextUpdate: SQLSessionUpdate = {}
         if (code !== 0 && code !== null) {
@@ -1356,15 +1475,31 @@ export function createSessionManager(input: {
       })
 
       activeSessions.set(activeSession.id, activeSession)
-      return toDaemonSession(await SessionStorage.get(id))
+      const sessionDocument =
+        db.sessions.first({
+          where: { sessionId: id },
+        }) ?? null
+      return toDaemonSession(sessionDocument ? fromStoredSession(sessionDocument) : null)
     } catch (error) {
       logger.log("session.launch_failed", {
         sessionId: id,
         ...sessionLogContext,
         errorMessage: error instanceof Error ? error.message : String(error),
       })
-      await SessionPermissionsStorage.revoke(id).catch(() => {})
-      await SessionStateStorage.remove(id).catch(() => {})
+      const permission =
+        db.sessionPermissions.first({
+          where: { sessionId: id },
+        }) ?? null
+      if (permission) {
+        await Promise.resolve(db.sessionPermissions.delete(permission.id)).catch(() => {})
+      }
+      const state =
+        db.sessionStates.first({
+          where: { sessionId: id },
+        }) ?? null
+      if (state) {
+        await Promise.resolve(db.sessionStates.delete(state.id)).catch(() => {})
+      }
       throw error
     }
   }
@@ -1375,7 +1510,11 @@ export function createSessionManager(input: {
 
   async function loadSession(params: LoadSessionParams): Promise<DaemonSession> {
     await ready
-    const existingSession = await SessionStorage.get(params.id)
+    const existingRecord =
+      db.sessions.first({
+        where: { sessionId: params.id },
+      }) ?? null
+    const existingSession = existingRecord ? fromStoredSession(existingRecord) : null
     if (!existingSession) {
       throw new IpcClientError(`Cannot load unknown session: ${params.id}`)
     }
@@ -1385,7 +1524,11 @@ export function createSessionManager(input: {
 
   async function getSession(id: string): Promise<DaemonSession> {
     await ready
-    return toDaemonSession(await SessionStorage.get(id))
+    const record =
+      db.sessions.first({
+        where: { sessionId: id },
+      }) ?? null
+    return toDaemonSession(record ? fromStoredSession(record) : null)
   }
 
   async function listSessions(
@@ -1393,10 +1536,15 @@ export function createSessionManager(input: {
   ): Promise<ListDaemonSessionsResponse> {
     await ready
     const pageSize = normalizeSessionPageSize(params.limit)
-    const records = await SessionStorage.listRecent({
-      limit: pageSize + 1,
-      cursor: decodeSessionListCursor(params.cursor),
-    })
+    const cursor = decodeSessionListCursor(params.cursor)
+    const cursorSortKey = cursor ? toSessionSortKey(cursor.updatedAt.valueOf(), cursor.id) : null
+    const records = db.sessions
+      .findMany({
+        where: cursorSortKey ? { sortKey: { lt: cursorSortKey } } : undefined,
+        orderBy: { sortKey: "desc" },
+        limit: pageSize + 1,
+      })
+      .map(fromStoredSession)
     const hasMore = records.length > pageSize
     const pageRecords = records.slice(0, pageSize)
 
@@ -1430,14 +1578,23 @@ export function createSessionManager(input: {
       id: session.id,
       acpId: session.acpId,
       connection: session.connection,
-      history: active ? [...active.history] : ((await SessionStateStorage.get(id))?.history ?? []),
+      history: active
+        ? [...active.history]
+        : ((
+            db.sessionStates.first({
+              where: { sessionId: id },
+            }) ?? null
+          )?.history ?? []),
     }
   }
 
   async function getDiagnostics(id: string): Promise<GetDaemonSessionDiagnosticsResponse> {
     await ready
     const session = await getSession(id)
-    const state = await SessionStateStorage.get(id)
+    const state =
+      db.sessionStates.first({
+        where: { sessionId: id },
+      }) ?? null
     return {
       id: session.id,
       acpId: session.acpId,
@@ -1545,7 +1702,10 @@ export function createSessionManager(input: {
 
   async function resolveSessionIdByToken(token: string): Promise<string> {
     await ready
-    const record = await SessionPermissionsStorage.getByToken(token)
+    const record =
+      db.sessionPermissions.first({
+        where: { token },
+      }) ?? null
     if (!record) {
       throw new IpcClientError("Invalid session token")
     }
@@ -1560,7 +1720,13 @@ export function createSessionManager(input: {
       await treeKill(session.process)
       await session.writer.close().catch(() => {})
       await session.subscription.close().catch(() => {})
-      await SessionPermissionsStorage.revoke(session.id).catch(() => {})
+      const permission =
+        db.sessionPermissions.first({
+          where: { sessionId: session.id },
+        }) ?? null
+      if (permission) {
+        await Promise.resolve(db.sessionPermissions.delete(permission.id)).catch(() => {})
+      }
     }
     activeSessions.clear()
   }

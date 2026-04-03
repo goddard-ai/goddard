@@ -4,7 +4,8 @@ import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createDaemonLogger } from "./logging.ts"
-import { ManagedPrLocationStorage } from "./persistence/managed-pr-locations.ts"
+import { getManagedPrLocationKey } from "./persistence/managed-pr-locations.ts"
+import { db } from "./persistence/store.ts"
 import * as prompts from "./prompts/index.ts"
 
 export type OneShotInput = {
@@ -91,5 +92,11 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
 }
 
 async function resolveProjectDir(event: FeedbackEvent): Promise<string | null> {
-  return (await ManagedPrLocationStorage.get(event.owner, event.repo, event.prNumber))?.cwd ?? null
+  return (
+    db.managedPrLocations.first({
+      where: {
+        locationKey: getManagedPrLocationKey(event.owner, event.repo, event.prNumber),
+      },
+    })?.cwd ?? null
+  )
 }

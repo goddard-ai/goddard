@@ -24,6 +24,9 @@
     "acp": "bun run ./scripts/acp-session.ts",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
+  "dependencies": {
+    "kindstore": "0.3.2"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
     "@goddard-ai/daemon": "workspace:^",

@@ -1,11 +1,27 @@
-import { and, desc, eq, lt, or } from "drizzle-orm"
-import { getDatabaseInstance } from "./db/index.ts"
-import { sessions } from "./db/schema.ts"
+import type * as acp from "@agentclientprotocol/sdk"
+import type { DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
+import type { SessionStatus } from "@goddard-ai/schema/db"
+import { db } from "./store.ts"
 
-/** Full SQL row shape accepted when creating a durable session record. */
-export type SQLSessionInsert = typeof sessions.$inferInsert
+/** Full durable daemon-session row accepted when creating a session record. */
+export type SQLSessionInsert = {
+  id: string
+  acpId: string
+  status: SessionStatus
+  agentName: string
+  cwd: string
+  mcpServers: acp.McpServer[]
+  errorMessage?: string | null
+  blockedReason?: string | null
+  initiative?: string | null
+  lastAgentMessage?: string | null
+  repository?: string | null
+  prNumber?: number | null
+  metadata?: DaemonSessionMetadata | null
+  models?: acp.SessionModelState | null
+}
 
-/** Partial SQL row updates that may mutate an existing durable session record. */
+/** Partial daemon-session updates that may mutate an existing durable session record. */
 export type SQLSessionUpdate = Partial<SQLSessionInsert>
 
 /** Stable cursor key used for recency-ordered daemon session pagination. */
@@ -14,64 +30,111 @@ export type SQLSessionListCursor = {
   id: string
 }
 
-/** SQL-backed storage for the primary durable facts about daemon sessions. */
-export namespace SessionStorage {
-  export async function create(data: SQLSessionInsert) {
-    const db = await getDatabaseInstance()
-    await db.insert(sessions).values(data)
+/** Durable daemon-session row returned from kindstore-backed persistence. */
+export type SQLSessionRecord = Required<
+  Pick<SQLSessionInsert, "id" | "acpId" | "status" | "agentName" | "cwd" | "mcpServers">
+> & {
+  createdAt: Date
+  updatedAt: Date
+  errorMessage: string | null
+  blockedReason: string | null
+  initiative: string | null
+  lastAgentMessage: string | null
+  repository: string | null
+  prNumber: number | null
+  metadata: DaemonSessionMetadata | null
+  models: acp.SessionModelState | null
+}
+
+export type StoredSessionRecord = NonNullable<ReturnType<typeof db.sessions.get>>
+
+function toRepositoryPrKey(repository: string | null, prNumber: number | null) {
+  return repository && typeof prNumber === "number" ? `${repository}#${prNumber}` : null
+}
+
+export function toSessionSortKey(updatedAt: number, sessionId: string) {
+  return `${String(updatedAt).padStart(13, "0")}:${sessionId}`
+}
+
+/** Converts one session insert shape into the stored kindstore payload. */
+export function normalizeSessionInsert(data: SQLSessionInsert) {
+  const updatedAt = Date.now()
+  const repository = data.repository ?? null
+  const prNumber = typeof data.prNumber === "number" ? data.prNumber : null
+
+  return {
+    sessionId: data.id,
+    acpId: data.acpId,
+    status: data.status,
+    agentName: data.agentName,
+    cwd: data.cwd,
+    mcpServers: data.mcpServers,
+    errorMessage: data.errorMessage ?? null,
+    blockedReason: data.blockedReason ?? null,
+    initiative: data.initiative ?? null,
+    lastAgentMessage: data.lastAgentMessage ?? null,
+    repository,
+    prNumber,
+    repositoryPrKey: toRepositoryPrKey(repository, prNumber),
+    metadata: data.metadata ?? null,
+    models: data.models ?? null,
+    sortKey: toSessionSortKey(updatedAt, data.id),
   }
+}
 
-  /** Lists every persisted session row without pagination. */
-  export async function listAll() {
-    const db = await getDatabaseInstance()
-    return db.select().from(sessions)
+/** Converts one stored kindstore session payload into the daemon-facing session record shape. */
+export function fromStoredSession(value: StoredSessionRecord): SQLSessionRecord {
+  return {
+    id: value.sessionId,
+    acpId: value.acpId,
+    status: value.status,
+    agentName: value.agentName,
+    cwd: value.cwd,
+    mcpServers: value.mcpServers,
+    createdAt: new Date(value.createdAt),
+    updatedAt: new Date(value.updatedAt),
+    errorMessage: value.errorMessage,
+    blockedReason: value.blockedReason,
+    initiative: value.initiative,
+    lastAgentMessage: value.lastAgentMessage,
+    repository: value.repository,
+    prNumber: value.prNumber,
+    metadata: value.metadata,
+    models: value.models,
   }
+}
 
-  export async function listRecent(input: { limit: number; cursor?: SQLSessionListCursor }) {
-    const db = await getDatabaseInstance()
-    const query = db.select().from(sessions)
-    if (input.cursor) {
-      query.where(
-        or(
-          lt(sessions.updatedAt, input.cursor.updatedAt),
-          and(eq(sessions.updatedAt, input.cursor.updatedAt), lt(sessions.id, input.cursor.id)),
-        ),
-      )
-    }
+/** Applies one partial session update to the stored kindstore payload. */
+export function applySessionUpdate(current: StoredSessionRecord, data: SQLSessionUpdate) {
+  const nextUpdatedAt = Date.now()
+  const repository = data.repository === undefined ? current.repository : (data.repository ?? null)
+  const prNumber =
+    data.prNumber === undefined
+      ? current.prNumber
+      : typeof data.prNumber === "number"
+        ? data.prNumber
+        : null
 
-    return query.orderBy(desc(sessions.updatedAt), desc(sessions.id)).limit(input.limit)
-  }
+  const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = current
 
-  export async function get(id: string) {
-    const db = await getDatabaseInstance()
-    return (await db.select().from(sessions).where(eq(sessions.id, id)))[0]
-  }
-
-  export async function getByAcpId(acpId: string) {
-    const db = await getDatabaseInstance()
-    return (await db.select().from(sessions).where(eq(sessions.acpId, acpId)))[0]
-  }
-
-  /** Lists all sessions currently associated with one repository. */
-  export async function listByRepository(repository: string) {
-    const db = await getDatabaseInstance()
-    return db.select().from(sessions).where(eq(sessions.repository, repository))
-  }
-
-  /** Lists all sessions currently associated with one repository pull request. */
-  export async function listByRepositoryPr(repository: string, prNumber: number) {
-    const db = await getDatabaseInstance()
-    return db
-      .select()
-      .from(sessions)
-      .where(and(eq(sessions.repository, repository), eq(sessions.prNumber, prNumber)))
-  }
-
-  export async function update(id: string, data: SQLSessionUpdate) {
-    const db = await getDatabaseInstance()
-    await db
-      .update(sessions)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(sessions.id, id))
+  return {
+    ...rest,
+    ...(data.acpId === undefined ? {} : { acpId: data.acpId }),
+    ...(data.status === undefined ? {} : { status: data.status }),
+    ...(data.agentName === undefined ? {} : { agentName: data.agentName }),
+    ...(data.cwd === undefined ? {} : { cwd: data.cwd }),
+    ...(data.mcpServers === undefined ? {} : { mcpServers: data.mcpServers }),
+    ...(data.errorMessage === undefined ? {} : { errorMessage: data.errorMessage ?? null }),
+    ...(data.blockedReason === undefined ? {} : { blockedReason: data.blockedReason ?? null }),
+    ...(data.initiative === undefined ? {} : { initiative: data.initiative ?? null }),
+    ...(data.lastAgentMessage === undefined
+      ? {}
+      : { lastAgentMessage: data.lastAgentMessage ?? null }),
+    ...(data.metadata === undefined ? {} : { metadata: data.metadata ?? null }),
+    ...(data.models === undefined ? {} : { models: data.models ?? null }),
+    repository,
+    prNumber,
+    repositoryPrKey: toRepositoryPrKey(repository, prNumber),
+    sortKey: toSessionSortKey(nextUpdatedAt, current.sessionId),
   }
 }

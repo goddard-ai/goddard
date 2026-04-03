@@ -6,10 +6,12 @@ import { once } from "node:events"
 import { resolveDaemonRuntimeConfig } from "../config.ts"
 import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager } from "../loop/index.ts"
-import { DaemonAuthTokenStore } from "../persistence/auth-token.ts"
-import { ManagedPrLocationStorage } from "../persistence/managed-pr-locations.ts"
-import { SessionPermissionsStorage } from "../persistence/session-permissions.ts"
-import { SessionStorage } from "../persistence/session.ts"
+import {
+  createManagedPrLocationRecord,
+  getManagedPrLocationKey,
+} from "../persistence/managed-pr-locations.ts"
+import { db } from "../persistence/store.ts"
+import { fromStoredSession } from "../persistence/session.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { createSessionManager } from "../session/manager.ts"
 import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
@@ -44,10 +46,50 @@ export async function startDaemonServer(
   const daemonUrl = createDaemonUrl(socketPath)
   const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
-  const getSessionByToken = deps.getSessionByToken ?? SessionPermissionsStorage.getByToken
-  const addAllowedPrToSession = deps.addAllowedPrToSession ?? SessionPermissionsStorage.addAllowedPr
-  const recordManagedPrLocation = deps.recordManagedPrLocation ?? ManagedPrLocationStorage.upsert
-  const authTokens = new DaemonAuthTokenStore()
+  const getSessionByToken =
+    deps.getSessionByToken ??
+    (async (token: string) =>
+      db.sessionPermissions.first({
+        where: { token },
+      }) ?? null)
+  const addAllowedPrToSession =
+    deps.addAllowedPrToSession ??
+    (async (sessionId: string, prNumber: number) => {
+      const permission = db.sessionPermissions.first({
+        where: { sessionId },
+      })
+      if (!permission) {
+        return
+      }
+
+      db.sessionPermissions.update(permission.id, (record) => {
+        if (record.allowedPrNumbers.includes(prNumber)) {
+          return record
+        }
+
+        return {
+          ...record,
+          allowedPrNumbers: [...record.allowedPrNumbers, prNumber],
+        }
+      })
+    })
+  const recordManagedPrLocation =
+    deps.recordManagedPrLocation ??
+    (async (record) => {
+      const existingRecord =
+        db.managedPrLocations.first({
+          where: {
+            locationKey: getManagedPrLocationKey(record.owner, record.repo, record.prNumber),
+          },
+        }) ?? null
+      const nextRecord = createManagedPrLocationRecord(record)
+      if (existingRecord) {
+        db.managedPrLocations.put(existingRecord.id, nextRecord)
+      } else {
+        db.managedPrLocations.create(nextRecord)
+      }
+      return nextRecord
+    })
 
   await prepareSocketPath(socketPath)
 
@@ -76,7 +118,11 @@ export async function startDaemonServer(
 
     context.setSessionId(session.sessionId)
 
-    const sessionRecord = await SessionStorage.get(session.sessionId)
+    const storedSessionRecord =
+      db.sessions.first({
+        where: { sessionId: session.sessionId },
+      }) ?? null
+    const sessionRecord = storedSessionRecord ? fromStoredSession(storedSessionRecord) : null
     const metadata =
       sessionRecord && typeof sessionRecord.metadata === "object" && sessionRecord.metadata !== null
         ? (sessionRecord.metadata as {
@@ -132,13 +178,13 @@ export async function startDaemonServer(
       authDeviceStart: async (payload) => client.auth.startDeviceFlow(payload),
       authDeviceComplete: async (payload) => {
         const session = await client.auth.completeDeviceFlow(payload)
-        await authTokens.setToken(session.token)
+        db.metadata.set("authToken", session.token)
         return session
       },
       authWhoami: async () => client.auth.whoami(),
       authLogout: async () => {
         await client.auth.logout()
-        await authTokens.clearToken()
+        db.metadata.delete("authToken")
         return { success: true as const }
       },
       prSubmit: async (payload, context) => {
@@ -190,9 +236,7 @@ export async function startDaemonServer(
         })
 
         if (!session.allowedPrNumbers.includes(resolvedInput.prNumber)) {
-          throw new IpcClientError(
-            `PR #${resolvedInput.prNumber} is not allowed for this session`,
-          )
+          throw new IpcClientError(`PR #${resolvedInput.prNumber} is not allowed for this session`)
         }
 
         const response = await client.pr.reply({

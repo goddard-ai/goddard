@@ -10,7 +10,7 @@ import {
   type DaemonLogMode,
 } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
-import { DaemonAuthTokenStore } from "./persistence/auth-token.ts"
+import { db } from "./persistence/store.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
@@ -220,16 +220,14 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
 
 /** Creates the daemon-owned backend client with auth headers sourced from daemon persistence. */
 async function defaultCreateBackendClient(baseUrl: string): Promise<BackendClient> {
-  const authTokens = new DaemonAuthTokenStore()
-
   return createBackendClient({
     baseUrl,
     getAuthorizationHeader: async () => {
-      const token = await authTokens.getToken()
+      const token = db.metadata.get("authToken") ?? null
       return token ? `Bearer ${token}` : null
     },
     clearAuthorization: async () => {
-      await authTokens.clearToken()
+      db.metadata.delete("authToken")
     },
   })
 }

@@ -7,7 +7,9 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
-import { SessionPermissionsStorage, SessionStorage } from "../src/persistence/index.ts"
+import { createSessionPermissionsRecord } from "../src/persistence/session-permissions.ts"
+import { normalizeSessionInsert } from "../src/persistence/session.ts"
+import { db, resetDb } from "../src/persistence/store.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 
 const cleanup: Array<() => Promise<void>> = []
@@ -29,6 +31,7 @@ afterEach(async () => {
   } else {
     process.env.HOME = originalHome
   }
+  resetDb()
 })
 
 afterAll(async () => {
@@ -166,7 +169,7 @@ test("daemon submit request enforces trusted repo context and records created PR
       recordedLocations.push(record)
       return {
         ...record,
-        updatedAt: new Date().toISOString(),
+        updatedAt: Date.now(),
       }
     },
     resolveSubmitRequest: async () => ({
@@ -268,7 +271,7 @@ test("daemon reply request records managed PR checkout locations", async () => {
       recordedLocations.push(record)
       return {
         ...record,
-        updatedAt: new Date().toISOString(),
+        updatedAt: Date.now(),
       }
     },
     resolveReplyRequest: async () => ({
@@ -539,7 +542,7 @@ type StartTestDaemonOptions = {
     repo: string
     prNumber: number
     cwd: string
-    updatedAt: string
+    updatedAt: number
   }>
   resolveSubmitRequest?: (input: any) => Promise<any>
   resolveReplyRequest?: (input: any) => Promise<any>
@@ -625,6 +628,7 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-home-"))
   process.env.HOME = sharedHomeDir
+  resetDb()
 }
 
 async function seedWorkforceSession(input: {
@@ -634,7 +638,7 @@ async function seedWorkforceSession(input: {
   requestId: string
   includeRootDir?: boolean
 }): Promise<void> {
-  await SessionStorage.create({
+  const sessionRecord = normalizeSessionInsert({
     id: input.sessionId,
     acpId: `acp-${input.sessionId}`,
     status: "active",
@@ -649,13 +653,15 @@ async function seedWorkforceSession(input: {
       },
     },
   })
-  await SessionPermissionsStorage.create({
+  db.sessions.create(sessionRecord)
+  const permissionRecord = createSessionPermissionsRecord({
     sessionId: input.sessionId,
     token: input.token,
     owner: "trusted",
     repo: "widgets",
     allowedPrNumbers: [],
   })
+  db.sessionPermissions.create(permissionRecord)
 }
 
 function createStaticWorkforceManager(
