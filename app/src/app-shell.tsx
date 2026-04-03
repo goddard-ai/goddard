@@ -1,14 +1,20 @@
+import { FolderOpen, FolderKanban, Inbox, ListTodo, Route, Rows3, ScrollText } from "lucide-react"
 import { useSignal } from "@preact/signals"
 import { useListener } from "preact-sigma"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
+import { browseForProject } from "~/desktop-host.ts"
+import type { NavigationItemId } from "~/navigation.ts"
+import { lookupProject } from "~/projects/project-registry.ts"
 import { SessionLaunchDialog } from "~/sessions/dialog.tsx"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
 import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
+import { CommandMenu } from "./components/CommandMenu/CommandMenu.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { GoodTooltipProvider } from "./lib/good-tooltip.tsx"
+import { deriveProjectName } from "./projects/project-name.ts"
 import { buildCreateSessionInput } from "./sessions/session-launch.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
@@ -128,6 +134,7 @@ export function AppShell() {
   const projectRegistry = useProjectRegistry()
   const sessionDialog = useSessionDialogState()
   const workbenchTabSet = useWorkbenchTabSet()
+  const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false)
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
     navigation.selectedNavId,
@@ -155,6 +162,120 @@ export function AppShell() {
 
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
+
+  function openNavigationSurfaceTab(kind: NavigationItemId) {
+    const nextNavigationItem =
+      navigation.items.find((item) => item.id === kind) ?? navigation.selectedItem
+
+    workbenchTabSet.openOrFocusTab({
+      id: `surface:${kind}`,
+      kind,
+      title: nextNavigationItem.label,
+      payload: {},
+      dirty: false,
+    })
+  }
+
+  function selectNavigationSurface(id: NavigationItemId, options?: { openInTab?: boolean }) {
+    if (options?.openInTab) {
+      openNavigationSurfaceTab(id)
+      return
+    }
+
+    navigation.selectNavItem(id)
+    workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
+  }
+
+  async function handleOpenFolderCommand() {
+    const selectedPath = await browseForProject()
+
+    if (!selectedPath) {
+      return
+    }
+
+    const existingProject = lookupProject(projectRegistry, selectedPath)
+    const projectName = existingProject?.name ?? deriveProjectName(selectedPath)
+
+    if (!existingProject) {
+      projectRegistry.addProject({
+        path: selectedPath,
+        name: projectName.length > 0 ? projectName : selectedPath,
+      })
+    }
+
+    selectNavigationSurface("projects")
+  }
+
+  const commandMenuItems = [
+    {
+      id: "open-folder",
+      group: "Actions",
+      icon: FolderOpen,
+      keywords: ["browse", "directory", "project", "add"],
+      label: "Open folder",
+      onSelect: handleOpenFolderCommand,
+    },
+    {
+      id: "view-projects",
+      group: "Views",
+      icon: FolderKanban,
+      keywords: ["navigation", "projects"],
+      label: "View projects",
+      onSelect: () => {
+        selectNavigationSurface("projects")
+      },
+    },
+    {
+      id: "view-inbox",
+      group: "Views",
+      icon: Inbox,
+      keywords: ["navigation", "inbox"],
+      label: "View inbox",
+      onSelect: () => {
+        selectNavigationSurface("inbox")
+      },
+    },
+    {
+      id: "view-sessions",
+      group: "Views",
+      icon: Rows3,
+      keywords: ["navigation", "sessions"],
+      label: "View sessions",
+      onSelect: () => {
+        selectNavigationSurface("sessions")
+      },
+    },
+    {
+      id: "view-specs",
+      group: "Views",
+      icon: ScrollText,
+      keywords: ["navigation", "specs", "documents"],
+      label: "View specs",
+      onSelect: () => {
+        selectNavigationSurface("specs")
+      },
+    },
+    {
+      id: "view-tasks",
+      group: "Views",
+      icon: ListTodo,
+      keywords: ["navigation", "tasks"],
+      label: "View tasks",
+      onSelect: () => {
+        selectNavigationSurface("tasks")
+      },
+    },
+    {
+      id: "view-roadmap",
+      group: "Views",
+      icon: Route,
+      keywords: ["navigation", "roadmap", "plan"],
+      label: "View roadmap",
+      onSelect: () => {
+        selectNavigationSurface("roadmap")
+      },
+    },
+  ] as const
 
   useListener(globalEventHub, "appMenu", (detail) => {
     switch (detail.action) {
@@ -189,6 +310,22 @@ export function AppShell() {
     }
   })
 
+  useListener(window, "keydown", (event) => {
+    const keyboardEvent = event as KeyboardEvent
+
+    if (keyboardEvent.defaultPrevented || keyboardEvent.altKey || keyboardEvent.isComposing) {
+      return
+    }
+
+    if (
+      (keyboardEvent.metaKey || keyboardEvent.ctrlKey) &&
+      keyboardEvent.key.toLowerCase() === "k"
+    ) {
+      keyboardEvent.preventDefault()
+      setIsCommandMenuOpen((open) => !open)
+    }
+  })
+
   function handleTopbarAction(action: AppShellTopbarAction) {
     if (action === "proposeTask") {
       return
@@ -208,37 +345,22 @@ export function AppShell() {
     })
   }
 
-  function openNavigationSurfaceTab<TKind extends (typeof navigation.items)[number]["id"]>(
-    kind: TKind,
-  ) {
-    const nextNavigationItem =
-      navigation.items.find((item) => item.id === kind) ?? navigation.selectedItem
-
-    workbenchTabSet.openOrFocusTab({
-      id: `surface:${kind}`,
-      kind,
-      title: nextNavigationItem.label,
-      payload: {},
-      dirty: false,
-    })
-  }
-
   return (
     <GoodTooltipProvider>
+      <CommandMenu
+        items={commandMenuItems}
+        open={isCommandMenuOpen}
+        onOpenChange={setIsCommandMenuOpen}
+      />
       <AppShellChrome
         activeTabId={workbenchTabSet.activeTabId}
         indicator={tabStrip.indicator}
         navigationItems={navigationItems}
         onAction={handleTopbarAction}
-        onNavigationSelect={(id, options) => {
-          if (options?.openInTab) {
-            openNavigationSurfaceTab(id)
-            return
-          }
-
-          navigation.selectNavItem(id)
-          workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
+        onCommandMenuOpen={() => {
+          setIsCommandMenuOpen(true)
         }}
+        onNavigationSelect={selectNavigationSurface}
         onTabClose={(id) => {
           workbenchTabSet.closeTab(id)
         }}

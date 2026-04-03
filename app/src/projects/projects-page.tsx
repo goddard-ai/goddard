@@ -19,6 +19,7 @@ import type { ComponentChild } from "preact"
 import { useEffect } from "preact/hooks"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { deriveProjectName } from "./project-name.ts"
 import { lookupProject, type ProjectRecord } from "./project-registry.ts"
 
 const panelClass = css({
@@ -233,18 +234,6 @@ const textInputClass = css({
     opacity: "0.7",
   },
 })
-
-/** Derives a default project name from the last path segment when present. */
-function deriveProjectName(path: string): string {
-  const trimmedPath = path.trim().replace(/[\\/]+$/, "")
-
-  if (trimmedPath.length === 0) {
-    return ""
-  }
-
-  const segments = trimmedPath.split(/[\\/]/)
-  return segments.at(-1) ?? ""
-}
 
 /** Renders the projects page plus its local add-project modal flow. */
 export function ProjectsPage() {

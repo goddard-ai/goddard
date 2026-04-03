@@ -5,6 +5,7 @@ const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
 
 const defaultNavigationItems = [
   { id: "inbox", label: "Inbox" },
+  { id: "projects", label: "Projects" },
   { id: "sessions", label: "Sessions" },
   { id: "search", label: "Search" },
   { id: "specs", label: "Specs" },

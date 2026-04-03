@@ -28,6 +28,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@xterm/headless": "^6.0.0",
     "bun-pty": "^0.4.8",
+    "cmdk": "^1.1.1",
     "electrobun": "^1.16.0",
     "hash-sum": "^2.0.0",
     "lucide-react": "^1.7.0",

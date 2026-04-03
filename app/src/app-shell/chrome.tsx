@@ -42,6 +42,7 @@ export function AppShellChrome(props: {
     label: string
   }>
   onAction: (action: AppShellTopbarAction) => void
+  onCommandMenuOpen: () => void
   onNavigationSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
   onTabClose: (id: string) => void
   onTabDragEnd: () => void
@@ -111,37 +112,76 @@ export function AppShellChrome(props: {
           width="137"
         /> */}
         <div
-          class={css({
-            position: "absolute",
-            left: "50%",
-            top: "10px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "min(40%, 320px)",
-            minWidth: "140px",
-            height: "28px",
-            paddingInline: "16px",
-            borderRadius: "6px",
-            backgroundColor: "#262626",
-            transform: "translateX(-50%)",
-          })}
+          class={cx(
+            css({
+              position: "absolute",
+              left: "50%",
+              top: "10px",
+              transform: "translateX(-50%)",
+            }),
+            "electrobun-webkit-app-region-no-drag",
+          )}
         >
-          <span
+          <button
+            aria-label="Open command menu"
             class={css({
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              textAlign: "center",
-              fontSize: "13px",
-              fontWeight: "400",
-              letterSpacing: "0.02em",
-              lineHeight: "1.21",
-              color: "rgba(255, 255, 255, 0.6)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "10px",
+              width: "min(44vw, 360px)",
+              minWidth: "180px",
+              height: "28px",
+              paddingInline: "12px",
+              border: "1px solid",
+              borderColor: "#313131",
+              borderRadius: "8px",
+              backgroundColor: "#262626",
+              color: "rgba(255, 255, 255, 0.72)",
+              cursor: "pointer",
+              transition:
+                "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+              _hover: {
+                backgroundColor: "#2c2c2c",
+                borderColor: "#3b3b3b",
+                color: "#ffffff",
+              },
+              _focusVisible: {
+                outline: "2px solid #66a1ff",
+                outlineOffset: "2px",
+              },
             })}
+            type="button"
+            onClick={props.onCommandMenuOpen}
           >
-            {props.selectedNavigationLabel}
-          </span>
+            <span
+              class={css({
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                textAlign: "left",
+                fontSize: "13px",
+                fontWeight: "500",
+                lineHeight: "1.21",
+                flex: "1",
+              })}
+            >
+              {props.selectedNavigationLabel}
+            </span>
+            <span
+              aria-hidden={true}
+              class={css({
+                paddingInline: "8px",
+                borderRadius: "999px",
+                backgroundColor: "#1d1d1d",
+                color: "rgba(255, 255, 255, 0.46)",
+                fontSize: "11px",
+                fontWeight: "700",
+                lineHeight: "20px",
+              })}
+            >
+              Cmd/Ctrl K
+            </span>
+          </button>
         </div>
         <div
           class={cx(

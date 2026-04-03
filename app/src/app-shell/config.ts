@@ -13,7 +13,7 @@ type AppShellSection = {
 export const appShellSections: readonly AppShellSection[] = [
   {
     group: "primary",
-    tabKinds: ["inbox", "sessions", "search"],
+    tabKinds: ["inbox", "projects", "sessions", "search"],
   },
   {
     group: "secondary",
