@@ -42,6 +42,10 @@ export const workbenchTabComponents = {
     component: PlaceholderWorkbenchTab,
     icon: "tabs/roadmap",
   },
+  settings: {
+    component: lazy(() => import("~/settings/page.tsx")),
+    icon: "settings",
+  },
   project: {
     component: lazy(() => import("~/projects/project-page.tsx")),
     icon: "tabs/projects",

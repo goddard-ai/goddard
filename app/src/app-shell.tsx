@@ -198,6 +198,14 @@ export function AppShell() {
       sessionDialog.openDialog(projectRegistry.projectList[0]?.path ?? null)
       return
     }
+
+    workbenchTabSet.openOrFocusTab({
+      id: "surface:settings",
+      kind: "settings",
+      title: "Settings",
+      payload: {},
+      dirty: false,
+    })
   }
 
   function openNavigationSurfaceTab<TKind extends (typeof navigation.items)[number]["id"]>(
