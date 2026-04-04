@@ -31,10 +31,10 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit && tsgo -p src/tauri --noEmit",
     "test": "vitest run"
   },
   "peerDependencies": {

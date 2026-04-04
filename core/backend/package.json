@@ -19,14 +19,14 @@
   },
   "scripts": {
     "start": "node dist/server.mjs",
-    "build": "tsdown",
+    "build": "tsdown --unused",
     "dev": "wrangler dev",
     "deploy": "alchemy deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

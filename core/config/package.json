@@ -14,10 +14,10 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsdown --no-minify --clean --unused --log-level error",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

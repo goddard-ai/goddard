@@ -1,7 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "compilerOptions": {
-    "types": ["node"]
-  }
+  "exclude": ["src/node", "src/tauri"]
 }
