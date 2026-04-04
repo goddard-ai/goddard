@@ -469,7 +469,9 @@ function TabButton(props: {
       ? "#cccccc"
       : "#ffffff"
     : isHovered
-      ? "#ffffff"
+      ? isHome
+        ? "#949494"
+        : "#9a9a9a"
       : isHome
         ? "#7a7a7a"
         : "#6b6b6b"
@@ -478,7 +480,9 @@ function TabButton(props: {
       ? "#cccccc"
       : "#ffffff"
     : isHovered
-      ? "#ffffff"
+      ? isHome
+        ? "#9b9b9b"
+        : "rgba(255, 255, 255, 0.52)"
       : isHome
         ? "#7a7a7a"
         : "rgba(255, 255, 255, 0.35)"
@@ -537,7 +541,7 @@ function TabButton(props: {
         })}
         style={{
           paddingLeft: "8px",
-          paddingRight: isHome ? "14px" : "34px",
+          paddingRight: isHome ? "14px" : "32px",
         }}
         role="tab"
         type="button"
@@ -605,7 +609,7 @@ function TabButton(props: {
             class={css({
               position: "absolute",
               top: "6px",
-              right: "10px",
+              right: "8px",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -614,19 +618,21 @@ function TabButton(props: {
               padding: "0",
               border: "none",
               borderRadius: "999px",
-              backgroundColor: "transparent",
-              color: "#6b6b6b",
+              backgroundColor: "rgba(255, 255, 255, 0)",
+              color: "#8d8d8d",
               cursor: "pointer",
               opacity: "0",
               transition:
-                "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+                "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               _focusVisible: {
                 outline: "2px solid #66a1ff",
                 outlineOffset: "1px",
                 opacity: "1",
+                backgroundColor: "rgba(255, 255, 255, 0.1)",
               },
               _hover: {
-                color: "#ffffff",
+                backgroundColor: "rgba(255, 255, 255, 0.1)",
+                color: "#cfcfcf",
               },
             })}
             style={{
