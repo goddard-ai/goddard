@@ -159,7 +159,7 @@ describe("core/ipc", () => {
     }> = []
     const handlerContexts: string[] = []
     let requestCount = 0
-    const ipcServer = createServer(
+    const ipcServer = createServer<typeof schema, { traceId: string }>(
       socketPath,
       schema,
       {

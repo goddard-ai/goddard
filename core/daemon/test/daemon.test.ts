@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
+import type { BackendClient } from "../src/backend.ts"
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {
   createDaemonUrl,
@@ -22,6 +23,7 @@ afterEach(async () => {
 
 class MockStreamSubscription {
   #handlers = new Map<string, ((payload?: unknown) => void)[]>()
+  #closed = false
 
   on(eventName: string, handler: (payload?: unknown) => void): this {
     const handlers = this.#handlers.get(eventName) ?? []
@@ -30,14 +32,80 @@ class MockStreamSubscription {
     return this
   }
 
+  off(eventName: string, handler: (payload?: unknown) => void): this {
+    const handlers = this.#handlers.get(eventName) ?? []
+    this.#handlers.set(
+      eventName,
+      handlers.filter((candidate) => candidate !== handler),
+    )
+    return this
+  }
+
   close(): void {
-    // no-op for tests
+    this.#closed = true
   }
 
   emit(eventName: string, payload: unknown): void {
     for (const handler of this.#handlers.get(eventName) ?? []) {
       void handler(payload)
     }
+  }
+
+  isClosed(): boolean {
+    return this.#closed
+  }
+}
+
+function createMockBackendClient(
+  input: {
+    subscription?: MockStreamSubscription
+    onSubscribe?: () => void
+  } = {},
+): BackendClient {
+  return {
+    auth: {
+      startDeviceFlow: async () => ({
+        deviceCode: "dev",
+        userCode: "code",
+        verificationUri: "https://github.com/login/device",
+        expiresIn: 900,
+        interval: 5,
+      }),
+      completeDeviceFlow: async () => ({
+        token: "tok",
+        githubUsername: "alec",
+        githubUserId: 1,
+      }),
+      whoami: async () => ({
+        token: "tok",
+        githubUsername: "alec",
+        githubUserId: 1,
+      }),
+      logout: async () => {},
+    },
+    pr: {
+      create: async (request) => ({
+        id: 1,
+        number: 1,
+        owner: request.owner,
+        repo: request.repo,
+        title: request.title,
+        body: request.body ?? "",
+        head: request.head,
+        base: request.base,
+        url: "https://github.com/acme/widgets/pull/1",
+        createdBy: "alec",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+      reply: async () => ({ success: true }),
+      isManaged: async () => true,
+    },
+    stream: {
+      subscribe: async () => {
+        input.onSubscribe?.()
+        return input.subscription ?? new MockStreamSubscription()
+      },
+    },
   }
 }
 
@@ -59,42 +127,13 @@ test("daemon run subscribes once, handles events across repositories, and passes
   const runOneShotCalls: any[] = []
   const startIpcCalls: any[] = []
   const deps: RunDaemonDeps = {
-    createBackendClient: async () => ({
-      auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev",
-          userCode: "code",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok",
-          githubUsername: "alec",
-          githubUserId: 1,
-        }),
-        whoami: async () => ({
-          token: "tok",
-          githubUsername: "alec",
-          githubUserId: 1,
-        }),
-        logout: async () => {},
-      },
-      pr: {
-        create: async () => ({
-          number: 1,
-          url: "https://github.com/acme/widgets/pull/1",
-        }),
-        reply: async () => ({ success: true }),
-        isManaged: async () => true,
-      },
-      stream: {
-        subscribe: async () => {
+    createBackendClient: async () =>
+      createMockBackendClient({
+        subscription,
+        onSubscribe: () => {
           subCalls += 1
-          return subscription
         },
-      },
-    }),
+      }),
     startIpcServer: async (_client, options) => {
       startIpcCalls.push(options)
       return {
@@ -200,42 +239,12 @@ test("daemon run can start only the IPC server when stream is disabled", async (
       },
       {
         io,
-        createBackendClient: async () => ({
-          auth: {
-            startDeviceFlow: async () => ({
-              deviceCode: "dev",
-              userCode: "code",
-              verificationUri: "https://github.com/login/device",
-              expiresIn: 900,
-              interval: 5,
-            }),
-            completeDeviceFlow: async () => ({
-              token: "tok",
-              githubUsername: "alec",
-              githubUserId: 1,
-            }),
-            whoami: async () => ({
-              token: "tok",
-              githubUsername: "alec",
-              githubUserId: 1,
-            }),
-            logout: async () => {},
-          },
-          pr: {
-            create: async () => ({
-              number: 1,
-              url: "https://github.com/acme/widgets/pull/1",
-            }),
-            reply: async () => ({ success: true }),
-            isManaged: async () => true,
-          },
-          stream: {
-            subscribe: async () => {
+        createBackendClient: async () =>
+          createMockBackendClient({
+            onSubscribe: () => {
               subCalls += 1
-              return new MockStreamSubscription()
             },
-          },
-        }),
+          }),
         startIpcServer: async (_client, options) => {
           startIpcCalls.push(options)
           return {
@@ -279,42 +288,13 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
       },
       {
         io,
-        createBackendClient: async () => ({
-          auth: {
-            startDeviceFlow: async () => ({
-              deviceCode: "dev",
-              userCode: "code",
-              verificationUri: "https://github.com/login/device",
-              expiresIn: 900,
-              interval: 5,
-            }),
-            completeDeviceFlow: async () => ({
-              token: "tok",
-              githubUsername: "alec",
-              githubUserId: 1,
-            }),
-            whoami: async () => ({
-              token: "tok",
-              githubUsername: "alec",
-              githubUserId: 1,
-            }),
-            logout: async () => {},
-          },
-          pr: {
-            create: async () => ({
-              number: 1,
-              url: "https://github.com/acme/widgets/pull/1",
-            }),
-            reply: async () => ({ success: true }),
-            isManaged: async () => true,
-          },
-          stream: {
-            subscribe: async () => {
+        createBackendClient: async () =>
+          createMockBackendClient({
+            subscription,
+            onSubscribe: () => {
               subCalls += 1
-              return subscription
             },
-          },
-        }),
+          }),
         startIpcServer: async (_client, options) => {
           startIpcCalls.push(options)
           return {

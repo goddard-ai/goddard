@@ -1,3 +1,4 @@
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import kleur from "kleur"
 import { randomUUID } from "node:crypto"
 import { inspect } from "node:util"
@@ -102,19 +103,19 @@ export function createChunkPreview(value: Uint8Array): DaemonTextPreview {
   }
 }
 
-export function readSessionIdForLog(value: unknown): string | undefined {
+export function readSessionIdForLog(value: unknown): DaemonSession["id"] | undefined {
   if (!value || typeof value !== "object") {
     return undefined
   }
 
-  if ("id" in value && typeof value.id === "string") {
-    return value.id
+  if ("id" in value && typeof value.id === "string" && value.id.startsWith("ses_")) {
+    return value.id as DaemonSession["id"]
   }
 
   if ("session" in value && value.session && typeof value.session === "object") {
     const session = value.session as { id?: unknown }
-    if (typeof session.id === "string") {
-      return session.id
+    if (typeof session.id === "string" && session.id.startsWith("ses_")) {
+      return session.id as DaemonSession["id"]
     }
   }
 

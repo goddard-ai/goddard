@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
+import type { FileSink } from "bun"
 import { Readable, Writable } from "node:stream"
-import { TransformStream } from "node:stream/web"
 import { createDaemonLogger } from "../logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
@@ -91,7 +91,7 @@ export function createAgentMessageStream(
             hooks.onChunk?.(chunk)
             controller.enqueue(chunk)
           },
-        }) as ReadableWritablePair<Uint8Array, Uint8Array>,
+        }) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>,
       )
     : readable
 
@@ -105,14 +105,14 @@ function toWritableStream(input: AgentInputStream): WritableStream<Uint8Array> {
   }
 
   return new WritableStream<Uint8Array>({
-    write(chunk) {
-      return input.write(chunk)
+    async write(chunk) {
+      await Promise.resolve(input.write(chunk))
     },
-    close() {
-      return input.end()
+    async close() {
+      await Promise.resolve(input.end())
     },
-    abort() {
-      return input.end()
+    async abort() {
+      await Promise.resolve(input.end())
     },
   })
 }
@@ -120,6 +120,6 @@ function toWritableStream(input: AgentInputStream): WritableStream<Uint8Array> {
 /** Normalizes agent stdout into a web readable stream for ACP NDJSON framing. */
 function toReadableStream(output: AgentOutputStream): ReadableStream<Uint8Array> {
   return output instanceof Readable
-    ? (Readable.toWeb(output) as ReadableStream<Uint8Array>)
+    ? (Readable.toWeb(output) as unknown as ReadableStream<Uint8Array>)
     : output
 }

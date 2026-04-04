@@ -1,15 +1,18 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterAll, afterEach, expect, test } from "bun:test"
+import type { KindInput, KindOutput } from "kindstore"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
+import type { BackendPrClient } from "../src/ipc/types.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
-import { normalizeSessionInsert } from "../src/persistence/session.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
+import type { WorkforceManager, WorkforceManagerMutation } from "../src/workforce/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
+import type { WorkforceActorContext } from "../src/workforce/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -115,6 +118,7 @@ test("daemon submit request enforces trusted repo context and records created PR
   const createCalls: Array<Record<string, unknown>> = []
   const recordedPrs: Array<{ sessionId: string; prNumber: number }> = []
   const recordedLocations: Array<{
+    host: "github"
     owner: string
     repo: string
     prNumber: number
@@ -167,7 +171,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     recordPullRequest: async (record) => {
       recordedLocations.push(record)
       return {
-        id: "pr_test",
+        id: db.pullRequests.newId(),
         ...record,
         updatedAt: Date.now(),
       }
@@ -252,6 +256,7 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
 
 test("daemon reply request records pull request checkout locations", async () => {
   const recordedLocations: Array<{
+    host: "github"
     owner: string
     repo: string
     prNumber: number
@@ -271,7 +276,7 @@ test("daemon reply request records pull request checkout locations", async () =>
     recordPullRequest: async (record) => {
       recordedLocations.push(record)
       return {
-        id: "pr_test",
+        id: db.pullRequests.newId(),
         ...record,
         updatedAt: Date.now(),
       }
@@ -515,41 +520,21 @@ type StartTestDaemonOptions = {
     Parameters<typeof startDaemonServer>[2]
   >["createWorkforceManager"]
   sdk?: {
-    auth?: {
-      startDeviceFlow?: () => Promise<Record<string, unknown>>
-      completeDeviceFlow?: () => Promise<Record<string, unknown>>
-      whoami?: () => Promise<Record<string, unknown>>
-      logout?: () => Promise<void>
-    }
-    pr?: {
-      create?: (input: any) => Promise<{ number: number; url: string }>
-      reply?: (input: any) => Promise<{ success: boolean }>
-    }
+    auth?: Partial<BackendPrClient["auth"]>
+    pr?: Partial<BackendPrClient["pr"]>
   }
   auth?: {
     getSessionByToken?: (token: string) => Promise<{
-      sessionId: string
+      sessionId: DaemonSession["id"]
       owner: string
       repo: string
       allowedPrNumbers: number[]
     } | null>
-    addAllowedPr?: (sessionId: string, prNumber: number) => Promise<void>
+    addAllowedPr?: (sessionId: DaemonSession["id"], prNumber: number) => Promise<void>
   }
-  recordPullRequest?: (record: {
-    host: "github"
-    owner: string
-    repo: string
-    prNumber: number
-    cwd: string
-  }) => Promise<{
-    id: string
-    host: "github"
-    owner: string
-    repo: string
-    prNumber: number
-    cwd: string
-    updatedAt: number
-  }>
+  recordPullRequest?: (
+    record: KindInput<typeof db.schema.pullRequests>,
+  ) => Promise<KindOutput<typeof db.schema.pullRequests>>
   resolveSubmitRequest?: (input: any) => Promise<any>
   resolveReplyRequest?: (input: any) => Promise<any>
 }
@@ -644,7 +629,7 @@ async function seedWorkforceSession(input: {
   requestId: string
   includeRootDir?: boolean
 }): Promise<void> {
-  const sessionRecord = normalizeSessionInsert({
+  const sessionRecord = {
     acpSessionId: `acp-${input.sessionId}`,
     status: "active",
     agentName: "pi",
@@ -657,7 +642,7 @@ async function seedWorkforceSession(input: {
       allowedPrNumbers: [],
     },
     metadata: null,
-  })
+  } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(input.sessionId, sessionRecord)
   db.workforces.create({
     sessionId: input.sessionId,
@@ -670,10 +655,10 @@ async function seedWorkforceSession(input: {
 function createStaticWorkforceManager(
   onAppend: (
     rootDir: string,
-    mutation: { type: string },
-    actor: { rootDir: string | null },
+    mutation: WorkforceManagerMutation,
+    actor: WorkforceActorContext,
   ) => void,
-) {
+): WorkforceManager {
   return {
     startWorkforce: async (rootDir: string) => buildWorkforce(rootDir),
     getWorkforce: async (rootDir: string) => buildWorkforce(rootDir),
@@ -681,13 +666,27 @@ function createStaticWorkforceManager(
     shutdownWorkforce: async () => true,
     appendWorkforceEvent: async (
       rootDir: string,
-      mutation: { type: string; requestId?: string },
-      actor: { rootDir: string | null },
+      mutation: WorkforceManagerMutation,
+      actor?: WorkforceActorContext,
     ) => {
-      onAppend(rootDir, mutation, actor)
+      onAppend(
+        rootDir,
+        mutation,
+        actor ?? {
+          sessionId: null,
+          rootDir: null,
+          agentId: null,
+          requestId: null,
+        },
+      )
       return {
         workforce: buildWorkforceStatus(rootDir),
-        requestId: mutation.type === "request" ? "req-1" : (mutation.requestId ?? null),
+        requestId:
+          mutation.type === "request"
+            ? "req-1"
+            : "requestId" in mutation
+              ? (mutation.requestId ?? null)
+              : null,
       }
     },
     close: async () => {},

@@ -1,5 +1,5 @@
 import { agentBinaryPlatforms } from "@goddard-ai/schema/session-server"
-import { access, chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createGzip } from "node:zlib"
@@ -83,7 +83,7 @@ test("installBinaryTargetPayload writes raw binaries to the declared command pat
 
   // Explicit exception: remote archive downloads cross a non-local third-party boundary.
   const fetchMock = vi.fn(async () => new Response("#!/bin/sh\nexit 0\n", { status: 200 }))
-  globalThis.fetch = fetchMock as typeof fetch
+  globalThis.fetch = fetchMock as unknown as typeof fetch
 
   await installBinaryTargetPayload({
     archiveUrl:
@@ -105,7 +105,7 @@ test("installBinaryTargetPayload restores executability for zip payload commands
   const fetchMock = vi.fn(
     async () => new Response(Buffer.from(testZipArchiveBase64, "base64"), { status: 200 }),
   )
-  globalThis.fetch = fetchMock as typeof fetch
+  globalThis.fetch = fetchMock as unknown as typeof fetch
 
   await installBinaryTargetPayload({
     archiveUrl: "https://example.com/opencode-darwin-arm64.zip",
@@ -127,8 +127,8 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
   resetDb()
 
   const archiveBody = await createTestTarGzArchive()
-  const fetchMock = vi.fn(async () => new Response(archiveBody, { status: 200 }))
-  globalThis.fetch = fetchMock as typeof fetch
+  const fetchMock = vi.fn(async () => new Response(Buffer.from(archiveBody), { status: 200 }))
+  globalThis.fetch = fetchMock as unknown as typeof fetch
 
   const binaryTarget = {
     archive:

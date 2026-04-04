@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
+import type { DaemonLoop, DaemonLoopStatus, DaemonSession } from "@goddard-ai/schema/daemon"
 import { pathToFileURL } from "node:url"
 import { proportionalJitter } from "radashi"
 import { createDaemonLogger, createPayloadPreview } from "../logging.ts"
@@ -26,7 +26,7 @@ export class LoopRuntime {
   readonly #config: ResolvedDaemonLoopStartRequest
   readonly #deps: LoopRuntimeDeps
   readonly #startedAt: string
-  readonly #sessionId: string
+  readonly #sessionId: DaemonSession["id"]
   readonly #sessionAcpId: string
   readonly #rateLimiter: LoopRateLimiter
 
@@ -41,7 +41,7 @@ export class LoopRuntime {
   private constructor(input: {
     config: ResolvedDaemonLoopStartRequest
     deps: LoopRuntimeDeps
-    sessionId: string
+    sessionId: DaemonSession["id"]
     sessionAcpId: string
   }) {
     this.#config = input.config

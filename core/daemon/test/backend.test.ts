@@ -73,8 +73,9 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   const server = await startBackendServer(controlPlane, { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
   let authorization: string | null = null
-  let subscription: Awaited<ReturnType<ReturnType<typeof createBackendClient>["stream"]["subscribe"]>> | null =
-    null
+  let subscription: Awaited<
+    ReturnType<ReturnType<typeof createBackendClient>["stream"]["subscribe"]>
+  > | null = null
 
   try {
     const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
@@ -91,7 +92,7 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
     subscription = await client.stream.subscribe()
 
     const eventPromise = new Promise<unknown>((resolve) => {
-      subscription.on("event", resolve)
+      subscription!.on("event", resolve)
     })
 
     const pr = await client.pr.create({

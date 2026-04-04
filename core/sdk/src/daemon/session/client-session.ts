@@ -1,9 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 
 /** Managed agent session connected to the daemon over IPC. */
 export class AgentSession {
-  public readonly sessionId: string
+  public readonly sessionId: DaemonSession["id"]
 
   private readonly acpSessionId: string
   private readonly acpClient: acp.ClientSideConnection
@@ -11,7 +12,7 @@ export class AgentSession {
   private readonly closeStream: () => Promise<void> | void
 
   constructor(
-    sessionId: string,
+    sessionId: DaemonSession["id"],
     acpSessionId: string,
     acpClient: acp.ClientSideConnection,
     daemonClient: DaemonIpcClient,

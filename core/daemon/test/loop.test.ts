@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { startDaemonServer } from "../src/ipc.ts"
+import type { LoopManager } from "../src/loop/manager.ts"
 import { createLoopManager } from "../src/loop/manager.ts"
 import { normalizeLoopRootDir } from "../src/loop/paths.ts"
 import { LoopRuntime } from "../src/loop/runtime.ts"
@@ -76,66 +77,72 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
       socketPath: join(socketDir, "daemon.sock"),
     },
     {
-      createLoopManager: () => ({
-        startLoop: async (input) => ({
-          state: "running",
-          rootDir: input.rootDir,
-          loopName: input.loopName,
-          promptModulePath: `${input.rootDir}/.goddard/loops/${input.loopName}/prompt.js`,
-          startedAt: "2026-03-20T00:00:00.000Z",
-          sessionId: "session-1",
-          acpSessionId: "acp-1",
-          cycleCount: 0,
-          lastPromptAt: null,
-          session: input.session,
-          rateLimits: input.rateLimits,
-          retries: input.retries,
-        }),
-        getLoop: async (rootDir: string, loopName: string) => ({
-          state: "running",
-          rootDir,
-          loopName,
-          promptModulePath: `${rootDir}/.goddard/loops/${loopName}/prompt.js`,
-          startedAt: "2026-03-20T00:00:00.000Z",
-          sessionId: "session-1",
-          acpSessionId: "acp-1",
-          cycleCount: 1,
-          lastPromptAt: null,
-          session: {
-            agent: "pi-acp",
-            cwd: rootDir,
-            mcpServers: [],
-            systemPrompt: "test",
-          },
-          rateLimits: {
-            cycleDelay: "30s",
-            maxOpsPerMinute: 4,
-            maxCyclesBeforePause: 200,
-          },
-          retries: {
-            maxAttempts: 1,
-            initialDelayMs: 500,
-            maxDelayMs: 5_000,
-            backoffFactor: 2,
-            jitterRatio: 0.2,
-          },
-        }),
-        listLoops: async () => [
-          {
+      createLoopManager: () =>
+        ({
+          startLoop: async (input) => ({
             state: "running",
-            rootDir: "/repo",
-            loopName: "review",
-            promptModulePath: "/repo/.goddard/loops/review/prompt.js",
+            rootDir: input.rootDir,
+            loopName: input.loopName,
+            promptModulePath: `${input.rootDir}/.goddard/loops/${input.loopName}/prompt.js`,
             startedAt: "2026-03-20T00:00:00.000Z",
-            sessionId: "session-1",
+            sessionId: "ses_1",
+            acpSessionId: "acp-1",
+            cycleCount: 0,
+            lastPromptAt: null,
+            session: input.session ?? {
+              agent: "pi-acp",
+              cwd: input.rootDir,
+              mcpServers: [],
+              systemPrompt: "",
+            },
+            rateLimits: input.rateLimits,
+            retries: input.retries,
+          }),
+          getLoop: async (rootDir: string, loopName: string) => ({
+            state: "running",
+            rootDir,
+            loopName,
+            promptModulePath: `${rootDir}/.goddard/loops/${loopName}/prompt.js`,
+            startedAt: "2026-03-20T00:00:00.000Z",
+            sessionId: "ses_1",
             acpSessionId: "acp-1",
             cycleCount: 1,
             lastPromptAt: null,
-          },
-        ],
-        shutdownLoop: async () => true,
-        close: async () => {},
-      }),
+            session: {
+              agent: "pi-acp",
+              cwd: rootDir,
+              mcpServers: [],
+              systemPrompt: "test",
+            },
+            rateLimits: {
+              cycleDelay: "30s",
+              maxOpsPerMinute: 4,
+              maxCyclesBeforePause: 200,
+            },
+            retries: {
+              maxAttempts: 1,
+              initialDelayMs: 500,
+              maxDelayMs: 5_000,
+              backoffFactor: 2,
+              jitterRatio: 0.2,
+            },
+          }),
+          listLoops: async () => [
+            {
+              state: "running",
+              rootDir: "/repo",
+              loopName: "review",
+              promptModulePath: "/repo/.goddard/loops/review/prompt.js",
+              startedAt: "2026-03-20T00:00:00.000Z",
+              sessionId: "ses_1",
+              acpSessionId: "acp-1",
+              cycleCount: 1,
+              lastPromptAt: null,
+            },
+          ],
+          shutdownLoop: async () => true,
+          close: async () => {},
+        }) as LoopManager,
     },
   )
   cleanup.push(async () => {

@@ -30,12 +30,12 @@ describe("@goddard-ai/sdk session namespace", () => {
 
     send.mockResolvedValueOnce({ accepted: true })
 
-    await expect(sdk.session.send({ id: "daemon-session-1", message })).resolves.toEqual({
+    await expect(sdk.session.send({ id: "ses_1", message })).resolves.toEqual({
       accepted: true,
     })
 
     expect(send).toHaveBeenCalledWith("sessionSend", {
-      id: "daemon-session-1",
+      id: "ses_1",
       message,
     })
   })
@@ -46,9 +46,9 @@ describe("@goddard-ai/sdk session namespace", () => {
     const unsubscribe = vi.fn()
 
     subscribe.mockImplementationOnce(async (_name, subscription, handler) => {
-      expect(subscription).toEqual({ id: "daemon-session-1" })
+      expect(subscription).toEqual({ id: "ses_1" })
       handler({
-        id: "daemon-session-1",
+        id: "ses_1",
         message: {
           jsonrpc: "2.0",
           method: acp.CLIENT_METHODS.session_update,
@@ -58,13 +58,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       return unsubscribe
     })
 
-    const result = await sdk.session.subscribe({ id: "daemon-session-1" }, onMessage)
+    const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
 
-    expect(subscribe).toHaveBeenCalledWith(
-      "sessionMessage",
-      { id: "daemon-session-1" },
-      expect.any(Function),
-    )
+    expect(subscribe).toHaveBeenCalledWith("sessionMessage", { id: "ses_1" }, expect.any(Function))
     expect(onMessage).toHaveBeenCalledTimes(1)
     expect(onMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
@@ -81,11 +77,11 @@ describe("@goddard-ai/sdk session namespace", () => {
     subscribe.mockResolvedValueOnce(unsubscribe)
     send.mockResolvedValueOnce({
       session: {
-        id: "daemon-session-1",
+        id: "ses_1",
         acpSessionId: "acp-session-1",
       },
     })
-    send.mockResolvedValueOnce({ id: "daemon-session-1", success: true })
+    send.mockResolvedValueOnce({ id: "ses_1", success: true })
 
     const session = await sdk.session.run({
       agent: "pi",
@@ -95,7 +91,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
 
     expect(session).toBeInstanceOf(AgentSession)
-    await session.stop()
+    await session!.stop()
 
     expect(send).toHaveBeenNthCalledWith(1, "sessionCreate", {
       agent: "pi",
@@ -110,12 +106,8 @@ describe("@goddard-ai/sdk session namespace", () => {
       initialPrompt: undefined,
       oneShot: undefined,
     })
-    expect(subscribe).toHaveBeenCalledWith(
-      "sessionMessage",
-      { id: "daemon-session-1" },
-      expect.any(Function),
-    )
-    expect(send).toHaveBeenNthCalledWith(2, "sessionShutdown", { id: "daemon-session-1" })
+    expect(subscribe).toHaveBeenCalledWith("sessionMessage", { id: "ses_1" }, expect.any(Function))
+    expect(send).toHaveBeenNthCalledWith(2, "sessionShutdown", { id: "ses_1" })
   })
 
   test("workforce.subscribe passes the root filter and unwraps ledger events", async () => {
@@ -165,7 +157,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   test("AgentSession.setAgentModel forwards the requested model id through ACP", async () => {
     const setModelMock = vi.fn()
     const session = new AgentSession(
-      "daemon-session-1",
+      "ses_1",
       "acp-session-1",
       {
         prompt: vi.fn(),

@@ -1,6 +1,6 @@
 import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
 import { ActionConfig, type InlineSessionParams } from "@goddard-ai/schema/config"
-import type { SessionParams } from "@goddard-ai/schema/session-server"
+import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
@@ -135,7 +135,7 @@ export function buildNamedActionSessionParams(
   action: ResolvedDaemonAction,
   cwd: string,
   params: InlineSessionParams = {},
-): SessionParams & { oneShot: true } {
+): CreateDaemonSessionRequest & { oneShot: true } {
   const sessionConfig = action.config.session ?? {}
 
   return {
@@ -143,7 +143,7 @@ export function buildNamedActionSessionParams(
     cwd: resolve(params.cwd ?? cwd),
     mcpServers: params.mcpServers ?? sessionConfig.mcpServers ?? [],
     env: params.env ?? sessionConfig.env,
-    systemPrompt: params.systemPrompt,
+    systemPrompt: params.systemPrompt ?? "",
     repository: params.repository,
     prNumber: params.prNumber,
     metadata: params.metadata,

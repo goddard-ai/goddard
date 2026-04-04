@@ -4,6 +4,7 @@ import { createRequire } from "node:module"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
+import { ReadableStream } from "node:stream/web"
 import { createGunzip } from "node:zlib"
 import * as tarFs from "tar-fs"
 
@@ -48,7 +49,7 @@ export async function installBinaryTargetPayload(
 
   await mkdir(input.installDir, { recursive: true })
 
-  const payloadStream = Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
+  const payloadStream = Readable.fromWeb(response.body as unknown as ReadableStream)
 
   switch (detectBinaryTargetPayloadFormat(input.archiveUrl)) {
     case "raw":

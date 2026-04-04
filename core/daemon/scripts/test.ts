@@ -1,4 +1,5 @@
-import { readdir } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -14,20 +15,29 @@ async function listTestFiles() {
 }
 
 /** Runs one daemon test file in its own Bun test process to avoid mock leakage. */
-function runTestFile(fileName: string) {
-  return Bun.spawnSync(["bun", "test", "--conditions", "source", join("test", fileName)], {
-    cwd: packageDir,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-    env: process.env,
-  })
+async function runTestFile(fileName: string) {
+  const homeDir = await mkdtemp(join(tmpdir(), "goddard-daemon-test-home-"))
+
+  try {
+    return Bun.spawnSync(["bun", "test", "--conditions", "source", join("test", fileName)], {
+      cwd: packageDir,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      env: {
+        ...process.env,
+        HOME: homeDir,
+      },
+    })
+  } finally {
+    await rm(homeDir, { recursive: true, force: true })
+  }
 }
 
 const files = await listTestFiles()
 
 for (const fileName of files) {
-  const result = runTestFile(fileName)
+  const result = await runTestFile(fileName)
   if (result.exitCode === 0) {
     continue
   }

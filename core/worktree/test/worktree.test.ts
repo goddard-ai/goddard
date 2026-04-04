@@ -63,7 +63,6 @@ test("default plugin uses the global worktree directory when the repository has 
 
 test("worktree setup maps repository subdirectories into the created workspace", async () => {
   const repoDir = await createRepoFixture({ includeSrc: true })
-  const requestedCwd = join(repoDir, "src")
 
   const worktree = new Worktree({ cwd: repoDir })
   const created = await worktree.setup("feature-1")
