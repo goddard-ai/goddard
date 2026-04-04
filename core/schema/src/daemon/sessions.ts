@@ -18,11 +18,40 @@ export const SessionWorktreeParams = z.object({
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
 
+/** Workforce attachment stored separately from the base daemon session record. */
+export const SessionWorkforceParams = z
+  .object({
+    rootDir: z.string().optional(),
+    agentId: z.string().optional(),
+    requestId: z.string().optional(),
+  })
+  .catchall(z.unknown())
+
+export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
+
+/** Persisted daemon-managed worktree metadata addressed by one session id. */
+export const DaemonSessionWorktree = z.strictObject({
+  repoRoot: z.string(),
+  requestedCwd: z.string(),
+  effectiveCwd: z.string(),
+  worktreeDir: z.string(),
+  branchName: z.string(),
+  poweredBy: z.string(),
+})
+
+export type DaemonSessionWorktree = z.infer<typeof DaemonSessionWorktree>
+
+/** Persisted daemon-managed workforce metadata addressed by one session id. */
+export const DaemonSessionWorkforce = SessionWorkforceParams
+
+export type DaemonSessionWorkforce = z.infer<typeof DaemonSessionWorkforce>
+
 /** Request payload used to create one daemon-managed session. */
 export const CreateDaemonSessionRequest = z.object({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
   cwd: z.string(),
   worktree: SessionWorktreeParams.optional(),
+  workforce: SessionWorkforceParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string(),
   env: z.record(z.string(), z.string()).optional(),
@@ -89,7 +118,6 @@ export type DaemonSessionRuntimeEnv = {
 export type DaemonSessionConnection = {
   mode: "live" | "history" | "none"
   reconnectable: boolean
-  historyAvailable: boolean
   activeDaemonSession: boolean
 }
 
@@ -99,13 +127,6 @@ export type DaemonDiagnosticEvent = {
   at: string
   sessionId: string
   detail?: Record<string, unknown>
-}
-
-/** Lightweight diagnostic summary exposed with every daemon session read. */
-export type DaemonSessionDiagnostics = {
-  eventCount: number
-  historyLength: number
-  lastEventAt: string | null
 }
 
 /** Stable identity values used to address one daemon-managed session. */
@@ -123,7 +144,6 @@ export type DaemonSession = DaemonSessionIdentity & {
   prNumber: number | null
   metadata: DaemonSessionMetadata | null
   connection: DaemonSessionConnection
-  diagnostics: DaemonSessionDiagnostics
   createdAt: string
   updatedAt: string
   errorMessage: string | null
@@ -160,6 +180,16 @@ export type GetDaemonSessionHistoryResponse = DaemonSessionIdentity & {
 export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
   connection: DaemonSessionConnection
   events: DaemonDiagnosticEvent[]
+}
+
+/** Response payload returned after one daemon-managed session worktree fetch. */
+export type GetDaemonSessionWorktreeResponse = DaemonSessionIdentity & {
+  worktree: DaemonSessionWorktree | null
+}
+
+/** Response payload returned after one daemon-managed session workforce fetch. */
+export type GetDaemonSessionWorkforceResponse = DaemonSessionIdentity & {
+  workforce: DaemonSessionWorkforce | null
 }
 
 /** Response payload returned after one daemon-managed session shutdown request. */

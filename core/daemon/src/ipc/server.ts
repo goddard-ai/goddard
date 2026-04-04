@@ -1,6 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { IpcClientError, createServer } from "@goddard-ai/ipc/node"
-import type { SubscribeDaemonWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonSession,
+  SubscribeDaemonWorkforceEventsRequest,
+} from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { once } from "node:events"
 import { resolveDaemonRuntimeConfig } from "../config.ts"
@@ -23,8 +26,8 @@ import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts
 /** Mutable logging context carried through one daemon IPC request. */
 type DaemonIpcRequestContext = {
   opId: string
-  sessionId: string | undefined
-  setSessionId: (sessionId: string) => void
+  sessionId: DaemonSession["id"] | undefined
+  setSessionId: (sessionId: DaemonSession["id"]) => void
 }
 
 export async function startDaemonServer(
@@ -61,7 +64,7 @@ export async function startDaemonServer(
     })
   const addAllowedPrToSession =
     deps.addAllowedPrToSession ??
-    (async (sessionId: string, prNumber: number) => {
+    (async (sessionId: DaemonSession["id"], prNumber: number) => {
       const sessionRecord = db.sessions.get(sessionId)
       if (!sessionRecord?.permissions) {
         return
@@ -107,7 +110,7 @@ export async function startDaemonServer(
   async function resolveWorkforceActor(
     token: string | undefined,
     requestedRootDir: string,
-    context: { setSessionId: (sessionId: string) => void },
+    context: { setSessionId: (sessionId: DaemonSession["id"]) => void },
   ): Promise<WorkforceActorContext> {
     if (!token) {
       return {
@@ -165,7 +168,7 @@ export async function startDaemonServer(
     return actor.requestId
   }
 
-  const ipcServer = createServer(
+  const ipcServer = createServer<typeof daemonIpcSchema, DaemonIpcRequestContext>(
     socketPath,
     daemonIpcSchema,
     {
@@ -275,6 +278,12 @@ export async function startDaemonServer(
       sessionDiagnostics: async ({ id }) => {
         return sessionManager.getDiagnostics(id)
       },
+      sessionWorktree: async ({ id }) => {
+        return sessionManager.getWorktree(id)
+      },
+      sessionWorkforce: async ({ id }) => {
+        return sessionManager.getWorkforce(id)
+      },
       sessionShutdown: async ({ id }) => {
         return {
           id,
@@ -294,7 +303,7 @@ export async function startDaemonServer(
       },
       actionRun: async (payload, context) => {
         const action = await resolveNamedAction(payload.actionName, payload.cwd)
-        const session = await sessionManager.createSession(
+        const session = await sessionManager.newSession(
           buildNamedActionSessionParams(action, payload.cwd, {
             cwd: payload.cwd,
             agent: payload.agent,
@@ -446,7 +455,7 @@ export async function startDaemonServer(
         const context: DaemonIpcRequestContext = {
           opId: logger.createOpId(),
           sessionId: readSessionIdForLog(payload),
-          setSessionId(sessionId: string) {
+          setSessionId(sessionId: DaemonSession["id"]) {
             context.sessionId = sessionId
           },
         }

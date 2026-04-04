@@ -11,6 +11,8 @@ import type {
   DaemonSessionMetadata,
   GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
+  GetDaemonSessionWorkforceResponse,
+  GetDaemonSessionWorktreeResponse,
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
 } from "@goddard-ai/schema/daemon"
@@ -22,21 +24,21 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
-import type { KindInput, KindOutput } from "kindstore"
 import treeKill, { type ProcessLike } from "@goddard-ai/tree-kill"
 import type { WorktreePlugin } from "@goddard-ai/worktree"
+import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
 import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
+import { ReadableStream } from "node:stream/web"
 import { prependAgentBinToPath } from "../config.ts"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
 } from "../persistence/session-state.ts"
-import { normalizeSessionInsert } from "../persistence/session.ts"
 import { db } from "../persistence/store.ts"
 import {
   createAgentConnection,
@@ -166,6 +168,8 @@ export type SessionManager = {
   getSession: (id: DaemonSessionId) => Promise<DaemonSession>
   getHistory: (id: DaemonSessionId) => Promise<GetDaemonSessionHistoryResponse>
   getDiagnostics: (id: DaemonSessionId) => Promise<GetDaemonSessionDiagnosticsResponse>
+  getWorktree: (id: DaemonSessionId) => Promise<GetDaemonSessionWorktreeResponse>
+  getWorkforce: (id: DaemonSessionId) => Promise<GetDaemonSessionWorkforceResponse>
   sendMessage: (id: DaemonSessionId, message: acp.AnyMessage) => Promise<void>
   promptSession: (
     id: DaemonSessionId,
@@ -258,16 +262,14 @@ function toIsoString(value: Date | number): string {
   return (value instanceof Date ? value : new Date(value)).toISOString()
 }
 
-/** Derives reconnectability and history availability from stored connection state. */
+/** Derives reconnectability from stored connection state without joining adjacent kinds. */
 function toConnectionState(input: {
   mode: SessionConnectionMode
   activeDaemonSession: boolean
-  historyLength: number
 }): DaemonSessionConnection {
   return {
     mode: input.mode,
     reconnectable: input.mode === "live" && input.activeDaemonSession,
-    historyAvailable: input.historyLength > 0,
     activeDaemonSession: input.activeDaemonSession,
   }
 }
@@ -291,110 +293,13 @@ function mergeSessionMetadata(
   return Object.keys(merged).length > 0 ? merged : undefined
 }
 
-function stripDaemonOwnedSessionMetadata(
-  metadata: DaemonSessionMetadata | null | undefined,
-): DaemonSessionMetadata | undefined {
-  if (typeof metadata !== "object" || metadata === null) {
-    return undefined
-  }
-
-  const { worktree: _worktree, workforce: _workforce, ...rest } = metadata
-  return Object.keys(rest).length > 0 ? (rest as DaemonSessionMetadata) : undefined
-}
-
-function getSessionWorktreeMetadata(metadata: DaemonSessionMetadata | null | undefined) {
-  if (typeof metadata !== "object" || metadata === null || typeof metadata.worktree !== "object") {
-    return undefined
-  }
-
-  const worktree = metadata.worktree
-  if (
-    worktree === null ||
-    typeof worktree.repoRoot !== "string" ||
-    typeof worktree.requestedCwd !== "string" ||
-    typeof worktree.effectiveCwd !== "string" ||
-    typeof worktree.worktreeDir !== "string" ||
-    typeof worktree.branchName !== "string" ||
-    typeof worktree.poweredBy !== "string"
-  ) {
-    return undefined
-  }
-
-  return {
-    repoRoot: worktree.repoRoot,
-    requestedCwd: worktree.requestedCwd,
-    effectiveCwd: worktree.effectiveCwd,
-    worktreeDir: worktree.worktreeDir,
-    branchName: worktree.branchName,
-    poweredBy: worktree.poweredBy,
-  } satisfies Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
-}
-
-function getSessionWorkforceMetadata(metadata: DaemonSessionMetadata | null | undefined) {
-  if (typeof metadata !== "object" || metadata === null || typeof metadata.workforce !== "object") {
-    return undefined
-  }
-
-  const workforce = metadata.workforce
-  if (workforce === null) {
-    return undefined
-  }
-
-  const { rootDir, agentId, requestId, ...rest } = workforce
-  if (
-    (rootDir !== undefined && typeof rootDir !== "string") ||
-    (agentId !== undefined && typeof agentId !== "string") ||
-    (requestId !== undefined && typeof requestId !== "string")
-  ) {
-    return undefined
-  }
-
-  return {
-    ...rest,
-    ...(rootDir !== undefined ? { rootDir } : {}),
-    ...(agentId !== undefined ? { agentId } : {}),
-    ...(requestId !== undefined ? { requestId } : {}),
-  } satisfies Omit<KindInput<typeof db.schema.workforces>, "sessionId">
-}
-
-/** Hydrates a stored session record with derived state needed by daemon clients. */
-async function toDaemonSession(
+/** Maps one stored session record to the base daemon session response shape. */
+function toDaemonSessionRecord(
   record: KindOutput<typeof db.schema.sessions> | null | undefined,
-): Promise<DaemonSession> {
+): DaemonSession {
   if (!record) {
     throw new IpcClientError("Session not found")
   }
-
-  const state =
-    db.sessionMessages.first({
-      where: { sessionId: record.id },
-    }) ?? null
-  const diagnostics =
-    db.sessionDiagnostics.first({
-      where: { sessionId: record.id },
-    }) ?? null
-  const worktree =
-    db.worktrees.first({
-      where: { sessionId: record.id },
-    }) ?? null
-  const workforce =
-    db.workforces.first({
-      where: { sessionId: record.id },
-    }) ?? null
-  const historyLength = state?.messages.length ?? 0
-  const metadata = mergeSessionMetadata(
-    record.metadata && typeof record.metadata === "object" ? record.metadata : null,
-    worktree
-      ? (({ id: _id, sessionId: _sessionId, ...value }) => ({
-          worktree: value,
-        }))(worktree)
-      : undefined,
-    workforce
-      ? (({ id: _id, sessionId: _sessionId, ...value }) => ({
-          workforce: value,
-        }))(workforce)
-      : undefined,
-  )
 
   return {
     id: record.id,
@@ -404,17 +309,11 @@ async function toDaemonSession(
     cwd: record.cwd,
     repository: record.repository ?? null,
     prNumber: typeof record.prNumber === "number" ? record.prNumber : null,
-    metadata: metadata ?? null,
+    metadata: record.metadata ?? null,
     connection: toConnectionState({
       mode: record.connectionMode,
       activeDaemonSession: record.activeDaemonSession,
-      historyLength,
     }),
-    diagnostics: {
-      eventCount: diagnostics?.events.length ?? 0,
-      historyLength,
-      lastEventAt: diagnostics?.events.at(-1)?.at ?? null,
-    },
     createdAt: toIsoString(record.createdAt),
     updatedAt: toIsoString(record.updatedAt),
     errorMessage: record.errorMessage,
@@ -447,11 +346,6 @@ function buildAgentProcessEnv(input: {
     GODDARD_DAEMON_URL: input.daemonUrl,
     GODDARD_SESSION_TOKEN: input.token,
   }
-}
-
-/** Resolves the local Claude executable when the Claude ACP wrapper is in use. */
-function resolveClaudeExecutable(): string | null {
-  return Bun.which("claude") ?? null
 }
 
 /** Wraps Bun's subprocess API with the minimal process hooks used by session management. */
@@ -502,7 +396,7 @@ function createAgentProcessHandle(input: {
         })
     },
   })
-  const stdout = Readable.fromWeb(subprocess.stdout)
+  const stdout = Readable.fromWeb(subprocess.stdout as unknown as ReadableStream)
 
   return {
     stdin,
@@ -871,19 +765,9 @@ function buildSessionLogContext(params: {
   oneShot?: boolean
   repository?: string
   prNumber?: number
-  metadata?: DaemonSessionMetadata
+  workforce?: CreateDaemonSessionRequest["workforce"]
   launchLogContext?: Record<string, unknown>
 }): Record<string, unknown> {
-  const metadata = params.metadata
-  const workforceMetadata =
-    metadata && typeof metadata === "object" && "workforce" in metadata
-      ? (metadata.workforce as {
-          rootDir?: unknown
-          agentId?: unknown
-          requestId?: unknown
-        } | null)
-      : null
-
   return {
     agent: agentNameFromInput(params.agent),
     cwd: params.cwd,
@@ -891,16 +775,16 @@ function buildSessionLogContext(params: {
     repository: typeof params.repository === "string" ? params.repository : undefined,
     prNumber: typeof params.prNumber === "number" ? params.prNumber : undefined,
     workforceRootDir:
-      workforceMetadata && typeof workforceMetadata.rootDir === "string"
-        ? workforceMetadata.rootDir
+      params.workforce && typeof params.workforce.rootDir === "string"
+        ? params.workforce.rootDir
         : undefined,
     workforceAgentId:
-      workforceMetadata && typeof workforceMetadata.agentId === "string"
-        ? workforceMetadata.agentId
+      params.workforce && typeof params.workforce.agentId === "string"
+        ? params.workforce.agentId
         : undefined,
     workforceRequestId:
-      workforceMetadata && typeof workforceMetadata.requestId === "string"
-        ? workforceMetadata.requestId
+      params.workforce && typeof params.workforce.requestId === "string"
+        ? params.workforce.requestId
         : undefined,
     ...params.launchLogContext,
   }
@@ -1018,7 +902,7 @@ function normalizeSessionPageSize(limit?: number): number {
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
-  publish: (id: string, message: acp.AnyMessage) => void
+  publish: (id: DaemonSessionId, message: acp.AnyMessage) => void
   registry?: Record<string, AgentDistribution>
 }): SessionManager {
   const activeSessions = new Map<DaemonSessionId, ActiveSession>()
@@ -1031,25 +915,18 @@ export function createSessionManager(input: {
   ): Promise<void> {
     const active = activeSessions.get(id)
     const previousRecord = db.sessions.get(id) ?? null
-    const nextUpdate =
-      update.metadata === undefined
-        ? update
-        : {
-            ...update,
-            metadata: stripDaemonOwnedSessionMetadata(update.metadata) ?? null,
-          }
     const previousStatus = active?.status ?? previousRecord?.status
-    if (nextUpdate.status && active) {
-      active.status = nextUpdate.status
+    if (update.status && active) {
+      active.status = update.status
     }
 
     if (previousRecord) {
-      db.sessions.update(previousRecord.id, nextUpdate)
+      db.sessions.update(previousRecord.id, update)
     }
-    if (nextUpdate.status && previousStatus && previousStatus !== nextUpdate.status) {
+    if (update.status && previousStatus && previousStatus !== update.status) {
       await emitDiagnostic(id, "session_status_changed", {
         previousStatus,
-        nextStatus: nextUpdate.status,
+        nextStatus: update.status,
         ...detail,
       })
     }
@@ -1221,10 +1098,10 @@ export function createSessionManager(input: {
       : null
     const existingWorktree = existingWorktreeRecord
       ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(existingWorktreeRecord)
-      : getSessionWorktreeMetadata(existingSession?.metadata)
+      : null
     const existingWorkforce = existingWorkforceRecord
       ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(existingWorkforceRecord)
-      : getSessionWorkforceMetadata(existingSession?.metadata)
+      : null
     const worktree =
       existingWorktree != null || params.worktree?.enabled === true
         ? await prepareSessionWorktree(id, params.cwd, {
@@ -1237,16 +1114,9 @@ export function createSessionManager(input: {
         : null
 
     const cwd = worktree?.effectiveCwd ?? params.cwd
-    const sessionMetadata = mergeSessionMetadata(
-      stripDaemonOwnedSessionMetadata(existingSession?.metadata),
-      stripDaemonOwnedSessionMetadata(params.metadata),
-    )
-    const workforceMetadata = getSessionWorkforceMetadata(params.metadata) ?? existingWorkforce
-    const metadata = mergeSessionMetadata(
-      sessionMetadata,
-      workforceMetadata && { workforce: workforceMetadata },
-      worktree && { worktree: worktree.metadata },
-    )
+    const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.metadata)
+    const workforceMetadata = params.workforce ?? existingWorkforce
+    const metadata = sessionMetadata
     const sessionContext = {
       sessionId: id,
       acpSessionId: undefined as string | undefined,
@@ -1255,7 +1125,7 @@ export function createSessionManager(input: {
     const sessionLogContext = buildSessionLogContext({
       ...params,
       cwd,
-      metadata,
+      workforce: workforceMetadata ?? undefined,
       launchLogContext: worktree
         ? {
             worktreeDir: worktree.metadata.worktreeDir,
@@ -1389,7 +1259,7 @@ export function createSessionManager(input: {
           lastAgentMessage: null,
         })
       } else {
-        const nextSession = normalizeSessionInsert({
+        db.sessions.put(id, {
           acpSessionId: initialized.acpSessionId,
           status: initialized.status,
           agentName: agentNameFromInput(params.agent),
@@ -1404,7 +1274,6 @@ export function createSessionManager(input: {
           metadata: sessionMetadata ?? null,
           models: initialized.models ?? null,
         })
-        db.sessions.put(id, nextSession)
       }
       await emitDiagnostic(id, "session_created", {
         status: initialized.status,
@@ -1430,7 +1299,7 @@ export function createSessionManager(input: {
         await emitDiagnostic(id, "session_completed_one_shot")
         await treeKill(agentProcess)
         const sessionDocument = db.sessions.get(id) ?? null
-        return toDaemonSession(sessionDocument)
+        return toDaemonSessionRecord(sessionDocument)
       }
 
       const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
@@ -1539,7 +1408,7 @@ export function createSessionManager(input: {
 
       activeSessions.set(activeSession.id, activeSession)
       const sessionDocument = db.sessions.get(id) ?? null
-      return toDaemonSession(sessionDocument)
+      return toDaemonSessionRecord(sessionDocument)
     } catch (error) {
       logger.log("session.launch_failed", {
         sessionId: id,
@@ -1584,7 +1453,7 @@ export function createSessionManager(input: {
   async function getSession(id: DaemonSessionId): Promise<DaemonSession> {
     await ready
     const record = db.sessions.get(id) ?? null
-    return toDaemonSession(record)
+    return toDaemonSessionRecord(record)
   }
 
   async function listSessions(
@@ -1608,7 +1477,7 @@ export function createSessionManager(input: {
     }
 
     return {
-      sessions: await Promise.all(page.items.map((record) => toDaemonSession(record))),
+      sessions: page.items.map((record) => toDaemonSessionRecord(record)),
       nextCursor: page.next ?? null,
       hasMore: page.next != null,
     }
@@ -1619,7 +1488,7 @@ export function createSessionManager(input: {
     if (!activeSessions.has(id)) {
       const session = await getSession(id)
       throw new IpcClientError(
-        session.connection.historyAvailable
+        session.connection.mode === "history"
           ? `Session ${id} is archived and no longer reconnectable`
           : `Session ${id} is not reconnectable`,
       )
@@ -1662,6 +1531,40 @@ export function createSessionManager(input: {
         ...event,
         sessionId: session.id,
       })) satisfies DaemonDiagnosticEvent[],
+    }
+  }
+
+  async function getWorktree(id: DaemonSessionId): Promise<GetDaemonSessionWorktreeResponse> {
+    await ready
+    const session = await getSession(id)
+    const worktreeRecord =
+      db.worktrees.first({
+        where: { sessionId: id },
+      }) ?? null
+
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      worktree: worktreeRecord
+        ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(worktreeRecord)
+        : null,
+    }
+  }
+
+  async function getWorkforce(id: DaemonSessionId): Promise<GetDaemonSessionWorkforceResponse> {
+    await ready
+    const session = await getSession(id)
+    const workforceRecord =
+      db.workforces.first({
+        where: { sessionId: id },
+      }) ?? null
+
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      workforce: workforceRecord
+        ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(workforceRecord)
+        : null,
     }
   }
 
@@ -1801,6 +1704,8 @@ export function createSessionManager(input: {
     getSession,
     getHistory,
     getDiagnostics,
+    getWorktree,
+    getWorkforce,
     sendMessage,
     promptSession,
     shutdownSession,

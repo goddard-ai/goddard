@@ -1,8 +1,11 @@
 import { $type, route } from "rouzer"
 import type {
   CreateDaemonSessionResponse,
+  GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
   GetDaemonSessionResponse,
+  GetDaemonSessionWorkforceResponse,
+  GetDaemonSessionWorktreeResponse,
   ListDaemonSessionsResponse,
   ShutdownDaemonSessionResponse,
 } from "../sessions.ts"
@@ -41,6 +44,30 @@ export const sessionHistoryRoute = route("sessions/:id/history", {
   GET: {
     path: DaemonSessionPathParams,
     response: $type<GetDaemonSessionHistoryResponse>(),
+  },
+})
+
+/** Fetches persisted diagnostic events for one daemon-managed session. */
+export const sessionDiagnosticsRoute = route("sessions/:id/diagnostics", {
+  GET: {
+    path: DaemonSessionPathParams,
+    response: $type<GetDaemonSessionDiagnosticsResponse>(),
+  },
+})
+
+/** Fetches persisted worktree metadata for one daemon-managed session. */
+export const sessionWorktreeRoute = route("sessions/:id/worktree", {
+  GET: {
+    path: DaemonSessionPathParams,
+    response: $type<GetDaemonSessionWorktreeResponse>(),
+  },
+})
+
+/** Fetches persisted workforce metadata for one daemon-managed session. */
+export const sessionWorkforceRoute = route("sessions/:id/workforce", {
+  GET: {
+    path: DaemonSessionPathParams,
+    response: $type<GetDaemonSessionWorkforceResponse>(),
   },
 })
 

@@ -94,6 +94,10 @@ function createSessionNamespace(client: DaemonIpcClient) {
     history: async (input: DaemonSessionIdParams) => client.send("sessionHistory", input),
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: async (input: DaemonSessionIdParams) => client.send("sessionDiagnostics", input),
+    /** Reads persisted worktree metadata attached to one daemon-managed session. */
+    worktree: async (input: DaemonSessionIdParams) => client.send("sessionWorktree", input),
+    /** Reads persisted workforce metadata attached to one daemon-managed session. */
+    workforce: async (input: DaemonSessionIdParams) => client.send("sessionWorkforce", input),
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
     shutdown: async (input: DaemonSessionIdParams) => client.send("sessionShutdown", input),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */

@@ -282,13 +282,6 @@ async function defaultRunWorkforceSession(
 ): Promise<void> {
   const agentDistribution = input.agent.agent ?? input.config.defaultAgent
   const cwd = input.agent.cwd === "." ? input.rootDir : join(input.rootDir, input.agent.cwd)
-  const metadata = {
-    workforce: {
-      rootDir: input.rootDir,
-      agentId: input.agent.id,
-      requestId: input.request.id,
-    },
-  }
 
   logger.log("workforce.session_launch_started", {
     rootDir: input.rootDir,
@@ -302,9 +295,13 @@ async function defaultRunWorkforceSession(
   const session = await deps.sessionManager.newSession({
     agent: agentDistribution,
     cwd,
+    workforce: {
+      rootDir: input.rootDir,
+      agentId: input.agent.id,
+      requestId: input.request.id,
+    },
     mcpServers: [],
     systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
-    metadata,
     oneShot: true,
     initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
     env: {

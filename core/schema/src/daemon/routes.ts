@@ -7,5 +7,6 @@ export type {
   CreateDaemonSessionRequest,
   DaemonSessionPathParams,
   ListDaemonSessionsRequest,
+  SessionWorkforceParams,
 } from "./sessions.ts"
 export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "./pull-requests.ts"

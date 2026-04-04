@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { AgentSession } from "./client-session.ts"
 
@@ -9,7 +10,10 @@ function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
 }
 
 /** Turns a writable ACP transport into daemon `sessionSend` requests. */
-function createMessageInputTransport(client: DaemonIpcClient, id: string): WritableStream {
+function createMessageInputTransport(
+  client: DaemonIpcClient,
+  id: DaemonSession["id"],
+): WritableStream {
   let buffer = ""
   const decoder = new TextDecoder()
 
@@ -41,7 +45,7 @@ function createMessageInputTransport(client: DaemonIpcClient, id: string): Writa
 async function flushMessageBuffer(
   buffer: string,
   client: DaemonIpcClient,
-  id: string,
+  id: DaemonSession["id"],
 ): Promise<string> {
   const lines = buffer.split("\n")
   const remainingBuffer = lines.pop() ?? ""
@@ -76,7 +80,7 @@ function decodeStreamChunk(chunk: unknown, decoder: TextDecoder): string {
 /** Turns daemon-published session messages back into a readable ACP output transport. */
 async function createMessageOutputTransport(
   client: DaemonIpcClient,
-  id: string,
+  id: DaemonSession["id"],
 ): Promise<{
   readable: ReadableStream<Uint8Array>
   close: () => Promise<void>
@@ -168,6 +172,7 @@ export async function runSession(
           agent: params.agent,
           cwd: params.cwd,
           worktree: params.worktree,
+          workforce: params.workforce,
           mcpServers: params.mcpServers,
           systemPrompt: params.systemPrompt ?? "",
           env: params.env,

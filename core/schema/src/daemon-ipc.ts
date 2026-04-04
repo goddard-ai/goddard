@@ -24,6 +24,8 @@ import {
   type GetDaemonSessionDiagnosticsResponse,
   type GetDaemonSessionHistoryResponse,
   type GetDaemonSessionResponse,
+  type GetDaemonSessionWorkforceResponse,
+  type GetDaemonSessionWorktreeResponse,
   type ListDaemonSessionsResponse,
   type ShutdownDaemonSessionResponse,
   CreateDaemonSessionRequest,
@@ -110,6 +112,14 @@ export const daemonIpcSchema = {
     sessionDiagnostics: {
       payload: DaemonSessionIdParams,
       response: $type<GetDaemonSessionDiagnosticsResponse>(),
+    },
+    sessionWorktree: {
+      payload: DaemonSessionIdParams,
+      response: $type<GetDaemonSessionWorktreeResponse>(),
+    },
+    sessionWorkforce: {
+      payload: DaemonSessionIdParams,
+      response: $type<GetDaemonSessionWorkforceResponse>(),
     },
     sessionShutdown: {
       payload: DaemonSessionIdParams,

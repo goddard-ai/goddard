@@ -1,5 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { IpcClientError } from "@goddard-ai/ipc"
+import type { CreateDaemonSessionRequest, DaemonWorkforceEvent } from "@goddard-ai/schema/daemon"
 import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
@@ -21,21 +22,7 @@ afterEach(async () => {
 
 test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-ipc-"))
-  let publishEvent:
-    | ((payload: {
-        rootDir: string
-        event: {
-          id: string
-          at: string
-          type: "request"
-          requestId: string
-          toAgentId: string
-          fromAgentId: string | null
-          intent: "default"
-          input: string
-        }
-      }) => void)
-    | null = null
+  let publishEvent: ((payload: DaemonWorkforceEvent) => void) | undefined
   const daemon = await startDaemonServer(
     {
       auth: {
@@ -64,7 +51,7 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
     },
     {
       createWorkforceManager: (input) => {
-        publishEvent = input.publishEvent as typeof publishEvent
+        publishEvent = input.publishEvent
         return {
           startWorkforce: async (rootDir: string) => ({
             state: "running",
@@ -138,28 +125,8 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const started = await client.send("workforceStart", { rootDir: "/repo" })
   const fetched = await client.send("workforceGet", { rootDir: "/repo" })
   const listed = await client.send("workforceList")
-  let resolveStreamEvent:
-    | ((payload: {
-        id: string
-        at: string
-        type: "request"
-        requestId: string
-        toAgentId: string
-        fromAgentId: string | null
-        intent: "default"
-        input: string
-      }) => void)
-    | null = null
-  const streamedEvent = new Promise<{
-    id: string
-    at: string
-    type: "request"
-    requestId: string
-    toAgentId: string
-    fromAgentId: string | null
-    intent: "default"
-    input: string
-  }>((resolve) => {
+  let resolveStreamEvent: ((payload: DaemonWorkforceEvent["event"]) => void) | null = null
+  const streamedEvent = new Promise<DaemonWorkforceEvent["event"]>((resolve) => {
     resolveStreamEvent = resolve
   })
   const unsubscribe = await client.subscribe("workforceEvent", { rootDir: "/repo" }, (payload) => {
@@ -174,19 +141,21 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
     input: "Ship it.",
   })
 
-  publishEvent?.({
-    rootDir: "/repo",
-    event: {
-      id: "evt-1",
-      at: new Date().toISOString(),
-      type: "request",
-      requestId: "req-stream-1",
-      toAgentId: "api",
-      fromAgentId: null,
-      intent: "default",
-      input: "Tail this request.",
-    },
-  })
+  if (publishEvent) {
+    publishEvent({
+      rootDir: "/repo",
+      event: {
+        id: "evt-1",
+        at: new Date().toISOString(),
+        type: "request",
+        requestId: "req-stream-1",
+        toAgentId: "api",
+        fromAgentId: null,
+        intent: "default",
+        input: "Tail this request.",
+      },
+    })
+  }
   const stopped = await client.send("workforceShutdown", { rootDir: "/repo" })
 
   expect(started.workforce.rootDir).toBe("/repo")
@@ -631,13 +600,10 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input) => {
-        const metadata =
-          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
-            ? (input.metadata.workforce as { requestId: string; agentId: string })
-            : null
+      newSession: async (input: CreateDaemonSessionRequest) => {
+        const metadata = input.workforce ?? null
 
-        if (!metadata) {
+        if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
         }
 
@@ -721,7 +687,7 @@ test("create-intent requests target the root agent and specialize the root sessi
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input) => {
+      newSession: async (input: CreateDaemonSessionRequest) => {
         const initialPrompt =
           typeof input.initialPrompt === "string"
             ? input.initialPrompt
@@ -735,12 +701,9 @@ test("create-intent requests target the root agent and specialize the root sessi
           defaultSystemPrompt = input.systemPrompt
         }
 
-        const metadata =
-          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
-            ? (input.metadata.workforce as { requestId: string; agentId: string })
-            : null
+        const metadata = input.workforce ?? null
 
-        if (!metadata) {
+        if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
         }
 
@@ -844,15 +807,12 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input) => {
+      newSession: async (input: CreateDaemonSessionRequest) => {
         capturedSystemPrompt = input.systemPrompt
 
-        const metadata =
-          input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
-            ? (input.metadata.workforce as { requestId: string; agentId: string })
-            : null
+        const metadata = input.workforce ?? null
 
-        if (!metadata) {
+        if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
         }
 
@@ -921,13 +881,10 @@ test("workforce runtime logs request-to-session correlation for launched session
   const { logs } = await captureDaemonLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
       sessionManager: {
-        newSession: async (input) => {
-          const metadata =
-            input.metadata && typeof input.metadata === "object" && "workforce" in input.metadata
-              ? (input.metadata.workforce as { requestId: string; agentId: string })
-              : null
+        newSession: async (input: CreateDaemonSessionRequest) => {
+          const metadata = input.workforce ?? null
 
-          if (!metadata) {
+          if (!metadata?.agentId || !metadata.requestId) {
             throw new Error("Missing workforce metadata")
           }
 

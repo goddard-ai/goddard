@@ -20,11 +20,20 @@ export interface SessionWorktreeOptions {
   enabled?: boolean
 }
 
+/** Structured workforce attachment accepted when starting one daemon-backed session. */
+export interface SessionWorkforceOptions {
+  rootDir?: string
+  agentId?: string
+  requestId?: string
+  [key: string]: unknown
+}
+
 /** Shared session creation fields used by both new and reconnect flows. */
 interface BaseSessionParams {
   agent: ACPAdapterName | AgentDistribution
   cwd: string
   worktree?: SessionWorktreeOptions
+  workforce?: SessionWorkforceOptions
   mcpServers: acp.McpServer[]
   systemPrompt?: string
   env?: Record<string, string>

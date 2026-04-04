@@ -8,7 +8,6 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import { normalizeSessionInsert } from "../src/persistence/session.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
@@ -75,9 +74,7 @@ test("daemon persists repository context into durable session storage", async ()
     systemPrompt: "Keep responses short.",
     repository: "acme/widgets",
     prNumber: 12,
-    metadata: {
-      workforce: { agentId: "reviewer", requestId: "req-1" },
-    },
+    workforce: { agentId: "reviewer", requestId: "req-1" },
   })
 
   const storedRecord = db.sessions.get(created.session.id) ?? null
@@ -85,6 +82,7 @@ test("daemon persists repository context into durable session storage", async ()
     db.workforces.first({
       where: { sessionId: created.session.id },
     }) ?? null
+  const workforce = await client.send("sessionWorkforce", { id: created.session.id })
 
   expect(created.session.repository).toBe("acme/widgets")
   expect(created.session.prNumber).toBe(12)
@@ -98,8 +96,10 @@ test("daemon persists repository context into durable session storage", async ()
     agentId: "reviewer",
     requestId: "req-1",
   })
-  expect(created.session.metadata).toMatchObject({
-    workforce: { agentId: "reviewer", requestId: "req-1" },
+  expect(created.session.metadata ?? null).toBeNull()
+  expect(workforce.workforce).toMatchObject({
+    agentId: "reviewer",
+    requestId: "req-1",
   })
 
   await client.send("sessionShutdown", { id: created.session.id })
@@ -110,7 +110,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
 
   const sessionId = db.sessions.newId()
   const acpSessionId = `acp-restart-${randomUUID()}`
-  const sessionRecord = normalizeSessionInsert({
+  const sessionRecord = {
     acpSessionId,
     status: "active",
     agentName: "node",
@@ -125,7 +125,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
       allowedPrNumbers: [12],
     },
     metadata: null,
-  })
+  } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(sessionId, sessionRecord)
   db.sessionMessages.create({
     sessionId,
@@ -227,7 +227,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
     systemPrompt: "Keep responses short.",
   })
 
-  const worktree = created.session.metadata?.worktree
+  const worktree = (await client.send("sessionWorktree", { id: created.session.id })).worktree
   expect(worktree).toBeTruthy()
   expect(worktree?.requestedCwd.endsWith("/src")).toBe(true)
   expect(worktree?.effectiveCwd).toMatch(/\/src$/)
