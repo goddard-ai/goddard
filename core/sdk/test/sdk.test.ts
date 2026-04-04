@@ -82,7 +82,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     send.mockResolvedValueOnce({
       session: {
         id: "daemon-session-1",
-        acpId: "acp-session-1",
+        acpSessionId: "acp-session-1",
       },
     })
     send.mockResolvedValueOnce({ id: "daemon-session-1", success: true })

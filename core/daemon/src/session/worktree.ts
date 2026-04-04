@@ -1,13 +1,14 @@
-import type { SessionWorktreeMetadata } from "@goddard-ai/schema/daemon"
+import type { KindInput } from "kindstore"
 import { Worktree, type WorktreePlugin } from "@goddard-ai/worktree"
 import { realpathSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
+import { db } from "../persistence/store.ts"
 
 /** Prepared worktree state returned when one daemon session opts into isolation. */
 export interface PreparedSessionWorktree {
   worktree: Worktree
   effectiveCwd: string
-  metadata: SessionWorktreeMetadata
+  metadata: Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
   logContext: Record<string, unknown>
 }
 
@@ -82,7 +83,7 @@ export async function prepareSessionWorktree(
  * Removes one daemon session worktree using the metadata recorded at creation time.
  */
 export async function cleanupSessionWorktree(
-  metadata: SessionWorktreeMetadata,
+  metadata: Omit<KindInput<typeof db.schema.worktrees>, "sessionId">,
   params: {
     /**
      * Custom integration plugins to use for worktree cleanup.
@@ -134,10 +135,7 @@ async function resolveExistingWorktreeBranchName(cwd: string): Promise<string> {
 /**
  * Runs one git subprocess asynchronously using Bun's native subprocess API.
  */
-async function runGit(
-  cwd: string,
-  args: string[],
-): Promise<{ success: boolean; stdout: string }> {
+async function runGit(cwd: string, args: string[]): Promise<{ success: boolean; stdout: string }> {
   const result = Bun.spawn(["git", ...args], {
     cwd,
     stdin: "ignore",

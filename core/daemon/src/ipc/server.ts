@@ -6,20 +6,15 @@ import { once } from "node:events"
 import { resolveDaemonRuntimeConfig } from "../config.ts"
 import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager } from "../loop/index.ts"
-import {
-  createManagedPrLocationRecord,
-  getManagedPrLocationKey,
-} from "../persistence/managed-pr-locations.ts"
 import { db } from "../persistence/store.ts"
-import { fromStoredSession } from "../persistence/session.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { createSessionManager } from "../session/manager.ts"
-import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
 import {
   discoverWorkforceInitCandidates,
   initializeWorkforce,
   resolveRepositoryRoot,
 } from "../workforce/config.ts"
+import { createWorkforceManager, type WorkforceActorContext } from "../workforce/index.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
@@ -48,47 +43,59 @@ export async function startDaemonServer(
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
   const getSessionByToken =
     deps.getSessionByToken ??
-    (async (token: string) =>
-      db.sessionPermissions.first({
-        where: { token },
-      }) ?? null)
+    (async (token: string) => {
+      const sessionRecord =
+        db.sessions.first({
+          where: { token },
+        }) ?? null
+      if (!sessionRecord?.permissions) {
+        return null
+      }
+
+      return {
+        sessionId: sessionRecord.id,
+        owner: sessionRecord.permissions.owner,
+        repo: sessionRecord.permissions.repo,
+        allowedPrNumbers: sessionRecord.permissions.allowedPrNumbers,
+      }
+    })
   const addAllowedPrToSession =
     deps.addAllowedPrToSession ??
     (async (sessionId: string, prNumber: number) => {
-      const permission = db.sessionPermissions.first({
-        where: { sessionId },
-      })
-      if (!permission) {
+      const sessionRecord = db.sessions.get(sessionId)
+      if (!sessionRecord?.permissions) {
         return
       }
 
-      db.sessionPermissions.update(permission.id, (record) => {
-        if (record.allowedPrNumbers.includes(prNumber)) {
+      db.sessions.update(sessionId, (record) => {
+        if (!record.permissions || record.permissions.allowedPrNumbers.includes(prNumber)) {
           return record
         }
 
         return {
           ...record,
-          allowedPrNumbers: [...record.allowedPrNumbers, prNumber],
+          permissions: {
+            ...record.permissions,
+            allowedPrNumbers: [...record.permissions.allowedPrNumbers, prNumber],
+          },
         }
       })
     })
-  const recordManagedPrLocation =
-    deps.recordManagedPrLocation ??
+  const recordPullRequest =
+    deps.recordPullRequest ??
     (async (record) => {
       const existingRecord =
-        db.managedPrLocations.first({
+        db.pullRequests.first({
           where: {
-            locationKey: getManagedPrLocationKey(record.owner, record.repo, record.prNumber),
+            host: record.host,
+            owner: record.owner,
+            repo: record.repo,
+            prNumber: record.prNumber,
           },
         }) ?? null
-      const nextRecord = createManagedPrLocationRecord(record)
-      if (existingRecord) {
-        db.managedPrLocations.put(existingRecord.id, nextRecord)
-      } else {
-        db.managedPrLocations.create(nextRecord)
-      }
-      return nextRecord
+      return existingRecord
+        ? db.pullRequests.put(existingRecord.id, record)
+        : db.pullRequests.create(record)
     })
 
   await prepareSocketPath(socketPath)
@@ -118,32 +125,21 @@ export async function startDaemonServer(
 
     context.setSessionId(session.sessionId)
 
-    const storedSessionRecord =
-      db.sessions.first({
+    const workforceRecord =
+      db.workforces.first({
         where: { sessionId: session.sessionId },
       }) ?? null
-    const sessionRecord = storedSessionRecord ? fromStoredSession(storedSessionRecord) : null
-    const metadata =
-      sessionRecord && typeof sessionRecord.metadata === "object" && sessionRecord.metadata !== null
-        ? (sessionRecord.metadata as {
-            workforce?: {
-              rootDir?: string
-              agentId?: string
-              requestId?: string
-            }
-          })
-        : null
 
-    if (!metadata?.workforce || typeof metadata.workforce.agentId !== "string") {
+    if (!workforceRecord || typeof workforceRecord.agentId !== "string") {
       throw new IpcClientError("Session is not attached to a workforce request")
     }
 
-    if (typeof metadata.workforce.rootDir !== "string") {
+    if (typeof workforceRecord.rootDir !== "string") {
       throw new IpcClientError("Session is not attached to a workforce root")
     }
 
     const [sessionRootDir, normalizedRequestedRootDir] = await Promise.all([
-      normalizeWorkforceRootDir(metadata.workforce.rootDir),
+      normalizeWorkforceRootDir(workforceRecord.rootDir),
       normalizeWorkforceRootDir(requestedRootDir),
     ])
 
@@ -156,9 +152,8 @@ export async function startDaemonServer(
     return {
       sessionId: session.sessionId,
       rootDir: sessionRootDir,
-      agentId: metadata.workforce.agentId,
-      requestId:
-        typeof metadata.workforce.requestId === "string" ? metadata.workforce.requestId : null,
+      agentId: workforceRecord.agentId,
+      requestId: typeof workforceRecord.requestId === "string" ? workforceRecord.requestId : null,
     }
   }
 
@@ -211,7 +206,8 @@ export async function startDaemonServer(
           repo: session.repo,
         })
         await addAllowedPrToSession(session.sessionId, pr.number)
-        await recordManagedPrLocation({
+        await recordPullRequest({
+          host: "github",
           owner: session.owner,
           repo: session.repo,
           prNumber: pr.number,
@@ -244,7 +240,8 @@ export async function startDaemonServer(
           owner: session.owner,
           repo: session.repo,
         })
-        await recordManagedPrLocation({
+        await recordPullRequest({
+          host: "github",
           owner: session.owner,
           repo: session.repo,
           prNumber: resolvedInput.prNumber,

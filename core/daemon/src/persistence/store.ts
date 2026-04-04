@@ -1,8 +1,9 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { getDatabasePath } from "@goddard-ai/paths/node"
+import { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import { type DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
 import { SessionStatus } from "@goddard-ai/schema/db"
-import { kind, kindstore, type DatabaseOptions } from "kindstore"
+import { kind, kindstore, UnrecoverableStoreOpenError, type DatabaseOptions } from "kindstore"
 import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { z } from "zod"
@@ -17,69 +18,104 @@ const metadata = {
   authToken: z.string(),
 }
 
+const SessionPermissions = z.object({
+  owner: z.string(),
+  repo: z.string(),
+  allowedPrNumbers: z.array(z.number().int()),
+})
+
+const WorktreeMetadata = z.strictObject({
+  repoRoot: z.string(),
+  requestedCwd: z.string(),
+  effectiveCwd: z.string(),
+  worktreeDir: z.string(),
+  branchName: z.string(),
+  poweredBy: z.string(),
+})
+
+const WorkforceMetadata = z
+  .object({
+    rootDir: z.string().optional(),
+    agentId: z.string().optional(),
+    requestId: z.string().optional(),
+  })
+  .catchall(z.unknown())
+
 const schema = {
   sessions: kind(
     "ses",
     z.object({
-      sessionId: z.string(),
-      acpId: z.string(),
+      acpSessionId: z.string(),
       status: z.enum(SessionStatus),
       agentName: z.string(),
       cwd: z.string(),
       mcpServers: z.custom<acp.McpServer[]>(),
+      connectionMode: z.custom<SessionConnectionMode>().default("none"),
+      activeDaemonSession: z.boolean().default(false),
       errorMessage: z.string().nullable(),
       blockedReason: z.string().nullable(),
       initiative: z.string().nullable(),
       lastAgentMessage: z.string().nullable(),
       repository: z.string().nullable(),
       prNumber: z.number().int().nullable(),
-      repositoryPrKey: z.string().nullable(),
+      token: z.string().nullable(),
+      permissions: SessionPermissions.nullable(),
       metadata: z.custom<DaemonSessionMetadata | null>(),
       models: z.custom<acp.SessionModelState | null>(),
-      sortKey: z.string(),
     }),
   )
     .createdAt()
     .updatedAt()
-    .index("sessionId")
-    .index("acpId")
+    .index("acpSessionId")
     .index("repository")
-    .index("repositoryPrKey")
-    .index("sortKey"),
-
-  sessionStates: kind(
-    "sst",
-    z.object({
-      sessionId: z.string(),
-      acpId: z.string(),
-      connectionMode: z.custom<SessionConnectionMode>(),
-      history: z.custom<acp.AnyMessage[]>(),
-      diagnostics: z.custom<SessionDiagnosticEvent[]>(),
-      activeDaemonSession: z.boolean(),
+    .index("token")
+    .multi("repository_prNumber", {
+      repository: "asc",
+      prNumber: "asc",
+    })
+    .multi("updatedAt_id", {
+      updatedAt: "desc",
+      id: "desc",
     }),
-  )
-    .createdAt()
-    .updatedAt()
-    .index("sessionId"),
 
-  sessionPermissions: kind(
-    "spr",
+  sessionMessages: kind(
+    "msg",
     z.object({
-      sessionId: z.string(),
-      token: z.string(),
-      owner: z.string(),
-      repo: z.string(),
-      allowedPrNumbers: z.array(z.number().int()),
+      sessionId: DaemonSessionId,
+      messages: z.custom<acp.AnyMessage[]>(),
     }),
-  )
-    .createdAt()
-    .index("sessionId")
-    .index("token"),
+  ).index("sessionId", { type: "text" }),
 
-  managedPrLocations: kind(
-    "mpl",
+  sessionDiagnostics: kind(
+    "dgn",
     z.object({
-      locationKey: z.string(),
+      sessionId: DaemonSessionId,
+      events: z.custom<SessionDiagnosticEvent[]>(),
+    }),
+  ).index("sessionId", { type: "text" }),
+
+  worktrees: kind(
+    "wt",
+    z.object({
+      sessionId: DaemonSessionId,
+      ...WorktreeMetadata.shape,
+    }),
+  ).index("sessionId", { type: "text" }),
+
+  workforces: kind(
+    "wf",
+    z
+      .object({
+        sessionId: DaemonSessionId,
+        ...WorkforceMetadata.shape,
+      })
+      .catchall(z.unknown()),
+  ).index("sessionId", { type: "text" }),
+
+  pullRequests: kind(
+    "pr",
+    z.object({
+      host: z.enum(["github"]),
       owner: z.string(),
       repo: z.string(),
       prNumber: z.number().int(),
@@ -87,7 +123,12 @@ const schema = {
     }),
   )
     .updatedAt()
-    .index("locationKey"),
+    .multi("host_owner_repo_prNumber", {
+      host: "asc",
+      owner: "asc",
+      repo: "asc",
+      prNumber: "asc",
+    }),
 }
 
 function createStore(options: StoreConnectionOptions) {
@@ -113,13 +154,7 @@ function openStore(connection: StoreConnectionOptions) {
   try {
     return createStore(connection)
   } catch (error) {
-    if (
-      connection.filename === ":memory:" ||
-      (error instanceof Error &&
-        error.message.includes("kindstore format version") === false &&
-        error.message.includes("cannot be opened safely") === false &&
-        error.message.includes("newer than supported version") === false)
-    ) {
+    if (connection.filename === ":memory:" || !(error instanceof UnrecoverableStoreOpenError)) {
       throw error
     }
 
@@ -136,9 +171,7 @@ export let db = openStore({ filename: getDatabasePath() })
 
 /** Recreates the shared kindstore handle, optionally with explicit connection options. */
 export function resetDb(connection: StoreConnectionOptions = { filename: getDatabasePath() }) {
-  if (db) {
-    db.close()
-  }
+  db.close()
   db = openStore(connection)
   return db
 }

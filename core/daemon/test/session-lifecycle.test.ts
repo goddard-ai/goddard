@@ -1,4 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
@@ -6,11 +7,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, afterEach, expect, test } from "bun:test"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import { createSessionPermissionsRecord } from "../src/persistence/session-permissions.ts"
-import { createSessionStateRecord } from "../src/persistence/session-state.ts"
-import { fromStoredSession, normalizeSessionInsert } from "../src/persistence/session.ts"
+import { normalizeSessionInsert } from "../src/persistence/session.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
@@ -50,28 +48,18 @@ test("daemon revokes session tokens when agent processes exit", async () => {
     systemPrompt: "Keep responses short.",
   })
 
-  const permissions =
-    db.sessionPermissions.first({
-      where: { sessionId: created.session.id },
-    }) ?? null
+  const permissions = db.sessions.get(created.session.id)?.permissions ?? null
+  const token = db.sessions.get(created.session.id)?.token ?? null
   expect(permissions).toBeTruthy()
-  expect(typeof permissions?.token).toBe("string")
+  expect(typeof token).toBe("string")
 
   await client.send("sessionShutdown", { id: created.session.id })
 
   await waitFor(async () => {
-    return (
-      db.sessionPermissions.first({
-        where: { token: permissions!.token },
-      }) === undefined
-    )
+    return db.sessions.get(created.session.id)?.permissions == null
   })
 
-  expect(
-    db.sessionPermissions.first({
-      where: { token: permissions!.token },
-    }) ?? null,
-  ).toBeNull()
+  expect(db.sessions.get(created.session.id)?.permissions ?? null).toBeNull()
 })
 
 test("daemon persists repository context into durable session storage", async () => {
@@ -92,20 +80,26 @@ test("daemon persists repository context into durable session storage", async ()
     },
   })
 
-  const storedRecord =
-    db.sessions.first({
+  const storedRecord = db.sessions.get(created.session.id) ?? null
+  const workforceRecord =
+    db.workforces.first({
       where: { sessionId: created.session.id },
     }) ?? null
-  const stored = storedRecord ? fromStoredSession(storedRecord) : null
 
   expect(created.session.repository).toBe("acme/widgets")
   expect(created.session.prNumber).toBe(12)
-  expect(stored).toMatchObject({
+  expect(storedRecord).toMatchObject({
     repository: "acme/widgets",
     prNumber: 12,
-    metadata: {
-      workforce: { agentId: "reviewer", requestId: "req-1" },
-    },
+  })
+  expect(storedRecord?.metadata ?? null).toBeNull()
+  expect(workforceRecord).toMatchObject({
+    sessionId: created.session.id,
+    agentId: "reviewer",
+    requestId: "req-1",
+  })
+  expect(created.session.metadata).toMatchObject({
+    workforce: { agentId: "reviewer", requestId: "req-1" },
   })
 
   await client.send("sessionShutdown", { id: created.session.id })
@@ -114,36 +108,33 @@ test("daemon persists repository context into durable session storage", async ()
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {
   await useTempHome()
 
-  const sessionId = `session-restart-${randomUUID()}`
-  const acpId = `acp-restart-${randomUUID()}`
+  const sessionId = db.sessions.newId()
+  const acpSessionId = `acp-restart-${randomUUID()}`
   const sessionRecord = normalizeSessionInsert({
-    id: sessionId,
-    acpId,
+    acpSessionId,
     status: "active",
     agentName: "node",
     cwd: process.cwd(),
     mcpServers: [],
+    connectionMode: "live",
+    activeDaemonSession: true,
+    token: "tok-restart-1",
+    permissions: {
+      owner: "acme",
+      repo: "widgets",
+      allowedPrNumbers: [12],
+    },
     metadata: null,
   })
-  db.sessions.create(sessionRecord)
-  const stateRecord = createSessionStateRecord({
+  db.sessions.put(sessionId, sessionRecord)
+  db.sessionMessages.create({
     sessionId,
-    acpId,
-    connectionMode: "live",
-    history: [{ jsonrpc: "2.0", method: "session/update", params: { value: "persisted" } }],
-    diagnostics: [],
-    activeDaemonSession: true,
+    messages: [{ jsonrpc: "2.0", method: "session/update", params: { value: "persisted" } }],
   })
-  db.sessionStates.create(stateRecord)
-  const permissionRecord = createSessionPermissionsRecord({
+  db.sessionDiagnostics.create({
     sessionId,
-    token: "tok-restart-1",
-    owner: "acme",
-    repo: "widgets",
-    allowedPrNumbers: [12],
+    events: [],
   })
-  db.sessionPermissions.create(permissionRecord)
-
   const daemon = await startTestDaemon({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
@@ -205,7 +196,7 @@ test("multiple clients can observe the same live session stream independently", 
       id: 1,
       method: "session/prompt",
       params: {
-        sessionId: created.session.acpId,
+        sessionId: created.session.acpSessionId,
         prompt: [{ type: "text", text: "Say hello in one sentence." }],
       },
     },

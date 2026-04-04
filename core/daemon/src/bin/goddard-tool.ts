@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { command, option, run, string, subcommands } from "cmd-ts"
 import * as fs from "node:fs/promises"
-import { applySessionUpdate } from "../persistence/session.ts"
 import { db } from "../persistence/store.ts"
 
 async function requireSessionId(): Promise<string> {
@@ -15,51 +15,45 @@ function requireSessionToken(): string {
   return requiredEnv(process.env.GODDARD_SESSION_TOKEN, "GODDARD_SESSION_TOKEN")
 }
 
-export async function declareInitiative(sessionId: string, title: string) {
-  const record = db.sessions.first({ where: { sessionId } })
+export async function declareInitiative(sessionId: DaemonSession["id"], title: string) {
+  const record = db.sessions.get(sessionId)
   if (!record) {
     throw new Error(`Unknown session: ${sessionId}`)
   }
 
-  db.sessions.update(record.id, (current) =>
-    applySessionUpdate(current, {
-      status: "active",
-      initiative: title,
-      blockedReason: null,
-    }),
-  )
+  db.sessions.update(sessionId, {
+    status: "active",
+    initiative: title,
+    blockedReason: null,
+  })
 }
 
-export async function reportBlocker(sessionId: string, reason: string) {
-  const record = db.sessions.first({ where: { sessionId } })
+export async function reportBlocker(sessionId: DaemonSession["id"], reason: string) {
+  const record = db.sessions.get(sessionId)
   if (!record) {
     throw new Error(`Unknown session: ${sessionId}`)
   }
 
-  db.sessions.update(record.id, (current) =>
-    applySessionUpdate(current, {
-      status: "blocked",
-      blockedReason: reason,
-    }),
-  )
+  db.sessions.update(sessionId, {
+    status: "blocked",
+    blockedReason: reason,
+  })
 }
 
-export async function reportCompleted(sessionId: string) {
-  const record = db.sessions.first({ where: { sessionId } })
+export async function reportCompleted(sessionId: DaemonSession["id"]) {
+  const record = db.sessions.get(sessionId)
   if (!record) {
     throw new Error(`Unknown session: ${sessionId}`)
   }
 
-  db.sessions.update(record.id, (current) =>
-    applySessionUpdate(current, {
-      status: "done",
-      initiative: null,
-      blockedReason: null,
-    }),
-  )
+  db.sessions.update(sessionId, {
+    status: "done",
+    initiative: null,
+    blockedReason: null,
+  })
 }
 
-export async function submitPr(sessionId: string, title: string, body: string) {
+export async function submitPr(sessionId: DaemonSession["id"], title: string, body: string) {
   const { client } = createDaemonIpcClientFromEnv()
   const pr = await client.send("prSubmit", {
     token: requireSessionToken(),
@@ -68,20 +62,18 @@ export async function submitPr(sessionId: string, title: string, body: string) {
     body,
   })
 
-  const record = db.sessions.first({ where: { sessionId } })
+  const record = db.sessions.get(sessionId)
   if (!record) {
     throw new Error(`Unknown session: ${sessionId}`)
   }
 
-  db.sessions.update(record.id, (current) =>
-    applySessionUpdate(current, {
-      status: "done",
-      lastAgentMessage: `PR Submitted: ${title}\n${pr.url}\n\n${body}`,
-    }),
-  )
+  db.sessions.update(sessionId, {
+    status: "done",
+    lastAgentMessage: `PR Submitted: ${title}\n${pr.url}\n\n${body}`,
+  })
 }
 
-export async function replyPr(sessionId: string, message: string) {
+export async function replyPr(sessionId: DaemonSession["id"], message: string) {
   const { client } = createDaemonIpcClientFromEnv()
   await client.send("prReply", {
     token: requireSessionToken(),
@@ -89,17 +81,15 @@ export async function replyPr(sessionId: string, message: string) {
     message,
   })
 
-  const record = db.sessions.first({ where: { sessionId } })
+  const record = db.sessions.get(sessionId)
   if (!record) {
     throw new Error(`Unknown session: ${sessionId}`)
   }
 
-  db.sessions.update(record.id, (current) =>
-    applySessionUpdate(current, {
-      status: "done",
-      lastAgentMessage: `PR Reply: ${message}`,
-    }),
-  )
+  db.sessions.update(sessionId, {
+    status: "done",
+    lastAgentMessage: `PR Reply: ${message}`,
+  })
 }
 
 export async function main(argv: string[]) {

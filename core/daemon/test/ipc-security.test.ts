@@ -1,13 +1,12 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { randomUUID } from "node:crypto"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import { afterAll, afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, afterEach, expect, test } from "bun:test"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
-import { createSessionPermissionsRecord } from "../src/persistence/session-permissions.ts"
 import { normalizeSessionInsert } from "../src/persistence/session.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
@@ -78,7 +77,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
     },
     auth: {
       getSessionByToken: async () => ({
-        sessionId: "session-crash",
+        sessionId: "ses_crash",
         owner: "trusted",
         repo: "widgets",
         allowedPrNumbers: [],
@@ -155,7 +154,7 @@ test("daemon submit request enforces trusted repo context and records created PR
       getSessionByToken: async (token) => {
         expect(token).toBe("tok_session")
         return {
-          sessionId: "session-42",
+          sessionId: "ses_42",
           owner: "trusted",
           repo: "widgets",
           allowedPrNumbers: [],
@@ -165,9 +164,10 @@ test("daemon submit request enforces trusted repo context and records created PR
         recordedPrs.push({ sessionId, prNumber })
       },
     },
-    recordManagedPrLocation: async (record) => {
+    recordPullRequest: async (record) => {
       recordedLocations.push(record)
       return {
+        id: "pr_test",
         ...record,
         updatedAt: Date.now(),
       }
@@ -202,9 +202,10 @@ test("daemon submit request enforces trusted repo context and records created PR
       base: "main",
     },
   ])
-  expect(recordedPrs).toEqual([{ sessionId: "session-42", prNumber: 42 }])
+  expect(recordedPrs).toEqual([{ sessionId: "ses_42", prNumber: 42 }])
   expect(recordedLocations).toEqual([
     {
+      host: "github",
       owner: "trusted",
       repo: "widgets",
       prNumber: 42,
@@ -217,14 +218,14 @@ test("daemon submit request enforces trusted repo context and records created PR
   expect(received?.requestName).toBe("prSubmit")
   expect(responded?.requestName).toBe("prSubmit")
   expect(received?.opId).toBe(responded?.opId)
-  expect(responded?.sessionId).toBe("session-42")
+  expect(responded?.sessionId).toBe("ses_42")
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
   const daemon = await startTestDaemon({
     auth: {
       getSessionByToken: async () => ({
-        sessionId: "session-7",
+        sessionId: "ses_7",
         owner: "trusted",
         repo: "widgets",
         allowedPrNumbers: [7],
@@ -249,7 +250,7 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
   ).rejects.toThrow(/not allowed/i)
 })
 
-test("daemon reply request records managed PR checkout locations", async () => {
+test("daemon reply request records pull request checkout locations", async () => {
   const recordedLocations: Array<{
     owner: string
     repo: string
@@ -260,16 +261,17 @@ test("daemon reply request records managed PR checkout locations", async () => {
   const daemon = await startTestDaemon({
     auth: {
       getSessionByToken: async () => ({
-        sessionId: "session-12",
+        sessionId: "ses_12",
         owner: "trusted",
         repo: "widgets",
         allowedPrNumbers: [12],
       }),
       addAllowedPr: async () => undefined,
     },
-    recordManagedPrLocation: async (record) => {
+    recordPullRequest: async (record) => {
       recordedLocations.push(record)
       return {
+        id: "pr_test",
         ...record,
         updatedAt: Date.now(),
       }
@@ -291,6 +293,7 @@ test("daemon reply request records managed PR checkout locations", async () => {
 
   expect(recordedLocations).toEqual([
     {
+      host: "github",
       owner: "trusted",
       repo: "widgets",
       prNumber: 12,
@@ -301,7 +304,7 @@ test("daemon reply request records managed PR checkout locations", async () => {
 
 test("daemon workforce request binds token-backed mutations to the session workforce root", async () => {
   await useTempHome()
-  const sessionId = `workforce-session-match-${randomUUID()}`
+  const sessionId = db.sessions.newId()
   const token = "workforce-token-match"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-match-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
@@ -357,7 +360,7 @@ test("daemon workforce request binds token-backed mutations to the session workf
 
 test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {
   await useTempHome()
-  const sessionId = `workforce-session-mismatch-${randomUUID()}`
+  const sessionId = db.sessions.newId()
   const token = "workforce-token-mismatch"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-a-"))
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-b-"))
@@ -405,7 +408,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
 test("daemon workforce respond rejects mismatched roots for token-backed sessions", async () => {
   await useTempHome()
-  const sessionId = `workforce-session-respond-${randomUUID()}`
+  const sessionId = db.sessions.newId()
   const token = "workforce-token-respond"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-c-"))
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-d-"))
@@ -446,7 +449,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
 
 test("daemon workforce request rejects token-backed sessions without a workforce root", async () => {
   await useTempHome()
-  const sessionId = `workforce-session-no-root-${randomUUID()}`
+  const sessionId = db.sessions.newId()
   const token = "workforce-token-no-root"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-e-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
@@ -532,12 +535,15 @@ type StartTestDaemonOptions = {
     } | null>
     addAllowedPr?: (sessionId: string, prNumber: number) => Promise<void>
   }
-  recordManagedPrLocation?: (record: {
+  recordPullRequest?: (record: {
+    host: "github"
     owner: string
     repo: string
     prNumber: number
     cwd: string
   }) => Promise<{
+    id: string
+    host: "github"
     owner: string
     repo: string
     prNumber: number
@@ -612,7 +618,7 @@ async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<Da
         })),
       getSessionByToken: options.auth?.getSessionByToken,
       addAllowedPrToSession: options.auth?.addAllowedPr,
-      recordManagedPrLocation: options.recordManagedPrLocation,
+      recordPullRequest: options.recordPullRequest,
       createWorkforceManager: options.createWorkforceManager,
     },
   )
@@ -632,36 +638,33 @@ async function useTempHome(): Promise<void> {
 }
 
 async function seedWorkforceSession(input: {
-  sessionId: string
+  sessionId: DaemonSession["id"]
   token: string
   rootDir: string
   requestId: string
   includeRootDir?: boolean
 }): Promise<void> {
   const sessionRecord = normalizeSessionInsert({
-    id: input.sessionId,
-    acpId: `acp-${input.sessionId}`,
+    acpSessionId: `acp-${input.sessionId}`,
     status: "active",
     agentName: "pi",
     cwd: input.rootDir,
     mcpServers: [],
-    metadata: {
-      workforce: {
-        ...(input.includeRootDir === false ? {} : { rootDir: input.rootDir }),
-        agentId: "root",
-        requestId: input.requestId,
-      },
-    },
-  })
-  db.sessions.create(sessionRecord)
-  const permissionRecord = createSessionPermissionsRecord({
-    sessionId: input.sessionId,
     token: input.token,
-    owner: "trusted",
-    repo: "widgets",
-    allowedPrNumbers: [],
+    permissions: {
+      owner: "trusted",
+      repo: "widgets",
+      allowedPrNumbers: [],
+    },
+    metadata: null,
   })
-  db.sessionPermissions.create(permissionRecord)
+  db.sessions.put(input.sessionId, sessionRecord)
+  db.workforces.create({
+    sessionId: input.sessionId,
+    ...(input.includeRootDir === false ? {} : { rootDir: input.rootDir }),
+    agentId: "root",
+    requestId: input.requestId,
+  })
 }
 
 function createStaticWorkforceManager(

@@ -5,7 +5,7 @@
     "": {
       "name": "goddard",
       "dependencies": {
-        "kindstore": "0.3.2",
+        "kindstore": "0.4.1",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20260307.1",
@@ -117,7 +117,7 @@
         "@goddard-ai/tree-kill": "workspace:^",
         "@goddard-ai/worktree": "workspace:^",
         "cmd-ts": "^0.15.0",
-        "kindstore": "0.3.4",
+        "kindstore": "^0.4.1",
         "kleur": "^4.1.5",
         "node-stream-zip": "^1.15.0",
         "radashi": "^12.7.2",
@@ -1530,7 +1530,7 @@
 
     "jws": ["jws@4.0.1", "", { "dependencies": { "jwa": "^2.0.1", "safe-buffer": "^5.0.1" } }, "sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA=="],
 
-    "kindstore": ["kindstore@0.3.2", "", { "dependencies": { "ulid": "^3.0.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-I64J3VInz1nz1TSZepbwFfaXE3I2Ef4WeByBhNT/TC2aiktbFYoHeGPbA7KJuqz/IPDqsw4H53P47UVndzbZcA=="],
+    "kindstore": ["kindstore@0.4.1", "", { "dependencies": { "ulid": "^3.0.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-id9VL6e3GnuZYy4DxL71Ienhr5JYxztj0CS/g8ucanDSSSUrLNB6CQEZQUJCtPOUKCi5l/iMVHM6an1Ix8OZpA=="],
 
     "kleur": ["kleur@4.1.5", "", {}, "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ=="],
 
@@ -2145,8 +2145,6 @@
     "@goddard-ai/app/react": ["react-shim@file:app/overrides/react", {}],
 
     "@goddard-ai/app/react-dom": ["react-shim@file:app/overrides/react", {}],
-
-    "@goddard-ai/daemon/kindstore": ["kindstore@0.3.4", "", { "dependencies": { "ulid": "^3.0.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-SvR9CSstGrdoZ+91wV8NzcOTuIYUrAB2Otar7cEwT9MZFaT+QmU3GAKvSIACOg15AURYlcN7H6vHrSTzs4rH/Q=="],
 
     "@hattip/adapter-cloudflare-workers/@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.3.4", "", { "dependencies": { "mime": "^3.0.0" } }, "sha512-YLPHc8yASwjNkmcDMQMY35yiWjoKAKnhUbPRszBRS0YgH+IXtsMp61j+yTcnCE3oO2DgP0U3iejLC8FTtKDC8Q=="],
 

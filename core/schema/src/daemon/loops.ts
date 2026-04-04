@@ -64,7 +64,7 @@ export type DaemonLoopStatus = {
   promptModulePath: string
   startedAt: string
   sessionId: string
-  acpId: string
+  acpSessionId: string
   cycleCount: number
   lastPromptAt: string | null
 }

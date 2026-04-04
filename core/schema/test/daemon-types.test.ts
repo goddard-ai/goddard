@@ -16,9 +16,9 @@ test("daemon schema keeps loop and workforce response types as types rather than
 })
 
 test("daemon session and loop contracts expose stable ids without legacy server ids", () => {
-  const keys: Array<keyof daemonSchema.DaemonSession> = ["id", "acpId"]
+  const keys: Array<keyof daemonSchema.DaemonSession> = ["id", "acpSessionId"]
 
-  expect(keys).toEqual(["id", "acpId"])
+  expect(keys).toEqual(["id", "acpSessionId"])
   expect("serverId" in ({} as daemonSchema.DaemonSession)).toBe(false)
   expect("serverId" in ({} as daemonSchema.DaemonLoopStatus)).toBe(false)
 })

@@ -318,7 +318,7 @@ async function defaultRunWorkforceSession(
     requestId: input.request.id,
     agentId: input.agent.id,
     sessionId: session.id,
-    acpId: session.acpId,
+    acpSessionId: session.acpSessionId,
     status: session.status,
   })
 }

@@ -19,7 +19,7 @@ export type {
   SubmitPrDaemonRequest,
   SubmitPrDaemonResponse,
 } from "./daemon/pull-requests.ts"
-export type { DaemonSessionMetadata, SessionWorktreeMetadata } from "./daemon/session-metadata.ts"
+export type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
 export type {
   CreateDaemonSessionRequest,
   CreateDaemonSessionResponse,

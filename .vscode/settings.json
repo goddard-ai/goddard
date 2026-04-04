@@ -38,5 +38,9 @@
     "**/.husky": true,
     "**/.turbo": true,
     "**/node_modules": true
+  },
+  "search.exclude": {
+    "**/.agents": true,
+    "**/dist": true
   }
 }

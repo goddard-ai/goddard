@@ -10,6 +10,4 @@ export type {
   BackendPrClient,
   DaemonServer,
   DaemonServerDeps,
-  ReplyPrDaemonRequest,
-  SubmitPrDaemonRequest,
 } from "./ipc/types.ts"

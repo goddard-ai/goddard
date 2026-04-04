@@ -1,8 +1,8 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test } from "bun:test"
 import { startDaemonServer } from "../src/ipc.ts"
 import { createLoopManager } from "../src/loop/manager.ts"
 import { normalizeLoopRootDir } from "../src/loop/paths.ts"
@@ -84,7 +84,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
           promptModulePath: `${input.rootDir}/.goddard/loops/${input.loopName}/prompt.js`,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "session-1",
-          acpId: "acp-1",
+          acpSessionId: "acp-1",
           cycleCount: 0,
           lastPromptAt: null,
           session: input.session,
@@ -98,7 +98,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
           promptModulePath: `${rootDir}/.goddard/loops/${loopName}/prompt.js`,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "session-1",
-          acpId: "acp-1",
+          acpSessionId: "acp-1",
           cycleCount: 1,
           lastPromptAt: null,
           session: {
@@ -128,7 +128,7 @@ test("daemon IPC exposes repo-root loop lifecycle methods", async () => {
             promptModulePath: "/repo/.goddard/loops/review/prompt.js",
             startedAt: "2026-03-20T00:00:00.000Z",
             sessionId: "session-1",
-            acpId: "acp-1",
+            acpSessionId: "acp-1",
             cycleCount: 1,
             lastPromptAt: null,
           },
@@ -213,7 +213,7 @@ test("loop manager reuses one runtime per normalized repository root and loop na
           promptModulePath: input.promptModulePath,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "session-1",
-          acpId: "acp-1",
+          acpSessionId: "acp-1",
           cycleCount: 0,
           lastPromptAt: null,
           session: input.session,
@@ -227,7 +227,7 @@ test("loop manager reuses one runtime per normalized repository root and loop na
           promptModulePath: input.promptModulePath,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "session-1",
-          acpId: "acp-1",
+          acpSessionId: "acp-1",
           cycleCount: 0,
           lastPromptAt: null,
         }),
@@ -323,7 +323,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
       newSessionCalls.push(input)
       return {
         id: "session-1",
-        acpId: "acp-1",
+        acpSessionId: "acp-1",
       }
     },
     async promptSession(...args: unknown[]) {
@@ -383,7 +383,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
       rootDir,
       loopName: "review",
       sessionId: "session-1",
-      acpId: "acp-1",
+      acpSessionId: "acp-1",
       cycleCount: 3,
       lastPromptAt: expect.any(String),
     }),

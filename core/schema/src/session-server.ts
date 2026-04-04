@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { ACPAdapterName } from "./acp-adapters.ts"
+import type { DaemonSessionId } from "./common/params.ts"
 import type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
 import type { AgentDistribution } from "./session-server/agent-distribution.ts"
 
@@ -41,7 +42,7 @@ export interface NewSessionParams extends BaseSessionParams {
 
 /** Parameters used to reconnect to one previously created daemon-backed session. */
 export interface LoadSessionParams extends BaseSessionParams {
-  sessionId: string
+  sessionId: DaemonSessionId
 }
 
 /** Union describing both reconnect and fresh session creation entrypoints. */

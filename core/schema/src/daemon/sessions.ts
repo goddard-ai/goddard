@@ -1,10 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
 import { ACPAdapterName } from "../acp-adapters.ts"
-import { DaemonSessionIdParams } from "../common/params.ts"
+import { DaemonSessionId, DaemonSessionIdParams } from "../common/params.ts"
+import type { SessionStatus } from "../db.ts"
 import { AgentDistribution } from "../session-server/agent-distribution.ts"
 import { DaemonSessionMetadata } from "./session-metadata.ts"
-import type { SessionStatus } from "../db.ts"
 
 /** Session-start initial prompt values accepted by the daemon session API. */
 export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
@@ -50,13 +50,13 @@ export type DaemonSessionPathParams = z.infer<typeof DaemonSessionPathParams>
 
 /** Request payload used to forward one raw ACP message to a daemon-managed session. */
 export const SendDaemonSessionMessageRequest = z.object({
-  id: z.string(),
+  id: DaemonSessionId,
   message: z.unknown(),
 })
 
 /** Compile-time shape of one raw ACP message forwarded to a daemon-managed session. */
 export interface SendDaemonSessionMessageRequest {
-  id: string
+  id: DaemonSessionId
   message: acp.AnyMessage
 }
 
@@ -70,13 +70,13 @@ export type ResolveDaemonSessionTokenRequest = z.infer<typeof ResolveDaemonSessi
 
 /** Stream payload emitted for one daemon-managed ACP session message. */
 export const DaemonSessionMessageEvent = z.object({
-  id: z.string(),
+  id: DaemonSessionId,
   message: z.unknown(),
 })
 
 /** Compile-time shape of one daemon-managed ACP session message event. */
 export interface DaemonSessionMessageEvent {
-  id: string
+  id: DaemonSessionId
   message: acp.AnyMessage
 }
 
@@ -110,8 +110,8 @@ export type DaemonSessionDiagnostics = {
 
 /** Stable identity values used to address one daemon-managed session. */
 export type DaemonSessionIdentity = {
-  id: string
-  acpId: string
+  id: DaemonSessionId
+  acpSessionId: string
 }
 
 /** Full daemon-managed session record exposed to app and SDK consumers. */
@@ -164,6 +164,6 @@ export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
 
 /** Response payload returned after one daemon-managed session shutdown request. */
 export type ShutdownDaemonSessionResponse = {
-  id: string
+  id: DaemonSessionId
   success: boolean
 }

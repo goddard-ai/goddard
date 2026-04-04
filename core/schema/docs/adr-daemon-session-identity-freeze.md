@@ -1,4 +1,4 @@
-# ADR: Daemon Session Identity Freeze (`id` vs `acpId`)
+# ADR: Daemon Session Identity Freeze (`id` vs `acpSessionId`)
 
 ## Status
 
@@ -13,7 +13,7 @@ Historically, code paths mixed multiple identifiers (`sessionId`, ACP session id
 ## Decision
 
 1. `sessions.id` is the daemon-owned internal identifier and the canonical primary key.
-2. `sessions.acpId` is the ACP protocol-facing session identifier (unique) and only used for ACP transport mapping.
+2. `sessions.acpSessionId` is the ACP protocol-facing session identifier (unique) and only used for ACP transport mapping.
 3. Daemon session HTTP/WS routes are keyed by internal `:id`:
    - `POST /sessions`
    - `GET /sessions/:id`
@@ -26,5 +26,5 @@ Historically, code paths mixed multiple identifiers (`sessionId`, ACP session id
 ## Consequences
 
 - Parallel tracks can implement independently against a shared contract.
-- Storage and runtime internals can evolve as long as external contracts preserve `id` as canonical and `acpId` as protocol mapping.
+- Storage and runtime internals can evolve as long as external contracts preserve `id` as canonical and `acpSessionId` as protocol mapping.
 - Remaining `serverId` usages are treated as migration debt and should be removed in follow-up plans.

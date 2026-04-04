@@ -1,3 +1,4 @@
+import type { KindInput, KindOutput } from "kindstore"
 import type {
   AuthSession,
   DeviceFlowComplete,
@@ -5,17 +6,15 @@ import type {
   DeviceFlowStart,
 } from "@goddard-ai/schema/backend"
 import type {
+  DaemonSession,
   DaemonWorkforceEvent,
   ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
 } from "@goddard-ai/schema/daemon"
-import type { ManagedPrLocationRecord } from "../persistence/managed-pr-locations.ts"
-import type { SessionPermissionsRecord } from "../persistence/session-permissions.ts"
+import { db } from "../persistence/store.ts"
 import type { LoopManager } from "../loop/index.ts"
 import type { SessionManager } from "../session/index.ts"
 import type { WorkforceManager } from "../workforce/index.ts"
-
-export type { ReplyPrDaemonRequest, SubmitPrDaemonRequest }
 
 export type PrCreateInput = {
   owner: string
@@ -52,19 +51,21 @@ export type DaemonServer = {
   close: () => Promise<void>
 }
 
-export type AuthorizedSession = Pick<
-  SessionPermissionsRecord,
-  "sessionId" | "owner" | "repo" | "allowedPrNumbers"
->
+export type AuthorizedSession = {
+  sessionId: DaemonSession["id"]
+  owner: string
+  repo: string
+  allowedPrNumbers: number[]
+}
 
 export type DaemonServerDeps = {
   resolveSubmitRequest?: (input: SubmitPrDaemonRequest) => Promise<PrCreateInput>
   resolveReplyRequest?: (input: ReplyPrDaemonRequest) => Promise<PrReplyInput>
   getSessionByToken?: (token: string) => Promise<AuthorizedSession | null>
-  addAllowedPrToSession?: (sessionId: string, prNumber: number) => Promise<void>
-  recordManagedPrLocation?: (
-    record: Omit<ManagedPrLocationRecord, "updatedAt">,
-  ) => Promise<ManagedPrLocationRecord>
+  addAllowedPrToSession?: (sessionId: DaemonSession["id"], prNumber: number) => Promise<void>
+  recordPullRequest?: (
+    record: KindInput<typeof db.schema.pullRequests>,
+  ) => Promise<KindOutput<typeof db.schema.pullRequests>>
   createLoopManager?: (input: { sessionManager: SessionManager }) => LoopManager
   createWorkforceManager?: (input: {
     sessionManager: SessionManager

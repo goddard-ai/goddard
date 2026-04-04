@@ -11,6 +11,13 @@ exactly like these examples.
 
 kindstore is a registry-driven document store. It is not a general ORM.
 
+When opening an existing store, treat `UnrecoverableStoreOpenError` as the
+signal that the persisted internal metadata or store format cannot be opened
+safely by the current code. Downstream code that accepts data loss may catch
+that error and wipe the store before retrying; ordinary schema declaration,
+structural migration, or payload migration errors should still be handled as
+normal application failures.
+
 ## Start from real kinds
 
 ```ts
@@ -40,12 +47,38 @@ const db = kindstore({
 });
 ```
 
+When you need the inferred input or output shape for a declared kind, you can
+derive it directly from the builder instance:
+
+```ts
+import type { KindInput, KindOutput } from "kindstore";
+
+const schema = {
+  tasks: kind("tsk", Task).index("status"),
+};
+
+type TaskInput = KindInput<typeof schema.tasks>;
+type TaskOutput = KindOutput<typeof schema.tasks>;
+```
+
+When you already have a store instance, the same builders are also available at
+`db.schema.<kindKey>`, so `KindInput<typeof db.schema.tasks>` and
+`KindOutput<typeof db.schema.tasks>` work without keeping a separate schema bag
+in scope.
+
 Use this shape when you need:
 
 - stable tagged IDs like `tsk_...`
 - typed payload validation with Zod
-- typed filtering on declared top-level fields only
-- deterministic ordering on indexed fields
+- typed filtering on declared query fields only
+- deterministic ordering on declared query fields
+
+`.multi(...)` may reference any top-level payload field, and it may also
+include the store-managed `id`, even if those fields do not also have their own
+`.index(...)`. kindstore derives any needed generated columns for payload
+fields automatically, while `id` reuses the existing row ID column. Add a
+standalone `.index(...)` too when you want a dedicated single-field SQLite
+index or need an explicit SQLite type hint.
 
 When a kind uses `.createdAt()` or `.updatedAt()`, kindstore adds integer
 timestamp fields to the schema if they are missing. If the field already exists
@@ -168,8 +201,8 @@ where: {
 
 Keep queries inside this boundary:
 
-- only declared indexed top-level fields are queryable
-- ordering is only on declared indexed fields
+- only declared query fields are queryable: top-level payload fields declared in `.index(...)` or `.multi(...)`, plus `id` when it is included in `.multi(...)`
+- ordering is only on declared query fields
 - the operators are `in`, `gt`, `gte`, `lt`, and `lte`
 - there is no arbitrary boolean composition or join support
 
@@ -233,9 +266,13 @@ db.metadata.update("syncCursor", (current) => ({
 }));
 ```
 
+Here `syncedAt` is just an ordinary metadata field in the payload. kindstore
+does not add or maintain metadata timestamps for you.
+
 Use metadata for small typed values like preferences, checkpoints, cursors, or
-feature flags. If the value needs many records, indexing, or per-record IDs,
-make it a real kind instead.
+feature flags. kindstore does not add store-managed metadata timestamps, so if
+you need them, include them in the metadata schema yourself. If the value needs
+many records, indexing, or per-record IDs, make it a real kind instead.
 
 ## Batch related writes together
 

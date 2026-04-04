@@ -1,10 +1,10 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { IpcClientError } from "@goddard-ai/ipc"
+import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test } from "bun:test"
-import { IpcClientError } from "@goddard-ai/ipc"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureDaemonLogging } from "../src/logging.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
@@ -944,7 +944,7 @@ test("workforce runtime logs request-to-session correlation for launched session
 
           return {
             id: "daemon-session-1",
-            acpId: "acp-session-1",
+            acpSessionId: "acp-session-1",
             status: "done",
           } as never
         },
@@ -969,7 +969,7 @@ test("workforce runtime logs request-to-session correlation for launched session
       entry.event === "workforce.session_completed" && entry.sessionId === "daemon-session-1",
   )
   expect(completedLog).toBeTruthy()
-  expect(completedLog?.acpId).toBe("acp-session-1")
+  expect(completedLog?.acpSessionId).toBe("acp-session-1")
   expect(typeof completedLog?.requestId).toBe("string")
 })
 

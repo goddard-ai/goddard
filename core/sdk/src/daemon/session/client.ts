@@ -183,7 +183,7 @@ export async function runSession(
   }
 
   const daemonSessionId = connectedSession.session.id
-  const acpSessionId = connectedSession.session.acpId
+  const acpSessionId = connectedSession.session.acpSessionId
 
   const agentInput = createMessageInputTransport(client, daemonSessionId)
   const agentOutput = await createMessageOutputTransport(client, daemonSessionId)

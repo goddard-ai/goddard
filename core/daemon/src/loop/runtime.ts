@@ -78,14 +78,14 @@ export class LoopRuntime {
       config,
       deps,
       sessionId: session.id,
-      sessionAcpId: session.acpId,
+      sessionAcpId: session.acpSessionId,
     })
 
     logger.log("loop.runtime_started", {
       rootDir: config.rootDir,
       loopName: config.loopName,
       sessionId: session.id,
-      acpId: session.acpId,
+      acpSessionId: session.acpSessionId,
       promptModulePath: config.promptModulePath,
     })
 
@@ -127,7 +127,7 @@ export class LoopRuntime {
       promptModulePath: this.#config.promptModulePath,
       startedAt: this.#startedAt,
       sessionId: this.#sessionId,
-      acpId: this.#sessionAcpId,
+      acpSessionId: this.#sessionAcpId,
       cycleCount: this.#cycleCount,
       lastPromptAt: this.#lastPromptAt,
     }
