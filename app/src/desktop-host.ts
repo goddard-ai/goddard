@@ -30,6 +30,9 @@ export interface DesktopHostBridge {
   /** Opens one native directory picker and returns the chosen project root when present. */
   browseForProject(): Promise<string | null>
 
+  /** Maximizes the active desktop window through the Bun host bridge. */
+  maximizeWindow(): Promise<void>
+
   /** Forwards one daemon IPC request through the Bun host's default daemon client. */
   daemonSend<Name extends DaemonRequestName>(
     name: Name,
@@ -66,6 +69,11 @@ export async function browseForProject(): Promise<string | null> {
   return response.path
 }
 
+/** Maximizes the active desktop window through the Bun host. */
+export async function maximizeWindow(): Promise<void> {
+  await rpc.request.maximizeWindow({})
+}
+
 /** Forwards one daemon IPC request through the Bun host. */
 export async function daemonSend<Name extends DaemonRequestName>(
   name: Name,
@@ -79,6 +87,7 @@ export async function daemonSend<Name extends DaemonRequestName>(
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
   browseForProject,
+  maximizeWindow,
   daemonSend,
   sdk: goddardSdk,
 }

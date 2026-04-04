@@ -43,6 +43,10 @@ export type AppDesktopRpc = {
         params: DaemonSendInput
         response: unknown
       }
+      maximizeWindow: {
+        params: {}
+        response: {}
+      }
     }
     messages: {}
   }>

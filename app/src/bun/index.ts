@@ -1,8 +1,8 @@
 import { BrowserWindow, Updater } from "electrobun/bun"
+import { getMainWindow, setMainWindow } from "./main-window"
 import { installMacOsApplicationMenu } from "./menu"
 import { appRpc } from "./rpc"
 
-let mainWindow: BrowserWindow<typeof appRpc> | null = null
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
 
@@ -39,7 +39,8 @@ async function getMainWindowUrl() {
   return "views://main/index.html"
 }
 
-installMacOsApplicationMenu(() => mainWindow)
+installMacOsApplicationMenu(getMainWindow)
 
 const mainWindowUrl = await getMainWindowUrl()
-mainWindow = createMainWindow(mainWindowUrl)
+const mainWindow = createMainWindow(mainWindowUrl)
+setMainWindow(mainWindow)

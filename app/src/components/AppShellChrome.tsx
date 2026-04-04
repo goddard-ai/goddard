@@ -2,11 +2,12 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
-import { SvgIcon, type SvgIconName } from "./SvgIcon"
+import { maximizeWindow } from "../desktop-host"
 import { formatBadgeCount, type AppShellTopbarAction } from "./AppShell.config"
 import type { NavigationItemId } from "./state/Navigation"
 import { getWorkbenchTabIcon, type WorkbenchTab } from "./state/WorkbenchTabRegistry"
 import { WORKBENCH_PRIMARY_TAB } from "./state/WorkbenchTabSet"
+import { SvgIcon, type SvgIconName } from "./SvgIcon"
 
 const actionButtonClass = css({
   position: "relative",
@@ -86,6 +87,15 @@ export function AppShellChrome(props: {
           }),
           "electrobun-webkit-app-region-drag",
         )}
+        onDblClick={(event) => {
+          if (
+            (event.target as HTMLElement | null)?.closest(".electrobun-webkit-app-region-no-drag")
+          ) {
+            return
+          }
+
+          void maximizeWindow()
+        }}
       >
         {/* <SvgIcon
           class={css({
