@@ -10,8 +10,15 @@ The desktop app now runs on Electrobun with a Bun-owned host layer and a Preact 
 ## Development
 
 - Run `pnpm --dir app run dev` to start the Electrobun desktop app.
-- Run `pnpm --dir app run build` to produce a packaged Electrobun build.
+- Run `pnpm --dir app run build` to produce a packaged local Electrobun build.
+- Run `pnpm --dir app run build:stable` to produce release artifacts in `app/artifacts`.
 - Run `pnpm --dir app run typecheck` to typecheck both the browser code and the Bun host code.
+
+## Releases
+
+- Pushing a `v*` git tag triggers `.github/workflows/release-app.yml`.
+- The workflow runs native Electrobun `stable` builds on macOS, Windows, and Linux, then uploads `app/artifacts/*` into the matching GitHub Release.
+- Before publishing a new stable release, the workflow also copies forward older `.patch` assets from the previous latest release so Electrobun `bsdiff` updates remain available across versions.
 
 ## Host Model
 

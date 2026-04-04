@@ -1,6 +1,8 @@
 import type { ElectrobunConfig } from "electrobun"
 import pkg from "./package.json" with { type: "json" }
 
+const releaseBaseUrl = `https://github.com/${process.env.GITHUB_REPOSITORY ?? "goddard-ai/goddard"}/releases/latest/download`
+
 /** Electrobun build config for the desktop host and Vite-produced webview assets. */
 export default {
   app: {
@@ -25,5 +27,8 @@ export default {
     linux: {
       icon: "assets/icon.png",
     },
+  },
+  release: {
+    baseUrl: releaseBaseUrl,
   },
 } satisfies ElectrobunConfig

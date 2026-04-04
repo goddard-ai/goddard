@@ -9,6 +9,8 @@
     "dev": "picorun 'bun run vite:dev' 'bun run electrobun:watch:hmr' --names=vite,electrobun",
     "prebuild": "bun run panda:sync",
     "build": "vite build && electrobun build",
+    "build:canary": "bun run panda:sync && vite build && electrobun build --env=canary",
+    "build:stable": "bun run panda:sync && vite build && electrobun build --env=stable",
     "icons:generate": "bun run ./scripts/generate-iconset.mjs",
     "lint": "oxlint",
     "fmt": "oxfmt",
