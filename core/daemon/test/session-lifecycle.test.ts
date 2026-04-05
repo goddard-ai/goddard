@@ -118,6 +118,12 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     mcpServers: [],
     connectionMode: "live",
     activeDaemonSession: true,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+    repository: null,
+    prNumber: null,
     token: "tok-restart-1",
     permissions: {
       owner: "acme",
@@ -125,6 +131,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
       allowedPrNumbers: [12],
     },
     metadata: null,
+    models: null,
   } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(sessionId, sessionRecord)
   db.sessionMessages.create({
@@ -140,8 +147,8 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
 
   const session = await client.send("sessionGet", { id: sessionId })
   expect(session.session.status).toBe("error")
-  expect(session.session.connection.mode).toBe("history")
-  expect(session.session.connection.reconnectable).toBe(false)
+  expect(session.session.connectionMode).toBe("history")
+  expect(session.session.activeDaemonSession).toBe(false)
   expect(session.session.errorMessage ?? "").toMatch(/previous daemon exited unexpectedly/i)
 
   const history = await client.send("sessionHistory", { id: sessionId })

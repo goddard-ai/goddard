@@ -254,7 +254,7 @@ export async function startDaemonServer(
       },
       sessionCreate: async (payload, context) => {
         const response = {
-          session: await sessionManager.newSession(payload),
+          session: await sessionManager.newSession({ request: payload }),
         }
         context.setSessionId(response.session.id)
         return response
@@ -303,8 +303,8 @@ export async function startDaemonServer(
       },
       actionRun: async (payload, context) => {
         const action = await resolveNamedAction(payload.actionName, payload.cwd)
-        const session = await sessionManager.newSession(
-          buildNamedActionSessionParams(action, payload.cwd, {
+        const session = await sessionManager.newSession({
+          request: buildNamedActionSessionParams(action, payload.cwd, {
             cwd: payload.cwd,
             agent: payload.agent,
             mcpServers: payload.mcpServers,
@@ -314,7 +314,7 @@ export async function startDaemonServer(
             prNumber: payload.prNumber,
             metadata: payload.metadata,
           }),
-        )
+        })
         context.setSessionId(session.id)
         return { session }
       },

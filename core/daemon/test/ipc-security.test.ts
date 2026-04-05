@@ -635,6 +635,14 @@ async function seedWorkforceSession(input: {
     agentName: "pi",
     cwd: input.rootDir,
     mcpServers: [],
+    connectionMode: "none",
+    activeDaemonSession: false,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+    repository: null,
+    prNumber: null,
     token: input.token,
     permissions: {
       owner: "trusted",
@@ -642,6 +650,7 @@ async function seedWorkforceSession(input: {
       allowedPrNumbers: [],
     },
     metadata: null,
+    models: null,
   } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(input.sessionId, sessionRecord)
   db.workforces.create({

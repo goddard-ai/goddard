@@ -145,7 +145,8 @@ type ActiveSession = {
 }
 
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
-interface SessionLaunchParams extends CreateDaemonSessionRequest {
+interface SessionLaunchParams {
+  request: CreateDaemonSessionRequest
   token?: string
   config?: UserConfig
   worktreePlugins?: WorktreePlugin[]
@@ -254,12 +255,7 @@ function isErrorSignal(signal: string | null): boolean {
 
 /** Detects one-shot sessions that should exit immediately after the initial prompt completes. */
 function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
-  return params.oneShot === true && params.initialPrompt !== undefined
-}
-
-/** Normalizes persisted timestamps to ISO strings for schema responses. */
-function toIsoString(value: Date | number): string {
-  return (value instanceof Date ? value : new Date(value)).toISOString()
+  return params.request.oneShot === true && params.request.initialPrompt !== undefined
 }
 
 /** Derives reconnectability from stored connection state without joining adjacent kinds. */
@@ -281,47 +277,11 @@ function archivedConnectionMode(historyLength: number): SessionConnectionMode {
 
 /** Merges structured session metadata layers while dropping empty results. */
 function mergeSessionMetadata(
-  ...layers: Array<DaemonSessionMetadata | null | undefined>
+  a: DaemonSessionMetadata | null | undefined,
+  b: DaemonSessionMetadata | null | undefined,
 ): DaemonSessionMetadata | undefined {
-  const merged = Object.assign(
-    {},
-    ...layers.filter(
-      (layer): layer is DaemonSessionMetadata => typeof layer === "object" && layer !== null,
-    ),
-  )
-
+  const merged = { ...a, ...b }
   return Object.keys(merged).length > 0 ? merged : undefined
-}
-
-/** Maps one stored session record to the base daemon session response shape. */
-function toDaemonSessionRecord(
-  record: KindOutput<typeof db.schema.sessions> | null | undefined,
-): DaemonSession {
-  if (!record) {
-    throw new IpcClientError("Session not found")
-  }
-
-  return {
-    id: record.id,
-    acpSessionId: record.acpSessionId,
-    status: record.status,
-    agentName: record.agentName,
-    cwd: record.cwd,
-    repository: record.repository ?? null,
-    prNumber: typeof record.prNumber === "number" ? record.prNumber : null,
-    metadata: record.metadata ?? null,
-    connection: toConnectionState({
-      mode: record.connectionMode,
-      activeDaemonSession: record.activeDaemonSession,
-    }),
-    createdAt: toIsoString(record.createdAt),
-    updatedAt: toIsoString(record.updatedAt),
-    errorMessage: record.errorMessage,
-    blockedReason: record.blockedReason,
-    initiative: record.initiative,
-    lastAgentMessage: record.lastAgentMessage,
-    models: record.models ?? null,
-  }
 }
 
 /** Produces a stable agent name whether the request used an id or a resolved distribution. */
@@ -422,17 +382,15 @@ function createAgentProcessHandle(input: {
 }
 
 /** Resolves and launches the requested agent distribution for a new daemon session. */
-export async function spawnAgentProcess(
-  daemonUrl: string,
-  token: string,
-  params: {
-    agent: ACPAdapterName | AgentDistribution
-    cwd: string
-    agentBinDir: string
-    env?: Record<string, string>
-    registry?: Record<string, AgentDistribution>
-  },
-): Promise<AgentProcessHandle> {
+export async function spawnAgentProcess(params: {
+  daemonUrl: string
+  token: string
+  agent: ACPAdapterName | AgentDistribution
+  cwd: string
+  agentBinDir: string
+  env?: Record<string, string>
+  registry?: Record<string, AgentDistribution>
+}): Promise<AgentProcessHandle> {
   let agent = params.agent
 
   if (typeof agent === "string") {
@@ -447,18 +405,18 @@ export async function spawnAgentProcess(
     }
   }
 
-  const processSpec = await resolveAgentProcessSpec(agent)
+  const { cmd, args, env } = await resolveAgentProcessSpec(agent)
 
   return createAgentProcessHandle({
-    cmd: processSpec.cmd,
-    args: processSpec.args,
+    cmd,
+    args,
     cwd: params.cwd,
     env: buildAgentProcessEnv({
-      daemonUrl,
-      token,
+      daemonUrl: params.daemonUrl,
+      token: params.token,
       agentBinDir: params.agentBinDir,
       env: {
-        ...processSpec.env,
+        ...env,
         ...params.env,
       },
     }),
@@ -627,14 +585,13 @@ async function cleanupOtherAgentBinaryInstalls(
 }
 
 /** Performs the ACP handshake and optional initial prompt before live streaming begins. */
-async function initializeSession(
-  input: AgentInputStream,
-  output: AgentOutputStream,
-  params: CreateDaemonSessionRequest & {
-    resumeAcpId?: string
-    onMessageWrite?: (message: acp.AnyMessage) => void
-  },
-): Promise<
+async function initializeSession(params: {
+  input: AgentInputStream
+  output: AgentOutputStream
+  request: CreateDaemonSessionRequest
+  resumeAcpId?: string
+  onMessageWrite?: (message: acp.AnyMessage) => void
+}): Promise<
   acp.InitializeResponse & {
     status: SessionStatus
     isFirstPrompt: boolean
@@ -644,7 +601,7 @@ async function initializeSession(
   }
 > {
   const history: acp.AnyMessage[] = []
-  const stream = createAgentMessageStream(input, output)
+  const stream = createAgentMessageStream(params.input, params.output)
 
   try {
     const agent = new acp.ClientSideConnection(
@@ -680,26 +637,26 @@ async function initializeSession(
     ) {
       await agent.loadSession({
         sessionId: params.resumeAcpId,
-        cwd: params.cwd,
-        mcpServers: params.mcpServers,
+        cwd: params.request.cwd,
+        mcpServers: params.request.mcpServers,
       })
       acpSessionId = params.resumeAcpId
       isFirstPrompt = false
     } else {
-      const newSession = await agent.newSession(params)
+      const newSession = await agent.newSession(params.request)
       acpSessionId = newSession.sessionId
       models = newSession.models
     }
 
-    if (params.initialPrompt !== undefined) {
+    if (params.request.initialPrompt !== undefined) {
       const initialMessage = {
         jsonrpc: "2.0",
         method: acp.AGENT_METHODS.session_prompt,
         params: createInitialPromptRequest({
           sessionId: acpSessionId,
-          prompt: params.initialPrompt,
+          prompt: params.request.initialPrompt,
           isFirstPrompt,
-          systemPrompt: params.systemPrompt,
+          systemPrompt: params.request.systemPrompt,
         }),
       } satisfies acp.AnyMessage
 
@@ -760,33 +717,20 @@ function parseRepoScope(params: { repository?: string; prNumber?: number }): {
 
 /** Builds the structured logging context shared across session lifecycle events. */
 function buildSessionLogContext(params: {
-  agent: string | AgentDistribution
-  cwd: string
-  oneShot?: boolean
-  repository?: string
-  prNumber?: number
+  request: CreateDaemonSessionRequest
+  cwd?: string
   workforce?: CreateDaemonSessionRequest["workforce"]
-  launchLogContext?: Record<string, unknown>
+  extraContext?: Record<string, unknown>
 }): Record<string, unknown> {
   return {
-    agent: agentNameFromInput(params.agent),
-    cwd: params.cwd,
-    oneShot: params.oneShot === true,
-    repository: typeof params.repository === "string" ? params.repository : undefined,
-    prNumber: typeof params.prNumber === "number" ? params.prNumber : undefined,
-    workforceRootDir:
-      params.workforce && typeof params.workforce.rootDir === "string"
-        ? params.workforce.rootDir
-        : undefined,
-    workforceAgentId:
-      params.workforce && typeof params.workforce.agentId === "string"
-        ? params.workforce.agentId
-        : undefined,
-    workforceRequestId:
-      params.workforce && typeof params.workforce.requestId === "string"
-        ? params.workforce.requestId
-        : undefined,
-    ...params.launchLogContext,
+    agent: agentNameFromInput(params.request.agent),
+    cwd: params.cwd ?? params.request.cwd,
+    oneShot: params.request.oneShot === true,
+    repository:
+      typeof params.request.repository === "string" ? params.request.repository : undefined,
+    prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : undefined,
+    workforce: params.workforce ?? params.request.workforce,
+    ...params.extraContext,
   }
 }
 
@@ -1076,65 +1020,62 @@ export function createSessionManager(input: {
     await ready
     const id = existingSession?.id ?? db.sessions.newId()
     const token = params.token ?? randomBytes(32).toString("hex")
+
     const existingMessagesRecord = existingSession
-      ? (db.sessionMessages.first({
+      ? db.sessionMessages.first({
           where: { sessionId: id },
-        }) ?? null)
+        })
       : null
-    const existingDiagnosticsRecord = existingSession
-      ? (db.sessionDiagnostics.first({
+
+    const existingWorktree = existingSession
+      ? db.worktrees.first({
           where: { sessionId: id },
-        }) ?? null)
+        })
       : null
-    const existingWorktreeRecord = existingSession
-      ? (db.worktrees.first({
+
+    const existingWorkforce = existingSession
+      ? db.workforces.first({
           where: { sessionId: id },
-        }) ?? null)
+        })
       : null
-    const existingWorkforceRecord = existingSession
-      ? (db.workforces.first({
-          where: { sessionId: id },
-        }) ?? null)
-      : null
-    const existingWorktree = existingWorktreeRecord
-      ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(existingWorktreeRecord)
-      : null
-    const existingWorkforce = existingWorkforceRecord
-      ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(existingWorkforceRecord)
-      : null
+
     const worktree =
-      existingWorktree != null || params.worktree?.enabled === true
-        ? await prepareSessionWorktree(id, params.cwd, {
+      existingWorktree != null || params.request.worktree?.enabled === true
+        ? await prepareSessionWorktree(id, params.request.cwd, {
             branchNameOverride:
-              typeof params.prNumber === "number" ? `pr-${params.prNumber}` : undefined,
+              typeof params.request.prNumber === "number"
+                ? `pr-${params.request.prNumber}`
+                : undefined,
             worktreePlugins: params.worktreePlugins,
             existingFolder: existingWorktree?.worktreeDir,
             defaultWorktreesFolder: params.config?.worktrees?.defaultFolder,
           })
         : null
 
-    const cwd = worktree?.effectiveCwd ?? params.cwd
-    const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.metadata)
-    const workforceMetadata = params.workforce ?? existingWorkforce
-    const metadata = sessionMetadata
+    const cwd = worktree?.effectiveCwd ?? params.request.cwd
+    const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.request.metadata)
+    const existingWorkforceMetadata = existingWorkforce
+      ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(existingWorkforce)
+      : undefined
+    const workforceMetadata = params.request.workforce ?? existingWorkforceMetadata
     const sessionContext = {
       sessionId: id,
       acpSessionId: undefined as string | undefined,
     }
 
     const sessionLogContext = buildSessionLogContext({
-      ...params,
+      request: params.request,
       cwd,
       workforce: workforceMetadata ?? undefined,
-      launchLogContext: worktree
+      extraContext: worktree
         ? {
-            worktreeDir: worktree.metadata.worktreeDir,
-            worktreePoweredBy: worktree.metadata.poweredBy,
+            worktreeDir: worktree.state.worktreeDir,
+            worktreePoweredBy: worktree.state.poweredBy,
           }
         : undefined,
     })
 
-    const scope = parseRepoScope(params)
+    const scope = parseRepoScope(params.request)
 
     const nextPermission = {
       owner: scope.owner,
@@ -1148,18 +1089,24 @@ export function createSessionManager(input: {
         ...sessionLogContext,
       })
 
-      const agentProcess = await spawnAgentProcess(input.daemonUrl, token, {
-        agent: params.agent,
+      const agentProcess = await spawnAgentProcess({
+        daemonUrl: input.daemonUrl,
+        token,
+        agent: params.request.agent,
         cwd,
         agentBinDir: input.agentBinDir,
-        env: params.env,
+        env: params.request.env,
         registry: input.registry,
       })
 
-      const initialized = await initializeSession(agentProcess.stdin, agentProcess.stdout, {
-        ...params,
-        cwd,
-        metadata,
+      const initialized = await initializeSession({
+        input: agentProcess.stdin,
+        output: agentProcess.stdout,
+        request: {
+          ...params.request,
+          cwd,
+          metadata: sessionMetadata,
+        },
         resumeAcpId: existingSession?.acpSessionId,
         onMessageWrite: (message) => {
           logAgentMessage(
@@ -1179,7 +1126,6 @@ export function createSessionManager(input: {
             : [...initialized.history]
           : [...existingMessagesRecord.messages, ...initialized.history]
         : [...initialized.history]
-      const initialDiagnostics = existingDiagnosticsRecord?.events ?? []
 
       if (existingMessagesRecord) {
         db.sessionMessages.put(existingMessagesRecord.id, {
@@ -1193,30 +1139,16 @@ export function createSessionManager(input: {
         })
       }
 
-      if (existingDiagnosticsRecord) {
-        db.sessionDiagnostics.put(existingDiagnosticsRecord.id, {
-          sessionId: id,
-          events: initialDiagnostics,
-        })
-      } else {
-        db.sessionDiagnostics.create({
-          sessionId: id,
-          events: initialDiagnostics,
-        })
-      }
-
       if (worktree) {
         const nextWorktree = {
           sessionId: id,
-          ...worktree.metadata,
+          ...worktree.state,
         }
-        if (existingWorktreeRecord) {
-          db.worktrees.put(existingWorktreeRecord.id, nextWorktree)
+        if (existingWorktree) {
+          db.worktrees.put(existingWorktree.id, nextWorktree)
         } else {
           db.worktrees.create(nextWorktree)
         }
-      } else if (existingWorktreeRecord) {
-        db.worktrees.delete(existingWorktreeRecord.id)
       }
 
       if (workforceMetadata) {
@@ -1224,13 +1156,11 @@ export function createSessionManager(input: {
           sessionId: id,
           ...workforceMetadata,
         }
-        if (existingWorkforceRecord) {
-          db.workforces.put(existingWorkforceRecord.id, nextWorkforce)
+        if (existingWorkforce) {
+          db.workforces.put(existingWorkforce.id, nextWorkforce)
         } else {
           db.workforces.create(nextWorkforce)
         }
-      } else if (existingWorkforceRecord) {
-        db.workforces.delete(existingWorkforceRecord.id)
       }
 
       if (existingSession) {
@@ -1242,9 +1172,9 @@ export function createSessionManager(input: {
         db.sessions.update(id, {
           acpSessionId: initialized.acpSessionId,
           status: initialized.status,
-          agentName: agentNameFromInput(params.agent),
+          agentName: agentNameFromInput(params.request.agent),
           cwd,
-          mcpServers: params.mcpServers,
+          mcpServers: params.request.mcpServers,
           connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
           activeDaemonSession: !shouldExitAfterInitialPrompt(params),
           repository: scope.repository,
@@ -1262,9 +1192,9 @@ export function createSessionManager(input: {
         db.sessions.put(id, {
           acpSessionId: initialized.acpSessionId,
           status: initialized.status,
-          agentName: agentNameFromInput(params.agent),
+          agentName: agentNameFromInput(params.request.agent),
           cwd,
-          mcpServers: params.mcpServers,
+          mcpServers: params.request.mcpServers,
           connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
           activeDaemonSession: !shouldExitAfterInitialPrompt(params),
           repository: scope.repository,
@@ -1273,6 +1203,10 @@ export function createSessionManager(input: {
           permissions: nextPermission,
           metadata: sessionMetadata ?? null,
           models: initialized.models ?? null,
+          errorMessage: null,
+          blockedReason: null,
+          initiative: null,
+          lastAgentMessage: null,
         })
       }
       await emitDiagnostic(id, "session_created", {
@@ -1299,7 +1233,10 @@ export function createSessionManager(input: {
         await emitDiagnostic(id, "session_completed_one_shot")
         await treeKill(agentProcess)
         const sessionDocument = db.sessions.get(id) ?? null
-        return toDaemonSessionRecord(sessionDocument)
+        if (!sessionDocument) {
+          throw new IpcClientError("Session not found")
+        }
+        return sessionDocument
       }
 
       const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
@@ -1325,7 +1262,7 @@ export function createSessionManager(input: {
         status: initialized.status,
         history: initialHistory,
         isFirstPrompt: initialized.isFirstPrompt,
-        systemPrompt: params.systemPrompt,
+        systemPrompt: params.request.systemPrompt,
         lastPermissionRequest: null,
         clientRequests: new Map(),
         pendingPrompts: new Map(),
@@ -1408,7 +1345,10 @@ export function createSessionManager(input: {
 
       activeSessions.set(activeSession.id, activeSession)
       const sessionDocument = db.sessions.get(id) ?? null
-      return toDaemonSessionRecord(sessionDocument)
+      if (!sessionDocument) {
+        throw new IpcClientError("Session not found")
+      }
+      return sessionDocument
     } catch (error) {
       logger.log("session.launch_failed", {
         sessionId: id,
@@ -1453,7 +1393,10 @@ export function createSessionManager(input: {
   async function getSession(id: DaemonSessionId): Promise<DaemonSession> {
     await ready
     const record = db.sessions.get(id) ?? null
-    return toDaemonSessionRecord(record)
+    if (!record) {
+      throw new IpcClientError("Session not found")
+    }
+    return record
   }
 
   async function listSessions(
@@ -1477,7 +1420,7 @@ export function createSessionManager(input: {
     }
 
     return {
-      sessions: page.items.map((record) => toDaemonSessionRecord(record)),
+      sessions: page.items,
       nextCursor: page.next ?? null,
       hasMore: page.next != null,
     }
@@ -1488,7 +1431,7 @@ export function createSessionManager(input: {
     if (!activeSessions.has(id)) {
       const session = await getSession(id)
       throw new IpcClientError(
-        session.connection.mode === "history"
+        session.connectionMode === "history"
           ? `Session ${id} is archived and no longer reconnectable`
           : `Session ${id} is not reconnectable`,
       )
@@ -1505,7 +1448,10 @@ export function createSessionManager(input: {
     return {
       id: session.id,
       acpSessionId: session.acpSessionId,
-      connection: session.connection,
+      connection: toConnectionState({
+        mode: session.connectionMode,
+        activeDaemonSession: session.activeDaemonSession,
+      }),
       history: active
         ? [...active.history]
         : ((
@@ -1526,7 +1472,10 @@ export function createSessionManager(input: {
     return {
       id: session.id,
       acpSessionId: session.acpSessionId,
-      connection: session.connection,
+      connection: toConnectionState({
+        mode: session.connectionMode,
+        activeDaemonSession: session.activeDaemonSession,
+      }),
       events: (diagnosticsRecord?.events ?? []).map((event) => ({
         ...event,
         sessionId: session.id,

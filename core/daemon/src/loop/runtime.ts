@@ -61,17 +61,19 @@ export class LoopRuntime {
     deps: LoopRuntimeDeps,
   ): Promise<LoopRuntime> {
     const session = await deps.sessionManager.newSession({
-      ...config.session,
-      systemPrompt: config.session.systemPrompt ?? "",
-      metadata: {
-        ...config.session.metadata,
-        loop: {
-          rootDir: config.rootDir,
-          loopName: config.loopName,
-          promptModulePath: config.promptModulePath,
+      request: {
+        ...config.session,
+        systemPrompt: config.session.systemPrompt ?? "",
+        metadata: {
+          ...config.session.metadata,
+          loop: {
+            rootDir: config.rootDir,
+            loopName: config.loopName,
+            promptModulePath: config.promptModulePath,
+          },
         },
+        worktree: config.session.worktree ?? { enabled: true },
       },
-      worktree: config.session.worktree ?? { enabled: true },
     })
 
     const runtime = new LoopRuntime({

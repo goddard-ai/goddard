@@ -1,5 +1,5 @@
-import type { KindInput } from "kindstore"
 import { Worktree, type WorktreePlugin } from "@goddard-ai/worktree"
+import type { KindInput } from "kindstore"
 import { realpathSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { db } from "../persistence/store.ts"
@@ -8,7 +8,7 @@ import { db } from "../persistence/store.ts"
 export interface PreparedSessionWorktree {
   worktree: Worktree
   effectiveCwd: string
-  metadata: Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
+  state: Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
   logContext: Record<string, unknown>
 }
 
@@ -64,7 +64,7 @@ export async function prepareSessionWorktree(
   return {
     worktree,
     effectiveCwd,
-    metadata: {
+    state: {
       repoRoot,
       requestedCwd,
       effectiveCwd,

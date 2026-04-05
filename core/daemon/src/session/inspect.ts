@@ -6,7 +6,9 @@ import { spawnAgentProcess } from "./manager.ts"
 
 /** Starts one raw ACP adapter, initializes it, and opens a fresh session for inspection. */
 export async function inspectAdapterSession(adapter: string, cwd: string) {
-  const processHandle = await spawnAgentProcess("http://localhost:0", "test-token", {
+  const processHandle = await spawnAgentProcess({
+    daemonUrl: "http://localhost:0",
+    token: "test-token",
     agent: adapter,
     cwd,
     agentBinDir: os.tmpdir(),

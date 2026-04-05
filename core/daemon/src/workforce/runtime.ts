@@ -293,20 +293,22 @@ async function defaultRunWorkforceSession(
   })
 
   const session = await deps.sessionManager.newSession({
-    agent: agentDistribution,
-    cwd,
-    workforce: {
-      rootDir: input.rootDir,
-      agentId: input.agent.id,
-      requestId: input.request.id,
-    },
-    mcpServers: [],
-    systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
-    oneShot: true,
-    initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
-    env: {
-      GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
-      GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
+    request: {
+      agent: agentDistribution,
+      cwd,
+      workforce: {
+        rootDir: input.rootDir,
+        agentId: input.agent.id,
+        requestId: input.request.id,
+      },
+      mcpServers: [],
+      systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
+      oneShot: true,
+      initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
+      env: {
+        GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
+        GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
+      },
     },
   })
 

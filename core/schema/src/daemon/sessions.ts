@@ -19,13 +19,11 @@ export const SessionWorktreeParams = z.object({
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
 
 /** Workforce attachment stored separately from the base daemon session record. */
-export const SessionWorkforceParams = z
-  .object({
-    rootDir: z.string().optional(),
-    agentId: z.string().optional(),
-    requestId: z.string().optional(),
-  })
-  .catchall(z.unknown())
+export const SessionWorkforceParams = z.object({
+  rootDir: z.string().optional(),
+  agentId: z.string().optional(),
+  requestId: z.string().optional(),
+})
 
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
 
@@ -114,6 +112,13 @@ export type DaemonSessionRuntimeEnv = {
   GODDARD_SESSION_TOKEN: string
 }
 
+/** Durable PR permission scope stored with one daemon-managed session. */
+export type DaemonSessionPermissions = {
+  owner: string
+  repo: string
+  allowedPrNumbers: number[]
+}
+
 /** Durable connectivity state exposed to app and SDK consumers. */
 export type DaemonSessionConnection = {
   mode: "live" | "history" | "none"
@@ -140,17 +145,21 @@ export type DaemonSession = DaemonSessionIdentity & {
   status: SessionStatus
   agentName: string
   cwd: string
+  mcpServers: acp.McpServer[]
+  connectionMode: "live" | "history" | "none"
+  activeDaemonSession: boolean
+  token: string | null
+  permissions: DaemonSessionPermissions | null
   repository: string | null
   prNumber: number | null
   metadata: DaemonSessionMetadata | null
-  connection: DaemonSessionConnection
-  createdAt: string
-  updatedAt: string
+  createdAt: number
+  updatedAt: number
   errorMessage: string | null
   blockedReason: string | null
   initiative: string | null
   lastAgentMessage: string | null
-  models?: acp.SessionModelState | null
+  models: acp.SessionModelState | null
 }
 
 /** Response payload returned after one daemon-managed session is created. */
