@@ -377,8 +377,10 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   })
   expect(newSessionCalls[0]).toEqual(
     expect.objectContaining({
-      cwd: rootDir,
-      worktree: { enabled: true },
+      request: expect.objectContaining({
+        cwd: rootDir,
+        worktree: { enabled: true },
+      }),
     }),
   )
   await waitForExpectation(() => {

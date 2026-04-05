@@ -600,14 +600,14 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input: CreateDaemonSessionRequest) => {
-        const metadata = input.workforce ?? null
+      newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+        const metadata = input.request.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
         }
 
-        systemPrompts[metadata.agentId] = input.systemPrompt
+        systemPrompts[metadata.agentId] = input.request.systemPrompt
 
         await runtime.respond({
           requestId: metadata.requestId,
@@ -687,21 +687,21 @@ test("create-intent requests target the root agent and specialize the root sessi
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input: CreateDaemonSessionRequest) => {
+      newSession: async (input: { request: CreateDaemonSessionRequest }) => {
         const initialPrompt =
-          typeof input.initialPrompt === "string"
-            ? input.initialPrompt
-            : JSON.stringify(input.initialPrompt)
-        capturedEnv = input.env
+          typeof input.request.initialPrompt === "string"
+            ? input.request.initialPrompt
+            : JSON.stringify(input.request.initialPrompt)
+        capturedEnv = input.request.env
 
         if (initialPrompt.includes("Request intent: create")) {
-          createSystemPrompt = input.systemPrompt
+          createSystemPrompt = input.request.systemPrompt
           createInitialPrompt = initialPrompt
         } else {
-          defaultSystemPrompt = input.systemPrompt
+          defaultSystemPrompt = input.request.systemPrompt
         }
 
-        const metadata = input.workforce ?? null
+        const metadata = input.request.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -807,10 +807,10 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input: CreateDaemonSessionRequest) => {
-        capturedSystemPrompt = input.systemPrompt
+      newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+        capturedSystemPrompt = input.request.systemPrompt
 
-        const metadata = input.workforce ?? null
+        const metadata = input.request.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -881,8 +881,8 @@ test("workforce runtime logs request-to-session correlation for launched session
   const { logs } = await captureDaemonLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
       sessionManager: {
-        newSession: async (input: CreateDaemonSessionRequest) => {
-          const metadata = input.workforce ?? null
+        newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+          const metadata = input.request.workforce ?? null
 
           if (!metadata?.agentId || !metadata.requestId) {
             throw new Error("Missing workforce metadata")
