@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import treeKill, { type ProcessLike } from "@alloc/tree-kill"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
@@ -24,7 +25,6 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
-import treeKill, { type ProcessLike } from "@goddard-ai/tree-kill"
 import type { WorktreePlugin } from "@goddard-ai/worktree"
 import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
