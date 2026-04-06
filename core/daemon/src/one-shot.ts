@@ -1,5 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { resolveDefaultAgent } from "@goddard-ai/config"
+import type { ConfigManager } from "./config-manager.ts"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
@@ -13,6 +14,7 @@ export type OneShotInput = {
   daemonUrl: string
   agentBinDir: string
   env?: Record<string, string>
+  configManager?: Pick<ConfigManager, "getRootConfig">
   resolveProjectDir?: (event: FeedbackEvent) => Promise<string | null> | string | null
 }
 
@@ -64,9 +66,12 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
 
   try {
     readSocketPathFromDaemonUrl(input.daemonUrl)
+    const rootConfig = input.configManager
+      ? (await input.configManager.getRootConfig(projectDir)).config
+      : undefined
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
     await client.send("sessionCreate", {
-      agent: await resolveDefaultAgent(),
+      agent: await resolveDefaultAgent(rootConfig),
       cwd: projectDir,
       worktree: { enabled: true },
       mcpServers: [],

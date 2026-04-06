@@ -6,12 +6,15 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { once } from "node:events"
+import { createConfigManager } from "../config-manager.ts"
 import { resolveDaemonRuntimeConfig } from "../config.ts"
 import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager } from "../loop/index.ts"
 import { db } from "../persistence/store.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
+import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createSessionManager } from "../session/manager.ts"
+import { getDaemonSetupContext } from "../setup-context.ts"
 import {
   discoverWorkforceInitCandidates,
   initializeWorkforce,
@@ -36,12 +39,17 @@ export async function startDaemonServer(
   deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
   const logger = createDaemonLogger()
-  const runtime = resolveDaemonRuntimeConfig({
-    socketPath: options.socketPath,
-    agentBinDir: options.agentBinDir,
-  })
+  const setupContext = getDaemonSetupContext()
+  const runtime =
+    setupContext?.runtime ??
+    resolveDaemonRuntimeConfig({
+      socketPath: options.socketPath,
+      agentBinDir: options.agentBinDir,
+    })
   const socketPath = runtime.socketPath
   const daemonUrl = createDaemonUrl(socketPath)
+  const configManager = deps.configManager ?? setupContext?.configManager ?? createConfigManager()
+  const ownsConfigManager = deps.configManager == null && setupContext?.configManager == null
   const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
   const getSessionByToken =
@@ -302,7 +310,7 @@ export async function startDaemonServer(
         }
       },
       actionRun: async (payload, context) => {
-        const action = await resolveNamedAction(payload.actionName, payload.cwd)
+        const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
         const session = await sessionManager.newSession({
           request: buildNamedActionSessionParams(action, payload.cwd, {
             cwd: payload.cwd,
@@ -505,12 +513,14 @@ export async function startDaemonServer(
   sessionManager = createSessionManager({
     daemonUrl,
     agentBinDir: runtime.agentBinDir,
+    configManager,
     publish: (id, message) => {
       ipcServer.publish("sessionMessage", { id, message })
     },
   })
-  loopManager = (deps.createLoopManager ?? ((input) => createLoopManager(input)))({
+  loopManager = (deps.createLoopManager ?? createLoopManager)({
     sessionManager,
+    resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configManager),
   })
   workforceManager = (deps.createWorkforceManager ?? ((input) => createWorkforceManager(input)))({
     sessionManager,
@@ -542,6 +552,9 @@ export async function startDaemonServer(
       await loopManager.close().catch(() => {})
       await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
+      if (ownsConfigManager) {
+        await configManager.close().catch(() => {})
+      }
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error?: Error) => {
           if (error) {

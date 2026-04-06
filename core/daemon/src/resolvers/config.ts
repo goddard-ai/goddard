@@ -17,6 +17,11 @@ export type ResolvedConfigRoots = {
   config: UserConfig
 }
 
+/** Minimal root-config provider contract shared by daemon resolvers and the config manager. */
+export type RootConfigProvider = {
+  getRootConfig: (cwd?: string) => Promise<ResolvedConfigRoots>
+}
+
 const SCHEMA_BASE_URL =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/"
 
@@ -97,6 +102,20 @@ export async function readMergedRootConfig(
       await readJsonConfig(getGlobalConfigPath(), UserConfig, "Global config", "goddard.json"),
       await readJsonConfig(getLocalConfigPath(cwd), UserConfig, "Local config", "goddard.json"),
     ),
+  }
+}
+
+/** Reads the current merged root config from one provider when available, otherwise from disk. */
+export async function readCurrentRootConfig(cwd: string, provider?: RootConfigProvider) {
+  if (!provider) {
+    return readMergedRootConfig(cwd)
+  }
+
+  const snapshot = await provider.getRootConfig(cwd)
+  return {
+    globalRoot: snapshot.globalRoot,
+    localRoot: snapshot.localRoot,
+    config: snapshot.config,
   }
 }
 

@@ -4,7 +4,8 @@ import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { readActionConfig, readMergedRootConfig } from "./config.ts"
+import type { RootConfigProvider } from "./config.ts"
+import { readActionConfig, readCurrentRootConfig } from "./config.ts"
 
 /** A resolved named action prompt and merged persisted config. */
 export type ResolvedDaemonAction = {
@@ -102,9 +103,13 @@ async function resolveActionFromRoot(
 export async function resolveNamedAction(
   actionName: string,
   cwd: string,
+  rootConfigProvider?: RootConfigProvider,
 ): Promise<ResolvedDaemonAction> {
   const resolvedCwd = resolve(cwd)
-  const { config, globalRoot, localRoot } = await readMergedRootConfig(resolvedCwd)
+  const { config, globalRoot, localRoot } = await readCurrentRootConfig(
+    resolvedCwd,
+    rootConfigProvider,
+  )
   const localAction = await resolveActionFromRoot(actionName, localRoot)
   const globalAction = localAction ? null : await resolveActionFromRoot(actionName, globalRoot)
   const action = localAction ?? globalAction

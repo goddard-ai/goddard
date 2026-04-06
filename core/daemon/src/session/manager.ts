@@ -34,6 +34,7 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import { prependAgentBinToPath } from "../config.ts"
+import type { ConfigManager } from "../config-manager.ts"
 import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import {
   type SessionConnectionMode,
@@ -379,6 +380,15 @@ function createAgentProcessHandle(input: {
       exitHandlers.add(wrapped)
     },
   }
+}
+
+/** Waits until one tracked agent process reports that it has exited. */
+function waitForAgentProcessExit(process: AgentProcessHandle) {
+  return new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    process.onceExit((code, signal) => {
+      resolve({ code, signal })
+    })
+  })
 }
 
 /** Resolves and launches the requested agent distribution for a new daemon session. */
@@ -847,6 +857,7 @@ export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
   publish: (id: DaemonSessionId, message: acp.AnyMessage) => void
+  configManager?: ConfigManager
   registry?: Record<string, AgentDistribution>
 }): SessionManager {
   const activeSessions = new Map<DaemonSessionId, ActiveSession>()
@@ -1038,6 +1049,12 @@ export function createSessionManager(input: {
           where: { sessionId: id },
         })
       : null
+    const resolvedConfig =
+      params.config ??
+      (input.configManager
+        ? (await input.configManager.getRootConfig(params.request.cwd)).config
+        : undefined)
+    const resolvedRegistry = resolvedConfig?.registry ?? input.registry
 
     const worktree =
       existingWorktree != null || params.request.worktree?.enabled === true
@@ -1048,7 +1065,7 @@ export function createSessionManager(input: {
                 : undefined,
             worktreePlugins: params.worktreePlugins,
             existingFolder: existingWorktree?.worktreeDir,
-            defaultWorktreesFolder: params.config?.worktrees?.defaultFolder,
+            defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
           })
         : null
 
@@ -1096,7 +1113,7 @@ export function createSessionManager(input: {
         cwd,
         agentBinDir: input.agentBinDir,
         env: params.request.env,
-        registry: input.registry,
+        registry: resolvedRegistry,
       })
 
       const initialized = await initializeSession({
@@ -1232,6 +1249,7 @@ export function createSessionManager(input: {
         await setConnectionMode(id, "history", false)
         await emitDiagnostic(id, "session_completed_one_shot")
         await treeKill(agentProcess)
+        await waitForAgentProcessExit(agentProcess)
         const sessionDocument = db.sessions.get(id) ?? null
         if (!sessionDocument) {
           throw new IpcClientError("Session not found")
@@ -1611,6 +1629,7 @@ export function createSessionManager(input: {
 
     await emitDiagnostic(id, "session_shutdown_requested")
     await treeKill(active.process)
+    await waitForAgentProcessExit(active.process)
     return true
   }
 
@@ -1632,6 +1651,7 @@ export function createSessionManager(input: {
     for (const session of activeSessions.values()) {
       await emitDiagnostic(session.id, "daemon_shutdown", { status: session.status })
       await treeKill(session.process)
+      await waitForAgentProcessExit(session.process)
       await session.writer.close().catch(() => {})
       await session.subscription.close().catch(() => {})
       const sessionRecord = db.sessions.get(session.id) ?? null

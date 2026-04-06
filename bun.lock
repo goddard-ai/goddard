@@ -109,6 +109,7 @@
       },
       "dependencies": {
         "@agentclientprotocol/sdk": "^0.15.0",
+        "@b9g/async-context": "^0.2.1",
         "@goddard-ai/config": "workspace:^",
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/ipc": "workspace:^",
@@ -116,6 +117,7 @@
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/tree-kill": "workspace:^",
         "@goddard-ai/worktree": "workspace:^",
+        "chokidar": "^5.0.0",
         "cmd-ts": "^0.15.0",
         "kindstore": "^0.4.1",
         "kleur": "^4.1.5",
@@ -307,6 +309,8 @@
     "@azure/msal-common": ["@azure/msal-common@16.4.0", "", {}, "sha512-twXt09PYtj1PffNNIAzQlrBd0DS91cdA6i1gAfzJ6BnPM4xNk5k9q/5xna7jLIjU3Jnp0slKYtucshGM8OGNAw=="],
 
     "@azure/msal-node": ["@azure/msal-node@5.1.1", "", { "dependencies": { "@azure/msal-common": "16.4.0", "jsonwebtoken": "^9.0.0", "uuid": "^8.3.0" } }, "sha512-71grXU6+5hl+3CL3joOxlj/AW6rmhthuTlG0fRqsTrhPArQBpZuUFzCIlKOGdcafLUa/i1hBdV78ZxJdlvRA+g=="],
+
+    "@b9g/async-context": ["@b9g/async-context@0.2.1", "", {}, "sha512-Pga+sVg8yVR1Z40BkeK/OWKNJeXlA2XhZWusx6g7dM956biRSTfdInS29Z3WIfvdXi8YsgSzTOiOhcQlD8U2pw=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 

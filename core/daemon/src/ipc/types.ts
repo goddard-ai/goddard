@@ -12,7 +12,9 @@ import type {
   SubmitPrDaemonRequest,
 } from "@goddard-ai/schema/daemon"
 import { db } from "../persistence/store.ts"
+import type { ConfigManager } from "../config-manager.ts"
 import type { LoopManager } from "../loop/index.ts"
+import type { LoopManagerDeps } from "../loop/manager.ts"
 import type { SessionManager } from "../session/index.ts"
 import type { WorkforceManager } from "../workforce/index.ts"
 
@@ -66,7 +68,8 @@ export type DaemonServerDeps = {
   recordPullRequest?: (
     record: KindInput<typeof db.schema.pullRequests>,
   ) => Promise<KindOutput<typeof db.schema.pullRequests>>
-  createLoopManager?: (input: { sessionManager: SessionManager }) => LoopManager
+  configManager?: ConfigManager
+  createLoopManager?: (input: LoopManagerDeps) => LoopManager
   createWorkforceManager?: (input: {
     sessionManager: SessionManager
     publishEvent?: (payload: DaemonWorkforceEvent) => void

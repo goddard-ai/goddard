@@ -3,7 +3,8 @@ import { ResolvedLoopConfig, type LoopConfig } from "@goddard-ai/schema/config"
 import type { CreateDaemonSessionRequest, StartDaemonLoopRequest } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { readLoopConfig, readMergedRootConfig } from "./config.ts"
+import type { RootConfigProvider } from "./config.ts"
+import { readCurrentRootConfig, readLoopConfig } from "./config.ts"
 
 type RequiredObject<T> = Required<Exclude<T, undefined>>
 
@@ -137,9 +138,13 @@ async function resolveLoopFromRoot(
 export async function resolveNamedLoop(
   loopName: string,
   rootDir: string,
+  rootConfigProvider?: RootConfigProvider,
 ): Promise<ResolvedDaemonLoop> {
   const resolvedRootDir = resolve(rootDir)
-  const { config, globalRoot, localRoot } = await readMergedRootConfig(resolvedRootDir)
+  const { config, globalRoot, localRoot } = await readCurrentRootConfig(
+    resolvedRootDir,
+    rootConfigProvider,
+  )
   const localLoop = await resolveLoopFromRoot(loopName, localRoot)
   const globalLoop = localLoop ? null : await resolveLoopFromRoot(loopName, globalRoot)
   const loop = localLoop ?? globalLoop
@@ -168,9 +173,10 @@ export async function resolveNamedLoop(
 /** Resolves one public loop-start request into the runtime config owned by the daemon. */
 export async function resolveNamedLoopStartRequest(
   input: StartDaemonLoopRequest,
+  rootConfigProvider?: RootConfigProvider,
 ): Promise<ResolvedDaemonLoopStartRequest> {
   const resolvedRootDir = resolve(input.rootDir)
-  const loop = await resolveNamedLoop(input.loopName, resolvedRootDir)
+  const loop = await resolveNamedLoop(input.loopName, resolvedRootDir, rootConfigProvider)
   const resolvedConfig = resolveLoopRuntimeConfig(loop.config, resolvedRootDir, input)
 
   return {

@@ -1,5 +1,6 @@
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { createBackendClient, type BackendClient } from "./backend.ts"
+import { createConfigManager, type ConfigManager } from "./config-manager.ts"
 import { resolveDaemonRuntimeConfig } from "./config.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
@@ -11,6 +12,7 @@ import {
 } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
 import { db } from "./persistence/store.ts"
+import { runWithDaemonSetupContext } from "./setup-context.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
@@ -31,6 +33,7 @@ export type DaemonIo = {
 /** Optional test seams and runtime overrides for daemon startup. */
 export type RunDaemonDeps = {
   createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
+  createConfigManager?: () => ConfigManager
   startIpcServer?: (
     client: BackendClient,
     options: { socketPath: string; agentBinDir: string },
@@ -61,6 +64,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     agentBinDir: input.agentBinDir,
   })
   const createBackendClientImpl = deps.createBackendClient ?? defaultCreateBackendClient
+  const configManager = (deps.createConfigManager ?? createConfigManager)()
   const startIpcServer =
     deps.startIpcServer ??
     ((client, options) =>
@@ -68,7 +72,13 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
         socketPath: options.socketPath,
         agentBinDir: options.agentBinDir,
       }))
-  const runOneShotImpl = deps.runOneShot ?? runOneShot
+  const runOneShotImpl =
+    deps.runOneShot ??
+    ((oneShotInput) =>
+      runOneShot({
+        ...oneShotInput,
+        configManager,
+      }))
   const waitForShutdownImpl = deps.waitForShutdown ?? waitForShutdown
   let ipcServer: DaemonServer | undefined
 
@@ -86,10 +96,12 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
 
     const client = await createBackendClientImpl(runtime.baseUrl)
     if (enableIpc) {
-      ipcServer = await startIpcServer(client, {
-        socketPath: runtime.socketPath,
-        agentBinDir: runtime.agentBinDir,
-      })
+      ipcServer = await runWithDaemonSetupContext({ runtime, configManager }, () =>
+        startIpcServer(client, {
+          socketPath: runtime.socketPath,
+          agentBinDir: runtime.agentBinDir,
+        }),
+      )
     }
 
     const activeIpcServer = ipcServer
@@ -204,6 +216,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
     }
+    await configManager.close().catch(() => {})
     restoreLogging()
   }
 }
