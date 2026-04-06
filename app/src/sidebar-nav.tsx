@@ -5,8 +5,8 @@ import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
 import { SvgIcon } from "./SvgIcon"
-import type { NavigationItem, NavigationItemId } from "./state/Navigation"
-import { getWorkbenchTabIcon } from "./state/WorkbenchTabRegistry"
+import type { NavigationItem, NavigationItemId } from "./navigation"
+import { getWorkbenchTabIcon } from "./workbench-tab-registry"
 
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {

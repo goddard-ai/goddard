@@ -8,7 +8,7 @@ import {
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useMemo } from "preact/hooks"
-import { SessionChatMessageList, type SessionChatMessageListRow } from "./SessionChatMessageList"
+import { MessageList, type MessageListRow } from "./message-list"
 
 const transcriptViewportClass = css({
   position: "relative",
@@ -142,7 +142,7 @@ type PretextParagraphMeasurement = {
 }
 
 /** One transcript message rendered in the dumb visual transcript surface. */
-export type SessionChatTranscriptMessage = {
+export type TranscriptMessage = {
   id: string
   role: "assistant" | "user" | "system"
   authorName: string
@@ -151,8 +151,8 @@ export type SessionChatTranscriptMessage = {
 }
 
 /** Props accepted by the dumb session transcript component. */
-export type SessionChatTranscriptProps = {
-  messages: readonly SessionChatTranscriptMessage[]
+export type TranscriptProps = {
+  messages: readonly TranscriptMessage[]
   class?: string
   initialScrollPosition?: "top" | "bottom"
   scrollCacheKey?: string
@@ -195,7 +195,7 @@ function measureParagraph(text: string, maxWidth: number): PretextParagraphMeasu
 /** Returns the maximum bubble width available for one message role at the current viewport width. */
 function getBubbleMaxWidth(
   viewportWidth: number,
-  role: SessionChatTranscriptMessage["role"],
+  role: TranscriptMessage["role"],
 ): number {
   const safeViewportWidth = Math.max(280, viewportWidth - 48)
 
@@ -222,17 +222,14 @@ function getBubbleMaxWidth(
 }
 
 /** Returns the maximum text width available inside one transcript bubble. */
-function getTranscriptTextWidth(
-  message: SessionChatTranscriptMessage,
-  viewportWidth: number,
-): number {
+function getTranscriptTextWidth(message: TranscriptMessage, viewportWidth: number): number {
   const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message.role)
   return Math.max(MIN_TEXT_WIDTH, bubbleMaxWidth - BUBBLE_PADDING_X)
 }
 
 /** Builds the rendered transcript bubble width from one measured paragraph. */
 function getTranscriptBubbleWidth(
-  message: SessionChatTranscriptMessage,
+  message: TranscriptMessage,
   viewportWidth: number,
   paragraph: PretextParagraphMeasurement,
 ): number {
@@ -245,10 +242,7 @@ function getTranscriptBubbleWidth(
 }
 
 /** Rough row estimate used by Virtuoso before the real transcript row is measured. */
-function estimateTranscriptRowHeight(
-  message: SessionChatTranscriptMessage,
-  viewportWidth: number,
-): number {
+function estimateTranscriptRowHeight(message: TranscriptMessage, viewportWidth: number): number {
   const textWidth = getTranscriptTextWidth(message, viewportWidth)
   const approximateCharactersPerLine = Math.max(12, Math.floor(textWidth / 7.6))
   const normalizedLength = message.text.replace(/\s+/g, " ").trim().length
@@ -262,12 +256,12 @@ function estimateTranscriptRowHeight(
 }
 
 /** Renders one chat transcript using Pretext paragraphs inside a Virtuoso row virtualizer. */
-export function SessionChatTranscript(props: SessionChatTranscriptProps) {
+export function Transcript(props: TranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
 
   return (
     <div class={cx(transcriptViewportClass, props.class)}>
-      <SessionChatMessageList<SessionChatTranscriptMessage>
+      <MessageList<TranscriptMessage>
         defaultRowHeight={DEFAULT_ROW_HEIGHT}
         estimateRowHeight={(message, _index, viewportWidth) =>
           estimateTranscriptRowHeight(message, viewportWidth)
@@ -285,7 +279,7 @@ export function SessionChatTranscript(props: SessionChatTranscriptProps) {
 }
 
 /** Renders one transcript row with manual line rendering that matches Pretext layout. */
-function TranscriptRow(props: { row: SessionChatMessageListRow<SessionChatTranscriptMessage> }) {
+function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
   const message = props.row.item
   const paragraphMaxWidth = getTranscriptTextWidth(message, props.row.viewportWidth)
   const paragraph = useMemo(

@@ -1,7 +1,7 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES } from "./SessionChatTranscriptDebugData"
-import { SessionChatTranscript, type SessionChatTranscriptMessage } from "./SessionChatTranscript"
+import { SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES } from "./transcript-debug-data"
+import { Transcript, type TranscriptMessage } from "./transcript"
 
 const debugPageClass = css({
   display: "grid",
@@ -65,13 +65,13 @@ const debugCanvasClass = css({
 })
 
 /** Props for the standalone transcript debug view. */
-export type SessionChatTranscriptDebugViewProps = {
-  messages?: readonly SessionChatTranscriptMessage[]
+export type TranscriptDebugViewProps = {
+  messages?: readonly TranscriptMessage[]
   scrollCacheKey?: string
 }
 
 /** Renders the standalone transcript-debug surface used by the native development menu. */
-export function SessionChatTranscriptDebugView(props: SessionChatTranscriptDebugViewProps) {
+export function TranscriptDebugView(props: TranscriptDebugViewProps) {
   const messages = props.messages ?? SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES
 
   return (
@@ -86,7 +86,7 @@ export function SessionChatTranscriptDebugView(props: SessionChatTranscriptDebug
         </p>
       </section>
       <section class={debugCanvasClass}>
-        <SessionChatTranscript
+        <Transcript
           messages={messages}
           scrollCacheKey={props.scrollCacheKey ?? "debug:session-chat-transcript"}
         />
@@ -96,7 +96,9 @@ export function SessionChatTranscriptDebugView(props: SessionChatTranscriptDebug
 }
 
 /** Renders the transcript debug surface inside one closable workbench tab. */
-export default function SessionChatTranscriptDebugTab(props: { surface: "sessionChatTranscript" }) {
+export default function TranscriptDebugTab(props: {
+  surface: "sessionChatTranscript"
+}) {
   void props
-  return <SessionChatTranscriptDebugView scrollCacheKey="detail:debug:session-chat-transcript" />
+  return <TranscriptDebugView scrollCacheKey="detail:debug:session-chat-transcript" />
 }

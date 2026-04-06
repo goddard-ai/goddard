@@ -1,5 +1,5 @@
 import { BrowserView } from "electrobun/bun"
-import type { AppDesktopRpc } from "../shared/desktop-rpc"
+import type { AppDesktopRpc } from "~/shared/desktop-rpc"
 import { daemonSend } from "./daemon"
 import { getMainWindow } from "./main-window"
 import { browseForProject } from "./projects"

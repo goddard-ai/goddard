@@ -2,7 +2,7 @@ import { css } from "@goddard-ai/styled-system/css"
 import type { ComponentChild } from "preact"
 import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
-import { useTabViewport } from "../TabViewport"
+import { useTabViewport } from "~/tab-viewport"
 
 const loadingOverlayClass = css({
   display: "grid",
@@ -16,15 +16,15 @@ const loadingOverlayClass = css({
 
 const messageListStateCache = new Map<string, StateSnapshot>()
 
-/** One visible message row handed to a session-chat row renderer. */
-export type SessionChatMessageListRow<Item> = {
+/** One visible message row handed to the row renderer. */
+export type MessageListRow<Item> = {
   item: Item
   index: number
   viewportWidth: number
 }
 
-/** Props accepted by the SessionChat-owned Virtuoso wrapper. */
-export type SessionChatMessageListProps<Item> = {
+/** Props accepted by the session-chat-owned Virtuoso wrapper. */
+export type MessageListProps<Item> = {
   items: readonly Item[]
   overscanPx?: number
   initialScrollPosition?: "top" | "bottom"
@@ -33,7 +33,7 @@ export type SessionChatMessageListProps<Item> = {
   defaultRowHeight?: number
   getItemKey?: (item: Item, index: number) => string
   estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number
-  renderRow: (row: SessionChatMessageListRow<Item>) => ComponentChild
+  renderRow: (row: MessageListRow<Item>) => ComponentChild
 }
 
 /** Returns the first mount position for a list that should open from the top or bottom. */
@@ -57,7 +57,7 @@ function getInitialTopMostItemIndex<Item>(
 }
 
 /** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
-export function SessionChatMessageList<Item>(props: SessionChatMessageListProps<Item>) {
+export function MessageList<Item>(props: MessageListProps<Item>) {
   const viewport = useTabViewport()
   const virtuosoRef = useRef<VirtuosoHandle | null>(null)
   const scrollCacheKey = props.scrollCacheKey
