@@ -1,8 +1,8 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { SvgIcon } from "~/svg-icon"
-import { useProjectRegistry } from "~/app-state-context"
-import { lookupProject } from "./project-registry"
+import { SvgIcon } from "~/svg-icon.tsx"
+import { useProjectRegistry } from "~/app-state-context.tsx"
+import { lookupProject } from "./project-registry.ts"
 
 const pageClass = css({
   display: "flex",

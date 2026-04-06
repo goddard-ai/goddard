@@ -1,9 +1,9 @@
 import "@goddard-ai/styled-system/styles.css"
 import { QueryClient, QueryClientProvider } from "@tanstack/preact-query"
 import { render } from "preact"
-import { AppShell } from "~/app-shell"
-import { AppStateProvider } from "~/app-state-context"
-import { desktopHost, initializeDesktopHost } from "~/desktop-host"
+import { AppShell } from "~/app-shell.tsx"
+import { AppStateProvider } from "~/app-state-context.tsx"
+import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
 
 const queryClient = new QueryClient()
 

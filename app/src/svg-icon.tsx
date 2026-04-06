@@ -1,5 +1,5 @@
 import { type JSX } from "preact"
-import { svgIconSymbolIds } from "~/support/svg-icon-data"
+import { svgIconSymbolIds } from "~/support/svg-icon-data.ts"
 
 /** Identifiers for SVG assets generated from SVG files under `src/icons`. */
 export type SvgIconName = keyof typeof svgIconSymbolIds

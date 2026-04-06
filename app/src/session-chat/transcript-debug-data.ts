@@ -1,4 +1,4 @@
-import type { TranscriptMessage } from "./transcript"
+import type { TranscriptMessage } from "./transcript.tsx"
 
 const assistantMessageBodies = [
   "I mapped the shell layout and the current state modules. The next clean seam is the transcript itself, because it can be pinned down visually before any live session transport exists.",

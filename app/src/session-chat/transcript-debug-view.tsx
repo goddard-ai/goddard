@@ -1,7 +1,7 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES } from "./transcript-debug-data"
-import { Transcript, type TranscriptMessage } from "./transcript"
+import { SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES } from "./transcript-debug-data.ts"
+import { Transcript, type TranscriptMessage } from "./transcript.tsx"
 
 const debugPageClass = css({
   display: "grid",

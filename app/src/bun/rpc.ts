@@ -1,8 +1,8 @@
 import { BrowserView } from "electrobun/bun"
-import type { AppDesktopRpc } from "~/shared/desktop-rpc"
-import { daemonSend } from "./daemon"
-import { getMainWindow } from "./main-window"
-import { browseForProject } from "./projects"
+import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
+import { daemonSend } from "./daemon.ts"
+import { getMainWindow } from "./main-window.ts"
+import { browseForProject } from "./projects.ts"
 
 type AppRpc = ReturnType<typeof BrowserView.defineRPC<AppDesktopRpc>>
 

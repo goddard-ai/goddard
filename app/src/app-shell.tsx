@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
-import { AppShellChrome } from "./app-shell/chrome"
-import { appShellSections, type AppShellTopbarAction } from "./app-shell/config"
-import { AppShellWorkbenchContent } from "./app-shell/views"
-import { useNavigation, useWorkbenchTabSet } from "./app-state-context"
-import { getWorkbenchTabIcon } from "./workbench-tab-registry"
-import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set"
-import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu"
-import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "~/shared/debug-menu"
-import type { SvgIconName } from "./svg-icon"
+import { AppShellChrome } from "./app-shell/chrome.tsx"
+import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
+import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
+import { useNavigation, useWorkbenchTabSet } from "./app-state-context.tsx"
+import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
+import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
+import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu.ts"
+import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "~/shared/debug-menu.ts"
+import type { SvgIconName } from "./svg-icon.tsx"
 
 /** Tracks the shell tab strip's active-tab underline and drag state. */
 function useAppShellTabStrip(

@@ -1,6 +1,6 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
-import { createAppMenuDispatchScript, type AppMenuAction } from "~/shared/app-menu"
-import { createDebugMenuDispatchScript, type DebugMenuSurface } from "~/shared/debug-menu"
+import { createAppMenuDispatchScript, type AppMenuAction } from "~/shared/app-menu.ts"
+import { createDebugMenuDispatchScript, type DebugMenuSurface } from "~/shared/debug-menu.ts"
 
 const withParams =
   <T>(action: string) =>

@@ -1,7 +1,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useEffect, useRef } from "preact/hooks"
-import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model"
+import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model.ts"
 
 const VIEWPORT_PADDING_PX = 18
 

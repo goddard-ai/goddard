@@ -1,6 +1,6 @@
 import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
-import { goddardSdk } from "./sdk"
+import { goddardSdk } from "./sdk.ts"
 import type {
   AppDesktopRpc,
   DaemonRequestName,
@@ -8,7 +8,7 @@ import type {
   DaemonRequestResponse,
   DaemonSendInput,
   RuntimeInfo,
-} from "~/shared/desktop-rpc"
+} from "~/shared/desktop-rpc.ts"
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
   // Native dialogs and host-side daemon work can legitimately outlive Electrobun's

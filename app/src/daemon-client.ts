@@ -1,6 +1,6 @@
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import { daemonSend } from "./desktop-host"
-import type { DaemonRequestName, DaemonRequestPayload } from "~/shared/desktop-rpc"
+import { daemonSend } from "./desktop-host.ts"
+import type { DaemonRequestName, DaemonRequestPayload } from "~/shared/desktop-rpc.ts"
 
 /** Browser-safe daemon client adapter backed by the Electrobun Bun host bridge. */
 export const desktopDaemonClient: DaemonIpcClient = {

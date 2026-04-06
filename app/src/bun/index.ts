@@ -1,7 +1,7 @@
 import { BrowserWindow, Updater } from "electrobun/bun"
-import { getMainWindow, setMainWindow } from "./main-window"
-import { installMacOsApplicationMenu } from "./menu"
-import { appRpc } from "./rpc"
+import { getMainWindow, setMainWindow } from "./main-window.ts"
+import { installMacOsApplicationMenu } from "./menu.ts"
+import { appRpc } from "./rpc.ts"
 
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`

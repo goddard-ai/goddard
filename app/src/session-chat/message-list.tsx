@@ -2,7 +2,7 @@ import { css } from "@goddard-ai/styled-system/css"
 import type { ComponentChild } from "preact"
 import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
-import { useTabViewport } from "~/tab-viewport"
+import { useTabViewport } from "~/tab-viewport.tsx"
 
 const loadingOverlayClass = css({
   display: "grid",

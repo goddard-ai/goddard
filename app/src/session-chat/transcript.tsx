@@ -8,7 +8,7 @@ import {
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useMemo } from "preact/hooks"
-import { MessageList, type MessageListRow } from "./message-list"
+import { MessageList, type MessageListRow } from "./message-list.tsx"
 
 const transcriptViewportClass = css({
   position: "relative",

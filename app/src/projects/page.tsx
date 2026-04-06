@@ -17,9 +17,9 @@ import {
 } from "lucide-react"
 import type { ComponentChild } from "preact"
 import { useEffect } from "preact/hooks"
-import { browseForProject as browseForProjectPath } from "~/desktop-host"
-import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context"
-import { lookupProject, type ProjectRecord } from "./project-registry"
+import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
+import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { lookupProject, type ProjectRecord } from "./project-registry.ts"
 
 const panelClass = css({
   display: "flex",

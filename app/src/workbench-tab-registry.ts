@@ -1,6 +1,6 @@
 import type { ComponentProps, FunctionComponent } from "preact"
 import { lazy } from "preact/compat"
-import type { SvgIconName } from "./svg-icon"
+import type { SvgIconName } from "./svg-icon.tsx"
 
 /** One registered non-primary workbench tab definition. */
 type WorkbenchTabDefinition = {
@@ -43,11 +43,11 @@ export const workbenchTabComponents = {
     icon: "tabs/roadmap",
   },
   project: {
-    component: lazy(() => import("~/projects/project-page")),
+    component: lazy(() => import("~/projects/project-page.tsx")),
     icon: "tabs/projects",
   },
   sessionChatTranscriptDebug: {
-    component: lazy(() => import("~/session-chat/transcript-debug-view")),
+    component: lazy(() => import("~/session-chat/transcript-debug-view.tsx")),
     icon: "tabs/sessions",
   },
 } satisfies Record<string, WorkbenchTabDefinition>

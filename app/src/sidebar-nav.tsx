@@ -4,9 +4,9 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { SvgIcon } from "./svg-icon"
-import type { NavigationItem, NavigationItemId } from "./navigation"
-import { getWorkbenchTabIcon } from "./workbench-tab-registry"
+import { SvgIcon } from "./svg-icon.tsx"
+import type { NavigationItem, NavigationItemId } from "./navigation.ts"
+import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {
