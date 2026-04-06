@@ -1,6 +1,6 @@
 import { SigmaType } from "preact-sigma"
-import type { ShellIconName } from "../../support/shell-icons"
-import { readJsonStorage, writeJsonStorage } from "../../support/workspace-storage"
+import type { ShellIconName } from "./support/shell-icons"
+import { readJsonStorage, writeJsonStorage } from "./support/workspace-storage"
 
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
 

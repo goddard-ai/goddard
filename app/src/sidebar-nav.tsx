@@ -4,8 +4,8 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { ShellIcon } from "../support/shell-icons"
-import type { NavigationItem, NavigationItemId } from "./state/Navigation"
+import { ShellIcon } from "./support/shell-icons"
+import type { NavigationItem, NavigationItemId } from "./navigation"
 
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {

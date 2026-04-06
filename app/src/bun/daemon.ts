@@ -3,7 +3,7 @@ import type {
   DaemonRequestName,
   DaemonRequestResponse,
   DaemonSendInput,
-} from "../shared/desktop-rpc"
+} from "~/shared/desktop-rpc"
 
 let daemonClient: DaemonIpcClient | undefined
 

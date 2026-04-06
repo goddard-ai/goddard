@@ -1,4 +1,4 @@
-import type { SessionChatTranscriptMessage } from "./SessionChatTranscript"
+import type { TranscriptMessage } from "./transcript"
 
 const assistantMessageBodies = [
   "I mapped the shell layout and the current state modules. The next clean seam is the transcript itself, because it can be pinned down visually before any live session transport exists.",
@@ -33,8 +33,8 @@ function formatFixtureTimestamp(totalMinutes: number): string {
 }
 
 /** Builds a long deterministic transcript fixture that makes virtualization visible during debugging. */
-function buildDebugMessages(): SessionChatTranscriptMessage[] {
-  const messages: SessionChatTranscriptMessage[] = [
+function buildDebugMessages(): TranscriptMessage[] {
+  const messages: TranscriptMessage[] = [
     {
       id: "system:opening",
       role: "system",

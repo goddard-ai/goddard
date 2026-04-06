@@ -1,11 +1,11 @@
 import { SigmaType } from "preact-sigma"
-import { readJsonStorage, writeJsonStorage } from "../../support/workspace-storage"
+import { readJsonStorage, writeJsonStorage } from "./support/workspace-storage"
 import {
   isWorkbenchDetailTabKind,
   type WorkbenchTab,
   type WorkbenchDetailTabKind,
   type WorkbenchTabKind,
-} from "./WorkbenchTabRegistry"
+} from "./workbench-tab-registry"
 
 const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v3"
 

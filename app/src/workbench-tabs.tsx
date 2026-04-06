@@ -2,8 +2,8 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { X } from "lucide-react"
-import { ShellIcon } from "../support/shell-icons"
-import type { WorkbenchTab } from "./state/WorkbenchTabSet"
+import { ShellIcon } from "./support/shell-icons"
+import type { WorkbenchTab } from "./workbench-tab-set"
 
 /** Renders the primary tab plus any closable workbench tabs. */
 export function WorkbenchTabs(props: {

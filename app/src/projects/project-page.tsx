@@ -1,8 +1,8 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { ShellIcon } from "../../support/shell-icons"
-import { useProjectRegistry } from "../state/AppStateContext"
-import { lookupProject } from "./state/ProjectRegistry"
+import { ShellIcon } from "~/support/shell-icons"
+import { useProjectRegistry } from "~/app-state-context"
+import { lookupProject } from "./project-registry"
 
 const pageClass = css({
   display: "flex",

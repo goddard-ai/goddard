@@ -1,6 +1,6 @@
 import type { FunctionComponent } from "preact"
 import { lazy } from "preact/compat"
-import type { ShellIconName } from "../../support/shell-icons"
+import type { ShellIconName } from "./support/shell-icons"
 
 /** Payload props expected by each closable workbench tab component. */
 type WorkbenchTabPayloadByKind = {
@@ -23,9 +23,9 @@ type LooseWorkbenchTabComponent = FunctionComponent<any>
 
 /** Runtime registry for every closable workbench tab component. */
 export const workbenchTabComponents: WorkbenchTabComponentByKind = {
-  project: lazy(() => import("../Projects/ProjectPage")),
-  projects: lazy(() => import("../Projects/ProjectsPage")),
-  sessionChatTranscriptDebug: lazy(() => import("../SessionChat/SessionChatTranscriptDebugView")),
+  project: lazy(() => import("./projects/project-page")),
+  projects: lazy(() => import("./projects/page")),
+  sessionChatTranscriptDebug: lazy(() => import("./session-chat/transcript-debug-view")),
 }
 
 /** The supported closable workbench tab kinds available in the shell. */
