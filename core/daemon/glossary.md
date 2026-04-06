@@ -9,6 +9,9 @@
 - `Daemon Server`
   - The daemon's control surface exposed to local clients.
   - Why: so apps, SDKs, and tools can create or inspect daemon-managed work without directly embedding daemon internals.
+- `Config Manager`
+  - The daemon subsystem that owns persisted root-config loading, watching, and last-good snapshot promotion.
+  - Why: so hot-reload behavior, validation failure handling, and config freshness are coordinated in one place.
 - `Session Manager`
   - The daemon subsystem that owns session lifecycle operations.
   - Why: so creation, connection, message forwarding, shutdown, and session reconciliation are coordinated in one place.

@@ -42,6 +42,12 @@ We believe that separating user defaults, repository defaults, entity-level defa
 - Loops and Actions inherit the same user and repository baseline used for broader Goddard behavior, then apply any entity-specific defaults before execution begins.
 - Configuration should resolve before execution begins so the active runtime operates against a stable view of intent.
 
+## Daemon Refresh Behavior
+- A long-running daemon must apply changes to persisted user and repository configuration without requiring the daemon process to restart.
+- Updated persisted configuration affects future daemon-managed work only after the daemon has accepted the new persisted state.
+- Work that already began under an earlier resolved configuration continues against that earlier configuration unless the operator starts a new invocation.
+- If a persisted configuration edit is invalid, the daemon must preserve the last valid behavior until the persisted configuration is corrected.
+
 ## Configurable Entities
 
 ### Loops
