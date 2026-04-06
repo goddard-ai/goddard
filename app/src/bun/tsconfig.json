@@ -2,7 +2,10 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["bun"],
-    "rootDir": ".."
+    "rootDir": "..",
+    "paths": {
+      "~/*": ["../*"]
+    }
   },
   "include": ["./**/*.ts", "../shared", "../**/*.d.ts"],
   "exclude": ["./plugins/*.template.tsx"]

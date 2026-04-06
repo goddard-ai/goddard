@@ -96,9 +96,7 @@ export function TranscriptDebugView(props: TranscriptDebugViewProps) {
 }
 
 /** Renders the transcript debug surface inside one closable workbench tab. */
-export default function TranscriptDebugTab(props: {
-  surface: "sessionChatTranscript"
-}) {
+export default function TranscriptDebugTab(props: { surface: "sessionChatTranscript" }) {
   void props
   return <TranscriptDebugView scrollCacheKey="detail:debug:session-chat-transcript" />
 }

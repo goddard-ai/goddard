@@ -193,10 +193,7 @@ function measureParagraph(text: string, maxWidth: number): PretextParagraphMeasu
 }
 
 /** Returns the maximum bubble width available for one message role at the current viewport width. */
-function getBubbleMaxWidth(
-  viewportWidth: number,
-  role: TranscriptMessage["role"],
-): number {
+function getBubbleMaxWidth(viewportWidth: number, role: TranscriptMessage["role"]): number {
   const safeViewportWidth = Math.max(280, viewportWidth - 48)
 
   if (role === "system") {

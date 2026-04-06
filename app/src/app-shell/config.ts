@@ -1,4 +1,4 @@
-import type { NavigationItemId } from "./navigation"
+import type { NavigationItemId } from "~/navigation"
 
 /** Stable action ids used by the merged shell's top bar. */
 export type AppShellTopbarAction = "proposeTask" | "newSession" | "settings"

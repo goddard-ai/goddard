@@ -4,13 +4,13 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { SvgIcon } from "./SvgIcon"
+import { SvgIcon } from "./svg-icon"
 import type { NavigationItem, NavigationItemId } from "./navigation"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry"
 
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {
-  className?: string
+  class?: string
   items: Array<NavigationItem & { badgeCount?: number }>
   selectedItemId: NavigationItemId
   onSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
@@ -36,7 +36,7 @@ export function SidebarNav(props: {
             borderColor: "border",
             background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.panel")} 100%)`,
           }),
-          props.className,
+          props.class,
         ].join(" ")}
       >
         <div

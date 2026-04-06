@@ -1,7 +1,9 @@
 dist
 node_modules
 .turbo
+/research
 /roadmap
+/website
 *.py
 patch_*.js
 core/**/src/**/*.d.ts

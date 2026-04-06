@@ -1,6 +1,6 @@
 import type { ComponentProps, FunctionComponent } from "preact"
 import { lazy } from "preact/compat"
-import type { SvgIconName } from "./SvgIcon"
+import type { SvgIconName } from "./svg-icon"
 
 /** One registered non-primary workbench tab definition. */
 type WorkbenchTabDefinition = {

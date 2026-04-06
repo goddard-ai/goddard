@@ -8,7 +8,7 @@ import type {
   DaemonRequestResponse,
   DaemonSendInput,
   RuntimeInfo,
-} from "./shared/desktop-rpc"
+} from "~/shared/desktop-rpc"
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
   // Native dialogs and host-side daemon work can legitimately outlive Electrobun's

@@ -2,12 +2,12 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
-import { maximizeWindow } from "./desktop-host"
-import { formatBadgeCount, type AppShellTopbarAction } from "./AppShell.config"
-import type { NavigationItemId } from "./navigation"
-import { getWorkbenchTabIcon, type WorkbenchTab } from "./workbench-tab-registry"
-import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set"
-import { SvgIcon, type SvgIconName } from "./SvgIcon"
+import { formatBadgeCount, type AppShellTopbarAction } from "./config"
+import { maximizeWindow } from "~/desktop-host"
+import type { NavigationItemId } from "~/navigation"
+import { SvgIcon, type SvgIconName } from "~/svg-icon"
+import { getWorkbenchTabIcon, type WorkbenchTab } from "~/workbench-tab-registry"
+import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set"
 
 const actionButtonClass = css({
   position: "relative",

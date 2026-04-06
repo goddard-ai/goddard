@@ -3,10 +3,10 @@ import { css } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { Suspense } from "preact/compat"
 import { useLayoutEffect, useRef, useState } from "preact/hooks"
-import { TabViewportProvider } from "./tab-viewport"
-import { useNavigation, useWorkbenchTabSet } from "./app-state-context"
-import { getWorkbenchTabComponent } from "./workbench-tab-registry"
-import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set"
+import { useNavigation, useWorkbenchTabSet } from "~/app-state-context"
+import { TabViewportProvider } from "~/tab-viewport"
+import { getWorkbenchTabComponent } from "~/workbench-tab-registry"
+import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set"
 
 const workbenchPanelScrollerClass = css({
   minHeight: "0",

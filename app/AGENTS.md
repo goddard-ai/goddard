@@ -13,10 +13,15 @@
 - Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code. UI components should render props and invoke actions, not call host APIs.
 - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
 - Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
-- In `app/src`, keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there, and do not create `state/` subfolders.
-- In `app/src`, use all-lowercase kebab-case folder names for UI feature trees.
-- In `app/src`, use all-lowercase kebab-case component filenames and avoid repeating the parent feature name in child component names.
-- In `app/src`, use `~/` imports for cross-folder modules (resolves to `app/src`) and reserve relative imports for same-folder `./...` only.
+- Within `src/`:
+  - Keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there, and do not create `state/` subfolders.
+  - Use all-lowercase kebab-case folder names for UI feature trees.
+  - Use all-lowercase kebab-case component filenames and avoid repeating the parent feature name in child component names.
+  - Import-path precedence is `./...`, then `~/...`, then `../...`.
+  - Use `./...` for same-folder modules first.
+  - Use `~/...` for imports that would otherwise traverse up to `src/` or across feature roots.
+  - Use `../...` only when it does not traverse up to `src/` itself. A single `../...` is allowed when it still lands inside a child path such as `src/foo/...`, but do not use `../...` to reach `src/...` broadly.
+  - Never use `../../...` or deeper upward traversal imports.
 - In UI components, prefer `useListener` from `preact-sigma` over manual `addEventListener` and `removeEventListener` wiring.
 - Prefer the `class` JSX prop over `className`.
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.

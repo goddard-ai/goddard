@@ -2,7 +2,7 @@ import type { ComponentChildren } from "preact"
 import { createContext } from "preact"
 import { useContext, useEffect } from "preact/hooks"
 import { useSigma } from "preact-sigma"
-import { ProjectRegistry } from "./projects/project-registry"
+import { ProjectRegistry } from "~/projects/project-registry"
 import { Navigation } from "./navigation"
 import { WorkbenchTabSet } from "./workbench-tab-set"
 
