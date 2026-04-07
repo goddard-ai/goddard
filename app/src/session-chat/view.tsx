@@ -8,7 +8,7 @@ import { Composer } from "./composer.tsx"
 import { Header } from "./header.tsx"
 import { Transcript } from "./transcript.tsx"
 
-export function View(props: { sessionId: string }) {
+export function SessionChatView(props: { sessionId: string }) {
   const sessionChat = useSessionChat()
   const sessionIndex = useSessionIndex()
   const session = lookupSession(sessionIndex, props.sessionId)
@@ -96,4 +96,4 @@ export function View(props: { sessionId: string }) {
   )
 }
 
-export default View
+export default SessionChatView

@@ -4,7 +4,7 @@ import type { SessionChat } from "~/session-chat/chat.ts"
 import type { SessionRecord } from "./session-index.ts"
 import { ListRow } from "./list-row.tsx"
 
-export function List(props: {
+export function SessionsList(props: {
   listStatus?: "idle" | "loading" | "ready" | "error"
   onCreateSession: () => void
   onOpenSession: (sessionId: SessionRecord["id"]) => void

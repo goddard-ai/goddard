@@ -10,7 +10,7 @@ import {
   useSessionLaunch,
   useWorkbenchTabSet,
 } from "~/app-state-context.tsx"
-import { List } from "./list.tsx"
+import { SessionsList } from "./list.tsx"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 import { lookupSession, type SessionRecord } from "./session-index.ts"
@@ -24,7 +24,7 @@ function formatTimestamp(value: number) {
   }).format(new Date(value))
 }
 
-export function Page() {
+export function SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const sessionChat = useSessionChat()
   const sessionIndex = useSessionIndex()
@@ -111,7 +111,7 @@ export function Page() {
             overflowY: "auto",
           })}
         >
-          <List
+          <SessionsList
             listStatus={sessionIndex.listStatus}
             onCreateSession={() => {
               if (selectedSession?.cwd) {
@@ -305,4 +305,4 @@ function InfoRow(props: { label: string; value: string }) {
   )
 }
 
-export default Page
+export default SessionsPage
