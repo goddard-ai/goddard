@@ -91,20 +91,23 @@ async function createMessageOutputTransport(
   const writer = stream.writable.getWriter()
   let closed = false
 
-  const unsubscribe = await client.subscribe("sessionMessage", { id }, ({ message }) => {
-    if (
-      closed ||
-      (typeof message === "object" &&
-        message !== null &&
-        "method" in message &&
-        typeof message.method === "string" &&
-        agentMethods.has(message.method))
-    ) {
-      return
-    }
+  const unsubscribe = await client.subscribe(
+    { name: "sessionMessage", filter: { id } },
+    ({ message }) => {
+      if (
+        closed ||
+        (typeof message === "object" &&
+          message !== null &&
+          "method" in message &&
+          typeof message.method === "string" &&
+          agentMethods.has(message.method))
+      ) {
+        return
+      }
 
-    void writer.write(encoder.encode(`${JSON.stringify(message)}\n`)).catch(() => {})
-  })
+      void writer.write(encoder.encode(`${JSON.stringify(message)}\n`)).catch(() => {})
+    },
+  )
 
   return {
     readable: stream.readable,

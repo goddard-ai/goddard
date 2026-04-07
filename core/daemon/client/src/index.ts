@@ -1,6 +1,6 @@
-import { createClient } from "@goddard-ai/ipc"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+/** Shared daemon IPC client types used by runtime-specific daemon client modules. */
+import type { createClient } from "@goddard-ai/ipc"
+import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 
 /** Socket metadata passed to environment-specific IPC client factories. */
 export type DaemonIpcClientFactoryInput = {
@@ -14,15 +14,3 @@ export type DaemonIpcClient = ReturnType<typeof createClient<typeof daemonIpcSch
 export type DaemonIpcClientFactory<TClient = DaemonIpcClient> = (
   input: DaemonIpcClientFactoryInput,
 ) => TClient
-
-export { createDaemonUrl, readSocketPathFromDaemonUrl }
-
-/** Creates one daemon IPC client using an explicit daemon URL and host transport factory. */
-export function createDaemonIpcClient<TClient = DaemonIpcClient>(options: {
-  daemonUrl: string
-  createClient: DaemonIpcClientFactory<TClient>
-}): TClient {
-  return options.createClient({
-    socketPath: readSocketPathFromDaemonUrl(options.daemonUrl),
-  })
-}

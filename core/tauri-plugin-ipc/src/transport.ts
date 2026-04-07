@@ -17,7 +17,7 @@ export function createTauriTransport(socketPath: string): IpcTransport {
       return await invoke("plugin:ipc|send", { socketPath, name, payload })
     },
 
-    async subscribe(name, subscription, onMessage) {
+    async subscribe(name, filter, onMessage) {
       let activeSubscriptionId: string | null = null
 
       const unlisten = await listen<PluginStreamMessage>(IPC_STREAM_EVENT, (event) => {
@@ -39,7 +39,7 @@ export function createTauriTransport(socketPath: string): IpcTransport {
         activeSubscriptionId = await invoke<string>("plugin:ipc|subscribe", {
           socketPath,
           name,
-          subscription,
+          filter,
         })
       } catch (error) {
         unlisten()

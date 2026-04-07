@@ -15,13 +15,13 @@ type RequestSchema = {
   response: TypeMarker
 }
 
-type StreamSchemaWithSubscription = {
+type StreamSchemaWithFilter = {
   payload: TypeMarker
-  subscription?: z.ZodType
+  filter?: z.ZodType
 }
 
-/** Declares one server stream payload schema with optional subscription params. */
-type StreamSchema = TypeMarker | StreamSchemaWithSubscription
+/** Declares one server stream payload schema with optional filter params. */
+type StreamSchema = TypeMarker | StreamSchemaWithFilter
 
 /** Declares the request and stream contract for one typed IPC application boundary. */
 export type IpcSchema = {
@@ -32,13 +32,13 @@ export type IpcSchema = {
 /** Resolves one stream definition into its payload marker. */
 type StreamPayloadMarker<T extends StreamSchema> = T extends TypeMarker
   ? T
-  : T extends StreamSchemaWithSubscription
+  : T extends StreamSchemaWithFilter
     ? T["payload"]
     : never
 
-/** Resolves one stream definition into its optional subscription schema. */
-type StreamSubscriptionSchema<T extends StreamSchema> = T extends {
-  subscription: infer TSchema extends z.ZodType
+/** Resolves one stream definition into its optional filter schema. */
+type StreamFilterSchema<T extends StreamSchema> = T extends {
+  filter: infer TSchema extends z.ZodType
 }
   ? TSchema
   : z.ZodVoid
@@ -77,7 +77,15 @@ export type InferStreamPayload<
   K extends ValidStreamName<S>,
 > = StreamPayloadMarker<S["streams"][K]>["__unchecked__"]
 
-/** Infers the optional subscription params for one server stream in the IPC schema. */
-export type InferStreamSubscription<S extends IpcSchema, K extends ValidStreamName<S>> = z.infer<
-  StreamSubscriptionSchema<S["streams"][K]>
+/** Infers the optional filter params for one server stream in the IPC schema. */
+export type InferStreamFilter<S extends IpcSchema, K extends ValidStreamName<S>> = z.infer<
+  StreamFilterSchema<S["streams"][K]>
 >
+
+/** Resolves one stream target into either a bare name or a name-plus-filter object. */
+export type StreamTarget<S extends IpcSchema, K extends ValidStreamName<S>> =
+  K extends ValidStreamName<S>
+    ? [InferStreamFilter<S, K>] extends [void]
+      ? K | { name: K; filter?: undefined }
+      : { name: K; filter: InferStreamFilter<S, K> }
+    : never

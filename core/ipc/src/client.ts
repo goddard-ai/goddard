@@ -1,25 +1,46 @@
 import {
   type InferResponseType,
   type InferStreamPayload,
-  type InferStreamSubscription,
   type IpcSchema,
   type RequestArguments,
+  type StreamTarget,
   type ValidRequestName,
   type ValidStreamName,
 } from "./schema.ts"
 import { type IpcTransport } from "./transport.ts"
 
-/** Normalizes shorthand and object stream definitions into optional subscription schemas. */
+/** Normalizes shorthand and object stream definitions into optional filter schemas. */
 function getStreamSchemas<S extends IpcSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
   const definition = schema.streams[name]
   if (!("payload" in definition)) {
     return {
-      subscription: undefined,
+      filter: undefined,
     }
   }
 
   return {
-    subscription: definition.subscription,
+    filter: definition.filter,
+  }
+}
+
+/** Normalizes one stream target into a stream name plus optional filter payload. */
+function normalizeStreamTarget<S extends IpcSchema>(
+  target: StreamTarget<S, ValidStreamName<S>>,
+): { name: ValidStreamName<S>; filter: unknown } {
+  if (typeof target === "string") {
+    return {
+      name: target,
+      filter: undefined,
+    }
+  }
+
+  if (!Object.hasOwn(target, "filter")) {
+    throw new Error(`Stream target object for ${target.name} must include a filter`)
+  }
+
+  return {
+    name: target.name,
+    filter: target.filter,
   }
 }
 
@@ -41,44 +62,24 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
   }
 
   async function subscribe<K extends ValidStreamName<S>>(
-    name: K,
+    target: StreamTarget<S, K>,
     onMessage: (payload: InferStreamPayload<S, K>) => void,
-  ): Promise<() => void>
-  async function subscribe<K extends ValidStreamName<S>>(
-    name: K,
-    subscription: InferStreamSubscription<S, K>,
-    onMessage: (payload: InferStreamPayload<S, K>) => void,
-  ): Promise<() => void>
-  async function subscribe<K extends ValidStreamName<S>>(
-    name: K,
-    subscriptionOrHandler:
-      | InferStreamSubscription<S, K>
-      | ((payload: InferStreamPayload<S, K>) => void),
-    maybeHandler?: (payload: InferStreamPayload<S, K>) => void,
   ): Promise<() => void> {
+    const { name, filter } = normalizeStreamTarget(target)
+
     if (!Object.hasOwn(schema.streams, name)) {
       throw new Error(`Invalid stream: ${name}`)
     }
 
-    const { subscription } = getStreamSchemas(schema, name)
-    const onMessage =
-      typeof subscriptionOrHandler === "function" ? subscriptionOrHandler : maybeHandler
-
-    if (!onMessage) {
-      throw new Error(`Missing stream handler for ${name}`)
+    const { filter: filterSchema } = getStreamSchemas(schema, name)
+    if (filter !== undefined && !filterSchema) {
+      throw new Error(`Stream ${name} does not accept filter params`)
     }
 
-    if (typeof subscriptionOrHandler !== "function" && !subscription) {
-      throw new Error(`Stream ${name} does not accept subscription params`)
-    }
-
-    const validSubscription =
-      typeof subscriptionOrHandler === "function"
-        ? undefined
-        : subscription?.parse(subscriptionOrHandler)
+    const validFilter = filter !== undefined ? filterSchema?.parse(filter) : undefined
 
     return await Promise.resolve(
-      transport.subscribe(name, validSubscription, (streamPayload) => {
+      transport.subscribe(name, validFilter, (streamPayload) => {
         onMessage(streamPayload as InferStreamPayload<S, K>)
       }),
     )

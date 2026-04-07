@@ -65,7 +65,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
 
   async function subscribe(
     name: string,
-    subscription: unknown,
+    filter: unknown,
     onMessage: (payload: unknown) => void,
   ): Promise<() => void> {
     return await new Promise((resolve, reject) => {
@@ -77,9 +77,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
         {
           socketPath,
           path: `/stream?name=${encodeURIComponent(name)}${
-            subscription === undefined
-              ? ""
-              : `&subscription=${encodeURIComponent(JSON.stringify(subscription))}`
+            filter === undefined ? "" : `&filter=${encodeURIComponent(JSON.stringify(filter))}`
           }`,
           method: "GET",
         },

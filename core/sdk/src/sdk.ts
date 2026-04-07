@@ -21,18 +21,18 @@ import type {
   ShutdownDaemonWorkforceRequest,
   StartDaemonLoopRequest,
   StartDaemonWorkforceRequest,
-  SubscribeDaemonWorkforceEventsRequest,
   SubmitPrDaemonRequest,
+  SubscribeDaemonWorkforceEventsRequest,
   SuspendDaemonWorkforceRequest,
   TruncateDaemonWorkforceRequest,
   UpdateDaemonWorkforceRequest,
 } from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
-import { resolveDaemonClient, type DaemonClientOptions } from "./client.ts"
 import { runSession } from "./daemon/session/client.ts"
+import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
-export type GoddardSdkOptions = DaemonClientOptions
+export type GoddardClientOptions = IpcClientOptions
 
 /** Caches one namespace on first access by replacing the instance getter with the concrete value. */
 function defineCachedNamespace<TValue>(owner: object, key: string, value: TValue): TValue {
@@ -56,11 +56,14 @@ function createAuthNamespace(client: DaemonIpcClient) {
   return {
     /** Starts one GitHub device flow through the daemon auth contract. */
     startDeviceFlow: async (input: DeviceFlowStart) => client.send("authDeviceStart", input),
+
     /** Completes one pending GitHub device flow through the daemon auth contract. */
     completeDeviceFlow: async (input: DeviceFlowComplete) =>
       client.send("authDeviceComplete", input),
+
     /** Reads the current daemon-owned auth session as-is. */
     whoami: async () => client.send("authWhoami"),
+
     /** Clears the current daemon-owned auth session as-is. */
     logout: async () => client.send("authLogout"),
   }
@@ -72,6 +75,7 @@ function createPrNamespace(client: DaemonIpcClient) {
     /** Submits one pull request through the daemon PR contract. */
     submit: async (input: SubmitPrDaemonRequest & { token: string }) =>
       client.send("prSubmit", input),
+
     /** Posts one pull request reply through the daemon PR contract. */
     reply: async (input: ReplyPrDaemonRequest & { token: string }) => client.send("prReply", input),
   }
@@ -82,35 +86,47 @@ function createSessionNamespace(client: DaemonIpcClient) {
   return {
     /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
     run: async (input: SessionParams, handler?: acp.Client) => runSession(client, input, handler),
+
     /** Creates one daemon-managed session record. */
     create: async (input: CreateDaemonSessionRequest) => client.send("sessionCreate", input),
+
     /** Lists daemon-managed sessions and pagination state. */
     list: async (input: ListDaemonSessionsRequest) => client.send("sessionList", input),
+
     /** Fetches one daemon-managed session record. */
     get: async (input: DaemonSessionIdParams) => client.send("sessionGet", input),
+
     /** Reconnects to one daemon-managed session record. */
     connect: async (input: DaemonSessionIdParams) => client.send("sessionConnect", input),
+
     /** Reads one daemon-managed session history with session identity and connection state. */
     history: async (input: DaemonSessionIdParams) => client.send("sessionHistory", input),
+
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: async (input: DaemonSessionIdParams) => client.send("sessionDiagnostics", input),
+
     /** Reads persisted worktree metadata attached to one daemon-managed session. */
     worktree: async (input: DaemonSessionIdParams) => client.send("sessionWorktree", input),
+
     /** Reads persisted workforce metadata attached to one daemon-managed session. */
     workforce: async (input: DaemonSessionIdParams) => client.send("sessionWorkforce", input),
+
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
     shutdown: async (input: DaemonSessionIdParams) => client.send("sessionShutdown", input),
+
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
     send: async (input: SendDaemonSessionMessageRequest) => client.send("sessionSend", input),
+
     /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
     subscribe: async (
       input: DaemonSessionIdParams,
       onMessage: (message: acp.AnyMessage) => void,
     ): Promise<() => void> => {
-      return client.subscribe("sessionMessage", input, (payload) => {
+      return client.subscribe({ name: "sessionMessage", filter: input }, (payload) => {
         onMessage(payload.message)
       })
     },
+
     /** Resolves one daemon session token to its daemon session id. */
     resolveToken: async (input: ResolveDaemonSessionTokenRequest) =>
       client.send("sessionResolveToken", input),
@@ -130,10 +146,13 @@ function createLoopNamespace(client: DaemonIpcClient) {
   return {
     /** Starts or reuses one daemon loop runtime. */
     start: async (input: StartDaemonLoopRequest) => client.send("loopStart", input),
+
     /** Fetches one daemon loop runtime and its resolved config. */
     get: async (input: GetDaemonLoopRequest) => client.send("loopGet", input),
+
     /** Lists daemon loop runtime summaries. */
     list: async () => client.send("loopList"),
+
     /** Shuts down one daemon loop and reports whether shutdown succeeded. */
     shutdown: async (input: ShutdownDaemonLoopRequest) => client.send("loopShutdown", input),
   }
@@ -144,40 +163,52 @@ function createWorkforceNamespace(client: DaemonIpcClient) {
   return {
     /** Starts or reuses one daemon workforce runtime. */
     start: async (input: StartDaemonWorkforceRequest) => client.send("workforceStart", input),
+
     /** Discovers package candidates for one repository workforce initialization flow. */
     discoverCandidates: async (input: DiscoverDaemonWorkforceCandidatesRequest) =>
       client.send("workforceDiscoverCandidates", input),
+
     /** Initializes one repository workforce config and ledger through the daemon. */
     initialize: async (input: InitializeDaemonWorkforceRequest) =>
       client.send("workforceInitialize", input),
+
     /** Fetches one daemon workforce runtime and its resolved config. */
     get: async (input: GetDaemonWorkforceRequest) => client.send("workforceGet", input),
+
     /** Lists daemon workforce runtime summaries. */
     list: async () => client.send("workforceList"),
+
     /** Subscribes to live daemon-published workforce ledger events for one repository root. */
     subscribe: async (
-      input: SubscribeDaemonWorkforceEventsRequest,
+      filter: SubscribeDaemonWorkforceEventsRequest,
       onEvent: (event: DaemonWorkforceEvent["event"]) => void,
     ): Promise<() => void> => {
-      return client.subscribe("workforceEvent", input, (payload) => {
+      return client.subscribe({ name: "workforceEvent", filter }, (payload) => {
         onEvent(payload.event)
       })
     },
+
     /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
     shutdown: async (input: ShutdownDaemonWorkforceRequest) =>
       client.send("workforceShutdown", input),
+
     /** Enqueues one workforce request and includes the updated workforce projection. */
     request: async (input: CreateDaemonWorkforceRequestRequest) =>
       client.send("workforceRequest", input),
+
     /** Updates one workforce request and includes the updated workforce projection. */
     update: async (input: UpdateDaemonWorkforceRequest) => client.send("workforceUpdate", input),
+
     /** Cancels one workforce request and includes the updated workforce projection. */
     cancel: async (input: CancelDaemonWorkforceRequest) => client.send("workforceCancel", input),
+
     /** Truncates one workforce queue and includes the updated workforce projection. */
     truncate: async (input: TruncateDaemonWorkforceRequest) =>
       client.send("workforceTruncate", input),
+
     /** Responds to one active workforce request and includes the updated workforce projection. */
     respond: async (input: RespondDaemonWorkforceRequest) => client.send("workforceRespond", input),
+
     /** Suspends one active workforce request and includes the updated workforce projection. */
     suspend: async (input: SuspendDaemonWorkforceRequest) => client.send("workforceSuspend", input),
   }
@@ -187,8 +218,8 @@ function createWorkforceNamespace(client: DaemonIpcClient) {
 export class GoddardSdk {
   readonly #client: DaemonIpcClient
 
-  constructor(options: GoddardSdkOptions) {
-    this.#client = resolveDaemonClient(options)
+  constructor(options: GoddardClientOptions) {
+    this.#client = resolveIpcClient(options)
   }
 
   get daemon() {

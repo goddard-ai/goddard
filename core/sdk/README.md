@@ -63,16 +63,12 @@ Namespaces:
 Browser-safe explicit client:
 
 ```ts
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
 import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
 
 const sdk = new GoddardSdk({
-  client: createDaemonIpcClient({
-    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
-    createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
-  }),
+  client: createTauriClient("/tmp/goddard-daemon.sock", daemonIpcSchema),
 })
 
 const authSession = await sdk.auth.startDeviceFlow({

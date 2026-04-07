@@ -83,7 +83,7 @@ async fn subscribe<R: Runtime>(
     subscriptions: State<'_, SubscriptionStore>,
     socket_path: String,
     name: String,
-    subscription: Option<serde_json::Value>,
+    filter: Option<serde_json::Value>,
 ) -> Result<String, String> {
     let subscription_id = subscriptions
         .next_id
@@ -93,7 +93,7 @@ async fn subscribe<R: Runtime>(
     let task_subscription_id = subscription_id.clone();
     let task_socket_path = socket_path.clone();
     let task_name = name.clone();
-    let task_subscription = subscription.clone();
+    let task_filter = filter.clone();
 
     let task = tauri::async_runtime::spawn(async move {
         let mut stream = match UnixStream::connect(&task_socket_path).await {
@@ -101,12 +101,12 @@ async fn subscribe<R: Runtime>(
             Err(_) => return,
         };
 
-        let query = if let Some(subscription) = task_subscription {
-            match serde_json::to_string(&subscription) {
-                Ok(raw_subscription) => format!(
-                    "/stream?name={}&subscription={}",
+        let query = if let Some(filter) = task_filter {
+            match serde_json::to_string(&filter) {
+                Ok(raw_filter) => format!(
+                    "/stream?name={}&filter={}",
                     urlencoding::encode(&task_name),
-                    urlencoding::encode(&raw_subscription)
+                    urlencoding::encode(&raw_filter)
                 ),
                 Err(_) => return,
             }

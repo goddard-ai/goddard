@@ -13,6 +13,6 @@
       "react-dom": ["./node_modules/preact/compat"]
     }
   },
-  "include": ["src", "plugins/*.template.tsx"],
+  "include": ["src", "plugins/*.template.*"],
   "exclude": ["src/bun"]
 }

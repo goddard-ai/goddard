@@ -3,8 +3,8 @@ import * as http from "node:http"
 import { z } from "zod"
 import { IpcClientError } from "../errors.ts"
 import {
+  type InferStreamFilter,
   type InferStreamPayload,
-  type InferStreamSubscription,
   type IpcSchema,
   type ValidRequestName,
   type ValidStreamName,
@@ -67,7 +67,7 @@ function safeUnlink(socketPath: string): void {
   }
 }
 
-/** Normalizes shorthand and object stream definitions into optional subscription schemas. */
+/** Normalizes shorthand and object stream definitions into optional filter schemas. */
 function getStreamSchemas<TSchema extends IpcSchema, K extends ValidStreamName<TSchema>>(
   schema: TSchema,
   name: K,
@@ -75,31 +75,31 @@ function getStreamSchemas<TSchema extends IpcSchema, K extends ValidStreamName<T
   const definition = schema.streams[name]
   if (!("payload" in definition)) {
     return {
-      subscription: undefined,
+      filter: undefined,
     }
   }
 
   return {
-    subscription: definition.subscription,
+    filter: definition.filter,
   }
 }
 
-/** Matches one published stream payload against one validated subscription filter. */
-function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boolean {
-  if (subscription === undefined) {
+/** Matches one published stream payload against one validated stream filter. */
+function matchesStreamFilter(filter: unknown, payload: unknown): boolean {
+  if (filter === undefined) {
     return true
   }
 
   if (
-    typeof subscription !== "object" ||
-    subscription === null ||
+    typeof filter !== "object" ||
+    filter === null ||
     typeof payload !== "object" ||
     payload === null
   ) {
-    return Object.is(subscription, payload)
+    return Object.is(filter, payload)
   }
 
-  return Object.entries(subscription).every(([key, value]) =>
+  return Object.entries(filter).every(([key, value]) =>
     Object.is((payload as Record<string, unknown>)[key], value),
   )
 }
@@ -107,7 +107,7 @@ function matchesSubscriptionFilter(subscription: unknown, payload: unknown): boo
 /** Optional hooks that run when one client subscribes to a server-published stream. */
 type SubscribeHookInput<TSchema extends IpcSchema> = {
   name: ValidStreamName<TSchema>
-  subscription: InferStreamSubscription<TSchema, ValidStreamName<TSchema>> | undefined
+  filter: InferStreamFilter<TSchema, ValidStreamName<TSchema>> | undefined
 }
 
 /** Request payload made available to per-request context factories. */
@@ -141,7 +141,7 @@ type RequestFailedHookInput<TSchema extends IpcSchema, TContext> = {
   durationMs: number
 }
 
-/** Optional hooks that run during request and subscription handling. */
+/** Optional hooks that run during request and stream-filter handling. */
 type CreateServerOptions<TSchema extends IpcSchema, TContext> = {
   createRequestContext?: (input: CreateRequestContextInput<TSchema>) => TContext
   onRequestReceived?: (input: RequestReceivedHookInput<TSchema, TContext>) => Promise<void> | void
@@ -159,7 +159,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
 ) {
   const streamClients = new Set<{
     name: string
-    subscription: unknown
+    filter: unknown
     res: http.ServerResponse
   }>()
 
@@ -172,7 +172,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     for (const client of streamClients) {
       if (
         client.name === name &&
-        matchesSubscriptionFilter(client.subscription, payload) &&
+        matchesStreamFilter(client.filter, payload) &&
         !client.res.destroyed &&
         !client.res.writableEnded
       ) {
@@ -268,38 +268,33 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
       return
     }
 
-    let subscription: InferStreamSubscription<TSchema, ValidStreamName<TSchema>> | undefined
+    let filter: InferStreamFilter<TSchema, ValidStreamName<TSchema>> | undefined
     try {
-      const { subscription: subscriptionSchema } = getStreamSchemas(
-        schema,
-        name as ValidStreamName<TSchema>,
-      )
-      const rawSubscription = url.searchParams.get("subscription")
-      if (rawSubscription && !subscriptionSchema) {
-        throw new IpcClientError(`Stream ${name} does not accept subscription params`)
+      const { filter: filterSchema } = getStreamSchemas(schema, name as ValidStreamName<TSchema>)
+      const rawFilter = url.searchParams.get("filter")
+      if (rawFilter && !filterSchema) {
+        throw new IpcClientError(`Stream ${name} does not accept filter params`)
       }
 
-      let parsedSubscription: unknown
-      if (rawSubscription) {
+      let parsedFilter: unknown
+      if (rawFilter) {
         try {
-          parsedSubscription = JSON.parse(rawSubscription)
+          parsedFilter = JSON.parse(rawFilter)
         } catch (error) {
-          throw toClientError(error, "Stream subscription must be valid JSON")
+          throw toClientError(error, "Stream filter must be valid JSON")
         }
       }
 
-      subscription =
-        rawSubscription && subscriptionSchema
-          ? (subscriptionSchema.parse(parsedSubscription) as InferStreamSubscription<
+      filter =
+        rawFilter && filterSchema
+          ? (filterSchema.parse(parsedFilter) as InferStreamFilter<
               TSchema,
               ValidStreamName<TSchema>
             >)
           : undefined
     } catch (error) {
       const { statusCode, message } = getErrorResponse(
-        error instanceof IpcClientError
-          ? error
-          : toClientError(error, "Stream subscription is invalid"),
+        error instanceof IpcClientError ? error : toClientError(error, "Stream filter is invalid"),
       )
       res.writeHead(statusCode, { "Content-Type": "text/plain" })
       res.end(message)
@@ -309,7 +304,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     try {
       await options.onSubscribe?.({
         name: name as ValidStreamName<TSchema>,
-        subscription,
+        filter,
       })
     } catch (error) {
       const { statusCode, message } = getErrorResponse(error)
@@ -325,7 +320,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     })
     res.flushHeaders()
 
-    const client = { name, subscription, res }
+    const client = { name, filter, res }
     streamClients.add(client)
 
     const removeClient = () => {

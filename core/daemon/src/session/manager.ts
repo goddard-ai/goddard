@@ -74,6 +74,11 @@ function getPackageVersion(): string {
 const logger = createDaemonLogger()
 type DaemonSessionId = DaemonSession["id"]
 
+/** Persisted daemon session record shape used when reading sessions back from kindstore. */
+type PersistedSessionRecord = KindOutput<typeof db.schema.sessions> & {
+  acpSessionId: string
+}
+
 /** Returns true when one filesystem path currently exists. */
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -757,16 +762,17 @@ function buildDaemonSessionContext(params: {
       poweredBy: string
     }
   } | null
-}) {
+}): DaemonSessionContext {
   return {
     sessionId: params.sessionId,
+    acpSessionId: undefined,
     cwd: params.cwd,
     repository:
       typeof params.request.repository === "string" ? params.request.repository : undefined,
     prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : undefined,
     worktreeDir: params.worktree?.state.worktreeDir,
     worktreePoweredBy: params.worktree?.state.poweredBy,
-  } satisfies DaemonSessionContext
+  }
 }
 
 /** Creates a normalized diagnostic record for persistence and log correlation. */
@@ -971,7 +977,7 @@ export function createSessionManager(input: {
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
-    let persistedSessions: KindOutput<typeof db.schema.sessions>[]
+    let persistedSessions: PersistedSessionRecord[]
 
     try {
       persistedSessions = await Promise.resolve(db.sessions.findMany())
@@ -1047,7 +1053,7 @@ export function createSessionManager(input: {
 
   async function launchSession(
     params: SessionLaunchParams,
-    existingSession: KindOutput<typeof db.schema.sessions> | null = null,
+    existingSession: PersistedSessionRecord | null = null,
   ): Promise<DaemonSession> {
     await ready
     const id = existingSession?.id ?? db.sessions.newId()

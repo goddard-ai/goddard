@@ -11,14 +11,12 @@ async function main() {
   process.chdir(appDir)
 
   const vite = supervise({
-    name: "vite",
     command: "vite",
   })
 
-  await vite.waitFor("ready", { stream: "stdout" })
+  await vite.waitFor("ready")
 
   supervise({
-    name: "electrobun",
     command: "electrobun",
     args: ["dev", "--watch"],
   })

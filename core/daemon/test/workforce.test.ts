@@ -129,9 +129,12 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const streamedEvent = new Promise<DaemonWorkforceEvent["event"]>((resolve) => {
     resolveStreamEvent = resolve
   })
-  const unsubscribe = await client.subscribe("workforceEvent", { rootDir: "/repo" }, (payload) => {
-    resolveStreamEvent?.(payload.event)
-  })
+  const unsubscribe = await client.subscribe(
+    { name: "workforceEvent", filter: { rootDir: "/repo" } },
+    (payload) => {
+      resolveStreamEvent?.(payload.event)
+    },
+  )
   cleanup.push(async () => {
     await Promise.resolve(unsubscribe()).catch(() => {})
   })
@@ -224,9 +227,9 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  await expect(client.subscribe("workforceEvent", { rootDir: "/repo" }, () => {})).rejects.toThrow(
-    "No workforce is running for /repo",
-  )
+  await expect(
+    client.subscribe({ name: "workforceEvent", filter: { rootDir: "/repo" } }, () => {}),
+  ).rejects.toThrow("No workforce is running for /repo")
 })
 
 test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {

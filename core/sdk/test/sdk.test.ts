@@ -1,15 +1,16 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { describe, expect, test, vi } from "vitest"
-import { AgentSession, GoddardSdk } from "../src/index.ts"
+import { AgentSession, GoddardSdk, type GoddardClient } from "../src/index.ts"
 
 function createSdkWithClient() {
   const send = vi.fn()
   const subscribe = vi.fn()
+  const client: GoddardClient = {
+    send: (name, payload?) => send(name, payload),
+    subscribe: (target, onMessage) => subscribe(target, onMessage),
+  }
   const sdk = new GoddardSdk({
-    client: {
-      send,
-      subscribe,
-    } as never,
+    client,
   })
 
   return { sdk, send, subscribe }
@@ -45,8 +46,8 @@ describe("@goddard-ai/sdk session namespace", () => {
     const onMessage = vi.fn()
     const unsubscribe = vi.fn()
 
-    subscribe.mockImplementationOnce(async (_name, subscription, handler) => {
-      expect(subscription).toEqual({ id: "ses_1" })
+    subscribe.mockImplementationOnce(async (target, handler) => {
+      expect(target).toEqual({ name: "sessionMessage", filter: { id: "ses_1" } })
       handler({
         id: "ses_1",
         message: {
@@ -60,7 +61,10 @@ describe("@goddard-ai/sdk session namespace", () => {
 
     const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
 
-    expect(subscribe).toHaveBeenCalledWith("sessionMessage", { id: "ses_1" }, expect.any(Function))
+    expect(subscribe).toHaveBeenCalledWith(
+      { name: "sessionMessage", filter: { id: "ses_1" } },
+      expect.any(Function),
+    )
     expect(onMessage).toHaveBeenCalledTimes(1)
     expect(onMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
@@ -106,7 +110,10 @@ describe("@goddard-ai/sdk session namespace", () => {
       initialPrompt: undefined,
       oneShot: undefined,
     })
-    expect(subscribe).toHaveBeenCalledWith("sessionMessage", { id: "ses_1" }, expect.any(Function))
+    expect(subscribe).toHaveBeenCalledWith(
+      { name: "sessionMessage", filter: { id: "ses_1" } },
+      expect.any(Function),
+    )
     expect(send).toHaveBeenNthCalledWith(2, "sessionShutdown", { id: "ses_1" })
   })
 
@@ -115,8 +122,8 @@ describe("@goddard-ai/sdk session namespace", () => {
     const onEvent = vi.fn()
     const unsubscribe = vi.fn()
 
-    subscribe.mockImplementationOnce(async (_name, subscription, handler) => {
-      expect(subscription).toEqual({ rootDir: "/repo" })
+    subscribe.mockImplementationOnce(async (target, handler) => {
+      expect(target).toEqual({ name: "workforceEvent", filter: { rootDir: "/repo" } })
       handler({
         rootDir: "/repo",
         event: {
@@ -136,8 +143,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
 
     expect(subscribe).toHaveBeenCalledWith(
-      "workforceEvent",
-      { rootDir: "/repo" },
+      { name: "workforceEvent", filter: { rootDir: "/repo" } },
       expect.any(Function),
     )
     expect(onEvent).toHaveBeenCalledTimes(1)

@@ -182,15 +182,13 @@ test("multiple clients can observe the same live session stream independently", 
   const clientAMessages: unknown[] = []
   const clientBMessages: unknown[] = []
   const unsubscribeA = await clientA.subscribe(
-    "sessionMessage",
-    { id: created.session.id },
+    { name: "sessionMessage", filter: { id: created.session.id } },
     (payload) => {
       clientAMessages.push(payload.message)
     },
   )
   const unsubscribeB = await clientB.subscribe(
-    "sessionMessage",
-    { id: created.session.id },
+    { name: "sessionMessage", filter: { id: created.session.id } },
     (payload) => {
       clientBMessages.push(payload.message)
     },

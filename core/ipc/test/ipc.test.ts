@@ -30,7 +30,7 @@ const schema = {
         userId: string
         message: string
       }>(),
-      subscription: z.object({
+      filter: z.object({
         userId: z.string(),
       }),
     },
@@ -57,8 +57,8 @@ async function createFixture() {
       add: ({ a, b }) => ({ sum: a + b }),
     },
     {
-      onSubscribe: ({ name, subscription }) => {
-        if (name === "userAlert" && subscription?.userId === "blocked-user") {
+      onSubscribe: ({ name, filter }) => {
+        if (name === "userAlert" && filter?.userId === "blocked-user") {
           throw new IpcClientError("User alerts are disabled for blocked-user")
         }
       },
@@ -253,11 +253,14 @@ describe("core/ipc", () => {
     await expect(alertPromise).resolves.toEqual({ message: "Heads up", level: "warn" })
   })
 
-  test("applies stream subscription filters on the server side", async () => {
+  test("applies stream filters on the server side", async () => {
     const { client, publish } = await createFixture()
     const onMessage = vi.fn()
 
-    const unsubscribe = await client.subscribe("userAlert", { userId: "user-1" }, onMessage)
+    const unsubscribe = await client.subscribe(
+      { name: "userAlert", filter: { userId: "user-1" } },
+      onMessage,
+    )
     cleanups.push(async () => {
       unsubscribe()
     })
@@ -271,11 +274,11 @@ describe("core/ipc", () => {
     expect(onMessage).toHaveBeenCalledWith({ userId: "user-1", message: "deliver me" })
   })
 
-  test("rejects stream subscriptions when the server-side validator fails", async () => {
+  test("rejects stream filters when the server-side validator fails", async () => {
     const { client } = await createFixture()
 
     await expect(
-      client.subscribe("userAlert", { userId: "blocked-user" }, () => {}),
+      client.subscribe({ name: "userAlert", filter: { userId: "blocked-user" } }, () => {}),
     ).rejects.toThrow("User alerts are disabled for blocked-user")
   })
 

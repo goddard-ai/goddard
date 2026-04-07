@@ -203,11 +203,11 @@ export const daemonIpcSchema = {
   streams: {
     sessionMessage: {
       payload: $type<DaemonSessionMessageEvent>(),
-      subscription: DaemonSessionIdParams,
+      filter: DaemonSessionIdParams,
     },
     workforceEvent: {
       payload: $type<DaemonWorkforceEvent>(),
-      subscription: SubscribeDaemonWorkforceEventsRequest,
+      filter: SubscribeDaemonWorkforceEventsRequest,
     },
   },
 } satisfies IpcSchema

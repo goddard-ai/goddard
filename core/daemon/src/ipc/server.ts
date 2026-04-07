@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import type { Handlers } from "@goddard-ai/ipc"
 import { IpcClientError, createServer } from "@goddard-ai/ipc/node"
 import type {
   DaemonSession,
@@ -456,7 +457,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-  }
+  } satisfies Handlers<typeof daemonIpcSchema, DaemonIpcRequestContext>
   const scopedRequestHandlers = Object.fromEntries(
     Object.entries(requestHandlers).map(([name, handler]) => [
       name,
@@ -518,14 +519,14 @@ export async function startDaemonServer(
           })
         })
       },
-      onSubscribe: async ({ name, subscription }) => {
+      onSubscribe: async ({ name, filter }) => {
         if (name !== "workforceEvent") {
           return
         }
 
-        const request = subscription as SubscribeDaemonWorkforceEventsRequest | undefined
+        const request = filter as SubscribeDaemonWorkforceEventsRequest | undefined
         if (!request) {
-          throw new IpcClientError("Missing workforce event subscription filter")
+          throw new IpcClientError("Missing workforce event filter")
         }
 
         await workforceManager.getWorkforce(request.rootDir)
