@@ -7,7 +7,7 @@ import {
 } from "@goddard-ai/paths/node"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import { basename, dirname, resolve } from "node:path"
-import { createDaemonLogger } from "./logging.ts"
+import { createLogger } from "./logging.ts"
 import { readMergedRootConfig } from "./resolvers/config.ts"
 
 const WATCH_RELOAD_SETTLE_MS = 50
@@ -56,7 +56,7 @@ type CachedRootConfigEntry = {
 
 /** Creates the daemon-owned config manager for merged persisted root-config snapshots. */
 export function createConfigManager() {
-  const logger = createDaemonLogger()
+  const logger = createLogger()
   const entries = new Map<string, CachedRootConfigEntry>()
   const globalRoot = resolve(getGoddardGlobalDir())
   const globalConfigPath = resolve(getGlobalConfigPath())

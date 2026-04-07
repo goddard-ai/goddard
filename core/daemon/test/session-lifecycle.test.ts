@@ -35,7 +35,7 @@ afterAll(async () => {
 })
 
 test("daemon revokes session tokens when agent processes exit", async () => {
-  const daemon = await startTestDaemon()
+  const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
@@ -62,7 +62,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
 })
 
 test("daemon persists repository context into durable session storage", async () => {
-  const daemon = await startTestDaemon()
+  const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
@@ -142,7 +142,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     sessionId,
     events: [],
   })
-  const daemon = await startTestDaemon({ useExistingHome: true })
+  const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
   const session = await client.send("sessionGet", { id: sessionId })
@@ -166,7 +166,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
 })
 
 test("multiple clients can observe the same live session stream independently", async () => {
-  const daemon = await startTestDaemon()
+  const daemon = await startServer()
   const clientA = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const clientB = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
@@ -217,7 +217,7 @@ test("multiple clients can observe the same live session stream independently", 
 })
 
 test("session worktree opt-in maps cwd into a real worktree subdirectory", async () => {
-  const daemon = await startTestDaemon()
+  const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
@@ -242,7 +242,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   await client.send("sessionShutdown", { id: created.session.id })
 })
 
-async function startTestDaemon(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
+async function startServer(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
   if (!options.useExistingHome) {
     await useTempHome()
   }

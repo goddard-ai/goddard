@@ -1,37 +1,32 @@
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import { createBackendClient, type BackendClient } from "./backend.ts"
 import { createConfigManager, type ConfigManager } from "./config-manager.ts"
-import { resolveDaemonRuntimeConfig } from "./config.ts"
+import { resolveRuntimeConfig } from "./config.ts"
+import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
-import {
-  configureDaemonLogging,
-  createDaemonLogger,
-  createPayloadPreview,
-  type DaemonLogMode,
-} from "./logging.ts"
+import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
 import { db } from "./persistence/store.ts"
-import { daemonFeedbackEventContext, daemonSetupContext } from "./setup-context.ts"
 
 /** Input used to start the long-running daemon process. */
-export type RunDaemonInput = {
+export type RunInput = {
   baseUrl: string
   socketPath?: string
   agentBinDir?: string
   enableIpc?: boolean
   enableStream?: boolean
-  logMode?: DaemonLogMode
+  logMode?: LogMode
 }
 
 /** Output sinks used by the daemon for structured log lines. */
-export type DaemonIo = {
+export type Io = {
   stdout: (line: string) => void
   stderr: (line: string) => void
 }
 
 /** Optional test seams and runtime overrides for daemon startup. */
-export type RunDaemonDeps = {
+export type RunDeps = {
   createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
   createConfigManager?: () => ConfigManager
   startIpcServer?: (
@@ -40,25 +35,25 @@ export type RunDaemonDeps = {
   ) => Promise<DaemonServer>
   runOneShot?: (input: OneShotInput) => Promise<number> | number
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
-  io?: DaemonIo
+  io?: Io
 }
 
-const defaultIo: DaemonIo = {
+const defaultIo: Io = {
   stdout: (line) => process.stdout.write(`${line}\n`),
   stderr: (line) => process.stderr.write(`${line}\n`),
 }
 
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
-export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {}): Promise<number> {
+export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<number> {
   const io = deps.io ?? defaultIo
-  const restoreLogging = configureDaemonLogging({
+  const restoreLogging = configureLogging({
     writeLine: io.stdout,
     mode: input.logMode ?? "pretty",
   })
-  const logger = createDaemonLogger()
+  const logger = createLogger()
   const enableIpc = input.enableIpc ?? true
   const enableStream = input.enableStream ?? true
-  const runtime = resolveDaemonRuntimeConfig({
+  const runtime = resolveRuntimeConfig({
     baseUrl: input.baseUrl,
     socketPath: input.socketPath,
     agentBinDir: input.agentBinDir,
@@ -96,7 +91,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
 
     const client = await createBackendClientImpl(runtime.baseUrl)
     if (enableIpc) {
-      ipcServer = await daemonSetupContext.run({ runtime, configManager }, () =>
+      ipcServer = await SetupContext.run({ runtime, configManager }, () =>
         startIpcServer(client, {
           socketPath: runtime.socketPath,
           agentBinDir: runtime.agentBinDir,
@@ -132,7 +127,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           feedbackType: event.type,
         }
 
-        await daemonFeedbackEventContext.run(feedbackContext, async () => {
+        await FeedbackEventContext.run(feedbackContext, async () => {
           if (!activeIpcServer) {
             logger.log("repo.feedback_ignored", {
               reason: "ipc_disabled",

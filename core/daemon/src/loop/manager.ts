@@ -1,25 +1,17 @@
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
 import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
-import { createDaemonLogger } from "../logging.ts"
-import {
-  resolveNamedLoopStartRequest,
-  type ResolvedDaemonLoopStartRequest,
-} from "../resolvers/loops.ts"
+import { createLogger } from "../logging.ts"
+import { resolveNamedLoopStartRequest, type ResolvedLoopStartRequest } from "../resolvers/loops.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
 import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
 
-const logger = createDaemonLogger()
+const logger = createLogger()
 
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
 export interface LoopManagerDeps extends LoopRuntimeDeps {
-  createRuntime?: (
-    input: ResolvedDaemonLoopStartRequest,
-    deps: LoopRuntimeDeps,
-  ) => Promise<LoopRuntime>
-  resolveLoopStartRequest?: (
-    input: StartDaemonLoopRequest,
-  ) => Promise<ResolvedDaemonLoopStartRequest>
+  createRuntime?: (input: ResolvedLoopStartRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
+  resolveLoopStartRequest?: (input: StartDaemonLoopRequest) => Promise<ResolvedLoopStartRequest>
 }
 
 /** Daemon-owned loop runtime registry keyed by normalized repository root and loop name. */

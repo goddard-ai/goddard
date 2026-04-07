@@ -8,11 +8,11 @@ import { join } from "node:path"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import type { BackendPrClient } from "../src/ipc/types.ts"
-import { configureDaemonLogging } from "../src/logging.ts"
+import type { WorkforceActorContext } from "../src/context.ts"
+import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import type { WorkforceManager, WorkforceManagerMutation } from "../src/workforce/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
-import type { WorkforceActorContext } from "../src/workforce/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -41,10 +41,10 @@ afterAll(async () => {
 })
 
 test("daemon submit request requires a valid session token", async () => {
-  const daemon = await startTestDaemon()
+  const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const { logs } = await captureDaemonLogs(async () => {
+  const { logs } = await captureLogs(async () => {
     await expect(
       client.send("prSubmit", {
         token: "",
@@ -69,7 +69,7 @@ test("daemon submit request requires a valid session token", async () => {
 })
 
 test("daemon hides unexpected handler crashes from IPC clients", async () => {
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     sdk: {
       pr: {
         create: async () => {
@@ -98,7 +98,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const { logs } = await captureDaemonLogs(async () => {
+  const { logs } = await captureLogs(async () => {
     await expect(
       client.send("prSubmit", {
         token: "tok_session",
@@ -125,7 +125,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     cwd: string
   }> = []
 
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     sdk: {
       auth: {
         startDeviceFlow: async () => ({
@@ -187,7 +187,7 @@ test("daemon submit request enforces trusted repo context and records created PR
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const { logs } = await captureDaemonLogs(async () => {
+  const { logs } = await captureLogs(async () => {
     await client.send("prSubmit", {
       token: "tok_session",
       cwd: process.cwd(),
@@ -227,7 +227,7 @@ test("daemon submit request enforces trusted repo context and records created PR
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     auth: {
       getSessionByToken: async () => ({
         sessionId: "ses_7",
@@ -264,7 +264,7 @@ test("daemon reply request records pull request checkout locations", async () =>
     cwd: string
   }> = []
 
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     auth: {
       getSessionByToken: async () => ({
         sessionId: "ses_12",
@@ -322,7 +322,7 @@ test("daemon workforce request binds token-backed mutations to the session workf
   })
 
   const calls: Array<{ rootDir: string; mutationType: string; actorRootDir: string | null }> = []
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     auth: {
       getSessionByToken: async (candidateToken) =>
         candidateToken === token
@@ -380,7 +380,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
   })
 
   const calls: Array<{ rootDir: string }> = []
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     auth: {
       getSessionByToken: async (candidateToken) =>
         candidateToken === token
@@ -427,7 +427,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
     requestId: "req-respond",
   })
 
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     auth: {
       getSessionByToken: async (candidateToken) =>
         candidateToken === token
@@ -467,7 +467,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
     includeRootDir: false,
   })
 
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     auth: {
       getSessionByToken: async (candidateToken) =>
         candidateToken === token
@@ -498,7 +498,7 @@ test("daemon workforce request preserves operator mutations without a token", as
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-operator-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
   const calls: Array<{ rootDir: string; actorRootDir: string | null }> = []
-  const daemon = await startTestDaemon({
+  const daemon = await startServer({
     createWorkforceManager: () =>
       createStaticWorkforceManager((rootDir, _mutation, actor) => {
         calls.push({ rootDir, actorRootDir: actor.rootDir })
@@ -515,7 +515,7 @@ test("daemon workforce request preserves operator mutations without a token", as
   expect(calls).toEqual([{ rootDir, actorRootDir: null }])
 })
 
-type StartTestDaemonOptions = {
+type StartServerOptions = {
   useExistingHome?: boolean
   createWorkforceManager?: NonNullable<
     Parameters<typeof startDaemonServer>[2]
@@ -540,7 +540,7 @@ type StartTestDaemonOptions = {
   resolveReplyRequest?: (input: any) => Promise<any>
 }
 
-async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<DaemonServer> {
+async function startServer(options: StartServerOptions = {}): Promise<DaemonServer> {
   if (!options.useExistingHome) {
     await useTempHome()
   }
@@ -728,11 +728,11 @@ function buildWorkforceStatus(rootDir: string) {
   }
 }
 
-async function captureDaemonLogs(
+async function captureLogs(
   action: () => Promise<void>,
 ): Promise<{ logs: Array<Record<string, unknown>> }> {
   const output: string[] = []
-  const restoreLogging = configureDaemonLogging({
+  const restoreLogging = configureLogging({
     mode: "json",
     writeLine: (line) => {
       output.push(line)

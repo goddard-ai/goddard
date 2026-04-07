@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url"
 import { createConfigManager } from "../src/config-manager.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
-import { configureDaemonLogging } from "../src/logging.ts"
+import { configureLogging } from "../src/logging.ts"
 import { runOneShot } from "../src/one-shot.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -42,7 +42,7 @@ test("config manager promotes valid root config edits and preserves the last goo
   cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
 
   const output: string[] = []
-  const restoreLogging = configureDaemonLogging({
+  const restoreLogging = configureLogging({
     mode: "json",
     writeLine: (line) => {
       output.push(line)
@@ -133,7 +133,7 @@ test("config manager promotes valid root config edits and preserves the last goo
   await writeFile(localConfigPath, "{ invalid json\n", "utf-8")
 
   await waitFor(() => {
-    return readDaemonLogs(output).some(
+    return readLogs(output).some(
       (entry) => entry.event === "config.reload_failed" && entry.watchScope === "local",
     )
   })
@@ -167,7 +167,7 @@ test(
 
     const configManager = createConfigManager()
     cleanup.push(() => configManager.close())
-    const daemon = await startTestDaemon(configManager)
+    const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstRun = await client.send("actionRun", {
@@ -221,7 +221,7 @@ test(
 
     const configManager = createConfigManager()
     cleanup.push(() => configManager.close())
-    const daemon = await startTestDaemon(configManager)
+    const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstExitCode = await runOneShot({
@@ -294,7 +294,7 @@ function createFeedbackEvent(): FeedbackEvent {
   }
 }
 
-async function startTestDaemon(configManager: ReturnType<typeof createConfigManager>) {
+async function startServer(configManager: ReturnType<typeof createConfigManager>) {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-daemon-"))
   const daemon = await startDaemonServer(
     {
@@ -374,7 +374,7 @@ async function writePromptOnlyAction(repoDir: string, actionName: string, prompt
   await writeFile(join(actionsDir, `${actionName}.md`), `${prompt}\n`, "utf-8")
 }
 
-function readDaemonLogs(lines: string[]) {
+function readLogs(lines: string[]) {
   return lines
     .flatMap((chunk) => chunk.split("\n"))
     .filter((line) => line.trim().length > 0)

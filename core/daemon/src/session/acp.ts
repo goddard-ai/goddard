@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { FileSink } from "bun"
 import { Readable, Writable } from "node:stream"
-import { createDaemonLogger } from "../logging.ts"
+import { createLogger } from "../logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
 
@@ -39,7 +39,7 @@ export function createAgentConnection(
   stdout: AgentOutputStream,
   hooks: AgentStreamHooks = {},
 ) {
-  const logger = createDaemonLogger()
+  const logger = createLogger()
   const stream = createAgentMessageStream(stdin, stdout, hooks)
 
   return {

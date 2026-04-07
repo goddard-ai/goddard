@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
-import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
+import { runDaemon, type RunDeps } from "../src/daemon.ts"
 import {
   createDaemonUrl,
   readSocketPathFromDaemonUrl,
@@ -126,7 +126,7 @@ test("daemon run subscribes once, handles events across repositories, and passes
 
   const runOneShotCalls: any[] = []
   const startIpcCalls: any[] = []
-  const deps: RunDaemonDeps = {
+  const deps: RunDeps = {
     createBackendClient: async () =>
       createMockBackendClient({
         subscription,
@@ -173,7 +173,7 @@ test("daemon run subscribes once, handles events across repositories, and passes
     },
   }
 
-  const { logs, result: exitCode } = await captureDaemonLogs((io) =>
+  const { logs, result: exitCode } = await captureLogs((io) =>
     runDaemon(
       {
         baseUrl: "",
@@ -243,7 +243,7 @@ test("daemon run can start only the IPC server when stream is disabled", async (
   let subCalls = 0
   const startIpcCalls: Array<{ socketPath: string; agentBinDir: string }> = []
 
-  const { logs, result: exitCode } = await captureDaemonLogs((io) =>
+  const { logs, result: exitCode } = await captureLogs((io) =>
     runDaemon(
       {
         baseUrl: "",
@@ -294,7 +294,7 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   const runOneShotCalls: any[] = []
   const startIpcCalls: any[] = []
 
-  const { logs, result: exitCode } = await captureDaemonLogs((io) =>
+  const { logs, result: exitCode } = await captureLogs((io) =>
     runDaemon(
       {
         baseUrl: "",
@@ -492,7 +492,7 @@ function runGit(cwd: string, args: string[]): void {
   expect(result.status).toBe(0)
 }
 
-async function captureDaemonLogs<T>(
+async function captureLogs<T>(
   action: (io: { stdout: (line: string) => void; stderr: (line: string) => void }) => Promise<T>,
 ): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
   const output: string[] = []

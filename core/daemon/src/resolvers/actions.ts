@@ -8,7 +8,7 @@ import type { RootConfigProvider } from "./config.ts"
 import { readActionConfig, readCurrentRootConfig } from "./config.ts"
 
 /** A resolved named action prompt and merged persisted config. */
-export type ResolvedDaemonAction = {
+export type ResolvedAction = {
   prompt: string
   config: ActionConfig
   path: string
@@ -44,7 +44,7 @@ async function loadMarkdownPrompt(path: string): Promise<string> {
 }
 
 /** Loads one prompt-only action package. */
-async function loadPromptOnlyAction(path: string): Promise<ResolvedDaemonAction> {
+async function loadPromptOnlyAction(path: string): Promise<ResolvedAction> {
   return {
     prompt: await loadMarkdownPrompt(path),
     config: {},
@@ -53,7 +53,7 @@ async function loadPromptOnlyAction(path: string): Promise<ResolvedDaemonAction>
 }
 
 /** Loads one packaged action directory and validates its required files. */
-async function loadPackagedAction(path: string): Promise<ResolvedDaemonAction> {
+async function loadPackagedAction(path: string): Promise<ResolvedAction> {
   const promptPath = join(path, "prompt.md")
   const configPath = join(path, "config.json")
 
@@ -76,7 +76,7 @@ async function loadPackagedAction(path: string): Promise<ResolvedDaemonAction> {
 async function resolveActionFromRoot(
   actionName: string,
   goddardRoot: string,
-): Promise<ResolvedDaemonAction | null> {
+): Promise<ResolvedAction | null> {
   const promptPath = join(goddardRoot, "actions", `${actionName}.md`)
   const folderPath = join(goddardRoot, "actions", actionName)
   const hasPromptFile = existsSync(promptPath)
@@ -104,7 +104,7 @@ export async function resolveNamedAction(
   actionName: string,
   cwd: string,
   rootConfigProvider?: RootConfigProvider,
-): Promise<ResolvedDaemonAction> {
+): Promise<ResolvedAction> {
   const resolvedCwd = resolve(cwd)
   const { config, globalRoot, localRoot } = await readCurrentRootConfig(
     resolvedCwd,
@@ -137,7 +137,7 @@ export async function resolveNamedAction(
 
 /** Builds daemon session params for one resolved action plus runtime overrides. */
 export function buildNamedActionSessionParams(
-  action: ResolvedDaemonAction,
+  action: ResolvedAction,
   cwd: string,
   params: InlineSessionParams = {},
 ): CreateDaemonSessionRequest & { oneShot: true } {

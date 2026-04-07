@@ -8,28 +8,20 @@ import type {
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { once } from "node:events"
 import { createConfigManager } from "../config-manager.ts"
-import { resolveDaemonRuntimeConfig } from "../config.ts"
-import { createDaemonLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
+import { resolveRuntimeConfig } from "../config.ts"
+import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
+import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager, type LoopManager } from "../loop/index.ts"
 import { db } from "../persistence/store.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createSessionManager, type SessionManager } from "../session/manager.ts"
 import {
-  daemonIpcRequestContext,
-  daemonSetupContext,
-  type DaemonIpcRequestContext,
-} from "../setup-context.ts"
-import {
   discoverWorkforceInitCandidates,
   initializeWorkforce,
   resolveRepositoryRoot,
 } from "../workforce/config.ts"
-import {
-  createWorkforceManager,
-  type WorkforceActorContext,
-  type WorkforceManager,
-} from "../workforce/index.ts"
+import { createWorkforceManager, type WorkforceManager } from "../workforce/index.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
@@ -40,11 +32,11 @@ export async function startDaemonServer(
   options: { socketPath?: string; agentBinDir?: string } = {},
   deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
-  const logger = createDaemonLogger()
-  const setupContext = daemonSetupContext.get()
+  const logger = createLogger()
+  const setupContext = SetupContext.get()
   const runtime =
     setupContext?.runtime ??
-    resolveDaemonRuntimeConfig({
+    resolveRuntimeConfig({
       socketPath: options.socketPath,
       agentBinDir: options.agentBinDir,
     })
@@ -461,27 +453,25 @@ export async function startDaemonServer(
   const scopedRequestHandlers = Object.fromEntries(
     Object.entries(requestHandlers).map(([name, handler]) => [
       name,
-      (payload: unknown, context: DaemonIpcRequestContext) =>
-        daemonIpcRequestContext.run(context, () =>
-          (
-            handler as (
-              payload: unknown,
-              context: DaemonIpcRequestContext,
-            ) => Promise<unknown> | unknown
-          )(payload, context),
+      (payload: unknown, context: IpcRequestContext) =>
+        IpcRequestContext.run(context, () =>
+          (handler as (payload: unknown, context: IpcRequestContext) => Promise<unknown> | unknown)(
+            payload,
+            context,
+          ),
         ),
     ]),
   ) as typeof requestHandlers
 
-  const ipcServer = createServer<typeof daemonIpcSchema, DaemonIpcRequestContext>(
+  const ipcServer = createServer<typeof daemonIpcSchema, IpcRequestContext>(
     socketPath,
     daemonIpcSchema,
     scopedRequestHandlers,
     {
       createRequestContext: ({ payload }) => {
-        const context: DaemonIpcRequestContext = {
+        const context: IpcRequestContext = {
           opId: logger.createOpId(),
-          sessionId: readSessionIdForLog(payload),
+          sessionId: readSessionIdForLog(payload) ?? null,
           setSessionId(sessionId: DaemonSession["id"]) {
             context.sessionId = sessionId
           },
@@ -489,7 +479,7 @@ export async function startDaemonServer(
         return context
       },
       onRequestReceived: ({ name, payload, context }) => {
-        daemonIpcRequestContext.run(context, () => {
+        IpcRequestContext.run(context, () => {
           logger.log("ipc.request_received", {
             requestName: name,
             payload: createPayloadPreview(payload),
@@ -502,7 +492,7 @@ export async function startDaemonServer(
           context.setSessionId(responseSessionId)
         }
 
-        daemonIpcRequestContext.run(context, () => {
+        IpcRequestContext.run(context, () => {
           logger.log("ipc.response_sent", {
             requestName: name,
             durationMs,
@@ -511,7 +501,7 @@ export async function startDaemonServer(
         })
       },
       onRequestFailed: ({ name, error, context, durationMs }) => {
-        daemonIpcRequestContext.run(context, () => {
+        IpcRequestContext.run(context, () => {
           logger.log("ipc.request_failed", {
             requestName: name,
             durationMs,

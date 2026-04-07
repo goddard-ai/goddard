@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { startDaemonServer } from "../src/ipc.ts"
-import { configureDaemonLogging } from "../src/logging.ts"
+import { configureLogging } from "../src/logging.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 import { WorkforceRuntime } from "../src/workforce/runtime.ts"
@@ -881,7 +881,7 @@ test("workforce runtime logs request-to-session correlation for launched session
   await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
 
   let runtime!: WorkforceRuntime
-  const { logs } = await captureDaemonLogs(async () => {
+  const { logs } = await captureLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
       sessionManager: {
         newSession: async (input: { request: CreateDaemonSessionRequest }) => {
@@ -939,9 +939,15 @@ test("workforce runtime logs request-to-session correlation for launched session
 
   const respondedLog = logs.find((entry) => entry.event === "workforce.request_responded")
   expect(respondedLog).toBeTruthy()
-  expect(respondedLog?.actorSessionId).toBe("daemon-session-1")
-  expect(respondedLog?.actorAgentId).toBe("root")
-  expect(respondedLog?.actorRequestId).toBe(completedLog?.requestId)
+  expect((respondedLog?.workforceActor as Record<string, unknown> | undefined)?.sessionId).toBe(
+    "daemon-session-1",
+  )
+  expect((respondedLog?.workforceActor as Record<string, unknown> | undefined)?.agentId).toBe(
+    "root",
+  )
+  expect((respondedLog?.workforceActor as Record<string, unknown> | undefined)?.requestId).toBe(
+    completedLog?.requestId,
+  )
 })
 
 test("workforce runtime rejects responses and suspends for a different attached request", async () => {
@@ -1050,11 +1056,11 @@ function listAdvertisedWorkforceCommands(prompt: string): string[] {
   ).sort()
 }
 
-async function captureDaemonLogs<T>(
+async function captureLogs<T>(
   action: () => Promise<T>,
 ): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
   const output: string[] = []
-  const restoreLogging = configureDaemonLogging({
+  const restoreLogging = configureLogging({
     mode: "json",
     writeLine: (line) => {
       output.push(line)

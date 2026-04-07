@@ -33,15 +33,16 @@ import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
-import { prependAgentBinToPath } from "../config.ts"
+import { omit } from "radashi"
 import type { ConfigManager } from "../config-manager.ts"
-import { createChunkPreview, createDaemonLogger, createPayloadPreview } from "../logging.ts"
+import { prependAgentBinToPath } from "../config.ts"
+import { SessionContext } from "../context.ts"
+import { createChunkPreview, createLogger, createPayloadPreview } from "../logging.ts"
 import {
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
 } from "../persistence/session-state.ts"
 import { db } from "../persistence/store.ts"
-import { daemonSessionContext, type DaemonSessionContext } from "../setup-context.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -57,7 +58,7 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import { fetchRegistryAgent } from "./registry.ts"
-import { prepareSessionWorktree } from "./worktree.ts"
+import { PreparedSessionWorktree, prepareSessionWorktree } from "./worktree.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
@@ -71,8 +72,8 @@ function getPackageVersion(): string {
   }
 }
 
-const logger = createDaemonLogger()
-type DaemonSessionId = DaemonSession["id"]
+const logger = createLogger()
+type SessionId = DaemonSession["id"]
 
 /** Persisted daemon session record shape used when reading sessions back from kindstore. */
 type PersistedSessionRecord = KindOutput<typeof db.schema.sessions> & {
@@ -134,9 +135,9 @@ type AgentProcessHandle = ProcessLike & {
 
 /** Holds the live runtime state for a daemon-owned session process. */
 type ActiveSession = {
-  id: DaemonSessionId
+  id: SessionId
   acpSessionId: string
-  context: DaemonSessionContext
+  context: SessionContext
   token: string
   process: AgentProcessHandle
   writer: WritableStreamDefaultWriter<acp.AnyMessage>
@@ -165,7 +166,7 @@ interface NewSessionParams extends SessionLaunchParams {}
 
 /** Stored daemon session input accepted by `SessionManager.loadSession()`. */
 interface LoadSessionParams extends SessionLaunchParams {
-  id: DaemonSessionId
+  id: SessionId
 }
 
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
@@ -173,19 +174,16 @@ export type SessionManager = {
   newSession: (params: NewSessionParams) => Promise<DaemonSession>
   loadSession: (params: LoadSessionParams) => Promise<DaemonSession>
   listSessions: (params: ListDaemonSessionsRequest) => Promise<ListDaemonSessionsResponse>
-  connectSession: (id: DaemonSessionId) => Promise<DaemonSession>
-  getSession: (id: DaemonSessionId) => Promise<DaemonSession>
-  getHistory: (id: DaemonSessionId) => Promise<GetDaemonSessionHistoryResponse>
-  getDiagnostics: (id: DaemonSessionId) => Promise<GetDaemonSessionDiagnosticsResponse>
-  getWorktree: (id: DaemonSessionId) => Promise<GetDaemonSessionWorktreeResponse>
-  getWorkforce: (id: DaemonSessionId) => Promise<GetDaemonSessionWorkforceResponse>
-  sendMessage: (id: DaemonSessionId, message: acp.AnyMessage) => Promise<void>
-  promptSession: (
-    id: DaemonSessionId,
-    prompt: string | acp.ContentBlock[],
-  ) => Promise<acp.PromptResponse>
-  shutdownSession: (id: DaemonSessionId) => Promise<boolean>
-  resolveSessionIdByToken: (token: string) => Promise<DaemonSessionId>
+  connectSession: (id: SessionId) => Promise<DaemonSession>
+  getSession: (id: SessionId) => Promise<DaemonSession>
+  getHistory: (id: SessionId) => Promise<GetDaemonSessionHistoryResponse>
+  getDiagnostics: (id: SessionId) => Promise<GetDaemonSessionDiagnosticsResponse>
+  getWorktree: (id: SessionId) => Promise<GetDaemonSessionWorktreeResponse>
+  getWorkforce: (id: SessionId) => Promise<GetDaemonSessionWorkforceResponse>
+  sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
+  promptSession: (id: SessionId, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
+  shutdownSession: (id: SessionId) => Promise<boolean>
+  resolveSessionIdByToken: (token: string) => Promise<SessionId>
   close: () => Promise<void>
 }
 
@@ -752,27 +750,21 @@ function buildSessionLogContext(params: {
 }
 
 /** Builds the stable async context installed while one daemon session is actively doing work. */
-function buildDaemonSessionContext(params: {
-  sessionId: DaemonSessionId
+function buildSessionContext(params: {
+  sessionId: SessionId
   request: CreateDaemonSessionRequest
   cwd: string
-  worktree?: {
-    state: {
-      worktreeDir: string
-      poweredBy: string
-    }
-  } | null
-}): DaemonSessionContext {
+  worktree?: PreparedSessionWorktree | null
+}) {
   return {
     sessionId: params.sessionId,
-    acpSessionId: undefined,
+    acpSessionId: null,
     cwd: params.cwd,
-    repository:
-      typeof params.request.repository === "string" ? params.request.repository : undefined,
-    prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : undefined,
-    worktreeDir: params.worktree?.state.worktreeDir,
-    worktreePoweredBy: params.worktree?.state.poweredBy,
-  }
+    repository: typeof params.request.repository === "string" ? params.request.repository : null,
+    prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : null,
+    worktreeDir: params.worktree?.state.worktreeDir ?? null,
+    worktreePoweredBy: params.worktree?.state.poweredBy ?? null,
+  } satisfies SessionContext
 }
 
 /** Creates a normalized diagnostic record for persistence and log correlation. */
@@ -793,7 +785,7 @@ function logAgentChunk(chunk: Uint8Array): void {
     return
   }
 
-  const session = daemonSessionContext.get()
+  const session = SessionContext.get()
   logger.log("agent.chunk_read", {
     sessionId: session?.sessionId,
     acpSessionId: session?.acpSessionId,
@@ -806,7 +798,7 @@ function logAgentMessage(
   event: "agent.message_read" | "agent.message_write",
   message: acp.AnyMessage,
 ): void {
-  const session = daemonSessionContext.get()
+  const session = SessionContext.get()
   logger.log(event, {
     sessionId: session?.sessionId,
     acpSessionId: session?.acpSessionId,
@@ -883,15 +875,15 @@ function normalizeSessionPageSize(limit?: number): number {
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
-  publish: (id: DaemonSessionId, message: acp.AnyMessage) => void
-  configManager?: ConfigManager
+  publish: (id: SessionId, message: acp.AnyMessage) => void
+  configManager: ConfigManager
   registry?: Record<string, AgentDistribution>
 }): SessionManager {
-  const activeSessions = new Map<DaemonSessionId, ActiveSession>()
+  const activeSessions = new Map<SessionId, ActiveSession>()
   const ready = reconcilePersistedSessions()
 
   async function updateSession(
-    id: DaemonSessionId,
+    id: SessionId,
     update: Partial<KindInput<typeof db.schema.sessions>>,
     detail?: Record<string, unknown>,
   ): Promise<void> {
@@ -914,7 +906,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function appendHistory(id: DaemonSessionId, message: acp.AnyMessage): Promise<void> {
+  async function appendHistory(id: SessionId, message: acp.AnyMessage): Promise<void> {
     const active = activeSessions.get(id)
     if (active) {
       active.history.push(message)
@@ -937,7 +929,7 @@ export function createSessionManager(input: {
   }
 
   async function emitDiagnostic(
-    sessionId: DaemonSessionId,
+    sessionId: SessionId,
     type: string,
     detail?: Record<string, unknown>,
   ): Promise<void> {
@@ -961,7 +953,7 @@ export function createSessionManager(input: {
   }
 
   async function setConnectionMode(
-    sessionId: DaemonSessionId,
+    sessionId: SessionId,
     mode: SessionConnectionMode,
     activeDaemonSession: boolean,
   ): Promise<void> {
@@ -1099,10 +1091,10 @@ export function createSessionManager(input: {
     const cwd = worktree?.effectiveCwd ?? params.request.cwd
     const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.request.metadata)
     const existingWorkforceMetadata = existingWorkforce
-      ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(existingWorkforce)
+      ? omit(existingWorkforce, ["id", "sessionId"])
       : undefined
     const workforceMetadata = params.request.workforce ?? existingWorkforceMetadata
-    const sessionContext = buildDaemonSessionContext({
+    const sessionContext = buildSessionContext({
       sessionId: id,
       request: params.request,
       cwd,
@@ -1129,7 +1121,7 @@ export function createSessionManager(input: {
       allowedPrNumbers: scope.allowedPrNumbers,
     }
 
-    return daemonSessionContext.run(sessionContext, async () => {
+    return SessionContext.run(sessionContext, async () => {
       try {
         logger.log("session.launch_requested", {
           sessionId: id,
@@ -1156,7 +1148,7 @@ export function createSessionManager(input: {
           },
           resumeAcpId: existingSession?.acpSessionId,
           onMessageWrite: (message) => {
-            daemonSessionContext.run(sessionContext, () => {
+            SessionContext.run(sessionContext, () => {
               logAgentMessage("agent.message_write", message)
             })
           },
@@ -1260,15 +1252,13 @@ export function createSessionManager(input: {
 
         if (shouldExitAfterInitialPrompt(params)) {
           agentProcess.onceExit((code, signal) => {
-            void daemonSessionContext
-              .run(sessionContext, () =>
-                emitDiagnostic(id, "agent_process_exit", {
-                  code,
-                  signal,
-                  nextStatus: "done",
-                }),
-              )
-              .catch(console.error)
+            void SessionContext.run(sessionContext, () =>
+              emitDiagnostic(id, "agent_process_exit", {
+                code,
+                signal,
+                nextStatus: "done",
+              }),
+            ).catch(console.error)
           })
 
           // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
@@ -1290,12 +1280,12 @@ export function createSessionManager(input: {
 
         const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
           onChunk: (chunk) => {
-            daemonSessionContext.run(sessionContext, () => {
+            SessionContext.run(sessionContext, () => {
               logAgentChunk(chunk)
             })
           },
           onMessageError: (error) => {
-            daemonSessionContext.run(sessionContext, () => {
+            SessionContext.run(sessionContext, () => {
               logger.log("agent.message_handler_failed", {
                 errorMessage: error instanceof Error ? error.message : String(error),
               })
@@ -1321,7 +1311,7 @@ export function createSessionManager(input: {
         }
 
         activeSession.subscription = connection.subscribe(async (message) => {
-          await daemonSessionContext.run(activeSession.context, async () => {
+          await SessionContext.run(activeSession.context, async () => {
             logAgentMessage("agent.message_read", message)
             if (
               isAcpRequest<PermissionRequest>(
@@ -1397,7 +1387,7 @@ export function createSessionManager(input: {
         }
 
         agentProcess.onceExit((code, signal) => {
-          void daemonSessionContext.run(activeSession.context, () => handleExit(code, signal))
+          void SessionContext.run(activeSession.context, () => handleExit(code, signal))
         })
 
         activeSessions.set(activeSession.id, activeSession)
@@ -1450,7 +1440,7 @@ export function createSessionManager(input: {
     return launchSession(params, existingSession)
   }
 
-  async function getSession(id: DaemonSessionId): Promise<DaemonSession> {
+  async function getSession(id: SessionId): Promise<DaemonSession> {
     await ready
     const record = db.sessions.get(id) ?? null
     if (!record) {
@@ -1486,7 +1476,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function connectSession(id: DaemonSessionId): Promise<DaemonSession> {
+  async function connectSession(id: SessionId): Promise<DaemonSession> {
     await ready
     if (!activeSessions.has(id)) {
       const session = await getSession(id)
@@ -1501,7 +1491,7 @@ export function createSessionManager(input: {
     return getSession(id)
   }
 
-  async function getHistory(id: DaemonSessionId): Promise<GetDaemonSessionHistoryResponse> {
+  async function getHistory(id: SessionId): Promise<GetDaemonSessionHistoryResponse> {
     await ready
     const active = activeSessions.get(id)
     const session = await getSession(id)
@@ -1522,7 +1512,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getDiagnostics(id: DaemonSessionId): Promise<GetDaemonSessionDiagnosticsResponse> {
+  async function getDiagnostics(id: SessionId): Promise<GetDaemonSessionDiagnosticsResponse> {
     await ready
     const session = await getSession(id)
     const diagnosticsRecord =
@@ -1543,7 +1533,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getWorktree(id: DaemonSessionId): Promise<GetDaemonSessionWorktreeResponse> {
+  async function getWorktree(id: SessionId): Promise<GetDaemonSessionWorktreeResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord =
@@ -1560,7 +1550,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getWorkforce(id: DaemonSessionId): Promise<GetDaemonSessionWorkforceResponse> {
+  async function getWorkforce(id: SessionId): Promise<GetDaemonSessionWorkforceResponse> {
     await ready
     const session = await getSession(id)
     const workforceRecord =
@@ -1577,14 +1567,14 @@ export function createSessionManager(input: {
     }
   }
 
-  async function sendMessage(id: DaemonSessionId, message: acp.AnyMessage): Promise<void> {
+  async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
       throw new IpcClientError(`Session ${id} is not active`)
     }
 
-    await daemonSessionContext.run(active.context, async () => {
+    await SessionContext.run(active.context, async () => {
       if (
         active.lastPermissionRequest &&
         "id" in message &&
@@ -1630,7 +1620,7 @@ export function createSessionManager(input: {
   }
 
   async function promptSession(
-    id: DaemonSessionId,
+    id: SessionId,
     prompt: string | acp.ContentBlock[],
   ): Promise<acp.PromptResponse> {
     await ready
@@ -1647,7 +1637,7 @@ export function createSessionManager(input: {
       })
     })
 
-    return daemonSessionContext.run(active.context, async () => {
+    return SessionContext.run(active.context, async () => {
       try {
         await sendMessage(id, {
           jsonrpc: "2.0",
@@ -1666,7 +1656,7 @@ export function createSessionManager(input: {
     })
   }
 
-  async function shutdownSession(id: DaemonSessionId): Promise<boolean> {
+  async function shutdownSession(id: SessionId): Promise<boolean> {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
@@ -1679,7 +1669,7 @@ export function createSessionManager(input: {
     return true
   }
 
-  async function resolveSessionIdByToken(token: string): Promise<DaemonSessionId> {
+  async function resolveSessionIdByToken(token: string): Promise<SessionId> {
     await ready
     const record =
       db.sessions.first({

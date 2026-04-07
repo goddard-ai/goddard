@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { startDaemonServer } from "../src/ipc.ts"
-import { configureDaemonLogging } from "../src/logging.ts"
+import { configureLogging } from "../src/logging.ts"
 import type { LoopManager } from "../src/loop/manager.ts"
 import { createLoopManager } from "../src/loop/manager.ts"
 import { normalizeLoopRootDir } from "../src/loop/paths.ts"
@@ -344,7 +344,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     },
   }
 
-  const { logs, result: runtime } = await captureDaemonLogs(async () => {
+  const { logs, result: runtime } = await captureLogs(async () => {
     const runtime = await LoopRuntime.start(
       {
         rootDir,
@@ -426,11 +426,11 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
 })
 
 /** Captures daemon logs emitted while one loop runtime test action is running. */
-async function captureDaemonLogs<T>(
+async function captureLogs<T>(
   action: () => Promise<T>,
 ): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
   const output: string[] = []
-  const restoreLogging = configureDaemonLogging({
+  const restoreLogging = configureLogging({
     mode: "json",
     writeLine: (line) => {
       output.push(line)

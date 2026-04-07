@@ -9,7 +9,7 @@ import { readCurrentRootConfig, readLoopConfig } from "./config.ts"
 type RequiredObject<T> = Required<Exclude<T, undefined>>
 
 /** Fully resolved daemon-owned loop runtime config after local package resolution. */
-export type ResolvedDaemonLoopStartRequest = {
+export type ResolvedLoopStartRequest = {
   rootDir: string
   loopName: string
   promptModulePath: string
@@ -19,7 +19,7 @@ export type ResolvedDaemonLoopStartRequest = {
 }
 
 /** A resolved named loop package with merged persisted config and prompt module path. */
-export type ResolvedDaemonLoop = {
+export type ResolvedLoop = {
   config: LoopConfig
   path: string
   promptModulePath: string
@@ -87,7 +87,7 @@ function resolveLoopRuntimeConfig(
 }
 
 /** Loads one packaged loop from disk and verifies the required prompt/config files exist. */
-async function loadPackagedLoop(path: string): Promise<ResolvedDaemonLoop> {
+async function loadPackagedLoop(path: string): Promise<ResolvedLoop> {
   const promptFilePath = join(path, "prompt.js")
   const promptMarkdownPath = join(path, "prompt.md")
   const configPath = join(path, "config.json")
@@ -117,7 +117,7 @@ async function loadPackagedLoop(path: string): Promise<ResolvedDaemonLoop> {
 async function resolveLoopFromRoot(
   loopName: string,
   goddardRoot: string,
-): Promise<ResolvedDaemonLoop | null> {
+): Promise<ResolvedLoop | null> {
   const promptOnlyPath = join(goddardRoot, "loops", `${loopName}.md`)
   const folderPath = join(goddardRoot, "loops", loopName)
 
@@ -139,7 +139,7 @@ export async function resolveNamedLoop(
   loopName: string,
   rootDir: string,
   rootConfigProvider?: RootConfigProvider,
-): Promise<ResolvedDaemonLoop> {
+): Promise<ResolvedLoop> {
   const resolvedRootDir = resolve(rootDir)
   const { config, globalRoot, localRoot } = await readCurrentRootConfig(
     resolvedRootDir,
@@ -174,7 +174,7 @@ export async function resolveNamedLoop(
 export async function resolveNamedLoopStartRequest(
   input: StartDaemonLoopRequest,
   rootConfigProvider?: RootConfigProvider,
-): Promise<ResolvedDaemonLoopStartRequest> {
+): Promise<ResolvedLoopStartRequest> {
   const resolvedRootDir = resolve(input.rootDir)
   const loop = await resolveNamedLoop(input.loopName, resolvedRootDir, rootConfigProvider)
   const resolvedConfig = resolveLoopRuntimeConfig(loop.config, resolvedRootDir, input)
@@ -183,7 +183,7 @@ export async function resolveNamedLoopStartRequest(
     rootDir: resolvedRootDir,
     loopName: input.loopName,
     promptModulePath: resolve(loop.promptModulePath),
-    session: resolvedConfig.session as ResolvedDaemonLoopStartRequest["session"],
+    session: resolvedConfig.session as ResolvedLoopStartRequest["session"],
     rateLimits: resolvedConfig.rateLimits,
     retries: resolvedConfig.retries,
   }

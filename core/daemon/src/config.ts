@@ -3,27 +3,25 @@ import { join } from "node:path"
 import { getDefaultDaemonSocketPath } from "./ipc/socket.ts"
 
 /** Environment variables recognized by the daemon runtime. */
-export type DaemonRuntimeEnv = Record<string, string | undefined>
+export type RuntimeEnv = Record<string, string | undefined>
 
 /** Explicit daemon launch settings accepted from CLI or tests before env/default resolution. */
-export type DaemonRuntimeConfigInput = {
+export type RuntimeConfigInput = {
   baseUrl?: string
   socketPath?: string
   agentBinDir?: string
-  env?: DaemonRuntimeEnv
+  env?: RuntimeEnv
 }
 
 /** Fully resolved daemon runtime contract shared across the daemon entry points. */
-export type ResolvedDaemonRuntimeConfig = {
+export type ResolvedRuntimeConfig = {
   baseUrl: string
   socketPath: string
   daemonUrl: string
   agentBinDir: string
 }
 
-export function resolveDaemonRuntimeConfig(
-  input: DaemonRuntimeConfigInput = {},
-): ResolvedDaemonRuntimeConfig {
+export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRuntimeConfig {
   const env = input.env ?? process.env
   const socketPath =
     input.socketPath ?? env.GODDARD_DAEMON_SOCKET_PATH ?? getDefaultDaemonSocketPath()

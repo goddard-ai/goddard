@@ -5,7 +5,7 @@ import type { ConfigManager } from "./config-manager.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 
 /** Setup-only dependencies installed while daemon construction is running. */
-export type DaemonSetupContext = {
+export type SetupContext = {
   runtime: {
     baseUrl: string
     socketPath: string
@@ -15,32 +15,33 @@ export type DaemonSetupContext = {
 }
 
 /** Mutable IPC request context shared across one daemon server request lifecycle. */
-export type DaemonIpcRequestContext = {
+export type IpcRequestContext = {
   opId: string
-  sessionId: DaemonSession["id"] | undefined
+  sessionId: DaemonSession["id"] | null
   setSessionId: (sessionId: DaemonSession["id"]) => void
 }
 
 /** Stable session metadata carried through live daemon session work. */
-export type DaemonSessionContext = {
+export type SessionContext = {
   sessionId: DaemonSession["id"]
-  acpSessionId?: string
+  acpSessionId: string | null
   cwd: string
-  repository?: string
-  prNumber?: number
-  worktreeDir?: string
-  worktreePoweredBy?: string
+  repository: string | null
+  prNumber: number | null
+  worktreeDir: string | null
+  worktreePoweredBy: string | null
 }
 
 /** Authenticated workforce actor identity attached to one mutation call. */
-export type DaemonWorkforceActorContext = {
-  actorSessionId?: string
-  actorAgentId?: string
-  actorRequestId?: string
+export type WorkforceActorContext = {
+  sessionId: string | null
+  rootDir: string | null
+  agentId: string | null
+  requestId: string | null
 }
 
 /** Active workforce dispatch metadata carried while one request attempt is running. */
-export type DaemonWorkforceDispatchContext = {
+export type WorkforceDispatchContext = {
   rootDir: string
   agentId: string
   requestId: string
@@ -48,7 +49,7 @@ export type DaemonWorkforceDispatchContext = {
 }
 
 /** Active loop runtime identity carried while one loop is executing work. */
-export type DaemonLoopContext = {
+export type LoopContext = {
   rootDir: string
   loopName: string
   sessionId: DaemonSession["id"]
@@ -56,17 +57,16 @@ export type DaemonLoopContext = {
 }
 
 /** Repository feedback metadata carried while one background feedback event is handled. */
-export type DaemonFeedbackEventContext = {
+export type FeedbackEventContext = {
   repository: string
   prNumber: number
   feedbackType: FeedbackEvent["type"]
 }
 
-export const daemonSetupContext = new AsyncContext.Variable<DaemonSetupContext>()
-export const daemonIpcRequestContext = new AsyncContext.Variable<DaemonIpcRequestContext>()
-export const daemonSessionContext = new AsyncContext.Variable<DaemonSessionContext>()
-export const daemonWorkforceActorContext = new AsyncContext.Variable<DaemonWorkforceActorContext>()
-export const daemonWorkforceDispatchContext =
-  new AsyncContext.Variable<DaemonWorkforceDispatchContext>()
-export const daemonLoopContext = new AsyncContext.Variable<DaemonLoopContext>()
-export const daemonFeedbackEventContext = new AsyncContext.Variable<DaemonFeedbackEventContext>()
+export const SetupContext = new AsyncContext.Variable<SetupContext>()
+export const IpcRequestContext = new AsyncContext.Variable<IpcRequestContext>()
+export const SessionContext = new AsyncContext.Variable<SessionContext>()
+export const WorkforceActorContext = new AsyncContext.Variable<WorkforceActorContext>()
+export const WorkforceDispatchContext = new AsyncContext.Variable<WorkforceDispatchContext>()
+export const LoopContext = new AsyncContext.Variable<LoopContext>()
+export const FeedbackEventContext = new AsyncContext.Variable<FeedbackEventContext>()

@@ -14,13 +14,9 @@ import type {
 import { join } from "node:path"
 import { concat, dedent } from "radashi"
 import { v7 as uuidv7 } from "uuid"
-import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.ts"
+import { WorkforceActorContext, WorkforceDispatchContext } from "../context.ts"
+import { createLogger, createPayloadPreview, isVerboseLogging } from "../logging.ts"
 import type { SessionManager } from "../session/index.ts"
-import {
-  daemonWorkforceActorContext,
-  daemonWorkforceDispatchContext,
-  type DaemonWorkforceActorContext,
-} from "../setup-context.ts"
 import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
 import {
   appendWorkforceLedgerEvent,
@@ -32,17 +28,9 @@ import {
 } from "./ledger.ts"
 import { buildWorkforcePaths } from "./paths.ts"
 
-const logger = createDaemonLogger()
+const logger = createLogger()
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never
-
-/** Optional authenticated agent context derived from the calling daemon session. */
-export interface WorkforceActorContext {
-  sessionId: string | null
-  rootDir: string | null
-  agentId: string | null
-  requestId: string | null
-}
 
 /** Input delivered to the daemon-owned session runner for one handled request. */
 export interface WorkforceSessionRunInput {
@@ -258,18 +246,9 @@ function buildWorkforceSummaryFields(
   }
 }
 
-/** Converts optional actor identity into the async context payload used for workforce logs. */
-function buildWorkforceActorContext(actor: WorkforceActorContext) {
-  return {
-    actorSessionId: actor.sessionId ?? undefined,
-    actorAgentId: actor.agentId ?? undefined,
-    actorRequestId: actor.requestId ?? undefined,
-  } satisfies DaemonWorkforceActorContext
-}
-
 /** Includes large free-form text in logs only when verbose daemon logging is enabled. */
 function buildVerboseTextField(field: string, value: string): Record<string, unknown> {
-  if (isVerboseDaemonLogging() === false) {
+  if (isVerboseLogging() === false) {
     return {}
   }
 
@@ -486,7 +465,7 @@ export class WorkforceRuntime {
       input: input.payload,
     })
 
-    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+    await WorkforceActorContext.run(input.actor, async () => {
       logger.log("workforce.request_enqueued", {
         rootDir: this.#rootDir,
         requestId,
@@ -523,7 +502,7 @@ export class WorkforceRuntime {
       input: input.payload,
     })
 
-    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+    await WorkforceActorContext.run(input.actor, async () => {
       logger.log("workforce.request_updated", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
@@ -558,7 +537,7 @@ export class WorkforceRuntime {
       reason: input.reason,
     })
 
-    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+    await WorkforceActorContext.run(input.actor, async () => {
       logger.log("workforce.request_cancelled", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
@@ -589,7 +568,7 @@ export class WorkforceRuntime {
       reason: input.reason,
     })
 
-    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+    await WorkforceActorContext.run(input.actor, async () => {
       logger.log("workforce.queue_truncated", {
         rootDir: this.#rootDir,
         agentId: input.agentId,
@@ -623,7 +602,7 @@ export class WorkforceRuntime {
       output: input.output,
     })
 
-    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+    await WorkforceActorContext.run(input.actor, async () => {
       logger.log("workforce.request_responded", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
@@ -656,7 +635,7 @@ export class WorkforceRuntime {
       reason: input.reason,
     })
 
-    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+    await WorkforceActorContext.run(input.actor, async () => {
       logger.log("workforce.request_suspended", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
@@ -734,7 +713,7 @@ export class WorkforceRuntime {
     const attempt = request.attemptCount + 1
     const queuedBefore = this.#projection.queues[agentId]?.length ?? 0
 
-    await daemonWorkforceDispatchContext.run(
+    await WorkforceDispatchContext.run(
       {
         rootDir: this.#rootDir,
         agentId,

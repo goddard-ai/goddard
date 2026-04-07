@@ -2,7 +2,7 @@ import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
 
 /** Canonical daemon loop identity fields derived from one repository root and loop name. */
-export interface DaemonLoopIdentity {
+export interface LoopIdentity {
   rootDir: string
   loopName: string
 }
@@ -16,7 +16,7 @@ export async function normalizeLoopRootDir(rootDir: string): Promise<string> {
 export async function normalizeLoopIdentity(
   rootDir: string,
   loopName: string,
-): Promise<DaemonLoopIdentity> {
+): Promise<LoopIdentity> {
   return {
     rootDir: await normalizeLoopRootDir(rootDir),
     loopName,

@@ -2,14 +2,15 @@ import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import kleur from "kleur"
 import { randomUUID } from "node:crypto"
 import { inspect } from "node:util"
+import { omit } from "radashi"
 import {
-  daemonFeedbackEventContext,
-  daemonIpcRequestContext,
-  daemonLoopContext,
-  daemonSessionContext,
-  daemonWorkforceActorContext,
-  daemonWorkforceDispatchContext,
-} from "./setup-context.ts"
+  FeedbackEventContext,
+  IpcRequestContext,
+  LoopContext,
+  SessionContext,
+  WorkforceActorContext,
+  WorkforceDispatchContext,
+} from "./context.ts"
 
 const defaultWriteLine = (_line: string) => {}
 const stdoutWriteLine = (line: string) => {
@@ -20,64 +21,61 @@ const secretKeys = new Set(["token", "authorization", "goddard_session_token"])
 const envSecretFragments = ["TOKEN", "SECRET", "KEY", "AUTH"]
 
 /** Function that writes a single serialized daemon log line. */
-export type DaemonLogWriter = (line: string) => void
+export type LogWriter = (line: string) => void
 
 /** Supported terminal output modes for daemon logs. */
-export type DaemonLogMode = "json" | "pretty" | "verbose"
+export type LogMode = "json" | "pretty" | "verbose"
 
 /** Structured preview emitted when long text must be truncated for logs. */
-export type DaemonTextPreview = {
+export type TextPreview = {
   text: string
   byteLength: number
   truncated: boolean
 }
 
 /** Sanitization settings used for payload and message previews. */
-export type DaemonSanitizeOptions = {
+export type SanitizeOptions = {
   maxStringLength?: number
   parentKey?: string
 }
 
 // Structured log entry emitted by the daemon logger.
-type DaemonLogEntry = {
+type LogEntry = {
   scope: "daemon"
   at: string
   event: string
 } & Record<string, unknown>
 
-let daemonLogMode: DaemonLogMode = "pretty"
-let daemonLogWriter: DaemonLogWriter = defaultWriteLine
+let logMode: LogMode = "pretty"
+let logWriter: LogWriter = defaultWriteLine
 
 /** Configures the shared daemon log writer and output mode for the current process. */
-export function configureDaemonLogging(options: {
-  writeLine?: DaemonLogWriter
-  mode?: DaemonLogMode
-}): () => void {
-  const previousMode = daemonLogMode
-  const previousWriter = daemonLogWriter
+export function configureLogging(options: { writeLine?: LogWriter; mode?: LogMode }): () => void {
+  const previousMode = logMode
+  const previousWriter = logWriter
 
-  daemonLogMode = options.mode ?? daemonLogMode
-  daemonLogWriter = options.writeLine ?? stdoutWriteLine
+  logMode = options.mode ?? logMode
+  logWriter = options.writeLine ?? stdoutWriteLine
 
   return () => {
-    daemonLogMode = previousMode
-    daemonLogWriter = previousWriter
+    logMode = previousMode
+    logWriter = previousWriter
   }
 }
 
 /** Creates a daemon logger that follows the current global output mode. */
-export function createDaemonLogger(writeLine: DaemonLogWriter = defaultWriteLine) {
+export function createLogger(writeLine: LogWriter = defaultWriteLine) {
   return {
     log(event: string, fields: Record<string, unknown> = {}) {
-      const entry: DaemonLogEntry = {
+      const entry: LogEntry = {
         scope: "daemon",
         at: new Date().toISOString(),
         event,
-        ...readAmbientDaemonLogFields(),
+        ...readAmbientLogFields(),
         ...fields,
       }
-      const resolvedWriter = writeLine === defaultWriteLine ? daemonLogWriter : writeLine
-      resolvedWriter(formatDaemonLogEntry(entry, daemonLogMode))
+      const resolvedWriter = writeLine === defaultWriteLine ? logWriter : writeLine
+      resolvedWriter(formatLogEntry(entry, logMode))
     },
     createOpId() {
       return randomUUID()
@@ -86,15 +84,15 @@ export function createDaemonLogger(writeLine: DaemonLogWriter = defaultWriteLine
 }
 
 /** Returns true when daemon logs are rendered in expanded verbose mode. */
-export function isVerboseDaemonLogging(): boolean {
-  return daemonLogMode === "verbose"
+export function isVerboseLogging(): boolean {
+  return logMode === "verbose"
 }
 
-export function createPayloadPreview(value: unknown, options: DaemonSanitizeOptions = {}): unknown {
+export function createPayloadPreview(value: unknown, options: SanitizeOptions = {}): unknown {
   return sanitizeValue(value, options.maxStringLength ?? 512, options.parentKey)
 }
 
-export function createChunkPreview(value: Uint8Array): DaemonTextPreview {
+export function createChunkPreview(value: Uint8Array): TextPreview {
   const text = new TextDecoder().decode(value)
   const byteLength = Buffer.byteLength(text)
   if (text.length <= 256) {
@@ -132,87 +130,44 @@ export function readSessionIdForLog(value: unknown): DaemonSession["id"] | undef
 }
 
 /** Collects the active daemon async-context fields that should be attached to every log line. */
-function readAmbientDaemonLogFields() {
-  const ipcRequest = daemonIpcRequestContext.get()
-  const feedbackEvent = daemonFeedbackEventContext.get()
-  const workforceDispatch = daemonWorkforceDispatchContext.get()
-  const loop = daemonLoopContext.get()
-  const session = daemonSessionContext.get()
-  const workforceActor = daemonWorkforceActorContext.get()
+function readAmbientLogFields() {
+  const ipcRequest = IpcRequestContext.get()
+  const feedbackEvent = FeedbackEventContext.get()
+  const workforceDispatch = WorkforceDispatchContext.get()
+  const loop = LoopContext.get()
+  const session = SessionContext.get()
+  const workforceActor = WorkforceActorContext.get()
 
   return {
-    ...(ipcRequest
-      ? {
-          opId: ipcRequest.opId,
-          sessionId: ipcRequest.sessionId,
-        }
-      : {}),
-    ...(feedbackEvent
-      ? {
-          repository: feedbackEvent.repository,
-          prNumber: feedbackEvent.prNumber,
-          feedbackType: feedbackEvent.feedbackType,
-        }
-      : {}),
-    ...(workforceDispatch
-      ? {
-          rootDir: workforceDispatch.rootDir,
-          agentId: workforceDispatch.agentId,
-          requestId: workforceDispatch.requestId,
-          attempt: workforceDispatch.attempt,
-        }
-      : {}),
-    ...(loop
-      ? {
-          rootDir: loop.rootDir,
-          loopName: loop.loopName,
-          sessionId: loop.sessionId,
-          acpSessionId: loop.acpSessionId,
-        }
-      : {}),
-    ...(session
-      ? {
-          sessionId: session.sessionId,
-          acpSessionId: session.acpSessionId,
-          cwd: session.cwd,
-          repository: session.repository,
-          prNumber: session.prNumber,
-          worktreeDir: session.worktreeDir,
-          worktreePoweredBy: session.worktreePoweredBy,
-        }
-      : {}),
-    ...(workforceActor
-      ? {
-          actorSessionId: workforceActor.actorSessionId,
-          actorAgentId: workforceActor.actorAgentId,
-          actorRequestId: workforceActor.actorRequestId,
-        }
-      : {}),
+    ipcRequest: ipcRequest && omit(ipcRequest, ["setSessionId"]),
+    feedbackEvent,
+    workforceDispatch,
+    loop,
+    session,
+    workforceActor,
   }
 }
 
-function formatDaemonLogEntry(entry: DaemonLogEntry, mode: DaemonLogMode): string {
+function formatLogEntry(entry: LogEntry, mode: LogMode): string {
   if (mode === "pretty") {
-    return formatPrettyDaemonLogEntry(entry)
+    return formatPrettyLogEntry(entry)
   }
 
   if (mode === "verbose") {
-    return formatVerboseDaemonLogEntry(entry)
+    return formatVerboseLogEntry(entry)
   }
 
   return JSON.stringify(entry)
 }
 
-function formatPrettyDaemonLogEntry(entry: DaemonLogEntry): string {
+function formatPrettyLogEntry(entry: LogEntry): string {
   const fields = Object.entries(entry).filter(([key]) => isMetadataField(key) === false)
-  const inlineFields = fields
-    .map(([key, value]) => formatInlineField(key, value))
-    .filter((value) => value !== null)
+  const inlineFields = fields.flatMap(([key, value]) => formatInlineFields(key, value))
 
   return [kleur.dim(formatTimestamp(entry.at)), kleur.cyan(entry.event), ...inlineFields].join(" ")
 }
 
-function formatVerboseDaemonLogEntry(entry: DaemonLogEntry): string {
+function formatVerboseLogEntry(entry: LogEntry): string {
   const fields = Object.entries(entry).filter(([key]) => isMetadataField(key) === false)
   if (fields.length === 0) {
     return `${kleur.dim(formatTimestamp(entry.at))} ${kleur.bold().cyan(entry.event)}`
@@ -232,6 +187,21 @@ function isMetadataField(key: string): boolean {
   return key === "scope" || key === "at" || key === "event"
 }
 
+function formatInlineFields(key: string, value: unknown): string[] {
+  if (isPlainObject(value)) {
+    const nestedFields = Object.entries(value)
+      .map(([nestedKey, nestedValue]) => formatInlineField(`${key}.${nestedKey}`, nestedValue))
+      .filter((field) => field !== null)
+
+    if (nestedFields.length > 0) {
+      return nestedFields
+    }
+  }
+
+  const field = formatInlineField(key, value)
+  return field ? [field] : []
+}
+
 function formatInlineField(key: string, value: unknown): string | null {
   if (value === undefined) {
     return null
@@ -246,6 +216,15 @@ function formatInlineField(key: string, value: unknown): string | null {
   }
 
   return `${kleur.gray(`${key}=`)}${truncateInlineValue(value)}`
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 function truncateInlineValue(value: unknown): string {
@@ -341,7 +320,7 @@ function sanitizeValue(
   return String(value)
 }
 
-function truncateText(value: string, maxStringLength: number): string | DaemonTextPreview {
+function truncateText(value: string, maxStringLength: number): string | TextPreview {
   const byteLength = Buffer.byteLength(value)
   if (value.length <= maxStringLength) {
     return value

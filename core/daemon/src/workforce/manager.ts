@@ -1,12 +1,9 @@
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
-import { createDaemonLogger } from "../logging.ts"
+import type { WorkforceActorContext } from "../context.ts"
+import { createLogger } from "../logging.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"
-import {
-  WorkforceRuntime,
-  type WorkforceActorContext,
-  type WorkforceRuntimeDeps,
-} from "./runtime.ts"
+import { WorkforceRuntime, type WorkforceRuntimeDeps } from "./runtime.ts"
 
 /** Supported daemon-side workforce mutations routed over IPC or agent tools. */
 export type WorkforceManagerMutation =
@@ -62,7 +59,7 @@ export interface WorkforceManager {
 }
 
 export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceManager {
-  const logger = createDaemonLogger()
+  const logger = createLogger()
   const runtimes = new Map<string, WorkforceRuntime>()
 
   async function getRuntime(

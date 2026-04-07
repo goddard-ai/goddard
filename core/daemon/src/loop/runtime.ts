@@ -2,13 +2,13 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonLoop, DaemonLoopStatus, DaemonSession } from "@goddard-ai/schema/daemon"
 import { pathToFileURL } from "node:url"
 import { proportionalJitter } from "radashi"
-import { createDaemonLogger, createPayloadPreview } from "../logging.ts"
-import type { ResolvedDaemonLoopStartRequest } from "../resolvers/loops.ts"
+import { LoopContext } from "../context.ts"
+import { createLogger, createPayloadPreview } from "../logging.ts"
+import type { ResolvedLoopStartRequest } from "../resolvers/loops.ts"
 import type { SessionManager } from "../session/index.ts"
-import { daemonLoopContext, type DaemonLoopContext } from "../setup-context.ts"
 import { LoopRateLimiter } from "./rate-limiter.ts"
 
-const logger = createDaemonLogger()
+const logger = createLogger()
 const LOOP_PAUSE_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 /** Detects the configured cycle boundary where the loop intentionally pauses for a full day. */
@@ -24,12 +24,12 @@ export interface LoopRuntimeDeps {
 
 /** Daemon-owned loop runtime backed by one persistent daemon session. */
 export class LoopRuntime {
-  readonly #config: ResolvedDaemonLoopStartRequest
+  readonly #config: ResolvedLoopStartRequest
   readonly #deps: LoopRuntimeDeps
   readonly #startedAt: string
   readonly #sessionId: DaemonSession["id"]
   readonly #sessionAcpId: string
-  readonly #context: DaemonLoopContext
+  readonly #context: LoopContext
   readonly #rateLimiter: LoopRateLimiter
 
   #cycleCount = 0
@@ -41,7 +41,7 @@ export class LoopRuntime {
   #stoppedNotified = false
 
   private constructor(input: {
-    config: ResolvedDaemonLoopStartRequest
+    config: ResolvedLoopStartRequest
     deps: LoopRuntimeDeps
     sessionId: DaemonSession["id"]
     sessionAcpId: string
@@ -65,7 +65,7 @@ export class LoopRuntime {
 
   /** Starts one daemon-owned loop runtime and begins background cycle execution. */
   static async start(
-    config: ResolvedDaemonLoopStartRequest,
+    config: ResolvedLoopStartRequest,
     deps: LoopRuntimeDeps,
   ): Promise<LoopRuntime> {
     const session = await deps.sessionManager.newSession({
@@ -91,13 +91,13 @@ export class LoopRuntime {
       sessionAcpId: session.acpSessionId,
     })
 
-    daemonLoopContext.run(runtime.#context, () => {
+    LoopContext.run(runtime.#context, () => {
       logger.log("loop.runtime_started", {
         promptModulePath: config.promptModulePath,
       })
     })
 
-    runtime.#runTask = daemonLoopContext.run(runtime.#context, () =>
+    runtime.#runTask = LoopContext.run(runtime.#context, () =>
       runtime.#run().catch(async (error) => {
         if (!runtime.#stopped) {
           logger.log("loop.runtime_failed", {
@@ -142,7 +142,7 @@ export class LoopRuntime {
 
   /** Stops the loop runtime and shuts down its backing daemon session. */
   async stop(): Promise<void> {
-    await daemonLoopContext.run(this.#context, async () => {
+    await LoopContext.run(this.#context, async () => {
       this.#stopped = true
       await this.#shutdownLoopRuntime()
       await this.#runTask?.catch(() => {})
@@ -233,7 +233,7 @@ export class LoopRuntime {
 
   /** Performs one-time runtime shutdown side effects without awaiting the active loop task. */
   async #shutdownLoopRuntime(): Promise<void> {
-    await daemonLoopContext.run(this.#context, async () => {
+    await LoopContext.run(this.#context, async () => {
       if (this.#shutdownCompleted) {
         return
       }

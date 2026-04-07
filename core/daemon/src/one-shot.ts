@@ -4,7 +4,7 @@ import type { ConfigManager } from "./config-manager.ts"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
-import { createDaemonLogger } from "./logging.ts"
+import { createLogger } from "./logging.ts"
 import { db } from "./persistence/store.ts"
 import * as prompts from "./prompts/index.ts"
 
@@ -53,7 +53,7 @@ function buildBackgroundSystemPrompt(): string {
 }
 
 export async function runOneShot(input: OneShotInput): Promise<number> {
-  const logger = createDaemonLogger()
+  const logger = createLogger()
   const projectDir =
     (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(input.event))
   if (!projectDir) {

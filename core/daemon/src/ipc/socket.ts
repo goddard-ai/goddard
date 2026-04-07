@@ -29,7 +29,7 @@ export async function cleanupSocketPath(socketPath: string): Promise<void> {
 
 async function ensureSocketPathAvailable(socketPath: string): Promise<void> {
   try {
-    await requestDaemonSocket(socketPath, "/health")
+    await requestSocket(socketPath, "/health")
     throw new Error(`A Goddard daemon is already listening at ${socketPath}`)
   } catch (error) {
     const code = typeof error === "object" && error && "code" in error ? error.code : undefined
@@ -42,7 +42,7 @@ async function ensureSocketPathAvailable(socketPath: string): Promise<void> {
   }
 }
 
-async function requestDaemonSocket(socketPath: string, pathname: string): Promise<void> {
+async function requestSocket(socketPath: string, pathname: string): Promise<void> {
   const response = await fetch(`http://localhost${pathname}`, {
     method: "GET",
     unix: socketPath,
