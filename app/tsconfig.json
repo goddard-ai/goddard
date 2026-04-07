@@ -14,5 +14,10 @@
     }
   },
   "include": ["src", "plugins/*.template.tsx"],
-  "exclude": ["src/bun"]
+  "exclude": ["src/bun"],
+  "references": [
+    {
+      "path": "./tsconfig.bun.json"
+    }
+  ]
 }
