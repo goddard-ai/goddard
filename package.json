@@ -13,6 +13,7 @@
   "scripts": {
     "prepare": "husky",
     "precommit:staged-fix": "node ./scripts/pre-commit-staged-fix.mjs",
+    "postcommit:restore-stash": "node ./scripts/post-commit-restore-stash.mjs",
     "docs:third-party:sync": "node ./app/scripts/sync-third-party-llms.mjs --commit",
     "build": "turbo run build",
     "fmt": "bun -r run fmt",
