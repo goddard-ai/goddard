@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import { once } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { request } from "node:http"
@@ -48,22 +49,20 @@ afterEach(async () => {
 async function createFixture() {
   const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-"))
   const socketPath = join(directory, "ipc.sock")
-  const ipcServer = createServer(
+  const ipcServer = createServer({
     socketPath,
     schema,
-    {
-      ping: () => ({ ok: true }),
+    handlers: {
+      ping: () => ({ ok: true as const }),
       echo: ({ text }) => ({ echoed: text }),
       add: ({ a, b }) => ({ sum: a + b }),
     },
-    {
-      onSubscribe: ({ name, filter }) => {
-        if (name === "userAlert" && filter?.userId === "blocked-user") {
-          throw new IpcClientError("User alerts are disabled for blocked-user")
-        }
-      },
+    onSubscribe: ({ name, filter }) => {
+      if (name === "userAlert" && filter?.userId === "blocked-user") {
+        throw new IpcClientError("User alerts are disabled for blocked-user")
+      }
     },
-  )
+  })
 
   await once(ipcServer.server, "listening")
 
@@ -149,6 +148,7 @@ describe("core/ipc", () => {
   test("creates request context and fires request lifecycle hooks", async () => {
     const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-hooks-"))
     const socketPath = join(directory, "ipc.sock")
+    const requestContext = new AsyncLocalStorage<{ traceId: string }>()
     const received: Array<{ name: string; payload: unknown; traceId: string }> = []
     const responded: Array<{
       name: string
@@ -159,35 +159,46 @@ describe("core/ipc", () => {
     }> = []
     const handlerContexts: string[] = []
     let requestCount = 0
-    const ipcServer = createServer<typeof schema, { traceId: string }>(
+    const readTraceId = () => {
+      const traceId = requestContext.getStore()?.traceId
+      if (!traceId) {
+        throw new Error("Missing request trace ID")
+      }
+
+      return traceId
+    }
+    const ipcServer = createServer({
       socketPath,
       schema,
-      {
-        ping: (context) => {
-          handlerContexts.push(context.traceId)
-          return { ok: true }
+      handlers: {
+        ping: () => {
+          handlerContexts.push(readTraceId())
+          return { ok: true as const }
         },
-        echo: ({ text }, context) => {
-          handlerContexts.push(context.traceId)
-          return { echoed: `${text}:${context.traceId}` }
+        echo: ({ text }) => {
+          const traceId = readTraceId()
+          handlerContexts.push(traceId)
+          return { echoed: `${text}:${traceId}` }
         },
-        add: ({ a, b }, context) => {
-          handlerContexts.push(context.traceId)
+        add: ({ a, b }) => {
+          handlerContexts.push(readTraceId())
           return { sum: a + b }
         },
       },
-      {
-        createRequestContext: ({ name }) => ({
-          traceId: `${name}-${String(++requestCount)}`,
-        }),
-        onRequestReceived: ({ name, payload, context }) => {
-          received.push({ name, payload, traceId: context.traceId })
-        },
-        onResponseSent: ({ name, payload, response, durationMs, context }) => {
-          responded.push({ name, payload, response, durationMs, traceId: context.traceId })
-        },
+      runHandler: ({ name }, handler) =>
+        requestContext.run(
+          {
+            traceId: `${name}-${String(++requestCount)}`,
+          },
+          handler,
+        ),
+      onRequestReceived: ({ name, payload }) => {
+        received.push({ name, payload, traceId: readTraceId() })
       },
-    )
+      onResponseSent: ({ name, payload, response, durationMs }) => {
+        responded.push({ name, payload, response, durationMs, traceId: readTraceId() })
+      },
+    })
 
     await once(ipcServer.server, "listening")
     cleanups.push(async () => {
@@ -285,6 +296,7 @@ describe("core/ipc", () => {
   test("fires request-failed hooks when a handler throws", async () => {
     const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-errors-"))
     const socketPath = join(directory, "ipc.sock")
+    const requestContext = new AsyncLocalStorage<{ traceId: string }>()
     const failures: Array<{
       name: string
       payload: unknown
@@ -292,29 +304,32 @@ describe("core/ipc", () => {
       durationMs: number
       traceId: string
     }> = []
-    const ipcServer = createServer(
+    const ipcServer = createServer({
       socketPath,
       schema,
-      {
-        ping: () => ({ ok: true }),
+      handlers: {
+        ping: () => ({ ok: true as const }),
         echo: ({ text }) => ({ echoed: text }),
         add: () => {
           throw new Error("handler exploded")
         },
       },
-      {
-        createRequestContext: () => ({ traceId: "trace-add" }),
-        onRequestFailed: ({ name, payload, error, durationMs, context }) => {
-          failures.push({
-            name,
-            payload,
-            errorMessage: error instanceof Error ? error.message : String(error),
-            durationMs,
-            traceId: context.traceId,
-          })
-        },
+      runHandler: (_input, handler) => requestContext.run({ traceId: "trace-add" }, handler),
+      onRequestFailed: ({ name, payload, error, durationMs }) => {
+        const traceId = requestContext.getStore()?.traceId
+        if (!traceId) {
+          throw new Error("Missing request trace ID")
+        }
+
+        failures.push({
+          name,
+          payload,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          durationMs,
+          traceId,
+        })
       },
-    )
+    })
 
     await once(ipcServer.server, "listening")
     cleanups.push(async () => {
@@ -346,11 +361,15 @@ describe("core/ipc", () => {
   test("returns client-visible handler failures unchanged", async () => {
     const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-client-errors-"))
     const socketPath = join(directory, "ipc.sock")
-    const ipcServer = createServer(socketPath, schema, {
-      ping: () => ({ ok: true }),
-      echo: ({ text }) => ({ echoed: text }),
-      add: () => {
-        throw new IpcClientError("Add is disabled")
+    const ipcServer = createServer({
+      socketPath,
+      schema,
+      handlers: {
+        ping: () => ({ ok: true as const }),
+        echo: ({ text }) => ({ echoed: text }),
+        add: () => {
+          throw new IpcClientError("Add is disabled")
+        },
       },
     })
 
@@ -375,11 +394,15 @@ describe("core/ipc", () => {
   test("returns generic raw errors for unexpected handler failures", async () => {
     const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-raw-errors-"))
     const socketPath = join(directory, "ipc.sock")
-    const ipcServer = createServer(socketPath, schema, {
-      ping: () => ({ ok: true }),
-      echo: ({ text }) => ({ echoed: text }),
-      add: () => {
-        throw new Error("handler exploded")
+    const ipcServer = createServer({
+      socketPath,
+      schema,
+      handlers: {
+        ping: () => ({ ok: true as const }),
+        echo: ({ text }) => ({ echoed: text }),
+        add: () => {
+          throw new Error("handler exploded")
+        },
       },
     })
 

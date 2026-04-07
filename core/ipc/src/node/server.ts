@@ -110,53 +110,57 @@ type SubscribeHookInput<TSchema extends IpcSchema> = {
   filter: InferStreamFilter<TSchema, ValidStreamName<TSchema>> | undefined
 }
 
-/** Request payload made available to per-request context factories. */
-type CreateRequestContextInput<TSchema extends IpcSchema> = {
+/** Request metadata made available to request wrappers and lifecycle hooks. */
+type RequestHookInput<TSchema extends IpcSchema> = {
   name: ValidRequestName<TSchema>
   payload: unknown
 }
 
 /** Lifecycle data passed to request-received hooks. */
-type RequestReceivedHookInput<TSchema extends IpcSchema, TContext> = {
-  name: ValidRequestName<TSchema>
-  payload: unknown
-  context: TContext
-}
+type RequestReceivedHookInput<TSchema extends IpcSchema> = RequestHookInput<TSchema>
 
 /** Lifecycle data passed to request-response hooks. */
-type ResponseSentHookInput<TSchema extends IpcSchema, TContext> = {
-  name: ValidRequestName<TSchema>
-  payload: unknown
+type ResponseSentHookInput<TSchema extends IpcSchema> = RequestHookInput<TSchema> & {
   response: unknown
-  context: TContext
   durationMs: number
 }
 
 /** Lifecycle data passed to request-failed hooks. */
-type RequestFailedHookInput<TSchema extends IpcSchema, TContext> = {
-  name: ValidRequestName<TSchema>
-  payload: unknown
+type RequestFailedHookInput<TSchema extends IpcSchema> = RequestHookInput<TSchema> & {
   error: unknown
-  context: TContext
   durationMs: number
 }
 
+/** Wraps one request lifecycle so callers can install ambient async context around handlers and hooks. */
+type RunHandlerHook<TSchema extends IpcSchema> = <T>(
+  input: RequestHookInput<TSchema>,
+  handler: () => Promise<T> | T,
+) => Promise<T> | T
+
 /** Optional hooks that run during request and stream-filter handling. */
-type CreateServerOptions<TSchema extends IpcSchema, TContext> = {
-  createRequestContext?: (input: CreateRequestContextInput<TSchema>) => TContext
-  onRequestReceived?: (input: RequestReceivedHookInput<TSchema, TContext>) => Promise<void> | void
-  onResponseSent?: (input: ResponseSentHookInput<TSchema, TContext>) => Promise<void> | void
-  onRequestFailed?: (input: RequestFailedHookInput<TSchema, TContext>) => Promise<void> | void
+type CreateServerConfig<TSchema extends IpcSchema> = {
+  socketPath: string
+  schema: TSchema
+  handlers: Handlers<TSchema>
+  runHandler?: RunHandlerHook<TSchema>
+  onRequestReceived?: (input: RequestReceivedHookInput<TSchema>) => Promise<void> | void
+  onResponseSent?: (input: ResponseSentHookInput<TSchema>) => Promise<void> | void
+  onRequestFailed?: (input: RequestFailedHookInput<TSchema>) => Promise<void> | void
   onSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
 }
 
 /** Creates the Node IPC server for one socket-backed application schema. */
-export function createServer<TSchema extends IpcSchema, TContext = undefined>(
-  socketPath: string,
-  schema: TSchema,
-  handlers: Handlers<TSchema, TContext>,
-  options: CreateServerOptions<TSchema, TContext> = {},
-) {
+export function createServer<TSchema extends IpcSchema>(config: CreateServerConfig<TSchema>) {
+  const {
+    socketPath,
+    schema,
+    handlers,
+    runHandler,
+    onRequestReceived,
+    onResponseSent,
+    onRequestFailed,
+    onSubscribe,
+  } = config
   const streamClients = new Set<{
     name: string
     filter: unknown
@@ -185,7 +189,6 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     const startedAt = Date.now()
     let requestName: ValidRequestName<TSchema> | undefined
     let payload: unknown
-    let context: TContext | undefined
 
     try {
       const body = await readBody(req)
@@ -214,43 +217,40 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
         }
       }
 
-      context = options.createRequestContext?.({
+      const requestInput: RequestHookInput<TSchema> = {
         name: requestName,
         payload,
-      })
+      }
+      const processRequest = async () => {
+        try {
+          await onRequestReceived?.(requestInput)
 
-      if (context)
-        await options.onRequestReceived?.({
-          name: requestName,
-          payload,
-          context,
-        })
+          const handler = handlers[requestName] as (...args: any[]) => any
+          const responseData = routeDef.payload ? await handler(payload) : await handler()
 
-      const handler: (...args: any[]) => any = handlers[requestName]
-      const responseData = routeDef.payload
-        ? await handler(payload, context)
-        : await handler(context)
+          await onResponseSent?.({
+            ...requestInput,
+            response: responseData,
+            durationMs: Date.now() - startedAt,
+          })
 
-      if (context)
-        await options.onResponseSent?.({
-          name: requestName,
-          payload,
-          response: responseData,
-          context,
-          durationMs: Date.now() - startedAt,
-        })
+          sendJson(res, 200, responseData)
+        } catch (error) {
+          await onRequestFailed?.({
+            ...requestInput,
+            error,
+            durationMs: Date.now() - startedAt,
+          })
+          throw error
+        }
+      }
 
-      sendJson(res, 200, responseData)
+      if (runHandler) {
+        await runHandler(requestInput, processRequest)
+      } else {
+        await processRequest()
+      }
     } catch (error) {
-      if (context && requestName)
-        await options.onRequestFailed?.({
-          name: requestName,
-          payload,
-          error,
-          context,
-          durationMs: Date.now() - startedAt,
-        })
-
       const { statusCode, message } = getErrorResponse(error)
       sendJson(res, statusCode, { error: message })
     }
@@ -302,7 +302,7 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     }
 
     try {
-      await options.onSubscribe?.({
+      await onSubscribe?.({
         name: name as ValidStreamName<TSchema>,
         filter,
       })

@@ -111,10 +111,18 @@ export async function startDaemonServer(
   let loopManager!: LoopManager
   let workforceManager!: WorkforceManager
 
+  function requireIpcRequestContext() {
+    const context = IpcRequestContext.get()
+    if (!context) {
+      throw new Error("IPC request context is unavailable")
+    }
+
+    return context
+  }
+
   async function resolveWorkforceActor(
     token: string | undefined,
     requestedRootDir: string,
-    context: { setSessionId: (sessionId: DaemonSession["id"]) => void },
   ): Promise<WorkforceActorContext> {
     if (!token) {
       return {
@@ -130,6 +138,7 @@ export async function startDaemonServer(
       throw new IpcClientError("Invalid session token")
     }
 
+    const context = requireIpcRequestContext()
     context.setSessionId(session.sessionId)
 
     const workforceRecord =
@@ -186,11 +195,12 @@ export async function startDaemonServer(
       db.metadata.delete("authToken")
       return { success: true as const }
     },
-    prSubmit: async (payload, context) => {
+    prSubmit: async (payload) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new IpcClientError("Invalid session token")
       }
+      const context = requireIpcRequestContext()
       context.setSessionId(session.sessionId)
       if (!session.owner || !session.repo) {
         throw new IpcClientError("Session is not scoped to a repository")
@@ -219,11 +229,12 @@ export async function startDaemonServer(
       })
       return { number: pr.number, url: pr.url }
     },
-    prReply: async (payload, context) => {
+    prReply: async (payload) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new IpcClientError("Invalid session token")
       }
+      const context = requireIpcRequestContext()
       context.setSessionId(session.sessionId)
       if (!session.owner || !session.repo) {
         throw new IpcClientError("Session is not scoped to a repository")
@@ -253,10 +264,11 @@ export async function startDaemonServer(
       })
       return response
     },
-    sessionCreate: async (payload, context) => {
+    sessionCreate: async (payload) => {
       const response = {
         session: await sessionManager.newSession({ request: payload }),
       }
+      const context = requireIpcRequestContext()
       context.setSessionId(response.session.id)
       return response
     },
@@ -295,14 +307,15 @@ export async function startDaemonServer(
       await sessionManager.sendMessage(id, message as acp.AnyMessage)
       return { accepted: true as const }
     },
-    sessionResolveToken: async ({ token }, context) => {
+    sessionResolveToken: async ({ token }) => {
       const id = await sessionManager.resolveSessionIdByToken(token)
+      const context = requireIpcRequestContext()
       context.setSessionId(id)
       return {
         id,
       }
     },
-    actionRun: async (payload, context) => {
+    actionRun: async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionManager.newSession({
         request: buildNamedActionSessionParams(action, payload.cwd, {
@@ -316,6 +329,7 @@ export async function startDaemonServer(
           metadata: payload.metadata,
         }),
       })
+      const context = requireIpcRequestContext()
       context.setSessionId(session.id)
       return { session }
     },
@@ -377,8 +391,8 @@ export async function startDaemonServer(
         success: await workforceManager.shutdownWorkforce(rootDir),
       }
     },
-    workforceRequest: async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
+    workforceRequest: async (payload) => {
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
         {
@@ -390,8 +404,8 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceUpdate: async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
+    workforceUpdate: async (payload) => {
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
         {
@@ -402,8 +416,8 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceCancel: async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
+    workforceCancel: async (payload) => {
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
         {
@@ -414,8 +428,8 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceTruncate: async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
+    workforceTruncate: async (payload) => {
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
         {
@@ -426,8 +440,8 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceRespond: async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
+    workforceRespond: async (payload) => {
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
         {
@@ -438,8 +452,8 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceSuspend: async (payload, context) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir, context)
+    workforceSuspend: async (payload) => {
+      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
         {
@@ -450,80 +464,61 @@ export async function startDaemonServer(
         actor,
       )
     },
-  } satisfies Handlers<typeof daemonIpcSchema, IpcRequestContext>
-  const scopedRequestHandlers = Object.fromEntries(
-    Object.entries(requestHandlers).map(([name, handler]) => [
-      name,
-      (payload: unknown, context: IpcRequestContext) =>
-        IpcRequestContext.run(context, () =>
-          (handler as (payload: unknown, context: IpcRequestContext) => Promise<unknown> | unknown)(
-            payload,
-            context,
-          ),
-        ),
-    ]),
-  ) as typeof requestHandlers
+  } satisfies Handlers<typeof daemonIpcSchema>
 
-  const ipcServer = createServer<typeof daemonIpcSchema, IpcRequestContext>(
+  const ipcServer = createServer({
     socketPath,
-    daemonIpcSchema,
-    scopedRequestHandlers,
-    {
-      createRequestContext: ({ payload }) => {
-        const context: IpcRequestContext = {
-          opId: randomUUID(),
-          sessionId: readSessionIdForLog(payload) ?? null,
-          setSessionId(sessionId: DaemonSession["id"]) {
-            context.sessionId = sessionId
-          },
-        }
-        return context
-      },
-      onRequestReceived: ({ name, payload, context }) => {
-        IpcRequestContext.run(context, () => {
-          logger.log("ipc.request_received", {
-            requestName: name,
-            payload: createPayloadPreview(payload),
-          })
-        })
-      },
-      onResponseSent: ({ name, response, context, durationMs }) => {
-        const responseSessionId = readSessionIdForLog(response)
-        if (responseSessionId) {
-          context.setSessionId(responseSessionId)
-        }
-
-        IpcRequestContext.run(context, () => {
-          logger.log("ipc.response_sent", {
-            requestName: name,
-            durationMs,
-            response: createPayloadPreview(response),
-          })
-        })
-      },
-      onRequestFailed: ({ name, error, context, durationMs }) => {
-        IpcRequestContext.run(context, () => {
-          logger.log("ipc.request_failed", {
-            requestName: name,
-            durationMs,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          })
-        })
-      },
-      onSubscribe: async ({ name, filter }) => {
-        if (name !== "workforceEvent") {
-          return
-        }
-
-        const request = filter as SubscribeDaemonWorkforceEventsRequest | undefined
-        if (!request) {
-          throw new IpcClientError("Missing workforce event filter")
-        }
-
-        await workforceManager.getWorkforce(request.rootDir)
-      },
+    schema: daemonIpcSchema,
+    handlers: requestHandlers,
+    runHandler: ({ payload }, handler) => {
+      const context: IpcRequestContext = {
+        opId: randomUUID(),
+        sessionId: readSessionIdForLog(payload) ?? null,
+        setSessionId(sessionId: DaemonSession["id"]) {
+          context.sessionId = sessionId
+        },
+      }
+      return IpcRequestContext.run(context, handler)
     },
-  )
+    onRequestReceived: ({ name, payload }) => {
+      logger.log("ipc.request_received", {
+        requestName: name,
+        payload: createPayloadPreview(payload),
+      })
+    },
+    onResponseSent: ({ name, response, durationMs }) => {
+      const responseSessionId = readSessionIdForLog(response)
+      if (responseSessionId) {
+        const context = requireIpcRequestContext()
+        context.setSessionId(responseSessionId)
+      }
+
+      logger.log("ipc.response_sent", {
+        requestName: name,
+        durationMs,
+        response: createPayloadPreview(response),
+      })
+    },
+    onRequestFailed: ({ name, error, durationMs }) => {
+      logger.log("ipc.request_failed", {
+        requestName: name,
+        durationMs,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+    },
+    onSubscribe: async ({ name, filter }) => {
+      if (name !== "workforceEvent") {
+        return
+      }
+
+      const request = filter as SubscribeDaemonWorkforceEventsRequest | undefined
+      if (!request) {
+        throw new IpcClientError("Missing workforce event filter")
+      }
+
+      await workforceManager.getWorkforce(request.rootDir)
+    },
+  })
 
   sessionManager = createSessionManager({
     daemonUrl,
