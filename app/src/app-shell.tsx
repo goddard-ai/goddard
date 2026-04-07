@@ -4,6 +4,7 @@ import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
 import { useNavigation, useWorkbenchTabSet } from "./app-state-context.tsx"
+import { GoodTooltipProvider } from "./support/good-tooltip.tsx"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu.ts"
@@ -149,57 +150,59 @@ export function AppShell() {
   }
 
   return (
-    <AppShellChrome
-      activeTabId={workbenchTabSet.activeTabId}
-      indicator={tabStrip.indicator}
-      navigationItems={navigationItems}
-      onAction={handleTopbarAction}
-      onNavigationSelect={(id, options) => {
-        if (options?.openInTab) {
-          const nextNavigationItem =
-            navigation.items.find((item) => item.id === id) ?? navigation.selectedItem
-          workbenchTabSet.openOrFocusTab({
-            id: `surface:${id}`,
-            kind: id,
-            title: nextNavigationItem.label,
-            payload: {},
-            dirty: false,
-          })
-          return
-        }
-
-        navigation.selectNavItem(id)
-        workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
-      }}
-      onTabClose={(id) => {
-        workbenchTabSet.closeTab(id)
-      }}
-      onTabDragEnd={() => {
-        tabStrip.dragSourceTabId.current = null
-      }}
-      onTabDragEnter={(id) => {
-        if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
-          workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
-        }
-      }}
-      onTabDragStart={(id) => {
-        tabStrip.dragSourceTabId.current = id
-      }}
-      onTabSelect={(id) => {
-        workbenchTabSet.activateTab(id)
-      }}
-      selectedNavigationId={navigation.selectedNavId}
-      selectedNavigationLabel={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
-      setTabRef={(id, element) => {
-        tabStrip.tabRefs.current[id] = element
-      }}
-      tabStripRef={tabStrip.tabStripRef}
-      tabs={workbenchTabSet.tabList}
-    >
-      <AppShellWorkbenchContent
+    <GoodTooltipProvider>
+      <AppShellChrome
         activeTabId={workbenchTabSet.activeTabId}
-        selectedNavId={navigation.selectedNavId}
-      />
-    </AppShellChrome>
+        indicator={tabStrip.indicator}
+        navigationItems={navigationItems}
+        onAction={handleTopbarAction}
+        onNavigationSelect={(id, options) => {
+          if (options?.openInTab) {
+            const nextNavigationItem =
+              navigation.items.find((item) => item.id === id) ?? navigation.selectedItem
+            workbenchTabSet.openOrFocusTab({
+              id: `surface:${id}`,
+              kind: id,
+              title: nextNavigationItem.label,
+              payload: {},
+              dirty: false,
+            })
+            return
+          }
+
+          navigation.selectNavItem(id)
+          workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
+        }}
+        onTabClose={(id) => {
+          workbenchTabSet.closeTab(id)
+        }}
+        onTabDragEnd={() => {
+          tabStrip.dragSourceTabId.current = null
+        }}
+        onTabDragEnter={(id) => {
+          if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
+            workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
+          }
+        }}
+        onTabDragStart={(id) => {
+          tabStrip.dragSourceTabId.current = id
+        }}
+        onTabSelect={(id) => {
+          workbenchTabSet.activateTab(id)
+        }}
+        selectedNavigationId={navigation.selectedNavId}
+        selectedNavigationLabel={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
+        setTabRef={(id, element) => {
+          tabStrip.tabRefs.current[id] = element
+        }}
+        tabStripRef={tabStrip.tabStripRef}
+        tabs={workbenchTabSet.tabList}
+      >
+        <AppShellWorkbenchContent
+          activeTabId={workbenchTabSet.activeTabId}
+          selectedNavId={navigation.selectedNavId}
+        />
+      </AppShellChrome>
+    </GoodTooltipProvider>
   )
 }
