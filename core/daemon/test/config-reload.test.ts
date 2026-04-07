@@ -1,7 +1,7 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getGlobalConfigPath } from "@goddard-ai/paths/node"
+import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -50,43 +50,96 @@ test("config manager promotes valid root config edits and preserves the last goo
     restoreLogging()
   })
 
+  const configManager = createConfigManager()
+  cleanup.push(() => configManager.close())
+
+  const firstSnapshot = await configManager.getRootConfig(repoDir)
+  expect(firstSnapshot.version).toBe(1)
+
   await writeGlobalRootConfig({
     session: {
       agent: "pi-acp",
     },
   })
 
-  const configManager = createConfigManager()
-  cleanup.push(() => configManager.close())
+  await waitFor(() => {
+    return configManager.getLastKnownRootConfig(repoDir)?.config.session?.agent === "pi-acp"
+  })
 
-  const firstSnapshot = await configManager.getRootConfig(repoDir)
-  expect(firstSnapshot.config.session?.agent).toBe("pi-acp")
-  expect(firstSnapshot.version).toBe(1)
+  const globalSnapshot = configManager.getLastKnownRootConfig(repoDir)
+  expect(globalSnapshot).toBeTruthy()
+  expect(globalSnapshot!.version).toBe(2)
 
-  await writeGlobalRootConfig({
-    session: {
-      agent: "codex-acp",
+  await writeLocalRootConfig(repoDir, {
+    actions: {
+      session: {
+        agent: "codex-acp",
+      },
     },
   })
 
   await waitFor(() => {
-    return configManager.getLastKnownRootConfig(repoDir)?.config.session?.agent === "codex-acp"
+    return (
+      configManager.getLastKnownRootConfig(repoDir)?.config.actions?.session?.agent === "codex-acp"
+    )
   })
 
-  const validSnapshot = configManager.getLastKnownRootConfig(repoDir)
-  expect(validSnapshot).toBeTruthy()
-  const validVersion = validSnapshot!.version
-  expect(validVersion).toBe(2)
+  const localSnapshot = configManager.getLastKnownRootConfig(repoDir)
+  expect(localSnapshot).toBeTruthy()
+  expect(localSnapshot!.version).toBe(3)
 
-  await writeFile(getGlobalConfigPath(), "{ invalid json\n", "utf-8")
+  await replaceRootConfigAtomically(getGlobalConfigPath(), {
+    session: {
+      agent: "claude-acp",
+    },
+  })
 
   await waitFor(() => {
-    return readDaemonLogs(output).some((entry) => entry.event === "config.reload_failed")
+    const snapshot = configManager.getLastKnownRootConfig(repoDir)
+    return (
+      snapshot?.config.session?.agent === "claude-acp" &&
+      snapshot?.config.actions?.session?.agent === "codex-acp"
+    )
+  })
+
+  const renamedSnapshot = configManager.getLastKnownRootConfig(repoDir)
+  expect(renamedSnapshot).toBeTruthy()
+
+  const localConfigPath = getLocalConfigPath(repoDir)
+  const recoveredWrite = Bun.sleep(75).then(() =>
+    writeLocalRootConfig(repoDir, {
+      actions: {
+        session: {
+          agent: "gemini-acp",
+        },
+      },
+    }),
+  )
+  await writeFile(localConfigPath, "{ invalid json\n", "utf-8")
+
+  await waitFor(() => {
+    return (
+      configManager.getLastKnownRootConfig(repoDir)?.config.actions?.session?.agent === "gemini-acp"
+    )
+  })
+  await recoveredWrite
+
+  const recoveredSnapshot = configManager.getLastKnownRootConfig(repoDir)
+  expect(recoveredSnapshot).toBeTruthy()
+  expect(recoveredSnapshot!.version).toBeGreaterThan(renamedSnapshot!.version)
+
+  await writeFile(localConfigPath, "{ invalid json\n", "utf-8")
+
+  await waitFor(() => {
+    return readDaemonLogs(output).some(
+      (entry) => entry.event === "config.reload_failed" && entry.watchScope === "local",
+    )
   })
 
   const fallbackSnapshot = await configManager.getRootConfig(repoDir)
-  expect(fallbackSnapshot.version).toBe(validVersion)
-  expect(fallbackSnapshot.config.session?.agent).toBe("codex-acp")
+  expect(fallbackSnapshot.version).toBe(recoveredSnapshot!.version)
+  expect(fallbackSnapshot.config.session?.agent).toBe("claude-acp")
+  expect(fallbackSnapshot.config.actions?.session?.agent).toBe("gemini-acp")
 })
 
 test(
@@ -293,20 +346,26 @@ async function useTempHome() {
 }
 
 async function writeGlobalRootConfig(config: Record<string, unknown>) {
-  const configPath = getGlobalConfigPath()
+  await writeRootConfig(getGlobalConfigPath(), config)
+}
+
+async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
+  await writeRootConfig(getLocalConfigPath(repoDir), config)
+}
+
+async function writeRootConfig(configPath: string, config: Record<string, unknown>) {
   await mkdir(dirname(configPath), { recursive: true })
   await writeFile(
     configPath,
-    `${JSON.stringify(
-      {
-        $schema: rootConfigSchemaUrl,
-        ...config,
-      },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify({ $schema: rootConfigSchemaUrl, ...config }, null, 2)}\n`,
     "utf-8",
   )
+}
+
+async function replaceRootConfigAtomically(configPath: string, config: Record<string, unknown>) {
+  const tempPath = `${configPath}.tmp`
+  await writeRootConfig(tempPath, config)
+  await rename(tempPath, configPath)
 }
 
 async function writePromptOnlyAction(repoDir: string, actionName: string, prompt: string) {
