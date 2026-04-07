@@ -150,9 +150,18 @@ type CreateServerOptions<TSchema extends IpcSchema, TContext> = {
   onSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
 }
 
-/** Creates the Node IPC server for one socket-backed application schema. */
+/** TCP bind target details for Node IPC servers. */
+export type NodeTcpServerTarget = {
+  host: string
+  port: number
+}
+
+/** Supported bind targets for Node IPC servers. */
+export type NodeIpcServerTarget = string | NodeTcpServerTarget
+
+/** Creates the Node IPC server for one unix-socket or TCP application schema. */
 export function createServer<TSchema extends IpcSchema, TContext = undefined>(
-  socketPath: string,
+  target: NodeIpcServerTarget,
   schema: TSchema,
   handlers: Handlers<TSchema, TContext>,
   options: CreateServerOptions<TSchema, TContext> = {},
@@ -353,10 +362,16 @@ export function createServer<TSchema extends IpcSchema, TContext = undefined>(
     res.end()
   })
 
-  safeUnlink(socketPath)
-  server.listen(socketPath)
+  if (typeof target === "string") {
+    safeUnlink(target)
+    server.listen(target)
+  } else {
+    server.listen(target.port, target.host)
+  }
   server.on("close", () => {
-    safeUnlink(socketPath)
+    if (typeof target === "string") {
+      safeUnlink(target)
+    }
   })
 
   return { server, publish }

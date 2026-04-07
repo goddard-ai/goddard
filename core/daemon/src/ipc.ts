@@ -2,6 +2,7 @@ export { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./ipc/g
 export { startDaemonServer } from "./ipc/server.ts"
 export {
   createDaemonUrl,
+  createTcpDaemonUrl,
   getDefaultDaemonSocketPath,
   readSocketPathFromDaemonUrl,
 } from "./ipc/socket.ts"

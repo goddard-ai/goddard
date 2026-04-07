@@ -16,6 +16,8 @@ import { DaemonAuthTokenStore } from "./persistence/auth-token.ts"
 export type RunDaemonInput = {
   baseUrl: string
   socketPath?: string
+  tcpHost?: string
+  tcpPort?: number
   agentBinDir?: string
   enableIpc?: boolean
   enableStream?: boolean
@@ -33,7 +35,7 @@ export type RunDaemonDeps = {
   createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
   startIpcServer?: (
     client: BackendClient,
-    options: { socketPath: string; agentBinDir: string },
+    options: { socketPath?: string; tcpHost?: string; tcpPort?: number; agentBinDir: string },
   ) => Promise<DaemonServer>
   runOneShot?: (input: OneShotInput) => Promise<number> | number
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
@@ -58,16 +60,14 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
   const runtime = resolveDaemonRuntimeConfig({
     baseUrl: input.baseUrl,
     socketPath: input.socketPath,
+    tcpHost: input.tcpHost,
+    tcpPort: input.tcpPort,
     agentBinDir: input.agentBinDir,
   })
   const createBackendClientImpl = deps.createBackendClient ?? defaultCreateBackendClient
   const startIpcServer =
     deps.startIpcServer ??
-    ((client, options) =>
-      startDaemonServer(client, {
-        socketPath: options.socketPath,
-        agentBinDir: options.agentBinDir,
-      }))
+    ((client, options) => startDaemonServer(client, options))
   const runOneShotImpl = deps.runOneShot ?? runOneShot
   const waitForShutdownImpl = deps.waitForShutdown ?? waitForShutdown
   let ipcServer: DaemonServer | undefined
@@ -76,6 +76,8 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     logger.log("daemon.startup", {
       baseUrl: runtime.baseUrl,
       socketPath: runtime.socketPath,
+      tcpHost: runtime.tcpHost,
+      tcpPort: runtime.tcpPort,
       agentBinDir: runtime.agentBinDir,
     })
 
@@ -87,7 +89,9 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
     const client = await createBackendClientImpl(runtime.baseUrl)
     if (enableIpc) {
       ipcServer = await startIpcServer(client, {
-        socketPath: runtime.socketPath,
+        ...(runtime.socketPath ? { socketPath: runtime.socketPath } : {}),
+        ...(runtime.tcpHost ? { tcpHost: runtime.tcpHost } : {}),
+        ...(runtime.tcpPort ? { tcpPort: runtime.tcpPort } : {}),
         agentBinDir: runtime.agentBinDir,
       })
     }

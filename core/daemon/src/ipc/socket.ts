@@ -1,13 +1,66 @@
-import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import {
+  createDaemonUrl,
+  createTcpDaemonUrl,
+  readSocketPathFromDaemonUrl,
+} from "@goddard-ai/schema/daemon-url"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { mkdir, rm } from "node:fs/promises"
 import * as path from "node:path"
 import { ipcPath } from "../ipc-path.ts"
+import type { NodeIpcServerTarget } from "@goddard-ai/ipc/node"
 
-export { createDaemonUrl, readSocketPathFromDaemonUrl }
+export { createDaemonUrl, createTcpDaemonUrl, readSocketPathFromDaemonUrl }
+
+/** Daemon IPC listen settings resolved for either unix-socket or TCP transports. */
+export type DaemonIpcListenTarget =
+  | {
+      type: "socket"
+      socketPath: string
+      daemonUrl: string
+      bindTarget: string
+    }
+  | {
+      type: "tcp"
+      host: string
+      port: number
+      daemonUrl: string
+      bindTarget: NodeIpcServerTarget
+    }
 
 export function getDefaultDaemonSocketPath(): string {
   return ipcPath.resolve(path.posix.join(toPosixPath(getGoddardGlobalDir()), "daemon.sock"))
+}
+
+/** Creates one listen target for daemon IPC transport setup. */
+export function createDaemonIpcListenTarget(input: {
+  socketPath: string | null
+  tcpHost: string | null
+  tcpPort: number | null
+}): DaemonIpcListenTarget {
+  if (input.tcpPort !== null) {
+    const host = input.tcpHost ?? "127.0.0.1"
+    return {
+      type: "tcp",
+      host,
+      port: input.tcpPort,
+      daemonUrl: createTcpDaemonUrl(host, input.tcpPort),
+      bindTarget: {
+        host,
+        port: input.tcpPort,
+      },
+    }
+  }
+
+  if (!input.socketPath) {
+    throw new Error("Daemon IPC socket path is required when TCP transport is disabled")
+  }
+
+  return {
+    type: "socket",
+    socketPath: input.socketPath,
+    daemonUrl: createDaemonUrl(input.socketPath),
+    bindTarget: input.socketPath,
+  }
 }
 
 export async function prepareSocketPath(socketPath: string): Promise<void> {

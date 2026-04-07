@@ -20,7 +20,7 @@ import {
 } from "../workforce/config.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
-import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
+import { cleanupSocketPath, createDaemonIpcListenTarget, prepareSocketPath } from "./socket.ts"
 import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
 
 /** Mutable logging context carried through one daemon IPC request. */
@@ -32,16 +32,23 @@ type DaemonIpcRequestContext = {
 
 export async function startDaemonServer(
   client: BackendPrClient,
-  options: { socketPath?: string; agentBinDir?: string } = {},
+  options: { socketPath?: string; tcpHost?: string; tcpPort?: number; agentBinDir?: string } = {},
   deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
   const logger = createDaemonLogger()
   const runtime = resolveDaemonRuntimeConfig({
     socketPath: options.socketPath,
+    tcpHost: options.tcpHost,
+    tcpPort: options.tcpPort,
     agentBinDir: options.agentBinDir,
   })
-  const socketPath = runtime.socketPath
-  const daemonUrl = createDaemonUrl(socketPath)
+  const listenTarget = createDaemonIpcListenTarget({
+    socketPath: runtime.socketPath,
+    tcpHost: runtime.tcpHost,
+    tcpPort: runtime.tcpPort,
+  })
+  const socketPath = listenTarget.type === "socket" ? listenTarget.socketPath : null
+  const daemonUrl = listenTarget.daemonUrl
   const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
   const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
   const getSessionByToken = deps.getSessionByToken ?? SessionPermissionsStorage.getByToken
@@ -49,7 +56,9 @@ export async function startDaemonServer(
   const recordManagedPrLocation = deps.recordManagedPrLocation ?? ManagedPrLocationStorage.upsert
   const authTokens = new DaemonAuthTokenStore()
 
-  await prepareSocketPath(socketPath)
+  if (listenTarget.type === "socket") {
+    await prepareSocketPath(listenTarget.socketPath)
+  }
 
   let sessionManager!: ReturnType<typeof createSessionManager>
   let loopManager!: ReturnType<typeof createLoopManager>
@@ -125,7 +134,7 @@ export async function startDaemonServer(
   }
 
   const ipcServer = createServer(
-    socketPath,
+    listenTarget.bindTarget,
     daemonIpcSchema,
     {
       health: async () => ({ ok: true }),
@@ -473,6 +482,7 @@ export async function startDaemonServer(
   logger.log("ipc.server_listening", {
     socketPath,
     daemonUrl,
+    ipcTransport: listenTarget.type,
   })
 
   let closed = false
@@ -501,10 +511,13 @@ export async function startDaemonServer(
           resolve()
         })
       })
-      await cleanupSocketPath(socketPath)
+      if (socketPath) {
+        await cleanupSocketPath(socketPath)
+      }
       logger.log("ipc.server_closed", {
         socketPath,
         daemonUrl,
+        ipcTransport: listenTarget.type,
       })
     },
   }

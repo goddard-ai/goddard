@@ -39,6 +39,27 @@ test("createDaemonIpcClientFromEnv passes the resolved socket path to the inject
   expect(calls).toEqual([{ socketPath: "/tmp/daemon.sock" }])
 })
 
+test("createDaemonIpcClient passes explicit TCP daemon URLs to the injected factory", () => {
+  const calls: Array<{ type: string; host: string; port: number }> = []
+  const client = createDaemonIpcClient({
+    daemonUrl: "http://127.0.0.1:7777/",
+    createClient: (connection) => {
+      if (connection.type !== "tcp") {
+        throw new Error("Expected a TCP connection")
+      }
+      calls.push({ type: connection.type, host: connection.host, port: connection.port })
+      return { kind: "custom" as const, host: connection.host, port: connection.port }
+    },
+  })
+
+  expect(client).toEqual({
+    kind: "custom",
+    host: "127.0.0.1",
+    port: 7777,
+  })
+  expect(calls).toEqual([{ type: "tcp", host: "127.0.0.1", port: 7777 }])
+})
+
 test("resolveDaemonConnectionFromEnv makes env-driven daemon settings explicit", () => {
   const result = resolveDaemonConnectionFromEnv({
     GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
@@ -46,7 +67,10 @@ test("resolveDaemonConnectionFromEnv makes env-driven daemon settings explicit",
 
   expect(result).toEqual({
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-    socketPath: "/tmp/daemon.sock",
+    daemonConnection: {
+      type: "socket",
+      socketPath: "/tmp/daemon.sock",
+    },
   })
 })
 
@@ -57,6 +81,24 @@ test("resolveDaemonConnectionFromEnv can derive the daemon URL from an explicit 
 
   expect(result).toEqual({
     daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fcustom-daemon.sock",
-    socketPath: "/tmp/custom-daemon.sock",
+    daemonConnection: {
+      type: "socket",
+      socketPath: "/tmp/custom-daemon.sock",
+    },
+  })
+})
+
+test("resolveDaemonConnectionFromEnv supports explicit TCP daemon URLs", () => {
+  const result = resolveDaemonConnectionFromEnv({
+    GODDARD_DAEMON_URL: "http://127.0.0.1:7777/",
+  })
+
+  expect(result).toEqual({
+    daemonUrl: "http://127.0.0.1:7777/",
+    daemonConnection: {
+      type: "tcp",
+      host: "127.0.0.1",
+      port: 7777,
+    },
   })
 })

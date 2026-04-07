@@ -1,6 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { resolveDefaultAgent } from "@goddard-ai/config"
-import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createDaemonLogger } from "./logging.ts"
@@ -63,7 +62,6 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
   }
 
   try {
-    readSocketPathFromDaemonUrl(input.daemonUrl)
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
     await client.send("sessionCreate", {
       agent: await resolveDefaultAgent(),

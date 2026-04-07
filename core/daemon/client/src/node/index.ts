@@ -6,7 +6,10 @@ import * as path from "node:path"
 import {
   createDaemonIpcClient as createExplicitDaemonIpcClient,
   createDaemonUrl,
+  createTcpDaemonUrl,
+  readDaemonConnectionFromDaemonUrl,
   readSocketPathFromDaemonUrl,
+  type DaemonConnection,
   type DaemonIpcClient,
   type DaemonIpcClientFactory,
   type DaemonIpcClientFactoryInput,
@@ -20,11 +23,13 @@ export type DaemonClientEnv = Record<string, string | undefined>
 /** Resolved daemon connection settings derived from environment variables. */
 export type ResolvedDaemonClientEnv = {
   daemonUrl: string
-  socketPath: string
+  daemonConnection: DaemonConnection
 }
 
 export {
   createDaemonUrl,
+  createTcpDaemonUrl,
+  readDaemonConnectionFromDaemonUrl,
   readSocketPathFromDaemonUrl,
   type DaemonIpcClient,
   type DaemonIpcClientFactory,
@@ -58,7 +63,7 @@ export function resolveDaemonConnectionFromEnv(
   const daemonUrl = resolveDaemonUrl(env)
   return {
     daemonUrl,
-    socketPath: readSocketPathFromDaemonUrl(daemonUrl),
+    daemonConnection: readDaemonConnectionFromDaemonUrl(daemonUrl),
   }
 }
 
@@ -119,8 +124,18 @@ export function createDaemonIpcClientFromEnv(
 }
 
 /** Creates the default Node daemon IPC transport from one socket path. */
-function defaultCreateClient(input: { socketPath: string }): DaemonIpcClient {
-  return createNodeClient(input.socketPath, daemonIpcSchema)
+function defaultCreateClient(input: DaemonIpcClientFactoryInput): DaemonIpcClient {
+  if (input.type === "socket") {
+    return createNodeClient(input.socketPath, daemonIpcSchema)
+  }
+
+  return createNodeClient(
+    {
+      host: input.host,
+      port: input.port,
+    },
+    daemonIpcSchema,
+  )
 }
 
 /** Detects the helper overload that carries an env object and injected factory. */

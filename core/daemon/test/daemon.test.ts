@@ -7,6 +7,7 @@ import { afterEach, expect, test } from "bun:test"
 import { runDaemon, type RunDaemonDeps } from "../src/daemon.ts"
 import {
   createDaemonUrl,
+  createTcpDaemonUrl,
   readSocketPathFromDaemonUrl,
   resolveReplyRequestFromGit,
   resolveSubmitRequestFromGit,
@@ -176,6 +177,8 @@ test("daemon run subscribes once, handles events across repositories, and passes
     event: "daemon.startup",
     baseUrl: "http://127.0.0.1:8787",
     socketPath: "/tmp/custom-daemon.sock",
+    tcpHost: null,
+    tcpPort: null,
     agentBinDir: "/tmp/custom-agent-bin",
   })
   expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(true)
@@ -186,7 +189,12 @@ test("daemon run subscribes once, handles events across repositories, and passes
 
 test("daemon run can start only the IPC server when stream is disabled", async () => {
   let subCalls = 0
-  const startIpcCalls: Array<{ socketPath: string; agentBinDir: string }> = []
+  const startIpcCalls: Array<{
+    socketPath?: string
+    tcpHost?: string
+    tcpPort?: number
+    agentBinDir: string
+  }> = []
 
   const { logs, result: exitCode } = await captureDaemonLogs((io) =>
     runDaemon(
@@ -439,6 +447,11 @@ test("daemon URL round-trips the socket path", () => {
 
   expect(daemonUrl).toBe("http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock")
   expect(readSocketPathFromDaemonUrl(daemonUrl)).toBe(socketPath)
+})
+
+test("daemon URL supports TCP endpoints", () => {
+  const daemonUrl = createTcpDaemonUrl("127.0.0.1", 7777)
+  expect(daemonUrl).toBe("http://127.0.0.1:7777/")
 })
 
 test("daemon resolves PR context from git metadata", async () => {

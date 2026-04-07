@@ -3,6 +3,15 @@ import { createClient } from "../client.ts"
 import { type IpcSchema } from "../schema.ts"
 import { type IpcTransport } from "../transport.ts"
 
+/** TCP endpoint details for Node-based IPC transports. */
+export type NodeTcpEndpoint = {
+  host: string
+  port: number
+}
+
+/** Supported endpoint types for Node IPC transports. */
+export type NodeIpcEndpoint = { socketPath: string } | NodeTcpEndpoint
+
 /** Normalizes one failed IPC response body into a human-readable error message. */
 function getErrorMessage(body: string): string {
   if (!body) {
@@ -21,14 +30,16 @@ function getErrorMessage(body: string): string {
   return body
 }
 
-/** Creates the Node HTTP-over-socket transport for one daemon socket path. */
-export function createNodeTransport(socketPath: string): IpcTransport {
+/** Creates the Node HTTP transport for one unix-socket or TCP daemon endpoint. */
+export function createNodeTransport(endpoint: string | NodeIpcEndpoint): IpcTransport {
+  const target = typeof endpoint === "string" ? { socketPath: endpoint } : endpoint
+
   async function send(name: string, payload: unknown): Promise<unknown> {
     const wireData = JSON.stringify({ name, payload })
     return new Promise((resolve, reject) => {
       const req = http.request(
         {
-          socketPath,
+          ...target,
           path: "/",
           method: "POST",
           headers: {
@@ -75,7 +86,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
 
       const req = http.request(
         {
-          socketPath,
+          ...target,
           path: `/stream?name=${encodeURIComponent(name)}${
             subscription === undefined
               ? ""
@@ -142,7 +153,10 @@ export function createNodeTransport(socketPath: string): IpcTransport {
   return { send, subscribe }
 }
 
-/** Creates the typed IPC client backed by the Node socket transport. */
-export function createNodeClient<S extends IpcSchema>(socketPath: string, schema: S) {
-  return createClient(schema, createNodeTransport(socketPath))
+/** Creates the typed IPC client backed by the Node unix-socket or TCP transport. */
+export function createNodeClient<S extends IpcSchema>(
+  endpoint: string | NodeIpcEndpoint,
+  schema: S,
+) {
+  return createClient(schema, createNodeTransport(endpoint))
 }

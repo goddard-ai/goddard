@@ -48,7 +48,7 @@ export type BackendPrClient = {
 
 export type DaemonServer = {
   daemonUrl: string
-  socketPath: string
+  socketPath: string | null
   close: () => Promise<void>
 }
 

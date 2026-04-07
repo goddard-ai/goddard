@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { request } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { AddressInfo } from "node:net"
 import { afterEach, describe, expect, test, vi } from "vitest"
 import { z } from "zod"
 import { $type, IpcClientError, type IpcSchema } from "../src/index.ts"
@@ -126,6 +127,37 @@ describe("core/ipc", () => {
   test("sends validated request/response messages over a unix socket", async () => {
     const { client } = await createFixture()
 
+    await expect(client.send("ping")).resolves.toEqual({ ok: true })
+    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({ echoed: "hello" })
+    await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
+  })
+
+  test("sends validated request/response messages over TCP", async () => {
+    const ipcServer = createServer(
+      { host: "127.0.0.1", port: 0 },
+      schema,
+      {
+        ping: () => ({ ok: true }),
+        echo: ({ text }) => ({ echoed: text }),
+        add: ({ a, b }) => ({ sum: a + b }),
+      },
+    )
+
+    await once(ipcServer.server, "listening")
+    const address = ipcServer.server.address() as AddressInfo
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    })
+
+    const client = createNodeClient({ host: "127.0.0.1", port: address.port }, schema)
     await expect(client.send("ping")).resolves.toEqual({ ok: true })
     await expect(client.send("echo", { text: "hello" })).resolves.toEqual({ echoed: "hello" })
     await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({ sum: 5 })

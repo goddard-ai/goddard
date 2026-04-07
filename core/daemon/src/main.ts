@@ -4,6 +4,7 @@ import {
   command,
   flag,
   oneOf,
+  number,
   option,
   optional,
   restPositionals,
@@ -76,6 +77,16 @@ export async function main(argv = process.argv.slice(2)) {
             long: "socket-path",
             description: "Unix socket path for daemon IPC control",
           }),
+          tcpHost: option({
+            type: optional(string),
+            long: "tcp-host",
+            description: "TCP host for daemon IPC control (enables TCP IPC when paired with --tcp-port)",
+          }),
+          tcpPort: option({
+            type: optional(number),
+            long: "tcp-port",
+            description: "TCP port for daemon IPC control",
+          }),
           agentBinDir: option({
             type: optional(string),
             long: "agent-bin-dir",
@@ -103,6 +114,8 @@ export async function main(argv = process.argv.slice(2)) {
           const exitCode = await runDaemon({
             baseUrl: args.baseUrl,
             socketPath: args.socketPath,
+            tcpHost: args.tcpHost,
+            tcpPort: args.tcpPort,
             agentBinDir: args.agentBinDir,
             enableIpc: featureFlags.enableIpc,
             enableStream: featureFlags.enableStream,
