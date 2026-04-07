@@ -2,7 +2,6 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
-import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -19,6 +18,9 @@ const originalHome = process.env.HOME
 const AGENT_LAUNCH_TEST_TIMEOUT_MS = 20_000
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
+const fastFixtureAgentPath = fileURLToPath(
+  new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
+)
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -149,8 +151,8 @@ test(
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-action-reload-repo-"))
     cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
 
-    const agentA = createFixtureAgent("Node Agent A", "node-agent-a")
-    const agentB = createFixtureAgent("Node Agent B", "node-agent-b")
+    const agentA = createFixtureAgent("Node Agent A")
+    const agentB = createFixtureAgent("Node Agent B")
     await writeGlobalRootConfig({
       session: {
         agent: agentA,
@@ -209,8 +211,8 @@ test(
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-one-shot-reload-repo-"))
     cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
 
-    const agentA = createFixtureAgent("Node Agent A", "node-agent-a")
-    const agentB = createFixtureAgent("Node Agent B", "node-agent-b")
+    const agentA = createFixtureAgent("Node Agent A")
+    const agentB = createFixtureAgent("Node Agent B")
     await writeGlobalRootConfig({
       session: {
         agent: agentA,
@@ -271,12 +273,10 @@ test(
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
 )
 
-function createFixtureAgent(name: string, id: string) {
-  const require = createRequire(import.meta.url)
-  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+function createFixtureAgent(name: string) {
   return {
-    ...createWrappedNodeAgent(exampleAgentPath),
-    id,
+    ...createWrappedNodeAgent(fastFixtureAgentPath),
+    id: "fast-node-agent",
     name,
   }
 }
