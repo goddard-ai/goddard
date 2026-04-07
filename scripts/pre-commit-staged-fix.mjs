@@ -107,7 +107,7 @@ if (hasUnstagedChanges()) {
 
 try {
   run("bunx", ["oxfmt", "--no-error-on-unmatched-pattern", ...stagedFiles])
-  run("bunx", ["oxlint", "--fix", ...stagedFiles])
+  run("bunx", ["oxlint", "--fix", "--quiet", ...stagedFiles])
   run("git", ["add", "--", ...stagedFiles])
 } catch (error) {
   if (pendingStashRef) {
