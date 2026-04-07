@@ -919,7 +919,10 @@ test("workforce runtime logs request-to-session correlation for launched session
 
   const launchLog = logs.find((entry) => entry.event === "workforce.session_launch_started")
   expect(launchLog).toBeTruthy()
+  expect(launchLog?.rootDir).toBe(rootDir)
   expect(launchLog?.agentId).toBe("root")
+  expect(launchLog?.attempt).toBe(1)
+  expect(typeof launchLog?.requestId).toBe("string")
 
   const completedLog = logs.find(
     (entry) =>
@@ -927,7 +930,15 @@ test("workforce runtime logs request-to-session correlation for launched session
   )
   expect(completedLog).toBeTruthy()
   expect(completedLog?.acpSessionId).toBe("acp-session-1")
+  expect(completedLog?.rootDir).toBe(rootDir)
+  expect(completedLog?.agentId).toBe("root")
   expect(typeof completedLog?.requestId).toBe("string")
+
+  const respondedLog = logs.find((entry) => entry.event === "workforce.request_responded")
+  expect(respondedLog).toBeTruthy()
+  expect(respondedLog?.actorSessionId).toBe("daemon-session-1")
+  expect(respondedLog?.actorAgentId).toBe("root")
+  expect(respondedLog?.actorRequestId).toBe(completedLog?.requestId)
 })
 
 test("workforce runtime rejects responses and suspends for a different attached request", async () => {

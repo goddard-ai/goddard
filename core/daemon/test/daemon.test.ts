@@ -218,8 +218,24 @@ test("daemon run subscribes once, handles events across repositories, and passes
     agentBinDir: "/tmp/custom-agent-bin",
   })
   expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(true)
-  expect(logs.some((entry) => entry.event === "one_shot.launch")).toBe(true)
-  expect(logs.some((entry) => entry.event === "one_shot.finish")).toBe(true)
+  expect(
+    logs.some(
+      (entry) =>
+        entry.event === "one_shot.launch" &&
+        entry.repository === "test/repo" &&
+        entry.prNumber === 123 &&
+        entry.feedbackType === "comment",
+    ),
+  ).toBe(true)
+  expect(
+    logs.some(
+      (entry) =>
+        entry.event === "one_shot.finish" &&
+        entry.repository === "test/repo" &&
+        entry.prNumber === 123 &&
+        entry.feedbackType === "comment",
+    ),
+  ).toBe(true)
   expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
 })
 

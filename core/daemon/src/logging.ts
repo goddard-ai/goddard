@@ -2,6 +2,14 @@ import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import kleur from "kleur"
 import { randomUUID } from "node:crypto"
 import { inspect } from "node:util"
+import {
+  daemonFeedbackEventContext,
+  daemonIpcRequestContext,
+  daemonLoopContext,
+  daemonSessionContext,
+  daemonWorkforceActorContext,
+  daemonWorkforceDispatchContext,
+} from "./setup-context.ts"
 
 const defaultWriteLine = (_line: string) => {}
 const stdoutWriteLine = (line: string) => {
@@ -65,6 +73,7 @@ export function createDaemonLogger(writeLine: DaemonLogWriter = defaultWriteLine
         scope: "daemon",
         at: new Date().toISOString(),
         event,
+        ...readAmbientDaemonLogFields(),
         ...fields,
       }
       const resolvedWriter = writeLine === defaultWriteLine ? daemonLogWriter : writeLine
@@ -120,6 +129,66 @@ export function readSessionIdForLog(value: unknown): DaemonSession["id"] | undef
   }
 
   return undefined
+}
+
+/** Collects the active daemon async-context fields that should be attached to every log line. */
+function readAmbientDaemonLogFields() {
+  const ipcRequest = daemonIpcRequestContext.get()
+  const feedbackEvent = daemonFeedbackEventContext.get()
+  const workforceDispatch = daemonWorkforceDispatchContext.get()
+  const loop = daemonLoopContext.get()
+  const session = daemonSessionContext.get()
+  const workforceActor = daemonWorkforceActorContext.get()
+
+  return {
+    ...(ipcRequest
+      ? {
+          opId: ipcRequest.opId,
+          sessionId: ipcRequest.sessionId,
+        }
+      : {}),
+    ...(feedbackEvent
+      ? {
+          repository: feedbackEvent.repository,
+          prNumber: feedbackEvent.prNumber,
+          feedbackType: feedbackEvent.feedbackType,
+        }
+      : {}),
+    ...(workforceDispatch
+      ? {
+          rootDir: workforceDispatch.rootDir,
+          agentId: workforceDispatch.agentId,
+          requestId: workforceDispatch.requestId,
+          attempt: workforceDispatch.attempt,
+        }
+      : {}),
+    ...(loop
+      ? {
+          rootDir: loop.rootDir,
+          loopName: loop.loopName,
+          sessionId: loop.sessionId,
+          acpSessionId: loop.acpSessionId,
+        }
+      : {}),
+    ...(session
+      ? {
+          sessionId: session.sessionId,
+          acpSessionId: session.acpSessionId,
+          cwd: session.cwd,
+          repository: session.repository,
+          prNumber: session.prNumber,
+          worktreeDir: session.worktreeDir,
+          worktreePoweredBy: session.worktreePoweredBy,
+        }
+      : {}),
+    ...(workforceActor
+      ? {
+          actorSessionId: workforceActor.actorSessionId,
+          actorAgentId: workforceActor.actorAgentId,
+          actorRequestId: workforceActor.actorRequestId,
+        }
+      : {}),
+  }
 }
 
 function formatDaemonLogEntry(entry: DaemonLogEntry, mode: DaemonLogMode): string {

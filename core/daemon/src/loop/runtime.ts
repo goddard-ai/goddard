@@ -5,6 +5,7 @@ import { proportionalJitter } from "radashi"
 import { createDaemonLogger, createPayloadPreview } from "../logging.ts"
 import type { ResolvedDaemonLoopStartRequest } from "../resolvers/loops.ts"
 import type { SessionManager } from "../session/index.ts"
+import { daemonLoopContext, type DaemonLoopContext } from "../setup-context.ts"
 import { LoopRateLimiter } from "./rate-limiter.ts"
 
 const logger = createDaemonLogger()
@@ -28,6 +29,7 @@ export class LoopRuntime {
   readonly #startedAt: string
   readonly #sessionId: DaemonSession["id"]
   readonly #sessionAcpId: string
+  readonly #context: DaemonLoopContext
   readonly #rateLimiter: LoopRateLimiter
 
   #cycleCount = 0
@@ -48,6 +50,12 @@ export class LoopRuntime {
     this.#deps = input.deps
     this.#sessionId = input.sessionId
     this.#sessionAcpId = input.sessionAcpId
+    this.#context = {
+      rootDir: input.config.rootDir,
+      loopName: input.config.loopName,
+      sessionId: input.sessionId,
+      acpSessionId: input.sessionAcpId,
+    }
     this.#startedAt = new Date().toISOString()
     this.#rateLimiter = new LoopRateLimiter({
       cycleDelay: input.config.rateLimits.cycleDelay,
@@ -83,27 +91,24 @@ export class LoopRuntime {
       sessionAcpId: session.acpSessionId,
     })
 
-    logger.log("loop.runtime_started", {
-      rootDir: config.rootDir,
-      loopName: config.loopName,
-      sessionId: session.id,
-      acpSessionId: session.acpSessionId,
-      promptModulePath: config.promptModulePath,
+    daemonLoopContext.run(runtime.#context, () => {
+      logger.log("loop.runtime_started", {
+        promptModulePath: config.promptModulePath,
+      })
     })
 
-    runtime.#runTask = runtime.#run().catch(async (error) => {
-      if (!runtime.#stopped) {
-        logger.log("loop.runtime_failed", {
-          rootDir: config.rootDir,
-          loopName: config.loopName,
-          sessionId: runtime.#sessionId,
-          errorMessage: error instanceof Error ? error.message : String(error),
-        })
-        runtime.#stopped = true
-        await runtime.#shutdownLoopRuntime()
-      }
-      throw error
-    })
+    runtime.#runTask = daemonLoopContext.run(runtime.#context, () =>
+      runtime.#run().catch(async (error) => {
+        if (!runtime.#stopped) {
+          logger.log("loop.runtime_failed", {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+          runtime.#stopped = true
+          await runtime.#shutdownLoopRuntime()
+        }
+        throw error
+      }),
+    )
     // Suppress the detached task warning here because failures are already logged and surfaced via runtime state.
     runtime.#runTask.catch(() => {})
     return runtime
@@ -137,9 +142,11 @@ export class LoopRuntime {
 
   /** Stops the loop runtime and shuts down its backing daemon session. */
   async stop(): Promise<void> {
-    this.#stopped = true
-    await this.#shutdownLoopRuntime()
-    await this.#runTask?.catch(() => {})
+    await daemonLoopContext.run(this.#context, async () => {
+      this.#stopped = true
+      await this.#shutdownLoopRuntime()
+      await this.#runTask?.catch(() => {})
+    })
   }
 
   /** Runs the daemon-owned loop until it completes, fails, or is stopped. */
@@ -187,9 +194,6 @@ export class LoopRuntime {
           promptMessage,
         )
         logger.log("loop.prompt_completed", {
-          rootDir: this.#config.rootDir,
-          loopName: this.#config.loopName,
-          sessionId: this.#sessionId,
           cycleCount: this.#cycleCount,
           stopReason: response.stopReason,
           prompt: createPayloadPreview(promptMessage),
@@ -229,23 +233,22 @@ export class LoopRuntime {
 
   /** Performs one-time runtime shutdown side effects without awaiting the active loop task. */
   async #shutdownLoopRuntime(): Promise<void> {
-    if (this.#shutdownCompleted) {
-      return
-    }
+    await daemonLoopContext.run(this.#context, async () => {
+      if (this.#shutdownCompleted) {
+        return
+      }
 
-    this.#shutdownCompleted = true
-    if (this.#sleepHandle) {
-      clearTimeout(this.#sleepHandle)
-      this.#sleepHandle = null
-    }
-    await this.#deps.sessionManager.shutdownSession(this.#sessionId).catch(() => {})
-    logger.log("loop.runtime_stopped", {
-      rootDir: this.#config.rootDir,
-      loopName: this.#config.loopName,
-      sessionId: this.#sessionId,
-      cycleCount: this.#cycleCount,
+      this.#shutdownCompleted = true
+      if (this.#sleepHandle) {
+        clearTimeout(this.#sleepHandle)
+        this.#sleepHandle = null
+      }
+      await this.#deps.sessionManager.shutdownSession(this.#sessionId).catch(() => {})
+      logger.log("loop.runtime_stopped", {
+        cycleCount: this.#cycleCount,
+      })
+      this.#notifyStopped()
     })
-    this.#notifyStopped()
   }
 
   /** Emits the manager stop callback only once per runtime lifecycle. */

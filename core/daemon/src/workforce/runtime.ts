@@ -16,6 +16,11 @@ import { concat, dedent } from "radashi"
 import { v7 as uuidv7 } from "uuid"
 import { createDaemonLogger, createPayloadPreview, isVerboseDaemonLogging } from "../logging.ts"
 import type { SessionManager } from "../session/index.ts"
+import {
+  daemonWorkforceActorContext,
+  daemonWorkforceDispatchContext,
+  type DaemonWorkforceActorContext,
+} from "../setup-context.ts"
 import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
 import {
   appendWorkforceLedgerEvent,
@@ -253,15 +258,13 @@ function buildWorkforceSummaryFields(
   }
 }
 
-/** Converts optional actor identity into log-friendly fields without null noise. */
-function buildWorkforceActorLogContext(
-  actor: WorkforceActorContext,
-): Record<string, string | undefined> {
+/** Converts optional actor identity into the async context payload used for workforce logs. */
+function buildWorkforceActorContext(actor: WorkforceActorContext) {
   return {
     actorSessionId: actor.sessionId ?? undefined,
     actorAgentId: actor.agentId ?? undefined,
     actorRequestId: actor.requestId ?? undefined,
-  }
+  } satisfies DaemonWorkforceActorContext
 }
 
 /** Includes large free-form text in logs only when verbose daemon logging is enabled. */
@@ -284,9 +287,6 @@ async function defaultRunWorkforceSession(
   const cwd = input.agent.cwd === "." ? input.rootDir : join(input.rootDir, input.agent.cwd)
 
   logger.log("workforce.session_launch_started", {
-    rootDir: input.rootDir,
-    requestId: input.request.id,
-    agentId: input.agent.id,
     agentName: input.agent.name,
     intent: input.request.intent,
     cwd,
@@ -313,9 +313,6 @@ async function defaultRunWorkforceSession(
   })
 
   logger.log("workforce.session_completed", {
-    rootDir: input.rootDir,
-    requestId: input.request.id,
-    agentId: input.agent.id,
     sessionId: session.id,
     acpSessionId: session.acpSessionId,
     status: session.status,
@@ -489,14 +486,15 @@ export class WorkforceRuntime {
       input: input.payload,
     })
 
-    logger.log("workforce.request_enqueued", {
-      rootDir: this.#rootDir,
-      requestId,
-      targetAgentId: input.targetAgentId,
-      intent: input.intent ?? "default",
-      ...buildWorkforceActorLogContext(input.actor),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
-      ...buildVerboseTextField("input", input.payload),
+    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+      logger.log("workforce.request_enqueued", {
+        rootDir: this.#rootDir,
+        requestId,
+        targetAgentId: input.targetAgentId,
+        intent: input.intent ?? "default",
+        ...buildWorkforceSummaryFields(this.#projection.summary),
+        ...buildVerboseTextField("input", input.payload),
+      })
     })
 
     return requestId
@@ -525,14 +523,15 @@ export class WorkforceRuntime {
       input: input.payload,
     })
 
-    logger.log("workforce.request_updated", {
-      rootDir: this.#rootDir,
-      requestId: input.requestId,
-      previousStatus,
-      nextStatus: assertRequestExists(this.#projection, input.requestId).status,
-      ...buildWorkforceActorLogContext(input.actor),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
-      ...buildVerboseTextField("input", input.payload),
+    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+      logger.log("workforce.request_updated", {
+        rootDir: this.#rootDir,
+        requestId: input.requestId,
+        previousStatus,
+        nextStatus: assertRequestExists(this.#projection, input.requestId).status,
+        ...buildWorkforceSummaryFields(this.#projection.summary),
+        ...buildVerboseTextField("input", input.payload),
+      })
     })
   }
 
@@ -559,13 +558,14 @@ export class WorkforceRuntime {
       reason: input.reason,
     })
 
-    logger.log("workforce.request_cancelled", {
-      rootDir: this.#rootDir,
-      requestId: input.requestId,
-      previousStatus,
-      ...buildWorkforceActorLogContext(input.actor),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
-      reason: input.reason,
+    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+      logger.log("workforce.request_cancelled", {
+        rootDir: this.#rootDir,
+        requestId: input.requestId,
+        previousStatus,
+        ...buildWorkforceSummaryFields(this.#projection.summary),
+        reason: input.reason,
+      })
     })
   }
 
@@ -589,12 +589,13 @@ export class WorkforceRuntime {
       reason: input.reason,
     })
 
-    logger.log("workforce.queue_truncated", {
-      rootDir: this.#rootDir,
-      agentId: input.agentId,
-      reason: input.reason,
-      ...buildWorkforceActorLogContext(input.actor),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
+    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+      logger.log("workforce.queue_truncated", {
+        rootDir: this.#rootDir,
+        agentId: input.agentId,
+        reason: input.reason,
+        ...buildWorkforceSummaryFields(this.#projection.summary),
+      })
     })
   }
 
@@ -622,13 +623,14 @@ export class WorkforceRuntime {
       output: input.output,
     })
 
-    logger.log("workforce.request_responded", {
-      rootDir: this.#rootDir,
-      requestId: input.requestId,
-      agentId: request.toAgentId,
-      ...buildWorkforceActorLogContext(input.actor),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
-      ...buildVerboseTextField("output", input.output),
+    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+      logger.log("workforce.request_responded", {
+        rootDir: this.#rootDir,
+        requestId: input.requestId,
+        agentId: request.toAgentId,
+        ...buildWorkforceSummaryFields(this.#projection.summary),
+        ...buildVerboseTextField("output", input.output),
+      })
     })
   }
 
@@ -654,13 +656,14 @@ export class WorkforceRuntime {
       reason: input.reason,
     })
 
-    logger.log("workforce.request_suspended", {
-      rootDir: this.#rootDir,
-      requestId: input.requestId,
-      agentId: request.toAgentId,
-      ...buildWorkforceActorLogContext(input.actor),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
-      reason: input.reason,
+    await daemonWorkforceActorContext.run(buildWorkforceActorContext(input.actor), async () => {
+      logger.log("workforce.request_suspended", {
+        rootDir: this.#rootDir,
+        requestId: input.requestId,
+        agentId: request.toAgentId,
+        ...buildWorkforceSummaryFields(this.#projection.summary),
+        reason: input.reason,
+      })
     })
   }
 
@@ -731,48 +734,56 @@ export class WorkforceRuntime {
     const attempt = request.attemptCount + 1
     const queuedBefore = this.#projection.queues[agentId]?.length ?? 0
 
-    await this.appendEvent({
-      at: new Date().toISOString(),
-      type: "handle",
-      requestId,
-      agentId,
-      attempt,
-      sessionId: null,
-    })
-
-    logger.log("workforce.request_dispatch_started", {
-      rootDir: this.#rootDir,
-      requestId,
-      agentId,
-      attempt,
-      remainingQueueDepth: Math.max(queuedBefore - 1, 0),
-      ...buildWorkforceSummaryFields(this.#projection.summary),
-    })
-
-    try {
-      const runSession =
-        this.#deps.runSession ?? ((input) => defaultRunWorkforceSession(this.#deps, input))
-      await runSession({
+    await daemonWorkforceDispatchContext.run(
+      {
         rootDir: this.#rootDir,
-        agent,
-        config: this.#config,
-        request: assertRequestExists(this.#projection, requestId),
-        recentActivity: buildRecentActivity(this.#events, request),
-      })
-    } catch (error) {
-      await this.handleAttemptFailure(requestId, agentId, attempt, error)
-      return
-    }
-
-    const latestRequest = assertRequestExists(this.#projection, requestId)
-    if (latestRequest.status === "active") {
-      await this.handleAttemptFailure(
-        requestId,
         agentId,
+        requestId,
         attempt,
-        new Error(`Workforce request ${requestId} completed without a response or suspend event`),
-      )
-    }
+      },
+      async () => {
+        await this.appendEvent({
+          at: new Date().toISOString(),
+          type: "handle",
+          requestId,
+          agentId,
+          attempt,
+          sessionId: null,
+        })
+
+        logger.log("workforce.request_dispatch_started", {
+          remainingQueueDepth: Math.max(queuedBefore - 1, 0),
+          ...buildWorkforceSummaryFields(this.#projection.summary),
+        })
+
+        try {
+          const runSession =
+            this.#deps.runSession ?? ((input) => defaultRunWorkforceSession(this.#deps, input))
+          await runSession({
+            rootDir: this.#rootDir,
+            agent,
+            config: this.#config,
+            request: assertRequestExists(this.#projection, requestId),
+            recentActivity: buildRecentActivity(this.#events, request),
+          })
+        } catch (error) {
+          await this.handleAttemptFailure(requestId, agentId, attempt, error)
+          return
+        }
+
+        const latestRequest = assertRequestExists(this.#projection, requestId)
+        if (latestRequest.status === "active") {
+          await this.handleAttemptFailure(
+            requestId,
+            agentId,
+            attempt,
+            new Error(
+              `Workforce request ${requestId} completed without a response or suspend event`,
+            ),
+          )
+        }
+      },
+    )
   }
 
   private async handleAttemptFailure(
@@ -792,10 +803,6 @@ export class WorkforceRuntime {
       })
 
       logger.log("workforce.request_failed", {
-        rootDir: this.#rootDir,
-        requestId,
-        agentId,
-        attempt,
         errorMessage,
         ...buildWorkforceSummaryFields(this.#projection.summary),
       })
@@ -812,10 +819,6 @@ export class WorkforceRuntime {
     }
 
     logger.log("workforce.request_retry_scheduled", {
-      rootDir: this.#rootDir,
-      requestId,
-      agentId,
-      attempt,
       nextAttempt: attempt + 1,
       errorMessage,
       ...buildWorkforceSummaryFields(this.#projection.summary),

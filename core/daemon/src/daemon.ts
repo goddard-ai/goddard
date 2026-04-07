@@ -12,7 +12,7 @@ import {
 } from "./logging.ts"
 import { runOneShot, type OneShotInput } from "./one-shot.ts"
 import { db } from "./persistence/store.ts"
-import { runWithDaemonSetupContext } from "./setup-context.ts"
+import { daemonFeedbackEventContext, daemonSetupContext } from "./setup-context.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunDaemonInput = {
@@ -96,7 +96,7 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
 
     const client = await createBackendClientImpl(runtime.baseUrl)
     if (enableIpc) {
-      ipcServer = await runWithDaemonSetupContext({ runtime, configManager }, () =>
+      ipcServer = await daemonSetupContext.run({ runtime, configManager }, () =>
         startIpcServer(client, {
           socketPath: runtime.socketPath,
           agentBinDir: runtime.agentBinDir,
@@ -126,74 +126,63 @@ export async function runDaemon(input: RunDaemonInput, deps: RunDaemonDeps = {})
           return
         }
 
-        if (!activeIpcServer) {
-          logger.log("repo.feedback_ignored", {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
-            reason: "ipc_disabled",
-          })
-          return
+        const feedbackContext = {
+          repository: `${event.owner}/${event.repo}`,
+          prNumber: event.prNumber,
+          feedbackType: event.type,
         }
 
-        const prompt = buildPrompt(event)
-        const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
-
-        if (runningPrs.has(requestKey)) {
-          logger.log("repo.feedback_coalesced", {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
-          })
-          return
-        }
-
-        runningPrs.add(requestKey)
-
-        try {
-          const managed = await client.pr.isManaged({
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-          })
-          if (!managed) {
+        await daemonFeedbackEventContext.run(feedbackContext, async () => {
+          if (!activeIpcServer) {
             logger.log("repo.feedback_ignored", {
-              repository: `${event.owner}/${event.repo}`,
-              prNumber: event.prNumber,
-              feedbackType: event.type,
-              reason: "unmanaged_pr",
+              reason: "ipc_disabled",
             })
             return
           }
 
-          logger.log("one_shot.launch", {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
-            prompt: createPayloadPreview(prompt),
-          })
-          const exitCode = await runOneShotImpl({
-            event,
-            prompt,
-            daemonUrl: activeIpcServer.daemonUrl,
-            agentBinDir: runtime.agentBinDir,
-          })
-          logger.log("one_shot.finish", {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
-            exitCode,
-          })
-        } catch (error) {
-          logger.log("one_shot.failed", {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          })
-        } finally {
-          runningPrs.delete(requestKey)
-        }
+          const prompt = buildPrompt(event)
+          const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
+
+          if (runningPrs.has(requestKey)) {
+            logger.log("repo.feedback_coalesced")
+            return
+          }
+
+          runningPrs.add(requestKey)
+
+          try {
+            const managed = await client.pr.isManaged({
+              owner: event.owner,
+              repo: event.repo,
+              prNumber: event.prNumber,
+            })
+            if (!managed) {
+              logger.log("repo.feedback_ignored", {
+                reason: "unmanaged_pr",
+              })
+              return
+            }
+
+            logger.log("one_shot.launch", {
+              prompt: createPayloadPreview(prompt),
+            })
+            const exitCode = await runOneShotImpl({
+              event,
+              prompt,
+              daemonUrl: activeIpcServer.daemonUrl,
+              agentBinDir: runtime.agentBinDir,
+            })
+            logger.log("one_shot.finish", {
+              exitCode,
+            })
+          } catch (error) {
+            logger.log("one_shot.failed", {
+              errorMessage: error instanceof Error ? error.message : String(error),
+            })
+          } finally {
+            runningPrs.delete(requestKey)
+          }
+        })
       })
     }
 

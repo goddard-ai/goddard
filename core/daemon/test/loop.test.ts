@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { startDaemonServer } from "../src/ipc.ts"
+import { configureDaemonLogging } from "../src/logging.ts"
 import type { LoopManager } from "../src/loop/manager.ts"
 import { createLoopManager } from "../src/loop/manager.ts"
 import { normalizeLoopRootDir } from "../src/loop/paths.ts"
@@ -343,49 +344,74 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     },
   }
 
-  const runtime = await LoopRuntime.start(
-    {
-      rootDir,
-      loopName: "review",
-      promptModulePath: join(rootDir, "prompt.js"),
-      session: {
-        agent: "pi-acp",
-        cwd: rootDir,
-        mcpServers: [],
-        systemPrompt: "test",
+  const { logs, result: runtime } = await captureDaemonLogs(async () => {
+    const runtime = await LoopRuntime.start(
+      {
+        rootDir,
+        loopName: "review",
+        promptModulePath: join(rootDir, "prompt.js"),
+        session: {
+          agent: "pi-acp",
+          cwd: rootDir,
+          mcpServers: [],
+          systemPrompt: "test",
+        },
+        rateLimits: {
+          cycleDelay: "0s",
+          maxOpsPerMinute: 100,
+          maxCyclesBeforePause: 200,
+        },
+        retries: {
+          maxAttempts: 1,
+          initialDelayMs: 500,
+          maxDelayMs: 5_000,
+          backoffFactor: 2,
+          jitterRatio: 0.2,
+        },
       },
-      rateLimits: {
-        cycleDelay: "0s",
-        maxOpsPerMinute: 100,
-        maxCyclesBeforePause: 200,
+      {
+        sessionManager: sessionManager as never,
       },
-      retries: {
-        maxAttempts: 1,
-        initialDelayMs: 500,
-        maxDelayMs: 5_000,
-        backoffFactor: 2,
-        jitterRatio: 0.2,
-      },
-    },
-    {
-      sessionManager: sessionManager as never,
-    },
-  )
+    )
 
-  await waitForExpectation(() => {
-    expect(promptSessionCalls).toHaveLength(3)
-  })
-  expect(newSessionCalls[0]).toEqual(
-    expect.objectContaining({
-      request: expect.objectContaining({
-        cwd: rootDir,
-        worktree: { enabled: true },
+    await waitForExpectation(() => {
+      expect(promptSessionCalls).toHaveLength(3)
+    })
+    expect(newSessionCalls[0]).toEqual(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          cwd: rootDir,
+          worktree: { enabled: true },
+        }),
       }),
-    }),
-  )
-  await waitForExpectation(() => {
-    expect(shutdownSessionCalls).toContain("session-1")
+    )
+    await waitForExpectation(() => {
+      expect(shutdownSessionCalls).toContain("session-1")
+    })
+
+    return runtime
   })
+
+  const startedLog = logs.find((entry) => entry.event === "loop.runtime_started")
+  expect(startedLog).toBeTruthy()
+  expect(startedLog?.rootDir).toBe(rootDir)
+  expect(startedLog?.loopName).toBe("review")
+  expect(startedLog?.sessionId).toBe("session-1")
+  expect(startedLog?.acpSessionId).toBe("acp-1")
+
+  const promptCompletedLog = logs.find((entry) => entry.event === "loop.prompt_completed")
+  expect(promptCompletedLog).toBeTruthy()
+  expect(promptCompletedLog?.rootDir).toBe(rootDir)
+  expect(promptCompletedLog?.loopName).toBe("review")
+  expect(promptCompletedLog?.sessionId).toBe("session-1")
+  expect(promptCompletedLog?.acpSessionId).toBe("acp-1")
+
+  const stoppedLog = logs.find((entry) => entry.event === "loop.runtime_stopped")
+  expect(stoppedLog).toBeTruthy()
+  expect(stoppedLog?.rootDir).toBe(rootDir)
+  expect(stoppedLog?.loopName).toBe("review")
+  expect(stoppedLog?.sessionId).toBe("session-1")
+  expect(stoppedLog?.acpSessionId).toBe("acp-1")
 
   expect(runtime.getStatus()).toEqual(
     expect.objectContaining({
@@ -398,3 +424,29 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     }),
   )
 })
+
+/** Captures daemon logs emitted while one loop runtime test action is running. */
+async function captureDaemonLogs<T>(
+  action: () => Promise<T>,
+): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
+  const output: string[] = []
+  const restoreLogging = configureDaemonLogging({
+    mode: "json",
+    writeLine: (line) => {
+      output.push(line)
+    },
+  })
+
+  try {
+    const result = await action()
+    return {
+      logs: output
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+      result,
+    }
+  } finally {
+    restoreLogging()
+  }
+}

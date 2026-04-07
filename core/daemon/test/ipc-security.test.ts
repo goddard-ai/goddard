@@ -222,6 +222,7 @@ test("daemon submit request enforces trusted repo context and records created PR
   expect(received?.requestName).toBe("prSubmit")
   expect(responded?.requestName).toBe("prSubmit")
   expect(received?.opId).toBe(responded?.opId)
+  expect(received?.sessionId).toBeUndefined()
   expect(responded?.sessionId).toBe("ses_42")
 })
 
