@@ -18,7 +18,7 @@ async function main() {
     throw new Error(`Found no SVG assets in ${assetsDirPath}.`)
   }
 
-  const changedAssets = []
+  const changedAssets: string[] = []
 
   for (const assetPath of assetPaths) {
     const currentSource = await readFile(assetPath, "utf8")
@@ -45,11 +45,11 @@ async function main() {
 }
 
 /** Resolves the requested target folder relative to the current working directory by default. */
-function resolveTargetPath(targetArg) {
+function resolveTargetPath(targetArg: string | undefined) {
   if (!targetArg) {
     throw new Error(
-      "Usage: bun ./scripts/replace-svg-fills.mjs <target-folder>\n" +
-        "Example: bun ./scripts/replace-svg-fills.mjs webstudio-components/AppShell",
+      "Usage: bun ./scripts/replace-svg-fills.ts <target-folder>\n" +
+        "Example: bun ./scripts/replace-svg-fills.ts webstudio-components/AppShell",
     )
   }
 
@@ -57,21 +57,21 @@ function resolveTargetPath(targetArg) {
 }
 
 /** Returns every SVG file found under the target folder's assets directory. */
-async function collectSvgAssetPaths(assetsDirPath) {
+async function collectSvgAssetPaths(assetsDirPath: string) {
   const assetsStat = await stat(assetsDirPath).catch(() => null)
 
   if (!assetsStat?.isDirectory()) {
     throw new Error(`Expected an assets directory at ${assetsDirPath}.`)
   }
 
-  const assetPaths = []
+  const assetPaths: string[] = []
   await walkSvgFiles(assetsDirPath, assetPaths)
 
   return assetPaths.sort((left, right) => left.localeCompare(right))
 }
 
 /** Recursively walks one directory tree and collects SVG file paths. */
-async function walkSvgFiles(directoryPath, assetPaths) {
+async function walkSvgFiles(directoryPath: string, assetPaths: string[]) {
   const entries = await readdir(directoryPath, { withFileTypes: true })
 
   for (const entry of entries) {

@@ -3,7 +3,7 @@
 import { access, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import sharp from "sharp"
+import sharp, { type Metadata } from "sharp"
 
 const assetDirUrl = new URL("../assets/", import.meta.url)
 const inputPath = new URL("./icon.png", assetDirUrl)
@@ -25,7 +25,7 @@ const iconFiles = [
 ]
 
 /** Warn when the source icon is undersized for the largest output. */
-function warnIfSourceIsSmall(metadata) {
+function warnIfSourceIsSmall(metadata: Metadata) {
   if (!metadata.width || !metadata.height) {
     return
   }
