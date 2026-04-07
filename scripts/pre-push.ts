@@ -142,7 +142,7 @@ function runBun(repoRoot: string, args: string[]) {
 
 /** Installs dependencies and runs the full repo check when the push requires it. */
 function runRepoCheck(repoRoot: string) {
-  return runBun(repoRoot, ["install"]) && runBun(repoRoot, ["check"])
+  return runBun(repoRoot, ["install", "--frozen-lockfile"]) && runBun(repoRoot, ["check"])
 }
 
 const [remoteName = ""] = process.argv.slice(2)
