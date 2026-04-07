@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "predev": "bun install",
-    "dev": "picorun 'bun run vite:dev' 'bun run electrobun:watch:hmr' --names=vite,electrobun",
+    "dev": "node ./scripts/dev.ts",
     "prebuild": "bun run panda:sync",
     "build": "vite build && electrobun build",
     "build:canary": "bun run panda:sync && vite build && electrobun build --env=canary",
@@ -18,7 +18,6 @@
     "pretypecheck": "bun run panda:sync",
     "typecheck": "picorun 'tsgo -p src/bun --noEmit' 'tsgo --noEmit' --names='tsgo:src/bun',tsgo",
     "electrobun:watch": "electrobun dev --watch",
-    "electrobun:watch:hmr": "sh -c 'until curl -fsSI http://127.0.0.1:5173 >/dev/null; do sleep 0.2; done; bun run electrobun:watch'",
     "panda:sync": "panda codegen && panda cssgen",
     "vite:dev": "vite"
   },
@@ -40,6 +39,7 @@
     "preact": "11.0.0-beta.1",
     "preact-in-motion": "^0.2.9",
     "preact-sigma": "^2.0.1",
+    "procband": "^0.2.0",
     "radashi": "^12.7.2",
     "react-virtuoso": "^4.18.3",
     "sharp": "^0.34.5"
@@ -52,7 +52,6 @@
     "@types/react": "file:overrides/react",
     "@types/react-dom": "file:overrides/react",
     "chokidar": "^5.0.0",
-    "picorun": "^0.1.5",
     "react": "file:overrides/react",
     "react-dom": "file:overrides/react",
     "vite": "^8.0.3"
