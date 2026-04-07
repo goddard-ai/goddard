@@ -137,7 +137,7 @@ type AgentProcessHandle = ProcessLike & {
 type ActiveSession = {
   id: SessionId
   acpSessionId: string
-  context: SessionContext
+  logger: ReturnType<typeof createLogger>
   token: string
   process: AgentProcessHandle
   writer: WritableStreamDefaultWriter<acp.AnyMessage>
@@ -756,7 +756,7 @@ function buildSessionContext(params: {
   cwd: string
   worktree?: PreparedSessionWorktree | null
 }) {
-  return {
+  const sessionContext: SessionContext = {
     sessionId: params.sessionId,
     acpSessionId: null,
     cwd: params.cwd,
@@ -764,7 +764,9 @@ function buildSessionContext(params: {
     prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : null,
     worktreeDir: params.worktree?.state.worktreeDir ?? null,
     worktreePoweredBy: params.worktree?.state.poweredBy ?? null,
-  } satisfies SessionContext
+  }
+
+  return sessionContext
 }
 
 /** Creates a normalized diagnostic record for persistence and log correlation. */
@@ -777,36 +779,6 @@ function createDiagnosticEvent(
     at: new Date().toISOString(),
     detail,
   }
-}
-
-/** Logs raw transport chunks with a compact preview for debugging broken streams. */
-function logAgentChunk(chunk: Uint8Array): void {
-  if (chunk.byteLength === 0) {
-    return
-  }
-
-  const session = SessionContext.get()
-  logger.log("agent.chunk_read", {
-    sessionId: session?.sessionId,
-    acpSessionId: session?.acpSessionId,
-    preview: createChunkPreview(chunk),
-  })
-}
-
-/** Logs ACP messages in a structured form without dumping full payloads verbatim. */
-function logAgentMessage(
-  event: "agent.message_read" | "agent.message_write",
-  message: acp.AnyMessage,
-): void {
-  const session = SessionContext.get()
-  logger.log(event, {
-    sessionId: session?.sessionId,
-    acpSessionId: session?.acpSessionId,
-    direction: event === "agent.message_read" ? "read" : "write",
-    hasId: "id" in message && message.id != null,
-    method: "method" in message ? message.method : undefined,
-    message: createPayloadPreview(message),
-  })
 }
 
 /** Creates the daemon session manager and owns reconciliation of live session processes. */
@@ -886,10 +858,12 @@ export function createSessionManager(input: {
     id: SessionId,
     update: Partial<KindInput<typeof db.schema.sessions>>,
     detail?: Record<string, unknown>,
+    diagnosticLogger?: ReturnType<typeof createLogger>,
   ): Promise<void> {
     const active = activeSessions.get(id)
     const previousRecord = db.sessions.get(id) ?? null
     const previousStatus = active?.status ?? previousRecord?.status
+    const resolvedLogger = diagnosticLogger ?? active?.logger ?? logger
     if (update.status && active) {
       active.status = update.status
     }
@@ -898,11 +872,16 @@ export function createSessionManager(input: {
       db.sessions.update(previousRecord.id, update)
     }
     if (update.status && previousStatus && previousStatus !== update.status) {
-      await emitDiagnostic(id, "session_status_changed", {
-        previousStatus,
-        nextStatus: update.status,
-        ...detail,
-      })
+      await emitDiagnostic(
+        id,
+        "session_status_changed",
+        {
+          previousStatus,
+          nextStatus: update.status,
+          ...detail,
+        },
+        resolvedLogger,
+      )
     }
   }
 
@@ -932,9 +911,10 @@ export function createSessionManager(input: {
     sessionId: SessionId,
     type: string,
     detail?: Record<string, unknown>,
+    diagnosticLogger: ReturnType<typeof createLogger> = logger,
   ): Promise<void> {
     const event = createDiagnosticEvent(type, detail)
-    logger.log(type, { sessionId, ...detail })
+    diagnosticLogger.log(type, { sessionId, ...detail })
     const diagnosticsRecord =
       db.sessionDiagnostics.first({
         where: { sessionId },
@@ -1121,308 +1101,326 @@ export function createSessionManager(input: {
       allowedPrNumbers: scope.allowedPrNumbers,
     }
 
-    return SessionContext.run(sessionContext, async () => {
-      try {
-        logger.log("session.launch_requested", {
-          sessionId: id,
-          ...sessionLogContext,
-        })
+    let sessionLogger = logger
+    sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
 
-        const agentProcess = await spawnAgentProcess({
-          daemonUrl: input.daemonUrl,
-          token,
-          agent: params.request.agent,
+    try {
+      sessionLogger.log("session.launch_requested", {
+        sessionId: id,
+        ...sessionLogContext,
+      })
+
+      const agentProcess = await spawnAgentProcess({
+        daemonUrl: input.daemonUrl,
+        token,
+        agent: params.request.agent,
+        cwd,
+        agentBinDir: input.agentBinDir,
+        env: params.request.env,
+        registry: resolvedRegistry,
+      })
+
+      const initialized = await initializeSession({
+        input: agentProcess.stdin,
+        output: agentProcess.stdout,
+        request: {
+          ...params.request,
           cwd,
-          agentBinDir: input.agentBinDir,
-          env: params.request.env,
-          registry: resolvedRegistry,
+          metadata: sessionMetadata,
+        },
+        resumeAcpId: existingSession?.acpSessionId,
+        onMessageWrite: (message) => {
+          sessionLogger.log("agent.message_write", {
+            direction: "write",
+            hasId: "id" in message && message.id != null,
+            method: "method" in message ? message.method : undefined,
+            message: createPayloadPreview(message),
+          })
+        },
+      })
+      sessionContext.acpSessionId = initialized.acpSessionId
+
+      const initialHistory = existingMessagesRecord
+        ? initialized.acpSessionId === existingSession?.acpSessionId
+          ? existingMessagesRecord.messages.length > 0
+            ? [...existingMessagesRecord.messages]
+            : [...initialized.history]
+          : [...existingMessagesRecord.messages, ...initialized.history]
+        : [...initialized.history]
+
+      if (existingMessagesRecord) {
+        db.sessionMessages.put(existingMessagesRecord.id, {
+          sessionId: id,
+          messages: initialHistory,
         })
-
-        const initialized = await initializeSession({
-          input: agentProcess.stdin,
-          output: agentProcess.stdout,
-          request: {
-            ...params.request,
-            cwd,
-            metadata: sessionMetadata,
-          },
-          resumeAcpId: existingSession?.acpSessionId,
-          onMessageWrite: (message) => {
-            SessionContext.run(sessionContext, () => {
-              logAgentMessage("agent.message_write", message)
-            })
-          },
+      } else {
+        db.sessionMessages.create({
+          sessionId: id,
+          messages: initialHistory,
         })
-        sessionContext.acpSessionId = initialized.acpSessionId
+      }
 
-        const initialHistory = existingMessagesRecord
-          ? initialized.acpSessionId === existingSession?.acpSessionId
-            ? existingMessagesRecord.messages.length > 0
-              ? [...existingMessagesRecord.messages]
-              : [...initialized.history]
-            : [...existingMessagesRecord.messages, ...initialized.history]
-          : [...initialized.history]
-
-        if (existingMessagesRecord) {
-          db.sessionMessages.put(existingMessagesRecord.id, {
-            sessionId: id,
-            messages: initialHistory,
-          })
+      if (worktree) {
+        const nextWorktree = {
+          sessionId: id,
+          ...worktree.state,
+        }
+        if (existingWorktree) {
+          db.worktrees.put(existingWorktree.id, nextWorktree)
         } else {
-          db.sessionMessages.create({
-            sessionId: id,
-            messages: initialHistory,
-          })
+          db.worktrees.create(nextWorktree)
         }
+      }
 
-        if (worktree) {
-          const nextWorktree = {
-            sessionId: id,
-            ...worktree.state,
-          }
-          if (existingWorktree) {
-            db.worktrees.put(existingWorktree.id, nextWorktree)
-          } else {
-            db.worktrees.create(nextWorktree)
-          }
+      if (workforceMetadata) {
+        const nextWorkforce = {
+          sessionId: id,
+          ...workforceMetadata,
         }
-
-        if (workforceMetadata) {
-          const nextWorkforce = {
-            sessionId: id,
-            ...workforceMetadata,
-          }
-          if (existingWorkforce) {
-            db.workforces.put(existingWorkforce.id, nextWorkforce)
-          } else {
-            db.workforces.create(nextWorkforce)
-          }
-        }
-
-        if (existingSession) {
-          const existingDocument = db.sessions.get(id) ?? null
-          if (!existingDocument) {
-            throw new IpcClientError(`Cannot update unknown session: ${id}`)
-          }
-
-          db.sessions.update(id, {
-            acpSessionId: initialized.acpSessionId,
-            status: initialized.status,
-            agentName: agentNameFromInput(params.request.agent),
-            cwd,
-            mcpServers: params.request.mcpServers,
-            connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
-            activeDaemonSession: !shouldExitAfterInitialPrompt(params),
-            repository: scope.repository,
-            prNumber: scope.prNumber,
-            token,
-            permissions: nextPermission,
-            metadata: sessionMetadata ?? null,
-            models: initialized.models ?? existingSession.models ?? null,
-            errorMessage: null,
-            blockedReason: null,
-            initiative: null,
-            lastAgentMessage: null,
-          })
+        if (existingWorkforce) {
+          db.workforces.put(existingWorkforce.id, nextWorkforce)
         } else {
-          db.sessions.put(id, {
-            acpSessionId: initialized.acpSessionId,
-            status: initialized.status,
-            agentName: agentNameFromInput(params.request.agent),
-            cwd,
-            mcpServers: params.request.mcpServers,
-            connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
-            activeDaemonSession: !shouldExitAfterInitialPrompt(params),
-            repository: scope.repository,
-            prNumber: scope.prNumber,
-            token,
-            permissions: nextPermission,
-            metadata: sessionMetadata ?? null,
-            models: initialized.models ?? null,
-            errorMessage: null,
-            blockedReason: null,
-            initiative: null,
-            lastAgentMessage: null,
-          })
+          db.workforces.create(nextWorkforce)
         }
-        await emitDiagnostic(id, "session_created", {
+      }
+
+      if (existingSession) {
+        const existingDocument = db.sessions.get(id) ?? null
+        if (!existingDocument) {
+          throw new IpcClientError(`Cannot update unknown session: ${id}`)
+        }
+
+        db.sessions.update(id, {
+          acpSessionId: initialized.acpSessionId,
+          status: initialized.status,
+          agentName: agentNameFromInput(params.request.agent),
+          cwd,
+          mcpServers: params.request.mcpServers,
+          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
+          repository: scope.repository,
+          prNumber: scope.prNumber,
+          token,
+          permissions: nextPermission,
+          metadata: sessionMetadata ?? null,
+          models: initialized.models ?? existingSession.models ?? null,
+          errorMessage: null,
+          blockedReason: null,
+          initiative: null,
+          lastAgentMessage: null,
+        })
+      } else {
+        db.sessions.put(id, {
+          acpSessionId: initialized.acpSessionId,
+          status: initialized.status,
+          agentName: agentNameFromInput(params.request.agent),
+          cwd,
+          mcpServers: params.request.mcpServers,
+          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
+          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
+          repository: scope.repository,
+          prNumber: scope.prNumber,
+          token,
+          permissions: nextPermission,
+          metadata: sessionMetadata ?? null,
+          models: initialized.models ?? null,
+          errorMessage: null,
+          blockedReason: null,
+          initiative: null,
+          lastAgentMessage: null,
+        })
+      }
+      await emitDiagnostic(
+        id,
+        "session_created",
+        {
           status: initialized.status,
           ...sessionLogContext,
-        })
+        },
+        sessionLogger,
+      )
 
-        if (shouldExitAfterInitialPrompt(params)) {
-          agentProcess.onceExit((code, signal) => {
-            void SessionContext.run(sessionContext, () =>
-              emitDiagnostic(id, "agent_process_exit", {
-                code,
-                signal,
-                nextStatus: "done",
-              }),
-            ).catch(console.error)
-          })
-
-          // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
-          await updateSession(
+      if (shouldExitAfterInitialPrompt(params)) {
+        agentProcess.onceExit((code, signal) => {
+          void emitDiagnostic(
             id,
-            { status: "done", token: null, permissions: null },
-            { reason: "one_shot_completed" },
-          )
-          await setConnectionMode(id, "history", false)
-          await emitDiagnostic(id, "session_completed_one_shot")
-          await treeKill(agentProcess)
-          await waitForAgentProcessExit(agentProcess)
-          const sessionDocument = db.sessions.get(id) ?? null
-          if (!sessionDocument) {
-            throw new IpcClientError("Session not found")
-          }
-          return sessionDocument
-        }
-
-        const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
-          onChunk: (chunk) => {
-            SessionContext.run(sessionContext, () => {
-              logAgentChunk(chunk)
-            })
-          },
-          onMessageError: (error) => {
-            SessionContext.run(sessionContext, () => {
-              logger.log("agent.message_handler_failed", {
-                errorMessage: error instanceof Error ? error.message : String(error),
-              })
-            })
-          },
-        })
-        const writer = connection.getWriter()
-        const activeSession: ActiveSession = {
-          id,
-          acpSessionId: initialized.acpSessionId,
-          context: sessionContext,
-          token,
-          process: agentProcess,
-          writer,
-          subscription: { close: async () => {} },
-          status: initialized.status,
-          history: initialHistory,
-          isFirstPrompt: initialized.isFirstPrompt,
-          systemPrompt: params.request.systemPrompt,
-          lastPermissionRequest: null,
-          clientRequests: new Map(),
-          pendingPrompts: new Map(),
-        }
-
-        activeSession.subscription = connection.subscribe(async (message) => {
-          await SessionContext.run(activeSession.context, async () => {
-            logAgentMessage("agent.message_read", message)
-            if (
-              isAcpRequest<PermissionRequest>(
-                message,
-                acp.CLIENT_METHODS.session_request_permission,
-              )
-            ) {
-              activeSession.lastPermissionRequest = message
-            } else if ("id" in message && message.id != null) {
-              const clientRequest = activeSession.clientRequests.get(message.id)
-              const nextStatus = sessionStatusFromAgentMessage(clientRequest, message)
-              if (nextStatus) {
-                await updateSession(
-                  activeSession.id,
-                  { status: nextStatus },
-                  {
-                    reason: "agent_message",
-                    requestMethod: clientRequest?.method,
-                    responseId: message.id,
-                  },
-                )
-              }
-              if (clientRequest) {
-                activeSession.clientRequests.delete(message.id)
-              }
-              settlePendingPrompt(activeSession, message)
-            }
-
-            await appendHistory(activeSession.id, message)
-            input.publish(activeSession.id, message)
-          })
-        })
-
-        const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
-          activeSessions.delete(activeSession.id)
-          rejectPendingPrompts(
-            activeSession,
-            new Error(`Session ${activeSession.id} ended before the prompt completed.`),
-          )
-          await activeSession.writer.close().catch(() => {})
-          await activeSession.subscription.close().catch(() => {})
-
-          const nextUpdate: Partial<KindInput<typeof db.schema.sessions>> = {}
-          if (code !== 0 && code !== null) {
-            nextUpdate.status = "error"
-            nextUpdate.errorMessage = `Exited with code ${code}`
-          } else if (isErrorSignal(signal)) {
-            nextUpdate.status = "error"
-            nextUpdate.errorMessage = `Killed by ${signal}`
-          } else if (activeSession.status !== "done") {
-            nextUpdate.status = "cancelled"
-          }
-          nextUpdate.token = null
-          nextUpdate.permissions = null
-
-          await setConnectionMode(
-            activeSession.id,
-            archivedConnectionMode(activeSession.history.length),
-            false,
-          )
-          await emitDiagnostic(activeSession.id, "agent_process_exit", {
-            code,
-            signal,
-            nextStatus: nextUpdate.status ?? activeSession.status,
-          })
-          if (Object.keys(nextUpdate).length > 0) {
-            await updateSession(activeSession.id, nextUpdate, {
-              reason: "agent_process_exit",
+            "agent_process_exit",
+            {
               code,
               signal,
-            }).catch(() => {})
-          }
-        }
-
-        agentProcess.onceExit((code, signal) => {
-          void SessionContext.run(activeSession.context, () => handleExit(code, signal))
+              nextStatus: "done",
+            },
+            sessionLogger,
+          ).catch(console.error)
         })
 
-        activeSessions.set(activeSession.id, activeSession)
+        // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
+        await updateSession(
+          id,
+          { status: "done", token: null, permissions: null },
+          { reason: "one_shot_completed" },
+          sessionLogger,
+        )
+        await setConnectionMode(id, "history", false)
+        await emitDiagnostic(id, "session_completed_one_shot", undefined, sessionLogger)
+        await treeKill(agentProcess)
+        await waitForAgentProcessExit(agentProcess)
         const sessionDocument = db.sessions.get(id) ?? null
         if (!sessionDocument) {
           throw new IpcClientError("Session not found")
         }
         return sessionDocument
-      } catch (error) {
-        logger.log("session.launch_failed", {
-          sessionId: id,
-          ...sessionLogContext,
-          errorMessage: error instanceof Error ? error.message : String(error),
-        })
-        if (!existingSession) {
-          const messagesRecord =
-            db.sessionMessages.first({
-              where: { sessionId: id },
-            }) ?? null
-          if (messagesRecord) {
-            await Promise.resolve(db.sessionMessages.delete(messagesRecord.id)).catch(() => {})
+      }
+
+      const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
+        onChunk: (chunk) => {
+          if (chunk.byteLength === 0) {
+            return
           }
-          const diagnosticsRecord =
-            db.sessionDiagnostics.first({
-              where: { sessionId: id },
-            }) ?? null
-          if (diagnosticsRecord) {
-            await Promise.resolve(db.sessionDiagnostics.delete(diagnosticsRecord.id)).catch(
-              () => {},
+
+          sessionLogger.log("agent.chunk_read", {
+            preview: createChunkPreview(chunk),
+          })
+        },
+        onMessageError: (error) => {
+          sessionLogger.log("agent.message_handler_failed", {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        },
+      })
+      const writer = connection.getWriter()
+      const activeSession: ActiveSession = {
+        id,
+        acpSessionId: initialized.acpSessionId,
+        logger: sessionLogger,
+        token,
+        process: agentProcess,
+        writer,
+        subscription: { close: async () => {} },
+        status: initialized.status,
+        history: initialHistory,
+        isFirstPrompt: initialized.isFirstPrompt,
+        systemPrompt: params.request.systemPrompt,
+        lastPermissionRequest: null,
+        clientRequests: new Map(),
+        pendingPrompts: new Map(),
+      }
+
+      activeSession.subscription = connection.subscribe(async (message) => {
+        activeSession.logger.log("agent.message_read", {
+          direction: "read",
+          hasId: "id" in message && message.id != null,
+          method: "method" in message ? message.method : undefined,
+          message: createPayloadPreview(message),
+        })
+        if (
+          isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
+        ) {
+          activeSession.lastPermissionRequest = message
+        } else if ("id" in message && message.id != null) {
+          const clientRequest = activeSession.clientRequests.get(message.id)
+          const nextStatus = sessionStatusFromAgentMessage(clientRequest, message)
+          if (nextStatus) {
+            await updateSession(
+              activeSession.id,
+              { status: nextStatus },
+              {
+                reason: "agent_message",
+                requestMethod: clientRequest?.method,
+                responseId: message.id,
+              },
             )
           }
+          if (clientRequest) {
+            activeSession.clientRequests.delete(message.id)
+          }
+          settlePendingPrompt(activeSession, message)
         }
-        throw error
+
+        await appendHistory(activeSession.id, message)
+        input.publish(activeSession.id, message)
+      })
+
+      const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
+        activeSessions.delete(activeSession.id)
+        rejectPendingPrompts(
+          activeSession,
+          new Error(`Session ${activeSession.id} ended before the prompt completed.`),
+        )
+        await activeSession.writer.close().catch(() => {})
+        await activeSession.subscription.close().catch(() => {})
+
+        const nextUpdate: Partial<KindInput<typeof db.schema.sessions>> = {}
+        if (code !== 0 && code !== null) {
+          nextUpdate.status = "error"
+          nextUpdate.errorMessage = `Exited with code ${code}`
+        } else if (isErrorSignal(signal)) {
+          nextUpdate.status = "error"
+          nextUpdate.errorMessage = `Killed by ${signal}`
+        } else if (activeSession.status !== "done") {
+          nextUpdate.status = "cancelled"
+        }
+        nextUpdate.token = null
+        nextUpdate.permissions = null
+
+        await setConnectionMode(
+          activeSession.id,
+          archivedConnectionMode(activeSession.history.length),
+          false,
+        )
+        await emitDiagnostic(
+          activeSession.id,
+          "agent_process_exit",
+          {
+            code,
+            signal,
+            nextStatus: nextUpdate.status ?? activeSession.status,
+          },
+          activeSession.logger,
+        )
+        if (Object.keys(nextUpdate).length > 0) {
+          await updateSession(activeSession.id, nextUpdate, {
+            reason: "agent_process_exit",
+            code,
+            signal,
+          }).catch(() => {})
+        }
       }
-    })
+
+      agentProcess.onceExit((code, signal) => {
+        void handleExit(code, signal)
+      })
+
+      activeSessions.set(activeSession.id, activeSession)
+      const sessionDocument = db.sessions.get(id) ?? null
+      if (!sessionDocument) {
+        throw new IpcClientError("Session not found")
+      }
+      return sessionDocument
+    } catch (error) {
+      sessionLogger.log("session.launch_failed", {
+        sessionId: id,
+        ...sessionLogContext,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+      if (!existingSession) {
+        const messagesRecord =
+          db.sessionMessages.first({
+            where: { sessionId: id },
+          }) ?? null
+        if (messagesRecord) {
+          await Promise.resolve(db.sessionMessages.delete(messagesRecord.id)).catch(() => {})
+        }
+        const diagnosticsRecord =
+          db.sessionDiagnostics.first({
+            where: { sessionId: id },
+          }) ?? null
+        if (diagnosticsRecord) {
+          await Promise.resolve(db.sessionDiagnostics.delete(diagnosticsRecord.id)).catch(() => {})
+        }
+      }
+      throw error
+    }
   }
 
   async function newSession(params: NewSessionParams): Promise<DaemonSession> {
@@ -1478,7 +1476,8 @@ export function createSessionManager(input: {
 
   async function connectSession(id: SessionId): Promise<DaemonSession> {
     await ready
-    if (!activeSessions.has(id)) {
+    const active = activeSessions.get(id)
+    if (!active) {
       const session = await getSession(id)
       throw new IpcClientError(
         session.connectionMode === "history"
@@ -1487,7 +1486,7 @@ export function createSessionManager(input: {
       )
     }
 
-    await emitDiagnostic(id, "session_connected")
+    await emitDiagnostic(id, "session_connected", undefined, active.logger)
     return getSession(id)
   }
 
@@ -1574,49 +1573,57 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${id} is not active`)
     }
 
-    await SessionContext.run(active.context, async () => {
+    if (
+      active.lastPermissionRequest &&
+      "id" in message &&
+      message.id === active.lastPermissionRequest.id
+    ) {
+      active.lastPermissionRequest = null
+    } else {
+      const nextStatus = sessionStatusFromClientMessage(message, active.status)
+      if (nextStatus) {
+        await updateSession(
+          active.id,
+          { status: nextStatus },
+          {
+            reason: "client_message",
+            method: "method" in message ? message.method : undefined,
+            messageId: "id" in message ? message.id : undefined,
+          },
+        )
+      }
+
       if (
-        active.lastPermissionRequest &&
-        "id" in message &&
-        message.id === active.lastPermissionRequest.id
+        active.isFirstPrompt &&
+        isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)
       ) {
-        active.lastPermissionRequest = null
-      } else {
-        const nextStatus = sessionStatusFromClientMessage(message, active.status)
-        if (nextStatus) {
-          await updateSession(
-            active.id,
-            { status: nextStatus },
-            {
-              reason: "client_message",
-              method: "method" in message ? message.method : undefined,
-              messageId: "id" in message ? message.id : undefined,
-            },
-          )
-        }
-
-        if (
-          active.isFirstPrompt &&
-          isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)
-        ) {
-          active.isFirstPrompt = false
-          message.params = injectSystemPrompt(message.params, active.systemPrompt)
-        }
+        active.isFirstPrompt = false
+        message.params = injectSystemPrompt(message.params, active.systemPrompt)
       }
+    }
 
-      if ("id" in message && message.id != null && "method" in message) {
-        active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
-      }
+    if ("id" in message && message.id != null && "method" in message) {
+      active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
+    }
 
-      logAgentMessage("agent.message_write", message)
-      await appendHistory(active.id, message)
-      await emitDiagnostic(active.id, "session_message_sent", {
+    active.logger.log("agent.message_write", {
+      direction: "write",
+      hasId: "id" in message && message.id != null,
+      method: "method" in message ? message.method : undefined,
+      message: createPayloadPreview(message),
+    })
+    await appendHistory(active.id, message)
+    await emitDiagnostic(
+      active.id,
+      "session_message_sent",
+      {
         hasId: "id" in message && message.id != null,
         method: "method" in message ? message.method : undefined,
-      })
-      input.publish(active.id, message)
-      await active.writer.write(message)
-    })
+      },
+      active.logger,
+    )
+    input.publish(active.id, message)
+    await active.writer.write(message)
   }
 
   async function promptSession(
@@ -1637,23 +1644,21 @@ export function createSessionManager(input: {
       })
     })
 
-    return SessionContext.run(active.context, async () => {
-      try {
-        await sendMessage(id, {
-          jsonrpc: "2.0",
-          id: requestId,
-          method: acp.AGENT_METHODS.session_prompt,
-          params: {
-            sessionId: active.acpSessionId,
-            prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
-          },
-        } satisfies acp.AnyMessage)
-        return await response
-      } catch (error) {
-        active.pendingPrompts.delete(requestId)
-        throw error
-      }
-    })
+    try {
+      await sendMessage(id, {
+        jsonrpc: "2.0",
+        id: requestId,
+        method: acp.AGENT_METHODS.session_prompt,
+        params: {
+          sessionId: active.acpSessionId,
+          prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
+        },
+      } satisfies acp.AnyMessage)
+      return await response
+    } catch (error) {
+      active.pendingPrompts.delete(requestId)
+      throw error
+    }
   }
 
   async function shutdownSession(id: SessionId): Promise<boolean> {
@@ -1663,7 +1668,7 @@ export function createSessionManager(input: {
       return false
     }
 
-    await emitDiagnostic(id, "session_shutdown_requested")
+    await emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     await treeKill(active.process)
     await waitForAgentProcessExit(active.process)
     return true
@@ -1685,7 +1690,12 @@ export function createSessionManager(input: {
   async function close(): Promise<void> {
     await ready
     for (const session of activeSessions.values()) {
-      await emitDiagnostic(session.id, "daemon_shutdown", { status: session.status })
+      await emitDiagnostic(
+        session.id,
+        "daemon_shutdown",
+        { status: session.status },
+        session.logger,
+      )
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
       await session.writer.close().catch(() => {})

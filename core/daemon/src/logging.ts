@@ -1,6 +1,6 @@
+import { AsyncContext } from "@b9g/async-context"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import kleur from "kleur"
-import { randomUUID } from "node:crypto"
 import { inspect } from "node:util"
 import { omit } from "radashi"
 import {
@@ -25,6 +25,12 @@ export type LogWriter = (line: string) => void
 
 /** Supported terminal output modes for daemon logs. */
 export type LogMode = "json" | "pretty" | "verbose"
+
+/** Shared daemon logger surface used across daemon runtime code. */
+export type DaemonLogger = {
+  log: (event: string, fields?: Record<string, unknown>) => void
+  snapshot: () => DaemonLogger
+}
 
 /** Structured preview emitted when long text must be truncated for logs. */
 export type TextPreview = {
@@ -64,23 +70,40 @@ export function configureLogging(options: { writeLine?: LogWriter; mode?: LogMod
 }
 
 /** Creates a daemon logger that follows the current global output mode. */
-export function createLogger(writeLine: LogWriter = defaultWriteLine) {
-  return {
+export function createLogger(
+  writeLine: LogWriter = defaultWriteLine,
+  boundSnapshot: InstanceType<typeof AsyncContext.Snapshot> | null = null,
+) {
+  const logger: DaemonLogger = {
     log(event: string, fields: Record<string, unknown> = {}) {
-      const entry: LogEntry = {
-        scope: "daemon",
-        at: new Date().toISOString(),
-        event,
-        ...readAmbientLogFields(),
-        ...fields,
+      const writeEntry = () => {
+        const entry: LogEntry = {
+          scope: "daemon",
+          at: new Date().toISOString(),
+          event,
+          ...readAmbientLogFields(),
+          ...fields,
+        }
+        const resolvedWriter = writeLine === defaultWriteLine ? logWriter : writeLine
+        resolvedWriter(formatLogEntry(entry, logMode))
       }
-      const resolvedWriter = writeLine === defaultWriteLine ? logWriter : writeLine
-      resolvedWriter(formatLogEntry(entry, logMode))
+
+      if (boundSnapshot) {
+        boundSnapshot.run(writeEntry)
+        return
+      }
+
+      writeEntry()
     },
-    createOpId() {
-      return randomUUID()
+    snapshot() {
+      const nextSnapshot = boundSnapshot
+        ? boundSnapshot.run(() => new AsyncContext.Snapshot())
+        : new AsyncContext.Snapshot()
+      return createLogger(writeLine, nextSnapshot)
     },
   }
+
+  return logger
 }
 
 /** Returns true when daemon logs are rendered in expanded verbose mode. */

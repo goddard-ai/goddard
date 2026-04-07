@@ -394,24 +394,28 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
 
   const startedLog = logs.find((entry) => entry.event === "loop.runtime_started")
   expect(startedLog).toBeTruthy()
-  expect(startedLog?.rootDir).toBe(rootDir)
-  expect(startedLog?.loopName).toBe("review")
-  expect(startedLog?.sessionId).toBe("session-1")
-  expect(startedLog?.acpSessionId).toBe("acp-1")
+  expect((startedLog?.loop as Record<string, unknown> | undefined)?.rootDir).toBe(rootDir)
+  expect((startedLog?.loop as Record<string, unknown> | undefined)?.loopName).toBe("review")
+  expect((startedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe("session-1")
+  expect((startedLog?.loop as Record<string, unknown> | undefined)?.acpSessionId).toBe("acp-1")
 
   const promptCompletedLog = logs.find((entry) => entry.event === "loop.prompt_completed")
   expect(promptCompletedLog).toBeTruthy()
-  expect(promptCompletedLog?.rootDir).toBe(rootDir)
-  expect(promptCompletedLog?.loopName).toBe("review")
-  expect(promptCompletedLog?.sessionId).toBe("session-1")
-  expect(promptCompletedLog?.acpSessionId).toBe("acp-1")
+  expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.rootDir).toBe(rootDir)
+  expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.loopName).toBe("review")
+  expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe(
+    "session-1",
+  )
+  expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.acpSessionId).toBe(
+    "acp-1",
+  )
 
   const stoppedLog = logs.find((entry) => entry.event === "loop.runtime_stopped")
   expect(stoppedLog).toBeTruthy()
-  expect(stoppedLog?.rootDir).toBe(rootDir)
-  expect(stoppedLog?.loopName).toBe("review")
-  expect(stoppedLog?.sessionId).toBe("session-1")
-  expect(stoppedLog?.acpSessionId).toBe("acp-1")
+  expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.rootDir).toBe(rootDir)
+  expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.loopName).toBe("review")
+  expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe("session-1")
+  expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.acpSessionId).toBe("acp-1")
 
   expect(runtime.getStatus()).toEqual(
     expect.objectContaining({

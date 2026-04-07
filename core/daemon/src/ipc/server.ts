@@ -6,6 +6,7 @@ import type {
   SubscribeDaemonWorkforceEventsRequest,
 } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
@@ -449,7 +450,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-  } satisfies Handlers<typeof daemonIpcSchema, DaemonIpcRequestContext>
+  } satisfies Handlers<typeof daemonIpcSchema, IpcRequestContext>
   const scopedRequestHandlers = Object.fromEntries(
     Object.entries(requestHandlers).map(([name, handler]) => [
       name,
@@ -470,7 +471,7 @@ export async function startDaemonServer(
     {
       createRequestContext: ({ payload }) => {
         const context: IpcRequestContext = {
-          opId: logger.createOpId(),
+          opId: randomUUID(),
           sessionId: readSessionIdForLog(payload) ?? null,
           setSessionId(sessionId: DaemonSession["id"]) {
             context.sessionId = sessionId

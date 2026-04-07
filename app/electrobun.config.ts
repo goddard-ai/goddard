@@ -13,6 +13,7 @@ export default {
   build: {
     bun: {
       entrypoint: "src/bun/index.ts",
+      tsconfig: "src/bun/tsconfig.json",
     },
     copy: {
       dist: "views/main",

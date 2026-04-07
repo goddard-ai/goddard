@@ -922,10 +922,16 @@ test("workforce runtime logs request-to-session correlation for launched session
 
   const launchLog = logs.find((entry) => entry.event === "workforce.session_launch_started")
   expect(launchLog).toBeTruthy()
-  expect(launchLog?.rootDir).toBe(rootDir)
-  expect(launchLog?.agentId).toBe("root")
-  expect(launchLog?.attempt).toBe(1)
-  expect(typeof launchLog?.requestId).toBe("string")
+  expect((launchLog?.workforceDispatch as Record<string, unknown> | undefined)?.rootDir).toBe(
+    rootDir,
+  )
+  expect((launchLog?.workforceDispatch as Record<string, unknown> | undefined)?.agentId).toBe(
+    "root",
+  )
+  expect((launchLog?.workforceDispatch as Record<string, unknown> | undefined)?.attempt).toBe(1)
+  expect(
+    typeof (launchLog?.workforceDispatch as Record<string, unknown> | undefined)?.requestId,
+  ).toBe("string")
 
   const completedLog = logs.find(
     (entry) =>
@@ -933,9 +939,15 @@ test("workforce runtime logs request-to-session correlation for launched session
   )
   expect(completedLog).toBeTruthy()
   expect(completedLog?.acpSessionId).toBe("acp-session-1")
-  expect(completedLog?.rootDir).toBe(rootDir)
-  expect(completedLog?.agentId).toBe("root")
-  expect(typeof completedLog?.requestId).toBe("string")
+  expect((completedLog?.workforceDispatch as Record<string, unknown> | undefined)?.rootDir).toBe(
+    rootDir,
+  )
+  expect((completedLog?.workforceDispatch as Record<string, unknown> | undefined)?.agentId).toBe(
+    "root",
+  )
+  expect(
+    typeof (completedLog?.workforceDispatch as Record<string, unknown> | undefined)?.requestId,
+  ).toBe("string")
 
   const respondedLog = logs.find((entry) => entry.event === "workforce.request_responded")
   expect(respondedLog).toBeTruthy()
@@ -946,7 +958,7 @@ test("workforce runtime logs request-to-session correlation for launched session
     "root",
   )
   expect((respondedLog?.workforceActor as Record<string, unknown> | undefined)?.requestId).toBe(
-    completedLog?.requestId,
+    (completedLog?.workforceDispatch as Record<string, unknown> | undefined)?.requestId,
   )
 })
 

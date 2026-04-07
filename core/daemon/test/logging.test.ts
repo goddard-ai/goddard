@@ -95,3 +95,57 @@ test("json logging preserves null-valued daemon context fields", () => {
     worktreePoweredBy: null,
   })
 })
+
+test("snapshot logger preserves captured async context outside the original run", () => {
+  const output: string[] = []
+  const restoreLogging = configureLogging({
+    mode: "json",
+    writeLine: (line) => {
+      output.push(line)
+    },
+  })
+
+  try {
+    const logger = IpcRequestContext.run(
+      {
+        opId: "op-1",
+        sessionId: null,
+        setSessionId: () => {},
+      },
+      () =>
+        SessionContext.run(
+          {
+            sessionId: "ses_456",
+            acpSessionId: "acp_456",
+            cwd: "/snapshot-workspace",
+            repository: "acme/repo",
+            prNumber: 12,
+            worktreeDir: null,
+            worktreePoweredBy: null,
+          },
+          () => createLogger().snapshot(),
+        ),
+    )
+
+    logger.log("example.snapshot")
+  } finally {
+    restoreLogging()
+  }
+
+  expect(output).toHaveLength(1)
+
+  const entry = JSON.parse(output[0] ?? "") as Record<string, unknown>
+  expect(entry.ipcRequest).toEqual({
+    opId: "op-1",
+    sessionId: null,
+  })
+  expect(entry.session).toEqual({
+    sessionId: "ses_456",
+    acpSessionId: "acp_456",
+    cwd: "/snapshot-workspace",
+    repository: "acme/repo",
+    prNumber: 12,
+    worktreeDir: null,
+    worktreePoweredBy: null,
+  })
+})

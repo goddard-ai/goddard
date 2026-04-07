@@ -222,18 +222,22 @@ test("daemon run subscribes once, handles events across repositories, and passes
     logs.some(
       (entry) =>
         entry.event === "one_shot.launch" &&
-        entry.repository === "test/repo" &&
-        entry.prNumber === 123 &&
-        entry.feedbackType === "comment",
+        typeof entry.feedbackEvent === "object" &&
+        entry.feedbackEvent !== null &&
+        (entry.feedbackEvent as Record<string, unknown>).repository === "test/repo" &&
+        (entry.feedbackEvent as Record<string, unknown>).prNumber === 123 &&
+        (entry.feedbackEvent as Record<string, unknown>).feedbackType === "comment",
     ),
   ).toBe(true)
   expect(
     logs.some(
       (entry) =>
         entry.event === "one_shot.finish" &&
-        entry.repository === "test/repo" &&
-        entry.prNumber === 123 &&
-        entry.feedbackType === "comment",
+        typeof entry.feedbackEvent === "object" &&
+        entry.feedbackEvent !== null &&
+        (entry.feedbackEvent as Record<string, unknown>).repository === "test/repo" &&
+        (entry.feedbackEvent as Record<string, unknown>).prNumber === 123 &&
+        (entry.feedbackEvent as Record<string, unknown>).feedbackType === "comment",
     ),
   ).toBe(true)
   expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)

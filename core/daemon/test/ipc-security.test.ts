@@ -57,6 +57,8 @@ test("daemon submit request requires a valid session token", async () => {
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
   const failed = logs.find((entry) => entry.event === "ipc.request_failed")
+  const receivedIpcRequest = received?.ipcRequest as Record<string, unknown> | undefined
+  const failedIpcRequest = failed?.ipcRequest as Record<string, unknown> | undefined
   expect(received?.requestName).toBe("prSubmit")
   expect(received?.payload).toEqual({
     token: "[REDACTED]",
@@ -64,7 +66,7 @@ test("daemon submit request requires a valid session token", async () => {
     title: "Ship daemon security",
     body: "Done.",
   })
-  expect(received?.opId).toBe(failed?.opId)
+  expect(receivedIpcRequest?.opId).toBe(failedIpcRequest?.opId)
   expect(failed?.requestName).toBe("prSubmit")
 })
 
@@ -219,11 +221,13 @@ test("daemon submit request enforces trusted repo context and records created PR
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
   const responded = logs.find((entry) => entry.event === "ipc.response_sent")
+  const receivedIpcRequest = received?.ipcRequest as Record<string, unknown> | undefined
+  const respondedIpcRequest = responded?.ipcRequest as Record<string, unknown> | undefined
   expect(received?.requestName).toBe("prSubmit")
   expect(responded?.requestName).toBe("prSubmit")
-  expect(received?.opId).toBe(responded?.opId)
-  expect(received?.sessionId).toBeUndefined()
-  expect(responded?.sessionId).toBe("ses_42")
+  expect(receivedIpcRequest?.opId).toBe(respondedIpcRequest?.opId)
+  expect(receivedIpcRequest?.sessionId).toBeNull()
+  expect(respondedIpcRequest?.sessionId).toBe("ses_42")
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
