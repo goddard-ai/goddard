@@ -1,7 +1,7 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { SvgIcon } from "~/svg-icon.tsx"
 import { useProjectRegistry } from "~/app-state-context.tsx"
+import { GoodIcon } from "~/lib/good-icon.tsx"
 import { lookupProject } from "./project-registry.ts"
 
 const pageClass = css({
@@ -75,7 +75,7 @@ export function ProjectPage(props: { projectPath: string }) {
       <section class={cardClass}>
         <div class={badgeClass}>
           <span class={css({ width: "14px", height: "14px" })}>
-            <SvgIcon name="tabs/projects" height="14px" width="14px" />
+            <GoodIcon name="tabs/projects" height="14px" width="14px" />
           </span>
           Tab
         </div>

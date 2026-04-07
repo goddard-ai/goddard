@@ -18,7 +18,7 @@ type ParsedInlineSvg = {
 const parsedInlineSvgs = new Map<string, ParsedInlineSvg>()
 
 /** Renders either one generated spritemap icon or one inline SVG string. */
-export function SvgIcon(props: SvgIconSource & JSX.IntrinsicElements["svg"]) {
+export function GoodIcon(props: SvgIconSource & JSX.IntrinsicElements["svg"]) {
   const svgProps = getSvgElementProps(props)
 
   if (props.data !== undefined) {

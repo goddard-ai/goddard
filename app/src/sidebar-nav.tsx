@@ -3,8 +3,8 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { GoodTooltip } from "./support/good-tooltip.tsx"
-import { SvgIcon } from "./svg-icon.tsx"
+import { GoodIcon } from "./lib/good-icon.tsx"
+import { GoodTooltip } from "./lib/good-tooltip.tsx"
 import type { NavigationItem, NavigationItemId } from "./navigation.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 
@@ -162,7 +162,7 @@ function SidebarNavItem(props: {
         }}
       >
         <span class={css({ width: "20px", height: "20px" })}>
-          <SvgIcon
+          <GoodIcon
             aria-hidden={props.isFocused ? undefined : true}
             aria-label={props.isFocused ? props.item.label : undefined}
             name={getWorkbenchTabIcon(props.item.id)}

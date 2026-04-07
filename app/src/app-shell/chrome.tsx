@@ -2,12 +2,12 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
-import { formatBadgeCount, type AppShellTopbarAction } from "./config.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
+import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
-import { SvgIcon, type SvgIconName } from "~/svg-icon.tsx"
 import { getWorkbenchTabIcon, type WorkbenchTab } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
+import { formatBadgeCount, type AppShellTopbarAction } from "./config.ts"
 
 const actionButtonClass = css({
   position: "relative",
@@ -680,7 +680,7 @@ function InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
     : [props.size, props.size]
 
   return (
-    <SvgIcon
+    <GoodIcon
       class={css({
         display: "inline-block",
         flexShrink: "0",
