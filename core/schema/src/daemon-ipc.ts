@@ -20,6 +20,7 @@ import {
   SubmitPrDaemonRequest,
 } from "./daemon/pull-requests.ts"
 import {
+  type CancelDaemonSessionResponse,
   type CreateDaemonSessionResponse,
   type GetDaemonSessionDiagnosticsResponse,
   type GetDaemonSessionHistoryResponse,
@@ -28,11 +29,14 @@ import {
   type GetDaemonSessionWorktreeResponse,
   type ListDaemonSessionsResponse,
   type ShutdownDaemonSessionResponse,
+  type SteerDaemonSessionResponse,
+  CancelDaemonSessionRequest,
   CreateDaemonSessionRequest,
   DaemonSessionMessageEvent,
   ListDaemonSessionsRequest,
   ResolveDaemonSessionTokenRequest,
   SendDaemonSessionMessageRequest,
+  SteerDaemonSessionRequest,
 } from "./daemon/sessions.ts"
 import {
   type DiscoverDaemonWorkforceCandidatesResponse,
@@ -124,6 +128,14 @@ export const daemonIpcSchema = {
     sessionShutdown: {
       payload: DaemonSessionIdParams,
       response: $type<ShutdownDaemonSessionResponse>(),
+    },
+    sessionCancel: {
+      payload: CancelDaemonSessionRequest,
+      response: $type<CancelDaemonSessionResponse>(),
+    },
+    sessionSteer: {
+      payload: SteerDaemonSessionRequest,
+      response: $type<SteerDaemonSessionResponse>(),
     },
     sessionSend: {
       payload: SendDaemonSessionMessageRequest,

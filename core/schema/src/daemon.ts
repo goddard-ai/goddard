@@ -21,6 +21,9 @@ export type {
 } from "./daemon/pull-requests.ts"
 export type { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
 export type {
+  AbortedDaemonSessionPrompt,
+  CancelDaemonSessionRequest,
+  CancelDaemonSessionResponse,
   CreateDaemonSessionRequest,
   CreateDaemonSessionResponse,
   DaemonSessionMessageEvent,
@@ -43,6 +46,8 @@ export type {
   SendDaemonSessionMessageRequest,
   SessionWorkforceParams,
   ShutdownDaemonSessionResponse,
+  SteerDaemonSessionRequest,
+  SteerDaemonSessionResponse,
 } from "./daemon/sessions.ts"
 export type {
   CancelDaemonWorkforceRequest,

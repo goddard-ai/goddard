@@ -75,6 +75,11 @@ export const DaemonSessionPathParams = DaemonSessionIdParams
 
 export type DaemonSessionPathParams = z.infer<typeof DaemonSessionPathParams>
 
+/** JSON-RPC request ids surfaced for queued and aborted prompt bookkeeping. */
+export const DaemonSessionPromptId = z.union([z.string(), z.number()])
+
+export type DaemonSessionPromptId = z.infer<typeof DaemonSessionPromptId>
+
 /** Request payload used to forward one raw ACP message to a daemon-managed session. */
 export const SendDaemonSessionMessageRequest = z.object({
   id: DaemonSessionId,
@@ -94,6 +99,26 @@ export const ResolveDaemonSessionTokenRequest = z.object({
 
 /** Compile-time shape used to resolve one daemon session token into its daemon session id. */
 export type ResolveDaemonSessionTokenRequest = z.infer<typeof ResolveDaemonSessionTokenRequest>
+
+/** One queued prompt payload surfaced back to clients after daemon-side cancellation. */
+export const AbortedDaemonSessionPrompt = z.object({
+  requestId: DaemonSessionPromptId,
+  prompt: z.array(z.custom<acp.ContentBlock>()),
+})
+
+export type AbortedDaemonSessionPrompt = z.infer<typeof AbortedDaemonSessionPrompt>
+
+/** Request payload used to cancel the active turn for one daemon-managed session. */
+export const CancelDaemonSessionRequest = DaemonSessionIdParams
+
+export type CancelDaemonSessionRequest = z.infer<typeof CancelDaemonSessionRequest>
+
+/** Request payload used to cancel the active turn and replace it with one new prompt. */
+export const SteerDaemonSessionRequest = DaemonSessionIdParams.extend({
+  prompt: InitialPromptOption,
+})
+
+export type SteerDaemonSessionRequest = z.infer<typeof SteerDaemonSessionRequest>
 
 /** Stream payload emitted for one daemon-managed ACP session message. */
 export const DaemonSessionMessageEvent = z.object({
@@ -206,4 +231,18 @@ export type GetDaemonSessionWorkforceResponse = DaemonSessionIdentity & {
 export type ShutdownDaemonSessionResponse = {
   id: DaemonSessionId
   success: boolean
+}
+
+/** Response payload returned after one daemon-managed session turn cancellation. */
+export type CancelDaemonSessionResponse = {
+  id: string
+  activeTurnCancelled: boolean
+  abortedQueue: AbortedDaemonSessionPrompt[]
+}
+
+/** Response payload returned after one daemon-managed session steer request. */
+export type SteerDaemonSessionResponse = {
+  id: string
+  abortedQueue: AbortedDaemonSessionPrompt[]
+  response: acp.PromptResponse
 }

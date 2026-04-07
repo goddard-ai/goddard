@@ -81,9 +81,21 @@
 - `Prompt Response`
   - The agent's protocol-level answer to a prompt request.
   - Why: so the daemon can distinguish completed turns from work that is still underway.
+- `Prompt Queue`
+  - The daemon-owned FIFO list of prompts waiting to be sent into one live session.
+  - Why: so multiple callers can target the same session without racing prompt delivery directly against the agent transport.
+  - Queued raw ACP prompts that are cancelled before dispatch are completed with a terminal protocol error instead of being left unresolved.
+- `Aborted Queue`
+  - The ordered set of queued prompts removed by a daemon-owned cancel or steer action before they were sent.
+  - Why: so callers can decide whether to replay those prompts explicitly instead of having the daemon do it silently after cancellation.
 - `Session Cancellation`
   - The explicit signal that active session work should stop before normal completion.
   - Why: so callers can end work intentionally instead of waiting for the agent runtime to finish on its own.
+  - Daemon-owned cancellation also surfaces the aborted queue so higher-level callers can choose whether to resubmit those prompts later.
+- `Session Steering`
+  - A daemon-owned cancel-and-reprompt flow that waits for a safe session boundary before injecting the replacement prompt.
+  - Why: so client surfaces can redirect active work without hand-rolling cancellation timing against raw ACP traffic.
+  - The safe boundary is the first post-cancel tool-call update or the cancelled prompt's final response, not just any streamed session update.
 - `Repository Scope`
   - The repository ownership context attached to a session, including optional pull request limits.
   - Why: so session permissions can be constrained to the repository context the session is meant to operate within.

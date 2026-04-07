@@ -35,7 +35,15 @@ export class AgentSession {
 
   /** Cancels any currently pending agent work. */
   async cancel() {
-    return this.acpClient.cancel({ sessionId: this.acpSessionId })
+    return this.daemonClient.send("sessionCancel", { id: this.sessionId })
+  }
+
+  /** Cancels the active turn and replaces it with one new prompt once the daemon observes a safe boundary. */
+  async steer(userPrompt: string | acp.ContentBlock[]) {
+    return this.daemonClient.send("sessionSteer", {
+      id: this.sessionId,
+      prompt: typeof userPrompt === "string" ? userPrompt : [...userPrompt],
+    })
   }
 
   /** Sets the active model for the connected agent session. */

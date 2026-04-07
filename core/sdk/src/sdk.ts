@@ -2,6 +2,10 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
+import type {
+  CancelDaemonSessionRequest,
+  SteerDaemonSessionRequest,
+} from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "@goddard-ai/schema/session-server"
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
@@ -112,7 +116,10 @@ function createSessionNamespace(client: DaemonIpcClient) {
 
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
     shutdown: async (input: DaemonSessionIdParams) => client.send("sessionShutdown", input),
-
+    /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
+    cancel: async (input: CancelDaemonSessionRequest) => client.send("sessionCancel", input),
+    /** Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary. */
+    steer: async (input: SteerDaemonSessionRequest) => client.send("sessionSteer", input),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
     send: async (input: SessionSendInput) => client.send("sessionSend", input),
 
@@ -127,7 +134,8 @@ function createSessionNamespace(client: DaemonIpcClient) {
     },
 
     /** Resolves one daemon session token to its daemon session id. */
-    resolveToken: async (input: SessionResolveTokenInput) => client.send("sessionResolveToken", input),
+    resolveToken: async (input: SessionResolveTokenInput) =>
+      client.send("sessionResolveToken", input),
   }
 }
 

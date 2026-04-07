@@ -31,7 +31,7 @@ Use `@goddard-ai/sdk` when you need to:
 - Work from a browser-safe or other non-Node host with an explicit daemon client.
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
-- Keep a stable `AgentSession` object for prompts, cancellation, history, shutdown, and model changes.
+- Keep a stable `AgentSession` object for prompts, daemon-owned turn cancellation, steering, history, shutdown, and model changes.
 - Subscribe to live daemon-filtered session updates through `sdk.session.subscribe(...)`.
 
 Use `@goddard-ai/sdk/node` when you need to:

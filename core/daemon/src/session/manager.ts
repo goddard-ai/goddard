@@ -5,8 +5,9 @@ import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
+  AbortedDaemonSessionPrompt,
+  CancelDaemonSessionResponse,
   CreateDaemonSessionRequest,
-  DaemonDiagnosticEvent,
   DaemonSession,
   DaemonSessionConnection,
   DaemonSessionMetadata,
@@ -16,6 +17,7 @@ import type {
   GetDaemonSessionWorktreeResponse,
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
+  SteerDaemonSessionResponse,
 } from "@goddard-ai/schema/daemon"
 import { InitialPromptOption } from "@goddard-ai/schema/daemon/sessions"
 import type { SessionStatus } from "@goddard-ai/schema/db"
@@ -79,6 +81,9 @@ type SessionId = DaemonSession["id"]
 type PersistedSessionRecord = KindOutput<typeof db.schema.sessions> & {
   acpSessionId: string
 }
+const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
+const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
+  "Queued prompt aborted before dispatch by session cancellation."
 
 /** Returns true when one filesystem path currently exists. */
 async function pathExists(path: string): Promise<boolean> {
@@ -109,6 +114,31 @@ type PermissionRequest = acp.AnyMessage & {
 /** Captures prompt requests so their responses can drive status transitions. */
 type PromptRequestMessage = acp.AnyMessage & {
   params: acp.PromptRequest
+}
+
+/** Narrows one agent notification to a structured session update payload. */
+type SessionUpdateMessage = acp.AnyMessage & {
+  params: acp.SessionNotification
+}
+
+/** Queue-backed prompt request owned by the daemon until it is sent or aborted. */
+type QueuedPromptEntry = {
+  requestId: string | number
+  prompt: acp.ContentBlock[]
+  source: "client" | "daemon"
+  resolve?: (response: acp.PromptResponse) => void
+  reject?: (error: Error) => void
+}
+
+/** Deferred steer request waiting for a safe boundary before dispatch. */
+type PendingSteerRequest = {
+  requestId: string
+  cancelledRequestId: string | number
+  prompt: acp.ContentBlock[]
+  abortedQueue: AbortedDaemonSessionPrompt[]
+  waitingForBoundary: boolean
+  resolve: (response: SteerDaemonSessionResponse) => void
+  reject: (error: Error) => void
 }
 
 /** Pending daemon-owned prompt request waiting for the agent response frame. */
@@ -151,6 +181,9 @@ type ActiveSession = {
   lastPermissionRequest: PermissionRequest | null
   clientRequests: ClientRequestMap
   pendingPrompts: Map<string | number, PendingPromptRequest>
+  promptQueue: QueuedPromptEntry[]
+  blockingPromptRequestId: string | number | null
+  pendingSteer: PendingSteerRequest | null
 }
 
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
@@ -181,6 +214,11 @@ export type SessionManager = {
   getWorktree: (id: SessionId) => Promise<GetDaemonSessionWorktreeResponse>
   getWorkforce: (id: SessionId) => Promise<GetDaemonSessionWorkforceResponse>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
+  cancelSessionTurn: (id: SessionId) => Promise<CancelDaemonSessionResponse>
+  steerSession: (
+    id: SessionId,
+    prompt: string | acp.ContentBlock[],
+  ) => Promise<SteerDaemonSessionResponse>
   promptSession: (id: SessionId, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
   shutdownSession: (id: SessionId) => Promise<boolean>
   resolveSessionIdByToken: (token: string) => Promise<SessionId>
@@ -207,11 +245,11 @@ function createInitialPromptRequest(params: {
   isFirstPrompt: boolean
   systemPrompt: string
 }) {
-  const promptRequest = {
+  const promptRequest: acp.PromptRequest = {
     sessionId: params.sessionId,
     prompt:
       typeof params.prompt === "string" ? [{ type: "text", text: params.prompt }] : params.prompt,
-  } satisfies acp.PromptRequest
+  }
 
   return params.isFirstPrompt
     ? injectSystemPrompt(promptRequest, params.systemPrompt)
@@ -605,13 +643,12 @@ async function initializeSession(params: {
         async requestPermission() {
           return { outcome: { outcome: "cancelled" } }
         },
-        async sessionUpdate(params: any) {
-          const message = {
+        async sessionUpdate(params) {
+          history.push({
             jsonrpc: "2.0",
             method: acp.CLIENT_METHODS.session_update,
             params,
-          } satisfies acp.AnyMessage
-          history.push(message)
+          })
         },
       }),
       stream,
@@ -753,15 +790,32 @@ function buildSessionContext(params: {
   return sessionContext
 }
 
-/** Creates a normalized diagnostic record for persistence and log correlation. */
-function createDiagnosticEvent(
-  type: string,
-  detail?: Record<string, unknown>,
-): SessionDiagnosticEvent {
+/** Logs ACP messages in a structured form without dumping full payloads verbatim. */
+function logAgentMessage(
+  diagnosticLogger: ReturnType<typeof createLogger>,
+  event: "agent.message_read" | "agent.message_write",
+  sessionId: SessionId,
+  acpSessionId: string | undefined,
+  message: acp.AnyMessage,
+): void {
+  diagnosticLogger.log(event, {
+    sessionId,
+    acpSessionId,
+    direction: event === "agent.message_read" ? "read" : "write",
+    hasId: "id" in message && message.id != null,
+    method: "method" in message ? message.method : undefined,
+    message: createPayloadPreview(message),
+  })
+}
+
+/** Normalizes one queued prompt back into the client-facing aborted-queue payload. */
+function toAbortedQueuedPrompt(entry: {
+  requestId: string | number
+  prompt: acp.ContentBlock[]
+}): AbortedDaemonSessionPrompt {
   return {
-    type,
-    at: new Date().toISOString(),
-    detail,
+    requestId: entry.requestId,
+    prompt: [...entry.prompt],
   }
 }
 
@@ -789,6 +843,14 @@ function rejectPendingPrompts(active: ActiveSession, error: Error): void {
     pending.reject(error)
   }
   active.pendingPrompts.clear()
+  for (const queued of active.promptQueue) {
+    queued.reject?.(error)
+  }
+  active.promptQueue.length = 0
+  if (active.pendingSteer) {
+    active.pendingSteer.reject(error)
+    active.pendingSteer = null
+  }
 }
 
 /** Formats one JSON-RPC error payload into a stable daemon error message. */
@@ -897,7 +959,11 @@ export function createSessionManager(input: {
     detail?: Record<string, unknown>,
     diagnosticLogger: ReturnType<typeof createLogger> = logger,
   ): Promise<void> {
-    const event = createDiagnosticEvent(type, detail)
+    const event: SessionDiagnosticEvent = {
+      type,
+      at: new Date().toISOString(),
+      detail,
+    }
     diagnosticLogger.log(type, { sessionId, ...detail })
     const diagnosticsRecord =
       db.sessionDiagnostics.first({
@@ -1005,6 +1071,259 @@ export function createSessionManager(input: {
         }
       }),
     )
+  }
+
+  function normalizePrompt(prompt: string | acp.ContentBlock[]): acp.ContentBlock[] {
+    return typeof prompt === "string" ? [{ type: "text", text: prompt }] : [...prompt]
+  }
+
+  async function publishSessionMessage(
+    active: ActiveSession,
+    message: acp.AnyMessage,
+  ): Promise<void> {
+    await appendHistory(active.id, message)
+    input.publish(active.id, message)
+  }
+
+  async function writeImmediateMessage(
+    active: ActiveSession,
+    message: acp.AnyMessage,
+    options: {
+      updateStatus?: boolean
+    } = {},
+  ): Promise<void> {
+    if (
+      active.lastPermissionRequest &&
+      "id" in message &&
+      message.id === active.lastPermissionRequest.id
+    ) {
+      active.lastPermissionRequest = null
+    } else if (options.updateStatus !== false) {
+      const nextStatus = sessionStatusFromClientMessage(message, active.status)
+      if (nextStatus) {
+        await updateSession(
+          active.id,
+          { status: nextStatus },
+          {
+            reason: "client_message",
+            method: "method" in message ? message.method : undefined,
+            messageId: "id" in message ? message.id : undefined,
+          },
+        )
+      }
+    }
+
+    if (
+      active.isFirstPrompt &&
+      isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)
+    ) {
+      active.isFirstPrompt = false
+      message.params = injectSystemPrompt(message.params, active.systemPrompt)
+    }
+
+    if ("id" in message && message.id != null && "method" in message) {
+      active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
+    }
+
+    logAgentMessage(active.logger, "agent.message_write", active.id, active.acpSessionId, message)
+    await emitDiagnostic(
+      active.id,
+      "session_message_sent",
+      {
+        hasId: "id" in message && message.id != null,
+        method: "method" in message ? message.method : undefined,
+      },
+      active.logger,
+    )
+    await publishSessionMessage(active, message)
+    await active.writer.write(message)
+  }
+
+  async function processPromptQueue(active: ActiveSession): Promise<void> {
+    if (active.blockingPromptRequestId !== null || active.pendingSteer?.waitingForBoundary) {
+      return
+    }
+
+    const nextPrompt = active.promptQueue.shift()
+    if (!nextPrompt) {
+      return
+    }
+
+    const message = {
+      jsonrpc: "2.0",
+      id: nextPrompt.requestId,
+      method: acp.AGENT_METHODS.session_prompt,
+      params: {
+        sessionId: active.acpSessionId,
+        prompt: [...nextPrompt.prompt],
+      },
+    } satisfies acp.AnyMessage & {
+      id: string | number
+      method: string
+      params: acp.PromptRequest
+    }
+    // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
+    active.blockingPromptRequestId = nextPrompt.requestId
+
+    if (nextPrompt.resolve || nextPrompt.reject) {
+      active.pendingPrompts.set(nextPrompt.requestId, {
+        resolve: nextPrompt.resolve ?? (() => {}),
+        reject: nextPrompt.reject ?? (() => {}),
+      })
+    }
+
+    try {
+      await writeImmediateMessage(active, message)
+    } catch (error) {
+      if (active.blockingPromptRequestId === nextPrompt.requestId) {
+        active.blockingPromptRequestId = null
+      }
+      active.pendingPrompts.delete(nextPrompt.requestId)
+      nextPrompt.reject?.(error instanceof Error ? error : new Error(String(error)))
+      throw error
+    }
+  }
+
+  async function abortQueuedPrompts(
+    active: ActiveSession,
+    reason: string,
+    options: {
+      includePendingSteer?: boolean
+    } = {},
+  ): Promise<AbortedDaemonSessionPrompt[]> {
+    const abortedQueue: AbortedDaemonSessionPrompt[] = []
+
+    if (options.includePendingSteer && active.pendingSteer) {
+      const pendingSteer = active.pendingSteer
+      active.pendingSteer = null
+      abortedQueue.push(
+        toAbortedQueuedPrompt({
+          requestId: pendingSteer.requestId,
+          prompt: pendingSteer.prompt,
+        }),
+      )
+      pendingSteer.reject(new IpcClientError(reason))
+    }
+
+    while (active.promptQueue.length > 0) {
+      const queuedPrompt = active.promptQueue.shift()!
+      abortedQueue.push(toAbortedQueuedPrompt(queuedPrompt))
+      if (queuedPrompt.source === "client") {
+        // Raw ACP callers need a terminal JSON-RPC response because this prompt never reached the agent.
+        await publishSessionMessage(active, {
+          jsonrpc: "2.0",
+          id: queuedPrompt.requestId,
+          error: {
+            code: QUEUED_PROMPT_ABORTED_ERROR_CODE,
+            message: QUEUED_PROMPT_ABORTED_ERROR_MESSAGE,
+          },
+        })
+        continue
+      }
+
+      queuedPrompt.reject?.(new IpcClientError(reason))
+    }
+
+    return abortedQueue
+  }
+
+  async function sendInternalCancel(
+    active: ActiveSession,
+    options: {
+      updateStatus: boolean
+    },
+  ): Promise<boolean> {
+    if (active.blockingPromptRequestId === null) {
+      return false
+    }
+
+    await writeImmediateMessage(
+      active,
+      {
+        jsonrpc: "2.0",
+        method: acp.AGENT_METHODS.session_cancel,
+        params: {
+          sessionId: active.acpSessionId,
+        },
+      },
+      { updateStatus: options.updateStatus },
+    )
+
+    return true
+  }
+
+  async function cancelSessionTurn(
+    id: SessionId,
+    options: {
+      includePendingSteer?: boolean
+      updateStatus: boolean
+    } = { updateStatus: true },
+  ): Promise<CancelDaemonSessionResponse> {
+    await ready
+    const active = activeSessions.get(id)
+    if (!active) {
+      throw new IpcClientError(`Session ${id} is not active`)
+    }
+
+    const abortedQueue = await abortQueuedPrompts(
+      active,
+      `Queued prompts were aborted for session ${id}.`,
+      {
+        includePendingSteer: options.includePendingSteer ?? true,
+      },
+    )
+    const activeTurnCancelled = await sendInternalCancel(active, {
+      updateStatus: options.updateStatus,
+    })
+
+    await emitDiagnostic(id, "session_turn_cancelled", {
+      activeTurnCancelled,
+      abortedQueueLength: abortedQueue.length,
+    })
+
+    return {
+      id,
+      activeTurnCancelled,
+      abortedQueue,
+    }
+  }
+
+  async function handleSteerBoundary(
+    active: ActiveSession,
+    message: acp.AnyMessage,
+  ): Promise<void> {
+    const steer = active.pendingSteer
+    if (!steer?.waitingForBoundary) {
+      return
+    }
+
+    const reachedBoundary = isAcpRequest<SessionUpdateMessage>(
+      message,
+      acp.CLIENT_METHODS.session_update,
+    )
+      ? message.params.update.sessionUpdate === "tool_call" ||
+        message.params.update.sessionUpdate === "tool_call_update"
+      : "id" in message && message.id != null && message.id === steer.cancelledRequestId
+    if (!reachedBoundary) {
+      return
+    }
+
+    steer.waitingForBoundary = false
+    if (active.blockingPromptRequestId === steer.cancelledRequestId) {
+      active.blockingPromptRequestId = null
+    }
+
+    active.pendingSteer = null
+    try {
+      const response = await promptSession(active.id, steer.prompt)
+      steer.resolve({
+        id: active.id,
+        abortedQueue: steer.abortedQueue,
+        response,
+      })
+    } catch (error) {
+      steer.reject(error instanceof Error ? error : new Error(String(error)))
+    }
   }
 
   async function launchSession(
@@ -1265,6 +1584,8 @@ export function createSessionManager(input: {
           }
 
           sessionLogger.log("agent.chunk_read", {
+            sessionId: id,
+            acpSessionId: initialized.acpSessionId,
             preview: createChunkPreview(chunk),
           })
         },
@@ -1290,20 +1611,26 @@ export function createSessionManager(input: {
         lastPermissionRequest: null,
         clientRequests: new Map(),
         pendingPrompts: new Map(),
+        promptQueue: [],
+        blockingPromptRequestId: null,
+        pendingSteer: null,
       }
 
       activeSession.subscription = connection.subscribe(async (message) => {
-        activeSession.logger.log("agent.message_read", {
-          direction: "read",
-          hasId: "id" in message && message.id != null,
-          method: "method" in message ? message.method : undefined,
-          message: createPayloadPreview(message),
-        })
+        logAgentMessage(
+          activeSession.logger,
+          "agent.message_read",
+          activeSession.id,
+          activeSession.acpSessionId,
+          message,
+        )
         if (
           isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
         ) {
           activeSession.lastPermissionRequest = message
-        } else if ("id" in message && message.id != null) {
+        }
+
+        if ("id" in message && message.id != null) {
           const clientRequest = activeSession.clientRequests.get(message.id)
           const promptRequest = clientRequest
             ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
@@ -1333,10 +1660,15 @@ export function createSessionManager(input: {
             activeSession.clientRequests.delete(message.id)
           }
           settlePendingPrompt(activeSession, message)
+
+          if (message.id === activeSession.blockingPromptRequestId) {
+            activeSession.blockingPromptRequestId = null
+          }
         }
 
-        await appendHistory(activeSession.id, message)
-        input.publish(activeSession.id, message)
+        await publishSessionMessage(activeSession, message)
+        await handleSteerBoundary(activeSession, message)
+        await processPromptQueue(activeSession)
       })
 
       const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
@@ -1526,7 +1858,7 @@ export function createSessionManager(input: {
       events: (diagnosticsRecord?.events ?? []).map((event) => ({
         ...event,
         sessionId: session.id,
-      })) satisfies DaemonDiagnosticEvent[],
+      })),
     }
   }
 
@@ -1571,57 +1903,33 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${id} is not active`)
     }
 
-    if (
-      active.lastPermissionRequest &&
-      "id" in message &&
-      message.id === active.lastPermissionRequest.id
-    ) {
-      active.lastPermissionRequest = null
-    } else {
-      const nextStatus = sessionStatusFromClientMessage(message, active.status)
-      if (nextStatus) {
-        await updateSession(
-          active.id,
-          { status: nextStatus },
-          {
-            reason: "client_message",
-            method: "method" in message ? message.method : undefined,
-            messageId: "id" in message ? message.id : undefined,
-          },
-        )
+    if (isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)) {
+      if ("id" in message === false || message.id == null) {
+        throw new IpcClientError("Queued prompt messages must include a JSON-RPC id")
       }
 
-      if (
-        active.isFirstPrompt &&
-        isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)
-      ) {
-        active.isFirstPrompt = false
-        message.params = injectSystemPrompt(message.params, active.systemPrompt)
-      }
+      active.promptQueue.push({
+        requestId: message.id,
+        prompt: [...message.params.prompt],
+        source: "client",
+      })
+      await emitDiagnostic(active.id, "session_prompt_enqueued", {
+        requestId: message.id,
+        queueLength: active.promptQueue.length,
+      })
+      await processPromptQueue(active)
+      return
     }
 
-    if ("id" in message && message.id != null && "method" in message) {
-      active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
+    if (isAcpRequest(message, acp.AGENT_METHODS.session_cancel)) {
+      await abortQueuedPrompts(active, `Queued prompts were aborted for session ${id}.`, {
+        includePendingSteer: true,
+      })
+      await writeImmediateMessage(active, message)
+      return
     }
 
-    active.logger.log("agent.message_write", {
-      direction: "write",
-      hasId: "id" in message && message.id != null,
-      method: "method" in message ? message.method : undefined,
-      message: createPayloadPreview(message),
-    })
-    await appendHistory(active.id, message)
-    await emitDiagnostic(
-      active.id,
-      "session_message_sent",
-      {
-        hasId: "id" in message && message.id != null,
-        method: "method" in message ? message.method : undefined,
-      },
-      active.logger,
-    )
-    input.publish(active.id, message)
-    await active.writer.write(message)
+    await writeImmediateMessage(active, message)
   }
 
   async function promptSession(
@@ -1636,27 +1944,80 @@ export function createSessionManager(input: {
 
     const requestId = randomUUID()
     const response = new Promise<acp.PromptResponse>((resolve, reject) => {
-      active.pendingPrompts.set(requestId, {
+      active.promptQueue.push({
+        requestId,
+        prompt: normalizePrompt(prompt),
+        source: "daemon",
         resolve,
         reject,
       })
     })
 
     try {
-      await sendMessage(id, {
-        jsonrpc: "2.0",
-        id: requestId,
-        method: acp.AGENT_METHODS.session_prompt,
-        params: {
-          sessionId: active.acpSessionId,
-          prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
+      await emitDiagnostic(
+        active.id,
+        "session_prompt_enqueued",
+        {
+          requestId,
+          queueLength: active.promptQueue.length,
         },
-      } satisfies acp.AnyMessage)
+        active.logger,
+      )
+      await processPromptQueue(active)
       return await response
     } catch (error) {
       active.pendingPrompts.delete(requestId)
       throw error
     }
+  }
+
+  async function steerSession(
+    id: SessionId,
+    prompt: string | acp.ContentBlock[],
+  ): Promise<SteerDaemonSessionResponse> {
+    await ready
+    const active = activeSessions.get(id)
+    if (!active) {
+      throw new IpcClientError(`Session ${id} is not active`)
+    }
+
+    const requestId = randomUUID()
+    const abortedQueue = await abortQueuedPrompts(
+      active,
+      `Queued prompts were aborted for session ${id}.`,
+      {
+        includePendingSteer: true,
+      },
+    )
+
+    if (active.blockingPromptRequestId === null) {
+      const response = await promptSession(id, prompt)
+      return {
+        id,
+        abortedQueue,
+        response,
+      }
+    }
+
+    return await new Promise<SteerDaemonSessionResponse>((resolve, reject) => {
+      // Keep tracking the cancelled prompt id so steering can wait for that turn's tool/final boundary.
+      active.pendingSteer = {
+        requestId,
+        cancelledRequestId: active.blockingPromptRequestId!,
+        prompt: normalizePrompt(prompt),
+        abortedQueue,
+        waitingForBoundary: true,
+        resolve,
+        reject,
+      }
+
+      void sendInternalCancel(active, { updateStatus: false }).catch((error) => {
+        if (active.pendingSteer?.requestId === requestId) {
+          active.pendingSteer = null
+        }
+        reject(error instanceof Error ? error : new Error(String(error)))
+      })
+    })
   }
 
   async function shutdownSession(id: SessionId): Promise<boolean> {
@@ -1720,6 +2081,8 @@ export function createSessionManager(input: {
     getWorktree,
     getWorkforce,
     sendMessage,
+    cancelSessionTurn,
+    steerSession,
     promptSession,
     shutdownSession,
     resolveSessionIdByToken,

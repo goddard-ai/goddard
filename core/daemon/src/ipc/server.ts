@@ -303,6 +303,12 @@ export async function startDaemonServer(
         success: await sessionManager.shutdownSession(id),
       }
     },
+    sessionCancel: async ({ id }) => {
+      return sessionManager.cancelSessionTurn(id)
+    },
+    sessionSteer: async ({ id, prompt }) => {
+      return sessionManager.steerSession(id, prompt)
+    },
     sessionSend: async ({ id, message }) => {
       await sessionManager.sendMessage(id, message as acp.AnyMessage)
       return { accepted: true as const }

@@ -41,6 +41,54 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session.cancel forwards daemon-owned turn cancellation to sessionCancel", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      id: "daemon-session-1",
+      activeTurnCancelled: true,
+      abortedQueue: [
+        { requestId: "prompt-2", prompt: [{ type: "text", text: "Queued follow-up" }] },
+      ],
+    })
+
+    await expect(sdk.session.cancel({ id: "daemon-session-1" })).resolves.toEqual({
+      id: "daemon-session-1",
+      activeTurnCancelled: true,
+      abortedQueue: [
+        { requestId: "prompt-2", prompt: [{ type: "text", text: "Queued follow-up" }] },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("sessionCancel", { id: "daemon-session-1" })
+  })
+
+  test("session.steer forwards one replacement prompt to sessionSteer", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      id: "daemon-session-1",
+      abortedQueue: [],
+      response: { stopReason: "end_turn" },
+    })
+
+    await expect(
+      sdk.session.steer({
+        id: "daemon-session-1",
+        prompt: "Review only the failing tests.",
+      }),
+    ).resolves.toEqual({
+      id: "daemon-session-1",
+      abortedQueue: [],
+      response: { stopReason: "end_turn" },
+    })
+
+    expect(send).toHaveBeenCalledWith("sessionSteer", {
+      id: "daemon-session-1",
+      prompt: "Review only the failing tests.",
+    })
+  })
+
   test("session.subscribe passes the daemon-side session filter and unwraps messages", async () => {
     const { sdk, subscribe } = createSdkWithClient()
     const onMessage = vi.fn()
@@ -166,8 +214,6 @@ describe("@goddard-ai/sdk session namespace", () => {
       "ses_1",
       "acp-session-1",
       {
-        prompt: vi.fn(),
-        cancel: vi.fn(),
         unstable_setSessionModel: setModelMock,
       } as never,
       {
@@ -181,6 +227,59 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(setModelMock).toHaveBeenCalledWith({
       sessionId: "acp-session-1",
       modelId: "gpt-5.4",
+    })
+  })
+
+  test("AgentSession.cancel uses the daemon-owned cancel path", async () => {
+    const daemonSend = vi.fn().mockResolvedValueOnce({
+      id: "daemon-session-1",
+      activeTurnCancelled: true,
+      abortedQueue: [],
+    })
+    const session = new AgentSession(
+      "daemon-session-1",
+      "acp-session-1",
+      {} as never,
+      {
+        send: daemonSend,
+      } as never,
+      vi.fn(),
+    )
+
+    await expect(session.cancel()).resolves.toEqual({
+      id: "daemon-session-1",
+      activeTurnCancelled: true,
+      abortedQueue: [],
+    })
+
+    expect(daemonSend).toHaveBeenCalledWith("sessionCancel", { id: "daemon-session-1" })
+  })
+
+  test("AgentSession.steer uses the daemon-owned steer path", async () => {
+    const daemonSend = vi.fn().mockResolvedValueOnce({
+      id: "daemon-session-1",
+      abortedQueue: [],
+      response: { stopReason: "end_turn" },
+    })
+    const session = new AgentSession(
+      "daemon-session-1",
+      "acp-session-1",
+      {} as never,
+      {
+        send: daemonSend,
+      } as never,
+      vi.fn(),
+    )
+
+    await expect(session.steer("Focus on the lint failure.")).resolves.toEqual({
+      id: "daemon-session-1",
+      abortedQueue: [],
+      response: { stopReason: "end_turn" },
+    })
+
+    expect(daemonSend).toHaveBeenCalledWith("sessionSteer", {
+      id: "daemon-session-1",
+      prompt: "Focus on the lint failure.",
     })
   })
 })
