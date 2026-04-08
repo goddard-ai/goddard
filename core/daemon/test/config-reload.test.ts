@@ -9,7 +9,7 @@ import { createConfigManager } from "../src/config-manager.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { runOneShot } from "../src/one-shot.ts"
+import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
@@ -205,10 +205,10 @@ test(
 )
 
 test(
-  "runOneShot picks up updated root-config agent defaults without restarting the daemon",
+  "runPrFeedbackFlow picks up updated root-config agent defaults without restarting the daemon",
   async () => {
     await useTempHome()
-    const repoDir = await mkdtemp(join(tmpdir(), "goddard-one-shot-reload-repo-"))
+    const repoDir = await mkdtemp(join(tmpdir(), "goddard-pr-feedback-reload-repo-"))
     cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
 
     const agentA = createFixtureAgent("Node Agent A")
@@ -224,7 +224,7 @@ test(
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-    const firstExitCode = await runOneShot({
+    const firstExitCode = await runPrFeedbackFlow({
       event: createFeedbackEvent(),
       prompt: "Reply briefly.",
       daemonUrl: daemon.daemonUrl,
@@ -249,7 +249,7 @@ test(
       return typeof agent === "object" && agent?.name === "Node Agent B"
     })
 
-    const secondExitCode = await runOneShot({
+    const secondExitCode = await runPrFeedbackFlow({
       event: createFeedbackEvent(),
       prompt: "Reply briefly.",
       daemonUrl: daemon.daemonUrl,

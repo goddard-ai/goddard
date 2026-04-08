@@ -6,7 +6,7 @@ import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
-import { runOneShot, type OneShotInput } from "./one-shot.ts"
+import { runPrFeedbackFlow, type PrFeedbackFlowInput } from "./pr-feedback-run.ts"
 import { db } from "./persistence/store.ts"
 
 /** Input used to start the long-running daemon process. */
@@ -33,7 +33,7 @@ export type RunDeps = {
     client: BackendClient,
     options: { socketPath: string; agentBinDir: string },
   ) => Promise<DaemonServer>
-  runOneShot?: (input: OneShotInput) => Promise<number> | number
+  runPrFeedbackFlow?: (input: PrFeedbackFlowInput) => Promise<number> | number
   waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
   io?: Io
 }
@@ -67,11 +67,11 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
         socketPath: options.socketPath,
         agentBinDir: options.agentBinDir,
       }))
-  const runOneShotImpl =
-    deps.runOneShot ??
-    ((oneShotInput) =>
-      runOneShot({
-        ...oneShotInput,
+  const runPrFeedbackFlowImpl =
+    deps.runPrFeedbackFlow ??
+    ((prFeedbackFlowInput) =>
+      runPrFeedbackFlow({
+        ...prFeedbackFlowInput,
         configManager,
       }))
   const waitForShutdownImpl = deps.waitForShutdown ?? waitForShutdown
@@ -158,20 +158,20 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
               return
             }
 
-            logger.log("one_shot.launch", {
+            logger.log("pr_feedback.launch", {
               prompt: createPayloadPreview(prompt),
             })
-            const exitCode = await runOneShotImpl({
+            const exitCode = await runPrFeedbackFlowImpl({
               event,
               prompt,
               daemonUrl: activeIpcServer.daemonUrl,
               agentBinDir: runtime.agentBinDir,
             })
-            logger.log("one_shot.finish", {
+            logger.log("pr_feedback.finish", {
               exitCode,
             })
           } catch (error) {
-            logger.log("one_shot.failed", {
+            logger.log("pr_feedback.failed", {
               errorMessage: error instanceof Error ? error.message : String(error),
             })
           } finally {

@@ -1,3 +1,4 @@
+/** Launches daemon-managed sessions for individual PR feedback events. */
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { ConfigManager } from "./config-manager.ts"
@@ -8,7 +9,8 @@ import { createLogger } from "./logging.ts"
 import { db } from "./persistence/store.ts"
 import * as prompts from "./prompts/index.ts"
 
-export type OneShotInput = {
+/** Launch input for a daemon-managed PR feedback flow. */
+export type PrFeedbackFlowInput = {
   event: FeedbackEvent
   prompt: string
   daemonUrl: string
@@ -18,7 +20,7 @@ export type OneShotInput = {
   resolveProjectDir?: (event: FeedbackEvent) => Promise<string | null> | string | null
 }
 
-function buildOneShotEnv(
+function buildPrFeedbackEnv(
   agentBinDir: string,
   inputEnv?: Record<string, string>,
 ): Record<string, string> {
@@ -52,12 +54,13 @@ function buildBackgroundSystemPrompt(): string {
   })
 }
 
-export async function runOneShot(input: OneShotInput): Promise<number> {
+/** Creates the daemon session that handles one managed PR feedback event within the flow. */
+export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<number> {
   const logger = createLogger()
   const projectDir =
     (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(input.event))
   if (!projectDir) {
-    logger.log("one_shot.repository_lookup_failed", {
+    logger.log("pr_feedback.repository_lookup_failed", {
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
     })
@@ -80,11 +83,11 @@ export async function runOneShot(input: OneShotInput): Promise<number> {
       systemPrompt: buildBackgroundSystemPrompt(),
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
-      env: buildOneShotEnv(input.agentBinDir, input.env),
+      env: buildPrFeedbackEnv(input.agentBinDir, input.env),
     })
     return 0
   } catch (error) {
-    logger.log("one_shot.session_create_failed", {
+    logger.log("pr_feedback.session_create_failed", {
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
       daemonUrl: input.daemonUrl,

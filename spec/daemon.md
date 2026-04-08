@@ -15,7 +15,7 @@ We believe that centralizing runtime lifecycle inside a daemon will improve oper
 
 ## Runtime Domains
 The daemon may host multiple distinct automation domains, including:
-- PR-feedback one-shot handling for managed pull requests
+- PR feedback handling for managed pull requests
 - Repository-scoped workforce orchestration for multi-agent delegation
 
 ## Hard Constraints
@@ -35,5 +35,5 @@ Background automation moved toward daemon-owned runtime management because unatt
 
 ## Encapsulated Sub-Specs
 
-* `spec/daemon/pr-feedback.md`: One-shot daemon behavior for managed pull request feedback.
+* `spec/daemon/pr-feedback.md`: PR feedback flow behavior for managed pull request feedback.
 * `spec/daemon/workforce.md`: Daemon-owned repository workforce orchestration for delegated multi-agent work.

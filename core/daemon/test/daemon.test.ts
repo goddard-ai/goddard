@@ -120,11 +120,11 @@ test("daemon package ships agent-bin wrappers for goddard and workforce", async 
   expect(workforceStat.isSymbolicLink() || workforceStat.isFile()).toBe(true)
 })
 
-test("daemon run subscribes once, handles events across repositories, and passes daemon URL into one-shot runs", async () => {
+test("daemon run subscribes once, handles events across repositories, and passes daemon URL into the PR feedback flow", async () => {
   const subscription = new MockStreamSubscription()
   let subCalls = 0
 
-  const runOneShotCalls: any[] = []
+  const runPrFeedbackFlowCalls: any[] = []
   const startIpcCalls: any[] = []
   const deps: RunDeps = {
     createBackendClient: async () =>
@@ -142,8 +142,8 @@ test("daemon run subscribes once, handles events across repositories, and passes
         close: async () => {},
       }
     },
-    runOneShot: async (input) => {
-      runOneShotCalls.push(input)
+    runPrFeedbackFlow: async (input) => {
+      runPrFeedbackFlowCalls.push(input)
       return 0
     },
     waitForShutdown: async (close) => {
@@ -196,17 +196,19 @@ test("daemon run subscribes once, handles events across repositories, and passes
       agentBinDir: "/tmp/custom-agent-bin",
     },
   ])
-  expect(runOneShotCalls).toHaveLength(2)
+  expect(runPrFeedbackFlowCalls).toHaveLength(2)
   expect(
-    runOneShotCalls.map((call) => `${call.event.owner}/${call.event.repo}#${call.event.prNumber}`),
+    runPrFeedbackFlowCalls.map(
+      (call) => `${call.event.owner}/${call.event.repo}#${call.event.prNumber}`,
+    ),
   ).toEqual(["other/repo#123", "test/repo#123"])
-  expect(runOneShotCalls[0].event.prNumber).toBe(123)
-  expect(runOneShotCalls[0].daemonUrl).toBe(
+  expect(runPrFeedbackFlowCalls[0].event.prNumber).toBe(123)
+  expect(runPrFeedbackFlowCalls[0].daemonUrl).toBe(
     "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon-test.sock",
   )
-  expect(runOneShotCalls[0].agentBinDir).toBe("/tmp/custom-agent-bin")
-  expect(runOneShotCalls[0].prompt).toMatch(/goddard reply-pr --message-file/)
-  expect(runOneShotCalls[0].prompt).not.toMatch(/goddard pr reply --body/)
+  expect(runPrFeedbackFlowCalls[0].agentBinDir).toBe("/tmp/custom-agent-bin")
+  expect(runPrFeedbackFlowCalls[0].prompt).toMatch(/goddard reply-pr --message-file/)
+  expect(runPrFeedbackFlowCalls[0].prompt).not.toMatch(/goddard pr reply --body/)
 
   const startupLog = logs.find((entry) => entry.event === "daemon.startup")
   expect(startupLog).toEqual({
@@ -221,7 +223,7 @@ test("daemon run subscribes once, handles events across repositories, and passes
   expect(
     logs.some(
       (entry) =>
-        entry.event === "one_shot.launch" &&
+        entry.event === "pr_feedback.launch" &&
         typeof entry.feedbackEvent === "object" &&
         entry.feedbackEvent !== null &&
         (entry.feedbackEvent as Record<string, unknown>).repository === "test/repo" &&
@@ -232,7 +234,7 @@ test("daemon run subscribes once, handles events across repositories, and passes
   expect(
     logs.some(
       (entry) =>
-        entry.event === "one_shot.finish" &&
+        entry.event === "pr_feedback.finish" &&
         typeof entry.feedbackEvent === "object" &&
         entry.feedbackEvent !== null &&
         (entry.feedbackEvent as Record<string, unknown>).repository === "test/repo" &&
@@ -292,10 +294,10 @@ test("daemon run can start only the IPC server when stream is disabled", async (
   expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
 })
 
-test("daemon run can subscribe without IPC and ignores feedback that requires one-shot execution", async () => {
+test("daemon run can subscribe without IPC and ignores feedback that requires the PR feedback flow", async () => {
   const subscription = new MockStreamSubscription()
   let subCalls = 0
-  const runOneShotCalls: any[] = []
+  const runPrFeedbackFlowCalls: any[] = []
   const startIpcCalls: any[] = []
 
   const { logs, result: exitCode } = await captureLogs((io) =>
@@ -323,8 +325,8 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
             close: async () => {},
           }
         },
-        runOneShot: async (input) => {
-          runOneShotCalls.push(input)
+        runPrFeedbackFlow: async (input) => {
+          runPrFeedbackFlowCalls.push(input)
           return 0
         },
         waitForShutdown: async (close) => {
@@ -348,7 +350,7 @@ test("daemon run can subscribe without IPC and ignores feedback that requires on
   expect(exitCode).toBe(0)
   expect(subCalls).toBe(1)
   expect(startIpcCalls).toEqual([])
-  expect(runOneShotCalls).toEqual([])
+  expect(runPrFeedbackFlowCalls).toEqual([])
   expect(
     logs.some(
       (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
