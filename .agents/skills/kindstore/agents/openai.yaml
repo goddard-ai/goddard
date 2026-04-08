@@ -1,4 +1,4 @@
 interface:
   display_name: "Kindstore"
   short_description: "Use kindstore idiomatically"
-  default_prompt: "Use $kindstore to model a kind, choose indexes, write queries, and add migrations that fit kindstore's narrow API."
+  default_prompt: "Use $kindstore to find the right documentation surface inside node_modules/kindstore before answering."
