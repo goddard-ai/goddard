@@ -12,7 +12,7 @@ Developer execution is fragmented across GitHub UI, IDEs, chat tools, and ad hoc
 
 Goddard addresses:
 1. **Workspace gap:** a unified local surface for GitHub operations and AI steering with minimal context switching.
-2. **Autonomous gap:** explicit runtimes for repeated cycles, daemon-managed workforce delegation, and one-shot pull-request feedback reactions.
+2. **Autonomous gap:** explicit runtimes for repeated cycles, daemon-managed workforce delegation, and daemon-managed pull-request feedback handling.
 
 ## Product Pillars
 
@@ -37,7 +37,7 @@ A human developer uses a unified, IDE-like desktop surface to monitor sessions, 
 ### 3) Background Automation
 A local runtime hosted by the desktop app or another supervised local process handles unattended execution:
 - Loop mode for recurring `pi-coding-agent` cycles.
-- Pull-request feedback one-shot handling triggered by managed pull request events.
+- Pull-request feedback handling triggered by managed pull request events.
 - Repository-scoped workforce orchestration for delegated multi-agent work.
 - Configurable limits for cadence, operations, and tokens.
 

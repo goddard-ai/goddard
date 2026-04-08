@@ -30,7 +30,7 @@ This file captures conceptual end-to-end sequences only. Wire formats and API pa
 3. Managed pull request events owned by that user may arrive from multiple repositories over the same stream.
 4. Unmanaged pull request events and events owned by other Goddard users are not delivered on that stream.
 5. The local host interprets the delivered feedback event for its own state and automation decisions.
-6. The subscriber updates workspace state or may launch one-shot `pi` execution.
+6. The subscriber updates workspace state or may launch the PR feedback flow.
 
 ## Workforce Orchestration (Daemon-Owned)
 

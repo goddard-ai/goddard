@@ -51,7 +51,7 @@ Boundary:
 
 ### Background Runtime
 - Own authenticated managed pull request stream consumption as part of supervised local automation behavior.
-- Launch daemon-managed one-shot reactions for managed pull request feedback.
+- Launch daemon-managed PR feedback flows for managed pull request feedback.
 - Host or cooperate with daemon-managed workforce orchestration for repository-scoped delegation.
 - Operate as background automation rather than a user-facing command surface.
 - Be hostable by the desktop workspace or another supervised local process when needed.

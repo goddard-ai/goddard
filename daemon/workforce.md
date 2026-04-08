@@ -39,7 +39,7 @@ We believe that making the daemon the single authority for workforce runtime sta
 - Before queue advancement, the daemon must validate the responding request's attributable git state and commits against that agent's owned paths.
 - A request must not complete while the responding agent still has dirty tracked changes inside its owned paths.
 - If attributable git changes for a request touch paths outside the responding agent's owned paths, the daemon must suspend that request and surface the violation for human review.
-- Workforce orchestration and PR-feedback handling remain separate daemon runtime domains even when hosted by the same daemon process.
+- Workforce orchestration and PR feedback handling remain separate daemon runtime domains even when hosted by the same daemon process.
 
 ## Failure Handling Expectations
 - Daemon restart should recover workforce state without losing operator-visible progress.
