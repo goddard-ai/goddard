@@ -39,16 +39,26 @@ function requireQueryClient(value: QueryClient | null) {
   return value
 }
 
+/**
+ * Stores query results by query function plus argument tuple and drives the local Suspense cache.
+ */
 export class QueryClient {
-  entries = new Map<string, QueryEntry>()
-  entryKeysByFunction = new WeakMap<AnyQueryFunction, Set<string>>()
-  functionIds = new WeakMap<AnyQueryFunction, string>()
-  nextFunctionId = 0
+  private entries = new Map<string, QueryEntry>()
+  private entryKeysByFunction = new WeakMap<AnyQueryFunction, Set<string>>()
+  private functionIds = new WeakMap<AnyQueryFunction, string>()
+  private nextFunctionId = 0
 
+  /**
+   * Returns the stable cache key for one query function and argument tuple.
+   */
   getQueryKey<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
     return hashSum([this.getFunctionId(queryFn), args])
   }
 
+  /**
+   * Reads the current cache snapshot without throwing, kicking off a fetch when the entry is stale
+   * or missing.
+   */
   getSnapshot<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
     const entry = this.getEntry(queryFn, args)
 
@@ -65,6 +75,9 @@ export class QueryClient {
     }
   }
 
+  /**
+   * Returns cached data for one query and suspends only while the first load is still pending.
+   */
   read<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
     const snapshot = this.getSnapshot(queryFn, args)
 
@@ -79,6 +92,9 @@ export class QueryClient {
     return snapshot.data as Awaited<ReturnType<TQueryFn>>
   }
 
+  /**
+   * Registers a listener for one query entry and returns the unsubscribe callback.
+   */
   subscribe<TQueryFn extends AnyQueryFunction>(
     queryFn: TQueryFn,
     args: Parameters<TQueryFn>,
@@ -92,11 +108,18 @@ export class QueryClient {
     }
   }
 
+  /**
+   * Refreshes one cached query in place while preserving the last resolved value.
+   */
   refetch<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
     const entry = this.getEntry(queryFn, args)
     void this.fetchEntry(entry, entry.hasData)
   }
 
+  /**
+   * Marks one cached query, or every query for the same function, stale and refetches active
+   * subscribers immediately.
+   */
   invalidate<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args?: Parameters<TQueryFn>) {
     if (args) {
       const entry = this.entries.get(this.getQueryKey(queryFn, args))
@@ -117,7 +140,7 @@ export class QueryClient {
     }
   }
 
-  fetchEntry(entry: QueryEntry, background: boolean) {
+  private fetchEntry(entry: QueryEntry, background: boolean) {
     if (entry.promise) {
       return entry.promise
     }
@@ -165,7 +188,10 @@ export class QueryClient {
     return promise
   }
 
-  getEntry<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
+  private getEntry<TQueryFn extends AnyQueryFunction>(
+    queryFn: TQueryFn,
+    args: Parameters<TQueryFn>,
+  ) {
     const key = this.getQueryKey(queryFn, args)
     const existingEntry = this.entries.get(key)
 
@@ -189,7 +215,7 @@ export class QueryClient {
     return entry
   }
 
-  getFunctionEntryKeys(queryFn: AnyQueryFunction) {
+  private getFunctionEntryKeys(queryFn: AnyQueryFunction) {
     const existingEntryKeys = this.entryKeysByFunction.get(queryFn)
 
     if (existingEntryKeys) {
@@ -201,7 +227,7 @@ export class QueryClient {
     return nextEntryKeys
   }
 
-  getFunctionId(queryFn: AnyQueryFunction) {
+  private getFunctionId(queryFn: AnyQueryFunction) {
     const existingId = this.functionIds.get(queryFn)
 
     if (existingId) {
@@ -214,7 +240,7 @@ export class QueryClient {
     return nextId
   }
 
-  invalidateEntry(entry: QueryEntry) {
+  private invalidateEntry(entry: QueryEntry) {
     entry.stale = true
 
     if (entry.subscribers.size > 0 && !entry.promise) {
@@ -222,21 +248,33 @@ export class QueryClient {
     }
   }
 
-  notify(entry: QueryEntry) {
+  private notify(entry: QueryEntry) {
     for (const subscriber of entry.subscribers) {
       subscriber()
     }
   }
 }
 
+/**
+ * Supplies one shared query client to hooks rendered below it.
+ */
 export function QueryClientProvider(props: { children: ComponentChildren; client: QueryClient }) {
   return createElement(queryClientContext.Provider, { value: props.client }, props.children)
 }
 
+/**
+ * Returns the shared query client for manual invalidation and direct cache interaction.
+ */
 export function useQueryClient() {
   return requireQueryClient(useContext(queryClientContext))
 }
 
+/**
+ * Reads one cached query and returns a `[data, refetch]` tuple.
+ *
+ * The hook suspends during the initial load, then keeps returning the last resolved value while
+ * later refetches run in the background.
+ */
 export function useQuery<TQueryFn extends AnyQueryFunction>(
   queryFn: TQueryFn,
   args: Parameters<TQueryFn>,
@@ -261,6 +299,10 @@ export function useQuery<TQueryFn extends AnyQueryFunction>(
   ] as const
 }
 
+/**
+ * Reads multiple cached queries from a keyed object and returns `[data, refetch]`, where `refetch`
+ * can refresh one key or the whole set.
+ */
 export function useQueries<TQueries extends Record<string, QueryDescriptor>>(queries: TQueries) {
   const queryClient = useQueryClient()
   const [, setVersion] = useState(0)
