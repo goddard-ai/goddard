@@ -41,7 +41,7 @@
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/paths": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
-    "@goddard-ai/worktree": "workspace:^",
+    "@goddard-ai/worktree-plugin": "workspace:^",
     "cmd-ts": "^0.15.0",
     "kindstore": "^0.4.1",
     "kleur": "^4.1.5",

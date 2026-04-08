@@ -1,11 +1,11 @@
-import { existsSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { existsSync, realpathSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { spawn } from "node:child_process"
-import { afterEach, expect, test } from "vitest"
-import { createWorktree, deleteWorktree, resolveWorktreePlugin } from "../src/index.ts"
-import { defaultPlugin } from "../src/default-plugin.ts"
+import { afterEach, expect, test } from "bun:test"
+import { createWorktree, deleteWorktree, resolveWorktreePlugin } from "../src/worktrees/index.ts"
+import { defaultPlugin } from "../src/worktrees/plugins/default.ts"
 
 const cleanup: string[] = []
 const originalHome = process.env.HOME
@@ -23,13 +23,12 @@ afterEach(async () => {
 })
 
 test("requires the cwd to be a git repository", async () => {
-  await expect(resolveWorktreePlugin({ cwd: "/tmp/not-a-repo" })).rejects.toThrow(
-    "Not a git repository",
-  )
+  expect(resolveWorktreePlugin({ cwd: "/tmp/not-a-repo" })).rejects.toThrow("Not a git repository")
 })
 
 test("default worktree setup creates and cleans up a workspace inside an explicit directory", async () => {
   const repoDir = await createRepoFixture()
+  const normalizedRepoDir = realpathSync.native(repoDir)
 
   const created = await createWorktree({
     cwd: repoDir,
@@ -37,8 +36,8 @@ test("default worktree setup creates and cleans up a workspace inside an explici
     branchName: "feature-1",
   })
 
-  expect(created.repoRoot).toBe(repoDir)
-  expect(created.requestedCwd).toBe(repoDir)
+  expect(created.repoRoot).toBe(normalizedRepoDir)
+  expect(created.requestedCwd).toBe(normalizedRepoDir)
   expect(created.effectiveCwd).toBe(created.worktreeDir)
   expect(created.worktreeDir).toMatch(/\.custom-dir\/feature-1-\d+$/)
   expect(existsSync(created.worktreeDir)).toBe(true)
@@ -75,8 +74,7 @@ test("default plugin uses the global worktree directory when the repository has 
 
 test("worktree setup maps repository subdirectories into the created workspace", async () => {
   const repoDir = await createRepoFixture({ includeSrc: true })
-
-  const requestedCwd = join(repoDir, "src")
+  const requestedCwd = realpathSync.native(join(repoDir, "src"))
   const created = await createWorktree({
     cwd: repoDir,
     requestedCwd,
@@ -98,7 +96,7 @@ test("worktree setup maps repository subdirectories into the created workspace",
   ).toBe(true)
 })
 
-async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {
+async function createRepoFixture(options: { includeSrc?: boolean } = {}) {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-worktree-repo-"))
   cleanup.push(repoDir)
 
@@ -138,6 +136,6 @@ async function runGit(cwd: string, args: string[]) {
   expect(result.status).toBe(0)
 }
 
-function escapeRegExp(value: string): string {
+function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

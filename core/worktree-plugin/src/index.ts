@@ -1,3 +1,5 @@
+/** Shared plugin types for daemon-owned and third-party worktree integrations. */
+
 /**
  * Options passed to a plugin when setting up a worktree.
  */
@@ -29,26 +31,16 @@ export interface WorktreePlugin {
 
   /**
    * Determines whether this plugin is applicable for the given environment.
-   *
-   * @param cwd - The current working directory of the original repository.
-   * @returns `true` if the plugin is applicable, `false` otherwise.
    */
   isApplicable(cwd: string): boolean | Promise<boolean>
 
   /**
    * Sets up a new worktree.
-   *
-   * @param options - Options for setting up the worktree.
-   * @returns The path to the created worktree directory, or `null` if setup failed.
    */
   setup(options: WorktreeSetupOptions): Promise<string | null>
 
   /**
    * Cleans up an existing worktree.
-   *
-   * @param worktreeDir - The path to the worktree directory to clean up.
-   * @param branchName - The name of the branch associated with the worktree.
-   * @returns `true` if the cleanup was successful, `false` otherwise.
    */
   cleanup(worktreeDir: string, branchName: string): Promise<boolean>
 }

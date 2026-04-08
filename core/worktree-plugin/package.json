@@ -1,5 +1,5 @@
 {
-  "name": "@goddard-ai/worktree",
+  "name": "@goddard-ai/worktree-plugin",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -17,7 +17,6 @@
     "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsgo --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsgo --noEmit"
   }
 }

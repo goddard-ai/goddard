@@ -1,14 +1,14 @@
+/** Worktrunk-backed worktree plugin used when a repository is managed by `wt`. */
+import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { runCommand } from "./process.ts"
-import type { WorktreePlugin, WorktreeSetupOptions } from "./types.ts"
+import { runCommand } from "../process.ts"
 
 export const worktrunkPlugin: WorktreePlugin = {
   name: "worktrunk",
 
-  async isApplicable(cwd: string): Promise<boolean> {
+  async isApplicable(cwd: string) {
     try {
-      // Check if the current project is a valid worktrunk environment by checking for .config/wt.toml
       if (!fs.existsSync(path.join(cwd, ".config", "wt.toml"))) {
         return false
       }
@@ -22,7 +22,7 @@ export const worktrunkPlugin: WorktreePlugin = {
     }
   },
 
-  async setup(options: WorktreeSetupOptions): Promise<string | null> {
+  async setup(options: WorktreeSetupOptions) {
     try {
       const switchResult = await runCommand("wt", ["switch", options.branchName], {
         cwd: options.cwd,
@@ -30,7 +30,6 @@ export const worktrunkPlugin: WorktreePlugin = {
       })
 
       if (switchResult.status === 0) {
-        // Find the newly created worktree path using git from within the project dir
         const worktreeListResult = await runCommand("git", ["worktree", "list"], {
           cwd: options.cwd,
         })
@@ -48,8 +47,6 @@ export const worktrunkPlugin: WorktreePlugin = {
         }
       }
 
-      // Edge case: Worktrunk switch succeeded but we couldn't find the path.
-      // Let's try to remove it before falling back so we don't leak it.
       if (switchResult.status === 0) {
         await runCommand("wt", ["remove", options.branchName], {
           cwd: options.cwd,
@@ -57,16 +54,15 @@ export const worktrunkPlugin: WorktreePlugin = {
         })
       }
     } catch {
-      // Setup failed
+      // Setup failed.
     }
 
     return null
   },
 
-  async cleanup(worktreeDir: string, branchName: string): Promise<boolean> {
+  async cleanup(worktreeDir: string, branchName: string) {
     try {
       const result = await runCommand("wt", ["remove", branchName], {
-        // Execute command from parent dir so we aren't inside the directory we're trying to delete
         cwd: path.dirname(worktreeDir) || "/",
         stdin: "ignore",
       })
@@ -75,7 +71,7 @@ export const worktrunkPlugin: WorktreePlugin = {
         return true
       }
     } catch {
-      // Cleanup failed
+      // Cleanup failed.
     }
 
     return false

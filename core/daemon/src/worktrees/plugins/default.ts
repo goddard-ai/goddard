@@ -1,20 +1,21 @@
+/** Default worktree plugin that clones or creates git worktrees under daemon control. */
+import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 import * as crypto from "node:crypto"
 import * as fs from "node:fs"
+import { constants as fsConstants } from "node:fs"
 import { cp, mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { constants as fsConstants } from "node:fs"
-import { runCommand } from "./process.ts"
-import type { WorktreePlugin, WorktreeSetupOptions } from "./types.ts"
+import { runCommand } from "../process.ts"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",
 
-  isApplicable(): boolean {
+  isApplicable() {
     return true
   },
 
-  async setup(options: WorktreeSetupOptions): Promise<string | null> {
+  async setup(options: WorktreeSetupOptions) {
     let agentsDirPath: string
 
     if (options.defaultDirName) {
@@ -24,7 +25,6 @@ export const defaultPlugin: WorktreePlugin = {
     } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
       agentsDirPath = path.join(options.cwd, "worktrees")
     } else {
-      // Use system temp directory if no specific directory is present, appending hash to prevent collisions
       const hash = crypto.createHash("sha256").update(options.cwd).digest("hex").substring(0, 7)
       agentsDirPath = path.join(
         resolveHomeDir(),
@@ -40,19 +40,16 @@ export const defaultPlugin: WorktreePlugin = {
       await mkdir(agentsDirPath, { recursive: true })
     }
 
-    // Use copy-on-write clone to create the workspace instantly based on OS
     try {
       let cloneSucceeded = await cloneWorkspace(options.cwd, worktreeDir)
 
       if (!cloneSucceeded) {
-        // Fallback to git worktree
         const wtResult = await runCommand("git", ["worktree", "add", "--detach", worktreeDir], {
           cwd: options.cwd,
           stdin: "ignore",
         })
 
         if (wtResult.status !== 0) {
-          // Fallback to regular copy if git worktree fails
           cloneSucceeded = await cloneWorkspace(options.cwd, worktreeDir, false)
 
           if (!cloneSucceeded) {
@@ -70,7 +67,6 @@ export const defaultPlugin: WorktreePlugin = {
       )
     }
 
-    // Fetch and checkout the branch in the new workspace
     try {
       const prNumberMatch = options.branchName.match(/^pr-(\d+)$/)
       if (prNumberMatch) {
@@ -89,21 +85,19 @@ export const defaultPlugin: WorktreePlugin = {
         stdin: "ignore",
       })
     } catch {
-      // Ignore error
+      // Ignore error.
     }
 
     return worktreeDir
   },
 
-  async cleanup(worktreeDir: string, _branchName: string): Promise<boolean> {
+  async cleanup(worktreeDir: string, _branchName: string) {
     try {
-      // First try to clean up if it was a git worktree
       const wtResult = await runCommand("git", ["worktree", "remove", "--force", worktreeDir], {
         stdin: "ignore",
       })
 
       if (wtResult.status !== 0) {
-        // Fallback to rm -rf if it wasn't a git worktree or remove failed
         await rm(worktreeDir, { recursive: true, force: true })
       }
       return true
@@ -116,11 +110,7 @@ export const defaultPlugin: WorktreePlugin = {
 /**
  * Copies one repository into a new worktree directory, preferring copy-on-write when supported.
  */
-async function cloneWorkspace(
-  sourceDir: string,
-  targetDir: string,
-  preferCopyOnWrite = true,
-): Promise<boolean> {
+async function cloneWorkspace(sourceDir: string, targetDir: string, preferCopyOnWrite = true) {
   try {
     await cp(sourceDir, targetDir, {
       recursive: true,
@@ -135,7 +125,7 @@ async function cloneWorkspace(
 /**
  * Returns the `fs.cp` mode used to request reflink copies on platforms that support them.
  */
-function reflinkModeForPlatform(): number {
+function reflinkModeForPlatform() {
   if (process.platform === "darwin" || process.platform === "linux") {
     return fsConstants.COPYFILE_FICLONE
   }
@@ -146,6 +136,6 @@ function reflinkModeForPlatform(): number {
 /**
  * Resolves the home directory used for global worktree storage in a testable way.
  */
-function resolveHomeDir(): string {
+function resolveHomeDir() {
   return process.env.HOME || os.homedir()
 }

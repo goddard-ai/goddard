@@ -118,7 +118,7 @@
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
-        "@goddard-ai/worktree": "workspace:^",
+        "@goddard-ai/worktree-plugin": "workspace:^",
         "cmd-ts": "^0.15.0",
         "kindstore": "^0.4.1",
         "kleur": "^4.1.5",
@@ -186,8 +186,8 @@
         "@goddard-ai/daemon": "workspace:^",
       },
     },
-    "core/worktree": {
-      "name": "@goddard-ai/worktree",
+    "core/worktree-plugin": {
+      "name": "@goddard-ai/worktree-plugin",
       "version": "0.1.0",
     },
     "workforce": {
@@ -466,7 +466,7 @@
 
     "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
 
-    "@goddard-ai/worktree": ["@goddard-ai/worktree@workspace:core/worktree"],
+    "@goddard-ai/worktree-plugin": ["@goddard-ai/worktree-plugin@workspace:core/worktree-plugin"],
 
     "@hattip/adapter-cloudflare-workers": ["@hattip/adapter-cloudflare-workers@0.0.49", "", { "dependencies": { "@cloudflare/kv-asset-handler": "^0.3.4", "@cloudflare/workers-types": "^4.20241022.0", "@hattip/core": "0.0.49" } }, "sha512-FtCarhqmAgSW0b4LOCMzWGyN6B/z6zZhL4yJgZBETKMEnXywVNYYrnEbYEKIY/l6f7aWD1vTZ9jNcKS5RZeUww=="],
 

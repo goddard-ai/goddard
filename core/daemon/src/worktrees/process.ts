@@ -1,3 +1,4 @@
+/** Async subprocess helpers shared by daemon-owned worktree integrations. */
 import { spawn } from "node:child_process"
 
 /**
@@ -19,8 +20,8 @@ export function runCommand(
     cwd?: string
     stdin?: "ignore"
   } = {},
-): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
+) {
+  return new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       stdio: [options.stdin ?? "pipe", "pipe", "pipe"],

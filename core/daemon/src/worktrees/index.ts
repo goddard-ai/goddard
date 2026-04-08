@@ -1,12 +1,10 @@
-/**
- * Public worktree helpers for creating and deleting repository worktrees with pluggable strategies.
- */
-
+/** Daemon-owned worktree creation and cleanup helpers with pluggable strategies. */
+import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
+import type { KindInput } from "kindstore"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { defaultPlugin } from "./default-plugin.ts"
-import type { WorktreePlugin, WorktreeSetupOptions } from "./types.ts"
-import { worktrunkPlugin } from "./worktrunk.ts"
+import { defaultPlugin } from "./plugins/default.ts"
+import { worktrunkPlugin } from "./plugins/worktrunk.ts"
 
 export type { WorktreePlugin, WorktreeSetupOptions }
 
@@ -67,14 +65,10 @@ export interface DeleteWorktreeOptions extends WorktreeOptions {
 }
 
 /** The durable metadata returned after creating one worktree. */
-export type CreatedWorktree = {
-  repoRoot: string
-  requestedCwd: string
-  effectiveCwd: string
-  worktreeDir: string
-  branchName: string
-  poweredBy: string
-}
+export type CreatedWorktree = Omit<
+  KindInput<(typeof import("../persistence/store.ts"))["db"]["schema"]["worktrees"]>,
+  "sessionId"
+>
 
 /**
  * Resolves the first applicable worktree plugin for one repository.
@@ -95,7 +89,7 @@ export async function resolveWorktreePlugin(options: WorktreeOptions) {
  * Creates one worktree and reports which plugin ultimately handled the setup.
  */
 export async function createWorktree(options: CreateWorktreeOptions) {
-  const repoRoot = path.resolve(options.cwd)
+  const repoRoot = normalizeExistingPath(options.cwd)
   const requestedCwd = resolveRequestedCwd(repoRoot, options.requestedCwd)
   const plugin = await resolveWorktreePlugin({
     ...options,
@@ -228,7 +222,7 @@ function createWorktreeMetadata(params: {
  * Resolves one requested cwd and verifies that it stays inside the repository root.
  */
 function resolveRequestedCwd(repoRoot: string, requestedCwd = repoRoot) {
-  const normalizedRequestedCwd = path.resolve(requestedCwd)
+  const normalizedRequestedCwd = normalizeExistingPath(requestedCwd)
   const relativeCwd = path.relative(repoRoot, normalizedRequestedCwd)
 
   if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
@@ -236,6 +230,19 @@ function resolveRequestedCwd(repoRoot: string, requestedCwd = repoRoot) {
   }
 
   return normalizedRequestedCwd
+}
+
+/**
+ * Resolves one existing filesystem path to a stable canonical path when possible.
+ */
+function normalizeExistingPath(value: string) {
+  const normalizedValue = path.resolve(value)
+
+  try {
+    return fs.realpathSync.native(normalizedValue)
+  } catch {
+    return normalizedValue
+  }
 }
 
 /**

@@ -1,5 +1,6 @@
 /** Daemon helpers for reusing and cleaning up session-owned worktrees. */
-import { deleteWorktree, type WorktreePlugin } from "@goddard-ai/worktree"
+import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
+import { deleteWorktree } from "../worktrees/index.ts"
 import type { KindInput } from "kindstore"
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"

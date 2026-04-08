@@ -27,7 +27,8 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
-import { createWorktree, type WorktreePlugin } from "@goddard-ai/worktree"
+import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
+import { createWorktree } from "../worktrees/index.ts"
 import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
