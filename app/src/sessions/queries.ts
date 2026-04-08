@@ -2,43 +2,25 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import { goddardSdk } from "~/sdk.ts"
 
 export const SESSION_LIST_LIMIT = 50
-const sessionsRootKey = ["sessions"] as const
 
-export const sessionQueryKeys = {
-  all: sessionsRootKey,
-  lists: () => [...sessionsRootKey, "list"] as const,
-  list: (limit: number) => [...sessionsRootKey, "list", limit] as const,
-  details: () => [...sessionsRootKey, "detail"] as const,
-  detail: (sessionId: DaemonSession["id"]) => [...sessionsRootKey, "detail", sessionId] as const,
-  histories: () => [...sessionsRootKey, "history"] as const,
-  history: (sessionId: DaemonSession["id"]) => [...sessionsRootKey, "history", sessionId] as const,
+export async function listSessions(limit = SESSION_LIST_LIMIT) {
+  const response = await goddardSdk.session.list({ limit })
+  return response.sessions
 }
 
-export function getSessionsListQueryOptions(limit = SESSION_LIST_LIMIT) {
-  return {
-    queryKey: sessionQueryKeys.list(limit),
-    queryFn: async () => {
-      const response = await goddardSdk.session.list({ limit })
-      return response.sessions
-    },
-  }
+export async function getSession(sessionId: DaemonSession["id"]) {
+  const response = await goddardSdk.session.get({ id: sessionId })
+  return response.session
 }
 
-export function getSessionQueryOptions(sessionId: DaemonSession["id"]) {
-  return {
-    queryKey: sessionQueryKeys.detail(sessionId),
-    queryFn: async () => {
-      const response = await goddardSdk.session.get({ id: sessionId })
-      return response.session
-    },
-  }
+export async function getSessionHistory(sessionId: DaemonSession["id"]) {
+  return await goddardSdk.session.history({ id: sessionId })
 }
 
-export function getSessionHistoryQueryOptions(sessionId: DaemonSession["id"]) {
-  return {
-    queryKey: sessionQueryKeys.history(sessionId),
-    queryFn: async () => {
-      return await goddardSdk.session.history({ id: sessionId })
-    },
+export async function getOptionalSessionHistory(sessionId: DaemonSession["id"] | null) {
+  if (!sessionId) {
+    return null
   }
+
+  return await getSessionHistory(sessionId)
 }

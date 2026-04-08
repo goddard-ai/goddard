@@ -3,18 +3,18 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { SendHorizontal } from "lucide-react"
 
-export function Composer(props: { onSubmit: (text: string) => void }) {
+export function Composer(props: { onSubmit: (text: string) => Promise<void> | void }) {
   const draft = useSignal("")
   const canSubmit = draft.value.trim().length > 0
 
-  function submit() {
+  async function submit() {
     const trimmedDraft = draft.value.trim()
 
     if (trimmedDraft.length === 0) {
       return
     }
 
-    props.onSubmit(trimmedDraft)
+    await props.onSubmit(trimmedDraft)
     draft.value = ""
   }
 
@@ -30,7 +30,7 @@ export function Composer(props: { onSubmit: (text: string) => void }) {
       })}
       onSubmit={(event) => {
         event.preventDefault()
-        submit()
+        void submit()
       }}
     >
       <textarea

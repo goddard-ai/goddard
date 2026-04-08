@@ -27,14 +27,18 @@ export function AppShellWorkbenchContent(props: {
   onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
   selectedNavId: string
 }) {
-  return props.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
-    <WorkbenchScrollPanel scrollKey={`main:${props.selectedNavId}`}>
-      <MainWorkbenchView onRequestSessionLaunch={props.onRequestSessionLaunch} />
-    </WorkbenchScrollPanel>
-  ) : (
-    <WorkbenchScrollPanel scrollKey={`detail:${props.activeTabId}`}>
-      <WorkbenchTabPanel onRequestSessionLaunch={props.onRequestSessionLaunch} />
-    </WorkbenchScrollPanel>
+  return (
+    <Suspense fallback={<div />}>
+      {props.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
+        <WorkbenchScrollPanel scrollKey={`main:${props.selectedNavId}`}>
+          <MainWorkbenchView onRequestSessionLaunch={props.onRequestSessionLaunch} />
+        </WorkbenchScrollPanel>
+      ) : (
+        <WorkbenchScrollPanel scrollKey={`detail:${props.activeTabId}`}>
+          <WorkbenchTabPanel onRequestSessionLaunch={props.onRequestSessionLaunch} />
+        </WorkbenchScrollPanel>
+      )}
+    </Suspense>
   )
 }
 
@@ -97,11 +101,9 @@ function WorkbenchTabPanel(props: {
   const activeTabPayload = activeTab.payload as Record<string, unknown>
 
   return (
-    <Suspense fallback={<div />}>
-      <ActiveTabComponent
-        {...activeTabPayload}
-        onRequestSessionLaunch={props.onRequestSessionLaunch}
-      />
-    </Suspense>
+    <ActiveTabComponent
+      {...activeTabPayload}
+      onRequestSessionLaunch={props.onRequestSessionLaunch}
+    />
   )
 }

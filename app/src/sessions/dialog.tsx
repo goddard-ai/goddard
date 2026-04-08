@@ -1,13 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import type { CreateDaemonSessionRequest } from "@goddard-ai/sdk"
-import { useMutation, useQueryClient } from "@tanstack/preact-query"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Sparkles, X } from "lucide-react"
 import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
-import { getSessionHistoryQueryOptions, sessionQueryKeys } from "./queries.ts"
+import { SESSION_LIST_LIMIT, listSessions } from "./queries.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useQueryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 
 export function SessionLaunchDialog(props: {
@@ -23,23 +23,8 @@ export function SessionLaunchDialog(props: {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const queryClient = useQueryClient()
-  const createSession = useMutation({
-    mutationFn: goddardSdk.session.create,
-  })
-  const submitStatus = createSession.isPending
-    ? "submitting"
-    : createSession.isError
-      ? "error"
-      : "idle"
-  const errorMessage =
-    createSession.error instanceof Error
-      ? createSession.error.message
-      : createSession.error
-        ? String(createSession.error)
-        : null
 
   function closeDialog() {
-    createSession.reset()
     props.onClose()
   }
 
@@ -51,12 +36,8 @@ export function SessionLaunchDialog(props: {
     }
 
     try {
-      const { session } = await createSession.mutateAsync(sessionInput)
-      queryClient.setQueryData(sessionQueryKeys.detail(session.id), session)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.lists() }),
-        queryClient.prefetchQuery(getSessionHistoryQueryOptions(session.id)),
-      ])
+      const { session } = await goddardSdk.session.create(sessionInput)
+      queryClient.invalidate(listSessions, [SESSION_LIST_LIMIT])
       props.onClose()
       workbenchTabSet.openOrFocusTab({
         id: `session:${session.id}`,
@@ -67,7 +48,9 @@ export function SessionLaunchDialog(props: {
         },
         dirty: false,
       })
-    } catch {}
+    } catch (error) {
+      console.error("Failed to create session.", error)
+    }
   }
 
   return (
@@ -195,12 +178,10 @@ export function SessionLaunchDialog(props: {
             canSubmit={props.canSubmit}
             draftProjectPath={props.draftProjectPath}
             draftPrompt={props.draftPrompt}
-            errorMessage={errorMessage}
             onChangeProjectPath={props.onChangeProjectPath}
             onChangePrompt={props.onChangePrompt}
             onSubmit={launchSession}
             projects={projectRegistry.projectList}
-            submitStatus={submitStatus}
           />
         </Dialog.Content>
       </Dialog.Portal>

@@ -1,5 +1,4 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { useQuery } from "@tanstack/preact-query"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
@@ -8,9 +7,10 @@ import { useEffect } from "preact/hooks"
 import { SessionsList } from "./list.tsx"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
-import { getSessionHistoryQueryOptions, getSessionsListQueryOptions } from "./queries.ts"
 import { buildTranscriptMessages } from "~/session-chat/chat.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useQuery } from "~/lib/query.ts"
+import { getOptionalSessionHistory, listSessions, SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 
 function formatTimestamp(value: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -26,19 +26,16 @@ export function SessionsPage(props: {
 }) {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const sessionsQuery = useQuery(getSessionsListQueryOptions())
-  const sessions = sessionsQuery.data ?? []
+  const [sessions] = useQuery(listSessions, [SESSION_LIST_LIMIT])
   const selectedSessionId = useSignal<DaemonSession["id"] | null>(sessions[0]?.id ?? null)
   const selectedSession = sessions.find((session) => session.id === selectedSessionId.value) ?? null
-  const selectedSessionHistoryQuery = useQuery({
-    ...getSessionHistoryQueryOptions((selectedSession?.id ?? "__missing__") as DaemonSession["id"]),
-    enabled: selectedSession !== null,
-  })
+  const [selectedSessionHistory] = useQuery(getOptionalSessionHistory, [
+    selectedSession?.id ?? null,
+  ])
   const transcriptMessages =
-    selectedSession && selectedSessionHistoryQuery.data
-      ? buildTranscriptMessages(selectedSession, selectedSessionHistoryQuery.data.history)
+    selectedSession && selectedSessionHistory
+      ? buildTranscriptMessages(selectedSession, selectedSessionHistory.history)
       : []
-  const listStatus = sessionsQuery.isPending ? "loading" : sessionsQuery.isError ? "error" : "ready"
 
   useEffect(() => {
     if (!selectedSessionId.value && sessions[0]) {
@@ -117,8 +114,6 @@ export function SessionsPage(props: {
           })}
         >
           <SessionsList
-            errorMessage={sessionsQuery.error instanceof Error ? sessionsQuery.error.message : null}
-            listStatus={listStatus}
             onCreateSession={() => {
               if (selectedSession?.cwd) {
                 props.onRequestSessionLaunch?.(selectedSession.cwd)
@@ -254,19 +249,6 @@ export function SessionsPage(props: {
             </p>
           </div>
         )}
-        {sessionsQuery.isError ? (
-          <p
-            class={css({
-              color: "danger",
-              fontSize: "0.84rem",
-              lineHeight: "1.6",
-            })}
-          >
-            {sessionsQuery.error instanceof Error
-              ? sessionsQuery.error.message
-              : "Session list failed to load."}
-          </p>
-        ) : null}
       </aside>
     </div>
   )

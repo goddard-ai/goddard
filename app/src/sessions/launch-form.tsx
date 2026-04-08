@@ -36,12 +36,10 @@ export function LaunchForm(props: {
   canSubmit: boolean
   draftProjectPath: string | null
   draftPrompt: string
-  errorMessage?: string | null
   onChangeProjectPath: (projectPath: string | null) => void
   onChangePrompt: (prompt: string) => void
-  onSubmit: () => void
+  onSubmit: () => Promise<void> | void
   projects: readonly ProjectRecord[]
-  submitStatus: "idle" | "submitting" | "error"
 }) {
   return (
     <form
@@ -51,7 +49,7 @@ export function LaunchForm(props: {
       })}
       onSubmit={(event) => {
         event.preventDefault()
-        props.onSubmit()
+        void props.onSubmit()
       }}
     >
       <label class={fieldClass}>
@@ -96,17 +94,6 @@ export function LaunchForm(props: {
           }}
         />
       </label>
-      {props.errorMessage ? (
-        <p
-          class={css({
-            color: "danger",
-            fontSize: "0.84rem",
-            lineHeight: "1.6",
-          })}
-        >
-          {props.errorMessage}
-        </p>
-      ) : null}
       <div
         class={css({
           display: "flex",
@@ -134,10 +121,10 @@ export function LaunchForm(props: {
               opacity: "0.52",
             },
           })}
-          disabled={!props.canSubmit || props.submitStatus === "submitting"}
+          disabled={!props.canSubmit}
           type="submit"
         >
-          {props.submitStatus === "submitting" ? "Launching..." : "Launch session"}
+          Launch session
         </button>
       </div>
     </form>
