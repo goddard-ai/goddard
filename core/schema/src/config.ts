@@ -148,6 +148,51 @@ export const LoopConfig = z
 
 export type LoopConfig = z.infer<typeof LoopConfig>
 
+/** Schema for one custom worktree plugin loaded from a filesystem path. */
+export const WorktreePluginPathReference = z
+  .strictObject({
+    type: z.literal("path"),
+    path: z
+      .string()
+      .min(1)
+      .describe(
+        "Absolute plugin module path or a path resolved relative to the Goddard global directory.",
+      ),
+    export: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional module export name to load. Defaults to `default`."),
+  })
+  .describe("Reference to a custom worktree plugin loaded from a module path.")
+
+export type WorktreePluginPathReference = z.infer<typeof WorktreePluginPathReference>
+
+/** Schema for one custom worktree plugin loaded from a globally installed package. */
+export const WorktreePluginPackageReference = z
+  .strictObject({
+    type: z.literal("package"),
+    package: z
+      .string()
+      .min(1)
+      .describe("Package name for a globally installed worktree plugin module."),
+    export: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional module export name to load. Defaults to `default`."),
+  })
+  .describe("Reference to a custom worktree plugin loaded from a globally installed package.")
+
+export type WorktreePluginPackageReference = z.infer<typeof WorktreePluginPackageReference>
+
+/** Schema for one custom worktree plugin reference declared in root config. */
+export const WorktreePluginReference = z
+  .discriminatedUnion("type", [WorktreePluginPathReference, WorktreePluginPackageReference])
+  .describe("Custom worktree plugin reference loaded by the daemon from global config.")
+
+export type WorktreePluginReference = z.infer<typeof WorktreePluginReference>
+
 /** Schema for persisted daemon worktree defaults loaded from JSON. */
 export const WorktreesConfig = z
   .strictObject({
@@ -156,6 +201,10 @@ export const WorktreesConfig = z
       .min(1)
       .optional()
       .describe("Default repository-local folder name used for daemon-managed worktrees."),
+    plugins: z
+      .array(WorktreePluginReference)
+      .optional()
+      .describe("Custom worktree plugins loaded from the global Goddard config only."),
   })
   .describe("Persisted worktree defaults loaded from JSON.")
 
@@ -226,6 +275,9 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(ActionConfig, { id: "ActionConfig" })
   z.globalRegistry.add(LoopConfig, { id: "LoopConfig" })
+  z.globalRegistry.add(WorktreePluginPathReference, { id: "WorktreePluginPathReference" })
+  z.globalRegistry.add(WorktreePluginPackageReference, { id: "WorktreePluginPackageReference" })
+  z.globalRegistry.add(WorktreePluginReference, { id: "WorktreePluginReference" })
   z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })
 }

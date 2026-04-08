@@ -22,6 +22,10 @@ export type RootConfigProvider = {
   getRootConfig: (cwd?: string) => Promise<ResolvedConfigRoots>
 }
 
+type JsonConfigReadOptions = {
+  validateNormalized?: (normalized: unknown) => void
+}
+
 const SCHEMA_BASE_URL =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/"
 
@@ -41,6 +45,7 @@ export async function readJsonConfig<T>(
   schema: z.ZodType<T>,
   label: string,
   schemaReference: string,
+  options: JsonConfigReadOptions = {},
 ): Promise<T | undefined> {
   if (!(await pathExists(path))) {
     return undefined
@@ -80,6 +85,15 @@ export async function readJsonConfig<T>(
         )
       : parsed
 
+  try {
+    options.validateNormalized?.(normalized)
+  } catch (error) {
+    throw new Error(
+      `${label} at ${path} is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    )
+  }
+
   const result = schema.safeParse(normalized)
   if (!result.success) {
     throw new Error(`${label} at ${path} is invalid: ${z.prettifyError(result.error)}`)
@@ -100,8 +114,30 @@ export async function readMergedRootConfig(
     localRoot,
     config: mergeRootConfigLayers(
       await readJsonConfig(getGlobalConfigPath(), UserConfig, "Global config", "goddard.json"),
-      await readJsonConfig(getLocalConfigPath(cwd), UserConfig, "Local config", "goddard.json"),
+      await readJsonConfig(getLocalConfigPath(cwd), UserConfig, "Local config", "goddard.json", {
+        validateNormalized: assertLocalConfigDoesNotDeclareWorktreePlugins,
+      }),
     ),
+  }
+}
+
+/**
+ * Prevents repository-local config from selecting arbitrary daemon-loaded worktree plugins.
+ */
+function assertLocalConfigDoesNotDeclareWorktreePlugins(normalized: unknown) {
+  if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized)) {
+    return
+  }
+
+  const worktrees = (normalized as Record<string, unknown>).worktrees
+  if (typeof worktrees !== "object" || worktrees === null || Array.isArray(worktrees)) {
+    return
+  }
+
+  if ("plugins" in worktrees) {
+    throw new Error(
+      "`worktrees.plugins` is only supported in the global Goddard config, not repository-local config.",
+    )
   }
 }
 

@@ -43,6 +43,7 @@
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/worktree-plugin": "workspace:^",
     "cmd-ts": "^0.15.0",
+    "hash-sum": "^2.0.0",
     "kindstore": "^0.4.1",
     "kleur": "^4.1.5",
     "node-stream-zip": "^1.15.0",
@@ -56,6 +57,7 @@
   "devDependencies": {
     "@goddard-ai/backend": "workspace:^",
     "@types/bun": "^1.3.11",
+    "@types/hash-sum": "^1.0.2",
     "@types/tar-fs": "^2.0.4",
     "@types/unbzip2-stream": "^1.4.3"
   }

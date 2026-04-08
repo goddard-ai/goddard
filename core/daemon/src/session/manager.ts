@@ -29,6 +29,7 @@ import {
 } from "@goddard-ai/schema/session-server"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import { createWorktree } from "../worktrees/index.ts"
+import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
 import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
@@ -795,6 +796,16 @@ async function initializeSession(params: {
 
 type InitializedSession = Awaited<ReturnType<typeof initializeSession>>
 
+/**
+ * Returns true when one launch path needs configured worktree plugins for reuse or creation.
+ */
+function shouldResolveConfiguredWorktreePlugins(
+  request: CreateDaemonSessionRequest,
+  existingWorktree: SessionWorktreeState | null,
+) {
+  return existingWorktree !== null || request.worktree?.enabled === true
+}
+
 /** Resolves the effective worktree used by one session launch, either by reuse or fresh creation. */
 async function resolveLaunchWorktree(params: {
   sessionId: SessionId
@@ -1121,6 +1132,10 @@ export function createSessionManager(input: {
   registry?: Record<string, AgentDistribution>
 }): SessionManager {
   const activeSessions = new Map<SessionId, ActiveSession>()
+  const worktreePluginManager = createWorktreePluginManager({
+    configManager: input.configManager,
+    logger,
+  })
   const ready = reconcilePersistedSessions()
 
   async function updateSession(
@@ -1764,12 +1779,17 @@ export function createSessionManager(input: {
       (input.configManager
         ? (await input.configManager.getRootConfig(params.request.cwd)).config
         : undefined)
+    const resolvedWorktreePlugins =
+      params.worktreePlugins ??
+      (shouldResolveConfiguredWorktreePlugins(params.request, existingArtifacts.worktree)
+        ? await worktreePluginManager.getPlugins(params.request.cwd)
+        : undefined)
     const resolvedRegistry = resolvedConfig?.registry ?? input.registry
     const worktree = await resolveLaunchWorktree({
       sessionId: id,
       request: params.request,
       existingWorktree: existingArtifacts.worktree,
-      worktreePlugins: params.worktreePlugins,
+      worktreePlugins: resolvedWorktreePlugins,
       defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
     })
     const cwd = worktree?.state.effectiveCwd ?? params.request.cwd

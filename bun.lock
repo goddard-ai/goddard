@@ -120,6 +120,7 @@
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/worktree-plugin": "workspace:^",
         "cmd-ts": "^0.15.0",
+        "hash-sum": "^2.0.0",
         "kindstore": "^0.4.1",
         "kleur": "^4.1.5",
         "node-stream-zip": "^1.15.0",
@@ -133,6 +134,7 @@
       "devDependencies": {
         "@goddard-ai/backend": "workspace:^",
         "@types/bun": "^1.3.11",
+        "@types/hash-sum": "^1.0.2",
         "@types/tar-fs": "^2.0.4",
         "@types/unbzip2-stream": "^1.4.3",
       },
@@ -997,6 +999,8 @@
     "@types/deep-eql": ["@types/deep-eql@4.0.2", "", {}, "sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw=="],
 
     "@types/estree": ["@types/estree@1.0.8", "", {}, "sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w=="],
+
+    "@types/hash-sum": ["@types/hash-sum@1.0.2", "", {}, "sha512-UP28RddqY8xcU0SCEp9YKutQICXpaAq9N8U2klqF5hegGha7KzTOL8EdhIIV3bOSGBzjEpN9bU/d+nNZBdJYVw=="],
 
     "@types/jsesc": ["@types/jsesc@2.5.1", "", {}, "sha512-9VN+6yxLOPLOav+7PwjZbxiID2bVaeq0ED4qSQmdQTdjnXJSaCVKTR58t15oqH1H5t8Ng2ZX1SabJVoN9Q34bw=="],
 
