@@ -10,6 +10,7 @@
     "core/daemon/client",
     "workforce"
   ],
+  "type": "module",
   "scripts": {
     "prepare": "husky",
     "precommit:staged-fix": "bun run ./scripts/pre-commit-staged-fix.mjs",

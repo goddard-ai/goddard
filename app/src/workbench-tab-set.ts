@@ -2,8 +2,8 @@ import { SigmaType } from "preact-sigma"
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 import {
   isWorkbenchDetailTabKind,
-  type WorkbenchTab,
   type WorkbenchDetailTabKind,
+  type WorkbenchTab,
   type WorkbenchTabKind,
 } from "./workbench-tab-registry.ts"
 
@@ -49,7 +49,9 @@ export const WORKBENCH_PRIMARY_TAB: WorkbenchTab<"main"> = {
 export const WORKBENCH_TAB_LIMIT = 20
 
 /** Returns whether one stored record still matches a registered closable tab kind. */
-function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchDetailTab {
+function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchDetailTab & {
+  payload: any
+} {
   return (
     typeof tab.id === "string" &&
     typeof tab.title === "string" &&
@@ -95,7 +97,7 @@ export const WorkbenchTabSet = new SigmaType<WorkbenchTabSetShape>("WorkbenchTab
   })
   .actions({
     /** Opens one closable tab or focuses the existing tab with the same stable id. */
-    openOrFocusTab(tab: WorkbenchDetailTab) {
+    openOrFocusTab(tab: WorkbenchDetailTab & { payload: any }) {
       if (this.tabs[tab.id]) {
         this.tabs[tab.id] = { ...this.tabs[tab.id], ...tab }
         this.activateTab(tab.id)
@@ -182,9 +184,12 @@ export const WorkbenchTabSet = new SigmaType<WorkbenchTabSetShape>("WorkbenchTab
         activeTabId: WORKBENCH_PRIMARY_TAB.id,
         recency: [],
       })
-      const tabList = snapshot.tabs.filter(isStoredWorkbenchTab)
-      const tabs = Object.fromEntries(tabList.map((tab) => [tab.id, tab]))
-      const orderedTabIds = tabList.map((tab) => tab.id)
+
+      const validatedTabList = snapshot.tabs.filter(isStoredWorkbenchTab)
+
+      const tabs = Object.fromEntries(validatedTabList.map((tab) => [tab.id, tab]))
+      const orderedTabIds = validatedTabList.map((tab) => tab.id)
+
       const activeTabId =
         snapshot.activeTabId === WORKBENCH_PRIMARY_TAB.id || tabs[snapshot.activeTabId]
           ? snapshot.activeTabId

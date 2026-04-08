@@ -2,8 +2,10 @@ import { expect, test } from "bun:test"
 import { IpcRequestContext, SessionContext } from "../src/context.ts"
 import { configureLogging, createLogger } from "../src/logging.ts"
 
+const ansiColorPattern = new RegExp(String.raw`\u001B\[[0-9;]*m`, "g")
+
 function stripAnsi(value: string): string {
-  return value.replace(/\u001B\[[0-9;]*m/g, "")
+  return value.replace(ansiColorPattern, "")
 }
 
 test("pretty logging flattens plain object fields one level", () => {

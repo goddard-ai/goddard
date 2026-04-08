@@ -45,46 +45,46 @@ describe("@goddard-ai/sdk session namespace", () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [
         { requestId: "prompt-2", prompt: [{ type: "text", text: "Queued follow-up" }] },
       ],
     })
 
-    await expect(sdk.session.cancel({ id: "daemon-session-1" })).resolves.toEqual({
-      id: "daemon-session-1",
+    await expect(sdk.session.cancel({ id: "ses_daemon-session-1" })).resolves.toEqual({
+      id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [
         { requestId: "prompt-2", prompt: [{ type: "text", text: "Queued follow-up" }] },
       ],
     })
 
-    expect(send).toHaveBeenCalledWith("sessionCancel", { id: "daemon-session-1" })
+    expect(send).toHaveBeenCalledWith("sessionCancel", { id: "ses_daemon-session-1" })
   })
 
   test("session.steer forwards one replacement prompt to sessionSteer", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       abortedQueue: [],
       response: { stopReason: "end_turn" },
     })
 
     await expect(
       sdk.session.steer({
-        id: "daemon-session-1",
+        id: "ses_daemon-session-1",
         prompt: "Review only the failing tests.",
       }),
     ).resolves.toEqual({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       abortedQueue: [],
       response: { stopReason: "end_turn" },
     })
 
     expect(send).toHaveBeenCalledWith("sessionSteer", {
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       prompt: "Review only the failing tests.",
     })
   })
@@ -232,12 +232,12 @@ describe("@goddard-ai/sdk session namespace", () => {
 
   test("AgentSession.cancel uses the daemon-owned cancel path", async () => {
     const daemonSend = vi.fn().mockResolvedValueOnce({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [],
     })
     const session = new AgentSession(
-      "daemon-session-1",
+      "ses_daemon-session-1",
       "acp-session-1",
       {} as never,
       {
@@ -247,22 +247,22 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     await expect(session.cancel()).resolves.toEqual({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [],
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("sessionCancel", { id: "daemon-session-1" })
+    expect(daemonSend).toHaveBeenCalledWith("sessionCancel", { id: "ses_daemon-session-1" })
   })
 
   test("AgentSession.steer uses the daemon-owned steer path", async () => {
     const daemonSend = vi.fn().mockResolvedValueOnce({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       abortedQueue: [],
       response: { stopReason: "end_turn" },
     })
     const session = new AgentSession(
-      "daemon-session-1",
+      "ses_daemon-session-1",
       "acp-session-1",
       {} as never,
       {
@@ -272,13 +272,13 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     await expect(session.steer("Focus on the lint failure.")).resolves.toEqual({
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       abortedQueue: [],
       response: { stopReason: "end_turn" },
     })
 
     expect(daemonSend).toHaveBeenCalledWith("sessionSteer", {
-      id: "daemon-session-1",
+      id: "ses_daemon-session-1",
       prompt: "Focus on the lint failure.",
     })
   })
