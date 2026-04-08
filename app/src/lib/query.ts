@@ -3,8 +3,6 @@ import type { ComponentChildren } from "preact"
 import { createContext, createElement } from "preact"
 import { useContext, useEffect, useState } from "preact/hooks"
 
-const REFETCH_SUSPENSE_DELAY_MS = 1_250
-
 type QueryArgs = readonly unknown[]
 type QueryFunction<TArgs extends QueryArgs = QueryArgs, TData = unknown> = (
   ...args: TArgs
@@ -18,8 +16,6 @@ type QueryEntry = {
   hasData: boolean
   promise: Promise<unknown> | null
   queryFn: AnyQueryFunction
-  slowRefetchTimer: ReturnType<typeof setTimeout> | null
-  shouldSuspendOnRefetch: boolean
   stale: boolean
   subscribers: Set<() => void>
 }
@@ -65,7 +61,7 @@ export class QueryClient {
       error: entry.error,
       hasData: entry.hasData,
       promise: entry.promise,
-      shouldSuspend: entry.promise !== null && (!entry.hasData || entry.shouldSuspendOnRefetch),
+      shouldSuspend: entry.promise !== null && !entry.hasData,
     }
   }
 
@@ -128,22 +124,9 @@ export class QueryClient {
 
     entry.error = null
     entry.stale = false
-    entry.shouldSuspendOnRefetch = false
-    this.clearSlowRefetchTimer(entry)
 
     const promise = Promise.resolve().then(() => entry.queryFn(...entry.args))
     entry.promise = promise
-
-    if (background) {
-      entry.slowRefetchTimer = setTimeout(() => {
-        if (entry.promise !== promise) {
-          return
-        }
-
-        entry.shouldSuspendOnRefetch = true
-        this.notify(entry)
-      }, REFETCH_SUSPENSE_DELAY_MS)
-    }
 
     promise.then(
       (data) => {
@@ -154,12 +137,10 @@ export class QueryClient {
         entry.data = data
         entry.hasData = true
         entry.promise = null
-        entry.shouldSuspendOnRefetch = false
-        this.clearSlowRefetchTimer(entry)
         this.notify(entry)
 
         if (entry.stale) {
-          void this.fetchEntry(entry, true)
+          void this.fetchEntry(entry, background)
         }
       },
       (error) => {
@@ -168,8 +149,6 @@ export class QueryClient {
         }
 
         entry.promise = null
-        entry.shouldSuspendOnRefetch = false
-        this.clearSlowRefetchTimer(entry)
 
         if (!entry.hasData) {
           entry.error = error
@@ -201,8 +180,6 @@ export class QueryClient {
       hasData: false,
       promise: null,
       queryFn,
-      slowRefetchTimer: null,
-      shouldSuspendOnRefetch: false,
       stale: true,
       subscribers: new Set(),
     }
@@ -242,13 +219,6 @@ export class QueryClient {
 
     if (entry.subscribers.size > 0 && !entry.promise) {
       void this.fetchEntry(entry, entry.hasData)
-    }
-  }
-
-  clearSlowRefetchTimer(entry: QueryEntry) {
-    if (entry.slowRefetchTimer !== null) {
-      clearTimeout(entry.slowRefetchTimer)
-      entry.slowRefetchTimer = null
     }
   }
 
