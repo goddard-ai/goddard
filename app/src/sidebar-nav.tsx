@@ -102,14 +102,14 @@ function SidebarNavItem(props: {
 }) {
   return (
     <GoodTooltip
-      ariaLabel={props.item.ariaLabel}
+      ariaLabel={props.item.label}
       content={props.item.label}
       side="right"
       sideOffset={12}
     >
       <button
         aria-current={props.isSelected ? "page" : undefined}
-        aria-label={props.item.ariaLabel}
+        aria-label={props.item.label}
         class={css({
           position: "relative",
           display: "grid",

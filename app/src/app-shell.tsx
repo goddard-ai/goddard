@@ -92,7 +92,6 @@ export function AppShell() {
     workbenchTabSet.tabList,
   )
   const navigationItems: Array<{
-    ariaLabel: string
     group: "primary" | "secondary"
     icon: SvgIconName
     id: (typeof navigation.items)[number]["id"]

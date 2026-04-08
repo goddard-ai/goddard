@@ -3,29 +3,31 @@ import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.t
 
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
 
+const defaultNavigationItems = [
+  { id: "inbox", label: "Inbox" },
+  { id: "sessions", label: "Sessions" },
+  { id: "search", label: "Search" },
+  { id: "specs", label: "Specs" },
+  { id: "tasks", label: "Tasks" },
+  { id: "roadmap", label: "Roadmap" },
+] as const satisfies {
+  id: string
+  label: string
+}[]
+
 /** Stable ids for the primary workbench navigation items. */
-export type NavigationItemId = "inbox" | "sessions" | "search" | "specs" | "tasks" | "roadmap"
+export type NavigationItemId = (typeof defaultNavigationItems)[number]["id"]
 
 /** One item rendered in the left navigation rail. */
 export type NavigationItem = {
   id: NavigationItemId
   label: string
-  ariaLabel: string
 }
 
 /** Public state owned by the navigation model. */
 type NavigationShape = {
   selectedNavId: NavigationItemId
 }
-
-const defaultNavigationItems: NavigationItem[] = [
-  { id: "inbox", label: "Inbox", ariaLabel: "Inbox" },
-  { id: "sessions", label: "Sessions", ariaLabel: "Sessions" },
-  { id: "search", label: "Search", ariaLabel: "Search" },
-  { id: "specs", label: "Specs", ariaLabel: "Specs" },
-  { id: "tasks", label: "Tasks", ariaLabel: "Tasks" },
-  { id: "roadmap", label: "Roadmap", ariaLabel: "Roadmap" },
-]
 
 /** Sigma state for the app shell's primary navigation rail. */
 export const Navigation = new SigmaType<NavigationShape>("Navigation")

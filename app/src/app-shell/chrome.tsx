@@ -36,7 +36,6 @@ export function AppShellChrome(props: {
     width: number
   }
   navigationItems: Array<{
-    ariaLabel: string
     group: "primary" | "secondary"
     icon: SvgIconName
     id: NavigationItemId
@@ -346,9 +345,9 @@ export function AppShellChrome(props: {
 /** Renders one grouped section of the left navigation rail. */
 function AppShellSidebarSection(props: {
   items: Array<{
-    ariaLabel: string
     icon: SvgIconName
     id: NavigationItemId
+    label: string
   }>
   onNavigationSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
   selectedNavigationId: NavigationItemId
@@ -360,7 +359,7 @@ function AppShellSidebarSection(props: {
           key={item.id}
           icon={item.icon}
           isSelected={item.id === props.selectedNavigationId}
-          label={item.ariaLabel}
+          label={item.label}
           onSelect={(options) => {
             props.onNavigationSelect(item.id, options)
           }}
