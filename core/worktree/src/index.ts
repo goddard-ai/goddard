@@ -1,3 +1,7 @@
+/**
+ * Public worktree helpers for creating and deleting repository worktrees with pluggable strategies.
+ */
+
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { defaultPlugin } from "./default-plugin.ts"
@@ -7,12 +11,12 @@ import { worktrunkPlugin } from "./worktrunk.ts"
 export type { WorktreePlugin, WorktreeSetupOptions }
 
 /**
- * Options for configuring a Worktree instance.
+ * Shared options for resolving or operating on one repository worktree.
  */
 export interface WorktreeOptions {
   /**
    * Optional list of plugins to use for worktree management.
-   * If provided, these will be evaluated before the default plugin.
+   * If provided, these will be evaluated before the built-in plugins.
    */
   plugins?: WorktreePlugin[]
 
@@ -28,145 +32,217 @@ export interface WorktreeOptions {
 }
 
 /**
- * A utility class for managing Git worktrees with pluggable strategies.
+ * Options for creating one worktree for a target branch.
  */
-export class Worktree {
+export interface CreateWorktreeOptions extends WorktreeOptions {
   /**
-   * The current working directory of the original repository.
+   * The branch name to create or reuse inside the new worktree.
    */
-  readonly cwd: string
+  branchName: string
 
   /**
-   * The default directory name to use for created worktrees.
+   * The requested working directory that should be mapped inside the created worktree.
    */
-  readonly defaultPluginDirName?: string
+  requestedCwd?: string
+}
+
+/**
+ * Options for deleting one previously created worktree.
+ */
+export interface DeleteWorktreeOptions extends WorktreeOptions {
+  /**
+   * The worktree directory to remove.
+   */
+  worktreeDir: string
 
   /**
-   * Candidate plugins evaluated before falling back to the default plugin.
+   * The branch associated with the worktree.
    */
-  readonly plugins: WorktreePlugin[]
+  branchName: string
 
   /**
-   * The active plugin being used to manage worktrees.
+   * The plugin name that originally created the worktree when known.
    */
-  plugin: WorktreePlugin
+  poweredBy?: string
+}
 
-  /**
-   * Tracks whether plugin applicability has already been resolved.
-   */
-  private pluginResolved = false
+/** The durable metadata returned after creating one worktree. */
+export type CreatedWorktree = {
+  repoRoot: string
+  requestedCwd: string
+  effectiveCwd: string
+  worktreeDir: string
+  branchName: string
+  poweredBy: string
+}
 
-  /**
-   * Creates a new Worktree instance.
-   *
-   * @param options - Configuration options for the Worktree.
-   * @throws {Error} If the provided `cwd` is not a valid git repository.
-   */
-  constructor(options: WorktreeOptions) {
-    this.cwd = options.cwd
-    this.defaultPluginDirName = options.defaultPluginDirName
+/**
+ * Resolves the first applicable worktree plugin for one repository.
+ */
+export async function resolveWorktreePlugin(options: WorktreeOptions) {
+  assertGitRepository(options.cwd)
 
-    if (!fs.existsSync(path.join(this.cwd, ".git"))) {
-      throw new Error(`Not a git repository: ${this.cwd}`)
+  for (const candidate of listWorktreePlugins(options)) {
+    if (await candidate.isApplicable(options.cwd)) {
+      return candidate
     }
-
-    this.plugins = [...(options.plugins || []), worktrunkPlugin]
-    this.plugin = defaultPlugin
   }
 
-  /**
-   * The name of the active plugin powering the worktree management.
-   */
-  get poweredBy(): string {
-    return this.plugin.name
-  }
+  return defaultPlugin
+}
 
-  /**
-   * Sets up a new worktree for the specified branch.
-   *
-   * @param branchName - The name of the branch to create a worktree for.
-   * @returns An object containing the path to the created worktree directory and the branch name.
-   * @throws {Error} If the default plugin fails to set up the workspace.
-   */
-  async setup(branchName: string): Promise<{ worktreeDir: string; branchName: string }> {
-    const setupOptions: WorktreeSetupOptions = {
-      cwd: this.cwd,
-      branchName,
-      defaultDirName: this.defaultPluginDirName,
-    }
+/**
+ * Creates one worktree and reports which plugin ultimately handled the setup.
+ */
+export async function createWorktree(options: CreateWorktreeOptions) {
+  const repoRoot = path.resolve(options.cwd)
+  const requestedCwd = resolveRequestedCwd(repoRoot, options.requestedCwd)
+  const plugin = await resolveWorktreePlugin({
+    ...options,
+    cwd: repoRoot,
+  })
+  const setupOptions = createSetupOptions({
+    ...options,
+    cwd: repoRoot,
+  })
 
-    await this.ensurePlugin()
-
-    // Evaluate the initially selected custom plugin or worktrunkPlugin
-    if (this.plugin !== defaultPlugin) {
-      let worktreeDir: string | null = null
-      try {
-        worktreeDir = await this.plugin.setup(setupOptions)
-      } catch {
-        // Suppress console output; default plugin handles fallback
-      }
-
-      if (worktreeDir) {
-        return {
-          worktreeDir,
-          branchName,
-        }
-      }
-
-      // Since it failed, permanently change the active plugin to defaultPlugin for cleanup
-      this.plugin = defaultPlugin
-    }
-
-    // Evaluate the default fallback
-    let worktreeDir: string | null = null
+  if (plugin !== defaultPlugin) {
     try {
-      worktreeDir = await defaultPlugin.setup(setupOptions)
-    } catch (err) {
-      throw new Error(
-        `Default worktree plugin failed to setup the workspace: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      )
-    }
-
-    if (!worktreeDir) {
-      throw new Error(`Default worktree plugin failed to setup the workspace (returned null).`)
-    }
-
-    return {
-      worktreeDir,
-      branchName,
-    }
-  }
-
-  /**
-   * Cleans up an existing worktree.
-   *
-   * @param worktreeDir - The path to the worktree directory to clean up.
-   * @param branchName - The name of the branch associated with the worktree.
-   * @returns `true` if the cleanup was successful, `false` otherwise.
-   */
-  async cleanup(worktreeDir: string, branchName: string): Promise<boolean> {
-    await this.ensurePlugin()
-    return this.plugin.cleanup(worktreeDir, branchName)
-  }
-
-  /**
-   * Resolves the first applicable plugin once and reuses it for later operations.
-   */
-  private async ensurePlugin(): Promise<void> {
-    if (this.pluginResolved) {
-      return
-    }
-
-    for (const candidate of this.plugins) {
-      if (await candidate.isApplicable(this.cwd)) {
-        this.plugin = candidate
-        this.pluginResolved = true
-        return
+      const worktreeDir = await plugin.setup(setupOptions)
+      if (worktreeDir) {
+        return createWorktreeMetadata({
+          repoRoot,
+          requestedCwd,
+          worktreeDir,
+          branchName: options.branchName,
+          poweredBy: plugin.name,
+        })
       }
+    } catch {
+      // Suppress console output; default plugin handles fallback.
     }
+  }
 
-    this.plugin = defaultPlugin
-    this.pluginResolved = true
+  let worktreeDir: string | null = null
+  try {
+    worktreeDir = await defaultPlugin.setup(setupOptions)
+  } catch (err) {
+    throw new Error(
+      `Default worktree plugin failed to setup the workspace: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    )
+  }
+
+  if (!worktreeDir) {
+    throw new Error(`Default worktree plugin failed to setup the workspace (returned null).`)
+  }
+
+  return createWorktreeMetadata({
+    repoRoot,
+    requestedCwd,
+    worktreeDir,
+    branchName: options.branchName,
+    poweredBy: defaultPlugin.name,
+  })
+}
+
+/**
+ * Deletes one worktree using the originating plugin when available and falls back to the default plugin.
+ */
+export async function deleteWorktree(options: DeleteWorktreeOptions) {
+  const plugin = await resolveDeleteWorktreePlugin(options)
+  if (await plugin.cleanup(options.worktreeDir, options.branchName)) {
+    return true
+  }
+
+  if (plugin === defaultPlugin) {
+    return false
+  }
+
+  return defaultPlugin.cleanup(options.worktreeDir, options.branchName)
+}
+
+/**
+ * Lists the candidate plugins in evaluation order for one repository.
+ */
+function listWorktreePlugins(options: WorktreeOptions) {
+  return [...(options.plugins || []), worktrunkPlugin, defaultPlugin]
+}
+
+/**
+ * Resolves the plugin that should be used for worktree deletion.
+ */
+async function resolveDeleteWorktreePlugin(options: DeleteWorktreeOptions) {
+  assertGitRepository(options.cwd)
+
+  if (options.poweredBy) {
+    const poweredByPlugin = listWorktreePlugins(options).find(
+      (candidate) => candidate.name === options.poweredBy,
+    )
+    if (poweredByPlugin) {
+      return poweredByPlugin
+    }
+  }
+
+  return resolveWorktreePlugin(options)
+}
+
+/**
+ * Builds the plugin setup payload from one public create request.
+ */
+function createSetupOptions(options: CreateWorktreeOptions) {
+  return {
+    cwd: options.cwd,
+    branchName: options.branchName,
+    defaultDirName: options.defaultPluginDirName,
+  }
+}
+
+/**
+ * Builds the persisted metadata shape shared by daemon session worktrees.
+ */
+function createWorktreeMetadata(params: {
+  repoRoot: string
+  requestedCwd: string
+  worktreeDir: string
+  branchName: string
+  poweredBy: string
+}) {
+  const relativeCwd = path.relative(params.repoRoot, params.requestedCwd)
+  const normalizedWorktreeDir = path.resolve(params.worktreeDir)
+
+  return {
+    repoRoot: params.repoRoot,
+    requestedCwd: params.requestedCwd,
+    effectiveCwd:
+      relativeCwd.length === 0
+        ? normalizedWorktreeDir
+        : path.join(normalizedWorktreeDir, relativeCwd),
+    worktreeDir: normalizedWorktreeDir,
+    branchName: params.branchName,
+    poweredBy: params.poweredBy,
+  } satisfies CreatedWorktree
+}
+
+/**
+ * Resolves one requested cwd and verifies that it stays inside the repository root.
+ */
+function resolveRequestedCwd(repoRoot: string, requestedCwd = repoRoot) {
+  const normalizedRequestedCwd = path.resolve(requestedCwd)
+  const relativeCwd = path.relative(repoRoot, normalizedRequestedCwd)
+
+  if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
+    throw new Error(`Requested cwd must stay within the git repository: ${normalizedRequestedCwd}`)
+  }
+
+  return normalizedRequestedCwd
+}
+
+/**
+ * Verifies that one cwd points at a git repository before any plugin work runs.
+ */
+function assertGitRepository(cwd: string) {
+  if (!fs.existsSync(path.join(cwd, ".git"))) {
+    throw new Error(`Not a git repository: ${cwd}`)
   }
 }

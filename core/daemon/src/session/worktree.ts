@@ -1,81 +1,45 @@
-import { Worktree, type WorktreePlugin } from "@goddard-ai/worktree"
+/** Daemon helpers for reusing and cleaning up session-owned worktrees. */
+import { deleteWorktree, type WorktreePlugin } from "@goddard-ai/worktree"
 import type { KindInput } from "kindstore"
 import { realpathSync } from "node:fs"
-import { join, relative, resolve } from "node:path"
+import { resolve } from "node:path"
 import { db } from "../persistence/store.ts"
+
+const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
+
+/** Persisted worktree state stored separately from the base daemon session record. */
+export type SessionWorktreeState = Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
 
 /** Prepared worktree state returned when one daemon session opts into isolation. */
 export interface PreparedSessionWorktree {
-  worktree: Worktree
-  effectiveCwd: string
-  state: Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
+  state: SessionWorktreeState
   logContext: Record<string, unknown>
 }
 
 /**
- * Creates one daemon-owned worktree and maps the requested cwd into the cloned workspace.
+ * Reuses one persisted worktree by validating its plugin dependency and refreshing its branch metadata.
  */
-export async function prepareSessionWorktree(
-  sessionId: string,
-  cwd: string,
+export async function reuseExistingWorktree(
+  worktree: SessionWorktreeState,
   params: {
     /**
-     * If provided, use this branch name instead of the default one.
-     */
-    branchNameOverride?: string
-    /**
-     * Custom integration plugins to use for worktree setup.
+     * Custom integration plugins to use for worktree reuse and later cleanup.
      */
     worktreePlugins?: WorktreePlugin[]
-    /**
-     * Use this already-provisioned folder instead of creating a new worktree.
-     */
-    existingFolder?: string
-    /**
-     * If the default worktree implementation is used, ensure this folder
-     * exists in the repository root. Worktrees are stored in this folder.
-     */
-    defaultWorktreesFolder?: string
   } = {},
-): Promise<PreparedSessionWorktree | null> {
-  const requestedCwd = resolve(realpathSync.native(cwd))
-  const repoRoot = await resolveGitRepoRoot(requestedCwd)
-  if (!repoRoot) {
-    return null
+) {
+  if (
+    builtinWorktreePluginNames.has(worktree.poweredBy) === false &&
+    params.worktreePlugins?.some((plugin) => plugin.name === worktree.poweredBy) !== true
+  ) {
+    throw new Error(
+      `Missing worktree plugin "${worktree.poweredBy}" required to reuse ${worktree.worktreeDir}`,
+    )
   }
 
-  const relativeCwd = relative(repoRoot, requestedCwd)
-  const worktree = new Worktree({
-    cwd: repoRoot,
-    plugins: params.worktreePlugins,
-    defaultPluginDirName: params.defaultWorktreesFolder,
-  })
-  const existingFolder = params.existingFolder
-    ? resolve(realpathSync.native(params.existingFolder))
-    : null
-  const { worktreeDir, branchName } = existingFolder
-    ? {
-        worktreeDir: existingFolder,
-        branchName: await resolveExistingWorktreeBranchName(existingFolder),
-      }
-    : await worktree.setup(params.branchNameOverride || `goddard-${sessionId}`)
-  const effectiveCwd = join(worktreeDir, relativeCwd)
-
-  return {
-    worktree,
-    effectiveCwd,
-    state: {
-      repoRoot,
-      requestedCwd,
-      effectiveCwd,
-      worktreeDir,
-      branchName,
-      poweredBy: worktree.poweredBy,
-    },
-    logContext: {
-      worktreeDir,
-      worktreePoweredBy: worktree.poweredBy,
-    },
+  const headRef = await resolveExistingWorktreeHeadRef(worktree.worktreeDir)
+  if (headRef) {
+    worktree.branchName = headRef
   }
 }
 
@@ -83,25 +47,27 @@ export async function prepareSessionWorktree(
  * Removes one daemon session worktree using the metadata recorded at creation time.
  */
 export async function cleanupSessionWorktree(
-  metadata: Omit<KindInput<typeof db.schema.worktrees>, "sessionId">,
+  metadata: SessionWorktreeState,
   params: {
     /**
      * Custom integration plugins to use for worktree cleanup.
      */
     worktreePlugins?: WorktreePlugin[]
   } = {},
-): Promise<boolean> {
-  const worktree = new Worktree({
+) {
+  return await deleteWorktree({
     cwd: metadata.repoRoot,
     plugins: params.worktreePlugins,
+    worktreeDir: metadata.worktreeDir,
+    branchName: metadata.branchName,
+    poweredBy: metadata.poweredBy,
   })
-  return await worktree.cleanup(metadata.worktreeDir, metadata.branchName)
 }
 
 /**
  * Resolves the containing git repository root for one requested session cwd when one exists.
  */
-async function resolveGitRepoRoot(cwd: string): Promise<string | null> {
+export async function resolveGitRepoRoot(cwd: string) {
   const { success, stdout } = await runGit(cwd, ["rev-parse", "--show-toplevel"])
   if (!success) {
     return null
@@ -116,26 +82,50 @@ async function resolveGitRepoRoot(cwd: string): Promise<string | null> {
 }
 
 /**
- * Resolves the active branch name for one existing worktree folder.
+ * Converts persisted worktree metadata into the logging wrapper used by session launch.
  */
-async function resolveExistingWorktreeBranchName(cwd: string): Promise<string> {
-  const { success, stdout } = await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+export function toPreparedSessionWorktree(state: SessionWorktreeState): PreparedSessionWorktree {
+  return {
+    state,
+    logContext: {
+      worktreeDir: state.worktreeDir,
+      worktreePoweredBy: state.poweredBy,
+    },
+  }
+}
+
+/**
+ * Resolves the currently attached branch for one existing worktree folder when HEAD is not detached.
+ */
+async function resolveExistingWorktreeHeadRef(cwd: string) {
+  const resolvedCwd = resolve(realpathSync.native(cwd))
+  const gitWorktreeCheck = await runGit(resolvedCwd, ["rev-parse", "--git-dir"])
+  if (!gitWorktreeCheck.success) {
+    throw new Error(`Existing worktree folder must be a git worktree: ${resolvedCwd}`)
+  }
+
+  const { success, stdout } = await runGit(resolvedCwd, [
+    "symbolic-ref",
+    "--quiet",
+    "--short",
+    "HEAD",
+  ])
   if (!success) {
-    throw new Error(`Existing worktree folder must be a git worktree: ${cwd}`)
+    return null
   }
 
-  const branchName = stdout.trim()
-  if (!branchName) {
-    throw new Error(`Existing worktree folder must have a readable branch name: ${cwd}`)
+  const headRef = stdout.trim()
+  if (!headRef) {
+    return null
   }
 
-  return branchName
+  return headRef
 }
 
 /**
  * Runs one git subprocess asynchronously using Bun's native subprocess API.
  */
-async function runGit(cwd: string, args: string[]): Promise<{ success: boolean; stdout: string }> {
+async function runGit(cwd: string, args: string[]) {
   const result = Bun.spawn(["git", ...args], {
     cwd,
     stdin: "ignore",

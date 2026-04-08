@@ -1,29 +1,45 @@
-# @goddard/worktree
+# @goddard-ai/worktree
 
 A utility for managing Git worktrees with pluggable strategies.
 
 ## Purpose
 
-The `Worktree` class provides a consistent interface for creating and cleaning up Git worktrees. It supports different "plugins" to determine how a worktree should be set up, falling back to a default implementation if necessary. This is primarily used to isolate development environments for automated agents.
+The package provides top-level helpers for resolving plugins and creating or deleting Git worktrees. It supports different "plugins" to determine how a worktree should be set up, falling back to a default implementation if necessary. This is primarily used to isolate development environments for automated agents.
 
 ## Usage Example
 
 ```typescript
-import { Worktree } from '@goddard/worktree';
+import {
+  createWorktree,
+  deleteWorktree,
+  resolveWorktreePlugin,
+} from "@goddard-ai/worktree"
 
-const worktree = new Worktree({
-  cwd: '/path/to/repo',
-});
+const plugin = await resolveWorktreePlugin({
+  cwd: "/path/to/repo",
+})
 
-// Setup a new worktree for a branch
-const { worktreeDir, branchName } = await worktree.setup('feature-branch');
+console.log(`Worktree plugin: ${plugin.name}`)
 
-console.log(`Worktree created at: ${worktreeDir}`);
+// Create a new worktree for a branch.
+const { effectiveCwd, worktreeDir, branchName, poweredBy } = await createWorktree({
+  cwd: "/path/to/repo",
+  requestedCwd: "/path/to/repo/packages/example",
+  branchName: "feature-branch",
+})
+
+console.log(`Worktree created at: ${worktreeDir}`)
+console.log(`Start working in: ${effectiveCwd}`)
 
 // ... perform operations in worktreeDir ...
 
-// Clean up when finished
-await worktree.cleanup(worktreeDir, branchName);
+// Clean up when finished.
+await deleteWorktree({
+  cwd: "/path/to/repo",
+  worktreeDir,
+  branchName,
+  poweredBy,
+})
 ```
 
 ## License

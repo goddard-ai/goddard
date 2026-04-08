@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawn } from "node:child_process"
 import { afterEach, expect, test } from "vitest"
-import { Worktree } from "../src/index.ts"
+import { createWorktree, deleteWorktree, resolveWorktreePlugin } from "../src/index.ts"
 import { defaultPlugin } from "../src/default-plugin.ts"
 
 const cleanup: string[] = []
@@ -22,24 +22,36 @@ afterEach(async () => {
   }
 })
 
-test("requires the cwd to be a git repository", () => {
-  expect(() => new Worktree({ cwd: "/tmp/not-a-repo" })).toThrow("Not a git repository")
+test("requires the cwd to be a git repository", async () => {
+  await expect(resolveWorktreePlugin({ cwd: "/tmp/not-a-repo" })).rejects.toThrow(
+    "Not a git repository",
+  )
 })
 
 test("default worktree setup creates and cleans up a workspace inside an explicit directory", async () => {
   const repoDir = await createRepoFixture()
 
-  const worktree = new Worktree({
+  const created = await createWorktree({
     cwd: repoDir,
     defaultPluginDirName: ".custom-dir",
+    branchName: "feature-1",
   })
 
-  const created = await worktree.setup("feature-1")
-
+  expect(created.repoRoot).toBe(repoDir)
+  expect(created.requestedCwd).toBe(repoDir)
+  expect(created.effectiveCwd).toBe(created.worktreeDir)
   expect(created.worktreeDir).toMatch(/\.custom-dir\/feature-1-\d+$/)
   expect(existsSync(created.worktreeDir)).toBe(true)
+  expect(created.poweredBy).toBe(defaultPlugin.name)
 
-  expect(await worktree.cleanup(created.worktreeDir, created.branchName)).toBe(true)
+  expect(
+    await deleteWorktree({
+      cwd: created.repoRoot,
+      worktreeDir: created.worktreeDir,
+      branchName: created.branchName,
+      poweredBy: created.poweredBy,
+    }),
+  ).toBe(true)
   expect(existsSync(created.worktreeDir)).toBe(false)
 })
 
@@ -64,13 +76,26 @@ test("default plugin uses the global worktree directory when the repository has 
 test("worktree setup maps repository subdirectories into the created workspace", async () => {
   const repoDir = await createRepoFixture({ includeSrc: true })
 
-  const worktree = new Worktree({ cwd: repoDir })
-  const created = await worktree.setup("feature-1")
+  const requestedCwd = join(repoDir, "src")
+  const created = await createWorktree({
+    cwd: repoDir,
+    requestedCwd,
+    branchName: "feature-1",
+  })
   const effectiveCwd = join(created.worktreeDir, "src")
 
+  expect(created.requestedCwd).toBe(requestedCwd)
+  expect(created.effectiveCwd).toBe(effectiveCwd)
   expect(existsSync(effectiveCwd)).toBe(true)
 
-  expect(await worktree.cleanup(created.worktreeDir, created.branchName)).toBe(true)
+  expect(
+    await deleteWorktree({
+      cwd: created.repoRoot,
+      worktreeDir: created.worktreeDir,
+      branchName: created.branchName,
+      poweredBy: created.poweredBy,
+    }),
+  ).toBe(true)
 })
 
 async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {

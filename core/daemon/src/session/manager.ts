@@ -27,7 +27,7 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/session-server"
-import type { WorktreePlugin } from "@goddard-ai/worktree"
+import { createWorktree, type WorktreePlugin } from "@goddard-ai/worktree"
 import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
@@ -60,7 +60,13 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import { fetchRegistryAgent } from "./registry.ts"
-import { PreparedSessionWorktree, prepareSessionWorktree } from "./worktree.ts"
+import {
+  type PreparedSessionWorktree,
+  type SessionWorktreeState,
+  resolveGitRepoRoot,
+  reuseExistingWorktree,
+  toPreparedSessionWorktree,
+} from "./worktree.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
@@ -85,6 +91,17 @@ const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
 const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
   "Queued prompt aborted before dispatch by session cancellation."
 
+type PersistedSessionMessagesRecord = KindOutput<typeof db.schema.sessionMessages>
+type PersistedSessionWorktreeRecord = KindOutput<typeof db.schema.worktrees>
+type PersistedSessionWorkforceRecord = KindOutput<typeof db.schema.workforces>
+
+type ExistingSessionArtifacts = {
+  messagesRecord: PersistedSessionMessagesRecord | null
+  worktreeRecord: PersistedSessionWorktreeRecord | null
+  worktree: SessionWorktreeState | null
+  workforceRecord: PersistedSessionWorkforceRecord | null
+}
+
 /** Returns true when one filesystem path currently exists. */
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -93,6 +110,51 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/** Loads any persisted session-side artifacts that need to be reused during launch. */
+function resolveExistingSessionArtifacts(
+  id: SessionId,
+  existingSession: PersistedSessionRecord | null,
+) {
+  if (!existingSession) {
+    return {
+      messagesRecord: null,
+      worktreeRecord: null,
+      worktree: null,
+      workforceRecord: null,
+    } satisfies ExistingSessionArtifacts
+  }
+
+  const messagesRecord =
+    db.sessionMessages.first({
+      where: { sessionId: id },
+    }) ?? null
+  const worktreeRecord =
+    db.worktrees.first({
+      where: { sessionId: id },
+    }) ?? null
+  const workforceRecord =
+    db.workforces.first({
+      where: { sessionId: id },
+    }) ?? null
+
+  return {
+    messagesRecord,
+    worktreeRecord,
+    worktree: toSessionWorktreeState(worktreeRecord),
+    workforceRecord,
+  } satisfies ExistingSessionArtifacts
+}
+
+/** Removes kindstore-only identity fields from one persisted worktree record. */
+function toSessionWorktreeState(record: PersistedSessionWorktreeRecord | null) {
+  if (!record) {
+    return null
+  }
+
+  const { id: _id, sessionId: _sessionId, ...worktree } = record
+  return worktree
 }
 
 /** Tracks in-flight client requests so agent responses can be correlated back to session state. */
@@ -730,6 +792,166 @@ async function initializeSession(params: {
   }
 }
 
+type InitializedSession = Awaited<ReturnType<typeof initializeSession>>
+
+/** Resolves the effective worktree used by one session launch, either by reuse or fresh creation. */
+async function resolveLaunchWorktree(params: {
+  sessionId: SessionId
+  request: CreateDaemonSessionRequest
+  existingWorktree: SessionWorktreeState | null
+  worktreePlugins?: WorktreePlugin[]
+  defaultWorktreesFolder?: string
+}) {
+  if (params.existingWorktree) {
+    await reuseExistingWorktree(params.existingWorktree, {
+      worktreePlugins: params.worktreePlugins,
+    })
+    return toPreparedSessionWorktree(params.existingWorktree)
+  }
+
+  if (params.request.worktree?.enabled !== true) {
+    return null
+  }
+
+  const repoRoot = await resolveGitRepoRoot(params.request.cwd)
+  if (!repoRoot) {
+    return null
+  }
+
+  return toPreparedSessionWorktree(
+    await createWorktree({
+      cwd: repoRoot,
+      requestedCwd: params.request.cwd,
+      branchName:
+        typeof params.request.prNumber === "number"
+          ? `pr-${params.request.prNumber}`
+          : `goddard-${params.sessionId}`,
+      plugins: params.worktreePlugins,
+      defaultPluginDirName: params.defaultWorktreesFolder,
+    }),
+  )
+}
+
+/** Merges any persisted history with the ACP initialization frames produced during launch. */
+function resolveInitialSessionHistory(params: {
+  initialized: InitializedSession
+  existingSession: PersistedSessionRecord | null
+  existingMessagesRecord: PersistedSessionMessagesRecord | null
+}) {
+  if (!params.existingMessagesRecord) {
+    return [...params.initialized.history]
+  }
+
+  if (params.initialized.acpSessionId === params.existingSession?.acpSessionId) {
+    return params.existingMessagesRecord.messages.length > 0
+      ? [...params.existingMessagesRecord.messages]
+      : [...params.initialized.history]
+  }
+
+  return [...params.existingMessagesRecord.messages, ...params.initialized.history]
+}
+
+/** Builds the persisted daemon session record written after ACP session initialization completes. */
+function createSessionRecordUpdate(params: {
+  initialized: InitializedSession
+  request: CreateDaemonSessionRequest
+  cwd: string
+  token: string
+  scope: ReturnType<typeof parseRepoScope>
+  nextPermission: {
+    owner: string
+    repo: string
+    allowedPrNumbers: number[]
+  }
+  sessionMetadata: DaemonSessionMetadata | null | undefined
+  existingSession: PersistedSessionRecord | null
+  exitAfterInitialPrompt: boolean
+}) {
+  const connectionMode: SessionConnectionMode = params.exitAfterInitialPrompt ? "history" : "live"
+
+  return {
+    acpSessionId: params.initialized.acpSessionId,
+    status: params.initialized.status,
+    stopReason: params.initialized.stopReason ?? params.existingSession?.stopReason ?? null,
+    agentName: agentNameFromInput(params.request.agent),
+    cwd: params.cwd,
+    mcpServers: params.request.mcpServers,
+    connectionMode,
+    activeDaemonSession: !params.exitAfterInitialPrompt,
+    repository: params.scope.repository,
+    prNumber: params.scope.prNumber,
+    token: params.token,
+    permissions: params.nextPermission,
+    metadata: params.sessionMetadata ?? null,
+    models: params.initialized.models ?? params.existingSession?.models ?? null,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+  }
+}
+
+/** Persists the records produced by one successful session launch across all daemon-owned kinds. */
+function persistLaunchedSession(params: {
+  id: SessionId
+  existingSession: PersistedSessionRecord | null
+  existingMessagesRecord: PersistedSessionMessagesRecord | null
+  existingWorktreeRecord: PersistedSessionWorktreeRecord | null
+  existingWorkforceRecord: PersistedSessionWorkforceRecord | null
+  initialHistory: acp.AnyMessage[]
+  worktree: PreparedSessionWorktree | null
+  workforceMetadata: CreateDaemonSessionRequest["workforce"] | undefined
+  sessionRecord: ReturnType<typeof createSessionRecordUpdate>
+}) {
+  if (params.existingMessagesRecord) {
+    db.sessionMessages.put(params.existingMessagesRecord.id, {
+      sessionId: params.id,
+      messages: params.initialHistory,
+    })
+  } else {
+    db.sessionMessages.create({
+      sessionId: params.id,
+      messages: params.initialHistory,
+    })
+  }
+
+  if (params.worktree) {
+    const nextWorktree = {
+      sessionId: params.id,
+      ...params.worktree.state,
+    }
+    if (params.existingWorktreeRecord) {
+      db.worktrees.put(params.existingWorktreeRecord.id, nextWorktree)
+    } else {
+      db.worktrees.create(nextWorktree)
+    }
+  }
+
+  if (params.workforceMetadata) {
+    const nextWorkforce = {
+      sessionId: params.id,
+      ...params.workforceMetadata,
+    }
+    if (params.existingWorkforceRecord) {
+      db.workforces.put(params.existingWorkforceRecord.id, nextWorkforce)
+    } else {
+      db.workforces.create(nextWorkforce)
+    }
+  }
+
+  if (params.existingSession) {
+    const existingDocument = db.sessions.get(params.id) ?? null
+    if (!existingDocument) {
+      throw new IpcClientError(`Cannot update unknown session: ${params.id}`)
+    }
+
+    db.sessions.update(params.id, params.sessionRecord)
+    return
+  }
+
+  db.sessions.put(params.id, params.sessionRecord)
+}
+
 /** Extracts repository ownership fields used for permission scoping and persistence. */
 function parseRepoScope(params: { repository?: string; prNumber?: number }): {
   repository: string | null
@@ -1326,6 +1548,207 @@ export function createSessionManager(input: {
     }
   }
 
+  async function completeOneShotLaunch(params: {
+    id: SessionId
+    agentProcess: AgentProcessHandle
+    sessionLogger: ReturnType<typeof createLogger>
+  }) {
+    params.agentProcess.onceExit((code, signal) => {
+      void emitDiagnostic(
+        params.id,
+        "agent_process_exit",
+        {
+          code,
+          signal,
+          nextStatus: "done",
+        },
+        params.sessionLogger,
+      ).catch(console.error)
+    })
+
+    await updateSession(
+      params.id,
+      { status: "done", token: null, permissions: null },
+      { reason: "one_shot_completed" },
+      params.sessionLogger,
+    )
+    await setConnectionMode(params.id, "history", false)
+    await emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
+    await treeKill(params.agentProcess)
+    await waitForAgentProcessExit(params.agentProcess)
+
+    const sessionDocument = db.sessions.get(params.id) ?? null
+    if (!sessionDocument) {
+      throw new IpcClientError("Session not found")
+    }
+
+    return sessionDocument
+  }
+
+  async function activateLiveSession(params: {
+    id: SessionId
+    token: string
+    agentProcess: AgentProcessHandle
+    initialized: InitializedSession
+    initialHistory: acp.AnyMessage[]
+    sessionLogger: ReturnType<typeof createLogger>
+    systemPrompt: string
+  }) {
+    const connection = createAgentConnection(
+      params.agentProcess.stdin,
+      params.agentProcess.stdout,
+      {
+        onChunk: (chunk) => {
+          if (chunk.byteLength === 0) {
+            return
+          }
+
+          params.sessionLogger.log("agent.chunk_read", {
+            sessionId: params.id,
+            acpSessionId: params.initialized.acpSessionId,
+            preview: createChunkPreview(chunk),
+          })
+        },
+        onMessageError: (error) => {
+          params.sessionLogger.log("agent.message_handler_failed", {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        },
+      },
+    )
+    const writer = connection.getWriter()
+    const activeSession: ActiveSession = {
+      id: params.id,
+      acpSessionId: params.initialized.acpSessionId,
+      logger: params.sessionLogger,
+      token: params.token,
+      process: params.agentProcess,
+      writer,
+      subscription: { close: async () => {} },
+      status: params.initialized.status,
+      history: params.initialHistory,
+      isFirstPrompt: params.initialized.isFirstPrompt,
+      systemPrompt: params.systemPrompt,
+      lastPermissionRequest: null,
+      clientRequests: new Map(),
+      pendingPrompts: new Map(),
+      promptQueue: [],
+      blockingPromptRequestId: null,
+      pendingSteer: null,
+    }
+
+    activeSession.subscription = connection.subscribe(async (message) => {
+      logAgentMessage(
+        activeSession.logger,
+        "agent.message_read",
+        activeSession.id,
+        activeSession.acpSessionId,
+        message,
+      )
+      if (
+        isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
+      ) {
+        activeSession.lastPermissionRequest = message
+      }
+
+      if ("id" in message && message.id != null) {
+        const clientRequest = activeSession.clientRequests.get(message.id)
+        const promptRequest = clientRequest
+          ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
+          : null
+        const promptResponse = promptRequest ? getAcpMessageResult<acp.PromptResponse>(message) : null
+        const stopReason = promptResponse?.stopReason ?? null
+        const nextStatus = stopReason === "end_turn" ? "done" : null
+
+        if (nextStatus || stopReason) {
+          await updateSession(
+            activeSession.id,
+            {
+              ...(nextStatus && { status: nextStatus }),
+              ...(stopReason && { stopReason }),
+            },
+            {
+              reason: "agent_message",
+              requestMethod: clientRequest?.method,
+              responseId: message.id,
+              stopReason: stopReason ?? undefined,
+            },
+          )
+        }
+        if (clientRequest) {
+          activeSession.clientRequests.delete(message.id)
+        }
+        settlePendingPrompt(activeSession, message)
+
+        if (message.id === activeSession.blockingPromptRequestId) {
+          activeSession.blockingPromptRequestId = null
+        }
+      }
+
+      await publishSessionMessage(activeSession, message)
+      await handleSteerBoundary(activeSession, message)
+      await processPromptQueue(activeSession)
+    })
+
+    const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
+      activeSessions.delete(activeSession.id)
+      rejectPendingPrompts(
+        activeSession,
+        new Error(`Session ${activeSession.id} ended before the prompt completed.`),
+      )
+      await activeSession.writer.close().catch(() => {})
+      await activeSession.subscription.close().catch(() => {})
+
+      const nextUpdate: Partial<KindInput<typeof db.schema.sessions>> = {}
+      if (code !== 0 && code !== null) {
+        nextUpdate.status = "error"
+        nextUpdate.errorMessage = `Exited with code ${code}`
+      } else if (isErrorSignal(signal)) {
+        nextUpdate.status = "error"
+        nextUpdate.errorMessage = `Killed by ${signal}`
+      } else if (activeSession.status !== "done") {
+        nextUpdate.status = "cancelled"
+      }
+      nextUpdate.token = null
+      nextUpdate.permissions = null
+
+      await setConnectionMode(
+        activeSession.id,
+        archivedConnectionMode(activeSession.history.length),
+        false,
+      )
+      await emitDiagnostic(
+        activeSession.id,
+        "agent_process_exit",
+        {
+          code,
+          signal,
+          nextStatus: nextUpdate.status ?? activeSession.status,
+        },
+        activeSession.logger,
+      )
+      if (Object.keys(nextUpdate).length > 0) {
+        await updateSession(activeSession.id, nextUpdate, {
+          reason: "agent_process_exit",
+          code,
+          signal,
+        }).catch(() => {})
+      }
+    }
+
+    params.agentProcess.onceExit((code, signal) => {
+      void handleExit(code, signal)
+    })
+
+    activeSessions.set(activeSession.id, activeSession)
+    const sessionDocument = db.sessions.get(params.id) ?? null
+    if (!sessionDocument) {
+      throw new IpcClientError("Session not found")
+    }
+
+    return sessionDocument
+  }
+
   async function launchSession(
     params: SessionLaunchParams,
     existingSession: PersistedSessionRecord | null = null,
@@ -1333,48 +1756,25 @@ export function createSessionManager(input: {
     await ready
     const id = existingSession?.id ?? db.sessions.newId()
     const token = params.token ?? randomBytes(32).toString("hex")
-
-    const existingMessagesRecord = existingSession
-      ? db.sessionMessages.first({
-          where: { sessionId: id },
-        })
-      : null
-
-    const existingWorktree = existingSession
-      ? db.worktrees.first({
-          where: { sessionId: id },
-        })
-      : null
-
-    const existingWorkforce = existingSession
-      ? db.workforces.first({
-          where: { sessionId: id },
-        })
-      : null
+    const exitAfterInitialPrompt = shouldExitAfterInitialPrompt(params)
+    const existingArtifacts = resolveExistingSessionArtifacts(id, existingSession)
     const resolvedConfig =
       params.config ??
       (input.configManager
         ? (await input.configManager.getRootConfig(params.request.cwd)).config
         : undefined)
     const resolvedRegistry = resolvedConfig?.registry ?? input.registry
-
-    const worktree =
-      existingWorktree != null || params.request.worktree?.enabled === true
-        ? await prepareSessionWorktree(id, params.request.cwd, {
-            branchNameOverride:
-              typeof params.request.prNumber === "number"
-                ? `pr-${params.request.prNumber}`
-                : undefined,
-            worktreePlugins: params.worktreePlugins,
-            existingFolder: existingWorktree?.worktreeDir,
-            defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
-          })
-        : null
-
-    const cwd = worktree?.effectiveCwd ?? params.request.cwd
+    const worktree = await resolveLaunchWorktree({
+      sessionId: id,
+      request: params.request,
+      existingWorktree: existingArtifacts.worktree,
+      worktreePlugins: params.worktreePlugins,
+      defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
+    })
+    const cwd = worktree?.state.effectiveCwd ?? params.request.cwd
     const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.request.metadata)
-    const existingWorkforceMetadata = existingWorkforce
-      ? omit(existingWorkforce, ["id", "sessionId"])
+    const existingWorkforceMetadata = existingArtifacts.workforceRecord
+      ? omit(existingArtifacts.workforceRecord, ["id", "sessionId"])
       : undefined
     const workforceMetadata = params.request.workforce ?? existingWorkforceMetadata
     const sessionContext = buildSessionContext({
@@ -1443,98 +1843,34 @@ export function createSessionManager(input: {
       })
       sessionContext.acpSessionId = initialized.acpSessionId
 
-      const initialHistory = existingMessagesRecord
-        ? initialized.acpSessionId === existingSession?.acpSessionId
-          ? existingMessagesRecord.messages.length > 0
-            ? [...existingMessagesRecord.messages]
-            : [...initialized.history]
-          : [...existingMessagesRecord.messages, ...initialized.history]
-        : [...initialized.history]
+      const initialHistory = resolveInitialSessionHistory({
+        initialized,
+        existingSession,
+        existingMessagesRecord: existingArtifacts.messagesRecord,
+      })
+      const sessionRecord = createSessionRecordUpdate({
+        initialized,
+        request: params.request,
+        cwd,
+        token,
+        scope,
+        nextPermission,
+        sessionMetadata,
+        existingSession,
+        exitAfterInitialPrompt,
+      })
 
-      if (existingMessagesRecord) {
-        db.sessionMessages.put(existingMessagesRecord.id, {
-          sessionId: id,
-          messages: initialHistory,
-        })
-      } else {
-        db.sessionMessages.create({
-          sessionId: id,
-          messages: initialHistory,
-        })
-      }
-
-      if (worktree) {
-        const nextWorktree = {
-          sessionId: id,
-          ...worktree.state,
-        }
-        if (existingWorktree) {
-          db.worktrees.put(existingWorktree.id, nextWorktree)
-        } else {
-          db.worktrees.create(nextWorktree)
-        }
-      }
-
-      if (workforceMetadata) {
-        const nextWorkforce = {
-          sessionId: id,
-          ...workforceMetadata,
-        }
-        if (existingWorkforce) {
-          db.workforces.put(existingWorkforce.id, nextWorkforce)
-        } else {
-          db.workforces.create(nextWorkforce)
-        }
-      }
-
-      if (existingSession) {
-        const existingDocument = db.sessions.get(id) ?? null
-        if (!existingDocument) {
-          throw new IpcClientError(`Cannot update unknown session: ${id}`)
-        }
-
-        db.sessions.update(id, {
-          acpSessionId: initialized.acpSessionId,
-          status: initialized.status,
-          stopReason: initialized.stopReason ?? existingSession.stopReason ?? null,
-          agentName: agentNameFromInput(params.request.agent),
-          cwd,
-          mcpServers: params.request.mcpServers,
-          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
-          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
-          repository: scope.repository,
-          prNumber: scope.prNumber,
-          token,
-          permissions: nextPermission,
-          metadata: sessionMetadata ?? null,
-          models: initialized.models ?? existingSession.models ?? null,
-          errorMessage: null,
-          blockedReason: null,
-          initiative: null,
-          lastAgentMessage: null,
-        })
-      } else {
-        db.sessions.put(id, {
-          acpSessionId: initialized.acpSessionId,
-          status: initialized.status,
-          stopReason: initialized.stopReason,
-          agentName: agentNameFromInput(params.request.agent),
-          cwd,
-          mcpServers: params.request.mcpServers,
-          connectionMode: shouldExitAfterInitialPrompt(params) ? "history" : "live",
-          activeDaemonSession: !shouldExitAfterInitialPrompt(params),
-          repository: scope.repository,
-          prNumber: scope.prNumber,
-          token,
-          permissions: nextPermission,
-          metadata: sessionMetadata ?? null,
-          models: initialized.models ?? null,
-          errorMessage: null,
-          blockedReason: null,
-          initiative: null,
-          lastAgentMessage: null,
-        })
-      }
+      persistLaunchedSession({
+        id,
+        existingSession,
+        existingMessagesRecord: existingArtifacts.messagesRecord,
+        existingWorktreeRecord: existingArtifacts.worktreeRecord,
+        existingWorkforceRecord: existingArtifacts.workforceRecord,
+        initialHistory,
+        worktree,
+        workforceMetadata,
+        sessionRecord,
+      })
       await emitDiagnostic(
         id,
         "session_created",
@@ -1545,188 +1881,23 @@ export function createSessionManager(input: {
         sessionLogger,
       )
 
-      if (shouldExitAfterInitialPrompt(params)) {
-        agentProcess.onceExit((code, signal) => {
-          void emitDiagnostic(
-            id,
-            "agent_process_exit",
-            {
-              code,
-              signal,
-              nextStatus: "done",
-            },
-            sessionLogger,
-          ).catch(console.error)
-        })
-
-        // InitializeSession already sent the only prompt, so archive the history and tear the agent down.
-        await updateSession(
+      if (exitAfterInitialPrompt) {
+        return await completeOneShotLaunch({
           id,
-          { status: "done", token: null, permissions: null },
-          { reason: "one_shot_completed" },
+          agentProcess,
           sessionLogger,
-        )
-        await setConnectionMode(id, "history", false)
-        await emitDiagnostic(id, "session_completed_one_shot", undefined, sessionLogger)
-        await treeKill(agentProcess)
-        await waitForAgentProcessExit(agentProcess)
-        const sessionDocument = db.sessions.get(id) ?? null
-        if (!sessionDocument) {
-          throw new IpcClientError("Session not found")
-        }
-        return sessionDocument
+        })
       }
 
-      const connection = createAgentConnection(agentProcess.stdin, agentProcess.stdout, {
-        onChunk: (chunk) => {
-          if (chunk.byteLength === 0) {
-            return
-          }
-
-          sessionLogger.log("agent.chunk_read", {
-            sessionId: id,
-            acpSessionId: initialized.acpSessionId,
-            preview: createChunkPreview(chunk),
-          })
-        },
-        onMessageError: (error) => {
-          sessionLogger.log("agent.message_handler_failed", {
-            errorMessage: error instanceof Error ? error.message : String(error),
-          })
-        },
-      })
-      const writer = connection.getWriter()
-      const activeSession: ActiveSession = {
+      return await activateLiveSession({
         id,
-        acpSessionId: initialized.acpSessionId,
-        logger: sessionLogger,
         token,
-        process: agentProcess,
-        writer,
-        subscription: { close: async () => {} },
-        status: initialized.status,
-        history: initialHistory,
-        isFirstPrompt: initialized.isFirstPrompt,
+        agentProcess,
+        initialized,
+        initialHistory,
+        sessionLogger,
         systemPrompt: params.request.systemPrompt,
-        lastPermissionRequest: null,
-        clientRequests: new Map(),
-        pendingPrompts: new Map(),
-        promptQueue: [],
-        blockingPromptRequestId: null,
-        pendingSteer: null,
-      }
-
-      activeSession.subscription = connection.subscribe(async (message) => {
-        logAgentMessage(
-          activeSession.logger,
-          "agent.message_read",
-          activeSession.id,
-          activeSession.acpSessionId,
-          message,
-        )
-        if (
-          isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
-        ) {
-          activeSession.lastPermissionRequest = message
-        }
-
-        if ("id" in message && message.id != null) {
-          const clientRequest = activeSession.clientRequests.get(message.id)
-          const promptRequest = clientRequest
-            ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
-            : null
-          const promptResponse = promptRequest
-            ? getAcpMessageResult<acp.PromptResponse>(message)
-            : null
-          const stopReason = promptResponse?.stopReason ?? null
-          const nextStatus = stopReason === "end_turn" ? "done" : null
-
-          if (nextStatus || stopReason) {
-            await updateSession(
-              activeSession.id,
-              {
-                ...(nextStatus && { status: nextStatus }),
-                ...(stopReason && { stopReason }),
-              },
-              {
-                reason: "agent_message",
-                requestMethod: clientRequest?.method,
-                responseId: message.id,
-                stopReason: stopReason ?? undefined,
-              },
-            )
-          }
-          if (clientRequest) {
-            activeSession.clientRequests.delete(message.id)
-          }
-          settlePendingPrompt(activeSession, message)
-
-          if (message.id === activeSession.blockingPromptRequestId) {
-            activeSession.blockingPromptRequestId = null
-          }
-        }
-
-        await publishSessionMessage(activeSession, message)
-        await handleSteerBoundary(activeSession, message)
-        await processPromptQueue(activeSession)
       })
-
-      const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
-        activeSessions.delete(activeSession.id)
-        rejectPendingPrompts(
-          activeSession,
-          new Error(`Session ${activeSession.id} ended before the prompt completed.`),
-        )
-        await activeSession.writer.close().catch(() => {})
-        await activeSession.subscription.close().catch(() => {})
-
-        const nextUpdate: Partial<KindInput<typeof db.schema.sessions>> = {}
-        if (code !== 0 && code !== null) {
-          nextUpdate.status = "error"
-          nextUpdate.errorMessage = `Exited with code ${code}`
-        } else if (isErrorSignal(signal)) {
-          nextUpdate.status = "error"
-          nextUpdate.errorMessage = `Killed by ${signal}`
-        } else if (activeSession.status !== "done") {
-          nextUpdate.status = "cancelled"
-        }
-        nextUpdate.token = null
-        nextUpdate.permissions = null
-
-        await setConnectionMode(
-          activeSession.id,
-          archivedConnectionMode(activeSession.history.length),
-          false,
-        )
-        await emitDiagnostic(
-          activeSession.id,
-          "agent_process_exit",
-          {
-            code,
-            signal,
-            nextStatus: nextUpdate.status ?? activeSession.status,
-          },
-          activeSession.logger,
-        )
-        if (Object.keys(nextUpdate).length > 0) {
-          await updateSession(activeSession.id, nextUpdate, {
-            reason: "agent_process_exit",
-            code,
-            signal,
-          }).catch(() => {})
-        }
-      }
-
-      agentProcess.onceExit((code, signal) => {
-        void handleExit(code, signal)
-      })
-
-      activeSessions.set(activeSession.id, activeSession)
-      const sessionDocument = db.sessions.get(id) ?? null
-      if (!sessionDocument) {
-        throw new IpcClientError("Session not found")
-      }
-      return sessionDocument
     } catch (error) {
       sessionLogger.log("session.launch_failed", {
         sessionId: id,
