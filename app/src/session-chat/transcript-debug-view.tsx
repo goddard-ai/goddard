@@ -67,7 +67,6 @@ const debugCanvasClass = css({
 /** Props for the standalone transcript debug view. */
 export type TranscriptDebugViewProps = {
   messages?: readonly TranscriptMessage[]
-  scrollCacheKey?: string
 }
 
 /** Renders the standalone transcript-debug surface used by the native development menu. */
@@ -86,17 +85,10 @@ export function TranscriptDebugView(props: TranscriptDebugViewProps) {
         </p>
       </section>
       <section class={debugCanvasClass}>
-        <Transcript
-          messages={messages}
-          scrollCacheKey={props.scrollCacheKey ?? "debug:session-chat-transcript"}
-        />
+        <Transcript messages={messages} scrollCacheKey="debug:session-chat-transcript" />
       </section>
     </div>
   )
 }
 
-/** Renders the transcript debug surface inside one closable workbench tab. */
-export default function TranscriptDebugTab(props: { surface: "sessionChatTranscript" }) {
-  void props
-  return <TranscriptDebugView scrollCacheKey="detail:debug:session-chat-transcript" />
-}
+export { TranscriptDebugView as default }

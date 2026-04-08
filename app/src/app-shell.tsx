@@ -117,22 +117,20 @@ export function AppShell() {
     }
   })
 
-  useListener(window, DEBUG_MENU_EVENT_NAME, (event) => {
-    const detail = (event as CustomEvent<DebugMenuEventDetail>).detail
-
-    if (detail.surface !== "sessionChatTranscript") {
-      return
+  useListener(window, DEBUG_MENU_EVENT_NAME, (event: CustomEvent<DebugMenuEventDetail>) => {
+    switch (event.detail.surface) {
+      case "SessionChatTranscript":
+        workbenchTabSet.openOrFocusTab({
+          id: "debug:session-chat-transcript",
+          kind: "sessionChatTranscriptDebug",
+          title: "Transcript Debug",
+          payload: {},
+          dirty: false,
+        })
+        break
+      default:
+        throw new Error(`Unknown debug surface: ${event.detail.surface}.`)
     }
-
-    workbenchTabSet.openOrFocusTab({
-      id: "debug:session-chat-transcript",
-      kind: "sessionChatTranscriptDebug",
-      title: "Transcript Debug",
-      payload: {
-        surface: "sessionChatTranscript",
-      },
-      dirty: false,
-    })
   })
 
   function handleTopbarAction(action: AppShellTopbarAction) {

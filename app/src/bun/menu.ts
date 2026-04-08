@@ -1,17 +1,119 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
+import { concat } from "radashi"
 import { createAppMenuDispatchScript, type AppMenuAction } from "~/shared/app-menu.ts"
 import { createDebugMenuDispatchScript, type DebugMenuSurface } from "~/shared/debug-menu.ts"
 
-const withParams =
-  <T>(action: string) =>
-  (params: T) =>
-    `${action}/${JSON.stringify(params)}`
+const fileMenu = {
+  label: "File",
+  closeWindow: {
+    label: "Close Window",
+    action: "file:close-window",
+    accelerator: "CommandOrControl+Shift+W",
+  },
+  closeTab: {
+    label: "Close Tab",
+    action: "file:close-tab",
+    accelerator: "CommandOrControl+W",
+  },
+} as const
 
-const reloadViewAction = "view:reload"
-const inspectElementAction = "view:inspect-element"
-const closeTabAction = "file:close-tab"
-const closeWindowAction = "file:close-window"
-const debugNavigateAction = withParams<DebugMenuSurface>("debug:navigate")
+const viewMenu = {
+  label: "View",
+  reload: {
+    label: "Reload",
+    action: "view:reload",
+    accelerator: "CommandOrControl+R",
+  },
+  inspectElement: {
+    label: "Inspect Element",
+    action: "view:inspect-element",
+    accelerator: "Alt+CommandOrControl+I",
+  },
+} as const
+
+/** Installs the native application menu so platform accelerators work inside the desktop shell. */
+export function installApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
+  const actions: Record<string, (window: BrowserWindow, params: unknown) => void> = {
+    [fileMenu.closeTab.action]: dispatchAppMenuAction("closeTab"),
+    [fileMenu.closeWindow.action]: closeWindow,
+    [viewMenu.reload.action]: reloadWindow,
+    [viewMenu.inspectElement.action]: inspectWindow,
+  }
+
+  const debugMenu: ApplicationMenuItemConfig[] = []
+  if (isDevelopmentRuntime()) {
+    const debugNavigateAction = withParams<DebugMenuSurface>("debug:navigate")
+
+    for (const { surface, accelerator } of [
+      {
+        surface: "SessionChatTranscript",
+        accelerator: "Alt+CommandOrControl+9",
+      },
+      {
+        surface: "Terminal",
+      },
+    ] satisfies ReadonlyArray<{ surface: DebugMenuSurface; accelerator?: string }>) {
+      const action = debugNavigateAction(surface)
+      actions[action] = openDebugSurface(surface)
+      debugMenu.push({ label: surface, action, accelerator })
+    }
+  }
+
+  const menu: ApplicationMenuItemConfig[] = [
+    {
+      label: fileMenu.label,
+      submenu: concat(
+        fileMenu.closeTab,
+        fileMenu.closeWindow,
+        process.platform === "darwin" ? [{ type: "separator" as const }, { role: "quit" }] : null,
+      ),
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: viewMenu.label,
+      submenu: [
+        viewMenu.reload,
+        {
+          label: "Developer",
+          submenu: [viewMenu.inspectElement],
+        },
+      ],
+    },
+  ]
+
+  if (debugMenu.length > 0) {
+    menu.push({
+      label: "Debug",
+      submenu: debugMenu,
+    })
+  }
+
+  ApplicationMenu.setApplicationMenu(menu)
+
+  ApplicationMenu.on("application-menu-clicked", (event: any) => {
+    const [action, params = "null"] = event.data?.action?.split("/") ?? []
+    if (!action) {
+      return
+    }
+    const mainWindow = getMainWindow()
+    if (mainWindow) {
+      actions[action]?.(mainWindow, JSON.parse(params))
+    }
+  })
+}
 
 function reloadWindow(window: BrowserWindow): void {
   window.webview.executeJavascript("window.location.reload()")
@@ -40,6 +142,11 @@ function openDebugSurface(surface: DebugMenuSurface) {
   }
 }
 
+/** Creates a function that dispatches one action with one parameter. */
+function withParams<T>(action: string) {
+  return (params: T) => `${action}/${JSON.stringify(params)}`
+}
+
 /** Returns whether the current Bun runtime should expose development-only menu items. */
 function isDevelopmentRuntime(): boolean {
   return (
@@ -47,117 +154,4 @@ function isDevelopmentRuntime(): boolean {
     Bun.env.NODE_ENV === "development" ||
     Bun.argv.some((argument) => argument === "--watch" || argument === "dev")
   )
-}
-
-/** Installs the standard macOS Edit menu so native text shortcuts work in webviews. */
-export function installMacOsApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
-  if (process.platform !== "darwin") {
-    return
-  }
-
-  const actions: Record<string, (window: BrowserWindow, params: unknown) => void> = {
-    [closeTabAction]: dispatchAppMenuAction("closeTab"),
-    [closeWindowAction]: closeWindow,
-    [reloadViewAction]: reloadWindow,
-    [inspectElementAction]: inspectWindow,
-  }
-  const showDebugMenu = isDevelopmentRuntime()
-
-  const debugMenu: ApplicationMenuItemConfig[] = []
-  if (showDebugMenu) {
-    const surfaces: { label: string; surface: DebugMenuSurface; accelerator?: string }[] = [
-      { label: "Terminal", surface: "terminal" },
-      {
-        label: "SessionChatTranscript",
-        surface: "sessionChatTranscript",
-        accelerator: "cmd+alt+9",
-      },
-    ]
-    debugMenu.push(
-      ...surfaces.map(({ label, surface, accelerator }): ApplicationMenuItemConfig => {
-        const action = debugNavigateAction(surface)
-        actions[action] = openDebugSurface(surface)
-        return {
-          label,
-          action,
-          accelerator,
-        }
-      }),
-    )
-  }
-
-  const menu: ApplicationMenuItemConfig[] = [
-    {
-      submenu: [{ label: "Quit", role: "quit", accelerator: "cmd+q" }],
-    },
-    {
-      label: "File",
-      submenu: [
-        {
-          label: "Close Tab",
-          action: closeTabAction,
-          accelerator: "cmd+w",
-        },
-        {
-          label: "Close Window",
-          action: closeWindowAction,
-          accelerator: "cmd+shift+w",
-        },
-      ],
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "pasteAndMatchStyle" },
-        { role: "delete" },
-        { role: "selectAll" },
-      ],
-    },
-    {
-      label: "View",
-      submenu: [
-        {
-          label: "Reload",
-          action: reloadViewAction,
-          accelerator: "cmd+r",
-        },
-        {
-          label: "Developer",
-          submenu: [
-            {
-              label: "Inspect Element",
-              action: inspectElementAction,
-              accelerator: "cmd+alt+i",
-            },
-          ],
-        },
-      ],
-    },
-  ]
-
-  if (debugMenu.length > 0) {
-    menu.push({
-      label: "Debug",
-      submenu: debugMenu,
-    })
-  }
-
-  ApplicationMenu.setApplicationMenu(menu)
-
-  ApplicationMenu.on("application-menu-clicked", (event: any) => {
-    const [action, params = "null"] = event.data?.action?.split("/") ?? []
-    if (!action) {
-      return
-    }
-    const mainWindow = getMainWindow()
-    if (mainWindow) {
-      actions[action]?.(mainWindow, JSON.parse(params))
-    }
-  })
 }
