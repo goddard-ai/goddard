@@ -59,8 +59,12 @@ export class QueryClient {
    * Reads the current cache snapshot without throwing, kicking off a fetch when the entry is stale
    * or missing.
    */
-  getSnapshot<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
-    const entry = this.getEntry(queryFn, args)
+  getSnapshot<TQueryFn extends AnyQueryFunction>(
+    queryKey: string,
+    queryFn: TQueryFn,
+    args: Parameters<TQueryFn>,
+  ) {
+    const entry = this.ensureEntry(queryKey, queryFn, args)
 
     if (entry.stale || (!entry.hasData && !entry.promise && entry.error === null)) {
       void this.fetchEntry(entry, entry.hasData)
@@ -78,8 +82,12 @@ export class QueryClient {
   /**
    * Returns cached data for one query and suspends only while the first load is still pending.
    */
-  read<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
-    const snapshot = this.getSnapshot(queryFn, args)
+  read<TQueryFn extends AnyQueryFunction>(
+    queryKey: string,
+    queryFn: TQueryFn,
+    args: Parameters<TQueryFn>,
+  ) {
+    const snapshot = this.getSnapshot(queryKey, queryFn, args)
 
     if (snapshot.error !== null && !snapshot.hasData) {
       throw snapshot.error
@@ -93,14 +101,10 @@ export class QueryClient {
   }
 
   /**
-   * Registers a listener for one query entry and returns the unsubscribe callback.
+   * Registers a listener for one existing query entry key and returns the unsubscribe callback.
    */
-  subscribe<TQueryFn extends AnyQueryFunction>(
-    queryFn: TQueryFn,
-    args: Parameters<TQueryFn>,
-    subscriber: () => void,
-  ) {
-    const entry = this.getEntry(queryFn, args)
+  subscribe(queryKey: string, subscriber: () => void) {
+    const entry = this.getEntry(queryKey)
     entry.subscribers.add(subscriber)
 
     return () => {
@@ -111,8 +115,8 @@ export class QueryClient {
   /**
    * Refreshes one cached query in place while preserving the last resolved value.
    */
-  refetch<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
-    const entry = this.getEntry(queryFn, args)
+  refetch(queryKey: string) {
+    const entry = this.getEntry(queryKey)
     void this.fetchEntry(entry, entry.hasData)
   }
 
@@ -188,12 +192,22 @@ export class QueryClient {
     return promise
   }
 
-  private getEntry<TQueryFn extends AnyQueryFunction>(
+  private getEntry(queryKey: string) {
+    const entry = this.entries.get(queryKey)
+
+    if (!entry) {
+      throw new Error(`Missing query entry for key ${queryKey}.`)
+    }
+
+    return entry
+  }
+
+  private ensureEntry<TQueryFn extends AnyQueryFunction>(
+    queryKey: string,
     queryFn: TQueryFn,
     args: Parameters<TQueryFn>,
   ) {
-    const key = this.getQueryKey(queryFn, args)
-    const existingEntry = this.entries.get(key)
+    const existingEntry = this.entries.get(queryKey)
 
     if (existingEntry) {
       return existingEntry
@@ -210,8 +224,8 @@ export class QueryClient {
       subscribers: new Set(),
     }
 
-    this.entries.set(key, entry)
-    this.getFunctionEntryKeys(queryFn).add(key)
+    this.entries.set(queryKey, entry)
+    this.getFunctionEntryKeys(queryFn).add(queryKey)
     return entry
   }
 
@@ -284,17 +298,17 @@ export function useQuery<TQueryFn extends AnyQueryFunction>(
   const queryKey = queryClient.getQueryKey(queryFn, args)
 
   useEffect(() => {
-    return queryClient.subscribe(queryFn, args, () => {
+    return queryClient.subscribe(queryKey, () => {
       setVersion((version) => version + 1)
     })
-  }, [queryClient, queryFn, queryKey])
+  }, [queryClient, queryKey])
 
-  const data = queryClient.read(queryFn, args)
+  const data = queryClient.read(queryKey, queryFn, args)
 
   return [
     data,
     () => {
-      queryClient.refetch(queryFn, args)
+      queryClient.refetch(queryKey)
     },
   ] as const
 }
@@ -309,13 +323,15 @@ export function useQueries<TQueries extends Record<string, QueryDescriptor>>(que
   const entries = Object.entries(queries) as Array<
     [keyof TQueries & string, TQueries[keyof TQueries]]
   >
-  const subscriptionKey = hashSum(
-    entries.map(([key, [queryFn, args]]) => [key, queryClient.getQueryKey(queryFn, args)]),
-  )
+  const queryKeys = entries.map(([, [queryFn, args]]) => queryClient.getQueryKey(queryFn, args))
+  const queryKeysByName = Object.fromEntries(
+    entries.map(([key], index) => [key, queryKeys[index]]),
+  ) as Record<keyof TQueries & string, string>
+  const subscriptionKey = hashSum(entries.map(([key]) => [key, queryKeysByName[key]]))
 
   useEffect(() => {
-    const unsubscribers = entries.map(([, [queryFn, args]]) =>
-      queryClient.subscribe(queryFn, args, () => {
+    const unsubscribers = queryKeys.map((queryKey) =>
+      queryClient.subscribe(queryKey, () => {
         setVersion((version) => version + 1)
       }),
     )
@@ -331,7 +347,8 @@ export function useQueries<TQueries extends Record<string, QueryDescriptor>>(que
   let pendingPromise: Promise<unknown> | null = null
 
   for (const [key, [queryFn, args]] of entries) {
-    const snapshot = queryClient.getSnapshot(queryFn, args)
+    const queryKey = queryKeysByName[key]
+    const snapshot = queryClient.getSnapshot(queryKey, queryFn, args)
 
     if (snapshot.error !== null && !snapshot.hasData) {
       throw snapshot.error
@@ -357,14 +374,14 @@ export function useQueries<TQueries extends Record<string, QueryDescriptor>>(que
         const query = queries[key]
 
         if (query) {
-          queryClient.refetch(query[0], query[1])
+          queryClient.refetch(queryKeysByName[key])
         }
 
         return
       }
 
-      for (const [, [queryFn, args]] of entries) {
-        queryClient.refetch(queryFn, args)
+      for (const queryKey of queryKeys) {
+        queryClient.refetch(queryKey)
       }
     },
   ] as const
