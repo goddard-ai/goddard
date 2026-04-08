@@ -93,7 +93,6 @@ export function AppShell() {
   )
   const navigationItems: Array<{
     ariaLabel: string
-    badgeCount?: number
     group: "primary" | "secondary"
     icon: SvgIconName
     id: (typeof navigation.items)[number]["id"]
@@ -107,7 +106,6 @@ export function AppShell() {
 
     return {
       ...item,
-      badgeCount: navigation.badgeCounts[item.id],
       group: section.group,
       icon: getWorkbenchTabIcon(item.id),
     }

@@ -11,7 +11,7 @@ import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 /** Renders the icon-only primary navigation rail for the app shell. */
 export function SidebarNav(props: {
   class?: string
-  items: Array<NavigationItem & { badgeCount?: number }>
+  items: NavigationItem[]
   selectedItemId: NavigationItemId
   onSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
 }) {
@@ -93,7 +93,7 @@ export function SidebarNav(props: {
 
 /** Renders one accessible icon button inside the left navigation rail. */
 function SidebarNavItem(props: {
-  item: NavigationItem & { badgeCount?: number }
+  item: NavigationItem
   isSelected: boolean
   isFocused: boolean
   onFocus: () => void
@@ -170,28 +170,6 @@ function SidebarNavItem(props: {
             width="20px"
           />
         </span>
-        {props.item.badgeCount ? (
-          <span
-            class={css({
-              position: "absolute",
-              top: "7px",
-              right: "7px",
-              minWidth: "20px",
-              height: "20px",
-              paddingInline: "6px",
-              borderRadius: "999px",
-              backgroundColor: "accentStrong",
-              color: "background",
-              boxShadow: `0 8px 20px color-mix(in srgb, ${token.var("colors.accent")} 24%, transparent)`,
-              fontSize: "11px",
-              fontWeight: "700",
-              lineHeight: "20px",
-              textAlign: "center",
-            })}
-          >
-            {props.item.badgeCount}
-          </span>
-        ) : null}
       </button>
     </GoodTooltip>
   )

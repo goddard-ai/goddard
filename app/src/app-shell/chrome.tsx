@@ -2,12 +2,12 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
+import { type AppShellTopbarAction } from "./config.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
 import { getWorkbenchTabIcon, type WorkbenchTab } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
-import { formatBadgeCount, type AppShellTopbarAction } from "./config.ts"
 
 const actionButtonClass = css({
   position: "relative",
@@ -37,7 +37,6 @@ export function AppShellChrome(props: {
   }
   navigationItems: Array<{
     ariaLabel: string
-    badgeCount?: number
     group: "primary" | "secondary"
     icon: SvgIconName
     id: NavigationItemId
@@ -348,7 +347,6 @@ export function AppShellChrome(props: {
 function AppShellSidebarSection(props: {
   items: Array<{
     ariaLabel: string
-    badgeCount?: number
     icon: SvgIconName
     id: NavigationItemId
   }>
@@ -360,7 +358,6 @@ function AppShellSidebarSection(props: {
       {props.items.map((item) => (
         <SidebarItem
           key={item.id}
-          badgeCount={item.badgeCount}
           icon={item.icon}
           isSelected={item.id === props.selectedNavigationId}
           label={item.ariaLabel}
@@ -407,7 +404,6 @@ function ActionButton(props: {
 }
 
 function SidebarItem(props: {
-  badgeCount?: number
   icon: SvgIconName
   isSelected: boolean
   label: string
@@ -448,29 +444,6 @@ function SidebarItem(props: {
       }}
     >
       <InlineSvgIcon icon={props.icon} size="22px 21px" />
-      {props.badgeCount ? (
-        <span
-          aria-hidden="true"
-          class={css({
-            position: "absolute",
-            top: "4px",
-            right: "3px",
-            minWidth: "14px",
-            height: "14px",
-            paddingInline: "4px",
-            borderRadius: "999px",
-            backgroundColor: "#66a1ff",
-            color: "#0f1115",
-            fontSize: "9px",
-            fontWeight: "700",
-            lineHeight: "14px",
-            textAlign: "center",
-            boxShadow: "0 6px 16px rgba(102, 161, 255, 0.24)",
-          })}
-        >
-          {formatBadgeCount(props.badgeCount)}
-        </span>
-      ) : null}
     </button>
   )
 }

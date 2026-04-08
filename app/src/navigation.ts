@@ -13,13 +13,9 @@ export type NavigationItem = {
   ariaLabel: string
 }
 
-/** Badge counts keyed by primary navigation id. */
-type NavigationBadgeCounts = Partial<Record<NavigationItemId, number>>
-
 /** Public state owned by the navigation model. */
 type NavigationShape = {
   selectedNavId: NavigationItemId
-  badgeCounts: NavigationBadgeCounts
 }
 
 const defaultNavigationItems: NavigationItem[] = [
@@ -35,7 +31,6 @@ const defaultNavigationItems: NavigationItem[] = [
 export const Navigation = new SigmaType<NavigationShape>("Navigation")
   .defaultState({
     selectedNavId: "inbox",
-    badgeCounts: {},
   })
   .computed({
     /** Returns the full set of primary navigation items. */
@@ -53,16 +48,6 @@ export const Navigation = new SigmaType<NavigationShape>("Navigation")
     selectNavItem(id: NavigationItemId) {
       this.selectedNavId = id
       writeJsonStorage(NAVIGATION_STORAGE_KEY, { selectedNavId: id })
-    },
-
-    /** Updates one badge count without forcing sidebar consumers to compute cross-domain data. */
-    setBadgeCount(id: NavigationItemId, count: number) {
-      if (count <= 0) {
-        delete this.badgeCounts[id]
-        return
-      }
-
-      this.badgeCounts[id] = count
     },
 
     /** Rehydrates the selected primary view from persisted workspace storage. */

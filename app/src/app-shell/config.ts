@@ -20,8 +20,3 @@ export const appShellSections: readonly AppShellSection[] = [
     tabKinds: ["specs", "tasks", "roadmap"],
   },
 ]
-
-/** Formats one compact rail badge count. */
-export function formatBadgeCount(count: number) {
-  return count > 99 ? "99+" : `${count}`
-}
