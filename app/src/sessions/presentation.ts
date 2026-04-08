@@ -1,4 +1,4 @@
-import type { SessionRecord } from "./session-index.ts"
+import type { DaemonSession } from "@goddard-ai/sdk"
 
 function basename(path: string) {
   const normalized = path.replace(/[\\/]+$/, "")
@@ -10,7 +10,7 @@ function trimFirstLine(value: string) {
   return value.split(/\r?\n/, 1)[0]?.trim() ?? ""
 }
 
-export function getSessionDisplayTitle(session: SessionRecord) {
+export function getSessionDisplayTitle(session: DaemonSession) {
   return (
     session.initiative?.trim() ||
     trimFirstLine(session.lastAgentMessage ?? "") ||
@@ -19,7 +19,7 @@ export function getSessionDisplayTitle(session: SessionRecord) {
   )
 }
 
-export function getSessionPreviewText(session: SessionRecord) {
+export function getSessionPreviewText(session: DaemonSession) {
   return (
     session.blockedReason ??
     session.lastAgentMessage ??

@@ -1,8 +1,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { ArrowUpRight, CircleDot, FolderGit2, MessageSquareText } from "lucide-react"
-import type { SessionTranscriptMessage } from "./models.ts"
-import type { SessionRecord } from "./session-index.ts"
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { getSessionDisplayTitle, getSessionPreviewText } from "./presentation.ts"
 
 function formatTimeLabel(value: number) {
@@ -16,10 +15,9 @@ function formatTimeLabel(value: number) {
 
 export function ListRow(props: {
   isSelected: boolean
-  lastMessage: SessionTranscriptMessage | null
   onOpen: () => void
   onSelect: () => void
-  session: SessionRecord
+  session: DaemonSession
 }) {
   return (
     <article
@@ -124,8 +122,7 @@ export function ListRow(props: {
               lineClamp: "2",
             })}
           >
-            {(props.lastMessage?.text ?? getSessionPreviewText(props.session)) ||
-              "No transcript yet."}
+            {getSessionPreviewText(props.session) || "No transcript yet."}
           </p>
         </div>
         <div
@@ -140,7 +137,7 @@ export function ListRow(props: {
         >
           <span class={css({ display: "inline-flex", alignItems: "center", gap: "6px" })}>
             <MessageSquareText size={14} strokeWidth={2} />
-            {props.lastMessage ? "Transcript ready" : "Waiting for first prompt"}
+            {props.session.lastAgentMessage ? "Transcript ready" : "Waiting for first prompt"}
           </span>
           <span class={css({ display: "inline-flex", alignItems: "center", gap: "6px" })}>
             <FolderGit2 size={14} strokeWidth={2} />

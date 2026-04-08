@@ -1,25 +1,85 @@
+import type { DaemonSession } from "@goddard-ai/sdk"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/preact-query"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { useEffect } from "preact/hooks"
-import { useSessionChat, useSessionIndex } from "~/app-state-context.tsx"
-import { lookupSession } from "~/sessions/session-index.ts"
-import { desktopSessionService } from "~/sessions/session-service.ts"
 import { Composer } from "./composer.tsx"
+import { buildTranscriptMessages } from "./chat.ts"
 import { Header } from "./header.tsx"
 import { Transcript } from "./transcript.tsx"
+import {
+  getSessionHistoryQueryOptions,
+  getSessionQueryOptions,
+  sessionQueryKeys,
+} from "~/sessions/queries.ts"
+import { goddardSdk } from "~/sdk.ts"
 
 export function SessionChatView(props: { sessionId: string }) {
-  const sessionChat = useSessionChat()
-  const sessionIndex = useSessionIndex()
-  const session = lookupSession(sessionIndex, props.sessionId)
+  const queryClient = useQueryClient()
+  const sessionId = props.sessionId as DaemonSession["id"]
+  const sessionQuery = useQuery(getSessionQueryOptions(sessionId))
+  const session = sessionQuery.data ?? null
+  const sessionHistoryQuery = useQuery({
+    ...getSessionHistoryQueryOptions(sessionId),
+    enabled: session !== null,
+  })
+  const promptSessionMutation = useMutation({
+    mutationFn: async (prompt: string) => {
+      if (!session) {
+        return null
+      }
 
-  useEffect(() => {
-    if (!session) {
-      return
-    }
+      const trimmedPrompt = prompt.trim()
 
-    void sessionChat.loadThread(desktopSessionService, session)
-  }, [session, sessionChat])
+      if (trimmedPrompt.length === 0) {
+        return null
+      }
+
+      await goddardSdk.session.prompt({
+        id: session.id,
+        acpId: session.acpSessionId,
+        prompt: trimmedPrompt,
+      })
+
+      const response = await goddardSdk.session.get({ id: session.id })
+      return response.session
+    },
+    onSuccess: async (nextSession) => {
+      if (!nextSession) {
+        return
+      }
+
+      queryClient.setQueryData(sessionQueryKeys.detail(nextSession.id), nextSession)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.lists() }),
+        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.history(nextSession.id) }),
+      ])
+    },
+  })
+
+  if (sessionQuery.isPending) {
+    return (
+      <div
+        class={css({
+          display: "grid",
+          placeItems: "center",
+          height: "100%",
+          padding: "28px",
+          background:
+            `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), transparent 28%), ` +
+            `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
+        })}
+      >
+        <div
+          class={css({
+            color: "muted",
+            fontSize: "0.95rem",
+          })}
+        >
+          Loading session...
+        </div>
+      </div>
+    )
+  }
 
   if (!session) {
     return (
@@ -61,14 +121,14 @@ export function SessionChatView(props: { sessionId: string }) {
             })}
           >
             The chat tab still exists, but the backing session record is no longer present in the
-            shared session index.
+            daemon session store.
           </p>
         </div>
       </div>
     )
   }
 
-  const messages = sessionChat.messagesForSession(session.id)
+  const messages = buildTranscriptMessages(session, sessionHistoryQuery.data?.history ?? [])
 
   return (
     <div
@@ -89,7 +149,7 @@ export function SessionChatView(props: { sessionId: string }) {
       />
       <Composer
         onSubmit={(text) => {
-          void sessionChat.promptSession(desktopSessionService, sessionIndex, session, text)
+          void promptSessionMutation.mutateAsync(text)
         }}
       />
     </div>

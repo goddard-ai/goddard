@@ -1,19 +1,16 @@
+import type { DaemonSession } from "@goddard-ai/sdk"
+import { useQuery } from "@tanstack/preact-query"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { MessageSquareText, Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import {
-  useProjectRegistry,
-  useSessionChat,
-  useSessionIndex,
-  useSessionLaunch,
-  useWorkbenchTabSet,
-} from "~/app-state-context.tsx"
 import { SessionsList } from "./list.tsx"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
-import { lookupSession, type SessionRecord } from "./session-index.ts"
+import { getSessionHistoryQueryOptions, getSessionsListQueryOptions } from "./queries.ts"
+import { buildTranscriptMessages } from "~/session-chat/chat.ts"
+import { useProjectRegistry, useSessionLaunch, useWorkbenchTabSet } from "~/app-state-context.tsx"
 
 function formatTimestamp(value: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -26,30 +23,37 @@ function formatTimestamp(value: number) {
 
 export function SessionsPage() {
   const projectRegistry = useProjectRegistry()
-  const sessionChat = useSessionChat()
-  const sessionIndex = useSessionIndex()
   const sessionLaunch = useSessionLaunch()
   const workbenchTabSet = useWorkbenchTabSet()
-  const selectedSessionId = useSignal<SessionRecord["id"] | null>(
-    sessionIndex.sessionList[0]?.id ?? null,
-  )
-  const sessions = sessionIndex.sessionList
-  const selectedSession = selectedSessionId.value
-    ? lookupSession(sessionIndex, selectedSessionId.value)
-    : null
+  const sessionsQuery = useQuery(getSessionsListQueryOptions())
+  const sessions = sessionsQuery.data ?? []
+  const selectedSessionId = useSignal<DaemonSession["id"] | null>(sessions[0]?.id ?? null)
+  const selectedSession = sessions.find((session) => session.id === selectedSessionId.value) ?? null
+  const selectedSessionHistoryQuery = useQuery({
+    ...getSessionHistoryQueryOptions((selectedSession?.id ?? "__missing__") as DaemonSession["id"]),
+    enabled: selectedSession !== null,
+  })
+  const transcriptMessages =
+    selectedSession && selectedSessionHistoryQuery.data
+      ? buildTranscriptMessages(selectedSession, selectedSessionHistoryQuery.data.history)
+      : []
+  const listStatus = sessionsQuery.isPending ? "loading" : sessionsQuery.isError ? "error" : "ready"
 
   useEffect(() => {
     if (!selectedSessionId.value && sessions[0]) {
       selectedSessionId.value = sessions[0].id
     }
 
-    if (selectedSessionId.value && !sessionIndex.getSession(selectedSessionId.value)) {
+    if (
+      selectedSessionId.value &&
+      !sessions.some((session) => session.id === selectedSessionId.value)
+    ) {
       selectedSessionId.value = sessions[0]?.id ?? null
     }
-  }, [selectedSessionId, sessionIndex, sessions])
+  }, [selectedSessionId, sessions])
 
-  function openSession(sessionId: SessionRecord["id"]) {
-    const session = sessionIndex.getSession(sessionId)
+  function openSession(sessionId: DaemonSession["id"]) {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
 
     if (!session) {
       return
@@ -112,7 +116,8 @@ export function SessionsPage() {
           })}
         >
           <SessionsList
-            listStatus={sessionIndex.listStatus}
+            errorMessage={sessionsQuery.error instanceof Error ? sessionsQuery.error.message : null}
+            listStatus={listStatus}
             onCreateSession={() => {
               if (selectedSession?.cwd) {
                 sessionLaunch.openDialog(selectedSession.cwd)
@@ -126,7 +131,6 @@ export function SessionsPage() {
               selectedSessionId.value = sessionId
             }}
             selectedSessionId={selectedSessionId.value}
-            sessionChat={sessionChat}
             sessions={sessions}
           />
         </div>
@@ -191,10 +195,7 @@ export function SessionsPage() {
               <InfoRow label="Project" value={selectedSession.cwd} />
               <InfoRow label="Created" value={formatTimestamp(selectedSession.createdAt)} />
               <InfoRow label="Updated" value={formatTimestamp(selectedSession.updatedAt)} />
-              <InfoRow
-                label="Transcript"
-                value={`${sessionChat.messagesForSession(selectedSession.id).length} messages`}
-              />
+              <InfoRow label="Transcript" value={`${transcriptMessages.length} messages`} />
               <InfoRow label="Status" value={selectedSession.status} />
             </div>
             <button
@@ -252,7 +253,7 @@ export function SessionsPage() {
             </p>
           </div>
         )}
-        {sessionIndex.listStatus === "error" ? (
+        {sessionsQuery.isError ? (
           <p
             class={css({
               color: "danger",
@@ -260,7 +261,9 @@ export function SessionsPage() {
               lineHeight: "1.6",
             })}
           >
-            {sessionIndex.errorMessage}
+            {sessionsQuery.error instanceof Error
+              ? sessionsQuery.error.message
+              : "Session list failed to load."}
           </p>
         ) : null}
       </aside>

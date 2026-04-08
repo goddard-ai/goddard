@@ -1,14 +1,5 @@
-import { SigmaType } from "preact-sigma"
-import type { GetDaemonSessionHistoryResponse } from "@goddard-ai/sdk"
+import type { DaemonSession, GetDaemonSessionHistoryResponse } from "@goddard-ai/sdk"
 import type { SessionTranscriptMessage } from "~/sessions/models.ts"
-import type { SessionIndex, SessionRecord } from "~/sessions/session-index.ts"
-import type { SessionService } from "~/sessions/session-service.ts"
-
-type SessionChatShape = {
-  messagesBySessionId: Record<string, SessionTranscriptMessage[]>
-  threadStatusBySessionId: Record<string, "idle" | "loading" | "ready" | "error">
-  errorBySessionId: Record<string, string | undefined>
-}
 
 type SessionHistoryMessage = GetDaemonSessionHistoryResponse["history"][number]
 
@@ -99,8 +90,8 @@ function extractUpdateText(message: SessionHistoryMessage): string | null {
   return uniqueFragments.join("\n").trim() || null
 }
 
-function buildTranscriptMessages(
-  session: SessionRecord,
+export function buildTranscriptMessages(
+  session: DaemonSession,
   history: readonly SessionHistoryMessage[],
 ) {
   const messages: SessionTranscriptMessage[] = [
@@ -157,84 +148,3 @@ function buildTranscriptMessages(
 
   return messages
 }
-
-export const SessionChat = new SigmaType<SessionChatShape>("SessionChat")
-  .defaultState({
-    messagesBySessionId: {},
-    threadStatusBySessionId: {},
-    errorBySessionId: {},
-  })
-  .queries({
-    messagesForSession(sessionId: string) {
-      return this.messagesBySessionId[sessionId] ?? []
-    },
-
-    lastMessageForSession(sessionId: string) {
-      const messages = this.messagesForSession(sessionId)
-      const lastNonSystemMessage = [...messages]
-        .reverse()
-        .find((message) => message.role !== "system")
-      return lastNonSystemMessage ?? null
-    },
-  })
-  .actions({
-    setThreadLoading(sessionId: string) {
-      this.threadStatusBySessionId[sessionId] = "loading"
-      delete this.errorBySessionId[sessionId]
-    },
-
-    setThreadReady(sessionId: string, messages: SessionTranscriptMessage[]) {
-      this.messagesBySessionId[sessionId] = messages
-      this.threadStatusBySessionId[sessionId] = "ready"
-      delete this.errorBySessionId[sessionId]
-    },
-
-    setThreadError(sessionId: string, message: string) {
-      this.threadStatusBySessionId[sessionId] = "error"
-      this.errorBySessionId[sessionId] = message
-    },
-
-    async loadThread(service: SessionService, session: SessionRecord) {
-      this.setThreadLoading(session.id)
-      this.commit()
-
-      try {
-        const history = await service.getHistory(session.id)
-        this.setThreadReady(session.id, buildTranscriptMessages(session, history.history))
-        this.commit()
-      } catch (error) {
-        this.setThreadError(session.id, error instanceof Error ? error.message : String(error))
-        this.commit()
-      }
-    },
-
-    async promptSession(
-      service: SessionService,
-      sessionIndex: SessionIndex,
-      session: SessionRecord,
-      prompt: string,
-    ) {
-      const trimmedPrompt = prompt.trim()
-
-      if (trimmedPrompt.length === 0) {
-        return null
-      }
-
-      await service.promptSession({
-        id: session.id,
-        acpId: session.acpSessionId,
-        prompt: trimmedPrompt,
-      })
-
-      const nextSession = await sessionIndex.refreshSession(service, session.id)
-
-      if (!nextSession) {
-        return null
-      }
-
-      await this.loadThread(service, nextSession)
-      return nextSession
-    },
-  })
-
-export interface SessionChat extends InstanceType<typeof SessionChat> {}

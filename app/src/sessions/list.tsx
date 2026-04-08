@@ -1,17 +1,16 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { FolderPlus, Rows3 } from "lucide-react"
-import type { SessionChat } from "~/session-chat/chat.ts"
-import type { SessionRecord } from "./session-index.ts"
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { ListRow } from "./list-row.tsx"
 
 export function SessionsList(props: {
+  errorMessage?: string | null
   listStatus?: "idle" | "loading" | "ready" | "error"
   onCreateSession: () => void
-  onOpenSession: (sessionId: SessionRecord["id"]) => void
-  onSelectSession: (sessionId: SessionRecord["id"]) => void
-  selectedSessionId: SessionRecord["id"] | null
-  sessionChat: SessionChat
-  sessions: readonly SessionRecord[]
+  onOpenSession: (sessionId: DaemonSession["id"]) => void
+  onSelectSession: (sessionId: DaemonSession["id"]) => void
+  selectedSessionId: DaemonSession["id"] | null
+  sessions: readonly DaemonSession[]
 }) {
   if (props.listStatus === "loading" && props.sessions.length === 0) {
     return (
@@ -25,6 +24,40 @@ export function SessionsList(props: {
         })}
       >
         Loading sessions...
+      </div>
+    )
+  }
+
+  if (props.listStatus === "error" && props.sessions.length === 0) {
+    return (
+      <div
+        class={css({
+          display: "grid",
+          placeItems: "center",
+          minHeight: "320px",
+          padding: "40px",
+          color: "muted",
+          textAlign: "center",
+        })}
+      >
+        <div class={css({ display: "grid", gap: "10px", maxWidth: "28rem" })}>
+          <h2
+            class={css({
+              color: "text",
+              fontSize: "1.15rem",
+              fontWeight: "720",
+            })}
+          >
+            Couldn&apos;t load sessions
+          </h2>
+          <p
+            class={css({
+              lineHeight: "1.7",
+            })}
+          >
+            {props.errorMessage ?? "The daemon-backed session list request failed."}
+          </p>
+        </div>
       </div>
     )
   }
@@ -120,7 +153,6 @@ export function SessionsList(props: {
         <ListRow
           key={session.id}
           isSelected={session.id === props.selectedSessionId}
-          lastMessage={props.sessionChat.lastMessageForSession(session.id)}
           onOpen={() => {
             props.onOpenSession(session.id)
           }}

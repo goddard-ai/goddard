@@ -1,8 +1,8 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Clock3, FolderGit2, Sparkles } from "lucide-react"
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { getSessionDisplayTitle } from "~/sessions/presentation.ts"
-import type { SessionRecord } from "~/sessions/session-index.ts"
 
 function formatTimestamp(value: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -13,7 +13,7 @@ function formatTimestamp(value: number) {
   }).format(new Date(value))
 }
 
-export function Header(props: { messageCount: number; session: SessionRecord }) {
+export function Header(props: { messageCount: number; session: DaemonSession }) {
   return (
     <header
       class={css({

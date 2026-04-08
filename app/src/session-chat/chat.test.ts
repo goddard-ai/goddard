@@ -1,17 +1,11 @@
 import { expect, test } from "vitest"
-import type {
-  DaemonSession,
-  GetDaemonSessionHistoryResponse,
-  SessionPromptRequest,
-} from "@goddard-ai/sdk"
-import { SessionIndex } from "~/sessions/session-index.ts"
-import type { SessionService } from "~/sessions/session-service.ts"
-import { SessionChat } from "./chat.ts"
+import type { DaemonSession, GetDaemonSessionHistoryResponse } from "@goddard-ai/sdk"
+import { buildTranscriptMessages } from "./chat.ts"
 
-function createSession(id: string) {
+function createSession(lastAgentMessage: string | null) {
   return {
-    id: id as DaemonSession["id"],
-    acpSessionId: `${id}-acp`,
+    id: "ses_session-1" as DaemonSession["id"],
+    acpSessionId: "ses_session-1-acp",
     status: "active",
     agentName: "pi",
     cwd: "/repo-a",
@@ -28,95 +22,76 @@ function createSession(id: string) {
     errorMessage: null,
     blockedReason: null,
     initiative: null,
-    lastAgentMessage: "Latest agent summary.",
+    lastAgentMessage,
     models: null,
   } satisfies DaemonSession
 }
 
-function createHistoryResponse(
-  session: DaemonSession,
-  history: GetDaemonSessionHistoryResponse["history"],
-) {
-  return {
-    id: session.id,
-    acpSessionId: session.acpSessionId,
-    connection: {
-      mode: session.connectionMode,
-      reconnectable: true,
-      activeDaemonSession: session.activeDaemonSession,
-    },
-    history,
-  } satisfies GetDaemonSessionHistoryResponse
-}
-
-test("promptSession refreshes the daemon session and keeps transcript history in sync", async () => {
-  const originalSession = createSession("ses_session-1")
-  const refreshedSession = {
-    ...originalSession,
-    updatedAt: 1_743_968_600_000,
-    lastAgentMessage: "I reviewed the diff and found one issue.",
-  }
-  const promptCalls: SessionPromptRequest[] = []
-  const service: SessionService = {
-    async createSession() {
-      return originalSession
-    },
-    async listSessions() {
-      return []
-    },
-    async getSession(id) {
-      expect(id).toBe("ses_session-1")
-      return refreshedSession
-    },
-    async getHistory() {
-      return createHistoryResponse(refreshedSession, [
-        {
-          jsonrpc: "2.0",
-          id: "prompt-1",
-          method: "session/prompt",
-          params: {
-            sessionId: refreshedSession.acpSessionId,
-            prompt: [{ type: "text", text: "Review the diff and summarize problems." }],
-          },
-        },
-        {
-          jsonrpc: "2.0",
-          method: "session/update",
-          params: {
-            value: "I reviewed the diff and found one issue.",
-          },
-        },
-      ])
-    },
-    async promptSession(input) {
-      promptCalls.push(input)
-      return { accepted: true }
-    },
-  }
-  const sessionIndex = new SessionIndex()
-  const sessionChat = new SessionChat()
-
-  sessionIndex.upsertSession(originalSession)
-
-  const nextSession = await sessionChat.promptSession(
-    service,
-    sessionIndex,
-    originalSession,
-    "Review the diff and summarize problems.",
-  )
-
-  expect(promptCalls).toEqual([
+test("buildTranscriptMessages parses prompt and update events without duplicating the latest message", () => {
+  const session = createSession("I reviewed the diff and found one issue.")
+  const history = [
     {
-      id: "ses_session-1",
-      acpId: "ses_session-1-acp",
-      prompt: "Review the diff and summarize problems.",
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: "session/prompt",
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: "text", text: "Review the diff and summarize problems." }],
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        value: "I reviewed the diff and found one issue.",
+      },
+    },
+  ] satisfies GetDaemonSessionHistoryResponse["history"]
+
+  expect(buildTranscriptMessages(session, history)).toEqual([
+    {
+      id: "ses_session-1:context",
+      role: "system",
+      authorName: "System",
+      timestampLabel: "active",
+      text: "Working directory: /repo-a",
+    },
+    {
+      id: "ses_session-1:prompt:0",
+      role: "user",
+      authorName: "You",
+      timestampLabel: "Prompt",
+      text: "Review the diff and summarize problems.",
+    },
+    {
+      id: "ses_session-1:update:1",
+      role: "assistant",
+      authorName: "pi",
+      timestampLabel: "Update",
+      text: "I reviewed the diff and found one issue.",
     },
   ])
-  expect(nextSession?.updatedAt).toBe(1_743_968_600_000)
-  expect(sessionIndex.getSession("ses_session-1")?.lastAgentMessage).toBe(
-    "I reviewed the diff and found one issue.",
-  )
-  expect(sessionChat.lastMessageForSession("ses_session-1")?.text).toBe(
-    "I reviewed the diff and found one issue.",
-  )
+})
+
+test("buildTranscriptMessages appends the latest daemon summary when history has no assistant update yet", () => {
+  const session = createSession("Ready to review the diff.")
+  const history = [
+    {
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: "session/prompt",
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: "text", text: "Review the current diff." }],
+      },
+    },
+  ] satisfies GetDaemonSessionHistoryResponse["history"]
+
+  expect(buildTranscriptMessages(session, history).at(-1)).toEqual({
+    id: "ses_session-1:latest",
+    role: "assistant",
+    authorName: "pi",
+    timestampLabel: "Latest",
+    text: "Ready to review the diff.",
+  })
 })

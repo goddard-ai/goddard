@@ -1,49 +1,61 @@
 import * as RadixDialog from "@radix-ui/react-dialog"
+import type { CreateDaemonSessionRequest } from "@goddard-ai/sdk"
+import { useMutation, useQueryClient } from "@tanstack/preact-query"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Sparkles, X } from "lucide-react"
-import {
-  useProjectRegistry,
-  useSessionChat,
-  useSessionIndex,
-  useSessionLaunch,
-  useWorkbenchTabSet,
-} from "~/app-state-context.tsx"
 import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
-import { desktopSessionService } from "./session-service.ts"
+import { getSessionHistoryQueryOptions, sessionQueryKeys } from "./queries.ts"
+import { useProjectRegistry, useSessionLaunch, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { goddardSdk } from "~/sdk.ts"
 
 export function Dialog() {
   const projectRegistry = useProjectRegistry()
-  const sessionChat = useSessionChat()
-  const sessionIndex = useSessionIndex()
   const sessionLaunch = useSessionLaunch()
   const workbenchTabSet = useWorkbenchTabSet()
+  const queryClient = useQueryClient()
+  const createSessionMutation = useMutation({
+    mutationFn: async (sessionInput: CreateDaemonSessionRequest) => {
+      const response = await goddardSdk.session.create(sessionInput)
+      return response.session
+    },
+  })
 
   function closeDialog() {
     sessionLaunch.closeDialog()
   }
 
   async function launchSession() {
-    const session = await sessionLaunch.submitLaunch(
-      desktopSessionService,
-      sessionIndex,
-      sessionChat,
-    )
+    const sessionInput = sessionLaunch.createSessionInput()
 
-    if (!session) {
+    if (!sessionInput) {
+      sessionLaunch.failSubmit("Choose a project and enter the first prompt.")
       return
     }
 
-    workbenchTabSet.openOrFocusTab({
-      id: `session:${session.id}`,
-      kind: "sessionChat",
-      title: getSessionDisplayTitle(session),
-      payload: {
-        sessionId: session.id,
-      },
-      dirty: false,
-    })
+    sessionLaunch.beginSubmit()
+
+    try {
+      const session = await createSessionMutation.mutateAsync(sessionInput)
+      queryClient.setQueryData(sessionQueryKeys.detail(session.id), session)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.lists() }),
+        queryClient.prefetchQuery(getSessionHistoryQueryOptions(session.id)),
+      ])
+      sessionLaunch.closeDialog()
+      workbenchTabSet.openOrFocusTab({
+        id: `session:${session.id}`,
+        kind: "sessionChat",
+        title: getSessionDisplayTitle(session),
+        payload: {
+          sessionId: session.id,
+        },
+        dirty: false,
+      })
+    } catch (error) {
+      sessionLaunch.failSubmit(error instanceof Error ? error.message : String(error))
+    }
   }
 
   return (
@@ -141,7 +153,7 @@ export function Dialog() {
                   })}
                 >
                   This minimal flow creates a session record, seeds the transcript, and opens the
-                  chat tab immediately.
+                  chat tab immediately from the shared daemon session data.
                 </RadixDialog.Description>
               </div>
             </div>

@@ -134,7 +134,7 @@ export function LaunchForm(props: {
               opacity: "0.52",
             },
           })}
-          disabled={!props.canSubmit}
+          disabled={!props.canSubmit || props.submitStatus === "submitting"}
           type="submit"
         >
           {props.submitStatus === "submitting" ? "Launching..." : "Launch session"}
