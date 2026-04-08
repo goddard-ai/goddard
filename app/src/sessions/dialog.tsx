@@ -7,12 +7,24 @@ import { Sparkles, X } from "lucide-react"
 import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 import { getSessionHistoryQueryOptions, sessionQueryKeys } from "./queries.ts"
-import { useProjectRegistry, useSessionLaunch, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { goddardSdk } from "~/sdk.ts"
 
-export function Dialog() {
+export function Dialog(props: {
+  canSubmit: boolean
+  createSessionInput: () => CreateDaemonSessionRequest | null
+  draftProjectPath: string | null
+  draftPrompt: string
+  errorMessage: string | null
+  isDialogOpen: boolean
+  onBeginSubmit: () => void
+  onChangeProjectPath: (projectPath: string | null) => void
+  onChangePrompt: (prompt: string) => void
+  onClose: () => void
+  onFailSubmit: (message: string) => void
+  submitStatus: "idle" | "submitting" | "error"
+}) {
   const projectRegistry = useProjectRegistry()
-  const sessionLaunch = useSessionLaunch()
   const workbenchTabSet = useWorkbenchTabSet()
   const queryClient = useQueryClient()
   const createSessionMutation = useMutation({
@@ -23,18 +35,18 @@ export function Dialog() {
   })
 
   function closeDialog() {
-    sessionLaunch.closeDialog()
+    props.onClose()
   }
 
   async function launchSession() {
-    const sessionInput = sessionLaunch.createSessionInput()
+    const sessionInput = props.createSessionInput()
 
     if (!sessionInput) {
-      sessionLaunch.failSubmit("Choose a project and enter the first prompt.")
+      props.onFailSubmit("Choose a project and enter the first prompt.")
       return
     }
 
-    sessionLaunch.beginSubmit()
+    props.onBeginSubmit()
 
     try {
       const session = await createSessionMutation.mutateAsync(sessionInput)
@@ -43,7 +55,7 @@ export function Dialog() {
         queryClient.invalidateQueries({ queryKey: sessionQueryKeys.lists() }),
         queryClient.prefetchQuery(getSessionHistoryQueryOptions(session.id)),
       ])
-      sessionLaunch.closeDialog()
+      props.onClose()
       workbenchTabSet.openOrFocusTab({
         id: `session:${session.id}`,
         kind: "sessionChat",
@@ -54,13 +66,13 @@ export function Dialog() {
         dirty: false,
       })
     } catch (error) {
-      sessionLaunch.failSubmit(error instanceof Error ? error.message : String(error))
+      props.onFailSubmit(error instanceof Error ? error.message : String(error))
     }
   }
 
   return (
     <RadixDialog.Root
-      open={sessionLaunch.isDialogOpen}
+      open={props.isDialogOpen}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
           closeDialog()
@@ -180,19 +192,19 @@ export function Dialog() {
             </RadixDialog.Close>
           </div>
           <LaunchForm
-            canSubmit={sessionLaunch.canSubmit()}
-            draftProjectPath={sessionLaunch.draftProjectPath}
-            draftPrompt={sessionLaunch.draftPrompt}
-            errorMessage={sessionLaunch.errorMessage}
+            canSubmit={props.canSubmit}
+            draftProjectPath={props.draftProjectPath}
+            draftPrompt={props.draftPrompt}
+            errorMessage={props.errorMessage}
             onChangeProjectPath={(projectPath) => {
-              sessionLaunch.setDraftProjectPath(projectPath)
+              props.onChangeProjectPath(projectPath)
             }}
             onChangePrompt={(prompt) => {
-              sessionLaunch.setDraftPrompt(prompt)
+              props.onChangePrompt(prompt)
             }}
             onSubmit={launchSession}
             projects={projectRegistry.projectList}
-            submitStatus={sessionLaunch.submitStatus}
+            submitStatus={props.submitStatus}
           />
         </RadixDialog.Content>
       </RadixDialog.Portal>

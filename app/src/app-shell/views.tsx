@@ -22,14 +22,18 @@ const workbenchPanelBodyClass = css({
 const panelScrollCache = new Map<string, number>()
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
-export function AppShellWorkbenchContent(props: { activeTabId: string; selectedNavId: string }) {
+export function AppShellWorkbenchContent(props: {
+  activeTabId: string
+  onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
+  selectedNavId: string
+}) {
   return props.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
     <WorkbenchScrollPanel scrollKey={`main:${props.selectedNavId}`}>
-      <MainWorkbenchView />
+      <MainWorkbenchView onRequestSessionLaunch={props.onRequestSessionLaunch} />
     </WorkbenchScrollPanel>
   ) : (
     <WorkbenchScrollPanel scrollKey={`detail:${props.activeTabId}`}>
-      <WorkbenchTabPanel />
+      <WorkbenchTabPanel onRequestSessionLaunch={props.onRequestSessionLaunch} />
     </WorkbenchScrollPanel>
   )
 }
@@ -69,15 +73,19 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: ComponentChi
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
-function MainWorkbenchView() {
+function MainWorkbenchView(props: {
+  onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
+}) {
   const navigation = useNavigation()
   const ActiveNavigationComponent = getWorkbenchTabComponent(navigation.selectedNavId)
 
-  return <ActiveNavigationComponent />
+  return <ActiveNavigationComponent onRequestSessionLaunch={props.onRequestSessionLaunch} />
 }
 
 /** Renders the active closable workbench tab panel. */
-function WorkbenchTabPanel() {
+function WorkbenchTabPanel(props: {
+  onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
+}) {
   const workbenchTabSet = useWorkbenchTabSet()
   const activeTab = workbenchTabSet.activeTab
 
@@ -90,7 +98,10 @@ function WorkbenchTabPanel() {
 
   return (
     <Suspense fallback={<div />}>
-      <ActiveTabComponent {...activeTabPayload} />
+      <ActiveTabComponent
+        {...activeTabPayload}
+        onRequestSessionLaunch={props.onRequestSessionLaunch}
+      />
     </Suspense>
   )
 }

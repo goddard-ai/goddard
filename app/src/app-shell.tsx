@@ -1,17 +1,14 @@
-import { useListener } from "preact-sigma"
+import { useSignal } from "@preact/signals"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
+import { useListener } from "preact-sigma"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu.ts"
 import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "~/shared/debug-menu.ts"
 import { Dialog as SessionDialog } from "~/sessions/dialog.tsx"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
-import {
-  useNavigation,
-  useProjectRegistry,
-  useSessionLaunch,
-  useWorkbenchTabSet,
-} from "./app-state-context.tsx"
+import { buildCreateSessionInput } from "./sessions/session-launch.ts"
+import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { GoodTooltipProvider } from "./lib/good-tooltip.tsx"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
@@ -81,10 +78,76 @@ function useAppShellTabStrip(
   }
 }
 
+function useSessionDialogState() {
+  const isDialogOpen = useSignal(false)
+  const draftProjectPath = useSignal<string | null>(null)
+  const draftPrompt = useSignal("")
+  const submitStatus = useSignal<"idle" | "submitting" | "error">("idle")
+  const errorMessage = useSignal<string | null>(null)
+
+  function openDialog(preferredProjectPath?: string | null) {
+    isDialogOpen.value = true
+    draftProjectPath.value = preferredProjectPath ?? null
+    draftPrompt.value = ""
+    submitStatus.value = "idle"
+    errorMessage.value = null
+  }
+
+  function closeDialog() {
+    isDialogOpen.value = false
+    draftProjectPath.value = null
+    draftPrompt.value = ""
+    submitStatus.value = "idle"
+    errorMessage.value = null
+  }
+
+  function setDraftProjectPath(projectPath: string | null) {
+    draftProjectPath.value = projectPath
+  }
+
+  function setDraftPrompt(prompt: string) {
+    draftPrompt.value = prompt
+  }
+
+  function beginSubmit() {
+    submitStatus.value = "submitting"
+    errorMessage.value = null
+  }
+
+  function failSubmit(message: string) {
+    submitStatus.value = "error"
+    errorMessage.value = message
+  }
+
+  function createSessionInput() {
+    return buildCreateSessionInput(draftProjectPath.value, draftPrompt.value)
+  }
+
+  function canSubmit() {
+    return createSessionInput() !== null
+  }
+
+  return {
+    beginSubmit,
+    canSubmit,
+    closeDialog,
+    createSessionInput,
+    draftProjectPath,
+    draftPrompt,
+    errorMessage,
+    failSubmit,
+    isDialogOpen,
+    openDialog,
+    setDraftProjectPath,
+    setDraftPrompt,
+    submitStatus,
+  }
+}
+
 export function AppShell() {
   const navigation = useNavigation()
   const projectRegistry = useProjectRegistry()
-  const sessionLaunch = useSessionLaunch()
+  const sessionDialog = useSessionDialogState()
   const workbenchTabSet = useWorkbenchTabSet()
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
@@ -142,9 +205,24 @@ export function AppShell() {
     }
 
     if (action === "newSession") {
-      sessionLaunch.openDialog(projectRegistry.projectList[0]?.path ?? null)
+      sessionDialog.openDialog(projectRegistry.projectList[0]?.path ?? null)
       return
     }
+  }
+
+  function openNavigationSurfaceTab<TKind extends (typeof navigation.items)[number]["id"]>(
+    kind: TKind,
+  ) {
+    const nextNavigationItem =
+      navigation.items.find((item) => item.id === kind) ?? navigation.selectedItem
+
+    workbenchTabSet.openOrFocusTab({
+      id: `surface:${kind}`,
+      kind,
+      title: nextNavigationItem.label,
+      payload: {},
+      dirty: false,
+    })
   }
 
   return (
@@ -156,15 +234,7 @@ export function AppShell() {
         onAction={handleTopbarAction}
         onNavigationSelect={(id, options) => {
           if (options?.openInTab) {
-            const nextNavigationItem =
-              navigation.items.find((item) => item.id === id) ?? navigation.selectedItem
-            workbenchTabSet.openOrFocusTab({
-              id: `surface:${id}`,
-              kind: id,
-              title: nextNavigationItem.label,
-              payload: {},
-              dirty: false,
-            })
+            openNavigationSurfaceTab(id)
             return
           }
 
@@ -198,10 +268,24 @@ export function AppShell() {
       >
         <AppShellWorkbenchContent
           activeTabId={workbenchTabSet.activeTabId}
+          onRequestSessionLaunch={sessionDialog.openDialog}
           selectedNavId={navigation.selectedNavId}
         />
       </AppShellChrome>
-      <SessionDialog />
+      <SessionDialog
+        canSubmit={sessionDialog.canSubmit()}
+        createSessionInput={sessionDialog.createSessionInput}
+        draftProjectPath={sessionDialog.draftProjectPath.value}
+        draftPrompt={sessionDialog.draftPrompt.value}
+        errorMessage={sessionDialog.errorMessage.value}
+        isDialogOpen={sessionDialog.isDialogOpen.value}
+        onBeginSubmit={sessionDialog.beginSubmit}
+        onChangeProjectPath={sessionDialog.setDraftProjectPath}
+        onChangePrompt={sessionDialog.setDraftPrompt}
+        onClose={sessionDialog.closeDialog}
+        onFailSubmit={sessionDialog.failSubmit}
+        submitStatus={sessionDialog.submitStatus.value}
+      />
     </GoodTooltipProvider>
   )
 }

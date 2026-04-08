@@ -10,7 +10,7 @@ import { ListToolbar } from "./list-toolbar.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 import { getSessionHistoryQueryOptions, getSessionsListQueryOptions } from "./queries.ts"
 import { buildTranscriptMessages } from "~/session-chat/chat.ts"
-import { useProjectRegistry, useSessionLaunch, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 
 function formatTimestamp(value: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -21,9 +21,10 @@ function formatTimestamp(value: number) {
   }).format(new Date(value))
 }
 
-export function SessionsPage() {
+export function SessionsPage(props: {
+  onRequestSessionLaunch?: (preferredProjectPath?: string | null) => void
+}) {
   const projectRegistry = useProjectRegistry()
-  const sessionLaunch = useSessionLaunch()
   const workbenchTabSet = useWorkbenchTabSet()
   const sessionsQuery = useQuery(getSessionsListQueryOptions())
   const sessions = sessionsQuery.data ?? []
@@ -102,11 +103,11 @@ export function SessionsPage() {
           sessionCount={sessions.length}
           onCreateSession={() => {
             if (selectedSession?.cwd) {
-              sessionLaunch.openDialog(selectedSession.cwd)
+              props.onRequestSessionLaunch?.(selectedSession.cwd)
               return
             }
 
-            sessionLaunch.openDialog(projectRegistry.projectList[0]?.path ?? null)
+            props.onRequestSessionLaunch?.(projectRegistry.projectList[0]?.path ?? null)
           }}
         />
         <div
@@ -120,11 +121,11 @@ export function SessionsPage() {
             listStatus={listStatus}
             onCreateSession={() => {
               if (selectedSession?.cwd) {
-                sessionLaunch.openDialog(selectedSession.cwd)
+                props.onRequestSessionLaunch?.(selectedSession.cwd)
                 return
               }
 
-              sessionLaunch.openDialog(projectRegistry.projectList[0]?.path ?? null)
+              props.onRequestSessionLaunch?.(projectRegistry.projectList[0]?.path ?? null)
             }}
             onOpenSession={openSession}
             onSelectSession={(sessionId) => {
