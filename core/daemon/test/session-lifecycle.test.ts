@@ -13,6 +13,7 @@ import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
+const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/fast-acp-agent.mjs")
 let sharedHomeDir: string | null = null
 
 afterEach(async () => {
@@ -103,6 +104,23 @@ test("daemon persists repository context into durable session storage", async ()
   })
 
   await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("daemon persists ACP stop reasons on the session record", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Say hello in one sentence.",
+    oneShot: true,
+  })
+
+  expect(created.session.stopReason).toBe("end_turn")
+  expect(db.sessions.get(created.session.id)?.stopReason).toBe("end_turn")
 })
 
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {

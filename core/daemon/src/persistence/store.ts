@@ -24,6 +24,14 @@ const SessionPermissions = z.object({
   allowedPrNumbers: z.array(z.number().int()),
 })
 
+const SessionStopReason = z.enum([
+  "end_turn",
+  "max_tokens",
+  "max_turn_requests",
+  "refusal",
+  "cancelled",
+])
+
 const WorktreeMetadata = z.strictObject({
   repoRoot: z.string(),
   requestedCwd: z.string(),
@@ -47,6 +55,7 @@ const schema = {
     z.object({
       acpSessionId: z.string(),
       status: z.enum(SessionStatus),
+      stopReason: SessionStopReason.nullable().default(null),
       agentName: z.string(),
       cwd: z.string(),
       mcpServers: z.custom<acp.McpServer[]>(),

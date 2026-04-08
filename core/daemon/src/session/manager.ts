@@ -234,26 +234,6 @@ function sessionStatusFromClientMessage(
   return null
 }
 
-/** Interprets agent responses in the context of the triggering client request. */
-function sessionStatusFromAgentMessage(
-  clientRequest: acp.AnyMessage | undefined,
-  message: acp.AnyMessage,
-): SessionStatus | null {
-  const promptRequest = clientRequest
-    ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
-    : null
-
-  if (!promptRequest) {
-    return null
-  }
-
-  if (getAcpMessageResult<acp.PromptResponse>(message)?.stopReason === "end_turn") {
-    return "done"
-  }
-
-  return null
-}
-
 /** Treats abrupt termination signals as session errors instead of normal shutdowns. */
 function isErrorSignal(signal: string | null): boolean {
   return signal === "SIGKILL" || signal === "SIGABRT" || signal === "SIGQUIT"
@@ -613,6 +593,7 @@ async function initializeSession(params: {
     history: acp.AnyMessage[]
     acpSessionId: string
     models?: acp.SessionModelState | null
+    stopReason: acp.PromptResponse["stopReason"] | null
   }
 > {
   const history: acp.AnyMessage[] = []
@@ -645,6 +626,7 @@ async function initializeSession(params: {
     let isFirstPrompt = true
     let acpSessionId: string
     let models: acp.SessionModelState | null | undefined
+    let stopReason: acp.PromptResponse["stopReason"] | null = null
 
     if (
       params.resumeAcpId !== undefined &&
@@ -679,6 +661,7 @@ async function initializeSession(params: {
       params.onMessageWrite?.(initialMessage)
 
       const response = await agent.prompt(initialMessage.params)
+      stopReason = response.stopReason
       switch (response.stopReason) {
         case "cancelled":
           status = "cancelled"
@@ -702,6 +685,7 @@ async function initializeSession(params: {
       history,
       acpSessionId,
       models,
+      stopReason,
     }
   } finally {
     await stream.readable.cancel().catch(() => {})
@@ -1193,6 +1177,7 @@ export function createSessionManager(input: {
         db.sessions.update(id, {
           acpSessionId: initialized.acpSessionId,
           status: initialized.status,
+          stopReason: initialized.stopReason ?? existingSession.stopReason ?? null,
           agentName: agentNameFromInput(params.request.agent),
           cwd,
           mcpServers: params.request.mcpServers,
@@ -1213,6 +1198,7 @@ export function createSessionManager(input: {
         db.sessions.put(id, {
           acpSessionId: initialized.acpSessionId,
           status: initialized.status,
+          stopReason: initialized.stopReason,
           agentName: agentNameFromInput(params.request.agent),
           cwd,
           mcpServers: params.request.mcpServers,
@@ -1319,15 +1305,27 @@ export function createSessionManager(input: {
           activeSession.lastPermissionRequest = message
         } else if ("id" in message && message.id != null) {
           const clientRequest = activeSession.clientRequests.get(message.id)
-          const nextStatus = sessionStatusFromAgentMessage(clientRequest, message)
-          if (nextStatus) {
+          const promptRequest = clientRequest
+            ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
+            : null
+          const promptResponse = promptRequest
+            ? getAcpMessageResult<acp.PromptResponse>(message)
+            : null
+          const stopReason = promptResponse?.stopReason ?? null
+          const nextStatus = stopReason === "end_turn" ? "done" : null
+
+          if (nextStatus || stopReason) {
             await updateSession(
               activeSession.id,
-              { status: nextStatus },
+              {
+                ...(nextStatus && { status: nextStatus }),
+                ...(stopReason && { stopReason }),
+              },
               {
                 reason: "agent_message",
                 requestMethod: clientRequest?.method,
                 responseId: message.id,
+                stopReason: stopReason ?? undefined,
               },
             )
           }

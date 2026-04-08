@@ -143,6 +143,7 @@ export type DaemonSessionIdentity = {
 /** Full daemon-managed session record exposed to app and SDK consumers. */
 export type DaemonSession = DaemonSessionIdentity & {
   status: SessionStatus
+  stopReason: acp.PromptResponse["stopReason"] | null
   agentName: string
   cwd: string
   mcpServers: acp.McpServer[]
