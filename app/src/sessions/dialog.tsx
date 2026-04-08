@@ -1,4 +1,4 @@
-import * as RadixDialog from "@radix-ui/react-dialog"
+import * as Dialog from "@radix-ui/react-dialog"
 import type { CreateDaemonSessionRequest } from "@goddard-ai/sdk"
 import { useMutation, useQueryClient } from "@tanstack/preact-query"
 import { css, cx } from "@goddard-ai/styled-system/css"
@@ -10,31 +10,36 @@ import { getSessionHistoryQueryOptions, sessionQueryKeys } from "./queries.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { goddardSdk } from "~/sdk.ts"
 
-export function Dialog(props: {
+export function SessionLaunchDialog(props: {
   canSubmit: boolean
   createSessionInput: () => CreateDaemonSessionRequest | null
   draftProjectPath: string | null
   draftPrompt: string
-  errorMessage: string | null
   isDialogOpen: boolean
-  onBeginSubmit: () => void
   onChangeProjectPath: (projectPath: string | null) => void
   onChangePrompt: (prompt: string) => void
   onClose: () => void
-  onFailSubmit: (message: string) => void
-  submitStatus: "idle" | "submitting" | "error"
 }) {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const queryClient = useQueryClient()
-  const createSessionMutation = useMutation({
-    mutationFn: async (sessionInput: CreateDaemonSessionRequest) => {
-      const response = await goddardSdk.session.create(sessionInput)
-      return response.session
-    },
+  const createSession = useMutation({
+    mutationFn: goddardSdk.session.create,
   })
+  const submitStatus = createSession.isPending
+    ? "submitting"
+    : createSession.isError
+      ? "error"
+      : "idle"
+  const errorMessage =
+    createSession.error instanceof Error
+      ? createSession.error.message
+      : createSession.error
+        ? String(createSession.error)
+        : null
 
   function closeDialog() {
+    createSession.reset()
     props.onClose()
   }
 
@@ -42,14 +47,11 @@ export function Dialog(props: {
     const sessionInput = props.createSessionInput()
 
     if (!sessionInput) {
-      props.onFailSubmit("Choose a project and enter the first prompt.")
       return
     }
 
-    props.onBeginSubmit()
-
     try {
-      const session = await createSessionMutation.mutateAsync(sessionInput)
+      const { session } = await createSession.mutateAsync(sessionInput)
       queryClient.setQueryData(sessionQueryKeys.detail(session.id), session)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: sessionQueryKeys.lists() }),
@@ -65,13 +67,11 @@ export function Dialog(props: {
         },
         dirty: false,
       })
-    } catch (error) {
-      props.onFailSubmit(error instanceof Error ? error.message : String(error))
-    }
+    } catch {}
   }
 
   return (
-    <RadixDialog.Root
+    <Dialog.Root
       open={props.isDialogOpen}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
@@ -79,8 +79,8 @@ export function Dialog(props: {
         }
       }}
     >
-      <RadixDialog.Portal>
-        <RadixDialog.Overlay
+      <Dialog.Portal>
+        <Dialog.Overlay
           class={css({
             position: "fixed",
             inset: "0",
@@ -93,7 +93,7 @@ export function Dialog(props: {
             },
           })}
         />
-        <RadixDialog.Content
+        <Dialog.Content
           class={css({
             position: "fixed",
             top: "50%",
@@ -146,7 +146,7 @@ export function Dialog(props: {
                 New session
               </span>
               <div class={css({ display: "grid", gap: "8px" })}>
-                <RadixDialog.Title
+                <Dialog.Title
                   class={css({
                     color: "text",
                     fontSize: "1.45rem",
@@ -156,8 +156,8 @@ export function Dialog(props: {
                   })}
                 >
                   Launch a local session
-                </RadixDialog.Title>
-                <RadixDialog.Description
+                </Dialog.Title>
+                <Dialog.Description
                   class={css({
                     color: "muted",
                     fontSize: "0.94rem",
@@ -166,10 +166,10 @@ export function Dialog(props: {
                 >
                   This minimal flow creates a session record, seeds the transcript, and opens the
                   chat tab immediately from the shared daemon session data.
-                </RadixDialog.Description>
+                </Dialog.Description>
               </div>
             </div>
-            <RadixDialog.Close asChild>
+            <Dialog.Close asChild>
               <button
                 class={cx(
                   css({
@@ -189,25 +189,21 @@ export function Dialog(props: {
               >
                 <X size={16} strokeWidth={2.2} />
               </button>
-            </RadixDialog.Close>
+            </Dialog.Close>
           </div>
           <LaunchForm
             canSubmit={props.canSubmit}
             draftProjectPath={props.draftProjectPath}
             draftPrompt={props.draftPrompt}
-            errorMessage={props.errorMessage}
-            onChangeProjectPath={(projectPath) => {
-              props.onChangeProjectPath(projectPath)
-            }}
-            onChangePrompt={(prompt) => {
-              props.onChangePrompt(prompt)
-            }}
+            errorMessage={errorMessage}
+            onChangeProjectPath={props.onChangeProjectPath}
+            onChangePrompt={props.onChangePrompt}
             onSubmit={launchSession}
             projects={projectRegistry.projectList}
-            submitStatus={props.submitStatus}
+            submitStatus={submitStatus}
           />
-        </RadixDialog.Content>
-      </RadixDialog.Portal>
-    </RadixDialog.Root>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

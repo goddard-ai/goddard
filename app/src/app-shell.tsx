@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
 import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu.ts"
 import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "~/shared/debug-menu.ts"
-import { Dialog as SessionDialog } from "~/sessions/dialog.tsx"
+import { SessionLaunchDialog } from "~/sessions/dialog.tsx"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
@@ -82,23 +82,17 @@ function useSessionDialogState() {
   const isDialogOpen = useSignal(false)
   const draftProjectPath = useSignal<string | null>(null)
   const draftPrompt = useSignal("")
-  const submitStatus = useSignal<"idle" | "submitting" | "error">("idle")
-  const errorMessage = useSignal<string | null>(null)
 
   function openDialog(preferredProjectPath?: string | null) {
     isDialogOpen.value = true
     draftProjectPath.value = preferredProjectPath ?? null
     draftPrompt.value = ""
-    submitStatus.value = "idle"
-    errorMessage.value = null
   }
 
   function closeDialog() {
     isDialogOpen.value = false
     draftProjectPath.value = null
     draftPrompt.value = ""
-    submitStatus.value = "idle"
-    errorMessage.value = null
   }
 
   function setDraftProjectPath(projectPath: string | null) {
@@ -107,16 +101,6 @@ function useSessionDialogState() {
 
   function setDraftPrompt(prompt: string) {
     draftPrompt.value = prompt
-  }
-
-  function beginSubmit() {
-    submitStatus.value = "submitting"
-    errorMessage.value = null
-  }
-
-  function failSubmit(message: string) {
-    submitStatus.value = "error"
-    errorMessage.value = message
   }
 
   function createSessionInput() {
@@ -128,19 +112,15 @@ function useSessionDialogState() {
   }
 
   return {
-    beginSubmit,
     canSubmit,
     closeDialog,
     createSessionInput,
     draftProjectPath,
     draftPrompt,
-    errorMessage,
-    failSubmit,
     isDialogOpen,
     openDialog,
     setDraftProjectPath,
     setDraftPrompt,
-    submitStatus,
   }
 }
 
@@ -272,19 +252,15 @@ export function AppShell() {
           selectedNavId={navigation.selectedNavId}
         />
       </AppShellChrome>
-      <SessionDialog
+      <SessionLaunchDialog
         canSubmit={sessionDialog.canSubmit()}
         createSessionInput={sessionDialog.createSessionInput}
         draftProjectPath={sessionDialog.draftProjectPath.value}
         draftPrompt={sessionDialog.draftPrompt.value}
-        errorMessage={sessionDialog.errorMessage.value}
         isDialogOpen={sessionDialog.isDialogOpen.value}
-        onBeginSubmit={sessionDialog.beginSubmit}
         onChangeProjectPath={sessionDialog.setDraftProjectPath}
         onChangePrompt={sessionDialog.setDraftPrompt}
         onClose={sessionDialog.closeDialog}
-        onFailSubmit={sessionDialog.failSubmit}
-        submitStatus={sessionDialog.submitStatus.value}
       />
     </GoodTooltipProvider>
   )
