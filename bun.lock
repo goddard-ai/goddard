@@ -186,14 +186,6 @@
         "@goddard-ai/daemon": "workspace:^",
       },
     },
-    "core/tauri-plugin-ipc": {
-      "name": "@goddard-ai/tauri-plugin-ipc",
-      "version": "0.1.0",
-      "dependencies": {
-        "@goddard-ai/ipc": "workspace:^",
-        "@tauri-apps/api": "^2.10.1",
-      },
-    },
     "core/worktree": {
       "name": "@goddard-ai/worktree",
       "version": "0.1.0",
@@ -471,8 +463,6 @@
     "@goddard-ai/sdk": ["@goddard-ai/sdk@workspace:core/sdk"],
 
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
-
-    "@goddard-ai/tauri-plugin-ipc": ["@goddard-ai/tauri-plugin-ipc@workspace:core/tauri-plugin-ipc"],
 
     "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
 

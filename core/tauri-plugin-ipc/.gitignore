@@ -1,8 +1,0 @@
-# Rust / Cargo
-target/
-debug/
-**/*.rs.bk
-Cargo.lock
-
-# Tauri generated artifacts
-**/gen

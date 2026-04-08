@@ -18,7 +18,7 @@
 Use `@goddard-ai/daemon-client` when you need to:
 
 - Parse or construct daemon URLs.
-- Bind a host-specific IPC client implementation such as Tauri IPC.
+- Bind a host-specific IPC client implementation.
 
 Use `@goddard-ai/daemon-client/node` when you need to:
 
@@ -28,7 +28,7 @@ Use `@goddard-ai/daemon-client/node` when you need to:
 Use `@goddard-ai/sdk` when you need to:
 
 - Call daemon IPC actions through one stable SDK instance.
-- Work from a browser-safe or Tauri host with an explicit daemon client.
+- Work from a browser-safe or other non-Node host with an explicit daemon client.
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, cancellation, history, shutdown, and model changes.
@@ -63,12 +63,32 @@ Namespaces:
 Browser-safe explicit client:
 
 ```ts
+import { createClient } from "@goddard-ai/ipc"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
-import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
+
+const desktopHost = globalThis.desktopHost
 
 const sdk = new GoddardSdk({
-  client: createTauriClient("/tmp/goddard-daemon.sock", daemonIpcSchema),
+  client: createClient(daemonIpcSchema, {
+    send(name, payload) {
+      return desktopHost.send({
+        socketPath: "/tmp/goddard-daemon.sock",
+        name,
+        payload,
+      })
+    },
+    subscribe(name, filter, onMessage) {
+      return desktopHost.subscribe(
+        {
+          socketPath: "/tmp/goddard-daemon.sock",
+          name,
+          filter,
+        },
+        onMessage,
+      )
+    },
+  }),
 })
 
 const authSession = await sdk.auth.startDeviceFlow({

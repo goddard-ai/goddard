@@ -22,12 +22,22 @@ Use `@goddard-ai/sdk` for explicit browser-safe daemon calls, or `@goddard-ai/sd
 
 ```ts
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { createTauriClient } from "@goddard-ai/tauri-plugin-ipc"
+import { createClient } from "@goddard-ai/ipc"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+
+const desktopHost = globalThis.desktopHost
 
 const client = createDaemonIpcClient({
   daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
-  createClient: ({ socketPath }) => createTauriClient(socketPath, daemonIpcSchema),
+  createClient: ({ socketPath }) =>
+    createClient(daemonIpcSchema, {
+      send(name, payload) {
+        return desktopHost.send({ socketPath, name, payload })
+      },
+      subscribe(name, filter, onMessage) {
+        return desktopHost.subscribe({ socketPath, name, filter }, onMessage)
+      },
+    }),
 })
 ```
 

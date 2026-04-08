@@ -21,7 +21,6 @@ This review covers the current checked-in test suite across the workspace, inclu
   - `core/daemon`
   - `core/daemon/client`
   - `core/paths`
-  - `core/tauri-plugin-ipc`
   - `core/worktree`
 
 ## Top Findings
@@ -104,8 +103,6 @@ Recommendation:
 
 - `core/paths` is no longer a zero-test package.
   - It now has real tests for token storage, session state storage, session permissions storage, and database-backed session / loop storage.
-- `core/tauri-plugin-ipc` is no longer untested.
-  - It now covers send, filtered subscribe delivery, unsubscribe cleanup, and failed subscribe cleanup.
 - `core/tree-kill` now has a `test` script, even though it still has no test files.
 - `workforce/` now has a dedicated CLI test suite.
 
@@ -120,12 +117,11 @@ Recommendation:
 - `core/backend/test/backend.test.ts` exercises user-visible login, PR creation, managed PR checks, and unified stream behavior through the HTTP server.
 - `core/paths/test/db.test.ts` gives the suite a real persistence contract for session and loop records.
 - `core/ipc/test/ipc.test.ts` stays lean and useful by checking request validation, structured errors, and NDJSON streaming over a real socket.
-- `core/tauri-plugin-ipc/test/transport.test.ts` is now a solid adapter-level contract suite.
 
 ### Good alignment with the repository testing policy
 
 - The best suites check package boundaries and user-visible behavior instead of private helpers.
-- Recent additions in `core/paths` and `core/tauri-plugin-ipc` are compact and contract-oriented.
+- Recent additions in `core/paths` are compact and contract-oriented.
 
 ## Packages Needing More Attention
 
@@ -181,11 +177,6 @@ Recommendation:
   - path resolution helpers such as loop config precedence
   - malformed file edge cases beyond token storage
 
-### `core/tauri-plugin-ipc`
-
-- Status: good adapter coverage now exists.
-- Recommendation: low-to-medium priority unless the bridge protocol changes.
-
 ### `core/tree-kill`
 
 - Status: no tests.
@@ -211,7 +202,7 @@ Recommendation:
 
 ## Bottom Line
 
-The suite is materially better than the previous review described. `core/paths` and `core/tauri-plugin-ipc` are no longer blind spots, and the daemon-centered behavioral coverage remains the strongest part of the repo.
+The suite is materially better than the previous review described. `core/paths` is no longer a blind spot, and the daemon-centered behavioral coverage remains the strongest part of the repo.
 
 The highest-value issues now are different:
 
