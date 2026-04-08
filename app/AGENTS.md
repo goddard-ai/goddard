@@ -10,11 +10,20 @@
 ## App Rules
 
 - Treat `app/` as an Electrobun desktop app with a Bun-owned host layer and a frontend-heavy TypeScript webview.
-- Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code. UI components should render props and invoke actions, not call host APIs.
-- Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
-- Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status. Do not model that kind of UI state in `preact-sigma`.
-- Keep custom Preact hooks for state management local to the component that uses them. Do not extract single-use state hooks into shared modules.
-- Use the local query cache in `src/lib/query.ts` for shared SDK or daemon-backed reads. Query functions passed to `useQuery()` should be stable references, not inline per-render closures. Call SDK writes directly, then manually invalidate affected queries with `useQueryClient()`. Do not add optimistic UI or loading indicators for local form submissions.
+- Desktop boundaries:
+  - Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code.
+  - UI components should render props and invoke actions, not call host APIs.
+- State ownership:
+  - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
+  - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.
+  - Do not model simple UI state in `preact-sigma`.
+  - Keep custom Preact hooks for state management local to the component that uses them.
+  - Do not extract single-use state hooks into shared modules.
+- Query cache:
+  - Use the local query cache in `src/lib/query.ts` for shared SDK or daemon-backed reads.
+  - Query functions passed to `useQuery()` should be stable references, not inline per-render closures.
+  - Call SDK writes directly, then manually invalidate affected queries with `useQueryClient()`.
+  - Do not add optimistic UI or loading indicators for local form submissions.
 - Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
 - Within `src/`:
   - Keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there, and do not create `state/` subfolders.
