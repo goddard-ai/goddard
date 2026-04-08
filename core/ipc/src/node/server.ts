@@ -146,7 +146,7 @@ type CreateServerConfig<TSchema extends IpcSchema> = {
   onRequestReceived?: (input: RequestReceivedHookInput<TSchema>) => Promise<void> | void
   onResponseSent?: (input: ResponseSentHookInput<TSchema>) => Promise<void> | void
   onRequestFailed?: (input: RequestFailedHookInput<TSchema>) => Promise<void> | void
-  onSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
+  beforeSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
 }
 
 /** Creates the Node IPC server for one socket-backed application schema. */
@@ -159,7 +159,7 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
     onRequestReceived,
     onResponseSent,
     onRequestFailed,
-    onSubscribe,
+    beforeSubscribe,
   } = config
   const streamClients = new Set<{
     name: string
@@ -302,7 +302,7 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
     }
 
     try {
-      await onSubscribe?.({
+      await beforeSubscribe?.({
         name: name as ValidStreamName<TSchema>,
         filter,
       })

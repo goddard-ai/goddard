@@ -57,7 +57,7 @@ async function createFixture() {
       echo: ({ text }) => ({ echoed: text }),
       add: ({ a, b }) => ({ sum: a + b }),
     },
-    onSubscribe: ({ name, filter }) => {
+    beforeSubscribe: ({ name, filter }) => {
       if (name === "userAlert" && filter?.userId === "blocked-user") {
         throw new IpcClientError("User alerts are disabled for blocked-user")
       }

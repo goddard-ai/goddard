@@ -506,7 +506,7 @@ export async function startDaemonServer(
         errorMessage: error instanceof Error ? error.message : String(error),
       })
     },
-    onSubscribe: async ({ name, filter }) => {
+    beforeSubscribe: async ({ name, filter }) => {
       if (name !== "workforceEvent") {
         return
       }
@@ -516,6 +516,8 @@ export async function startDaemonServer(
         throw new IpcClientError("Missing workforce event filter")
       }
 
+      // Subscription setup only validates that this workforce is active; events are still pushed later
+      // from the runtime when new ledger activity is appended.
       await workforceManager.getWorkforce(request.rootDir)
     },
   })
