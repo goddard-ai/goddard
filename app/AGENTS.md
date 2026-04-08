@@ -14,7 +14,7 @@
 - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
 - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status. Do not model that kind of UI state in `preact-sigma`.
 - Keep custom Preact hooks for state management local to the component that uses them. Do not extract single-use state hooks into shared modules.
-- Use the local query cache in `src/lib/query.ts` for shared SDK or daemon-backed reads. Call SDK writes directly, then manually invalidate affected queries with `useQueryClient()`. Do not add optimistic UI or loading indicators for local form submissions.
+- Use the local query cache in `src/lib/query.ts` for shared SDK or daemon-backed reads. Query functions passed to `useQuery()` should be stable references, not inline per-render closures. Call SDK writes directly, then manually invalidate affected queries with `useQueryClient()`. Do not add optimistic UI or loading indicators for local form submissions.
 - Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
 - Within `src/`:
   - Keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there, and do not create `state/` subfolders.
