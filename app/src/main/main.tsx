@@ -3,20 +3,17 @@ import { render } from "preact"
 import { AppShell } from "~/app-shell.tsx"
 import { AppStateProvider } from "~/app-state-context.tsx"
 import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
-import { QueryClient, QueryClientProvider } from "~/lib/query.ts"
-
-const queryClient = new QueryClient()
+import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 
 initializeDesktopHost()
+startQueryWindowReactivationRefetch()
 
 // Expose the desktop bridge for manual smoke checks until real flows consume it.
 window.__goddardDesktop = desktopHost
 
 render(
-  <QueryClientProvider client={queryClient}>
-    <AppStateProvider>
-      <AppShell />
-    </AppStateProvider>
-  </QueryClientProvider>,
+  <AppStateProvider>
+    <AppShell />
+  </AppStateProvider>,
   document.getElementById("root")!,
 )

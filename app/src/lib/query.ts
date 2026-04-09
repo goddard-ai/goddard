@@ -1,7 +1,5 @@
 import hashSum from "hash-sum"
-import type { ComponentChildren } from "preact"
-import { createContext, createElement } from "preact"
-import { useContext, useEffect, useState } from "preact/hooks"
+import { useEffect, useState } from "preact/hooks"
 
 type QueryArgs = readonly unknown[]
 type QueryFunction<TArgs extends QueryArgs = QueryArgs, TData = unknown> = (
@@ -27,16 +25,6 @@ type QueryDescriptor<TQueryFn extends AnyQueryFunction = AnyQueryFunction> = rea
 
 type QueryResults<TQueries extends Record<string, QueryDescriptor>> = {
   [TKey in keyof TQueries]: Awaited<ReturnType<TQueries[TKey][0]>>
-}
-
-const queryClientContext = createContext<QueryClient | null>(null)
-
-function requireQueryClient(value: QueryClient | null) {
-  if (!value) {
-    throw new Error("queryClientContext is missing.")
-  }
-
-  return value
 }
 
 /**
@@ -140,6 +128,17 @@ export class QueryClient {
 
       if (entry) {
         this.invalidateEntry(entry)
+      }
+    }
+  }
+
+  /**
+   * Refreshes every query that is currently observed by mounted UI.
+   */
+  refetchActiveQueries() {
+    for (const entry of this.entries.values()) {
+      if (entry.subscribers.size > 0 && !entry.promise) {
+        void this.fetchEntry(entry, entry.hasData)
       }
     }
   }
@@ -269,18 +268,46 @@ export class QueryClient {
   }
 }
 
-/**
- * Supplies one shared query client to hooks rendered below it.
- */
-export function QueryClientProvider(props: { children: ComponentChildren; client: QueryClient }) {
-  return createElement(queryClientContext.Provider, { value: props.client }, props.children)
-}
+export const queryClient = new QueryClient()
 
 /**
- * Returns the shared query client for manual invalidation and direct cache interaction.
+ * Installs one global listener set that refreshes active queries after the desktop view becomes
+ * visible or focused again.
  */
-export function useQueryClient() {
-  return requireQueryClient(useContext(queryClientContext))
+export function startQueryWindowReactivationRefetch() {
+  const runtimeWindow = window as Window & {
+    __goddardQueryWindowReactivationStarted?: boolean
+  }
+
+  if (runtimeWindow.__goddardQueryWindowReactivationStarted) {
+    return
+  }
+
+  runtimeWindow.__goddardQueryWindowReactivationStarted = true
+
+  let scheduledRefetchFrame: number | null = null
+
+  function scheduleActiveQueryRefetch() {
+    if (document.visibilityState === "hidden") {
+      return
+    }
+
+    if (scheduledRefetchFrame !== null) {
+      return
+    }
+
+    scheduledRefetchFrame = window.requestAnimationFrame(() => {
+      scheduledRefetchFrame = null
+      queryClient.refetchActiveQueries()
+    })
+  }
+
+  window.addEventListener("focus", scheduleActiveQueryRefetch)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      scheduleActiveQueryRefetch()
+    }
+  })
 }
 
 /**
@@ -293,7 +320,6 @@ export function useQuery<TQueryFn extends AnyQueryFunction>(
   queryFn: TQueryFn,
   args: Parameters<TQueryFn>,
 ) {
-  const queryClient = useQueryClient()
   const [, setVersion] = useState(0)
   const queryKey = queryClient.getQueryKey(queryFn, args)
 
@@ -318,7 +344,6 @@ export function useQuery<TQueryFn extends AnyQueryFunction>(
  * can refresh one key or the whole set.
  */
 export function useQueries<TQueries extends Record<string, QueryDescriptor>>(queries: TQueries) {
-  const queryClient = useQueryClient()
   const [, setVersion] = useState(0)
   const entries = Object.entries(queries) as Array<
     [keyof TQueries & string, TQueries[keyof TQueries]]
