@@ -89,5 +89,8 @@ export const desktopHost: DesktopHostBridge = {
   browseForProject,
   maximizeWindow,
   daemonSend,
-  sdk: goddardSdk,
+  // Resolve lazily so the desktop bridge and SDK transport can share a module cycle safely.
+  get sdk() {
+    return goddardSdk
+  },
 }
