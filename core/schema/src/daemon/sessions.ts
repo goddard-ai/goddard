@@ -17,14 +17,14 @@ export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.Con
 export type InitialPromptOption = z.infer<typeof InitialPromptOption>
 
 /** Worktree options accepted by the daemon session API. */
-export const SessionWorktreeParams = z.object({
+export const SessionWorktreeParams = z.strictObject({
   enabled: z.boolean().optional(),
 })
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
 
 /** Workforce attachment stored separately from the base daemon session record. */
-export const SessionWorkforceParams = z.object({
+export const SessionWorkforceParams = z.strictObject({
   rootDir: z.string().optional(),
   agentId: z.string().optional(),
   requestId: z.string().optional(),
@@ -33,7 +33,7 @@ export const SessionWorkforceParams = z.object({
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
 
 /** Request payload used to create one daemon-managed session. */
-export const CreateDaemonSessionRequest = z.object({
+export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
   cwd: z.string(),
   worktree: SessionWorktreeParams.optional(),
@@ -48,156 +48,158 @@ export const CreateDaemonSessionRequest = z.object({
   oneShot: z.boolean().optional(),
 })
 
-export type CreateDaemonSessionRequest = z.infer<typeof CreateDaemonSessionRequest>
+export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>
 
 /** Request payload used to list daemon-managed sessions in stable recency order. */
-export const ListDaemonSessionsRequest = z.object({
+export const ListSessionsRequest = z.strictObject({
   limit: z.number().int().positive().optional(),
   cursor: z.string().optional(),
 })
 
-export type ListDaemonSessionsRequest = z.infer<typeof ListDaemonSessionsRequest>
+export type ListSessionsRequest = z.infer<typeof ListSessionsRequest>
 
 /** Path and payload params used to address one daemon-managed session. */
-export const DaemonSessionPathParams = DaemonSessionIdParams
+export const SessionPathParams = DaemonSessionIdParams
 
-export type DaemonSessionPathParams = z.infer<typeof DaemonSessionPathParams>
+export type SessionPathParams = z.infer<typeof SessionPathParams>
 
 /** JSON-RPC request ids surfaced for queued and aborted prompt bookkeeping. */
-export const DaemonSessionPromptId = z.union([z.string(), z.number()])
+export const SessionPromptId = z.union([z.string(), z.number()])
 
-export type DaemonSessionPromptId = z.infer<typeof DaemonSessionPromptId>
+export type SessionPromptId = z.infer<typeof SessionPromptId>
 
 /** Request payload used to forward one raw ACP message to a daemon-managed session. */
-export const SendDaemonSessionMessageRequest = z.object({
+export const SendSessionMessageRequest = z.strictObject({
   id: DaemonSessionId,
   message: z.unknown(),
 })
 
 /** Compile-time shape of one raw ACP message forwarded to a daemon-managed session. */
-export interface SendDaemonSessionMessageRequest {
+export interface SendSessionMessageRequest {
   id: DaemonSessionId
   message: acp.AnyMessage
 }
 
 /** Request payload used to resolve one daemon session token into its daemon session id. */
-export const ResolveDaemonSessionTokenRequest = z.object({
+export const ResolveSessionTokenRequest = z.strictObject({
   token: z.string(),
 })
 
 /** Compile-time shape used to resolve one daemon session token into its daemon session id. */
-export type ResolveDaemonSessionTokenRequest = z.infer<typeof ResolveDaemonSessionTokenRequest>
+export type ResolveSessionTokenRequest = z.infer<typeof ResolveSessionTokenRequest>
 
 /** One queued prompt payload surfaced back to clients after daemon-side cancellation. */
-export const AbortedDaemonSessionPrompt = z.object({
-  requestId: DaemonSessionPromptId,
+export const AbortedSessionPrompt = z.strictObject({
+  requestId: SessionPromptId,
   prompt: z.array(z.custom<acp.ContentBlock>()),
 })
 
-export type AbortedDaemonSessionPrompt = z.infer<typeof AbortedDaemonSessionPrompt>
+export type AbortedSessionPrompt = z.infer<typeof AbortedSessionPrompt>
 
 /** Request payload used to cancel the active turn for one daemon-managed session. */
-export const CancelDaemonSessionRequest = DaemonSessionIdParams
+export const CancelSessionRequest = z.strictObject({
+  id: DaemonSessionId,
+})
 
-export type CancelDaemonSessionRequest = z.infer<typeof CancelDaemonSessionRequest>
+export type CancelSessionRequest = z.infer<typeof CancelSessionRequest>
 
 /** Request payload used to cancel the active turn and replace it with one new prompt. */
-export const SteerDaemonSessionRequest = DaemonSessionIdParams.extend({
+export const SteerSessionRequest = DaemonSessionIdParams.extend({
   prompt: InitialPromptOption,
 })
 
-export type SteerDaemonSessionRequest = z.infer<typeof SteerDaemonSessionRequest>
+export type SteerSessionRequest = z.infer<typeof SteerSessionRequest>
 
 /** Stream payload emitted for one daemon-managed ACP session message. */
-export const DaemonSessionMessageEvent = z.object({
+export const SessionMessageEvent = z.strictObject({
   id: DaemonSessionId,
   message: z.unknown(),
 })
 
 /** Compile-time shape of one daemon-managed ACP session message event. */
-export interface DaemonSessionMessageEvent {
+export interface SessionMessageEvent {
   id: DaemonSessionId
   message: acp.AnyMessage
 }
 
 /** Runtime environment variables injected into one daemon-managed session. */
-export type DaemonSessionRuntimeEnv = {
+export type SessionRuntimeEnv = {
   GODDARD_SESSION_TOKEN: string
 }
 
 /** Durable connectivity state exposed to app and SDK consumers. */
-export type DaemonSessionConnection = {
+export type SessionConnection = {
   mode: "live" | "history" | "none"
   reconnectable: boolean
   activeDaemonSession: boolean
 }
 
 /** Structured diagnostic event emitted by the daemon for session lifecycle debugging. */
-export type DaemonDiagnosticEvent = DaemonSessionDiagnosticEvent & {
+export type SessionDiagnosticEvent = DaemonSessionDiagnosticEvent & {
   sessionId: DaemonSessionId
 }
 
 /** Stable identity values used to address one daemon-managed session. */
-export type DaemonSessionIdentity = {
+export type SessionIdentity = {
   id: DaemonSessionId
   acpSessionId: string
 }
 
 /** Response payload returned after one daemon-managed session is created. */
-export type CreateDaemonSessionResponse = {
+export type CreateSessionResponse = {
   session: DaemonSession
 }
 
 /** Response payload returned after one daemon-managed session page is fetched. */
-export type ListDaemonSessionsResponse = {
+export type ListSessionsResponse = {
   sessions: DaemonSession[]
   nextCursor: string | null
   hasMore: boolean
 }
 
 /** Response payload returned after one daemon-managed session is fetched. */
-export type GetDaemonSessionResponse = {
+export type GetSessionResponse = {
   session: DaemonSession
 }
 
 /** Response payload returned after one daemon-managed session history fetch. */
-export type GetDaemonSessionHistoryResponse = DaemonSessionIdentity & {
-  connection: DaemonSessionConnection
+export type GetSessionHistoryResponse = SessionIdentity & {
+  connection: SessionConnection
   history: acp.AnyMessage[]
 }
 
 /** Full session diagnostic payload returned on demand for debugging and tests. */
-export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
-  connection: DaemonSessionConnection
-  events: DaemonDiagnosticEvent[]
+export type GetSessionDiagnosticsResponse = SessionIdentity & {
+  connection: SessionConnection
+  events: SessionDiagnosticEvent[]
 }
 
 /** Response payload returned after one daemon-managed session worktree fetch. */
-export type GetDaemonSessionWorktreeResponse = DaemonSessionIdentity & {
+export type GetSessionWorktreeResponse = SessionIdentity & {
   worktree: DaemonWorktree | null
 }
 
 /** Response payload returned after one daemon-managed session workforce fetch. */
-export type GetDaemonSessionWorkforceResponse = DaemonSessionIdentity & {
+export type GetSessionWorkforceResponse = SessionIdentity & {
   workforce: DaemonWorkforce | null
 }
 
 /** Response payload returned after one daemon-managed session shutdown request. */
-export type ShutdownDaemonSessionResponse = {
+export type ShutdownSessionResponse = {
   id: DaemonSessionId
   success: boolean
 }
 
 /** Response payload returned after one daemon-managed session turn cancellation. */
-export type CancelDaemonSessionResponse = {
+export type CancelSessionResponse = {
   id: string
   activeTurnCancelled: boolean
-  abortedQueue: AbortedDaemonSessionPrompt[]
+  abortedQueue: AbortedSessionPrompt[]
 }
 
 /** Response payload returned after one daemon-managed session steer request. */
-export type SteerDaemonSessionResponse = {
+export type SteerSessionResponse = {
   id: string
-  abortedQueue: AbortedDaemonSessionPrompt[]
+  abortedQueue: AbortedSessionPrompt[]
   response: acp.PromptResponse
 }

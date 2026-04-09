@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 /** Request payload used to create one pull request through the daemon. */
-export const SubmitPrDaemonRequest = z.object({
+export const SubmitPrRequest = z.strictObject({
   cwd: z.string(),
   title: z.string(),
   body: z.string(),
@@ -9,24 +9,24 @@ export const SubmitPrDaemonRequest = z.object({
   base: z.string().optional(),
 })
 
-export type SubmitPrDaemonRequest = z.infer<typeof SubmitPrDaemonRequest>
+export type SubmitPrRequest = z.infer<typeof SubmitPrRequest>
 
 /** Response payload returned after one pull request submission. */
-export type SubmitPrDaemonResponse = {
+export type SubmitPrResponse = {
   number: number
   url: string
 }
 
 /** Request payload used to reply to one pull request through the daemon. */
-export const ReplyPrDaemonRequest = z.object({
+export const ReplyPrRequest = z.strictObject({
   cwd: z.string(),
   message: z.string(),
   prNumber: z.number().optional(),
 })
 
-export type ReplyPrDaemonRequest = z.infer<typeof ReplyPrDaemonRequest>
+export type ReplyPrRequest = z.infer<typeof ReplyPrRequest>
 
 /** Response payload returned after one pull request reply. */
-export type ReplyPrDaemonResponse = {
+export type ReplyPrResponse = {
   success: boolean
 }

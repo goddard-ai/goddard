@@ -1,6 +1,6 @@
 import { mergeLoopConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
 import { ResolvedLoopConfig, type LoopConfig } from "@goddard-ai/schema/config"
-import type { CreateDaemonSessionRequest, StartDaemonLoopRequest } from "@goddard-ai/schema/daemon"
+import type { CreateSessionRequest, StartLoopRequest } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { RootConfigProvider } from "./config.ts"
@@ -13,9 +13,9 @@ export type ResolvedLoopStartRequest = {
   rootDir: string
   loopName: string
   promptModulePath: string
-  session: Omit<CreateDaemonSessionRequest, "initialPrompt" | "oneShot">
-  rateLimits: RequiredObject<StartDaemonLoopRequest["rateLimits"]>
-  retries: RequiredObject<StartDaemonLoopRequest["retries"]>
+  session: Omit<CreateSessionRequest, "initialPrompt" | "oneShot">
+  rateLimits: RequiredObject<StartLoopRequest["rateLimits"]>
+  retries: RequiredObject<StartLoopRequest["retries"]>
 }
 
 /** A resolved named loop package with merged persisted config and prompt module path. */
@@ -38,7 +38,7 @@ const DEFAULT_LOOP_RETRIES = {
 function resolveLoopRuntimeConfig(
   config: LoopConfig,
   rootDir: string,
-  overrides?: Pick<StartDaemonLoopRequest, "session" | "rateLimits" | "retries">,
+  overrides?: Pick<StartLoopRequest, "session" | "rateLimits" | "retries">,
 ) {
   const sessionConfig = config.session ?? {}
   const sessionOverrides = overrides?.session ?? {}
@@ -172,7 +172,7 @@ export async function resolveNamedLoop(
 
 /** Resolves one public loop-start request into the runtime config owned by the daemon. */
 export async function resolveNamedLoopStartRequest(
-  input: StartDaemonLoopRequest,
+  input: StartLoopRequest,
   rootConfigProvider?: RootConfigProvider,
 ): Promise<ResolvedLoopStartRequest> {
   const resolvedRootDir = resolve(input.rootDir)

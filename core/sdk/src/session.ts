@@ -4,26 +4,26 @@ import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type {
-  CreateDaemonSessionRequest,
-  CreateDaemonSessionResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
   DaemonSession,
   DaemonSessionMetadata,
-  GetDaemonSessionHistoryResponse,
-  ListDaemonSessionsRequest,
-  ListDaemonSessionsResponse,
+  GetSessionHistoryResponse,
+  ListSessionsRequest,
+  ListSessionsResponse,
   SessionWorkforceParams,
   SessionWorktreeParams,
-  ShutdownDaemonSessionResponse,
+  ShutdownSessionResponse,
 } from "@goddard-ai/schema/daemon"
 
 export type {
-  CreateDaemonSessionRequest,
-  CreateDaemonSessionResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
   DaemonSession,
-  GetDaemonSessionHistoryResponse,
-  ListDaemonSessionsRequest,
-  ListDaemonSessionsResponse,
-  ShutdownDaemonSessionResponse,
+  GetSessionHistoryResponse,
+  ListSessionsRequest,
+  ListSessionsResponse,
+  ShutdownSessionResponse,
 }
 
 export type SessionPromptRequest = {

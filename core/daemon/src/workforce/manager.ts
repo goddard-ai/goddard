@@ -1,5 +1,6 @@
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/workforce/requests"
+import type { WorkforceDescription } from "@goddard-ai/schema/daemon"
+import type { WorkforceStatus } from "@goddard-ai/schema/workforce"
 import type { WorkforceActorContext } from "../context.ts"
 import { createLogger } from "../logging.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"
@@ -46,15 +47,15 @@ export interface WorkforceManagerDeps extends WorkforceRuntimeDeps {
 
 /** Daemon-owned runtime registry keyed by normalized repository root. */
 export interface WorkforceManager {
-  startWorkforce: (rootDir: string) => Promise<DaemonWorkforce>
-  getWorkforce: (rootDir: string) => Promise<DaemonWorkforce>
-  listWorkforces: () => Promise<DaemonWorkforceStatus[]>
+  startWorkforce: (rootDir: string) => Promise<WorkforceDescription>
+  getWorkforce: (rootDir: string) => Promise<WorkforceDescription>
+  listWorkforces: () => Promise<WorkforceStatus[]>
   shutdownWorkforce: (rootDir: string) => Promise<boolean>
   appendWorkforceEvent: (
     rootDir: string,
     mutation: WorkforceManagerMutation,
     actor?: WorkforceActorContext,
-  ) => Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }>
+  ) => Promise<{ workforce: WorkforceStatus; requestId: string | null }>
   close: () => Promise<void>
 }
 
@@ -78,7 +79,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
   }
 
   return {
-    async startWorkforce(rootDir: string): Promise<DaemonWorkforce> {
+    async startWorkforce(rootDir: string): Promise<WorkforceDescription> {
       const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
       const existing = runtimes.get(normalizedRootDir)
       if (existing) {
@@ -105,12 +106,12 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
       return runtime.getWorkforce()
     },
 
-    async getWorkforce(rootDir: string): Promise<DaemonWorkforce> {
+    async getWorkforce(rootDir: string): Promise<WorkforceDescription> {
       const { runtime } = await getRuntime(rootDir)
       return runtime.getWorkforce()
     },
 
-    async listWorkforces(): Promise<DaemonWorkforceStatus[]> {
+    async listWorkforces(): Promise<WorkforceStatus[]> {
       return Array.from(runtimes.values())
         .map((runtime) => runtime.getStatus())
         .sort((left, right) => left.rootDir.localeCompare(right.rootDir))
@@ -137,7 +138,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
         agentId: null,
         requestId: null,
       },
-    ): Promise<{ workforce: DaemonWorkforceStatus; requestId: string | null }> {
+    ): Promise<{ workforce: WorkforceStatus; requestId: string | null }> {
       const { runtime } = await getRuntime(rootDir)
       let requestId: string | null = null
 

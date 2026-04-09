@@ -1,4 +1,4 @@
-import type { CreateDaemonSessionRequest } from "@goddard-ai/sdk"
+import type { CreateSessionRequest } from "@goddard-ai/sdk"
 
 export function buildCreateSessionInput(draftProjectPath: string | null, draftPrompt: string) {
   const prompt = draftPrompt.trim()
@@ -13,5 +13,5 @@ export function buildCreateSessionInput(draftProjectPath: string | null, draftPr
     mcpServers: [],
     systemPrompt: "",
     initialPrompt: prompt,
-  } satisfies CreateDaemonSessionRequest
+  } satisfies CreateSessionRequest
 }

@@ -1,7 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
-import type { DaemonWorkforceEvent } from "@goddard-ai/schema/workforce/requests"
+import type { CreateSessionRequest, WorkforceEventEnvelope } from "@goddard-ai/schema/daemon"
 import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
@@ -23,7 +22,7 @@ afterEach(async () => {
 
 test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-ipc-"))
-  let publishEvent: ((payload: DaemonWorkforceEvent) => void) | undefined
+  let publishEvent: ((payload: WorkforceEventEnvelope) => void) | undefined
   const daemon = await startDaemonServer(
     {
       auth: {
@@ -126,8 +125,8 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
   const started = await client.send("workforceStart", { rootDir: "/repo" })
   const fetched = await client.send("workforceGet", { rootDir: "/repo" })
   const listed = await client.send("workforceList")
-  let resolveStreamEvent: ((payload: DaemonWorkforceEvent["event"]) => void) | null = null
-  const streamedEvent = new Promise<DaemonWorkforceEvent["event"]>((resolve) => {
+  let resolveStreamEvent: ((payload: WorkforceEventEnvelope["event"]) => void) | null = null
+  const streamedEvent = new Promise<WorkforceEventEnvelope["event"]>((resolve) => {
     resolveStreamEvent = resolve
   })
   const unsubscribe = await client.subscribe(
@@ -604,7 +603,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+      newSession: async (input: { request: CreateSessionRequest }) => {
         const metadata = input.request.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
@@ -691,7 +690,7 @@ test("create-intent requests target the root agent and specialize the root sessi
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+      newSession: async (input: { request: CreateSessionRequest }) => {
         const initialPrompt =
           typeof input.request.initialPrompt === "string"
             ? input.request.initialPrompt
@@ -811,7 +810,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
-      newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+      newSession: async (input: { request: CreateSessionRequest }) => {
         capturedSystemPrompt = input.request.systemPrompt
 
         const metadata = input.request.workforce ?? null
@@ -885,7 +884,7 @@ test("workforce runtime logs request-to-session correlation for launched session
   const { logs } = await captureLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
       sessionManager: {
-        newSession: async (input: { request: CreateDaemonSessionRequest }) => {
+        newSession: async (input: { request: CreateSessionRequest }) => {
           const metadata = input.request.workforce ?? null
 
           if (!metadata?.agentId || !metadata.requestId) {

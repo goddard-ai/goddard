@@ -1,4 +1,3 @@
-import type { KindInput, KindOutput } from "kindstore"
 import type {
   AuthSession,
   DeviceFlowComplete,
@@ -7,14 +6,15 @@ import type {
 } from "@goddard-ai/schema/backend"
 import type {
   DaemonSession,
-  ReplyPrDaemonRequest,
-  SubmitPrDaemonRequest,
+  WorkforceEventEnvelope,
+  ReplyPrRequest,
+  SubmitPrRequest,
 } from "@goddard-ai/schema/daemon"
-import type { DaemonWorkforceEvent } from "@goddard-ai/schema/workforce/requests"
-import { db } from "../persistence/store.ts"
+import type { KindInput, KindOutput } from "kindstore"
 import type { ConfigManager } from "../config-manager.ts"
 import type { LoopManager } from "../loop/index.ts"
 import type { LoopManagerDeps } from "../loop/manager.ts"
+import { db } from "../persistence/store.ts"
 import type { SessionManager } from "../session/index.ts"
 import type { WorkforceManager } from "../workforce/index.ts"
 
@@ -61,8 +61,8 @@ export type AuthorizedSession = {
 }
 
 export type DaemonServerDeps = {
-  resolveSubmitRequest?: (input: SubmitPrDaemonRequest) => Promise<PrCreateInput>
-  resolveReplyRequest?: (input: ReplyPrDaemonRequest) => Promise<PrReplyInput>
+  resolveSubmitRequest?: (input: SubmitPrRequest) => Promise<PrCreateInput>
+  resolveReplyRequest?: (input: ReplyPrRequest) => Promise<PrReplyInput>
   getSessionByToken?: (token: string) => Promise<AuthorizedSession | null>
   addAllowedPrToSession?: (sessionId: DaemonSession["id"], prNumber: number) => Promise<void>
   recordPullRequest?: (
@@ -72,6 +72,6 @@ export type DaemonServerDeps = {
   createLoopManager?: (input: LoopManagerDeps) => LoopManager
   createWorkforceManager?: (input: {
     sessionManager: SessionManager
-    publishEvent?: (payload: DaemonWorkforceEvent) => void
+    publishEvent?: (payload: WorkforceEventEnvelope) => void
   }) => WorkforceManager
 }

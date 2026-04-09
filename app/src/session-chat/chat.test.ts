@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import type { DaemonSession, GetDaemonSessionHistoryResponse } from "@goddard-ai/sdk"
+import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { buildTranscriptMessages } from "./chat.ts"
 
 function createSession(lastAgentMessage: string | null) {
@@ -7,6 +7,7 @@ function createSession(lastAgentMessage: string | null) {
     id: "ses_session-1" as DaemonSession["id"],
     acpSessionId: "ses_session-1-acp",
     status: "active",
+    stopReason: null,
     agentName: "pi",
     cwd: "/repo-a",
     mcpServers: [],
@@ -46,7 +47,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
         value: "I reviewed the diff and found one issue.",
       },
     },
-  ] satisfies GetDaemonSessionHistoryResponse["history"]
+  ] satisfies GetSessionHistoryResponse["history"]
 
   expect(buildTranscriptMessages(session, history)).toEqual([
     {
@@ -85,7 +86,7 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
         prompt: [{ type: "text", text: "Review the current diff." }],
       },
     },
-  ] satisfies GetDaemonSessionHistoryResponse["history"]
+  ] satisfies GetSessionHistoryResponse["history"]
 
   expect(buildTranscriptMessages(session, history).at(-1)).toEqual({
     id: "ses_session-1:latest",

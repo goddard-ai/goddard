@@ -31,7 +31,7 @@ export type DaemonSessionStatus = z.output<typeof DaemonSessionStatus>
 /**
  * Durable PR permission scope persisted with one daemon-managed session.
  */
-export const DaemonSessionPermissions = z.object({
+export const DaemonSessionPermissions = z.strictObject({
   owner: z.string(),
   repo: z.string(),
   allowedPrNumbers: z.array(z.number().int()),
@@ -50,7 +50,7 @@ export type DaemonSessionMetadata = z.infer<typeof DaemonSessionMetadata>
 /**
  * Persisted daemon-managed session record stored in kindstore.
  */
-export const DaemonSession = z.object({
+export const DaemonSession = z.strictObject({
   acpSessionId: z.string(),
   status: DaemonSessionStatus,
   stopReason: DaemonSessionStopReason.nullable().default(null),
@@ -80,7 +80,7 @@ export type DaemonSession = z.output<typeof DaemonSession> & {
 /**
  * Persisted ACP history record stored for one daemon-managed session.
  */
-export const DaemonSessionMessages = z.object({
+export const DaemonSessionMessages = z.strictObject({
   sessionId: DaemonSessionId,
   messages: z.custom<acp.AnyMessage[]>(),
 })
@@ -92,7 +92,7 @@ export type DaemonSessionMessages = z.output<typeof DaemonSessionMessages> & {
 /**
  * Structured diagnostic event persisted for postmortem inspection.
  */
-export const DaemonSessionDiagnosticEvent = z.object({
+export const DaemonSessionDiagnosticEvent = z.strictObject({
   type: z.string(),
   at: z.string(),
   detail: z.record(z.string(), z.unknown()).optional(),
@@ -103,7 +103,7 @@ export type DaemonSessionDiagnosticEvent = z.output<typeof DaemonSessionDiagnost
 /**
  * Persisted diagnostic event record stored for one daemon-managed session.
  */
-export const DaemonSessionDiagnostics = z.object({
+export const DaemonSessionDiagnostics = z.strictObject({
   sessionId: DaemonSessionId,
   events: z.array(DaemonSessionDiagnosticEvent),
 })
@@ -146,7 +146,7 @@ export type DaemonWorkforce = z.output<typeof DaemonWorkforce> & {
 /**
  * Persisted daemon-managed pull request record used for session authorization checks.
  */
-export const DaemonPullRequest = z.object({
+export const DaemonPullRequest = z.strictObject({
   host: z.enum(["github"]),
   owner: z.string(),
   repo: z.string(),

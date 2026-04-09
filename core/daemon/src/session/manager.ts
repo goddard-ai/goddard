@@ -11,21 +11,21 @@ import {
 } from "@goddard-ai/schema/agent-distribution"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
-  AbortedDaemonSessionPrompt,
-  CancelDaemonSessionResponse,
-  CreateDaemonSessionRequest,
+  AbortedSessionPrompt,
+  CancelSessionResponse,
+  CreateSessionRequest,
   DaemonSession,
-  DaemonSessionConnection,
   DaemonSessionMetadata,
   DaemonSessionStatus,
-  GetDaemonSessionDiagnosticsResponse,
-  GetDaemonSessionHistoryResponse,
-  GetDaemonSessionWorkforceResponse,
-  GetDaemonSessionWorktreeResponse,
+  GetSessionDiagnosticsResponse,
+  GetSessionHistoryResponse,
+  GetSessionWorkforceResponse,
+  GetSessionWorktreeResponse,
   InitialPromptOption,
-  ListDaemonSessionsRequest,
-  ListDaemonSessionsResponse,
-  SteerDaemonSessionResponse,
+  ListSessionsRequest,
+  ListSessionsResponse,
+  SessionConnection,
+  SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type { KindInput, KindOutput } from "kindstore"
@@ -199,9 +199,9 @@ type PendingSteerRequest = {
   requestId: string
   cancelledRequestId: string | number
   prompt: acp.ContentBlock[]
-  abortedQueue: AbortedDaemonSessionPrompt[]
+  abortedQueue: AbortedSessionPrompt[]
   waitingForBoundary: boolean
-  resolve: (response: SteerDaemonSessionResponse) => void
+  resolve: (response: SteerSessionResponse) => void
   reject: (error: Error) => void
 }
 
@@ -252,7 +252,7 @@ type ActiveSession = {
 
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
 interface SessionLaunchParams {
-  request: CreateDaemonSessionRequest
+  request: CreateSessionRequest
   token?: string
   config?: UserConfig
   worktreePlugins?: WorktreePlugin[]
@@ -270,19 +270,19 @@ interface LoadSessionParams extends SessionLaunchParams {
 export type SessionManager = {
   newSession: (params: NewSessionParams) => Promise<DaemonSession>
   loadSession: (params: LoadSessionParams) => Promise<DaemonSession>
-  listSessions: (params: ListDaemonSessionsRequest) => Promise<ListDaemonSessionsResponse>
+  listSessions: (params: ListSessionsRequest) => Promise<ListSessionsResponse>
   connectSession: (id: SessionId) => Promise<DaemonSession>
   getSession: (id: SessionId) => Promise<DaemonSession>
-  getHistory: (id: SessionId) => Promise<GetDaemonSessionHistoryResponse>
-  getDiagnostics: (id: SessionId) => Promise<GetDaemonSessionDiagnosticsResponse>
-  getWorktree: (id: SessionId) => Promise<GetDaemonSessionWorktreeResponse>
-  getWorkforce: (id: SessionId) => Promise<GetDaemonSessionWorkforceResponse>
+  getHistory: (id: SessionId) => Promise<GetSessionHistoryResponse>
+  getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
+  getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
+  getWorkforce: (id: SessionId) => Promise<GetSessionWorkforceResponse>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
-  cancelSessionTurn: (id: SessionId) => Promise<CancelDaemonSessionResponse>
+  cancelSessionTurn: (id: SessionId) => Promise<CancelSessionResponse>
   steerSession: (
     id: SessionId,
     prompt: string | acp.ContentBlock[],
-  ) => Promise<SteerDaemonSessionResponse>
+  ) => Promise<SteerSessionResponse>
   promptSession: (id: SessionId, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
   shutdownSession: (id: SessionId) => Promise<boolean>
   resolveSessionIdByToken: (token: string) => Promise<SessionId>
@@ -350,7 +350,7 @@ function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
 function toConnectionState(input: {
   mode: SessionConnectionMode
   activeDaemonSession: boolean
-}): DaemonSessionConnection {
+}): SessionConnection {
   return {
     mode: input.mode,
     reconnectable: input.mode === "live" && input.activeDaemonSession,
@@ -685,7 +685,7 @@ async function cleanupOtherAgentBinaryInstalls(
 async function initializeSession(params: {
   input: AgentInputStream
   output: AgentOutputStream
-  request: CreateDaemonSessionRequest
+  request: CreateSessionRequest
   resumeAcpId?: string
   onMessageWrite?: (message: acp.AnyMessage) => void
 }): Promise<
@@ -800,7 +800,7 @@ type InitializedSession = Awaited<ReturnType<typeof initializeSession>>
  * Returns true when one launch path needs configured worktree plugins for reuse or creation.
  */
 function shouldResolveConfiguredWorktreePlugins(
-  request: CreateDaemonSessionRequest,
+  request: CreateSessionRequest,
   existingWorktree: SessionWorktreeState | null,
 ) {
   return existingWorktree !== null || request.worktree?.enabled === true
@@ -809,7 +809,7 @@ function shouldResolveConfiguredWorktreePlugins(
 /** Resolves the effective worktree used by one session launch, either by reuse or fresh creation. */
 async function resolveLaunchWorktree(params: {
   sessionId: SessionId
-  request: CreateDaemonSessionRequest
+  request: CreateSessionRequest
   existingWorktree: SessionWorktreeState | null
   worktreePlugins?: WorktreePlugin[]
   defaultWorktreesFolder?: string
@@ -866,7 +866,7 @@ function resolveInitialSessionHistory(params: {
 /** Builds the persisted daemon session record written after ACP session initialization completes. */
 function createSessionRecordUpdate(params: {
   initialized: InitializedSession
-  request: CreateDaemonSessionRequest
+  request: CreateSessionRequest
   cwd: string
   token: string
   scope: ReturnType<typeof parseRepoScope>
@@ -912,7 +912,7 @@ function persistLaunchedSession(params: {
   existingWorkforceRecord: PersistedSessionWorkforceRecord | null
   initialHistory: acp.AnyMessage[]
   worktree: PreparedSessionWorktree | null
-  workforceMetadata: CreateDaemonSessionRequest["workforce"] | undefined
+  workforceMetadata: CreateSessionRequest["workforce"] | undefined
   sessionRecord: ReturnType<typeof createSessionRecordUpdate>
 }) {
   if (params.existingMessagesRecord) {
@@ -987,9 +987,9 @@ function parseRepoScope(params: { repository?: string; prNumber?: number }): {
 
 /** Builds the structured logging context shared across session lifecycle events. */
 function buildSessionLogContext(params: {
-  request: CreateDaemonSessionRequest
+  request: CreateSessionRequest
   cwd?: string
-  workforce?: CreateDaemonSessionRequest["workforce"]
+  workforce?: CreateSessionRequest["workforce"]
   extraContext?: Record<string, unknown>
 }): Record<string, unknown> {
   return {
@@ -1007,7 +1007,7 @@ function buildSessionLogContext(params: {
 /** Builds the stable async context installed while one daemon session is actively doing work. */
 function buildSessionContext(params: {
   sessionId: SessionId
-  request: CreateDaemonSessionRequest
+  request: CreateSessionRequest
   cwd: string
   worktree?: PreparedSessionWorktree | null
 }) {
@@ -1046,7 +1046,7 @@ function logAgentMessage(
 function toAbortedQueuedPrompt(entry: {
   requestId: string | number
   prompt: acp.ContentBlock[]
-}): AbortedDaemonSessionPrompt {
+}): AbortedSessionPrompt {
   return {
     requestId: entry.requestId,
     prompt: [...entry.prompt],
@@ -1428,8 +1428,8 @@ export function createSessionManager(input: {
     options: {
       includePendingSteer?: boolean
     } = {},
-  ): Promise<AbortedDaemonSessionPrompt[]> {
-    const abortedQueue: AbortedDaemonSessionPrompt[] = []
+  ): Promise<AbortedSessionPrompt[]> {
+    const abortedQueue: AbortedSessionPrompt[] = []
 
     if (options.includePendingSteer && active.pendingSteer) {
       const pendingSteer = active.pendingSteer
@@ -1496,7 +1496,7 @@ export function createSessionManager(input: {
       includePendingSteer?: boolean
       updateStatus: boolean
     } = { updateStatus: true },
-  ): Promise<CancelDaemonSessionResponse> {
+  ): Promise<CancelSessionResponse> {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
@@ -1969,9 +1969,7 @@ export function createSessionManager(input: {
     return record
   }
 
-  async function listSessions(
-    params: ListDaemonSessionsRequest,
-  ): Promise<ListDaemonSessionsResponse> {
+  async function listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
     await ready
     const pageSize = normalizeSessionPageSize(params.limit)
     let page: ReturnType<typeof db.sessions.findPage>
@@ -2012,7 +2010,7 @@ export function createSessionManager(input: {
     return getSession(id)
   }
 
-  async function getHistory(id: SessionId): Promise<GetDaemonSessionHistoryResponse> {
+  async function getHistory(id: SessionId): Promise<GetSessionHistoryResponse> {
     await ready
     const active = activeSessions.get(id)
     const session = await getSession(id)
@@ -2033,7 +2031,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getDiagnostics(id: SessionId): Promise<GetDaemonSessionDiagnosticsResponse> {
+  async function getDiagnostics(id: SessionId): Promise<GetSessionDiagnosticsResponse> {
     await ready
     const session = await getSession(id)
     const diagnosticsRecord =
@@ -2054,7 +2052,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getWorktree(id: SessionId): Promise<GetDaemonSessionWorktreeResponse> {
+  async function getWorktree(id: SessionId): Promise<GetSessionWorktreeResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord =
@@ -2069,7 +2067,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getWorkforce(id: SessionId): Promise<GetDaemonSessionWorkforceResponse> {
+  async function getWorkforce(id: SessionId): Promise<GetSessionWorkforceResponse> {
     await ready
     const session = await getSession(id)
     const workforceRecord =
@@ -2162,7 +2160,7 @@ export function createSessionManager(input: {
   async function steerSession(
     id: SessionId,
     prompt: string | acp.ContentBlock[],
-  ): Promise<SteerDaemonSessionResponse> {
+  ): Promise<SteerSessionResponse> {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
@@ -2187,7 +2185,7 @@ export function createSessionManager(input: {
       }
     }
 
-    return await new Promise<SteerDaemonSessionResponse>((resolve, reject) => {
+    return await new Promise<SteerSessionResponse>((resolve, reject) => {
       // Keep tracking the cancelled prompt id so steering can wait for that turn's tool/final boundary.
       active.pendingSteer = {
         requestId,

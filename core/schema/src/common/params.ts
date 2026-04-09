@@ -8,7 +8,7 @@ export const DaemonSessionId = z.custom<`ses_${string}`>(
 export type DaemonSessionId = z.infer<typeof DaemonSessionId>
 
 /** Stable path and payload params used to address one daemon session by id. */
-export const DaemonSessionIdParams = z.object({
+export const DaemonSessionIdParams = z.strictObject({
   id: DaemonSessionId,
 })
 

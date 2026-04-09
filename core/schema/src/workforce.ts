@@ -148,3 +148,14 @@ export interface WorkforceProjection {
   queues: Record<string, string[]>
   summary: WorkforceProjectionSummary
 }
+
+/** Stable runtime states reported for daemon-managed workforce hosts. */
+export type WorkforceRuntimeState = "running"
+
+/** Workforce status summary exposed over daemon IPC. */
+export type WorkforceStatus = WorkforceProjectionSummary & {
+  state: WorkforceRuntimeState
+  rootDir: string
+  configPath: string
+  ledgerPath: string
+}

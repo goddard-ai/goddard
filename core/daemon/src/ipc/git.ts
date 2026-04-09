@@ -1,10 +1,8 @@
-import type { ReplyPrDaemonRequest, SubmitPrDaemonRequest } from "@goddard-ai/schema/daemon"
+import type { ReplyPrRequest, SubmitPrRequest } from "@goddard-ai/schema/daemon"
 import { splitRepo } from "../utils.ts"
 import type { PrCreateInput, PrReplyInput } from "./types.ts"
 
-export async function resolveSubmitRequestFromGit(
-  input: SubmitPrDaemonRequest,
-): Promise<PrCreateInput> {
+export async function resolveSubmitRequestFromGit(input: SubmitPrRequest): Promise<PrCreateInput> {
   const repoRef = inferRepoFromGit(input.cwd)
   const { owner, repo } = splitRepo(repoRef)
 
@@ -18,9 +16,7 @@ export async function resolveSubmitRequestFromGit(
   }
 }
 
-export async function resolveReplyRequestFromGit(
-  input: ReplyPrDaemonRequest,
-): Promise<PrReplyInput> {
+export async function resolveReplyRequestFromGit(input: ReplyPrRequest): Promise<PrReplyInput> {
   const repoRef = inferRepoFromGit(input.cwd)
   const { owner, repo } = splitRepo(repoRef)
 

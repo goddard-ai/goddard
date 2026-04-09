@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog"
-import type { CreateDaemonSessionRequest } from "@goddard-ai/sdk"
+import type { CreateSessionRequest } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Sparkles, X } from "lucide-react"
@@ -12,7 +12,7 @@ import { goddardSdk } from "~/sdk.ts"
 
 export function SessionLaunchDialog(props: {
   canSubmit: boolean
-  createSessionInput: () => CreateDaemonSessionRequest | null
+  createSessionInput: () => CreateSessionRequest | null
   draftProjectPath: string | null
   draftPrompt: string
   isDialogOpen: boolean

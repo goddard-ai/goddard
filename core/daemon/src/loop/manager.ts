@@ -1,6 +1,6 @@
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
-import type { StartDaemonLoopRequest } from "@goddard-ai/schema/daemon/loops"
+import type { StartLoopRequest } from "@goddard-ai/schema/daemon/loops"
 import { createLogger } from "../logging.ts"
 import { resolveNamedLoopStartRequest, type ResolvedLoopStartRequest } from "../resolvers/loops.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
@@ -11,12 +11,12 @@ const logger = createLogger()
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
 export interface LoopManagerDeps extends LoopRuntimeDeps {
   createRuntime?: (input: ResolvedLoopStartRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
-  resolveLoopStartRequest?: (input: StartDaemonLoopRequest) => Promise<ResolvedLoopStartRequest>
+  resolveLoopStartRequest?: (input: StartLoopRequest) => Promise<ResolvedLoopStartRequest>
 }
 
 /** Daemon-owned loop runtime registry keyed by normalized repository root and loop name. */
 export interface LoopManager {
-  startLoop: (input: StartDaemonLoopRequest) => Promise<DaemonLoop>
+  startLoop: (input: StartLoopRequest) => Promise<DaemonLoop>
   getLoop: (rootDir: string, loopName: string) => Promise<DaemonLoop>
   listLoops: () => Promise<DaemonLoopStatus[]>
   shutdownLoop: (rootDir: string, loopName: string) => Promise<boolean>
@@ -33,7 +33,7 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
   }
 
   return {
-    async startLoop(input: StartDaemonLoopRequest): Promise<DaemonLoop> {
+    async startLoop(input: StartLoopRequest): Promise<DaemonLoop> {
       const resolvedInput = await (deps.resolveLoopStartRequest ?? resolveNamedLoopStartRequest)(
         input,
       )

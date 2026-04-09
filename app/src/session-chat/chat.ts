@@ -1,7 +1,7 @@
-import type { DaemonSession, GetDaemonSessionHistoryResponse } from "@goddard-ai/sdk"
+import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import type { SessionTranscriptMessage } from "~/sessions/models.ts"
 
-type SessionHistoryMessage = GetDaemonSessionHistoryResponse["history"][number]
+type SessionHistoryMessage = GetSessionHistoryResponse["history"][number]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
