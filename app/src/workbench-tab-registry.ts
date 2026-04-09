@@ -50,6 +50,10 @@ export const workbenchTabComponents = {
     component: lazy(() => import("~/settings/page.tsx")),
     icon: "settings",
   },
+  keyboardShortcuts: {
+    component: lazy(() => import("~/shortcuts/view.tsx")),
+    icon: "settings",
+  },
   project: {
     component: lazy(() => import("~/projects/project-page.tsx")),
     icon: "tabs/projects",

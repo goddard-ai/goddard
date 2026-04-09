@@ -1,4 +1,13 @@
-import { FolderOpen, FolderKanban, Inbox, ListTodo, Route, Rows3, ScrollText } from "lucide-react"
+import {
+  FolderKanban,
+  FolderOpen,
+  Inbox,
+  Keyboard,
+  ListTodo,
+  Route,
+  Rows3,
+  ScrollText,
+} from "lucide-react"
 import { useListener } from "preact-sigma"
 import { Suspense } from "preact/compat"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
@@ -8,6 +17,8 @@ import { browseForProject } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import { lookupProject } from "~/projects/project-registry.ts"
 import { SessionLaunchDialog } from "~/sessions/dialog.tsx"
+import type { AppMenuEventDetail } from "~/shared/app-menu.ts"
+import type { DebugMenuEventDetail } from "~/shared/debug-menu.ts"
 import { globalEventHub, requestSessionLaunchDialog } from "~/shared/global-event-hub.ts"
 import { ShortcutCommands } from "~/shared/shortcut-keymap.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
@@ -245,13 +256,25 @@ export function AppShell() {
         selectNavigationSurface("roadmap")
       },
     },
+    {
+      id: "view-keyboard-shortcuts",
+      group: "Views",
+      icon: Keyboard,
+      keywords: ["shortcuts", "keyboard", "bindings", "keys"],
+      label: "View keyboard shortcuts",
+      onSelect: () => {
+        shortcutRegistry.dispatch(ShortcutCommands.openKeyboardShortcuts, {
+          source: "programmatic",
+        })
+      },
+    },
   ] as const
 
-  useListener(globalEventHub, "appMenu", (detail) => {
+  useListener(globalEventHub, "appMenu", (detail: AppMenuEventDetail) => {
     shortcutRegistry.dispatch(detail.action, { source: "native-menu" })
   })
 
-  useListener(globalEventHub, "debugMenu", (detail) => {
+  useListener(globalEventHub, "debugMenu", (detail: DebugMenuEventDetail) => {
     switch (detail.surface) {
       case "SessionChatTranscript":
         workbenchTabSet.openOrFocusTab({
@@ -282,6 +305,16 @@ export function AppShell() {
 
   useListener(shortcutRegistry, ShortcutCommands.newSession, () => {
     requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openKeyboardShortcuts, () => {
+    workbenchTabSet.openOrFocusTab({
+      id: "workbench:keyboard-shortcuts",
+      kind: "keyboardShortcuts",
+      title: "Keyboard Shortcuts",
+      payload: {},
+      dirty: false,
+    })
   })
 
   useListener(shortcutRegistry, ShortcutCommands.openInbox, () => {
