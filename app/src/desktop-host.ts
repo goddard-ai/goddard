@@ -7,9 +7,11 @@ import type {
   DaemonRequestPayload,
   DaemonRequestResponse,
   DaemonSendInput,
+  ReadShortcutKeymapResponse,
   RuntimeInfo,
 } from "~/shared/desktop-rpc.ts"
 import { dispatchGlobalEvent } from "~/shared/global-event-hub.ts"
+import type { UserShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import { goddardSdk } from "./sdk.ts"
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
@@ -33,6 +35,12 @@ export interface DesktopHostBridge {
 
   /** Opens one native directory picker and returns the chosen project root when present. */
   browseForProject(): Promise<string | null>
+
+  /** Reads the persisted user shortcut keymap through the Bun host bridge. */
+  readShortcutKeymap(): Promise<ReadShortcutKeymapResponse>
+
+  /** Writes the persisted user shortcut keymap through the Bun host bridge. */
+  writeShortcutKeymap(keymap: UserShortcutKeymapFile): Promise<UserShortcutKeymapFile>
 
   /** Maximizes the active desktop window through the Bun host bridge. */
   maximizeWindow(): Promise<void>
@@ -69,6 +77,17 @@ export async function browseForProject(): Promise<string | null> {
   return response.path
 }
 
+/** Reads the persisted user shortcut keymap through the Bun host. */
+export async function readShortcutKeymap() {
+  return await rpc.request.readShortcutKeymap({})
+}
+
+/** Writes the persisted user shortcut keymap through the Bun host. */
+export async function writeShortcutKeymap(keymap: UserShortcutKeymapFile) {
+  const response = await rpc.request.writeShortcutKeymap({ keymap })
+  return response.keymap
+}
+
 /** Maximizes the active desktop window through the Bun host. */
 export async function maximizeWindow(): Promise<void> {
   await rpc.request.maximizeWindow({})
@@ -87,6 +106,8 @@ export async function daemonSend<Name extends DaemonRequestName>(
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
   browseForProject,
+  readShortcutKeymap,
+  writeShortcutKeymap,
   maximizeWindow,
   daemonSend,
   // Resolve lazily so the desktop bridge and SDK transport can share a module cycle safely.

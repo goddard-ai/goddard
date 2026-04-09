@@ -27,3 +27,9 @@ export const GODDARD_MANAGED_PR_LOCATIONS_FILENAME = "managed-pr-locations.json"
 
 /** Directory name used for the cached ACP registry clone. */
 export const GODDARD_ACP_REGISTRY_CACHE_DIRECTORY = "acp-registry"
+
+/** Directory name used for app-only user preference files. */
+export const GODDARD_USER_DIRECTORY = "user"
+
+/** Filename used for the app keyboard shortcut keymap. */
+export const GODDARD_SHORTCUT_KEYMAP_FILENAME = "keymap.json"

@@ -11,6 +11,8 @@ import {
   GODDARD_MANAGED_PR_LOCATIONS_FILENAME,
   GODDARD_SESSION_PERMISSIONS_FILENAME,
   GODDARD_SESSION_STATE_DIRECTORY,
+  GODDARD_SHORTCUT_KEYMAP_FILENAME,
+  GODDARD_USER_DIRECTORY,
 } from "../constants.ts"
 
 /** Resolves the active home directory, preferring an explicit override for tests and Bun runs. */
@@ -96,6 +98,16 @@ export function getSessionPermissionsPath(): string {
 /** Returns the daemon managed-PR locations file path. */
 export function getManagedPrLocationsPath(): string {
   return join(getGoddardGlobalDir(), GODDARD_MANAGED_PR_LOCATIONS_FILENAME)
+}
+
+/** Returns the global app-only user-preferences directory. */
+export function getGoddardUserDir(): string {
+  return join(getGoddardGlobalDir(), GODDARD_USER_DIRECTORY)
+}
+
+/** Returns the app keyboard shortcut keymap path. */
+export function getShortcutKeymapPath(): string {
+  return join(getGoddardUserDir(), GODDARD_SHORTCUT_KEYMAP_FILENAME)
 }
 
 /** Returns the global and local root config paths in precedence order. */
