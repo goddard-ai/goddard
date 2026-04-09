@@ -27,6 +27,12 @@ type QueryResults<TQueries extends Record<string, QueryDescriptor>> = {
   [TKey in keyof TQueries]: Awaited<ReturnType<TQueries[TKey][0]>>
 }
 
+type HotImportMeta = ImportMeta & {
+  hot?: {
+    dispose: (callback: () => void) => void
+  }
+}
+
 /**
  * Stores query results by query function plus argument tuple and drives the local Suspense cache.
  */
@@ -275,20 +281,16 @@ export class QueryClient {
 
 export const queryClient = new QueryClient()
 
+let stopQueryWindowReactivationRefetch: (() => void) | null = null
+
 /**
  * Installs one global listener set that refreshes active queries after the desktop view becomes
  * visible or focused again.
  */
 export function startQueryWindowReactivationRefetch() {
-  const runtimeWindow = window as Window & {
-    __goddardQueryWindowReactivationStarted?: boolean
-  }
-
-  if (runtimeWindow.__goddardQueryWindowReactivationStarted) {
+  if (stopQueryWindowReactivationRefetch) {
     return
   }
-
-  runtimeWindow.__goddardQueryWindowReactivationStarted = true
 
   let scheduledRefetchFrame: number | null = null
 
@@ -307,13 +309,31 @@ export function startQueryWindowReactivationRefetch() {
     })
   }
 
-  window.addEventListener("focus", scheduleActiveQueryRefetch)
-  document.addEventListener("visibilitychange", () => {
+  function handleVisibilityChange() {
     if (document.visibilityState === "visible") {
       scheduleActiveQueryRefetch()
     }
-  })
+  }
+
+  window.addEventListener("focus", scheduleActiveQueryRefetch)
+  document.addEventListener("visibilitychange", handleVisibilityChange)
+
+  stopQueryWindowReactivationRefetch = () => {
+    window.removeEventListener("focus", scheduleActiveQueryRefetch)
+    document.removeEventListener("visibilitychange", handleVisibilityChange)
+
+    if (scheduledRefetchFrame !== null) {
+      window.cancelAnimationFrame(scheduledRefetchFrame)
+      scheduledRefetchFrame = null
+    }
+
+    stopQueryWindowReactivationRefetch = null
+  }
 }
+
+;(import.meta as HotImportMeta).hot?.dispose(() => {
+  stopQueryWindowReactivationRefetch?.()
+})
 
 /**
  * Reads one cached query and returns a `[data, refetch]` tuple.
