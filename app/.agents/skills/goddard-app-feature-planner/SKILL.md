@@ -1,6 +1,6 @@
 ---
 name: goddard-app-feature-planner
-description: Plan, revise, and review Goddard desktop app features using `app/plans/`, `spec/app.md`, `app/best-practices.md`, and `app/glossary.md`. Use when Codex needs to draft a new app feature plan, update or split an existing plan, reconcile a proposed feature with current app constraints, or identify the state modules, components, dependencies, and deferred follow-ons for an app change.
+description: Plan, revise, and review Goddard desktop app features using `app/plans/`, `app/README.md`, `app/glossary.md`, and `spec/app.md`. Use when Codex needs to draft a new app feature plan, update or split an existing plan, reconcile a proposed feature with current app constraints, or identify the state modules, components, dependencies, and deferred follow-ons for an app change.
 ---
 
 # goddard-app-feature-planner
@@ -9,7 +9,8 @@ Plan app features as doc changes grounded in the current spec and app architectu
 
 ## Load The Planning Context
 
-- Read `app/README.md`, `app/best-practices.md`, and `app/glossary.md`.
+- Read `app/AGENTS.md`, `app/README.md`, and `app/glossary.md`.
+- Read any app-local contribution or planning references that `app/AGENTS.md` points to when they are relevant to the requested feature.
 - Read `spec/README.md` and `spec/app.md`.
 - Read `app/plans/sprints.md` and `app/plans/feature-recommendations.md`.
 - Read any nearby plan file in `app/plans/` that overlaps the requested feature.
