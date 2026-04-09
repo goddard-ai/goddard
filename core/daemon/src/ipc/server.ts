@@ -1,11 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { Handlers } from "@goddard-ai/ipc"
 import { IpcClientError, createServer } from "@goddard-ai/ipc/node"
-import type {
-  DaemonSession,
-  SubscribeDaemonWorkforceEventsRequest,
-} from "@goddard-ai/schema/daemon"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import type { SubscribeDaemonWorkforceEventsRequest } from "@goddard-ai/schema/workforce/requests"
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createConfigManager } from "../config-manager.ts"

@@ -1,5 +1,5 @@
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/daemon"
+import type { DaemonWorkforce, DaemonWorkforceStatus } from "@goddard-ai/schema/workforce/requests"
 import type { WorkforceActorContext } from "../context.ts"
 import { createLogger } from "../logging.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"

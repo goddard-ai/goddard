@@ -2,7 +2,7 @@ import type {
   DaemonWorkforce,
   DaemonWorkforceEvent,
   DaemonWorkforceStatus,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/schema/workforce/requests"
 import type {
   WorkforceAgentConfig,
   WorkforceConfig,

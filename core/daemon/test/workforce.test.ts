@@ -1,6 +1,7 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { CreateDaemonSessionRequest, DaemonWorkforceEvent } from "@goddard-ai/schema/daemon"
+import type { CreateDaemonSessionRequest } from "@goddard-ai/schema/daemon"
+import type { DaemonWorkforceEvent } from "@goddard-ai/schema/workforce/requests"
 import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"

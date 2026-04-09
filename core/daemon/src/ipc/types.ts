@@ -7,10 +7,10 @@ import type {
 } from "@goddard-ai/schema/backend"
 import type {
   DaemonSession,
-  DaemonWorkforceEvent,
   ReplyPrDaemonRequest,
   SubmitPrDaemonRequest,
 } from "@goddard-ai/schema/daemon"
+import type { DaemonWorkforceEvent } from "@goddard-ai/schema/workforce/requests"
 import { db } from "../persistence/store.ts"
 import type { ConfigManager } from "../config-manager.ts"
 import type { LoopManager } from "../loop/index.ts"
