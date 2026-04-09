@@ -4,11 +4,8 @@
   - This glossary defines SDK-owned integration concepts.
   - Shared data-model terms belong in [`core/schema/glossary.md`](../schema/glossary.md).
 - `SDK Surface`
-  - One import boundary within `@goddard-ai/sdk` with a distinct ownership model.
-  - Why: so consumers can choose the right level of abstraction instead of pulling backend, daemon, loop, and node concerns in all at once.
-- `Backend Surface`
-  - The SDK API for direct backend HTTP operations.
-  - Why: so direct backend-owned operations remain a distinct integration boundary from the daemon-backed SDK surface.
+  - One public import boundary within the SDK package family, such as `@goddard-ai/sdk` or `@goddard-ai/sdk/node`.
+  - Why: so hosts can choose the right package entrypoint without changing the daemon-backed method shape they call.
 - `Daemon Surface`
   - The browser-safe SDK API that mirrors daemon IPC actions through namespace methods and owns the live session wrapper entrypoint.
   - Why: so every host sees one stable SDK shape instead of separate wrapper layers for the same daemon contract.
@@ -24,9 +21,3 @@
 - `Loop Runtime`
   - One daemon-managed repeated agent execution cycle addressed through SDK loop methods.
   - Why: so loop lifecycle remains part of the shared daemon IPC surface instead of Node-only helpers.
-- `Retry Policy`
-  - The caller-defined rule set that decides whether a failed loop cycle should be retried.
-  - Why: so recovery behavior can be adapted to the caller's tolerance for transient failures.
-- `Rate-Limit Policy`
-  - The caller-defined pacing contract for loop execution.
-  - Why: so long-running automation can stay within intentional operational limits rather than prompting continuously.
