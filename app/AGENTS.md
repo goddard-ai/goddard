@@ -22,7 +22,8 @@
 - Query cache:
   - Use the local query cache in `src/lib/query.ts` for shared SDK or daemon-backed reads.
   - Query functions passed to `useQuery()` should be stable references, not inline per-render closures.
-  - Call SDK writes directly, then manually invalidate affected queries with `useQueryClient()`.
+  - Import the shared `queryClient` directly from `src/lib/query.ts` when a feature needs manual cache access. Do not surface it with Preact context.
+  - Prefer feature-local write helpers that pair one SDK mutation with the affected query invalidation.
   - Do not add optimistic UI or loading indicators for local form submissions.
 - Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
 - Within `src/`:

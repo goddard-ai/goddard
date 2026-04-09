@@ -5,17 +5,11 @@ import { Composer } from "./composer.tsx"
 import { buildTranscriptMessages } from "./chat.ts"
 import { Header } from "./header.tsx"
 import { Transcript } from "./transcript.tsx"
-import { useQueries, useQueryClient } from "~/lib/query.ts"
-import { goddardSdk } from "~/sdk.ts"
-import {
-  getSession,
-  getSessionHistory,
-  listSessions,
-  SESSION_LIST_LIMIT,
-} from "~/sessions/queries.ts"
+import { useQueries } from "~/lib/query.ts"
+import { submitSessionPrompt } from "~/sessions/actions.ts"
+import { getSession, getSessionHistory } from "~/sessions/queries.ts"
 
 export function SessionChatView(props: { sessionId: string }) {
-  const queryClient = useQueryClient()
   const sessionId = props.sessionId as DaemonSession["id"]
   const [{ history, session }] = useQueries({
     history: [getSessionHistory, [sessionId]],
@@ -43,14 +37,11 @@ export function SessionChatView(props: { sessionId: string }) {
       <Composer
         onSubmit={async (text) => {
           try {
-            await goddardSdk.session.prompt({
+            await submitSessionPrompt({
               id: session.id,
               acpId: session.acpSessionId,
               prompt: text,
             })
-            queryClient.invalidate(listSessions, [SESSION_LIST_LIMIT])
-            queryClient.invalidate(getSession, [session.id])
-            queryClient.invalidate(getSessionHistory, [session.id])
           } catch (error) {
             console.error("Failed to submit session prompt.", error)
           }

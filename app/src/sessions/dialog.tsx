@@ -3,12 +3,10 @@ import type { CreateSessionRequest } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Sparkles, X } from "lucide-react"
+import { createSession } from "./actions.ts"
 import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
-import { SESSION_LIST_LIMIT, listSessions } from "./queries.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
-import { useQueryClient } from "~/lib/query.ts"
-import { goddardSdk } from "~/sdk.ts"
 
 export function SessionLaunchDialog(props: {
   canSubmit: boolean
@@ -22,7 +20,6 @@ export function SessionLaunchDialog(props: {
 }) {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const queryClient = useQueryClient()
 
   function closeDialog() {
     props.onClose()
@@ -36,8 +33,7 @@ export function SessionLaunchDialog(props: {
     }
 
     try {
-      const { session } = await goddardSdk.session.create(sessionInput)
-      queryClient.invalidate(listSessions, [SESSION_LIST_LIMIT])
+      const { session } = await createSession(sessionInput)
       props.onClose()
       workbenchTabSet.openOrFocusTab({
         id: `session:${session.id}`,
