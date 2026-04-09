@@ -5,6 +5,7 @@
   "license": "AGPL-3.0",
   "type": "module",
   "scripts": {
+    "prepare": "bun run ./scripts/generate-svg-icon-data.ts",
     "dev": "bun install --frozen-lockfile && bun run ./scripts/dev.ts",
     "build": "panda codegen && vite build && electrobun build",
     "build:canary": "bun run build --env=canary",

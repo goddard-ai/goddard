@@ -73,7 +73,7 @@ export default function svgIconBuildPlugin(): Plugin[] {
 }
 
 /** Rebuilds the generated SvgIcon data module from the current SVG asset set. */
-async function generateSvgIconDataModule() {
+export async function generateSvgIconDataModule() {
   console.log("Generating SVG icon data...")
   await mkdir(iconRoot, { recursive: true })
 
