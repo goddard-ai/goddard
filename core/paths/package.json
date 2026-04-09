@@ -20,14 +20,6 @@
       },
       "bun": "./src/node/index.ts",
       "import": "./dist/node/index.mjs"
-    },
-    "./tauri": {
-      "types": {
-        "source": "./src/tauri/index.ts",
-        "default": "./dist/tauri/index.d.mts"
-      },
-      "bun": "./src/tauri/index.ts",
-      "import": "./dist/tauri/index.mjs"
     }
   },
   "scripts": {
