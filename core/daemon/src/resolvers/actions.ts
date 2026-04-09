@@ -14,15 +14,6 @@ export type ResolvedAction = {
   path: string
 }
 
-/** Rejects legacy prompt frontmatter that now belongs in JSON config. */
-function detectLegacyFrontmatter(content: string, path: string): void {
-  if (content.startsWith("---\n") || content.startsWith("---\r\n")) {
-    throw new Error(
-      `Prompt file "${path}" uses YAML frontmatter. Persisted action config must move into JSON.`,
-    )
-  }
-}
-
 /** Validates that one parsed action config is an object when present. */
 function ensureActionConfig(value: ActionConfig | undefined, path: string): ActionConfig {
   if (!value) {
@@ -36,17 +27,10 @@ function ensureActionConfig(value: ActionConfig | undefined, path: string): Acti
   return value
 }
 
-/** Loads one markdown prompt file and rejects legacy frontmatter. */
-async function loadMarkdownPrompt(path: string): Promise<string> {
-  const content = await readFile(path, "utf-8")
-  detectLegacyFrontmatter(content, path)
-  return content
-}
-
 /** Loads one prompt-only action package. */
 async function loadPromptOnlyAction(path: string): Promise<ResolvedAction> {
   return {
-    prompt: await loadMarkdownPrompt(path),
+    prompt: await readFile(path, "utf-8"),
     config: {},
     path,
   }
@@ -66,7 +50,7 @@ async function loadPackagedAction(path: string): Promise<ResolvedAction> {
   }
 
   return {
-    prompt: await loadMarkdownPrompt(promptPath),
+    prompt: await readFile(promptPath, "utf-8"),
     config: ensureActionConfig(await readActionConfig(configPath), configPath),
     path,
   }
