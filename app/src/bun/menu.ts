@@ -3,6 +3,7 @@ import { concat } from "radashi"
 
 import type { AppMenuAction } from "~/shared/app-menu.ts"
 import type { DebugMenuSurface } from "~/shared/debug-menu.ts"
+import { ShortcutCommands } from "~/shared/shortcut-keymap.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
 
 const fileMenu = {
@@ -38,7 +39,7 @@ const debugNavigateAction = "debug:navigate"
 /** Installs the native application menu so platform accelerators work inside the desktop shell. */
 export function installApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
   const actions: Record<string, (window: BrowserWindow, params: unknown) => void> = {
-    [fileMenu.closeTab.action]: dispatchAppMenuAction("closeTab"),
+    [fileMenu.closeTab.action]: dispatchAppMenuAction(ShortcutCommands.closeActiveTab),
     [fileMenu.closeWindow.action]: closeWindow,
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
@@ -49,12 +50,17 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
   if (isDevelopmentRuntime()) {
     const debugNavigate = withParams<DebugMenuSurface>(debugNavigateAction)
 
-    for (const surface of [
-      "Terminal",
-      "SessionChatTranscript",
-    ] satisfies ReadonlyArray<DebugMenuSurface>) {
+    for (const { surface, accelerator } of [
+      {
+        surface: "SessionChatTranscript",
+        accelerator: "Alt+CommandOrControl+9",
+      },
+      {
+        surface: "Terminal",
+      },
+    ] satisfies ReadonlyArray<{ surface: DebugMenuSurface; accelerator?: string }>) {
       const action = debugNavigate(surface)
-      debugMenu.push({ label: surface, action })
+      debugMenu.push({ label: surface, action, accelerator })
     }
   }
 

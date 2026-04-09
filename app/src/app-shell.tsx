@@ -9,10 +9,16 @@ import type { NavigationItemId } from "~/navigation.ts"
 import { lookupProject } from "~/projects/project-registry.ts"
 import { SessionLaunchDialog } from "~/sessions/dialog.tsx"
 import { globalEventHub, requestSessionLaunchDialog } from "~/shared/global-event-hub.ts"
+import { ShortcutCommands } from "~/shared/shortcut-keymap.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
-import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
+import { appShellSections } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
-import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
+import {
+  useNavigation,
+  useProjectRegistry,
+  useShortcutRegistry,
+  useWorkbenchTabSet,
+} from "./app-state-context.tsx"
 import { CommandMenu } from "./command-menu.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { deriveProjectName } from "./projects/project-name.ts"
@@ -86,6 +92,7 @@ function useAppShellTabStrip(
 export function AppShell() {
   const navigation = useNavigation()
   const projectRegistry = useProjectRegistry()
+  const shortcutRegistry = useShortcutRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false)
   const [isAppearanceDialogOpen, setIsAppearanceDialogOpen] = useState(false)
@@ -116,6 +123,15 @@ export function AppShell() {
 
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
+  const activeTabKind = workbenchTabSet.activeTab?.kind ?? WORKBENCH_PRIMARY_TAB.kind
+
+  useEffect(() => {
+    shortcutRegistry.syncWorkbenchContext({
+      activeTabKind,
+      hasClosableActiveTab: workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id,
+      selectedNavId: navigation.selectedNavId,
+    })
+  }, [activeTabKind, navigation.selectedNavId, shortcutRegistry, workbenchTabSet.activeTabId])
 
   function openNavigationSurfaceTab(kind: NavigationItemId) {
     const nextNavigationItem =
@@ -232,13 +248,7 @@ export function AppShell() {
   ] as const
 
   useListener(globalEventHub, "appMenu", (detail) => {
-    switch (detail.action) {
-      case "closeTab":
-        if (workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
-          workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
-        }
-        return
-    }
+    shortcutRegistry.dispatch(detail.action, { source: "native-menu" })
   })
 
   useListener(globalEventHub, "debugMenu", (detail) => {
@@ -262,6 +272,40 @@ export function AppShell() {
         })
         return
     }
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.closeActiveTab, () => {
+    if (workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
+      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+    }
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.newSession, () => {
+    requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openInbox, () => {
+    selectNavigationSurface("inbox")
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openSessions, () => {
+    selectNavigationSurface("sessions")
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openSearch, () => {
+    selectNavigationSurface("search")
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openSpecs, () => {
+    selectNavigationSurface("specs")
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openTasks, () => {
+    selectNavigationSurface("tasks")
+  })
+
+  useListener(shortcutRegistry, ShortcutCommands.openRoadmap, () => {
+    selectNavigationSurface("roadmap")
   })
 
   useListener(window, "keydown", (event) => {
@@ -297,7 +341,7 @@ export function AppShell() {
           }
 
           if (action === "newSession") {
-            requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
+            shortcutRegistry.dispatch(ShortcutCommands.newSession, { source: "programmatic" })
             return
           }
 

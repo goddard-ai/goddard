@@ -1,3 +1,5 @@
+import type { EditablePolicy, KeyEventType } from "powerkeys"
+
 export const ShortcutCommands = {
   closeActiveTab: "workbench.closeActiveTab",
   newSession: "session.new",
@@ -20,6 +22,14 @@ export type KeymapProfileId = "goddard"
 export type ShortcutCommandDefinition = {
   label: string
   description: string
+  scope?: string | string[]
+  when?: string
+  keyEvent?: KeyEventType
+  priority?: number
+  editablePolicy?: "inherit" | EditablePolicy
+  preventDefault?: boolean
+  stopPropagation?: boolean
+  allowRepeat?: boolean
   nativeMenuAction?: boolean
 }
 
@@ -40,44 +50,57 @@ export type ShortcutKeymapProfile = {
   bindings: Partial<Record<ShortcutCommandId, readonly string[]>>
 }
 
+/** Effective shortcut expressions after one built-in profile is merged with user overrides. */
+export type ResolvedShortcutBindings = Partial<Record<ShortcutCommandId, readonly string[]>>
+
 /** Human-facing metadata for each shortcut command. */
 export const shortcutCommandDefinitions: Record<ShortcutCommandId, ShortcutCommandDefinition> = {
   [ShortcutCommands.closeActiveTab]: {
     label: "Close Active Tab",
     description: "Closes the current closable workbench tab.",
+    when: "workbench.hasClosableActiveTab",
+    preventDefault: true,
     nativeMenuAction: true,
   },
   [ShortcutCommands.newSession]: {
     label: "New Session",
     description: "Opens the new-session dialog from the app shell.",
+    preventDefault: true,
   },
   [ShortcutCommands.openKeyboardShortcuts]: {
     label: "Open Keyboard Shortcuts",
     description: "Opens the keyboard shortcut browser in a detail tab.",
+    preventDefault: true,
   },
   [ShortcutCommands.openInbox]: {
     label: "Open Inbox",
     description: "Selects the Inbox main workbench view.",
+    preventDefault: true,
   },
   [ShortcutCommands.openSessions]: {
     label: "Open Sessions",
     description: "Selects the Sessions main workbench view.",
+    preventDefault: true,
   },
   [ShortcutCommands.openSearch]: {
     label: "Open Search",
     description: "Selects the Search main workbench view.",
+    preventDefault: true,
   },
   [ShortcutCommands.openSpecs]: {
     label: "Open Specs",
     description: "Selects the Specs main workbench view.",
+    preventDefault: true,
   },
   [ShortcutCommands.openTasks]: {
     label: "Open Tasks",
     description: "Selects the Tasks main workbench view.",
+    preventDefault: true,
   },
   [ShortcutCommands.openRoadmap]: {
     label: "Open Roadmap",
     description: "Selects the Roadmap main workbench view.",
+    preventDefault: true,
   },
 }
 
@@ -105,7 +128,7 @@ export function createDefaultShortcutKeymapFile() {
     version: 1,
     profile: "goddard",
     overrides: {},
-  }
+  } satisfies UserShortcutKeymapFile
 }
 
 /** Returns whether one runtime string matches a known shortcut command id. */
