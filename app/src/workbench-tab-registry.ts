@@ -54,6 +54,10 @@ export const workbenchTabComponents = {
     component: lazy(() => import("~/session-chat/transcript-debug-view.tsx")),
     icon: "tabs/sessions",
   },
+  terminalDebug: {
+    component: lazy(() => import("~/terminal/debug-view.tsx")),
+    icon: "tabs/sessions",
+  },
 } satisfies Record<string, WorkbenchTabDefinition>
 
 /** The supported non-primary workbench tab kinds available in the shell. */

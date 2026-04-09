@@ -1,8 +1,9 @@
 import { useSignal } from "@preact/signals"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
-import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "~/shared/app-menu.ts"
-import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "~/shared/debug-menu.ts"
+import { APP_MENU_EVENT_NAME, createAppMenuEventListener } from "~/shared/app-menu.ts"
+import { DEBUG_MENU_EVENT_NAME, createDebugMenuEventListener } from "~/shared/debug-menu.ts"
+import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { SessionLaunchDialog } from "~/sessions/dialog.tsx"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
@@ -155,29 +156,45 @@ export function AppShell() {
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
 
-  useListener(window, APP_MENU_EVENT_NAME, (event) => {
-    const detail = (event as CustomEvent<AppMenuEventDetail>).detail
+  useListener(
+    globalEventHub,
+    APP_MENU_EVENT_NAME,
+    createAppMenuEventListener((detail) => {
+      if (
+        detail.action === "closeTab" &&
+        workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id
+      ) {
+        workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+      }
+    }),
+  )
 
-    if (detail.action === "closeTab" && workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
-      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
-    }
-  })
-
-  useListener(window, DEBUG_MENU_EVENT_NAME, (event: CustomEvent<DebugMenuEventDetail>) => {
-    switch (event.detail.surface) {
-      case "SessionChatTranscript":
-        workbenchTabSet.openOrFocusTab({
-          id: "debug:session-chat-transcript",
-          kind: "sessionChatTranscriptDebug",
-          title: "Transcript Debug",
-          payload: {},
-          dirty: false,
-        })
-        break
-      default:
-        throw new Error(`Unknown debug surface: ${event.detail.surface}.`)
-    }
-  })
+  useListener(
+    globalEventHub,
+    DEBUG_MENU_EVENT_NAME,
+    createDebugMenuEventListener((detail) => {
+      switch (detail.surface) {
+        case "SessionChatTranscript":
+          workbenchTabSet.openOrFocusTab({
+            id: "debug:session-chat-transcript",
+            kind: "sessionChatTranscriptDebug",
+            title: "Transcript Debug",
+            payload: {},
+            dirty: false,
+          })
+          return
+        case "Terminal":
+          workbenchTabSet.openOrFocusTab({
+            id: "debug:terminal",
+            kind: "terminalDebug",
+            title: "Terminal Debug",
+            payload: {},
+            dirty: false,
+          })
+          return
+      }
+    }),
+  )
 
   function handleTopbarAction(action: AppShellTopbarAction) {
     if (action === "proposeTask") {

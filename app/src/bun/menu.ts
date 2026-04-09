@@ -31,6 +31,8 @@ const viewMenu = {
   },
 } as const
 
+const debugNavigateAction = "debug:navigate"
+
 /** Installs the native application menu so platform accelerators work inside the desktop shell. */
 export function installApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
   const actions: Record<string, (window: BrowserWindow, params: unknown) => void> = {
@@ -38,24 +40,19 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
     [fileMenu.closeWindow.action]: closeWindow,
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
+    [debugNavigateAction]: dispatchDebugMenuAction,
   }
 
   const debugMenu: ApplicationMenuItemConfig[] = []
   if (isDevelopmentRuntime()) {
-    const debugNavigateAction = withParams<DebugMenuSurface>("debug:navigate")
+    const debugNavigate = withParams<DebugMenuSurface>(debugNavigateAction)
 
-    for (const { surface, accelerator } of [
-      {
-        surface: "SessionChatTranscript",
-        accelerator: "Alt+CommandOrControl+9",
-      },
-      {
-        surface: "Terminal",
-      },
-    ] satisfies ReadonlyArray<{ surface: DebugMenuSurface; accelerator?: string }>) {
-      const action = debugNavigateAction(surface)
-      actions[action] = openDebugSurface(surface)
-      debugMenu.push({ label: surface, action, accelerator })
+    for (const surface of [
+      "Terminal",
+      "SessionChatTranscript",
+    ] satisfies ReadonlyArray<DebugMenuSurface>) {
+      const action = debugNavigate(surface)
+      debugMenu.push({ label: surface, action })
     }
   }
 
@@ -136,10 +133,10 @@ function closeWindow(window: BrowserWindow): void {
 }
 
 /** Dispatches one development-menu surface request into the active webview. */
-function openDebugSurface(surface: DebugMenuSurface) {
-  return (window: BrowserWindow): void => {
-    window.webview.executeJavascript(createDebugMenuDispatchScript({ surface }))
-  }
+function dispatchDebugMenuAction(window: BrowserWindow, params: unknown): void {
+  window.webview.executeJavascript(
+    createDebugMenuDispatchScript({ surface: params as DebugMenuSurface }),
+  )
 }
 
 /** Creates a function that dispatches one action with one parameter. */
