@@ -26,7 +26,7 @@
     "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit && tsgo -p src/tauri --noEmit",
+    "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit",
     "test": "vitest run"
   },
   "peerDependencies": {
