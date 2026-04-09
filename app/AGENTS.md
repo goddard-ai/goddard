@@ -24,6 +24,7 @@
   - Query functions passed to `useQuery()` should be stable references, not inline per-render closures.
   - Import the shared `queryClient` directly from `src/lib/query.ts` when a feature needs manual cache access. Do not surface it with Preact context.
   - Prefer feature-local write helpers that pair one SDK mutation with the affected query invalidation.
+  - Do not add thin read wrappers around simple `goddardSdk` query calls. Prefer stable `goddardSdk` methods directly unless a helper adds real behavior such as nullable handling.
   - Do not add optimistic UI or loading indicators for local form submissions.
 - Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
 - Within `src/`:

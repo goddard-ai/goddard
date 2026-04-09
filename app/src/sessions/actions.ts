@@ -1,5 +1,5 @@
 import type { CreateSessionRequest, DaemonSession } from "@goddard-ai/sdk"
-import { getSession, getSessionHistory, listSessions, SESSION_LIST_LIMIT } from "./queries.ts"
+import { SESSION_LIST_LIMIT } from "./queries.ts"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 
@@ -8,7 +8,7 @@ import { goddardSdk } from "~/sdk.ts"
  */
 export async function createSession(input: CreateSessionRequest) {
   const result = await goddardSdk.session.create(input)
-  queryClient.invalidate(listSessions, [SESSION_LIST_LIMIT])
+  queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
   return result
 }
 
@@ -21,7 +21,7 @@ export async function submitSessionPrompt(props: {
   prompt: string
 }) {
   await goddardSdk.session.prompt(props)
-  queryClient.invalidate(listSessions, [SESSION_LIST_LIMIT])
-  queryClient.invalidate(getSession, [props.id])
-  queryClient.invalidate(getSessionHistory, [props.id])
+  queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
+  queryClient.invalidate(goddardSdk.session.get, [{ id: props.id }])
+  queryClient.invalidate(goddardSdk.session.history, [{ id: props.id }])
 }

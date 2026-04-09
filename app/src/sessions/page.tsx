@@ -10,7 +10,16 @@ import { getSessionDisplayTitle } from "./presentation.ts"
 import { buildTranscriptMessages } from "~/session-chat/chat.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { useQuery } from "~/lib/query.ts"
-import { getOptionalSessionHistory, listSessions, SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
+import { goddardSdk } from "~/sdk.ts"
+import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
+
+async function getOptionalSessionHistory(sessionId: DaemonSession["id"] | null) {
+  if (!sessionId) {
+    return null
+  }
+
+  return await goddardSdk.session.history({ id: sessionId })
+}
 
 function formatTimestamp(value: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -26,7 +35,7 @@ export function SessionsPage(props: {
 }) {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const [sessions] = useQuery(listSessions, [SESSION_LIST_LIMIT])
+  const [{ sessions }] = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
   const selectedSessionId = useSignal<DaemonSession["id"] | null>(sessions[0]?.id ?? null)
   const selectedSession = sessions.find((session) => session.id === selectedSessionId.value) ?? null
   const [selectedSessionHistory] = useQuery(getOptionalSessionHistory, [
