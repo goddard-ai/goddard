@@ -7,8 +7,8 @@
   - One import boundary within `@goddard-ai/sdk` with a distinct ownership model.
   - Why: so consumers can choose the right level of abstraction instead of pulling backend, daemon, loop, and node concerns in all at once.
 - `Backend Surface`
-  - The legacy SDK API for direct backend HTTP operations.
-  - Why: this concept is intentionally being reduced so durable auth and other backend ownership move behind the daemon boundary.
+  - The SDK API for direct backend HTTP operations.
+  - Why: so direct backend-owned operations remain a distinct integration boundary from the daemon-backed SDK surface.
 - `Daemon Surface`
   - The browser-safe SDK API that mirrors daemon IPC actions through namespace methods and owns the live session wrapper entrypoint.
   - Why: so every host sees one stable SDK shape instead of separate wrapper layers for the same daemon contract.
