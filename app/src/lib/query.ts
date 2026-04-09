@@ -93,7 +93,12 @@ export class QueryClient {
    */
   subscribe(queryKey: string, subscriber: () => void) {
     const entry = this.getEntry(queryKey)
+    const wasInactive = entry.subscribers.size === 0
     entry.subscribers.add(subscriber)
+
+    if (wasInactive && entry.hasData && !entry.promise) {
+      void this.fetchEntry(entry, true)
+    }
 
     return () => {
       entry.subscribers.delete(subscriber)
