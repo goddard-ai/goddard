@@ -1,4 +1,4 @@
-import type { AgentDistribution } from "@goddard-ai/schema/session-server"
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 
 /** Fetches one ACP agent registry entry by its registry id. */
 export async function fetchRegistryAgent(agentName: string): Promise<AgentDistribution | null> {

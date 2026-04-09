@@ -3,6 +3,12 @@ import treeKill, { type ProcessLike } from "@alloc/tree-kill"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
+import {
+  agentBinaryPlatforms,
+  type AgentBinaryPlatform,
+  type AgentBinaryTarget,
+  type AgentDistribution,
+} from "@goddard-ai/schema/agent-distribution"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
   AbortedDaemonSessionPrompt,
@@ -11,25 +17,17 @@ import type {
   DaemonSession,
   DaemonSessionConnection,
   DaemonSessionMetadata,
+  DaemonSessionStatus,
   GetDaemonSessionDiagnosticsResponse,
   GetDaemonSessionHistoryResponse,
   GetDaemonSessionWorkforceResponse,
   GetDaemonSessionWorktreeResponse,
+  InitialPromptOption,
   ListDaemonSessionsRequest,
   ListDaemonSessionsResponse,
   SteerDaemonSessionResponse,
 } from "@goddard-ai/schema/daemon"
-import { InitialPromptOption } from "@goddard-ai/schema/daemon/sessions"
-import type { SessionStatus } from "@goddard-ai/schema/db"
-import {
-  agentBinaryPlatforms,
-  type AgentBinaryPlatform,
-  type AgentBinaryTarget,
-  type AgentDistribution,
-} from "@goddard-ai/schema/session-server"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
-import { createWorktree } from "../worktrees/index.ts"
-import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
 import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
@@ -47,6 +45,8 @@ import {
   type SessionDiagnosticEvent,
 } from "../persistence/session-state.ts"
 import { db } from "../persistence/store.ts"
+import { createWorktree } from "../worktrees/index.ts"
+import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -63,11 +63,11 @@ import {
 } from "./archive.ts"
 import { fetchRegistryAgent } from "./registry.ts"
 import {
-  type PreparedSessionWorktree,
-  type SessionWorktreeState,
   resolveGitRepoRoot,
   reuseExistingWorktree,
   toPreparedSessionWorktree,
+  type PreparedSessionWorktree,
+  type SessionWorktreeState,
 } from "./worktree.ts"
 
 /** The current version of `@goddard-ai/daemon` */
@@ -238,7 +238,7 @@ type ActiveSession = {
   subscription: {
     close: () => Promise<void>
   }
-  status: SessionStatus
+  status: DaemonSessionStatus
   history: acp.AnyMessage[]
   isFirstPrompt: boolean
   systemPrompt: string
@@ -323,8 +323,8 @@ function createInitialPromptRequest(params: {
 /** Maps client-originated ACP messages to any immediate session status changes they imply. */
 function sessionStatusFromClientMessage(
   message: acp.AnyMessage,
-  status: SessionStatus,
-): SessionStatus | null {
+  status: DaemonSessionStatus,
+): DaemonSessionStatus | null {
   if (status !== "active") {
     return null
   }
@@ -690,7 +690,7 @@ async function initializeSession(params: {
   onMessageWrite?: (message: acp.AnyMessage) => void
 }): Promise<
   acp.InitializeResponse & {
-    status: SessionStatus
+    status: DaemonSessionStatus
     isFirstPrompt: boolean
     history: acp.AnyMessage[]
     acpSessionId: string
@@ -723,7 +723,7 @@ async function initializeSession(params: {
       clientInfo: { name: "npm:@goddard-ai/daemon", version: getPackageVersion() },
     })
 
-    let status: SessionStatus = "active"
+    let status: DaemonSessionStatus = "active"
     let isFirstPrompt = true
     let acpSessionId: string
     let models: acp.SessionModelState | null | undefined
@@ -1661,9 +1661,7 @@ export function createSessionManager(input: {
         activeSession.acpSessionId,
         message,
       )
-      if (
-        isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)
-      ) {
+      if (isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)) {
         activeSession.lastPermissionRequest = message
       }
 
@@ -1672,7 +1670,9 @@ export function createSessionManager(input: {
         const promptRequest = clientRequest
           ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
           : null
-        const promptResponse = promptRequest ? getAcpMessageResult<acp.PromptResponse>(message) : null
+        const promptResponse = promptRequest
+          ? getAcpMessageResult<acp.PromptResponse>(message)
+          : null
         const stopReason = promptResponse?.stopReason ?? null
         const nextStatus = stopReason === "end_turn" ? "done" : null
 
@@ -2065,9 +2065,7 @@ export function createSessionManager(input: {
     return {
       id: session.id,
       acpSessionId: session.acpSessionId,
-      worktree: worktreeRecord
-        ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(worktreeRecord)
-        : null,
+      worktree: worktreeRecord,
     }
   }
 
@@ -2082,9 +2080,7 @@ export function createSessionManager(input: {
     return {
       id: session.id,
       acpSessionId: session.acpSessionId,
-      workforce: workforceRecord
-        ? (({ id: _id, sessionId: _sessionId, ...value }) => value)(workforceRecord)
-        : null,
+      workforce: workforceRecord,
     }
   }
 

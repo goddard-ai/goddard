@@ -1,16 +1,16 @@
-import { agentBinaryPlatforms } from "@goddard-ai/schema/session-server"
+import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
+import { afterEach, expect, test, vi } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createGzip } from "node:zlib"
 import * as tarFs from "tar-fs"
-import { afterEach, expect, test, vi } from "bun:test"
+import { resetDb } from "../src/persistence/store.ts"
 import {
   detectBinaryTargetPayloadFormat,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "../src/session/archive.ts"
-import { resetDb } from "../src/persistence/store.ts"
 import { resolveAgentProcessSpec } from "../src/session/manager.ts"
 
 const cleanupDirs: string[] = []

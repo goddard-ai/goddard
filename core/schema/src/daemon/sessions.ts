@@ -1,10 +1,15 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
 import { ACPAdapterName } from "../acp-adapters.ts"
+import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId, DaemonSessionIdParams } from "../common/params.ts"
-import type { SessionStatus } from "../db.ts"
-import { AgentDistribution } from "../session-server/agent-distribution.ts"
-import { DaemonSessionMetadata } from "./session-metadata.ts"
+import {
+  DaemonSessionMetadata,
+  type DaemonSession,
+  type DaemonSessionDiagnosticEvent,
+  type DaemonWorkforce,
+  type DaemonWorktree,
+} from "./store.ts"
 
 /** Session-start initial prompt values accepted by the daemon session API. */
 export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
@@ -26,23 +31,6 @@ export const SessionWorkforceParams = z.object({
 })
 
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
-
-/** Persisted daemon-managed worktree metadata addressed by one session id. */
-export const DaemonSessionWorktree = z.strictObject({
-  repoRoot: z.string(),
-  requestedCwd: z.string(),
-  effectiveCwd: z.string(),
-  worktreeDir: z.string(),
-  branchName: z.string(),
-  poweredBy: z.string(),
-})
-
-export type DaemonSessionWorktree = z.infer<typeof DaemonSessionWorktree>
-
-/** Persisted daemon-managed workforce metadata addressed by one session id. */
-export const DaemonSessionWorkforce = SessionWorkforceParams
-
-export type DaemonSessionWorkforce = z.infer<typeof DaemonSessionWorkforce>
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateDaemonSessionRequest = z.object({
@@ -137,13 +125,6 @@ export type DaemonSessionRuntimeEnv = {
   GODDARD_SESSION_TOKEN: string
 }
 
-/** Durable PR permission scope stored with one daemon-managed session. */
-export type DaemonSessionPermissions = {
-  owner: string
-  repo: string
-  allowedPrNumbers: number[]
-}
-
 /** Durable connectivity state exposed to app and SDK consumers. */
 export type DaemonSessionConnection = {
   mode: "live" | "history" | "none"
@@ -152,40 +133,14 @@ export type DaemonSessionConnection = {
 }
 
 /** Structured diagnostic event emitted by the daemon for session lifecycle debugging. */
-export type DaemonDiagnosticEvent = {
-  type: string
-  at: string
-  sessionId: string
-  detail?: Record<string, unknown>
+export type DaemonDiagnosticEvent = DaemonSessionDiagnosticEvent & {
+  sessionId: DaemonSessionId
 }
 
 /** Stable identity values used to address one daemon-managed session. */
 export type DaemonSessionIdentity = {
   id: DaemonSessionId
   acpSessionId: string
-}
-
-/** Full daemon-managed session record exposed to app and SDK consumers. */
-export type DaemonSession = DaemonSessionIdentity & {
-  status: SessionStatus
-  stopReason: acp.PromptResponse["stopReason"] | null
-  agentName: string
-  cwd: string
-  mcpServers: acp.McpServer[]
-  connectionMode: "live" | "history" | "none"
-  activeDaemonSession: boolean
-  token: string | null
-  permissions: DaemonSessionPermissions | null
-  repository: string | null
-  prNumber: number | null
-  metadata: DaemonSessionMetadata | null
-  createdAt: number
-  updatedAt: number
-  errorMessage: string | null
-  blockedReason: string | null
-  initiative: string | null
-  lastAgentMessage: string | null
-  models: acp.SessionModelState | null
 }
 
 /** Response payload returned after one daemon-managed session is created. */
@@ -219,12 +174,12 @@ export type GetDaemonSessionDiagnosticsResponse = DaemonSessionIdentity & {
 
 /** Response payload returned after one daemon-managed session worktree fetch. */
 export type GetDaemonSessionWorktreeResponse = DaemonSessionIdentity & {
-  worktree: DaemonSessionWorktree | null
+  worktree: DaemonWorktree | null
 }
 
 /** Response payload returned after one daemon-managed session workforce fetch. */
 export type GetDaemonSessionWorkforceResponse = DaemonSessionIdentity & {
-  workforce: DaemonSessionWorkforce | null
+  workforce: DaemonWorkforce | null
 }
 
 /** Response payload returned after one daemon-managed session shutdown request. */

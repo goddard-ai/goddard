@@ -1,13 +1,16 @@
-import type * as acp from "@agentclientprotocol/sdk"
 import { getDatabasePath } from "@goddard-ai/paths/node"
-import { DaemonSessionId } from "@goddard-ai/schema/common/params"
-import { type DaemonSessionMetadata } from "@goddard-ai/schema/daemon"
-import { SessionStatus } from "@goddard-ai/schema/db"
+import {
+  DaemonPullRequest,
+  DaemonSession,
+  DaemonSessionDiagnostics,
+  DaemonSessionMessages,
+  DaemonWorkforce,
+  DaemonWorktree,
+} from "@goddard-ai/schema/daemon/store"
 import { kind, kindstore, UnrecoverableStoreOpenError, type DatabaseOptions } from "kindstore"
 import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { z } from "zod"
-import type { SessionConnectionMode, SessionDiagnosticEvent } from "./session-state.ts"
 
 type StoreConnectionOptions = {
   filename: string
@@ -18,61 +21,8 @@ const metadata = {
   authToken: z.string(),
 }
 
-const SessionPermissions = z.object({
-  owner: z.string(),
-  repo: z.string(),
-  allowedPrNumbers: z.array(z.number().int()),
-})
-
-const SessionStopReason = z.enum([
-  "end_turn",
-  "max_tokens",
-  "max_turn_requests",
-  "refusal",
-  "cancelled",
-])
-
-const WorktreeMetadata = z.strictObject({
-  repoRoot: z.string(),
-  requestedCwd: z.string(),
-  effectiveCwd: z.string(),
-  worktreeDir: z.string(),
-  branchName: z.string(),
-  poweredBy: z.string(),
-})
-
-const WorkforceMetadata = z
-  .object({
-    rootDir: z.string().optional(),
-    agentId: z.string().optional(),
-    requestId: z.string().optional(),
-  })
-  .catchall(z.unknown())
-
 const schema = {
-  sessions: kind(
-    "ses",
-    z.object({
-      acpSessionId: z.string(),
-      status: z.enum(SessionStatus),
-      stopReason: SessionStopReason.nullable().default(null),
-      agentName: z.string(),
-      cwd: z.string(),
-      mcpServers: z.custom<acp.McpServer[]>(),
-      connectionMode: z.custom<SessionConnectionMode>().default("none"),
-      activeDaemonSession: z.boolean().default(false),
-      errorMessage: z.string().nullable().default(null),
-      blockedReason: z.string().nullable().default(null),
-      initiative: z.string().nullable().default(null),
-      lastAgentMessage: z.string().nullable().default(null),
-      repository: z.string().nullable().default(null),
-      prNumber: z.number().int().nullable().default(null),
-      token: z.string().nullable().default(null),
-      permissions: SessionPermissions.nullable().default(null),
-      metadata: z.custom<DaemonSessionMetadata>().nullable().default(null),
-      models: z.custom<acp.SessionModelState>().nullable().default(null),
-    }),
-  )
+  sessions: kind("ses", DaemonSession)
     .createdAt()
     .updatedAt()
     .index("acpSessionId")
@@ -87,57 +37,20 @@ const schema = {
       id: "desc",
     }),
 
-  sessionMessages: kind(
-    "msg",
-    z.object({
-      sessionId: DaemonSessionId,
-      messages: z.custom<acp.AnyMessage[]>(),
-    }),
-  ).index("sessionId", { type: "text" }),
+  sessionMessages: kind("msg", DaemonSessionMessages).index("sessionId", { type: "text" }),
 
-  sessionDiagnostics: kind(
-    "dgn",
-    z.object({
-      sessionId: DaemonSessionId,
-      events: z.custom<SessionDiagnosticEvent[]>(),
-    }),
-  ).index("sessionId", { type: "text" }),
+  sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", { type: "text" }),
 
-  worktrees: kind(
-    "wt",
-    z.object({
-      sessionId: DaemonSessionId,
-      ...WorktreeMetadata.shape,
-    }),
-  ).index("sessionId", { type: "text" }),
+  worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
 
-  workforces: kind(
-    "wf",
-    z
-      .object({
-        sessionId: DaemonSessionId,
-        ...WorkforceMetadata.shape,
-      })
-      .catchall(z.unknown()),
-  ).index("sessionId", { type: "text" }),
+  workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
 
-  pullRequests: kind(
-    "pr",
-    z.object({
-      host: z.enum(["github"]),
-      owner: z.string(),
-      repo: z.string(),
-      prNumber: z.number().int(),
-      cwd: z.string(),
-    }),
-  )
-    .updatedAt()
-    .multi("host_owner_repo_prNumber", {
-      host: "asc",
-      owner: "asc",
-      repo: "asc",
-      prNumber: "asc",
-    }),
+  pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi("host_owner_repo_prNumber", {
+    host: "asc",
+    owner: "asc",
+    repo: "asc",
+    prNumber: "asc",
+  }),
 }
 
 function createStore(options: StoreConnectionOptions) {

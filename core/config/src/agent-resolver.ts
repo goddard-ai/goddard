@@ -1,5 +1,5 @@
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { UserConfig } from "@goddard-ai/schema/config"
-import type { AgentDistribution } from "@goddard-ai/schema/session-server"
 import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
 import { delimiter, join } from "node:path"

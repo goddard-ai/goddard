@@ -1,8 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
 import { type ACPAdapterName, ACPAdapterNames } from "./acp-adapters.ts"
-import { DaemonSessionMetadata } from "./daemon/session-metadata.ts"
-import { AgentDistribution } from "./session-server.ts"
+import { AgentDistribution } from "./agent-distribution.ts"
+import { DaemonSessionMetadata } from "./daemon/store.ts"
 
 export const AgentSetting = z.union([
   z.string().min(1) as z.ZodType<ACPAdapterName>,

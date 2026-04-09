@@ -1,6 +1,6 @@
 /** Daemon-owned worktree creation and cleanup helpers with pluggable strategies. */
+import type { DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
-import type { KindInput } from "kindstore"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { defaultPlugin } from "./plugins/default.ts"
@@ -65,10 +65,7 @@ export interface DeleteWorktreeOptions extends WorktreeOptions {
 }
 
 /** The durable metadata returned after creating one worktree. */
-export type CreatedWorktree = Omit<
-  KindInput<(typeof import("../persistence/store.ts"))["db"]["schema"]["worktrees"]>,
-  "sessionId"
->
+export type CreatedWorktree = Omit<DaemonWorktree, "id" | "sessionId">
 
 /**
  * Resolves the first applicable worktree plugin for one repository.

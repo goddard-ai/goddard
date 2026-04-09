@@ -1,15 +1,14 @@
 /** Daemon helpers for reusing and cleaning up session-owned worktrees. */
+import type { DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import { deleteWorktree } from "../worktrees/index.ts"
-import type { KindInput } from "kindstore"
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
-import { db } from "../persistence/store.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
 
 /** Persisted worktree state stored separately from the base daemon session record. */
-export type SessionWorktreeState = Omit<KindInput<typeof db.schema.worktrees>, "sessionId">
+export type SessionWorktreeState = Omit<DaemonWorktree, "id" | "sessionId">
 
 /** Prepared worktree state returned when one daemon session opts into isolation. */
 export interface PreparedSessionWorktree {

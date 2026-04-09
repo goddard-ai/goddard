@@ -102,6 +102,7 @@ test("daemon persists repository context into durable session storage", async ()
   })
   expect(created.session.metadata ?? null).toBeNull()
   expect(workforce.workforce).toMatchObject({
+    sessionId: created.session.id,
     agentId: "reviewer",
     requestId: "req-1",
   })
@@ -561,6 +562,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
 
   const worktree = (await client.send("sessionWorktree", { id: created.session.id })).worktree
   expect(worktree).toBeTruthy()
+  expect(worktree?.sessionId).toBe(created.session.id)
   expect(worktree?.requestedCwd.endsWith("/src")).toBe(true)
   expect(worktree?.effectiveCwd).toMatch(/\/src$/)
   expect(worktree?.worktreeDir).not.toBe(repoDir)

@@ -6,7 +6,7 @@ import type {
   CancelDaemonSessionRequest,
   SteerDaemonSessionRequest,
 } from "@goddard-ai/schema/daemon"
-import type { SessionParams } from "@goddard-ai/schema/session-server"
+import type { SessionParams } from "./session.ts"
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
 import { createSessionPromptMessage, type SessionPromptRequest } from "./session.ts"

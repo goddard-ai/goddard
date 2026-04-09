@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import type { SessionParams } from "@goddard-ai/schema/session-server"
+import type { SessionParams } from "../../session.ts"
 import { AgentSession } from "./client-session.ts"
 
 /** Detects the session-creation case that returns no live client session object. */
