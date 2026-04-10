@@ -48,7 +48,7 @@
         "lucide-react": "^1.7.0",
         "preact": "11.0.0-beta.1",
         "preact-in-motion": "^0.2.9",
-        "preact-sigma": "^2.2.3",
+        "preact-sigma": "^2.3.0",
         "radashi": "^12.7.2",
         "react-virtuoso": "^4.18.3",
         "sharp": "^0.34.5",
@@ -1758,7 +1758,7 @@
 
     "preact-in-motion": ["preact-in-motion@0.2.9", "", { "peerDependencies": { "motion": ">=12", "preact": ">=10" } }, "sha512-HRX0DibCW9LGLewfdIPvYnkiONdu2yUTi+EAsNVGQKk4kiOlPMBJgTYp40bTgx1lFLgKMzMOFZTt8nGz0feSfg=="],
 
-    "preact-sigma": ["preact-sigma@2.2.3", "", { "dependencies": { "@preact/signals": "^2.8.2", "immer": "^11.1.4", "preact": "11.0.0-beta.1" } }, "sha512-TBuYyJ0GeBVbyyZFEZycRtgqBHQMV8gR0TxT/VvIid0nTVuwMl5bypRvQmpON8TmC29t+9/e5w1fba9HMFmDGA=="],
+    "preact-sigma": ["preact-sigma@2.3.0", "", { "dependencies": { "@preact/signals": "^2.8.2", "immer": "^11.1.4", "preact": "11.0.0-beta.1" } }, "sha512-lyJ2LWSuJb7XKl3IR870uM+nTiSuO7GCIn+lsUBnck8OUKW1B3QH2DFP+4FV6ndPnbGoAAt3Kfrt+sfx+aQ3Tw=="],
 
     "prebuild-install": ["prebuild-install@7.1.3", "", { "dependencies": { "detect-libc": "^2.0.0", "expand-template": "^2.0.3", "github-from-package": "0.0.0", "minimist": "^1.2.3", "mkdirp-classic": "^0.5.3", "napi-build-utils": "^2.0.0", "node-abi": "^3.3.0", "pump": "^3.0.0", "rc": "^1.2.7", "simple-get": "^4.0.0", "tar-fs": "^2.0.0", "tunnel-agent": "^0.6.0" }, "bin": { "prebuild-install": "bin.js" } }, "sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug=="],
 

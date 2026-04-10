@@ -33,7 +33,7 @@
     "lucide-react": "^1.7.0",
     "preact": "11.0.0-beta.1",
     "preact-in-motion": "^0.2.9",
-    "preact-sigma": "^2.2.3",
+    "preact-sigma": "^2.3.0",
     "radashi": "^12.7.2",
     "react-virtuoso": "^4.18.3",
     "sharp": "^0.34.5"
