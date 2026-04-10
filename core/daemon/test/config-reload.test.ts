@@ -27,13 +27,13 @@ afterEach(async () => {
     await cleanup.pop()?.()
   }
 
+  resetDb({ filename: ":memory:" })
+
   if (originalHome === undefined) {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
   }
-
-  resetDb()
 })
 
 test("config manager promotes valid root config edits and preserves the last good snapshot after invalid edits", async () => {

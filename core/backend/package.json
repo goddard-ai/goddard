@@ -27,7 +27,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run"
+    "test": "bun test --dots"
   },
   "dependencies": {
     "@goddard-ai/schema": "workspace:^",

@@ -1,4 +1,4 @@
-import { test, assert } from "vitest"
+import { expect, test } from "bun:test"
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
 
 test("control plane creates PR authored by authenticated user", () => {
@@ -18,8 +18,8 @@ test("control plane creates PR authored by authenticated user", () => {
     base: "main",
   })
 
-  assert.equal(pr.number, 1)
-  assert.match(pr.body, /Authored via CLI by @alec/)
+  expect(pr.number).toBe(1)
+  expect(pr.body).toMatch(/Authored via CLI by @alec/)
 })
 
 test("http api supports login and pr creation", async () => {
@@ -45,7 +45,7 @@ test("http api supports login and pr creation", async () => {
       session.token,
     )
 
-    assert.equal(pr.number, 1)
+    expect(pr.number).toBe(1)
   } finally {
     await server.close()
   }
@@ -72,15 +72,17 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
-    assert.equal(managedResponse.status, 200)
-    assert.deepEqual(await managedResponse.json(), { managed: true })
+    expect(managedResponse.status).toBe(200)
+    const managedPayload = (await managedResponse.json()) as { managed: boolean }
+    expect(managedPayload.managed).toBe(true)
 
     const unmanagedResponse = await fetch(
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=9`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
-    assert.equal(unmanagedResponse.status, 200)
-    assert.deepEqual(await unmanagedResponse.json(), { managed: false })
+    expect(unmanagedResponse.status).toBe(200)
+    const unmanagedPayload = (await unmanagedResponse.json()) as { managed: boolean }
+    expect(unmanagedPayload.managed).toBe(false)
 
     const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
@@ -92,8 +94,9 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       `${baseUrl}/pr/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${bobSession.token}` } },
     )
-    assert.equal(foreignResponse.status, 200)
-    assert.deepEqual(await foreignResponse.json(), { managed: false })
+    expect(foreignResponse.status).toBe(200)
+    const foreignPayload = (await foreignResponse.json()) as { managed: boolean }
+    expect(foreignPayload.managed).toBe(false)
   } finally {
     await server.close()
   }
@@ -113,7 +116,7 @@ test("expired auth sessions are rejected", () => {
 
     Date.now = () => 1000 + 1000 * 60 * 60 * 24 + 1
 
-    assert.throws(() => backend.getSession(session.token), /Session expired/)
+    expect(() => backend.getSession(session.token)).toThrow(/Session expired/)
   } finally {
     Date.now = originalNow
   }
@@ -132,9 +135,9 @@ test("invalid JSON body returns 400", async () => {
       body: "{",
     })
 
-    assert.equal(response.status, 400)
+    expect(response.status).toBe(400)
     const payload = (await response.json()) as { message: string }
-    assert.equal(payload.message, "Invalid request body")
+    expect(payload.message).toBe("Invalid request body")
   } finally {
     await server.close()
   }
@@ -170,7 +173,7 @@ test("sse stream receives webhook events for a managed PR", async () => {
       },
     })
 
-    assert.equal(streamResponse.status, 200)
+    expect(streamResponse.status).toBe(200)
     const eventPromise = readFirstSseEvent(streamResponse)
 
     await postJson(`${baseUrl}/webhooks/github`, {
@@ -183,8 +186,8 @@ test("sse stream receives webhook events for a managed PR", async () => {
     })
 
     const parsed = (await eventPromise) as { event: { type: string; reactionAdded: string } }
-    assert.equal(parsed.event.type, "comment")
-    assert.equal(parsed.event.reactionAdded, "eyes")
+    expect(parsed.event.type).toBe("comment")
+    expect(parsed.event.reactionAdded).toBe("eyes")
   } finally {
     await server.close()
   }
@@ -252,7 +255,7 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     })
 
     const alecEvent = (await readFirstSseEvent(alecStream)) as { event: { prNumber: number } }
-    assert.equal(alecEvent.event.prNumber, 1)
+    expect(alecEvent.event.prNumber).toBe(1)
     await assertNoSseEvent(bobStream, 100)
   } finally {
     await server.close()
@@ -335,14 +338,13 @@ async function assertNoSseEvent(response: Response, timeoutMs: number): Promise<
   try {
     await readFirstSseEvent(response, timeoutMs)
   } catch (error) {
-    assert.match(
-      String(error),
+    expect(String(error)).toMatch(
       /(Timed out waiting for SSE event|SSE stream ended before emitting data)/,
     )
     return
   }
 
-  assert.fail(`Expected no SSE event within ${timeoutMs}ms`)
+  throw new Error(`Expected no SSE event within ${timeoutMs}ms`)
 }
 
 async function readWithTimeout(
@@ -350,10 +352,11 @@ async function readWithTimeout(
   timeoutMs: number,
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const readPromise = reader.read() as Promise<ReadableStreamReadResult<Uint8Array>>
 
   try {
     return await Promise.race([
-      reader.read(),
+      readPromise,
       new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
         timeoutId = setTimeout(() => {
           void reader.cancel().catch(() => {})

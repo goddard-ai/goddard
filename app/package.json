@@ -13,7 +13,7 @@
     "icons:generate": "bun run ./scripts/generate-iconset.ts",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "test": "vitest run -c ../vitest.config.ts",
+    "test": "bun test --dots",
     "typecheck": "panda codegen && tsgo --noEmit"
   },
   "dependencies": {
@@ -42,7 +42,6 @@
     "@pandacss/dev": "^1.9.1",
     "@preact/preset-vite": "^2.10.5",
     "@spiriit/vite-plugin-svg-spritemap": "7.0.0",
-    "@types/bun": "^1.3.11",
     "chokidar": "^5.0.0",
     "postcss": "^8.5.8",
     "procband": "^0.2.1",

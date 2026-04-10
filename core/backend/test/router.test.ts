@@ -1,4 +1,4 @@
-import { test, assert } from "vitest"
+import { expect, test } from "bun:test"
 import { createBackendRouter } from "../src/api/router.ts"
 import { HttpError, type BackendControlPlane } from "../src/api/control-plane.ts"
 import type { Env } from "../src/env.ts"
@@ -22,7 +22,7 @@ test("createBackendRouter handles auth device start via rouzer route map", async
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
     startDeviceFlow(input) {
-      assert.equal(input?.githubUsername, "alec")
+      expect(input?.githubUsername).toBe("alec")
       return {
         deviceCode: "dev_1",
         userCode: "ABCD1234",
@@ -47,9 +47,9 @@ test("createBackendRouter handles auth device start via rouzer route map", async
     ) as any,
   )
 
-  assert.equal(response.status, 200)
+  expect(response.status).toBe(200)
   const payload = (await response.json()) as { deviceCode: string }
-  assert.equal(payload.deviceCode, "dev_1")
+  expect(payload.deviceCode).toBe("dev_1")
 })
 
 test("createBackendRouter delegates stream route to injected handleUserStream", async () => {
@@ -58,7 +58,7 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
     getSession(token) {
-      assert.equal(token, "tok_1")
+      expect(token).toBe("tok_1")
       return { token, githubUsername: "alec", githubUserId: 1 }
     },
   }
@@ -79,9 +79,9 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
     ) as any,
   )
 
-  assert.equal(response.status, 200)
-  assert.equal(await response.text(), "stream-ok")
-  assert.equal(capturedGithubUsername, "alec")
+  expect(response.status).toBe(200)
+  expect(await response.text()).toBe("stream-ok")
+  expect(capturedGithubUsername).toBe("alec")
 })
 
 test("createBackendRouter serializes HttpError responses", async () => {
@@ -104,8 +104,9 @@ test("createBackendRouter serializes HttpError responses", async () => {
     ) as any,
   )
 
-  assert.equal(response.status, 401)
-  assert.deepEqual(await response.json(), { error: "Invalid token" })
+  expect(response.status).toBe(401)
+  const payload = (await response.json()) as { error: string }
+  expect(payload.error).toBe("Invalid token")
 })
 
 function createContext(request: Request, env = createEnv()) {

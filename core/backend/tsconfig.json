@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node", "@cloudflare/workers-types"]
+    "types": ["bun", "node", "@cloudflare/workers-types"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "bin/**/*.ts", "alchemy.run.ts", "drizzle.config.ts"]
 }

@@ -1,4 +1,4 @@
-import { test, assert } from "vitest"
+import { expect, test } from "bun:test"
 import { UserStream } from "../src/worker.ts"
 
 test("user stream durable object fans out published events to subscribers", async () => {
@@ -31,10 +31,10 @@ test("user stream durable object fans out published events to subscribers", asyn
     }),
   )
 
-  assert.equal(publishResponse.status, 204)
+  expect(publishResponse.status).toBe(204)
   const payload = (await eventPromise) as { event: { type: string; prNumber: number } }
-  assert.equal(payload.event.type, "comment")
-  assert.equal(payload.event.prNumber, 1)
+  expect(payload.event.type).toBe("comment")
+  expect(payload.event.prNumber).toBe(1)
 
   controller.abort()
 })

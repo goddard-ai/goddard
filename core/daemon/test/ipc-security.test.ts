@@ -23,6 +23,8 @@ afterEach(async () => {
     await cleanup.pop()?.()
   }
 
+  resetDb({ filename: ":memory:" })
+
   if (sharedHomeDir) {
     await rm(sharedHomeDir, { recursive: true, force: true })
     sharedHomeDir = null
@@ -33,7 +35,6 @@ afterEach(async () => {
   } else {
     process.env.HOME = originalHome
   }
-  resetDb()
 })
 
 afterAll(async () => {

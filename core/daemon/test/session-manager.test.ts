@@ -21,13 +21,13 @@ const testZipArchiveBase64 =
 
 afterEach(async () => {
   globalThis.fetch = originalFetch
+  resetDb({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
   }
-  resetDb()
 
   while (cleanupDirs.length > 0) {
     await rm(cleanupDirs.pop()!, { recursive: true, force: true })

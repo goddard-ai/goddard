@@ -26,12 +26,13 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
+  resetDb({ filename: ":memory:" })
+
   if (originalHome === undefined) {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
   }
-  resetDb()
 
   if (sharedHomeDir) {
     await rm(sharedHomeDir, { recursive: true, force: true })

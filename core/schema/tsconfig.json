@@ -1,5 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"]
+  },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "references": [{ "path": "./scripts/tsconfig.json" }]
 }

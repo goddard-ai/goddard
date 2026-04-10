@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { describe, expect, test, vi } from "vitest"
+import { describe, expect, test, vi } from "bun:test"
 import { AgentSession, GoddardSdk, type GoddardClient } from "../src/index.ts"
 
 function createSdkWithClient() {
@@ -94,18 +94,23 @@ describe("@goddard-ai/sdk session namespace", () => {
     const onMessage = vi.fn()
     const unsubscribe = vi.fn()
 
-    subscribe.mockImplementationOnce(async (target, handler) => {
-      expect(target).toEqual({ name: "sessionMessage", filter: { id: "ses_1" } })
-      handler({
-        id: "ses_1",
-        message: {
-          jsonrpc: "2.0",
-          method: acp.CLIENT_METHODS.session_update,
-          params: { value: "kept" },
-        },
-      })
-      return unsubscribe
-    })
+    subscribe.mockImplementationOnce(
+      async (
+        target: Parameters<GoddardClient["subscribe"]>[0],
+        handler: Parameters<GoddardClient["subscribe"]>[1],
+      ) => {
+        expect(target).toEqual({ name: "sessionMessage", filter: { id: "ses_1" } })
+        handler({
+          id: "ses_1",
+          message: {
+            jsonrpc: "2.0",
+            method: acp.CLIENT_METHODS.session_update,
+            params: { value: "kept" },
+          },
+        })
+        return unsubscribe
+      },
+    )
 
     const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
 
@@ -170,23 +175,28 @@ describe("@goddard-ai/sdk session namespace", () => {
     const onEvent = vi.fn()
     const unsubscribe = vi.fn()
 
-    subscribe.mockImplementationOnce(async (target, handler) => {
-      expect(target).toEqual({ name: "workforceEvent", filter: { rootDir: "/repo" } })
-      handler({
-        rootDir: "/repo",
-        event: {
-          id: "evt-1",
-          at: "2026-03-31T00:00:00.000Z",
-          type: "request",
-          requestId: "req-1",
-          toAgentId: "root",
-          fromAgentId: null,
-          intent: "default",
-          input: "Review the queue.",
-        },
-      })
-      return unsubscribe
-    })
+    subscribe.mockImplementationOnce(
+      async (
+        target: Parameters<GoddardClient["subscribe"]>[0],
+        handler: Parameters<GoddardClient["subscribe"]>[1],
+      ) => {
+        expect(target).toEqual({ name: "workforceEvent", filter: { rootDir: "/repo" } })
+        handler({
+          rootDir: "/repo",
+          event: {
+            id: "evt-1",
+            at: "2026-03-31T00:00:00.000Z",
+            type: "request",
+            requestId: "req-1",
+            toAgentId: "root",
+            fromAgentId: null,
+            intent: "default",
+            input: "Review the queue.",
+          },
+        })
+        return unsubscribe
+      },
+    )
 
     const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
 

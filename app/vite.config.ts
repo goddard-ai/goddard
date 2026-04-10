@@ -1,6 +1,5 @@
 import preact from "@preact/preset-vite"
 import { defineConfig } from "vite"
-import { workspaceAliases } from "../vitest.aliases.ts"
 import svgIcons from "./plugins/svg-icon-build-plugin.ts"
 
 /** Vite config for the desktop webview source rooted at src/main. */
@@ -19,7 +18,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   resolve: {
-    alias: workspaceAliases,
+    conditions: ["bun"],
     tsconfigPaths: true,
   },
 })

@@ -27,7 +27,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit",
-    "test": "vitest run"
+    "test": "bun test --pass-with-no-tests --dots"
   },
   "peerDependencies": {
     "@tauri-apps/api": "^2.10.1"

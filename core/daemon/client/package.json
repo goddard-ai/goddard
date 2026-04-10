@@ -26,7 +26,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit && tsgo -p test --noEmit",
-    "test": "vitest run"
+    "test": "bun test --dots"
   },
   "dependencies": {
     "@goddard-ai/ipc": "workspace:^",

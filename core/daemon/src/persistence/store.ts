@@ -89,11 +89,11 @@ function openStore(connection: StoreConnectionOptions) {
  * Shared kindstore handle for daemon persistence.
  * Tests that override HOME should call `resetDb()` after changing it.
  */
-export let db = openStore({ filename: getDatabasePath() })
+export let db = process.env.NODE_ENV !== "test" ? openStore({ filename: getDatabasePath() }) : null!
 
 /** Recreates the shared kindstore handle, optionally with explicit connection options. */
 export function resetDb(connection: StoreConnectionOptions = { filename: getDatabasePath() }) {
-  db.close()
+  db?.close()
   db = openStore(connection)
   return db
 }

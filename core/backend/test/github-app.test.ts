@@ -1,4 +1,4 @@
-import { test, assert } from "vitest"
+import { expect, test } from "bun:test"
 import { createGitHubApp } from "../src/github-app.ts"
 
 test("GoddardGitHubApp initialization", () => {
@@ -9,17 +9,17 @@ test("GoddardGitHubApp initialization", () => {
     backendBaseUrl: "http://127.0.0.1:8787",
   })
 
-  assert.ok(app.app)
-  assert.ok(app.app.webhooks)
+  expect(app.app).toBeDefined()
+  expect(app.app?.webhooks).toBeDefined()
 })
 
 test("github-app forwards webhooks to backend and returns handled event", async () => {
-  const fetchImpl: typeof fetch = async (input, init) => {
+  const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    assert.ok(url.endsWith("/webhooks/github"))
+    expect(url.endsWith("/webhooks/github")).toBe(true)
 
     const body = JSON.parse(String(init?.body))
-    assert.equal(body.type, "issue_comment")
+    expect(body.type).toBe("issue_comment")
 
     return new Response(
       JSON.stringify({
@@ -36,7 +36,10 @@ test("github-app forwards webhooks to backend and returns handled event", async 
     )
   }
 
-  const app = createGitHubApp({ backendBaseUrl: "http://127.0.0.1:8787", fetchImpl })
+  const app = createGitHubApp({
+    backendBaseUrl: "http://127.0.0.1:8787",
+    fetchImpl: fetchImpl as typeof fetch,
+  })
   const result = await app.handleWebhook({
     type: "issue_comment",
     owner: "goddard-ai",
@@ -46,6 +49,6 @@ test("github-app forwards webhooks to backend and returns handled event", async 
     body: "nice",
   })
 
-  assert.equal(result.handled, true)
-  assert.equal(result.event.type, "comment")
+  expect(result.handled).toBe(true)
+  expect(result.event.type).toBe("comment")
 })

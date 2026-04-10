@@ -21,7 +21,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run"
+    "test": "bun test --dots"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.15.0",

@@ -44,6 +44,11 @@
 - Include a body in every commit with brief bullets describing what changed and why.
 - In non-interactive terminals, set `GIT_EDITOR=true` for commands that would otherwise open an editor.
 
+## Testing
+
+- When running the full workspace test suite from the repository root, use `bun run test`.
+- Do not use `bun test` at the repository root; it bypasses the workspace package test scripts and monorepo orchestration.
+
 ## Documentation Routing
 
 - Read the nearest `glossary.md` before changing domain behavior, naming, states, roles, identifiers, or ownership rules in a package that has one.
