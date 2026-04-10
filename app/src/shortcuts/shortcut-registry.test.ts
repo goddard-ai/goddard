@@ -8,10 +8,10 @@ vi.mock("~/desktop-host.ts", () => ({
 }))
 
 const { ShortcutCommands } = await import("../shared/shortcut-keymap.ts")
-const { ShortcutRegistryModel } = await import("./shortcut-registry.ts")
+const { ShortcutRegistry } = await import("./shortcut-registry.ts")
 
 test("dispatch emits one typed shortcut command event", () => {
-  const registry = new ShortcutRegistryModel()
+  const registry = new ShortcutRegistry()
   const listener = vi.fn()
 
   const unsubscribe = registry.on(ShortcutCommands.newSession, listener)
@@ -27,7 +27,7 @@ test("dispatch emits one typed shortcut command event", () => {
 })
 
 test("applyKeymapSnapshot resolves overrides before the runtime is set up", () => {
-  const registry = new ShortcutRegistryModel()
+  const registry = new ShortcutRegistry()
 
   registry.applyKeymapSnapshot(
     "goddard",
@@ -44,7 +44,7 @@ test("applyKeymapSnapshot resolves overrides before the runtime is set up", () =
 })
 
 test("syncWorkbenchContext and syncOverlayContext track the initial runtime context surface", () => {
-  const registry = new ShortcutRegistryModel()
+  const registry = new ShortcutRegistry()
 
   registry.syncWorkbenchContext({
     activeTabKind: "main",
