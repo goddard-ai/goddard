@@ -23,7 +23,7 @@ type QueryEntry = {
 
 type QueryDescriptor<TQueryFn extends QueryInput = QueryInput> = readonly [
   TQueryFn,
-  TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : never,
+  TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null,
 ]
 
 type QueryResult<TQueryFn extends QueryInput> = TQueryFn extends AnyQueryFunction
@@ -37,8 +37,8 @@ type QueryResults<TQueries extends readonly QueryDescriptor[]> = {
 /**
  * Detects the explicit disabled-query sentinels supported by the query hooks.
  */
-function isDisabledQuery(queryFn: QueryInput): queryFn is DisabledQuery {
-  return queryFn === null || isEmptyQueryObject(queryFn)
+function isEnabledQuery(queryFn: QueryInput): queryFn is AnyQueryFunction {
+  return queryFn !== null && !isEmptyQueryObject(queryFn)
 }
 
 /**
@@ -356,13 +356,14 @@ import.meta.hot.dispose(() => {
  */
 export function useQuery<TQueryFn extends QueryInput>(
   queryFn: TQueryFn,
-  args: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : never,
-): QueryResult<TQueryFn>
-
-export function useQuery(queryFn: QueryInput, args: any[] = []) {
+  args: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null,
+): QueryResult<TQueryFn> {
   const [, setVersion] = useState(0)
 
-  const queryKey = isDisabledQuery(queryFn) ? null : queryClient.getQueryKey(queryFn, args)
+  const queryKey = isEnabledQuery(queryFn)
+    ? queryClient.getQueryKey(queryFn, args as Parameters<typeof queryFn>)
+    : null
+
   useEffect(() => {
     if (queryKey)
       return queryClient.subscribe(queryKey, () => {
@@ -370,15 +371,11 @@ export function useQuery(queryFn: QueryInput, args: any[] = []) {
       })
   }, [queryKey])
 
-  if (isDisabledQuery(queryFn)) {
-    return queryFn
+  if (isEnabledQuery(queryFn)) {
+    return queryClient.read(queryKey!, queryFn, args as Parameters<typeof queryFn>)
   }
 
-  if (!queryKey) {
-    throw new Error("Missing query key for enabled query.")
-  }
-
-  return queryClient.read(queryKey, queryFn, args)
+  return queryFn as QueryResult<TQueryFn>
 }
 
 /**
@@ -388,7 +385,9 @@ export function useQuery(queryFn: QueryInput, args: any[] = []) {
 export function useQueries<const TQueries extends readonly QueryDescriptor[]>(queries: TQueries) {
   const [, setVersion] = useState(0)
   const queryKeys = queries.map(([queryFn, args]) =>
-    isDisabledQuery(queryFn) ? null : queryClient.getQueryKey(queryFn, args),
+    isEnabledQuery(queryFn)
+      ? queryClient.getQueryKey(queryFn, args as Parameters<typeof queryFn>)
+      : null,
   )
 
   useEffect(() => {
@@ -412,7 +411,7 @@ export function useQueries<const TQueries extends readonly QueryDescriptor[]>(qu
   const pendingPromises: Promise<unknown>[] = []
 
   for (const [index, [queryFn, args]] of queries.entries()) {
-    if (isDisabledQuery(queryFn)) {
+    if (!isEnabledQuery(queryFn)) {
       data[index] = queryFn
       continue
     }
@@ -422,7 +421,7 @@ export function useQueries<const TQueries extends readonly QueryDescriptor[]>(qu
       throw new Error("Missing query key for enabled query.")
     }
 
-    const snapshot = queryClient.getSnapshot(queryKey, queryFn, args)
+    const snapshot = queryClient.getSnapshot(queryKey, queryFn, args!)
 
     if (snapshot.error !== null && !snapshot.hasData) {
       throw snapshot.error

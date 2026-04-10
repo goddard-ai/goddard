@@ -4,22 +4,14 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { MessageSquareText, Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { SessionsList } from "./list.tsx"
-import { ListToolbar } from "./list-toolbar.tsx"
-import { getSessionDisplayTitle } from "./presentation.ts"
-import { buildTranscriptMessages } from "~/session-chat/chat.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { buildTranscriptMessages } from "~/session-chat/chat.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
-
-async function getOptionalSessionHistory(sessionId: DaemonSession["id"] | null) {
-  if (!sessionId) {
-    return null
-  }
-
-  return await goddardSdk.session.history({ id: sessionId })
-}
+import { ListToolbar } from "./list-toolbar.tsx"
+import { SessionsList } from "./list.tsx"
+import { getSessionDisplayTitle } from "./presentation.ts"
 
 function formatTimestamp(value: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -38,7 +30,10 @@ export function SessionsPage(props: {
   const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
   const selectedSessionId = useSignal<DaemonSession["id"] | null>(sessions[0]?.id ?? null)
   const selectedSession = sessions.find((session) => session.id === selectedSessionId.value) ?? null
-  const selectedSessionHistory = useQuery(getOptionalSessionHistory, [selectedSession?.id ?? null])
+  const selectedSessionHistory = useQuery(
+    selectedSession ? goddardSdk.session.history : null,
+    selectedSession ? [{ id: selectedSession.id }] : null,
+  )
   const transcriptMessages =
     selectedSession && selectedSessionHistory
       ? buildTranscriptMessages(selectedSession, selectedSessionHistory.history)
