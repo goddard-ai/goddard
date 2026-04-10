@@ -50,11 +50,21 @@ export type ShortcutKeymapProfile = {
   bindings: Partial<Record<ShortcutCommandId, readonly string[]>>
 }
 
+/** Complete definition table for every declared shortcut command id. */
+export type ShortcutCommandDefinitionTable = {
+  [commandId in ShortcutCommandId]: ShortcutCommandDefinition
+}
+
+/** Complete built-in profile table keyed by profile id. */
+export type ShortcutKeymapProfileTable = {
+  [profileId in KeymapProfileId]: ShortcutKeymapProfile
+}
+
 /** Effective shortcut expressions after one built-in profile is merged with user overrides. */
 export type ResolvedShortcutBindings = Partial<Record<ShortcutCommandId, readonly string[]>>
 
 /** Human-facing metadata for each shortcut command. */
-export const shortcutCommandDefinitions: Record<ShortcutCommandId, ShortcutCommandDefinition> = {
+export const shortcutCommandDefinitions = {
   [ShortcutCommands.closeActiveTab]: {
     label: "Close Active Tab",
     description: "Closes the current closable workbench tab.",
@@ -102,10 +112,10 @@ export const shortcutCommandDefinitions: Record<ShortcutCommandId, ShortcutComma
     description: "Selects the Roadmap main workbench view.",
     preventDefault: true,
   },
-}
+} satisfies ShortcutCommandDefinitionTable
 
 /** Built-in shortcut keymap profiles shipped by the app. */
-export const shortcutKeymapProfiles: Record<KeymapProfileId, ShortcutKeymapProfile> = {
+export const shortcutKeymapProfiles = {
   goddard: {
     id: "goddard",
     label: "Goddard",
@@ -120,7 +130,7 @@ export const shortcutKeymapProfiles: Record<KeymapProfileId, ShortcutKeymapProfi
       [ShortcutCommands.openRoadmap]: ["Alt+6"],
     },
   },
-}
+} satisfies ShortcutKeymapProfileTable
 
 /** Returns one empty user keymap file using the default built-in profile. */
 export function createDefaultShortcutKeymapFile() {
