@@ -11,11 +11,11 @@ import { submitSessionPrompt } from "~/sessions/actions.ts"
 
 export function SessionChatView(props: { sessionId: string }) {
   const sessionId = props.sessionId as DaemonSession["id"]
-  const [{ history, session }] = useQueries({
-    history: [goddardSdk.session.history, [{ id: sessionId }]],
-    session: [goddardSdk.session.get, [{ id: sessionId }]],
-  })
-  const messages = buildTranscriptMessages(session.session, history.history)
+  const [{ history }, { session }] = useQueries([
+    [goddardSdk.session.history, [{ id: sessionId }]],
+    [goddardSdk.session.get, [{ id: sessionId }]],
+  ])
+  const messages = buildTranscriptMessages(session, history)
 
   return (
     <div
@@ -28,18 +28,18 @@ export function SessionChatView(props: { sessionId: string }) {
           `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
       })}
     >
-      <Header messageCount={messages.length} session={session.session} />
+      <Header messageCount={messages.length} session={session} />
       <Transcript
         initialScrollPosition="bottom"
         messages={messages}
-        scrollCacheKey={`detail:session:${session.session.id}:transcript`}
+        scrollCacheKey={`detail:session:${session.id}:transcript`}
       />
       <Composer
         onSubmit={async (text) => {
           try {
             await submitSessionPrompt({
-              id: session.session.id,
-              acpId: session.session.acpSessionId,
+              id: session.id,
+              acpId: session.acpSessionId,
               prompt: text,
             })
           } catch (error) {

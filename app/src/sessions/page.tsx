@@ -35,12 +35,10 @@ export function SessionsPage(props: {
 }) {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const [{ sessions }] = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
+  const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
   const selectedSessionId = useSignal<DaemonSession["id"] | null>(sessions[0]?.id ?? null)
   const selectedSession = sessions.find((session) => session.id === selectedSessionId.value) ?? null
-  const [selectedSessionHistory] = useQuery(getOptionalSessionHistory, [
-    selectedSession?.id ?? null,
-  ])
+  const selectedSessionHistory = useQuery(getOptionalSessionHistory, [selectedSession?.id ?? null])
   const transcriptMessages =
     selectedSession && selectedSessionHistory
       ? buildTranscriptMessages(selectedSession, selectedSessionHistory.history)

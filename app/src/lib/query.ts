@@ -23,7 +23,7 @@ type QueryDescriptor<TQueryFn extends AnyQueryFunction = AnyQueryFunction> = rea
   Parameters<TQueryFn>,
 ]
 
-type QueryResults<TQueries extends Record<string, QueryDescriptor>> = {
+type QueryResults<TQueries extends readonly QueryDescriptor[]> = {
   [TKey in keyof TQueries]: Awaited<ReturnType<TQueries[TKey][0]>>
 }
 
@@ -109,14 +109,6 @@ export class QueryClient {
     return () => {
       entry.subscribers.delete(subscriber)
     }
-  }
-
-  /**
-   * Refreshes one cached query in place while preserving the last resolved value.
-   */
-  refetch(queryKey: string) {
-    const entry = this.getEntry(queryKey)
-    void this.fetchEntry(entry, entry.hasData)
   }
 
   /**
@@ -336,7 +328,7 @@ export function startQueryWindowReactivationRefetch() {
 })
 
 /**
- * Reads one cached query and returns a `[data, refetch]` tuple.
+ * Reads one cached query and returns the resolved data directly.
  *
  * The hook suspends during the initial load, then keeps returning the last resolved value while
  * later refetches run in the background.
@@ -356,28 +348,17 @@ export function useQuery<TQueryFn extends AnyQueryFunction>(
 
   const data = queryClient.read(queryKey, queryFn, args)
 
-  return [
-    data,
-    () => {
-      queryClient.refetch(queryKey)
-    },
-  ] as const
+  return data
 }
 
 /**
- * Reads multiple cached queries from a keyed object and returns `[data, refetch]`, where `refetch`
- * can refresh one key or the whole set.
+ * Reads multiple cached queries from an ordered descriptor list and returns the resolved data in
+ * the same order.
  */
-export function useQueries<TQueries extends Record<string, QueryDescriptor>>(queries: TQueries) {
+export function useQueries<const TQueries extends readonly QueryDescriptor[]>(queries: TQueries) {
   const [, setVersion] = useState(0)
-  const entries = Object.entries(queries) as Array<
-    [keyof TQueries & string, TQueries[keyof TQueries]]
-  >
-  const queryKeys = entries.map(([, [queryFn, args]]) => queryClient.getQueryKey(queryFn, args))
-  const queryKeysByName = Object.fromEntries(
-    entries.map(([key], index) => [key, queryKeys[index]]),
-  ) as Record<keyof TQueries & string, string>
-  const subscriptionKey = hashSum(entries.map(([key]) => [key, queryKeysByName[key]]))
+  const queryKeys = queries.map(([queryFn, args]) => queryClient.getQueryKey(queryFn, args))
+  const subscriptionKey = hashSum(queryKeys)
 
   useEffect(() => {
     const unsubscribers = queryKeys.map((queryKey) =>
@@ -394,45 +375,28 @@ export function useQueries<TQueries extends Record<string, QueryDescriptor>>(que
   }, [queryClient, subscriptionKey])
 
   const data = {} as QueryResults<TQueries>
-  let pendingPromise: Promise<unknown> | null = null
+  const pendingPromises: Promise<unknown>[] = []
 
-  for (const [key, [queryFn, args]] of entries) {
-    const queryKey = queryKeysByName[key]
+  for (const [index, [queryFn, args]] of queries.entries()) {
+    const queryKey = queryKeys[index]
     const snapshot = queryClient.getSnapshot(queryKey, queryFn, args)
 
     if (snapshot.error !== null && !snapshot.hasData) {
       throw snapshot.error
     }
 
-    if (snapshot.shouldSuspend && snapshot.promise && pendingPromise === null) {
-      pendingPromise = snapshot.promise
+    if (snapshot.shouldSuspend && snapshot.promise) {
+      pendingPromises.push(snapshot.promise)
     }
 
     if (snapshot.hasData) {
-      ;(data as Record<string, unknown>)[key] = snapshot.data
+      ;(data as unknown[])[index] = snapshot.data
     }
   }
 
-  if (pendingPromise) {
-    throw pendingPromise
+  if (pendingPromises.length > 0) {
+    throw Promise.all(pendingPromises)
   }
 
-  return [
-    data,
-    (key?: keyof TQueries & string) => {
-      if (key) {
-        const query = queries[key]
-
-        if (query) {
-          queryClient.refetch(queryKeysByName[key])
-        }
-
-        return
-      }
-
-      for (const queryKey of queryKeys) {
-        queryClient.refetch(queryKey)
-      }
-    },
-  ] as const
+  return data
 }
