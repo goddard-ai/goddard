@@ -1,7 +1,5 @@
 import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
-import { goddardSdk } from "./sdk.ts"
-import { dispatchGlobalEvent } from "~/shared/global-event-hub.ts"
 import type {
   AppDesktopRpc,
   DaemonRequestName,
@@ -10,6 +8,8 @@ import type {
   DaemonSendInput,
   RuntimeInfo,
 } from "~/shared/desktop-rpc.ts"
+import { dispatchGlobalEvent } from "~/shared/global-event-hub.ts"
+import { goddardSdk } from "./sdk.ts"
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
   // Native dialogs and host-side daemon work can legitimately outlive Electrobun's
@@ -18,9 +18,7 @@ const rpc = Electroview.defineRPC<AppDesktopRpc>({
   handlers: {
     requests: {},
     messages: {
-      dispatchGlobalEvent: (event) => {
-        dispatchGlobalEvent(event)
-      },
+      dispatchGlobalEvent,
     },
   },
 })

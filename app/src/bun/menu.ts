@@ -1,7 +1,7 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { concat } from "radashi"
-import { APP_MENU_EVENT_NAME, type AppMenuAction } from "~/shared/app-menu.ts"
-import { DEBUG_MENU_EVENT_NAME, type DebugMenuSurface } from "~/shared/debug-menu.ts"
+import type { AppMenuAction } from "~/shared/app-menu.ts"
+import type { DebugMenuSurface } from "~/shared/debug-menu.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
 
 const fileMenu = {
@@ -125,7 +125,7 @@ function inspectWindow(window: BrowserWindow): void {
 function dispatchAppMenuAction(action: AppMenuAction) {
   return (_window: BrowserWindow): void => {
     dispatchGlobalEvent({
-      name: APP_MENU_EVENT_NAME,
+      name: "appMenu",
       detail: { action },
     })
   }
@@ -139,7 +139,7 @@ function closeWindow(window: BrowserWindow): void {
 /** Dispatches one development-menu surface request into the active webview. */
 function dispatchDebugMenuAction(_window: BrowserWindow, params: unknown): void {
   dispatchGlobalEvent({
-    name: DEBUG_MENU_EVENT_NAME,
+    name: "debugMenu",
     detail: { surface: params as DebugMenuSurface },
   })
 }

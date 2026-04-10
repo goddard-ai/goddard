@@ -1,17 +1,15 @@
 import { useSignal } from "@preact/signals"
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { useListener } from "preact-sigma"
-import { APP_MENU_EVENT_NAME } from "~/shared/app-menu.ts"
-import { DEBUG_MENU_EVENT_NAME } from "~/shared/debug-menu.ts"
-import { globalEventHub } from "~/shared/global-event-hub.ts"
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { SessionLaunchDialog } from "~/sessions/dialog.tsx"
+import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections, type AppShellTopbarAction } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
-import { buildCreateSessionInput } from "./sessions/session-launch.ts"
 import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { GoodTooltipProvider } from "./lib/good-tooltip.tsx"
+import { buildCreateSessionInput } from "./sessions/session-launch.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
 
@@ -158,13 +156,17 @@ export function AppShell() {
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
 
-  useListener(globalEventHub, APP_MENU_EVENT_NAME, (detail) => {
-    if (detail.action === "closeTab" && workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
-      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+  useListener(globalEventHub, "appMenu", (detail) => {
+    switch (detail.action) {
+      case "closeTab":
+        if (workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
+          workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+        }
+        return
     }
   })
 
-  useListener(globalEventHub, DEBUG_MENU_EVENT_NAME, (detail) => {
+  useListener(globalEventHub, "debugMenu", (detail) => {
     switch (detail.surface) {
       case "SessionChatTranscript":
         workbenchTabSet.openOrFocusTab({
