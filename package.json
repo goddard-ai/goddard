@@ -43,7 +43,7 @@
     "oxlint": "^1.51.0",
     "radashi": "^12.7.2",
     "tsdown": "^0.21.0",
-    "turbo": "^2.5.8",
+    "turbo": "^2.9.6",
     "typescript": "^5.9.3",
     "unplugin-raw": "^0.6.4",
     "unplugin-unused": "^0.5.7"
