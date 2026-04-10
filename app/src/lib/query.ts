@@ -1,11 +1,14 @@
 import hashSum from "hash-sum"
 import { useEffect, useState } from "preact/hooks"
 
-type QueryArgs = readonly unknown[]
+type QueryArgs = readonly any[]
 type QueryFunction<TArgs extends QueryArgs = QueryArgs, TData = unknown> = (
   ...args: TArgs
 ) => Promise<TData>
 type AnyQueryFunction = QueryFunction<any, any>
+type EmptyQueryResult = Record<string, never>
+type DisabledQuery = null | EmptyQueryResult
+type QueryInput = AnyQueryFunction | DisabledQuery
 
 type QueryEntry = {
   args: QueryArgs
@@ -18,19 +21,36 @@ type QueryEntry = {
   subscribers: Set<() => void>
 }
 
-type QueryDescriptor<TQueryFn extends AnyQueryFunction = AnyQueryFunction> = readonly [
+type QueryDescriptor<TQueryFn extends QueryInput = QueryInput> = readonly [
   TQueryFn,
-  Parameters<TQueryFn>,
+  TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : never,
 ]
 
+type QueryResult<TQueryFn extends QueryInput> = TQueryFn extends AnyQueryFunction
+  ? Awaited<ReturnType<TQueryFn>>
+  : never
+
 type QueryResults<TQueries extends readonly QueryDescriptor[]> = {
-  [TKey in keyof TQueries]: Awaited<ReturnType<TQueries[TKey][0]>>
+  [TKey in keyof TQueries]: QueryResult<TQueries[TKey][0]>
 }
 
-type HotImportMeta = ImportMeta & {
-  hot?: {
-    dispose: (callback: () => void) => void
-  }
+/**
+ * Detects the explicit disabled-query sentinels supported by the query hooks.
+ */
+function isDisabledQuery(queryFn: QueryInput): queryFn is DisabledQuery {
+  return queryFn === null || isEmptyQueryObject(queryFn)
+}
+
+/**
+ * Distinguishes the `{}` disabled-query sentinel from enabled query functions.
+ */
+function isEmptyQueryObject(value: QueryInput): value is EmptyQueryResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    Object.keys(value).length === 0
+  )
 }
 
 /**
@@ -91,7 +111,7 @@ export class QueryClient {
       throw snapshot.promise
     }
 
-    return snapshot.data as Awaited<ReturnType<TQueryFn>>
+    return snapshot.data!
   }
 
   /**
@@ -323,62 +343,85 @@ export function startQueryWindowReactivationRefetch() {
   }
 }
 
-;(import.meta as HotImportMeta).hot?.dispose(() => {
+import.meta.hot.dispose(() => {
   stopQueryWindowReactivationRefetch?.()
 })
 
 /**
- * Reads one cached query and returns the resolved data directly.
+ * Reads one cached query and returns the resolved data directly, or returns `null` / `{}` when the
+ * query is explicitly disabled with one of those sentinels.
  *
  * The hook suspends during the initial load, then keeps returning the last resolved value while
  * later refetches run in the background.
  */
-export function useQuery<TQueryFn extends AnyQueryFunction>(
+export function useQuery<TQueryFn extends QueryInput>(
   queryFn: TQueryFn,
-  args: Parameters<TQueryFn>,
-) {
+  args: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : never,
+): QueryResult<TQueryFn>
+
+export function useQuery(queryFn: QueryInput, args: any[] = []) {
   const [, setVersion] = useState(0)
-  const queryKey = queryClient.getQueryKey(queryFn, args)
 
+  const queryKey = isDisabledQuery(queryFn) ? null : queryClient.getQueryKey(queryFn, args)
   useEffect(() => {
-    return queryClient.subscribe(queryKey, () => {
-      setVersion((version) => version + 1)
-    })
-  }, [queryClient, queryKey])
+    if (queryKey)
+      return queryClient.subscribe(queryKey, () => {
+        setVersion((version) => version + 1)
+      })
+  }, [queryKey])
 
-  const data = queryClient.read(queryKey, queryFn, args)
+  if (isDisabledQuery(queryFn)) {
+    return queryFn
+  }
 
-  return data
+  if (!queryKey) {
+    throw new Error("Missing query key for enabled query.")
+  }
+
+  return queryClient.read(queryKey, queryFn, args)
 }
 
 /**
  * Reads multiple cached queries from an ordered descriptor list and returns the resolved data in
- * the same order.
+ * the same order, preserving disabled-query sentinels in their original positions.
  */
 export function useQueries<const TQueries extends readonly QueryDescriptor[]>(queries: TQueries) {
   const [, setVersion] = useState(0)
-  const queryKeys = queries.map(([queryFn, args]) => queryClient.getQueryKey(queryFn, args))
-  const subscriptionKey = hashSum(queryKeys)
+  const queryKeys = queries.map(([queryFn, args]) =>
+    isDisabledQuery(queryFn) ? null : queryClient.getQueryKey(queryFn, args),
+  )
 
   useEffect(() => {
-    const unsubscribers = queryKeys.map((queryKey) =>
-      queryClient.subscribe(queryKey, () => {
+    const unsubscribers = queryKeys.flatMap((queryKey) => {
+      if (!queryKey) {
+        return []
+      }
+      return queryClient.subscribe(queryKey, () => {
         setVersion((version) => version + 1)
-      }),
-    )
+      })
+    })
 
     return () => {
       for (const unsubscribe of unsubscribers) {
         unsubscribe()
       }
     }
-  }, [queryClient, subscriptionKey])
+  }, queryKeys)
 
-  const data = {} as QueryResults<TQueries>
+  const data: any[] = []
   const pendingPromises: Promise<unknown>[] = []
 
   for (const [index, [queryFn, args]] of queries.entries()) {
+    if (isDisabledQuery(queryFn)) {
+      data[index] = queryFn
+      continue
+    }
+
     const queryKey = queryKeys[index]
+    if (!queryKey) {
+      throw new Error("Missing query key for enabled query.")
+    }
+
     const snapshot = queryClient.getSnapshot(queryKey, queryFn, args)
 
     if (snapshot.error !== null && !snapshot.hasData) {
@@ -390,7 +433,7 @@ export function useQueries<const TQueries extends readonly QueryDescriptor[]>(qu
     }
 
     if (snapshot.hasData) {
-      ;(data as unknown[])[index] = snapshot.data
+      data[index] = snapshot.data
     }
   }
 
@@ -398,5 +441,5 @@ export function useQueries<const TQueries extends readonly QueryDescriptor[]>(qu
     throw Promise.all(pendingPromises)
   }
 
-  return data
+  return data as QueryResults<TQueries>
 }
