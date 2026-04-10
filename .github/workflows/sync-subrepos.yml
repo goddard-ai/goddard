@@ -50,9 +50,9 @@ jobs:
           git checkout -b temp-sync-branch
 
           # If one subrepo has no changes, don't fail the whole job
-          git subrepo push app || true
-          git subrepo push core || true
-          git subrepo push workforce || true
+          git subrepo push app --force || true
+          git subrepo push core --force || true
+          git subrepo push workforce --force || true
 
       - name: Push .gitrepo updates to monorepo
         run: |
