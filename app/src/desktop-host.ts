@@ -56,11 +56,7 @@ declare global {
 
 /** Creates the Electrobun view bridge once for the active browser context. */
 export function initializeDesktopHost(): void {
-  if (electroview) {
-    return
-  }
-
-  electroview = new Electroview({ rpc })
+  electroview ??= new Electroview({ rpc })
 }
 
 /** Returns one runtime handshake from the Bun host. */

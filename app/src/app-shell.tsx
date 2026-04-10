@@ -135,6 +135,7 @@ export function AppShell() {
     navigation.selectedNavId,
     workbenchTabSet.tabList,
   )
+
   const navigationItems: Array<{
     group: "primary" | "secondary"
     icon: SvgIconName
@@ -153,6 +154,7 @@ export function AppShell() {
       icon: getWorkbenchTabIcon(item.id),
     }
   })
+
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
 
