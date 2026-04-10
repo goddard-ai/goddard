@@ -100,7 +100,7 @@
   - The repository ownership context attached to a session, including optional pull request limits.
   - Why: so session permissions can be constrained to the repository context the session is meant to operate within.
 - `Session Worktree`
-  - The optional isolated repository checkout the daemon provisions for a fresh session before the agent starts.
+  - The optional isolated linked Git worktree the daemon provisions for a fresh session before the agent starts.
   - Why: so daemon-managed work inside git repositories does not mutate the caller's primary checkout or collide with concurrent sessions.
   - The session manager provisions it during `newSession()` when a caller opts in with `worktree.enabled: true`.
   - The session manager may reuse an already-prepared worktree during `loadSession()` by session id.

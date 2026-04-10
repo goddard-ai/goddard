@@ -4,6 +4,7 @@ import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { defaultPlugin } from "./plugins/default.ts"
+import { runCommand } from "./process.ts"
 import { worktrunkPlugin } from "./plugins/worktrunk.ts"
 
 export type { WorktreePlugin, WorktreeSetupOptions }
@@ -83,7 +84,7 @@ export async function resolveWorktreePlugin(options: WorktreeOptions) {
 }
 
 /**
- * Creates one worktree and reports which plugin ultimately handled the setup.
+ * Creates one linked git worktree and reports which plugin ultimately handled the setup.
  */
 export async function createWorktree(options: CreateWorktreeOptions) {
   const repoRoot = normalizeExistingPath(options.cwd)
@@ -101,7 +102,7 @@ export async function createWorktree(options: CreateWorktreeOptions) {
     try {
       const worktreeDir = await plugin.setup(setupOptions)
       if (worktreeDir) {
-        return createWorktreeMetadata({
+        return await createWorktreeMetadata({
           repoRoot,
           requestedCwd,
           worktreeDir,
@@ -128,7 +129,7 @@ export async function createWorktree(options: CreateWorktreeOptions) {
     throw new Error(`Default worktree plugin failed to setup the workspace (returned null).`)
   }
 
-  return createWorktreeMetadata({
+  return await createWorktreeMetadata({
     repoRoot,
     requestedCwd,
     worktreeDir,
@@ -192,18 +193,25 @@ function createSetupOptions(options: CreateWorktreeOptions) {
 /**
  * Builds the persisted metadata shape shared by daemon session worktrees.
  */
-function createWorktreeMetadata(params: {
+async function createWorktreeMetadata(params: {
   repoRoot: string
   requestedCwd: string
   worktreeDir: string
   branchName: string
   poweredBy: string
 }) {
-  const relativeCwd = path.relative(params.repoRoot, params.requestedCwd)
-  const normalizedWorktreeDir = path.resolve(params.worktreeDir)
+  const normalizedRepoRoot = normalizeExistingPath(params.repoRoot)
+  const normalizedWorktreeDir = normalizeExistingPath(params.worktreeDir)
+  await assertLinkedWorktree({
+    repoRoot: normalizedRepoRoot,
+    worktreeDir: normalizedWorktreeDir,
+    poweredBy: params.poweredBy,
+  })
+
+  const relativeCwd = path.relative(normalizedRepoRoot, params.requestedCwd)
 
   return {
-    repoRoot: params.repoRoot,
+    repoRoot: normalizedRepoRoot,
     requestedCwd: params.requestedCwd,
     effectiveCwd:
       relativeCwd.length === 0
@@ -213,6 +221,49 @@ function createWorktreeMetadata(params: {
     branchName: params.branchName,
     poweredBy: params.poweredBy,
   } satisfies CreatedWorktree
+}
+
+/**
+ * Verifies that one plugin-produced directory is a linked worktree attached to the source repository.
+ */
+async function assertLinkedWorktree(params: {
+  repoRoot: string
+  worktreeDir: string
+  poweredBy: string
+}) {
+  if (params.repoRoot === params.worktreeDir) {
+    throw new Error(
+      `Worktree plugin "${params.poweredBy}" returned the repository root instead of a linked worktree: ${params.worktreeDir}`,
+    )
+  }
+
+  const [repoCommonDir, worktreeCommonDir] = await Promise.all([
+    resolveGitCommonDir(params.repoRoot),
+    resolveGitCommonDir(params.worktreeDir),
+  ])
+
+  if (!repoCommonDir || !worktreeCommonDir || repoCommonDir !== worktreeCommonDir) {
+    throw new Error(
+      `Worktree plugin "${params.poweredBy}" must create a linked git worktree for ${params.worktreeDir}`,
+    )
+  }
+}
+
+/**
+ * Resolves one repository's common git dir as an absolute path when available.
+ */
+async function resolveGitCommonDir(cwd: string) {
+  const result = await runCommand("git", ["rev-parse", "--git-common-dir"], {
+    cwd,
+    stdin: "ignore",
+  })
+
+  if (result.status !== 0) {
+    return null
+  }
+
+  const commonDir = result.stdout.trim()
+  return commonDir ? normalizeExistingPath(path.resolve(cwd, commonDir)) : null
 }
 
 /**

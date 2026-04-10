@@ -291,6 +291,15 @@ export async function startDaemonServer(
     sessionWorktree: async ({ id }) => {
       return sessionManager.getWorktree(id)
     },
+    sessionWorktreeSyncMount: async ({ id }) => {
+      return sessionManager.mountWorktreeSync(id)
+    },
+    sessionWorktreeSync: async ({ id }) => {
+      return sessionManager.syncWorktree(id)
+    },
+    sessionWorktreeSyncUnmount: async ({ id }) => {
+      return sessionManager.unmountWorktreeSync(id)
+    },
     sessionWorkforce: async ({ id }) => {
       return sessionManager.getWorkforce(id)
     },

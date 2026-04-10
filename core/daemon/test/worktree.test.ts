@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync, realpathSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 import { createWorktree, deleteWorktree, resolveWorktreePlugin } from "../src/worktrees/index.ts"
 import { defaultPlugin } from "../src/worktrees/plugins/default.ts"
@@ -42,6 +42,9 @@ test("default worktree setup creates and cleans up a workspace inside an explici
   expect(created.worktreeDir).toMatch(/\.custom-dir\/feature-1-\d+$/)
   expect(existsSync(created.worktreeDir)).toBe(true)
   expect(created.poweredBy).toBe(defaultPlugin.name)
+  expect(await resolveGitCommonDir(created.repoRoot)).toBe(
+    await resolveGitCommonDir(created.worktreeDir),
+  )
 
   expect(
     await deleteWorktree({
@@ -67,6 +70,7 @@ test("default plugin uses the global worktree directory when the repository has 
 
   expect(created).toMatch(new RegExp(`${escapeRegExp(join(homeDir, ".goddard", "worktrees"))}`))
   expect(existsSync(created!)).toBe(true)
+  expect(await resolveGitCommonDir(repoDir)).toBe(await resolveGitCommonDir(created!))
 
   expect(await defaultPlugin.cleanup(created!, "feature-1")).toBe(true)
   expect(existsSync(created!)).toBe(false)
@@ -85,6 +89,9 @@ test("worktree setup maps repository subdirectories into the created workspace",
   expect(created.requestedCwd).toBe(requestedCwd)
   expect(created.effectiveCwd).toBe(effectiveCwd)
   expect(existsSync(effectiveCwd)).toBe(true)
+  expect(await resolveGitCommonDir(created.repoRoot)).toBe(
+    await resolveGitCommonDir(created.worktreeDir),
+  )
 
   expect(
     await deleteWorktree({
@@ -134,6 +141,39 @@ async function runGit(cwd: string, args: string[]) {
   })
 
   expect(result.status).toBe(0)
+}
+
+async function resolveGitCommonDir(cwd: string) {
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn("git", ["rev-parse", "--git-common-dir"], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+
+    if (!child.stdout) {
+      reject(new Error("Failed to capture git common dir output"))
+      return
+    }
+
+    let stdout = ""
+    child.stdout.setEncoding("utf8")
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk
+    })
+    child.on("error", reject)
+    child.on("close", (status: number | null) => {
+      if (status !== 0) {
+        reject(new Error(`git rev-parse failed for ${cwd}`))
+        return
+      }
+
+      resolve(resolvePath(cwd, stdout.trim()))
+    })
+  })
+}
+
+function resolvePath(cwd: string, value: string) {
+  return realpathSync.native(resolve(cwd, value))
 }
 
 function escapeRegExp(value: string) {

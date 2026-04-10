@@ -1,8 +1,10 @@
 # @goddard-ai/worktree-plugin
 
-Shared plugin types for Goddard worktree integrations.
+Shared plugin types for Goddard linked-worktree integrations.
 
 This package defines the plugin contract used by the daemon worktree host and by third-party worktree plugins that need type alignment.
+
+Plugins are expected to provision real linked Git worktrees attached to the source repository. Returning arbitrary directories or independent repositories is not supported by the daemon worktree host.
 
 The daemon loads third-party worktree plugins from the global Goddard config via either:
 

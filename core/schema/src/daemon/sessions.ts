@@ -8,7 +8,6 @@ import {
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
   type DaemonWorkforce,
-  type DaemonWorktree,
 } from "./store.ts"
 
 /** Session-start initial prompt values accepted by the daemon session API. */
@@ -17,8 +16,16 @@ export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.Con
 export type InitialPromptOption = z.infer<typeof InitialPromptOption>
 
 /** Worktree options accepted by the daemon session API. */
+export const SessionWorktreeSyncParams = z.strictObject({
+  enabled: z.boolean().optional(),
+})
+
+export type SessionWorktreeSyncParams = z.infer<typeof SessionWorktreeSyncParams>
+
+/** Worktree options accepted by the daemon session API. */
 export const SessionWorktreeParams = z.strictObject({
   enabled: z.boolean().optional(),
+  sync: SessionWorktreeSyncParams.optional(),
 })
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
@@ -32,6 +39,32 @@ export const SessionWorkforceParams = z.strictObject({
 
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
 
+/** Live sync-session state merged into one daemon worktree response. */
+export const SessionWorktreeSyncState = z.strictObject({
+  status: z.literal("mounted"),
+  conflictPreference: z.literal("worktree"),
+  baseOid: z.string(),
+  primaryLatestSnapshotOid: z.string().nullable(),
+  worktreeLatestSnapshotOid: z.string().nullable(),
+  resultSnapshotOid: z.string().nullable(),
+  primaryRecoverySnapshotOid: z.string().nullable(),
+  lastSyncAt: z.number().int().nullable(),
+})
+
+export type SessionWorktreeSyncState = z.infer<typeof SessionWorktreeSyncState>
+
+/** Response payload fragment returned after one daemon-managed session worktree fetch. */
+export const SessionWorktree = z.strictObject({
+  repoRoot: z.string(),
+  requestedCwd: z.string(),
+  effectiveCwd: z.string(),
+  worktreeDir: z.string(),
+  branchName: z.string(),
+  poweredBy: z.string(),
+  sync: SessionWorktreeSyncState.nullable(),
+})
+
+export type SessionWorktree = z.infer<typeof SessionWorktree>
 /** Request payload used to create one daemon-managed session. */
 export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
@@ -176,7 +209,30 @@ export type GetSessionDiagnosticsResponse = SessionIdentity & {
 
 /** Response payload returned after one daemon-managed session worktree fetch. */
 export type GetSessionWorktreeResponse = SessionIdentity & {
-  worktree: DaemonWorktree | null
+  worktree: SessionWorktree | null
+}
+
+/** Request payload used to mount sync on one daemon-managed session worktree. */
+export const MountSessionWorktreeSyncRequest = DaemonSessionIdParams
+
+export type MountSessionWorktreeSyncRequest = z.infer<typeof MountSessionWorktreeSyncRequest>
+
+/** Request payload used to ask the daemon to run its normal worktree sync cycle immediately. */
+export const SyncSessionWorktreeRequest = DaemonSessionIdParams
+
+export type SyncSessionWorktreeRequest = z.infer<typeof SyncSessionWorktreeRequest>
+
+/** Request payload used to unmount sync from one daemon-managed session worktree. */
+export const UnmountSessionWorktreeSyncRequest = DaemonSessionIdParams
+
+export type UnmountSessionWorktreeSyncRequest = z.infer<
+  typeof UnmountSessionWorktreeSyncRequest
+>
+
+/** Response payload returned after one daemon-managed worktree sync mutation. */
+export type MutateSessionWorktreeResponse = SessionIdentity & {
+  worktree: SessionWorktree | null
+  warnings: string[]
 }
 
 /** Response payload returned after one daemon-managed session workforce fetch. */

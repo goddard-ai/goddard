@@ -1,9 +1,10 @@
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
+import { realpathSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createConfigManager } from "../src/config-manager.ts"
 import { readMergedRootConfig } from "../src/resolvers/config.ts"
@@ -38,8 +39,8 @@ test("loads a configured path plugin from the global config", async () => {
   await writeFile(
     pluginPath,
     [
-      'import { mkdir, rm } from "node:fs/promises"',
-      'import { join } from "node:path"',
+      'import { mkdir } from "node:fs/promises"',
+      'import { dirname, join } from "node:path"',
       "",
       "export const plugin = {",
       '  name: "path-plugin",',
@@ -48,12 +49,28 @@ test("loads a configured path plugin from the global config", async () => {
       "  },",
       "  async setup(options) {",
       '    const worktreeDir = join(options.cwd, ".path-plugin", options.branchName)',
-      "    await mkdir(worktreeDir, { recursive: true })",
+      "    await mkdir(dirname(worktreeDir), { recursive: true })",
+      '    const result = Bun.spawn(["git", "worktree", "add", "--detach", worktreeDir], {',
+      "      cwd: options.cwd,",
+      '      stdin: "ignore",',
+      '      stdout: "ignore",',
+      '      stderr: "pipe",',
+      "    })",
+      "    const stderr = result.stderr ? await new Response(result.stderr).text() : ''",
+      "    await result.exited",
+      "    if (result.exitCode !== 0) {",
+      '      throw new Error(stderr || "git worktree add failed")',
+      "    }",
       "    return worktreeDir",
       "  },",
       "  async cleanup(worktreeDir) {",
-      "    await rm(worktreeDir, { recursive: true, force: true })",
-      "    return true",
+      '    const result = Bun.spawn(["git", "worktree", "remove", "--force", worktreeDir], {',
+      '      stdin: "ignore",',
+      '      stdout: "ignore",',
+      '      stderr: "ignore",',
+      "    })",
+      "    await result.exited",
+      "    return result.exitCode === 0",
       "  },",
       "}",
       "",
@@ -82,6 +99,9 @@ test("loads a configured path plugin from the global config", async () => {
 
   expect(created.poweredBy).toBe("path-plugin")
   expect(created.worktreeDir).toBe(join(created.repoRoot, ".path-plugin", "feature-1"))
+  expect(await resolveGitCommonDir(created.repoRoot)).toBe(
+    await resolveGitCommonDir(created.worktreeDir),
+  )
 
   await expect(
     deleteWorktree({
@@ -121,8 +141,8 @@ test("loads a configured package plugin from a resolvable package specifier", as
   await writeFile(
     join(packageDir, "index.mjs"),
     [
-      'import { mkdir, rm } from "node:fs/promises"',
-      'import { join } from "node:path"',
+      'import { mkdir } from "node:fs/promises"',
+      'import { dirname, join } from "node:path"',
       "",
       "export default {",
       '  name: "package-plugin",',
@@ -131,12 +151,28 @@ test("loads a configured package plugin from a resolvable package specifier", as
       "  },",
       "  async setup(options) {",
       '    const worktreeDir = join(options.cwd, ".package-plugin", options.branchName)',
-      "    await mkdir(worktreeDir, { recursive: true })",
+      "    await mkdir(dirname(worktreeDir), { recursive: true })",
+      '    const result = Bun.spawn(["git", "worktree", "add", "--detach", worktreeDir], {',
+      "      cwd: options.cwd,",
+      '      stdin: "ignore",',
+      '      stdout: "ignore",',
+      '      stderr: "pipe",',
+      "    })",
+      "    const stderr = result.stderr ? await new Response(result.stderr).text() : ''",
+      "    await result.exited",
+      "    if (result.exitCode !== 0) {",
+      '      throw new Error(stderr || "git worktree add failed")',
+      "    }",
       "    return worktreeDir",
       "  },",
       "  async cleanup(worktreeDir) {",
-      "    await rm(worktreeDir, { recursive: true, force: true })",
-      "    return true",
+      '    const result = Bun.spawn(["git", "worktree", "remove", "--force", worktreeDir], {',
+      '      stdin: "ignore",',
+      '      stdout: "ignore",',
+      '      stderr: "ignore",',
+      "    })",
+      "    await result.exited",
+      "    return result.exitCode === 0",
       "  },",
       "}",
       "",
@@ -164,6 +200,9 @@ test("loads a configured package plugin from a resolvable package specifier", as
 
   expect(created.poweredBy).toBe("package-plugin")
   expect(created.worktreeDir).toBe(join(created.repoRoot, ".package-plugin", "feature-2"))
+  expect(await resolveGitCommonDir(created.repoRoot)).toBe(
+    await resolveGitCommonDir(created.worktreeDir),
+  )
 
   await expect(
     deleteWorktree({
@@ -174,6 +213,61 @@ test("loads a configured package plugin from a resolvable package specifier", as
       plugins: await pluginManager.getPlugins(repoDir),
     }),
   ).resolves.toBe(true)
+})
+
+test("rejects plugins that do not create linked worktrees", async () => {
+  const homeDir = await useTempHome()
+  const repoDir = await createRepoFixture()
+  const configManager = createConfigManager()
+  cleanup.push(() => configManager.close())
+
+  const pluginPath = join(homeDir, ".goddard", "plugins", "invalid-plugin.mjs")
+  await mkdir(dirname(pluginPath), { recursive: true })
+  await writeFile(
+    pluginPath,
+    [
+      'import { mkdir } from "node:fs/promises"',
+      'import { join } from "node:path"',
+      "",
+      "export default {",
+      '  name: "invalid-plugin",',
+      "  isApplicable() {",
+      "    return true",
+      "  },",
+      "  async setup(options) {",
+      '    const worktreeDir = join(options.cwd, ".invalid-plugin", options.branchName)',
+      "    await mkdir(worktreeDir, { recursive: true })",
+      "    return worktreeDir",
+      "  },",
+      "  async cleanup() {",
+      "    return true",
+      "  },",
+      "}",
+      "",
+    ].join("\n"),
+    "utf-8",
+  )
+
+  await writeGlobalRootConfig({
+    worktrees: {
+      plugins: [
+        {
+          type: "path",
+          path: "plugins/invalid-plugin.mjs",
+        },
+      ],
+    },
+  })
+
+  const pluginManager = createWorktreePluginManager({ configManager })
+
+  await expect(
+    createWorktree({
+      cwd: repoDir,
+      branchName: "feature-invalid",
+      plugins: await pluginManager.getPlugins(repoDir),
+    }),
+  ).rejects.toThrow('Worktree plugin "invalid-plugin" must create a linked git worktree')
 })
 
 test("rejects worktree plugin references in repository-local config", async () => {
@@ -253,4 +347,37 @@ async function runGit(cwd: string, args: string[]) {
   })
 
   expect(result.status).toBe(0)
+}
+
+async function resolveGitCommonDir(cwd: string) {
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn("git", ["rev-parse", "--git-common-dir"], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+
+    if (!child.stdout) {
+      reject(new Error("Failed to capture git common dir output"))
+      return
+    }
+
+    let stdout = ""
+    child.stdout.setEncoding("utf8")
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk
+    })
+    child.on("error", reject)
+    child.on("close", (status: number | null) => {
+      if (status !== 0) {
+        reject(new Error(`git rev-parse failed for ${cwd}`))
+        return
+      }
+
+      resolve(resolvePath(cwd, stdout.trim()))
+    })
+  })
+}
+
+function resolvePath(cwd: string, value: string) {
+  return realpathSync.native(resolve(cwd, value))
 }

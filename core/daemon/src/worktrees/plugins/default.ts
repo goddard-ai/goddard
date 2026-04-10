@@ -1,9 +1,8 @@
-/** Default worktree plugin that clones or creates git worktrees under daemon control. */
+/** Default worktree plugin that creates linked git worktrees under daemon control. */
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 import * as crypto from "node:crypto"
 import * as fs from "node:fs"
-import { constants as fsConstants } from "node:fs"
-import { cp, mkdir, rm } from "node:fs/promises"
+import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
 import { runCommand } from "../process.ts"
@@ -40,30 +39,14 @@ export const defaultPlugin: WorktreePlugin = {
       await mkdir(agentsDirPath, { recursive: true })
     }
 
-    try {
-      let cloneSucceeded = await cloneWorkspace(options.cwd, worktreeDir)
+    const wtResult = await runCommand("git", ["worktree", "add", "--detach", worktreeDir], {
+      cwd: options.cwd,
+      stdin: "ignore",
+    })
 
-      if (!cloneSucceeded) {
-        const wtResult = await runCommand("git", ["worktree", "add", "--detach", worktreeDir], {
-          cwd: options.cwd,
-          stdin: "ignore",
-        })
-
-        if (wtResult.status !== 0) {
-          cloneSucceeded = await cloneWorkspace(options.cwd, worktreeDir, false)
-
-          if (!cloneSucceeded) {
-            throw new Error(`Workspace copy failed for ${worktreeDir}`)
-          }
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.includes("Workspace copy failed")) {
-        throw err
-      }
+    if (wtResult.status !== 0) {
       throw new Error(
-        `Failed to create workspace: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
+        `Failed to create linked worktree at ${worktreeDir}: ${wtResult.stderr.trim() || wtResult.stdout.trim() || "git worktree add exited unsuccessfully"}`,
       )
     }
 
@@ -105,32 +88,6 @@ export const defaultPlugin: WorktreePlugin = {
       return false
     }
   },
-}
-
-/**
- * Copies one repository into a new worktree directory, preferring copy-on-write when supported.
- */
-async function cloneWorkspace(sourceDir: string, targetDir: string, preferCopyOnWrite = true) {
-  try {
-    await cp(sourceDir, targetDir, {
-      recursive: true,
-      mode: preferCopyOnWrite ? reflinkModeForPlatform() : 0,
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * Returns the `fs.cp` mode used to request reflink copies on platforms that support them.
- */
-function reflinkModeForPlatform() {
-  if (process.platform === "darwin" || process.platform === "linux") {
-    return fsConstants.COPYFILE_FICLONE
-  }
-
-  return 0
 }
 
 /**

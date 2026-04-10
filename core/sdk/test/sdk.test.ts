@@ -89,6 +89,63 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session worktree sync helpers forward the expected daemon requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      worktree: {
+        repoRoot: "/repo",
+        requestedCwd: "/repo",
+        effectiveCwd: "/repo/wt",
+        worktreeDir: "/repo/wt",
+        branchName: "goddard-ses_1",
+        poweredBy: "default",
+        sync: null,
+      },
+      warnings: [],
+    })
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      worktree: {
+        repoRoot: "/repo",
+        requestedCwd: "/repo",
+        effectiveCwd: "/repo/wt",
+        worktreeDir: "/repo/wt",
+        branchName: "goddard-ses_1",
+        poweredBy: "default",
+        sync: null,
+      },
+      warnings: [],
+    })
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      worktree: {
+        repoRoot: "/repo",
+        requestedCwd: "/repo",
+        effectiveCwd: "/repo/wt",
+        worktreeDir: "/repo/wt",
+        branchName: "goddard-ses_1",
+        poweredBy: "default",
+        sync: null,
+      },
+      warnings: [],
+    })
+
+    await sdk.session.mountWorktreeSync({ id: "ses_1" })
+    await sdk.session.syncWorktree({ id: "ses_1" })
+    await sdk.session.unmountWorktree({ id: "ses_1" })
+
+    expect(send).toHaveBeenNthCalledWith(1, "sessionWorktreeSyncMount", {
+      id: "ses_1",
+    })
+    expect(send).toHaveBeenNthCalledWith(2, "sessionWorktreeSync", { id: "ses_1" })
+    expect(send).toHaveBeenNthCalledWith(3, "sessionWorktreeSyncUnmount", { id: "ses_1" })
+  })
+
   test("session.subscribe passes the daemon-side session filter and unwraps messages", async () => {
     const { sdk, subscribe } = createSdkWithClient()
     const onMessage = vi.fn()

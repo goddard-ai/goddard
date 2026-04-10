@@ -12,6 +12,7 @@ import type {
   GetWorkforceRequest,
   InitializeWorkforceRequest,
   ListSessionsRequest,
+  MountSessionWorktreeSyncRequest,
   ReplyPrRequest,
   ResolveSessionTokenRequest,
   RespondWorkforceRequest,
@@ -25,7 +26,9 @@ import type {
   SubmitPrRequest,
   SubscribeWorkforceEventsRequest,
   SuspendWorkforceRequest,
+  SyncSessionWorktreeRequest,
   TruncateWorkforceRequest,
+  UnmountSessionWorktreeSyncRequest,
   UpdateWorkforceRequest,
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
@@ -109,6 +112,18 @@ function createSessionNamespace(client: DaemonIpcClient) {
 
     /** Reads persisted worktree metadata attached to one daemon-managed session. */
     worktree: async (input: DaemonSessionIdParams) => client.send("sessionWorktree", input),
+
+    /** Mounts sync for one daemon-managed session worktree. */
+    mountWorktreeSync: async (input: MountSessionWorktreeSyncRequest) =>
+      client.send("sessionWorktreeSyncMount", input),
+
+    /** Asks the daemon to run its normal worktree sync cycle immediately for one mounted worktree. */
+    syncWorktree: async (input: SyncSessionWorktreeRequest) =>
+      client.send("sessionWorktreeSync", input),
+
+    /** Unmounts sync for one daemon-managed session worktree. */
+    unmountWorktree: async (input: UnmountSessionWorktreeSyncRequest) =>
+      client.send("sessionWorktreeSyncUnmount", input),
 
     /** Reads persisted workforce metadata attached to one daemon-managed session. */
     workforce: async (input: DaemonSessionIdParams) => client.send("sessionWorkforce", input),

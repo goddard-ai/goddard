@@ -27,15 +27,22 @@ import {
   type GetSessionWorkforceResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
+  type MountSessionWorktreeSyncRequest,
+  type MutateSessionWorktreeResponse,
   type ShutdownSessionResponse,
+  type SyncSessionWorktreeRequest,
   type SteerSessionResponse,
+  type UnmountSessionWorktreeSyncRequest,
   CancelSessionRequest,
   CreateSessionRequest,
   ListSessionsRequest,
+  MountSessionWorktreeSyncRequest as MountSessionWorktreeSyncRequestSchema,
   ResolveSessionTokenRequest,
   SendSessionMessageRequest,
   SessionMessageEvent,
+  SyncSessionWorktreeRequest as SyncSessionWorktreeRequestSchema,
   SteerSessionRequest,
+  UnmountSessionWorktreeSyncRequest as UnmountSessionWorktreeSyncRequestSchema,
 } from "./daemon/sessions.ts"
 import {
   type DiscoverWorkforceCandidatesResponse,
@@ -119,6 +126,18 @@ export const daemonIpcSchema = {
     sessionWorktree: {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionWorktreeResponse>(),
+    },
+    sessionWorktreeSyncMount: {
+      payload: MountSessionWorktreeSyncRequestSchema,
+      response: $type<MutateSessionWorktreeResponse>(),
+    },
+    sessionWorktreeSync: {
+      payload: SyncSessionWorktreeRequestSchema,
+      response: $type<MutateSessionWorktreeResponse>(),
+    },
+    sessionWorktreeSyncUnmount: {
+      payload: UnmountSessionWorktreeSyncRequestSchema,
+      response: $type<MutateSessionWorktreeResponse>(),
     },
     sessionWorkforce: {
       payload: DaemonSessionIdParams,

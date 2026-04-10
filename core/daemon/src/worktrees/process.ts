@@ -18,18 +18,22 @@ export function runCommand(
   args: string[],
   options: {
     cwd?: string
-    stdin?: "ignore"
+    stdin?: "ignore" | string
   } = {},
 ) {
   return new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      stdio: [options.stdin ?? "pipe", "pipe", "pipe"],
+      stdio: [options.stdin === "ignore" ? "ignore" : "pipe", "pipe", "pipe"],
     })
 
     if (!child.stdout || !child.stderr) {
       reject(new Error(`Failed to capture output for command: ${command}`))
       return
+    }
+
+    if (typeof options.stdin === "string") {
+      child.stdin?.end(options.stdin)
     }
 
     let stdout = ""

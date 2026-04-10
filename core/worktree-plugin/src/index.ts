@@ -21,7 +21,7 @@ export interface WorktreeSetupOptions {
 }
 
 /**
- * A plugin that defines how worktrees should be managed.
+ * A plugin that defines how linked git worktrees should be managed.
  */
 export interface WorktreePlugin {
   /**
@@ -35,7 +35,7 @@ export interface WorktreePlugin {
   isApplicable(cwd: string): boolean | Promise<boolean>
 
   /**
-   * Sets up a new worktree.
+   * Sets up one linked git worktree and returns its directory path.
    */
   setup(options: WorktreeSetupOptions): Promise<string | null>
 
