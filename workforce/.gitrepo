@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/goddard-ai/workforce
 	branch = main
-	commit = a237b691e4dc190dbc214d8082b075d8dc0f08f9
+	commit = 6e823b3b05e718864cfce2a05615cc00a990376c
 	method = merge
 	cmdver = 0.4.9
-	parent = 9dc8e6fe55de66b8c23ba388de3c1e61b9e0c8f0
+	parent = 126f47941a68b1a3615d479536d3133e1463f29c
