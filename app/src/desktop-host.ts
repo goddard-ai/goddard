@@ -1,6 +1,7 @@
 import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
 import { goddardSdk } from "./sdk.ts"
+import { dispatchGlobalEvent } from "~/shared/global-event-hub.ts"
 import type {
   AppDesktopRpc,
   DaemonRequestName,
@@ -16,7 +17,11 @@ const rpc = Electroview.defineRPC<AppDesktopRpc>({
   maxRequestTime: Infinity,
   handlers: {
     requests: {},
-    messages: {},
+    messages: {
+      dispatchGlobalEvent: (event) => {
+        dispatchGlobalEvent(event)
+      },
+    },
   },
 })
 

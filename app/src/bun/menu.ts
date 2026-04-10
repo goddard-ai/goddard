@@ -1,7 +1,8 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { concat } from "radashi"
-import { createAppMenuDispatchScript, type AppMenuAction } from "~/shared/app-menu.ts"
-import { createDebugMenuDispatchScript, type DebugMenuSurface } from "~/shared/debug-menu.ts"
+import { APP_MENU_EVENT_NAME, type AppMenuAction } from "~/shared/app-menu.ts"
+import { DEBUG_MENU_EVENT_NAME, type DebugMenuSurface } from "~/shared/debug-menu.ts"
+import { dispatchGlobalEvent } from "./rpc.ts"
 
 const fileMenu = {
   label: "File",
@@ -122,8 +123,11 @@ function inspectWindow(window: BrowserWindow): void {
 
 /** Dispatches one app menu action into the active webview. */
 function dispatchAppMenuAction(action: AppMenuAction) {
-  return (window: BrowserWindow): void => {
-    window.webview.executeJavascript(createAppMenuDispatchScript({ action }))
+  return (_window: BrowserWindow): void => {
+    dispatchGlobalEvent({
+      name: APP_MENU_EVENT_NAME,
+      detail: { action },
+    })
   }
 }
 
@@ -133,10 +137,11 @@ function closeWindow(window: BrowserWindow): void {
 }
 
 /** Dispatches one development-menu surface request into the active webview. */
-function dispatchDebugMenuAction(window: BrowserWindow, params: unknown): void {
-  window.webview.executeJavascript(
-    createDebugMenuDispatchScript({ surface: params as DebugMenuSurface }),
-  )
+function dispatchDebugMenuAction(_window: BrowserWindow, params: unknown): void {
+  dispatchGlobalEvent({
+    name: DEBUG_MENU_EVENT_NAME,
+    detail: { surface: params as DebugMenuSurface },
+  })
 }
 
 /** Creates a function that dispatches one action with one parameter. */

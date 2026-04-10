@@ -1,29 +1,56 @@
 import { SigmaType } from "preact-sigma"
-import { DebugMenuSurface } from "./debug-menu.ts"
+import { APP_MENU_EVENT_NAME, type AppMenuEventDetail } from "./app-menu.ts"
+import { DEBUG_MENU_EVENT_NAME, type DebugMenuEventDetail } from "./debug-menu.ts"
 
-type GlobalEvents = {
-  "open-debug-surface": { surface: DebugMenuSurface }
+type GlobalEventHubShape = {
+  eventVersion: number
 }
 
-// A hacky but acceptable typed event target for global app events.
-export const globalEventHub = new new SigmaType<never, GlobalEvents>()()
-
-/** Serializes one event-hub dispatch into JavaScript that Bun can inject into the webview. */
-export function createGlobalEventDispatchScript<TDetail>(
-  eventName: string,
-  detail: TDetail,
-): string {
-  return `(() => {
-    const key = ${JSON.stringify(GLOBAL_EVENT_HUB_KEY)};
-    const globalEventHubOwner = globalThis;
-    const globalEventHub = globalEventHubOwner[key] ?? (globalEventHubOwner[key] = new EventTarget());
-    globalEventHub.dispatchEvent(new CustomEvent(${JSON.stringify(eventName)}, { detail: ${JSON.stringify(detail)} }));
-  })();`
+type GlobalEventMap = {
+  [APP_MENU_EVENT_NAME]: AppMenuEventDetail
+  [DEBUG_MENU_EVENT_NAME]: DebugMenuEventDetail
 }
 
-/** Adapts one typed detail listener to the generic event callback shape used by EventTarget listeners. */
-export function createGlobalEventDetailListener<TDetail>(listener: (detail: TDetail) => void) {
-  return (event: Event) => {
-    listener((event as CustomEvent<TDetail>).detail)
+/** One Bun-to-webview global event dispatched through the shared Electrobun bridge. */
+export type GlobalEventEnvelope =
+  | {
+      name: typeof APP_MENU_EVENT_NAME
+      detail: AppMenuEventDetail
+    }
+  | {
+      name: typeof DEBUG_MENU_EVENT_NAME
+      detail: DebugMenuEventDetail
+    }
+
+export const GlobalEventHub = new SigmaType<GlobalEventHubShape, GlobalEventMap>("GlobalEventHub")
+  .defaultState({
+    eventVersion: 0,
+  })
+  .actions({
+    dispatchAppMenu(detail: AppMenuEventDetail) {
+      this.eventVersion += 1
+      this.commit()
+      this.emit(APP_MENU_EVENT_NAME, detail)
+    },
+    dispatchDebugMenu(detail: DebugMenuEventDetail) {
+      this.eventVersion += 1
+      this.commit()
+      this.emit(DEBUG_MENU_EVENT_NAME, detail)
+    },
+  })
+
+export interface GlobalEventHub extends InstanceType<typeof GlobalEventHub> {}
+
+export const globalEventHub: GlobalEventHub = new GlobalEventHub()
+
+/** Dispatches one typed global event on the singleton hub. */
+export function dispatchGlobalEvent(event: GlobalEventEnvelope) {
+  switch (event.name) {
+    case APP_MENU_EVENT_NAME:
+      globalEventHub.dispatchAppMenu(event.detail)
+      return
+    case DEBUG_MENU_EVENT_NAME:
+      globalEventHub.dispatchDebugMenu(event.detail)
+      return
   }
 }

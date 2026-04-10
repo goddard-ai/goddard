@@ -1,5 +1,6 @@
 import { BrowserView } from "electrobun/bun"
 import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
+import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
 import { daemonSend } from "./daemon.ts"
 import { getMainWindow } from "./main-window.ts"
 import { browseForProject } from "./projects.ts"
@@ -21,3 +22,8 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
     messages: {},
   },
 })
+
+/** Sends one typed global event from the Bun host into the active webview. */
+export function dispatchGlobalEvent(event: GlobalEventEnvelope) {
+  appRpc.send.dispatchGlobalEvent(event)
+}
