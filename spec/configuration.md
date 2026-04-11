@@ -66,6 +66,7 @@ We believe that separating user defaults, repository defaults, entity-level defa
 - All persisted configuration must be machine-readable and machine-writable.
 - Persisted configuration must be stored as JSON rather than executable source.
 - Repository-scoped configuration must be able to override user-scoped defaults without mutating the user-level source of truth.
+- Repository-scoped configuration may define shared, non-executable daemon session preparation intent, but executable daemon extensions remain user-scoped so repositories cannot silently expand local trust.
 - Loop and Action definitions must inherit the shared user and repository baseline before applying their own overrides.
 - Prompt content must not double as a configuration transport; document metadata is not a supported configuration surface.
 - Runtime overrides must remain ephemeral and must not implicitly rewrite persisted configuration.

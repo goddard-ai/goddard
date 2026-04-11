@@ -193,6 +193,44 @@ export const WorktreePluginReference = z
 
 export type WorktreePluginReference = z.infer<typeof WorktreePluginReference>
 
+/** Schema for supported package managers used by daemon-managed worktree bootstrap. */
+export const WorktreeBootstrapPackageManager = z
+  .enum(["bun", "pnpm", "npm", "yarn"])
+  .describe("Package manager command used to prepare fresh daemon-managed worktrees.")
+
+export type WorktreeBootstrapPackageManager = z.infer<typeof WorktreeBootstrapPackageManager>
+
+/** Schema for daemon-managed bootstrap defaults applied to fresh worktrees. */
+export const WorktreeBootstrapConfig = z
+  .strictObject({
+    enabled: z
+      .boolean()
+      .optional()
+      .describe("Whether daemon-managed worktree seeding and bootstrap are enabled."),
+    packageManager: WorktreeBootstrapPackageManager.optional().describe(
+      "Package manager command to run when bootstrapping a fresh daemon-managed worktree.",
+    ),
+    installArgs: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Additional arguments appended to the selected package-manager install command."),
+    seedEnabled: z
+      .boolean()
+      .optional()
+      .describe("Whether selected untracked artifacts should be copied into fresh worktrees."),
+    seedNames: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Recursive basename allowlist used when selecting untracked seed candidates."),
+    seedPaths: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Exact repository-relative paths added to the untracked seed candidate set."),
+  })
+  .describe("Daemon-managed preparation settings applied to fresh worktrees.")
+
+export type WorktreeBootstrapConfig = z.infer<typeof WorktreeBootstrapConfig>
+
 /** Schema for persisted daemon worktree defaults loaded from JSON. */
 export const WorktreesConfig = z
   .strictObject({
@@ -201,6 +239,9 @@ export const WorktreesConfig = z
       .min(1)
       .optional()
       .describe("Default repository-local folder name used for daemon-managed worktrees."),
+    bootstrap: WorktreeBootstrapConfig.optional().describe(
+      "Daemon-managed preparation defaults applied to fresh worktrees.",
+    ),
     plugins: z
       .array(WorktreePluginReference)
       .optional()
@@ -278,6 +319,8 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   z.globalRegistry.add(WorktreePluginPathReference, { id: "WorktreePluginPathReference" })
   z.globalRegistry.add(WorktreePluginPackageReference, { id: "WorktreePluginPackageReference" })
   z.globalRegistry.add(WorktreePluginReference, { id: "WorktreePluginReference" })
+  z.globalRegistry.add(WorktreeBootstrapPackageManager, { id: "WorktreeBootstrapPackageManager" })
+  z.globalRegistry.add(WorktreeBootstrapConfig, { id: "WorktreeBootstrapConfig" })
   z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })
 }

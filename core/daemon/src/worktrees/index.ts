@@ -237,16 +237,40 @@ async function assertLinkedWorktree(params: {
     )
   }
 
-  const [repoCommonDir, worktreeCommonDir] = await Promise.all([
+  const [repoCommonDir, worktreeCommonDir, worktreeGitDir] = await Promise.all([
     resolveGitCommonDir(params.repoRoot),
     resolveGitCommonDir(params.worktreeDir),
+    resolveGitDir(params.worktreeDir),
   ])
 
-  if (!repoCommonDir || !worktreeCommonDir || repoCommonDir !== worktreeCommonDir) {
+  if (
+    !repoCommonDir ||
+    !worktreeCommonDir ||
+    !worktreeGitDir ||
+    repoCommonDir !== worktreeCommonDir ||
+    worktreeGitDir === worktreeCommonDir
+  ) {
     throw new Error(
       `Worktree plugin "${params.poweredBy}" must create a linked git worktree for ${params.worktreeDir}`,
     )
   }
+}
+
+/**
+ * Resolves one repository's git dir as an absolute path when available.
+ */
+async function resolveGitDir(cwd: string) {
+  const result = await runCommand("git", ["rev-parse", "--git-dir"], {
+    cwd,
+    stdin: "ignore",
+  })
+
+  if (result.status !== 0) {
+    return null
+  }
+
+  const gitDir = result.stdout.trim()
+  return gitDir ? normalizeExistingPath(path.resolve(cwd, gitDir)) : null
 }
 
 /**

@@ -1,4 +1,5 @@
 /** Git-backed sync-session host for one primary checkout and one linked session worktree. */
+import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import { mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -13,7 +14,7 @@ export type WorktreeSyncStatus = "mounted"
 
 /** Live sync-session state merged into one daemon worktree response. */
 export interface WorktreeSyncSessionState {
-  sessionId: string
+  sessionId: DaemonSessionId
   status: WorktreeSyncStatus
   conflictPreference: WorktreeSyncConflictPreference
   primaryDir: string
@@ -31,7 +32,7 @@ export interface WorktreeSyncSessionState {
 }
 
 type WorktreeSyncMetadata = {
-  sessionId: string
+  sessionId: DaemonSessionId
   primaryDir: string
   worktreeDir: string
   commonDir: string
@@ -46,13 +47,16 @@ type WorktreeSyncMetadata = {
 }
 
 const syncRefNames = {
-  base: (sessionId: string) => `refs/goddard/worktree-sync/${sessionId}/base`,
-  primaryPreMount: (sessionId: string) =>
+  base: (sessionId: DaemonSessionId) => `refs/goddard/worktree-sync/${sessionId}/base`,
+  primaryPreMount: (sessionId: DaemonSessionId) =>
     `refs/goddard/worktree-sync/${sessionId}/primary/pre_mount`,
-  primaryLatest: (sessionId: string) => `refs/goddard/worktree-sync/${sessionId}/primary/latest`,
-  worktreeLatest: (sessionId: string) => `refs/goddard/worktree-sync/${sessionId}/worktree/latest`,
-  resultLatest: (sessionId: string) => `refs/goddard/worktree-sync/${sessionId}/result/latest`,
-  primaryRecoveryLatest: (sessionId: string) =>
+  primaryLatest: (sessionId: DaemonSessionId) =>
+    `refs/goddard/worktree-sync/${sessionId}/primary/latest`,
+  worktreeLatest: (sessionId: DaemonSessionId) =>
+    `refs/goddard/worktree-sync/${sessionId}/worktree/latest`,
+  resultLatest: (sessionId: DaemonSessionId) =>
+    `refs/goddard/worktree-sync/${sessionId}/result/latest`,
+  primaryRecoveryLatest: (sessionId: DaemonSessionId) =>
     `refs/goddard/worktree-sync/${sessionId}/primary/recovery/latest`,
 }
 
@@ -94,7 +98,7 @@ export class WorktreeSyncSessionHost {
   readonly #primaryDir
   readonly #worktreeDir
 
-  constructor(input: { sessionId: string; primaryDir: string; worktreeDir: string }) {
+  constructor(input: { sessionId: DaemonSessionId; primaryDir: string; worktreeDir: string }) {
     this.#sessionId = input.sessionId
     this.#primaryDir = input.primaryDir
     this.#worktreeDir = input.worktreeDir
@@ -567,7 +571,7 @@ async function createStateFromMetadata(metadata: WorktreeSyncMetadata) {
   } satisfies WorktreeSyncSessionState
 }
 
-async function deleteSessionRefs(primaryDir: string, sessionId: string) {
+async function deleteSessionRefs(primaryDir: string, sessionId: DaemonSessionId) {
   await Promise.all([
     deleteRef(primaryDir, syncRefNames.base(sessionId)),
     deleteRef(primaryDir, syncRefNames.primaryPreMount(sessionId)),
@@ -675,7 +679,7 @@ function resolveSyncMetadataDir(commonDir: string) {
   return join(commonDir, "goddard", "worktree-sync")
 }
 
-function resolveMetadataPath(commonDir: string, sessionId: string) {
+function resolveMetadataPath(commonDir: string, sessionId: DaemonSessionId) {
   return join(resolveSyncMetadataDir(commonDir), `${sessionId}.json`)
 }
 
@@ -683,7 +687,7 @@ function resolveLockDir(commonDir: string) {
   return join(resolveSyncMetadataDir(commonDir), "lock")
 }
 
-function resolveScratchDir(sessionId: string) {
+function resolveScratchDir(sessionId: DaemonSessionId) {
   return join(tmpdir(), `goddard-worktree-sync-${sessionId}-${randomUUID()}`)
 }
 

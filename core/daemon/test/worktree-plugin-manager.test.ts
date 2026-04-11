@@ -10,6 +10,7 @@ import { createConfigManager } from "../src/config-manager.ts"
 import { readMergedRootConfig } from "../src/resolvers/config.ts"
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
 import { createWorktreePluginManager } from "../src/worktrees/plugin-manager.ts"
+import { defaultPlugin } from "../src/worktrees/plugins/default.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -215,7 +216,7 @@ test("loads a configured package plugin from a resolvable package specifier", as
   ).resolves.toBe(true)
 })
 
-test("rejects plugins that do not create linked worktrees", async () => {
+test("falls back to the default plugin when a configured plugin does not create a linked worktree", async () => {
   const homeDir = await useTempHome()
   const repoDir = await createRepoFixture()
   const configManager = createConfigManager()
@@ -261,13 +262,22 @@ test("rejects plugins that do not create linked worktrees", async () => {
 
   const pluginManager = createWorktreePluginManager({ configManager })
 
+  const created = await createWorktree({
+    cwd: repoDir,
+    branchName: "feature-invalid",
+    plugins: await pluginManager.getPlugins(repoDir),
+  })
+
+  expect(created.poweredBy).toBe(defaultPlugin.name)
   await expect(
-    createWorktree({
-      cwd: repoDir,
-      branchName: "feature-invalid",
+    deleteWorktree({
+      cwd: created.repoRoot,
+      worktreeDir: created.worktreeDir,
+      branchName: created.branchName,
+      poweredBy: created.poweredBy,
       plugins: await pluginManager.getPlugins(repoDir),
     }),
-  ).rejects.toThrow('Worktree plugin "invalid-plugin" must create a linked git worktree')
+  ).resolves.toBe(true)
 })
 
 test("rejects worktree plugin references in repository-local config", async () => {
@@ -288,6 +298,47 @@ test("rejects worktree plugin references in repository-local config", async () =
   await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
     "`worktrees.plugins` is only supported in the global Goddard config",
   )
+})
+
+test("allows repository-local worktree bootstrap config and replaces inherited arrays", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeGlobalRootConfig({
+    worktrees: {
+      bootstrap: {
+        enabled: true,
+        packageManager: "bun",
+        installArgs: ["--global-flag"],
+        seedNames: ["node_modules", "dist"],
+        seedPaths: ["global/path"],
+      },
+    },
+  })
+
+  await writeLocalRootConfig(repoDir, {
+    worktrees: {
+      bootstrap: {
+        installArgs: ["--local-flag"],
+        seedNames: [".turbo"],
+        seedPaths: ["local/path"],
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
+    config: {
+      worktrees: {
+        bootstrap: {
+          enabled: true,
+          packageManager: "bun",
+          installArgs: ["--local-flag"],
+          seedNames: [".turbo"],
+          seedPaths: ["local/path"],
+        },
+      },
+    },
+  })
 })
 
 async function useTempHome() {

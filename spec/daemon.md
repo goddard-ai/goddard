@@ -18,6 +18,8 @@ The daemon may host multiple distinct automation domains, including:
 - PR feedback handling for managed pull requests
 - Repository-scoped workforce orchestration for multi-agent delegation
 
+The daemon also owns shared launch behavior for fresh isolated session worktrees when supported session flows request worktree isolation.
+
 ## Hard Constraints
 - The daemon is the lifecycle authority for supported daemon-managed runtimes.
 - Client surfaces may control or observe daemon-managed runtimes, but they must not create parallel ownership of mutable runtime state.
@@ -36,4 +38,5 @@ Background automation moved toward daemon-owned runtime management because unatt
 ## Encapsulated Sub-Specs
 
 * `spec/daemon/pr-feedback.md`: PR feedback flow behavior for managed pull request feedback.
+* `spec/daemon/session-worktree-preparation.md`: Fresh isolated session worktree preparation and its trust boundaries.
 * `spec/daemon/workforce.md`: Daemon-owned repository workforce orchestration for delegated multi-agent work.

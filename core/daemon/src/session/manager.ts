@@ -29,8 +29,10 @@ import {
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
+import { prepareFreshWorktree } from "../worktrees/bootstrap.ts"
 import { createWorktree } from "../worktrees/index.ts"
 import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
+import { defaultPlugin } from "../worktrees/plugins/default.ts"
 import {
   findMountedWorktreeSyncSessionByPrimaryDir,
   WorktreeSyncSessionHost,
@@ -2187,6 +2189,50 @@ export function createSessionManager(input: {
         ...sessionLogContext,
       })
 
+      if (
+        worktree &&
+        !existingArtifacts.worktree &&
+        worktree.state.poweredBy === defaultPlugin.name
+      ) {
+        try {
+          await prepareFreshWorktree({
+            repoRoot: worktree.state.repoRoot,
+            worktreeDir: worktree.state.worktreeDir,
+            config: resolvedConfig?.worktrees?.bootstrap,
+            onEvent: async (event) => {
+              await emitDiagnostic(id, event.type, event.detail, sessionLogger)
+            },
+          })
+        } catch (error) {
+          await emitDiagnostic(
+            id,
+            "worktree.bootstrap_failed",
+            {
+              errorMessage: error instanceof Error ? error.message : String(error),
+            },
+            sessionLogger,
+          )
+          throw error
+        }
+      } else if (worktree && existingArtifacts.worktree) {
+        await emitDiagnostic(
+          id,
+          "worktree.bootstrap_skipped",
+          { reason: "reused_worktree" },
+          sessionLogger,
+        )
+      } else if (worktree && worktree.state.poweredBy !== defaultPlugin.name) {
+        await emitDiagnostic(
+          id,
+          "worktree.bootstrap_skipped",
+          {
+            reason: "unsupported_plugin",
+            poweredBy: worktree.state.poweredBy,
+          },
+          sessionLogger,
+        )
+      }
+
       if (worktree && worktreeSyncEnabled) {
         mountedWorktreeSyncHost = await mountWorktreeSyncHost(id, worktree.state, sessionLogger)
       }
@@ -2430,10 +2476,7 @@ export function createSessionManager(input: {
       id: session.id,
       acpSessionId: session.acpSessionId,
       worktree: worktreeRecord
-        ? toSessionWorktreeValue(
-            worktreeRecord,
-            await resolveWorktreeSyncState(id, worktreeRecord),
-          )
+        ? toSessionWorktreeValue(worktreeRecord, await resolveWorktreeSyncState(id, worktreeRecord))
         : null,
     }
   }

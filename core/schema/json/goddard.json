@@ -409,10 +409,132 @@
           "description": "Default repository-local folder name used for daemon-managed worktrees.",
           "type": "string",
           "minLength": 1
+        },
+        "bootstrap": {
+          "description": "Daemon-managed preparation defaults applied to fresh worktrees.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorktreeBootstrapConfig"
+            }
+          ]
+        },
+        "plugins": {
+          "description": "Custom worktree plugins loaded from the global Goddard config only.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorktreePluginReference"
+          }
         }
       },
       "additionalProperties": false,
       "id": "WorktreesConfig"
+    },
+    "WorktreeBootstrapConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether daemon-managed worktree seeding and bootstrap are enabled.",
+          "type": "boolean"
+        },
+        "packageManager": {
+          "description": "Package manager command to run when bootstrapping a fresh daemon-managed worktree.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorktreeBootstrapPackageManager"
+            }
+          ]
+        },
+        "installArgs": {
+          "description": "Additional arguments appended to the selected package-manager install command.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "seedEnabled": {
+          "description": "Whether selected untracked artifacts should be copied into fresh worktrees.",
+          "type": "boolean"
+        },
+        "seedNames": {
+          "description": "Recursive basename allowlist used when selecting untracked seed candidates.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "seedPaths": {
+          "description": "Exact repository-relative paths added to the untracked seed candidate set.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false,
+      "id": "WorktreeBootstrapConfig"
+    },
+    "WorktreeBootstrapPackageManager": {
+      "type": "string",
+      "enum": ["bun", "pnpm", "npm", "yarn"],
+      "id": "WorktreeBootstrapPackageManager"
+    },
+    "WorktreePluginReference": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/WorktreePluginPathReference"
+        },
+        {
+          "$ref": "#/definitions/WorktreePluginPackageReference"
+        }
+      ],
+      "id": "WorktreePluginReference"
+    },
+    "WorktreePluginPathReference": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "path"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute plugin module path or a path resolved relative to the Goddard global directory."
+        },
+        "export": {
+          "description": "Optional module export name to load. Defaults to `default`.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["type", "path"],
+      "additionalProperties": false,
+      "id": "WorktreePluginPathReference"
+    },
+    "WorktreePluginPackageReference": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "package"
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Package name for a globally installed worktree plugin module."
+        },
+        "export": {
+          "description": "Optional module export name to load. Defaults to `default`.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["type", "package"],
+      "additionalProperties": false,
+      "id": "WorktreePluginPackageReference"
     },
     "AgentSetting": {
       "anyOf": [
@@ -760,7 +882,6 @@
         "crow-cli",
         "cursor",
         "deepagents",
-        "dimcode",
         "factory-droid",
         "fast-agent",
         "gemini",

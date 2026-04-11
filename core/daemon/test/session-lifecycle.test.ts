@@ -1,12 +1,13 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
@@ -16,10 +17,19 @@ const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", impor
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
+const originalPath = process.env.PATH
 const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/fast-acp-agent.mjs")
+const rootConfigSchemaUrl =
+  "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let sharedHomeDir: string | null = null
 
 afterEach(async () => {
+  if (originalPath === undefined) {
+    delete process.env.PATH
+  } else {
+    process.env.PATH = originalPath
+  }
+
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
@@ -561,15 +571,89 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
     systemPrompt: "Keep responses short.",
   })
 
-  const worktree = (await client.send("sessionWorktree", { id: created.session.id })).worktree
+  const fetchedWorktree = await client.send("sessionWorktree", { id: created.session.id })
+  const worktree = fetchedWorktree.worktree
   expect(worktree).toBeTruthy()
-  expect(worktree?.sessionId).toBe(created.session.id)
+  expect(fetchedWorktree.id).toBe(created.session.id)
   expect(worktree?.requestedCwd.endsWith("/src")).toBe(true)
   expect(worktree?.effectiveCwd).toMatch(/\/src$/)
   expect(worktree?.worktreeDir).not.toBe(repoDir)
   expect(existsSync(worktree!.worktreeDir)).toBe(true)
   expect(existsSync(worktree!.effectiveCwd)).toBe(true)
   await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap output", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture()
+  const binDir = await createFakePackageManager("bun", {
+    exitCode: 0,
+    outputFile: ".bootstrap-marker",
+  })
+
+  process.env.PATH = `${binDir}:${originalPath ?? ""}`
+  await writeLocalRootConfig(repoDir, {
+    worktrees: {
+      bootstrap: {
+        packageManager: "bun",
+        seedEnabled: false,
+      },
+    },
+  })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true, sync: { enabled: true } },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const worktree = (await client.send("sessionWorktree", { id: created.session.id })).worktree
+  expect(worktree?.sync?.status).toBe("mounted")
+  expect(await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8")).toBe(
+    "install\n",
+  )
+  expect(await readFile(join(repoDir, ".bootstrap-marker"), "utf-8")).toBe("install\n")
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("session creation fails when fresh worktree bootstrap install exits unsuccessfully", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture()
+  const binDir = await createFakePackageManager("bun", {
+    exitCode: 1,
+    outputFile: ".bootstrap-marker",
+  })
+
+  process.env.PATH = `${binDir}:${originalPath ?? ""}`
+  await writeLocalRootConfig(repoDir, {
+    worktrees: {
+      bootstrap: {
+        packageManager: "bun",
+        seedEnabled: false,
+      },
+    },
+  })
+
+  const sessionCountBefore = db.sessions.findMany().length
+  await expect(
+    client.send("sessionCreate", {
+      agent: createWrappedNodeAgent(exampleAgentPath),
+      cwd: repoDir,
+      worktree: { enabled: true },
+      mcpServers: [],
+      systemPrompt: "Keep responses short.",
+    }),
+  ).rejects.toThrow(/Internal server error/i)
+  expect(db.sessions.findMany()).toHaveLength(sessionCountBefore)
 })
 
 async function startServer(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
@@ -656,6 +740,44 @@ function runGit(cwd: string, args: string[]) {
   })
 
   expect(result.status).toBe(0)
+}
+
+async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
+  const configPath = getLocalConfigPath(repoDir)
+  await mkdir(dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ $schema: rootConfigSchemaUrl, ...config }, null, 2)}\n`,
+    "utf-8",
+  )
+}
+
+async function createFakePackageManager(
+  name: string,
+  options: {
+    exitCode: number
+    outputFile: string
+  },
+) {
+  const binDir = await mkdtemp(join(tmpdir(), `goddard-${name}-bin-`))
+  cleanup.push(async () => {
+    await rm(binDir, { recursive: true, force: true })
+  })
+
+  const scriptPath = join(binDir, name)
+  await writeFile(
+    scriptPath,
+    [
+      "#!/bin/sh",
+      `printf '%s\\n' "$@" > "${options.outputFile}"`,
+      `exit ${options.exitCode}`,
+      "",
+    ].join("\n"),
+    "utf-8",
+  )
+  await chmod(scriptPath, 0o755)
+
+  return binDir
 }
 
 function buildPromptMessage(sessionId: string, id: string, text: string) {
