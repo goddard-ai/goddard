@@ -130,6 +130,8 @@ export function AppShellChrome(props: {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              width: "min(40%, 320px)",
+              minWidth: "140px",
               transform: "translateX(-50%)",
             }),
             "electrobun-webkit-app-region-no-drag",
@@ -140,22 +142,19 @@ export function AppShellChrome(props: {
             class={css({
               display: "inline-flex",
               alignItems: "center",
-              gap: "10px",
-              width: "min(44vw, 360px)",
-              minWidth: "180px",
+              justifyContent: "center",
+              width: "100%",
               height: "28px",
-              paddingInline: "12px",
-              border: "1px solid",
-              borderColor: "border",
-              borderRadius: "8px",
+              paddingInline: "16px",
+              border: "none",
+              borderRadius: "6px",
               backgroundColor: "panel",
               color: "muted",
               cursor: "pointer",
               transition:
-                "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+                "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               _hover: {
                 backgroundColor: "surface",
-                borderColor: "accent",
                 color: "text",
               },
               _focusVisible: {
@@ -172,28 +171,14 @@ export function AppShellChrome(props: {
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                textAlign: "left",
+                textAlign: "center",
                 fontSize: "13px",
-                fontWeight: "500",
+                fontWeight: "400",
+                letterSpacing: "0.02em",
                 lineHeight: "1.21",
-                flex: "1",
               })}
             >
               {props.selectedNavigationLabel}
-            </span>
-            <span
-              aria-hidden={true}
-              class={css({
-                paddingInline: "8px",
-                borderRadius: "999px",
-                backgroundColor: "background",
-                color: "muted",
-                fontSize: "11px",
-                fontWeight: "700",
-                lineHeight: "20px",
-              })}
-            >
-              Cmd/Ctrl K
             </span>
           </button>
         </div>
@@ -520,6 +505,7 @@ function TabButton(props: {
   const isActive = props.activeTabId === props.id
   const isHome = props.isHome === true
   const [isHovered, setIsHovered] = useState(false)
+  const showCloseButton = isActive || isHovered
   const iconColor = isActive
     ? isHome
       ? accentStrongColor
@@ -594,7 +580,7 @@ function TabButton(props: {
         })}
         style={{
           paddingLeft: "8px",
-          paddingRight: isHome ? "14px" : "32px",
+          paddingRight: isHome ? "14px" : "8px",
         }}
         role="tab"
         type="button"
@@ -631,21 +617,31 @@ function TabButton(props: {
           })}
           style={{
             color: labelColor,
-            marginRight: isHome ? "0" : "6px",
           }}
         >
           {props.title}
         </span>
       </button>
       {isHome ? null : (
-        <>
+        <div
+          class={css({
+            display: "grid",
+            placeItems: "center",
+            width: "32px",
+            height: "30px",
+            marginRight: "0",
+            flexShrink: "0",
+            cursor: "pointer",
+          })}
+          onClick={() => {
+            props.onSelect(props.id)
+          }}
+        >
           {props.dirty ? (
             <span
               aria-hidden="true"
               class={css({
-                position: "absolute",
-                top: "11px",
-                right: "15px",
+                gridArea: "1 / 1",
                 width: "6px",
                 height: "6px",
                 borderRadius: "999px",
@@ -653,16 +649,14 @@ function TabButton(props: {
                 transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               })}
               style={{
-                opacity: isActive || isHovered ? "0" : "1",
+                opacity: showCloseButton ? "0" : "1",
               }}
             />
           ) : null}
           <button
             aria-label={`Close ${props.title}`}
             class={css({
-              position: "absolute",
-              top: "6px",
-              right: "8px",
+              gridArea: "1 / 1",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -690,7 +684,8 @@ function TabButton(props: {
               },
             })}
             style={{
-              opacity: isActive || isHovered ? "1" : "0",
+              opacity: showCloseButton ? "1" : "0",
+              pointerEvents: showCloseButton ? "auto" : "none",
             }}
             type="button"
             onClick={(event) => {
@@ -700,7 +695,7 @@ function TabButton(props: {
           >
             <InlineSvgIcon icon="close-tab" size="9px" />
           </button>
-        </>
+        </div>
       )}
     </div>
   )
