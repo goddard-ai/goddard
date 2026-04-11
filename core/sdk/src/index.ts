@@ -1,3 +1,4 @@
+export * from "./adapter.ts"
 export * from "./ipc-client.ts"
 export * from "./session.ts"
 export * from "./sdk.ts"

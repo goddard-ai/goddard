@@ -1,4 +1,5 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
+import type { AdapterCatalogEntry } from "@goddard-ai/sdk"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 
@@ -33,14 +34,20 @@ const controlClass = css({
 })
 
 export function LaunchForm(props: {
+  adapters: readonly AdapterCatalogEntry[]
   canSubmit: boolean
+  draftAdapterId: string | null
   draftProjectPath: string | null
   draftPrompt: string
+  onChangeAdapterId: (adapterId: string | null) => void
   onChangeProjectPath: (projectPath: string | null) => void
   onChangePrompt: (prompt: string) => void
   onSubmit: () => Promise<void> | void
   projects: readonly ProjectRecord[]
 }) {
+  const selectedAdapter =
+    props.adapters.find((adapter) => adapter.id === props.draftAdapterId) ?? null
+
   return (
     <form
       class={css({
@@ -75,6 +82,81 @@ export function LaunchForm(props: {
           ))}
         </select>
       </label>
+      <label class={fieldClass}>
+        <span class={labelClass}>Adapter</span>
+        <select
+          class={cx(
+            controlClass,
+            css({
+              height: "48px",
+              paddingInline: "16px",
+            }),
+          )}
+          value={props.draftAdapterId ?? ""}
+          onInput={(event) => {
+            props.onChangeAdapterId(event.currentTarget.value || null)
+          }}
+        >
+          <option value="">Select an adapter</option>
+          {props.adapters.map((adapter) => (
+            <option key={adapter.id} value={adapter.id}>
+              {adapter.name}
+              {adapter.unofficial ? " (Unofficial)" : ""}
+              {` · ${adapter.version}`}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selectedAdapter ? (
+        <div
+          class={css({
+            display: "grid",
+            gap: "6px",
+            padding: "14px 16px",
+            borderRadius: "18px",
+            border: "1px solid",
+            borderColor: "border",
+            backgroundColor: "surface",
+          })}
+        >
+          <div
+            class={css({
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              color: "text",
+              fontSize: "0.92rem",
+              fontWeight: "650",
+            })}
+          >
+            {selectedAdapter.icon ? (
+              <img
+                alt=""
+                class={css({
+                  width: "16px",
+                  height: "16px",
+                  borderRadius: "4px",
+                })}
+                src={selectedAdapter.icon}
+              />
+            ) : null}
+            <span>{selectedAdapter.name}</span>
+            <span class={css({ color: "muted", fontWeight: "560" })}>
+              {selectedAdapter.id}
+              {selectedAdapter.unofficial ? " (Unofficial)" : ""}
+            </span>
+          </div>
+          <p
+            class={css({
+              color: "muted",
+              fontSize: "0.88rem",
+              lineHeight: "1.5",
+            })}
+          >
+            {selectedAdapter.description}
+          </p>
+        </div>
+      ) : null}
       <label class={fieldClass}>
         <span class={labelClass}>Launch prompt</span>
         <textarea

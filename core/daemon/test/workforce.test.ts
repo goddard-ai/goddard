@@ -64,7 +64,7 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
             failedRequestCount: 0,
             config: {
               version: 1,
-              defaultAgent: "pi",
+              defaultAgent: "pi-acp",
               rootAgentId: "root",
               agents: [],
             },
@@ -80,7 +80,7 @@ test("daemon IPC exposes repo-root workforce lifecycle methods", async () => {
             failedRequestCount: 0,
             config: {
               version: 1,
-              defaultAgent: "pi",
+              defaultAgent: "pi-acp",
               rootAgentId: "root",
               agents: [],
             },
@@ -329,7 +329,7 @@ test("workforce manager reuses one runtime per normalized repository root", asyn
           failedRequestCount: 0,
           config: {
             version: 1,
-            defaultAgent: "pi",
+            defaultAgent: "pi-acp",
             rootAgentId: "root",
             agents: [],
           },
@@ -367,7 +367,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {
@@ -463,7 +463,7 @@ test("domain agents can update and cancel requests they originally sent", async 
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {
@@ -565,7 +565,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {
@@ -656,7 +656,7 @@ test("create-intent requests target the root agent and specialize the root sessi
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {
@@ -779,7 +779,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {
@@ -861,7 +861,7 @@ test("workforce runtime logs request-to-session correlation for launched session
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {
@@ -971,7 +971,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
     JSON.stringify(
       {
         version: 1,
-        defaultAgent: "pi",
+        defaultAgent: "pi-acp",
         rootAgentId: "root",
         agents: [
           {

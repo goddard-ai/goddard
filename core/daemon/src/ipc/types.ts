@@ -16,6 +16,7 @@ import type { LoopManager } from "../loop/index.ts"
 import type { LoopManagerDeps } from "../loop/manager.ts"
 import { db } from "../persistence/store.ts"
 import type { SessionManager } from "../session/index.ts"
+import type { ACPRegistryService } from "../session/registry.ts"
 import type { WorkforceManager } from "../workforce/index.ts"
 
 export type PrCreateInput = {
@@ -69,6 +70,7 @@ export type DaemonServerDeps = {
     record: KindInput<typeof db.schema.pullRequests>,
   ) => Promise<KindOutput<typeof db.schema.pullRequests>>
   configManager?: ConfigManager
+  createRegistryService?: () => ACPRegistryService
   createLoopManager?: (input: LoopManagerDeps) => LoopManager
   createWorkforceManager?: (input: {
     sessionManager: SessionManager

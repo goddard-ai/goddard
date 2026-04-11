@@ -2,6 +2,7 @@ import { $type, IpcSchema } from "@goddard-ai/ipc"
 import { z } from "zod"
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { DaemonSessionIdParams } from "./common/params.ts"
+import { type ListAdaptersResponse, ListAdaptersRequest } from "./daemon-adapters.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
   type GetLoopResponse,
@@ -86,6 +87,10 @@ export const daemonIpcSchema = {
     },
     authLogout: {
       response: $type<{ success: true }>(),
+    },
+    adapterList: {
+      payload: ListAdaptersRequest,
+      response: $type<ListAdaptersResponse>(),
     },
     prSubmit: {
       payload: SubmitPrRequest.extend({

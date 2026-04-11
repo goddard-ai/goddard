@@ -27,6 +27,7 @@
   },
   "scripts": {
     "build": "tsdown --unused",
+    "generate-acp-registry-fallback": "bun scripts/generate-acp-registry-fallback.ts",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "typecheck": "tsgo --noEmit",

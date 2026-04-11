@@ -69,7 +69,7 @@ import {
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
-import { fetchRegistryAgent } from "./registry.ts"
+import type { ACPRegistryService } from "./registry.ts"
 import {
   resolveGitRepoRoot,
   reuseExistingWorktree,
@@ -506,6 +506,7 @@ export async function spawnAgentProcess(params: {
   cwd: string
   agentBinDir: string
   env?: Record<string, string>
+  registryService: ACPRegistryService
   registry?: Record<string, AgentDistribution>
 }): Promise<AgentProcessHandle> {
   let agent = params.agent
@@ -514,11 +515,11 @@ export async function spawnAgentProcess(params: {
     if (params.registry?.[agent]) {
       agent = params.registry[agent]
     } else {
-      const fetchedAgent = await fetchRegistryAgent(agent)
-      if (!fetchedAgent) {
+      const registryEntry = await params.registryService.getAdapter(agent)
+      if (!registryEntry.adapter) {
         throw new Error(`Agent not found: ${agent}`)
       }
-      agent = fetchedAgent
+      agent = registryEntry.adapter
     }
   }
 
@@ -1149,7 +1150,7 @@ export function createSessionManager(input: {
   agentBinDir: string
   publish: (id: SessionId, message: acp.AnyMessage) => void
   configManager: ConfigManager
-  registry?: Record<string, AgentDistribution>
+  registryService: ACPRegistryService
 }): SessionManager {
   const activeSessions = new Map<SessionId, ActiveSession>()
   const worktreeSyncRuntimes = new Map<SessionId, WorktreeSyncRuntime>()
@@ -2137,7 +2138,7 @@ export function createSessionManager(input: {
       (shouldResolveConfiguredWorktreePlugins(params.request, existingArtifacts.worktree)
         ? await worktreePluginManager.getPlugins(params.request.cwd)
         : undefined)
-    const resolvedRegistry = resolvedConfig?.registry ?? input.registry
+    const resolvedRegistry = resolvedConfig?.registry
     const worktree = await resolveLaunchWorktree({
       sessionId: id,
       request: params.request,
@@ -2244,6 +2245,7 @@ export function createSessionManager(input: {
         cwd,
         agentBinDir: input.agentBinDir,
         env: params.request.env,
+        registryService: input.registryService,
         registry: resolvedRegistry,
       })
 

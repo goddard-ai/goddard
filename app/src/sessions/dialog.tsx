@@ -1,6 +1,6 @@
 import { Dialog } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
-import type { CreateSessionRequest } from "@goddard-ai/sdk"
+import type { AdapterCatalogEntry, CreateSessionRequest } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Sparkles, X } from "lucide-react"
@@ -11,11 +11,14 @@ import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 
 export function SessionLaunchDialog(props: {
+  adapters: readonly AdapterCatalogEntry[]
   canSubmit: boolean
   createSessionInput: () => CreateSessionRequest | null
+  draftAdapterId: string | null
   draftProjectPath: string | null
   draftPrompt: string
   isDialogOpen: boolean
+  onChangeAdapterId: (adapterId: string | null) => void
   onChangeProjectPath: (projectPath: string | null) => void
   onChangePrompt: (prompt: string) => void
   onClose: () => void
@@ -178,9 +181,12 @@ export function SessionLaunchDialog(props: {
               </Dialog.CloseTrigger>
             </div>
             <LaunchForm
+              adapters={props.adapters}
               canSubmit={props.canSubmit}
+              draftAdapterId={props.draftAdapterId}
               draftProjectPath={props.draftProjectPath}
               draftPrompt={props.draftPrompt}
+              onChangeAdapterId={props.onChangeAdapterId}
               onChangeProjectPath={props.onChangeProjectPath}
               onChangePrompt={props.onChangePrompt}
               onSubmit={launchSession}

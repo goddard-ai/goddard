@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { IpcClientError, createServer } from "@goddard-ai/ipc/node"
 import type { DaemonSession, SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
@@ -23,6 +24,11 @@ import { createWorkforceManager, type WorkforceManager } from "../workforce/inde
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
+import { createACPRegistryService } from "../session/registry.ts"
+import {
+  createConfigAdapterCatalogEntries,
+  mergeAdapterCatalogEntries,
+} from "../session/registry-catalog.ts"
 import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
 
 export async function startDaemonServer(
@@ -103,6 +109,7 @@ export async function startDaemonServer(
     })
 
   await prepareSocketPath(socketPath)
+  const registryService = (deps.createRegistryService ?? createACPRegistryService)()
 
   let sessionManager!: SessionManager
   let loopManager!: LoopManager
@@ -191,6 +198,27 @@ export async function startDaemonServer(
       await client.auth.logout()
       db.metadata.delete("authToken")
       return { success: true as const }
+    },
+    adapterList: async ({ cwd }) => {
+      const [registrySnapshot, resolvedConfig] = await Promise.all([
+        registryService.listAdapters(),
+        cwd ? configManager.getRootConfig(cwd).then((snapshot) => snapshot.config) : undefined,
+      ])
+      const mergedAdapters = mergeAdapterCatalogEntries(
+        registrySnapshot.adapters,
+        createConfigAdapterCatalogEntries(resolvedConfig?.registry),
+      )
+      const defaultAgent = await resolveDefaultAgent(resolvedConfig)
+
+      return {
+        ...registrySnapshot,
+        adapters: mergedAdapters,
+        defaultAdapterId:
+          typeof defaultAgent === "string" &&
+          mergedAdapters.some((adapter) => adapter.id === defaultAgent)
+            ? defaultAgent
+            : null,
+      }
     },
     prSubmit: async (payload) => {
       const session = await getSessionByToken(payload.token)
@@ -538,6 +566,7 @@ export async function startDaemonServer(
     daemonUrl,
     agentBinDir: runtime.agentBinDir,
     configManager,
+    registryService,
     publish: (id, message) => {
       ipcServer.publish("sessionMessage", { id, message })
     },

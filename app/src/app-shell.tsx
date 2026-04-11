@@ -15,7 +15,9 @@ import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
 import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
 import { CommandMenu } from "./command-menu.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
+import { useQuery } from "./lib/query.ts"
 import { deriveProjectName } from "./projects/project-name.ts"
+import { goddardSdk } from "./sdk.ts"
 import { buildCreateSessionInput } from "./sessions/session-launch.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
@@ -86,19 +88,49 @@ function useAppShellTabStrip(
 
 function useSessionDialogState() {
   const isDialogOpen = useSignal(false)
+  const draftAdapterId = useSignal<string | null>(null)
   const draftProjectPath = useSignal<string | null>(null)
   const draftPrompt = useSignal("")
+  const adapterCatalog = useQuery(goddardSdk.adapter.list, [
+    { cwd: draftProjectPath.value ?? undefined },
+  ])
+
+  useEffect(() => {
+    const availableAdapterIds = new Set(adapterCatalog.adapters.map((adapter) => adapter.id))
+    const nextAdapterId =
+      draftAdapterId.value && availableAdapterIds.has(draftAdapterId.value)
+        ? draftAdapterId.value
+        : adapterCatalog.defaultAdapterId &&
+            availableAdapterIds.has(adapterCatalog.defaultAdapterId)
+          ? adapterCatalog.defaultAdapterId
+          : (adapterCatalog.adapters[0]?.id ?? null)
+
+    if (draftAdapterId.value !== nextAdapterId) {
+      draftAdapterId.value = nextAdapterId
+    }
+  }, [
+    adapterCatalog.adapters,
+    adapterCatalog.defaultAdapterId,
+    draftAdapterId.value,
+    draftProjectPath.value,
+  ])
 
   function openDialog(preferredProjectPath?: string | null) {
     isDialogOpen.value = true
+    draftAdapterId.value = null
     draftProjectPath.value = preferredProjectPath ?? null
     draftPrompt.value = ""
   }
 
   function closeDialog() {
     isDialogOpen.value = false
+    draftAdapterId.value = null
     draftProjectPath.value = null
     draftPrompt.value = ""
+  }
+
+  function setDraftAdapterId(adapterId: string | null) {
+    draftAdapterId.value = adapterId
   }
 
   function setDraftProjectPath(projectPath: string | null) {
@@ -110,7 +142,7 @@ function useSessionDialogState() {
   }
 
   function createSessionInput() {
-    return buildCreateSessionInput(draftProjectPath.value, draftPrompt.value)
+    return buildCreateSessionInput(draftProjectPath.value, draftAdapterId.value, draftPrompt.value)
   }
 
   function canSubmit() {
@@ -118,13 +150,16 @@ function useSessionDialogState() {
   }
 
   return {
+    adapters: adapterCatalog.adapters,
     canSubmit,
     closeDialog,
     createSessionInput,
+    draftAdapterId,
     draftProjectPath,
     draftPrompt,
     isDialogOpen,
     openDialog,
+    setDraftAdapterId,
     setDraftProjectPath,
     setDraftPrompt,
   }
@@ -399,11 +434,14 @@ export function AppShell() {
         />
       </AppShellChrome>
       <SessionLaunchDialog
+        adapters={sessionDialog.adapters}
         canSubmit={sessionDialog.canSubmit()}
         createSessionInput={sessionDialog.createSessionInput}
+        draftAdapterId={sessionDialog.draftAdapterId.value}
         draftProjectPath={sessionDialog.draftProjectPath.value}
         draftPrompt={sessionDialog.draftPrompt.value}
         isDialogOpen={sessionDialog.isDialogOpen.value}
+        onChangeAdapterId={sessionDialog.setDraftAdapterId}
         onChangeProjectPath={sessionDialog.setDraftProjectPath}
         onChangePrompt={sessionDialog.setDraftPrompt}
         onClose={sessionDialog.closeDialog}

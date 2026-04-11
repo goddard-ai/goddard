@@ -1,5 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getLocalConfigPath } from "@goddard-ai/paths/node"
+import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
@@ -9,6 +10,7 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -136,6 +138,89 @@ test("daemon persists ACP stop reasons on the session record", async () => {
 
   expect(created.session.stopReason).toBe("end_turn")
   expect(db.sessions.get(created.session.id)?.stopReason).toBe("end_turn")
+})
+
+test("daemon lists adapters through the shared registry service and config default", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+  await writeFile(
+    getGlobalConfigPath(),
+    JSON.stringify({
+      session: {
+        agent: "pi-acp",
+      },
+    }),
+    "utf8",
+  )
+
+  const daemon = await startServer({
+    useExistingHome: true,
+    deps: {
+      createRegistryService: () => ({
+        listAdapters: async () => ({
+          adapters: [
+            {
+              id: "pi-acp",
+              name: "pi ACP",
+              version: "0.0.25",
+              description: "ACP adapter for pi coding agent",
+              repository: "https://github.com/svkozak/pi-acp",
+              authors: ["Sergii Kozak <svkozak@gmail.com>"],
+              license: "MIT",
+              distribution: {
+                npx: {
+                  package: "pi-acp@0.0.25",
+                },
+              },
+              unofficial: true,
+              source: "registry",
+            },
+          ],
+          registrySource: "cache",
+          lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+          stale: false,
+          lastError: null,
+        }),
+        getAdapter: async (id: string) => ({
+          adapter:
+            id === "pi-acp"
+              ? {
+                  id: "pi-acp",
+                  name: "pi ACP",
+                  version: "0.0.25",
+                  description: "ACP adapter for pi coding agent",
+                  repository: "https://github.com/svkozak/pi-acp",
+                  authors: ["Sergii Kozak <svkozak@gmail.com>"],
+                  license: "MIT",
+                  distribution: {
+                    npx: {
+                      package: "pi-acp@0.0.25",
+                    },
+                  },
+                  unofficial: true,
+                  source: "registry",
+                }
+              : null,
+          adapters: [],
+          registrySource: "cache",
+          lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+          stale: false,
+          lastError: null,
+        }),
+      }),
+    },
+  })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const response = await client.send("adapterList", { cwd: repoDir })
+
+  expect(response.defaultAdapterId).toBe("pi-acp")
+  expect(response.registrySource).toBe("cache")
+  expect(response.adapters).toHaveLength(1)
+  expect(response.adapters[0]).toMatchObject({
+    id: "pi-acp",
+    unofficial: true,
+  })
 })
 
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {
@@ -656,7 +741,9 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
   expect(db.sessions.findMany()).toHaveLength(sessionCountBefore)
 })
 
-async function startServer(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
+async function startServer(
+  options: { useExistingHome?: boolean; deps?: Parameters<typeof startDaemonServer>[2] } = {},
+): Promise<DaemonServer> {
   if (!options.useExistingHome) {
     await useTempHome()
   }
@@ -691,6 +778,7 @@ async function startServer(options: { useExistingHome?: boolean } = {}): Promise
       },
     },
     { socketPath },
+    options.deps,
   )
 
   cleanup.push(async () => {

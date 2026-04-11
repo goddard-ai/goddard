@@ -1,3 +1,5 @@
+export { AdapterCatalogEntry, ListAdaptersRequest } from "./daemon-adapters.ts"
+export type * from "./daemon-adapters.ts"
 export type * from "./daemon/actions.ts"
 export type * from "./daemon/loops.ts"
 export type * from "./daemon/pull-requests.ts"

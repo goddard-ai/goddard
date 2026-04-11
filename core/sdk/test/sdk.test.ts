@@ -17,6 +17,30 @@ function createSdkWithClient() {
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
+  test("adapter.list forwards to adapterList", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      adapters: [],
+      defaultAdapterId: "pi-acp",
+      registrySource: "cache",
+      lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+      stale: false,
+      lastError: null,
+    })
+
+    await expect(sdk.adapter.list({ cwd: "/tmp/project" })).resolves.toEqual({
+      adapters: [],
+      defaultAdapterId: "pi-acp",
+      registrySource: "cache",
+      lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+      stale: false,
+      lastError: null,
+    })
+
+    expect(send).toHaveBeenCalledWith("adapterList", { cwd: "/tmp/project" })
+  })
+
   test("session.send forwards ACP messages to sessionSend", async () => {
     const { sdk, send } = createSdkWithClient()
     const message: acp.AnyMessage = {
@@ -198,7 +222,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     send.mockResolvedValueOnce({ id: "ses_1", success: true })
 
     const session = await sdk.session.run({
-      agent: "pi",
+      agent: "pi-acp",
       cwd: "/tmp/project",
       mcpServers: [],
       systemPrompt: "Keep responses short.",
@@ -208,7 +232,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     await session!.stop()
 
     expect(send).toHaveBeenNthCalledWith(1, "sessionCreate", {
-      agent: "pi",
+      agent: "pi-acp",
       cwd: "/tmp/project",
       worktree: undefined,
       mcpServers: [],

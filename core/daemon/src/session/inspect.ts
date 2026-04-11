@@ -3,6 +3,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import * as os from "node:os"
 import { createAgentMessageStream } from "./acp.ts"
 import { spawnAgentProcess } from "./manager.ts"
+import { createACPRegistryService } from "./registry.ts"
 
 /** Starts one raw ACP adapter, initializes it, and opens a fresh session for inspection. */
 export async function inspectAdapterSession(adapter: string, cwd: string) {
@@ -12,6 +13,7 @@ export async function inspectAdapterSession(adapter: string, cwd: string) {
     agent: adapter,
     cwd,
     agentBinDir: os.tmpdir(),
+    registryService: createACPRegistryService(),
   })
   const stream = createAgentMessageStream(processHandle.stdin, processHandle.stdout)
   const sessionUpdates: acp.AnyMessage[] = []

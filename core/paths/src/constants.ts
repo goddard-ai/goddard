@@ -1,6 +1,9 @@
 /** Root directory name used for all Goddard-managed files and directories. */
 export const GODDARD_DIRECTORY_NAME = ".goddard"
 
+/** Directory name used for Goddard-managed OS cache contents. */
+export const GODDARD_CACHE_DIRECTORY_NAME = "goddard"
+
 /** Filename used for the root JSON configuration document. */
 export const GODDARD_CONFIG_FILENAME = "config.json"
 
@@ -21,3 +24,6 @@ export const GODDARD_SESSION_PERMISSIONS_FILENAME = "session-permissions.json"
 
 /** Filename used for daemon-managed pull request location metadata. */
 export const GODDARD_MANAGED_PR_LOCATIONS_FILENAME = "managed-pr-locations.json"
+
+/** Directory name used for the cached ACP registry clone. */
+export const GODDARD_ACP_REGISTRY_CACHE_DIRECTORY = "acp-registry"

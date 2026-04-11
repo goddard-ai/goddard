@@ -1,6 +1,8 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
+  GODDARD_ACP_REGISTRY_CACHE_DIRECTORY,
+  GODDARD_CACHE_DIRECTORY_NAME,
   GODDARD_AUTH_TOKEN_FILENAME,
   GODDARD_CONFIG_FILENAME,
   GODDARD_DATABASE_FILENAME,
@@ -19,6 +21,31 @@ function resolveHomeDir(): string {
 /** Returns the user-scoped global `.goddard` directory. */
 export function getGoddardGlobalDir(): string {
   return join(resolveHomeDir(), GODDARD_DIRECTORY_NAME)
+}
+
+/** Returns the user-scoped OS cache directory used for disposable Goddard runtime state. */
+export function getGoddardCacheDir(): string {
+  if (process.platform === "darwin") {
+    return join(resolveHomeDir(), "Library", "Caches", GODDARD_CACHE_DIRECTORY_NAME)
+  }
+
+  if (process.platform === "win32") {
+    return join(
+      process.env.LOCALAPPDATA || join(resolveHomeDir(), "AppData", "Local"),
+      "Goddard",
+      "Cache",
+    )
+  }
+
+  return join(
+    process.env.XDG_CACHE_HOME || join(resolveHomeDir(), ".cache"),
+    GODDARD_CACHE_DIRECTORY_NAME,
+  )
+}
+
+/** Returns the OS cache directory reserved for the ACP registry clone. */
+export function getAcpRegistryCacheDir(): string {
+  return join(getGoddardCacheDir(), GODDARD_ACP_REGISTRY_CACHE_DIRECTORY)
 }
 
 /** Returns the global root config file path. */

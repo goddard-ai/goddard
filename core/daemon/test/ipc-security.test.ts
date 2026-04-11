@@ -713,7 +713,7 @@ function buildWorkforce(rootDir: string) {
     ...buildWorkforceStatus(rootDir),
     config: {
       version: 1 as const,
-      defaultAgent: "pi",
+      defaultAgent: "pi-acp",
       rootAgentId: "root",
       agents: [],
     },

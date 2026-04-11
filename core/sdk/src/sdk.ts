@@ -2,6 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
+import type { ListAdaptersRequest } from "@goddard-ai/schema/daemon"
 import type {
   CancelSessionRequest,
   CancelWorkforceRequest,
@@ -72,6 +73,14 @@ function createAuthNamespace(client: DaemonIpcClient) {
 
     /** Clears the current daemon-owned auth session as-is. */
     logout: async () => client.send("authLogout"),
+  }
+}
+
+/** Builds the adapter namespace with one thin method per daemon adapter IPC action. */
+function createAdapterNamespace(client: DaemonIpcClient) {
+  return {
+    /** Lists adapters available for one project or global launch flow. */
+    list: async (input: ListAdaptersRequest = {}) => client.send("adapterList", input),
   }
 }
 
@@ -250,6 +259,10 @@ export class GoddardSdk {
 
   get auth() {
     return defineCachedNamespace(this, "auth", createAuthNamespace(this.#client))
+  }
+
+  get adapter() {
+    return defineCachedNamespace(this, "adapter", createAdapterNamespace(this.#client))
   }
 
   get pr() {
