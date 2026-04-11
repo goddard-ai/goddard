@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 import { inspectAdapterSession } from "../core/daemon/src/session/inspect.ts"
+import { ACPAdapterNames } from "../core/schema/src/acp-adapters.ts"
 import { GoddardSdk } from "../core/sdk/src/node/index.ts"
 
 const DEFAULT_PROMPT =
@@ -146,10 +147,23 @@ async function resumeSession(id: string) {
   })
 }
 
+/** Prints the generated ACP adapter ids accepted by daemon-backed session creation. */
+function listAgents() {
+  writeJson({
+    agents: ACPAdapterNames,
+  })
+}
+
 const app = subcommands({
   name: "acp",
   description: "ACP debugging commands for daemon-backed sessions and raw adapters",
   cmds: {
+    "list-agents": command({
+      name: "list-agents",
+      description: "List the available ACP adapter ids accepted as named agents",
+      args: {},
+      handler: listAgents,
+    }),
     stream: command({
       name: "stream",
       description: "Start a daemon-backed agent session and print streamed ACP messages",
