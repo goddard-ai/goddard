@@ -1,5 +1,4 @@
 import "preact/debug"
-import "@goddard-ai/styled-system/styles.css"
 import { render } from "preact"
 
 import { AppShell } from "~/app-shell.tsx"

@@ -8,15 +8,6 @@ export default defineConfig({
   outdir: "styled-system",
   jsxFramework: "preact",
   theme: {
-    tokens: {
-      colors: {
-        seed: {
-          accent: { value: "#8fa2b8" },
-          background: { value: "#ffffff" },
-          foreground: { value: "#18212b" },
-        },
-      },
-    },
     semanticTokens: {
       colors: {
         background: { value: "var(--theme-color-background)" },
