@@ -2,7 +2,12 @@ import { BrowserView } from "electrobun/bun"
 
 import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
-import { daemonSend } from "./daemon.ts"
+import {
+  daemonResetSubscriptions,
+  daemonSend,
+  daemonSubscribe,
+  daemonUnsubscribe,
+} from "./daemon.ts"
 import { getMainWindow } from "./main-window.ts"
 import { browseForProject } from "./projects.ts"
 import { readShortcutKeymap, writeShortcutKeymap } from "./shortcut-keymap.ts"
@@ -20,6 +25,9 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
         keymap: await writeShortcutKeymap(keymap),
       }),
       daemonSend: async (input) => await daemonSend(input),
+      daemonSubscribe: async (input) => await daemonSubscribe(input),
+      daemonUnsubscribe: async (input) => await daemonUnsubscribe(input),
+      daemonResetSubscriptions: async (input) => await daemonResetSubscriptions(input),
       maximizeWindow: async () => {
         getMainWindow()?.maximize()
         return {}
