@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ark UI"
+  short_description: "Build and debug Ark UI React components"
+  default_prompt: "Use $ark-ui to build or debug Ark UI React components, styling, or collection utilities."
