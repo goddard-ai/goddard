@@ -16,6 +16,7 @@
     "./json/*": "./json/*"
   },
   "scripts": {
+    "prepare": "bun run scripts/generate-acp-adapters.js",
     "build": "tsdown --unused && bun run generate-schemas",
     "generate-schemas": "node scripts/generate-json-schemas.ts && oxfmt json/",
     "lint": "oxlint",
