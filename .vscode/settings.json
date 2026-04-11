@@ -37,7 +37,10 @@
   "files.exclude": {
     "**/.husky": true,
     "**/.turbo": true,
-    "**/node_modules": true
+    "**/node_modules": true,
+    "**/roadmap": true,
+    "**/research": true,
+    "**/website": true
   },
   "search.exclude": {
     "**/.agents": true,
