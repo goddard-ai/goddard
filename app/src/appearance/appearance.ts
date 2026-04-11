@@ -1,4 +1,5 @@
 import { SigmaType } from "preact-sigma"
+
 import {
   applyAppearanceSnapshot,
   type AppearanceMode,
@@ -62,9 +63,7 @@ export const Appearance = new SigmaType<AppearanceShape>("Appearance")
       this.systemTheme = initialSnapshot.systemTheme
     })
 
-    if (typeof document !== "undefined") {
-      applyAppearanceSnapshot(initialSnapshot)
-    }
+    applyAppearanceSnapshot(initialSnapshot)
 
     return []
   })

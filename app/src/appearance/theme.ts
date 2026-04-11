@@ -8,6 +8,7 @@ import {
   useMode,
   wcagContrast,
 } from "culori/fn"
+
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 
 const APPEARANCE_STORAGE_KEY = "goddard.app.appearance.v1"
@@ -208,10 +209,6 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
 
 /** Returns the current system color-scheme choice observed by the browser runtime. */
 export function readSystemThemeName() {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return "light" satisfies BuiltInThemeName
-  }
-
   return window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY).matches ? "dark" : "light"
 }
 
@@ -247,10 +244,6 @@ export function buildAppearanceDocumentState(
 
 /** Applies the resolved appearance payload to the root document element in place. */
 export function applyAppearanceSnapshot(snapshot: AppearanceSnapshot) {
-  if (typeof document === "undefined") {
-    return
-  }
-
   const root = document.documentElement
   const documentState = buildAppearanceDocumentState(snapshot)
 
