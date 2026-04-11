@@ -1,5 +1,7 @@
+import "preact/debug"
 import "@goddard-ai/styled-system/styles.css"
 import { render } from "preact"
+
 import { AppShell } from "~/app-shell.tsx"
 import { AppStateProvider } from "~/app-state-context.tsx"
 import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
