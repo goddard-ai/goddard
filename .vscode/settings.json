@@ -5,7 +5,6 @@
   "typescript.tsdk": "./node_modules/typescript/lib",
   "oxc.enable.oxfmt": true,
   "editor.codeActionsOnSave": {
-    "source.organizeImports": "explicit",
     "source.fixAll.oxc": "explicit"
   },
   "typescript.preferences.importModuleSpecifierEnding": "js",

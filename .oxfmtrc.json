@@ -3,6 +3,17 @@
   "ignorePatterns": ["*.md", "**/.agents/**"],
   "semi": false,
   "singleQuote": false,
+  "sortImports": {
+    "newlinesBetween": false,
+    "groups": [
+      ["builtin", "external"],
+      { "newlinesBetween": true },
+      ["internal", "subpath"],
+      ["parent", "sibling", "index"],
+      "style",
+      "unknown"
+    ]
+  },
   "trailingComma": "all",
   "printWidth": 100
 }
