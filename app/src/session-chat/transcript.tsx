@@ -82,15 +82,19 @@ const assistantBubbleClass = css({
 
 const userBubbleClass = css({
   borderColor: "accent",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accentStrong")} 24%, white), color-mix(in srgb, ${token.var("colors.accent")} 22%, white))`,
-  color: "#102030",
+  background:
+    `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accentStrong")} 72%, ${token.var("colors.background")}), ` +
+    `color-mix(in srgb, ${token.var("colors.accent")} 82%, ${token.var("colors.background")}))`,
+  color: "accentFg",
 })
 
 const systemBubbleClass = css({
   borderColor: "border",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.surface")} 70%, white), ${token.var("colors.surface")})`,
+  background:
+    `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.surface")} 72%, ${token.var("colors.background")}), ` +
+    `${token.var("colors.surface")})`,
   color: "muted",
-  boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${token.var("colors.border")} 70%, white)`,
+  boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${token.var("colors.border")} 72%, ${token.var("colors.background")})`,
 })
 
 const transcriptLineClass = css({
@@ -103,7 +107,7 @@ const transcriptLineClass = css({
 })
 
 const userLineClass = css({
-  color: "#102030",
+  color: "accentFg",
 })
 
 const assistantLineClass = css({

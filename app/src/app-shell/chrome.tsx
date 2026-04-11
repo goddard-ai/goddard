@@ -1,13 +1,22 @@
 /** Presentational chrome primitives for the merged app shell layout. */
 import { css, cx } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
-import { type AppShellTopbarAction } from "./config.ts"
+
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
 import { getWorkbenchTabIcon, type WorkbenchTab } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
+import { type AppShellTopbarAction } from "./config.ts"
+
+const accentColor = token.var("colors.accent")
+const accentStrongColor = token.var("colors.accentStrong")
+const backgroundColor = token.var("colors.background")
+const borderColor = token.var("colors.border")
+const panelColor = token.var("colors.panel")
+const textColor = token.var("colors.text")
 
 const actionButtonClass = css({
   position: "relative",
@@ -16,12 +25,13 @@ const actionButtonClass = css({
   justifyContent: "center",
   border: "none",
   backgroundColor: "transparent",
-  color: "#66a1ff",
+  color: "accentStrong",
   cursor: "pointer",
   transition:
     "background-color 200ms cubic-bezier(0.23, 1, 0.32, 1), color 200ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms cubic-bezier(0.23, 1, 0.32, 1)",
   _focusVisible: {
-    outline: "2px solid #66a1ff",
+    outline: "2px solid",
+    outlineColor: "accentStrong",
     outlineOffset: "2px",
   },
 })
@@ -65,8 +75,8 @@ export function AppShellChrome(props: {
         height: "100vh",
         maxHeight: "100vh",
         overflow: "hidden",
-        backgroundColor: "#181818",
-        color: "#ffffff",
+        backgroundColor: "background",
+        color: "text",
         fontFamily: '"Inter Tight", sans-serif',
       })}
     >
@@ -80,8 +90,8 @@ export function AppShellChrome(props: {
             justifyContent: "flex-end",
             height: "48px",
             paddingRight: "11px",
-            backgroundColor: "#1c1c1c",
-            boxShadow: "0 0.5px 0 #313131",
+            backgroundColor: "surface",
+            boxShadow: `0 0.5px 0 ${borderColor}`,
             zIndex: "2",
           }),
           "electrobun-webkit-app-region-drag",
@@ -117,6 +127,9 @@ export function AppShellChrome(props: {
               position: "absolute",
               left: "50%",
               top: "10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               transform: "translateX(-50%)",
             }),
             "electrobun-webkit-app-region-no-drag",
@@ -133,20 +146,21 @@ export function AppShellChrome(props: {
               height: "28px",
               paddingInline: "12px",
               border: "1px solid",
-              borderColor: "#313131",
+              borderColor: "border",
               borderRadius: "8px",
-              backgroundColor: "#262626",
-              color: "rgba(255, 255, 255, 0.72)",
+              backgroundColor: "panel",
+              color: "muted",
               cursor: "pointer",
               transition:
                 "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               _hover: {
-                backgroundColor: "#2c2c2c",
-                borderColor: "#3b3b3b",
-                color: "#ffffff",
+                backgroundColor: "surface",
+                borderColor: "accent",
+                color: "text",
               },
               _focusVisible: {
-                outline: "2px solid #66a1ff",
+                outline: "2px solid",
+                outlineColor: "accentStrong",
                 outlineOffset: "2px",
               },
             })}
@@ -172,8 +186,8 @@ export function AppShellChrome(props: {
               class={css({
                 paddingInline: "8px",
                 borderRadius: "999px",
-                backgroundColor: "#1d1d1d",
-                color: "rgba(255, 255, 255, 0.46)",
+                backgroundColor: "background",
+                color: "muted",
                 fontSize: "11px",
                 fontWeight: "700",
                 lineHeight: "20px",
@@ -201,7 +215,7 @@ export function AppShellChrome(props: {
               alignItems: "center",
               padding: "3px",
               borderRadius: "14px",
-              backgroundColor: "rgba(51, 130, 255, 0.18)",
+              backgroundColor: `color-mix(in srgb, ${accentColor} 18%, transparent)`,
               _hover: {
                 "& > span": {
                   opacity: "0",
@@ -219,7 +233,7 @@ export function AppShellChrome(props: {
               class={css({
                 width: "1px",
                 height: "10px",
-                backgroundColor: "#66a1ff",
+                backgroundColor: accentStrongColor,
                 opacity: "0.3",
                 transition: "opacity 200ms cubic-bezier(0.23, 1, 0.32, 1)",
               })}
@@ -239,9 +253,10 @@ export function AppShellChrome(props: {
                 width: "32px",
                 height: "28px",
                 borderRadius: "9px",
-                color: "#999999",
+                color: "muted",
                 _hover: {
-                  backgroundColor: "#262626",
+                  backgroundColor: "panel",
+                  color: "text",
                 },
               }),
             )}
@@ -265,7 +280,7 @@ export function AppShellChrome(props: {
           height: "100%",
           overflowY: "auto",
           overflowX: "hidden",
-          background: "linear-gradient(180deg, #1c1c1c 12.32%, #181818 100%)",
+          background: `linear-gradient(180deg, ${panelColor} 12.32%, ${backgroundColor} 100%)`,
         })}
       >
         <AppShellSidebarSection
@@ -280,7 +295,7 @@ export function AppShellChrome(props: {
             minHeight: "0.5px",
             marginTop: "6px",
             marginBottom: "6px",
-            backgroundColor: "#2f2f2f",
+            backgroundColor: "border",
           })}
         />
         <AppShellSidebarSection
@@ -307,8 +322,8 @@ export function AppShellChrome(props: {
             height: "31px",
             overflowX: "auto",
             overflowY: "hidden",
-            backgroundColor: "#1c1c1c",
-            boxShadow: "inset 0 -0.5px 0 #313131",
+            backgroundColor: "surface",
+            boxShadow: `inset 0 -0.5px 0 ${borderColor}`,
           })}
         >
           <div
@@ -357,7 +372,7 @@ export function AppShellChrome(props: {
                 position: "absolute",
                 bottom: "0",
                 height: "0.5px",
-                backgroundColor: "#cccccc",
+                backgroundColor: "accentStrong",
                 transition:
                   "transform 180ms cubic-bezier(0.23, 1, 0.32, 1), width 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               })}
@@ -425,7 +440,7 @@ function ActionButton(props: {
           height: "22px",
           borderRadius: "11px",
           _hover: {
-            backgroundColor: "#2a3f61",
+            backgroundColor: `color-mix(in srgb, ${accentColor} 24%, ${panelColor})`,
           },
         }),
       )}
@@ -463,19 +478,20 @@ function SidebarItem(props: {
         minHeight: "42px",
         border: "none",
         backgroundColor: "transparent",
-        color: "#5a5a5a",
+        color: `color-mix(in srgb, ${textColor} 38%, transparent)`,
         cursor: "pointer",
         transition: "color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
         _focusVisible: {
-          outline: "2px solid #66a1ff",
+          outline: "2px solid",
+          outlineColor: "accentStrong",
           outlineOffset: "-2px",
         },
         _hover: {
-          color: "#ffffff",
+          color: "text",
         },
       })}
       style={{
-        color: props.isSelected ? "#ffffff" : "#5a5a5a",
+        color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
       }}
       type="button"
       onClick={(event) => {
@@ -506,26 +522,22 @@ function TabButton(props: {
   const [isHovered, setIsHovered] = useState(false)
   const iconColor = isActive
     ? isHome
-      ? "#cccccc"
-      : "#ffffff"
+      ? accentStrongColor
+      : textColor
     : isHovered
-      ? isHome
-        ? "#949494"
-        : "#9a9a9a"
+      ? textColor
       : isHome
-        ? "#7a7a7a"
-        : "#6b6b6b"
+        ? `color-mix(in srgb, ${textColor} 52%, transparent)`
+        : `color-mix(in srgb, ${textColor} 42%, transparent)`
   const labelColor = isActive
     ? isHome
-      ? "#cccccc"
-      : "#ffffff"
+      ? accentStrongColor
+      : textColor
     : isHovered
-      ? isHome
-        ? "#9b9b9b"
-        : "rgba(255, 255, 255, 0.52)"
+      ? textColor
       : isHome
-        ? "#7a7a7a"
-        : "rgba(255, 255, 255, 0.35)"
+        ? `color-mix(in srgb, ${textColor} 52%, transparent)`
+        : `color-mix(in srgb, ${textColor} 34%, transparent)`
 
   return (
     <div
@@ -570,12 +582,13 @@ function TabButton(props: {
           flexShrink: "0",
           border: "none",
           borderRadius: "0",
-          backgroundColor: "#1c1c1c",
+          backgroundColor: "surface",
           cursor: "pointer",
           transition:
             "color 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
           _focusVisible: {
-            outline: "2px solid #66a1ff",
+            outline: "2px solid",
+            outlineColor: "accentStrong",
             outlineOffset: "-2px",
           },
         })}
@@ -636,7 +649,7 @@ function TabButton(props: {
                 width: "6px",
                 height: "6px",
                 borderRadius: "999px",
-                backgroundColor: "#66a1ff",
+                backgroundColor: "accentStrong",
                 transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               })}
               style={{
@@ -658,21 +671,22 @@ function TabButton(props: {
               padding: "0",
               border: "none",
               borderRadius: "999px",
-              backgroundColor: "rgba(255, 255, 255, 0)",
-              color: "#8d8d8d",
+              backgroundColor: "transparent",
+              color: `color-mix(in srgb, ${textColor} 42%, transparent)`,
               cursor: "pointer",
               opacity: "0",
               transition:
                 "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
               _focusVisible: {
-                outline: "2px solid #66a1ff",
+                outline: "2px solid",
+                outlineColor: "accentStrong",
                 outlineOffset: "1px",
                 opacity: "1",
-                backgroundColor: "rgba(255, 255, 255, 0.1)",
+                backgroundColor: `color-mix(in srgb, ${textColor} 10%, transparent)`,
               },
               _hover: {
-                backgroundColor: "rgba(255, 255, 255, 0.1)",
-                color: "#cfcfcf",
+                backgroundColor: `color-mix(in srgb, ${textColor} 10%, transparent)`,
+                color: "text",
               },
             })}
             style={{

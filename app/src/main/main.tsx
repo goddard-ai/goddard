@@ -4,8 +4,11 @@ import { render } from "preact"
 
 import { AppShell } from "~/app-shell.tsx"
 import { AppStateProvider } from "~/app-state-context.tsx"
+import { getInitialAppearanceSnapshot } from "~/appearance/theme.ts"
 import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
+
+const initialAppearanceSnapshot = getInitialAppearanceSnapshot()
 
 initializeDesktopHost()
 startQueryWindowReactivationRefetch()
@@ -14,7 +17,7 @@ startQueryWindowReactivationRefetch()
 window.__goddardDesktop = desktopHost
 
 render(
-  <AppStateProvider>
+  <AppStateProvider initialAppearanceSnapshot={initialAppearanceSnapshot}>
     <AppShell />
   </AppStateProvider>,
   document.getElementById("root")!,

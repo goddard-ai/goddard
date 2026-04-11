@@ -1,7 +1,9 @@
-import { FolderOpen, FolderKanban, Inbox, ListTodo, Route, Rows3, ScrollText } from "lucide-react"
 import { useSignal } from "@preact/signals"
+import { FolderOpen, FolderKanban, Inbox, ListTodo, Route, Rows3, ScrollText } from "lucide-react"
 import { useListener } from "preact-sigma"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
+
+import { AppearanceDialog } from "~/appearance/appearance-dialog.tsx"
 import { browseForProject } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import { lookupProject } from "~/projects/project-registry.ts"
@@ -135,6 +137,7 @@ export function AppShell() {
   const sessionDialog = useSessionDialogState()
   const workbenchTabSet = useWorkbenchTabSet()
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false)
+  const [isAppearanceDialogOpen, setIsAppearanceDialogOpen] = useState(false)
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
     navigation.selectedNavId,
@@ -336,13 +339,17 @@ export function AppShell() {
       return
     }
 
-    workbenchTabSet.openOrFocusTab({
-      id: "surface:settings",
-      kind: "settings",
-      title: "Settings",
-      payload: {},
-      dirty: false,
-    })
+    if (action === "settings") {
+      workbenchTabSet.openOrFocusTab({
+        id: "surface:settings",
+        kind: "settings",
+        title: "Settings",
+        payload: {},
+        dirty: false,
+      })
+      setIsAppearanceDialogOpen(true)
+      return
+    }
   }
 
   return (
@@ -401,6 +408,12 @@ export function AppShell() {
         onChangeProjectPath={sessionDialog.setDraftProjectPath}
         onChangePrompt={sessionDialog.setDraftPrompt}
         onClose={sessionDialog.closeDialog}
+      />
+      <AppearanceDialog
+        isOpen={isAppearanceDialogOpen}
+        onOpenChange={(isOpen) => {
+          setIsAppearanceDialogOpen(isOpen)
+        }}
       />
     </GoodTooltipProvider>
   )
