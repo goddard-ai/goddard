@@ -46,6 +46,21 @@ Custom worktree plugins are loaded from the global Goddard config only. The daem
 
 If no values are provided, the daemon falls back to the standard local backend URL and the default socket path under `~/.goddard`.
 
+## Standalone Build
+
+Build standalone Bun executables for the daemon and bundled helper tools with:
+
+```sh
+bun run build:standalone
+```
+
+The command runs the normal package build first, then emits a platform-specific standalone runtime under `dist/standalone/<target>/` with:
+
+- `bin/goddard-daemon`
+- `agent-bin/goddard`
+- `agent-bin/workforce`
+- `manifest.json`
+
 ## Issues & Feature Requests
 
 Please direct bug reports and feature requests to the [Issue Tracker](https://github.com/goddard-ai/daemon/issues).

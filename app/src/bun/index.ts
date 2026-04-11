@@ -1,5 +1,5 @@
 import { BrowserWindow, Updater } from "electrobun/bun"
-
+import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { getMainWindow, setMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"
 import { appRpc } from "./rpc.ts"
@@ -42,6 +42,7 @@ async function getMainWindowUrl() {
 
 installApplicationMenu(getMainWindow)
 
+await ensureDaemonRuntime()
 const mainWindowUrl = await getMainWindowUrl()
 const mainWindow = createMainWindow(mainWindowUrl)
 setMainWindow(mainWindow)

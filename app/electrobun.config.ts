@@ -18,8 +18,10 @@ export default {
     },
     copy: {
       dist: "views/main",
+      ".generated/embedded-runtime": "embedded-runtime",
     },
-    watchIgnore: ["dist/**"],
+    watch: ["../core/daemon/src", "../core/daemon/scripts", "../core/daemon/package.json"],
+    watchIgnore: ["dist/**", ".generated/**"],
     mac: {
       icons: "assets/icon.iconset",
     },
@@ -32,5 +34,8 @@ export default {
   },
   release: {
     baseUrl: releaseBaseUrl,
+  },
+  scripts: {
+    preBuild: "./scripts/prepare-embedded-runtime.ts",
   },
 } satisfies ElectrobunConfig

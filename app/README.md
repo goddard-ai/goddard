@@ -13,6 +13,7 @@ The desktop app now runs on Electrobun with a Bun-owned host layer and a Preact 
 - Run `pnpm --dir app run build` to produce a packaged local Electrobun build.
 - Run `pnpm --dir app run build:stable` to produce release artifacts in `app/artifacts`.
 - Run `pnpm --dir app run typecheck` to typecheck both the browser code and the Bun host code.
+- The Electrobun `preBuild` step now stages the standalone Goddard daemon runtime and bundled `serviceman` assets into app resources before packaging.
 
 ## Releases
 

@@ -22,6 +22,7 @@
     "@comark/react": "0.2.1",
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/paths": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/sdk": "workspace:^",
     "@goddard-ai/styled-system": "workspace:^",
