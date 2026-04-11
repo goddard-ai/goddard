@@ -1,11 +1,12 @@
+import { afterEach, describe, expect, test, vi } from "bun:test"
 import { AsyncLocalStorage } from "node:async_hooks"
 import { once } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { request } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, test, vi } from "bun:test"
 import { z } from "zod"
+
 import { $type, IpcClientError, type IpcSchema } from "../src/index.ts"
 import { createNodeClient } from "../src/node/client.ts"
 import { createServer } from "../src/node/server.ts"
@@ -389,6 +390,24 @@ describe("core/ipc", () => {
 
     const client = createNodeClient(socketPath, schema)
     await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Add is disabled")
+  })
+
+  test("rewords missing IPC socket send failures", async () => {
+    const missingSocketPath = join(tmpdir(), "goddard-ipc-missing-send.sock")
+    const client = createNodeClient(missingSocketPath, schema)
+
+    await expect(client.send("ping")).rejects.toThrow(
+      `Could not connect to IPC socket at ${missingSocketPath}.`,
+    )
+  })
+
+  test("rewords missing IPC socket subscribe failures", async () => {
+    const missingSocketPath = join(tmpdir(), "goddard-ipc-missing-subscribe.sock")
+    const client = createNodeClient(missingSocketPath, schema)
+
+    await expect(client.subscribe("systemAlert", () => {})).rejects.toThrow(
+      `Could not connect to IPC socket at ${missingSocketPath}.`,
+    )
   })
 
   test("returns generic raw errors for unexpected handler failures", async () => {

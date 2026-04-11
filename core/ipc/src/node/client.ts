@@ -1,5 +1,7 @@
 import * as http from "node:http"
+
 import { createClient } from "../client.ts"
+import { IpcClientError } from "../errors.ts"
 import { type IpcSchema } from "../schema.ts"
 import { type IpcTransport } from "../transport.ts"
 
@@ -19,6 +21,30 @@ function getErrorMessage(body: string): string {
   }
 
   return body
+}
+
+/** Rewords low-level socket connection failures with the requested IPC socket path. */
+function toSocketConnectionError(error: unknown, socketPath: string) {
+  if (!(error instanceof Error)) {
+    return error
+  }
+
+  const errorCode = (error as Error & { code?: unknown }).code
+  if (
+    errorCode !== "FailedToOpenSocket" &&
+    errorCode !== "ENOENT" &&
+    errorCode !== "ECONNREFUSED"
+  ) {
+    return error
+  }
+
+  return new IpcClientError(
+    `Could not connect to IPC socket at ${socketPath}. ` +
+      "The server may not be running, or the socket path may be wrong.",
+    {
+      cause: error,
+    },
+  )
 }
 
 /** Creates the Node HTTP-over-socket transport for one daemon socket path. */
@@ -57,7 +83,9 @@ export function createNodeTransport(socketPath: string): IpcTransport {
         },
       )
 
-      req.on("error", reject)
+      req.on("error", (error: unknown) => {
+        reject(toSocketConnectionError(error, socketPath))
+      })
       req.write(wireData)
       req.end()
     })
@@ -127,10 +155,10 @@ export function createNodeTransport(socketPath: string): IpcTransport {
         },
       )
 
-      req.on("error", (error: Error) => {
+      req.on("error", (error: unknown) => {
         if (!settled) {
           settled = true
-          reject(error)
+          reject(toSocketConnectionError(error, socketPath))
         }
       })
       req.end()
