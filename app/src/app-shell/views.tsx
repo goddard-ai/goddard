@@ -8,17 +8,6 @@ import { TabViewportProvider } from "~/tab-viewport.tsx"
 import { getWorkbenchTabComponent } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 
-const workbenchPanelScrollerClass = css({
-  minHeight: "0",
-  height: "100%",
-  overflowY: "auto",
-  overscrollBehavior: "contain",
-})
-
-const workbenchPanelBodyClass = css({
-  minHeight: "100%",
-})
-
 const panelScrollCache = new Map<string, number>()
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
@@ -59,14 +48,25 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: preact.Compo
     <TabViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
       <div
         ref={scrollerRef}
-        class={workbenchPanelScrollerClass}
+        class={css({
+          minHeight: "0",
+          height: "100%",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+        })}
         onScroll={(event) => {
           const nextScrollTop = event.currentTarget.scrollTop
           panelScrollCache.set(props.scrollKey, nextScrollTop)
           setScrollTop(nextScrollTop)
         }}
       >
-        <div class={workbenchPanelBodyClass}>{props.children}</div>
+        <div
+          class={css({
+            minHeight: "100%",
+          })}
+        >
+          {props.children}
+        </div>
       </div>
     </TabViewportProvider>
   )

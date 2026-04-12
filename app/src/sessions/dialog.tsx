@@ -26,44 +26,6 @@ export function SessionLaunchDialog() {
   const adapterCatalog = useQuery(goddardSdk.adapter.list, [
     { cwd: draftProjectPath.value ?? undefined },
   ])
-  const overlayClass = css({
-    position: "fixed",
-    inset: "0",
-    background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accentStrong")} 10%, rgba(23, 29, 36, 0.24)), rgba(23, 29, 36, 0.34))`,
-    backdropFilter: "blur(10px)",
-    opacity: "1",
-    transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-    "@starting-style": {
-      opacity: "0",
-    },
-  })
-  const positionerClass = css({
-    position: "fixed",
-    inset: "0",
-    display: "grid",
-    placeItems: "center",
-    padding: "16px",
-  })
-  const contentClass = css({
-    width: "min(640px, calc(100vw - 32px))",
-    maxHeight: "calc(100vh - 32px)",
-    overflowY: "auto",
-    padding: "28px",
-    borderRadius: "30px",
-    border: "1px solid",
-    borderColor: "border",
-    background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-    boxShadow: "0 34px 90px rgba(84, 102, 124, 0.2)",
-    opacity: "1",
-    transform: "translateY(0) scale(1)",
-    transition:
-      "opacity 220ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1)",
-    outline: "none",
-    "@starting-style": {
-      opacity: "0",
-      transform: "translateY(16px) scale(0.985)",
-    },
-  })
 
   useEffect(() => {
     const availableAdapterIds = new Set(adapterCatalog.adapters.map((adapter) => adapter.id))
@@ -148,9 +110,50 @@ export function SessionLaunchDialog() {
       }}
     >
       <Portal>
-        <Dialog.Backdrop class={overlayClass} />
-        <Dialog.Positioner class={positionerClass}>
-          <Dialog.Content class={contentClass}>
+        <Dialog.Backdrop
+          class={css({
+            position: "fixed",
+            inset: "0",
+            background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accentStrong")} 10%, rgba(23, 29, 36, 0.24)), rgba(23, 29, 36, 0.34))`,
+            backdropFilter: "blur(10px)",
+            opacity: "1",
+            transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+            "@starting-style": {
+              opacity: "0",
+            },
+          })}
+        />
+        <Dialog.Positioner
+          class={css({
+            position: "fixed",
+            inset: "0",
+            display: "grid",
+            placeItems: "center",
+            padding: "16px",
+          })}
+        >
+          <Dialog.Content
+            class={css({
+              width: "min(640px, calc(100vw - 32px))",
+              maxHeight: "calc(100vh - 32px)",
+              overflowY: "auto",
+              padding: "28px",
+              borderRadius: "30px",
+              border: "1px solid",
+              borderColor: "border",
+              background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
+              boxShadow: "0 34px 90px rgba(84, 102, 124, 0.2)",
+              opacity: "1",
+              transform: "translateY(0) scale(1)",
+              transition:
+                "opacity 220ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1)",
+              outline: "none",
+              "@starting-style": {
+                opacity: "0",
+                transform: "translateY(16px) scale(0.985)",
+              },
+            })}
+          >
             <div
               class={css({
                 display: "flex",
