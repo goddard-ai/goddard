@@ -1,7 +1,7 @@
 import { css } from "@goddard-ai/styled-system/css"
-import type { ComponentChild } from "preact"
 import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
+
 import { useTabViewport } from "~/tab-viewport.tsx"
 
 const loadingOverlayClass = css({
@@ -29,11 +29,11 @@ export type MessageListProps<Item> = {
   overscanPx?: number
   initialScrollPosition?: "top" | "bottom"
   scrollCacheKey?: string
-  loadingFallback?: ComponentChild
+  loadingFallback?: preact.ComponentChild
   defaultRowHeight?: number
   getItemKey?: (item: Item, index: number) => string
   estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number
-  renderRow: (row: MessageListRow<Item>) => ComponentChild
+  renderRow: (row: MessageListRow<Item>) => preact.ComponentChild
 }
 
 /** Returns the first mount position for a list that should open from the top or bottom. */

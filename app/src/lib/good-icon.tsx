@@ -1,4 +1,3 @@
-import { type JSX } from "preact"
 import { svgIconSymbolIds } from "~/support/svg-icon-data.ts"
 
 /** Identifiers for SVG assets generated from SVG files under `src/icons`. */
@@ -18,7 +17,7 @@ type ParsedInlineSvg = {
 const parsedInlineSvgs = new Map<string, ParsedInlineSvg>()
 
 /** Renders either one generated spritemap icon or one inline SVG string. */
-export function GoodIcon(props: SvgIconSource & JSX.IntrinsicElements["svg"]) {
+export function GoodIcon(props: SvgIconSource & preact.JSX.IntrinsicElements["svg"]) {
   const svgProps = getSvgElementProps(props)
 
   if (props.data !== undefined) {
@@ -43,7 +42,7 @@ export function GoodIcon(props: SvgIconSource & JSX.IntrinsicElements["svg"]) {
 }
 
 /** Removes SvgIcon-only props before forwarding the rest to the `<svg>` element. */
-function getSvgElementProps(props: SvgIconSource & JSX.IntrinsicElements["svg"]) {
+function getSvgElementProps(props: SvgIconSource & preact.JSX.IntrinsicElements["svg"]) {
   const svgProps = { ...props }
 
   delete (svgProps as { data?: SvgIconData }).data

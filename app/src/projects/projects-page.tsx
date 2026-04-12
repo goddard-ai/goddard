@@ -16,7 +16,6 @@ import {
   Trash2,
   X,
 } from "lucide-react"
-import type { ComponentChild } from "preact"
 import { useEffect } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
@@ -705,7 +704,7 @@ function ProjectListRow(props: {
 }
 
 /** Renders one small inspector card. */
-function InfoCard(props: { icon: ComponentChild; label: string; value: string }) {
+function InfoCard(props: { icon: preact.ComponentChild; label: string; value: string }) {
   return (
     <div
       class={css({

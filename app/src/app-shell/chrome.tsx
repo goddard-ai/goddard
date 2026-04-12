@@ -1,7 +1,6 @@
 /** Presentational chrome primitives for the merged app shell layout. */
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import type { ComponentChildren } from "preact"
 import { useState } from "preact/hooks"
 
 import { maximizeWindow } from "~/desktop-host.ts"
@@ -39,7 +38,7 @@ const actionButtonClass = css({
 /** Renders the merged shell chrome around the active workbench content. */
 export function AppShellChrome(props: {
   activeTabId: string
-  children?: ComponentChildren
+  children?: preact.ComponentChildren
   indicator: {
     left: number
     opacity: number

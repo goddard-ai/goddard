@@ -1,15 +1,15 @@
-import type { ComponentProps, FunctionComponent } from "preact"
 import { lazy } from "preact/compat"
+
 import type { SvgIconName } from "./lib/good-icon.tsx"
 
 /** One registered non-primary workbench tab definition. */
 type WorkbenchTabDefinition = {
-  component: FunctionComponent<any>
+  component: preact.FunctionComponent<any>
   icon: SvgIconName
 }
 
 /** One loosely typed lazily rendered non-primary tab component. */
-type LooseWorkbenchTabComponent = FunctionComponent<any>
+type LooseWorkbenchTabComponent = preact.FunctionComponent<any>
 
 /** Placeholder workbench surface used until a real implementation exists. */
 function PlaceholderWorkbenchTab() {
@@ -75,7 +75,7 @@ export type WorkbenchRegisteredTabKind = keyof typeof workbenchTabComponents
 export type WorkbenchDetailTabKind = WorkbenchRegisteredTabKind
 
 /** Payload inferred from one registered non-primary workbench tab component. */
-type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> = ComponentProps<
+type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> = preact.ComponentProps<
   (typeof workbenchTabComponents)[TKind]["component"]
 >
 

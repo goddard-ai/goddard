@@ -3,7 +3,6 @@ import { Portal } from "@ark-ui/react/portal"
 import { Tooltip } from "@ark-ui/react/tooltip"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import type { ComponentChildren } from "preact"
 
 const tooltipContentClass = css({
   display: "inline-flex",
@@ -34,8 +33,8 @@ const tooltipContentClass = css({
 /** Attaches the shared app tooltip treatment to one trigger element. */
 export function GoodTooltip(props: {
   ariaLabel?: string
-  children: ComponentChildren
-  content: ComponentChildren
+  children: preact.ComponentChildren
+  content: preact.ComponentChildren
   side?: "top" | "right" | "bottom" | "left"
   sideOffset?: number
 }) {

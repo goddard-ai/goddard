@@ -1,12 +1,12 @@
-import type { ComponentChildren } from "preact"
 import { createContext } from "preact"
-import { useContext, useEffect } from "preact/hooks"
 import { useSigma } from "preact-sigma"
+import { useContext, useEffect } from "preact/hooks"
+
+import { ProjectRegistry } from "~/projects/project-registry.ts"
 import { Appearance } from "./appearance/appearance.ts"
 import { getSystemThemeMediaQuery, type AppearanceSnapshot } from "./appearance/theme.ts"
 import { Navigation } from "./navigation.ts"
 import { WorkbenchTabSet } from "./workbench-tab-set.ts"
-import { ProjectRegistry } from "~/projects/project-registry.ts"
 
 const appearanceContext = createContext<Appearance | null>(null)
 const navigationContext = createContext<Navigation | null>(null)
@@ -22,7 +22,7 @@ function requireContext<Value>(value: Value | null, name: string): Value {
 }
 
 export function AppStateProvider(props: {
-  children: ComponentChildren
+  children: preact.ComponentChildren
   initialAppearanceSnapshot: AppearanceSnapshot
 }) {
   const appearance = useSigma(

@@ -45,6 +45,7 @@
   - Never use `../../...` or deeper upward traversal imports.
 - In UI components, prefer `useListener` from `preact-sigma` over manual `addEventListener` and `removeEventListener` wiring.
 - Prefer the `class` JSX prop over `className`.
+- Prefer the global `preact.` namespace for Preact types such as `preact.ComponentChildren` instead of importing those types directly.
 - Prefix reusable, pre-styled UI primitives with `Good` (for example `GoodTooltip`). Reserve that prefix for opinionated design-system components, not feature/domain modules or state.
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.
 - Never destructure component props. Define component prop types inline instead of creating `Props` aliases or interfaces.

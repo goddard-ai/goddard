@@ -1,10 +1,9 @@
-import type { ComponentChildren, RefObject } from "preact"
 import { createContext } from "preact"
 import { useContext, useEffect, useState } from "preact/hooks"
 
 /** Shared viewport metrics exposed to detail-tab surfaces that render inside one scroller. */
 export type TabViewportSnapshot = {
-  viewportRef: RefObject<HTMLDivElement | null>
+  viewportRef: preact.RefObject<HTMLDivElement | null>
   width: number
   height: number
   scrollTop: number
@@ -51,8 +50,8 @@ function useFontsReady(): boolean {
 
 /** Props accepted by the shared tab viewport provider. */
 export type TabViewportProviderProps = {
-  children: ComponentChildren
-  viewportRef: RefObject<HTMLDivElement | null>
+  children: preact.ComponentChildren
+  viewportRef: preact.RefObject<HTMLDivElement | null>
   scrollTop: number
 }
 

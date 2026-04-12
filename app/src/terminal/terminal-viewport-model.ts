@@ -1,5 +1,4 @@
 import { Terminal, type ITheme } from "@xterm/headless"
-import type { CSSProperties, TargetedKeyboardEvent } from "preact"
 import { type SigmaRef, SigmaType } from "preact-sigma"
 
 const VIEWPORT_PADDING_PX = 18
@@ -55,7 +54,7 @@ export type TerminalViewportSetup = {
 
 export type TerminalViewportSegment = {
   key: string
-  style: CSSProperties
+  style: preact.CSSProperties
   text: string
 }
 
@@ -308,7 +307,7 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
 export interface TerminalViewportModel extends InstanceType<typeof TerminalViewportModel> {}
 
 export function translateKeyboardEvent(
-  event: TargetedKeyboardEvent<HTMLDivElement>,
+  event: preact.TargetedKeyboardEvent<HTMLDivElement>,
 ): string | null {
   if (event.isComposing || event.key === "Process" || event.metaKey) {
     return null
@@ -410,7 +409,7 @@ function buildViewportSnapshot(
     const segments: TerminalViewportSegment[] = []
     const nullCell = buffer.getNullCell()
     let currentText = ""
-    let currentStyle: CSSProperties | null = null
+    let currentStyle: preact.CSSProperties | null = null
     let currentStyleKey = ""
 
     for (let column = 0; column < terminal.cols; column += 1) {
@@ -505,7 +504,7 @@ function resolveCellStyle(
   cell: TerminalCell | undefined,
   theme: ITheme,
   isCursor: boolean,
-): CSSProperties {
+): preact.CSSProperties {
   let foreground = theme.foreground
   let background = undefined as string | undefined
 
@@ -607,7 +606,7 @@ function resolvePaletteColor(colorIndex: number, theme: ITheme): string {
   return theme.foreground ?? defaultTheme.foreground!
 }
 
-function serializeStyle(style: CSSProperties): string {
+function serializeStyle(style: preact.CSSProperties): string {
   return JSON.stringify(style)
 }
 
