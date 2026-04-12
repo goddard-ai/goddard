@@ -63,21 +63,21 @@
 - Why here:
   - Diff viewing supports local-first review workflows and is reusable later inside pull request tabs.
 
-## Sprint 4: Specs and MDX Document Workflows
+## Sprint 4: Specs and Markdown Document Workflows
 
 - Goal:
-  - Add project-scoped document discovery and editable MDX document tabs for specification management.
+  - Add project-scoped document discovery and editable markdown document tabs for specification management.
 - State:
   - `ProjectContentState`
-  - `MdxDocumentState`
+  - `MarkdownDocumentState`
 - Components:
   - `SpecsPage`
   - `SpecTreeSidebar`
   - `SpecFileList`
   - `DocumentBreadcrumbs`
-  - `MdxDocumentView`
-  - `MdxDocumentToolbar`
-  - `MdxEditorSurface`
+  - `MarkdownDocumentView`
+  - `MarkdownDocumentToolbar`
+  - `MarkdownEditorSurface`
 - Why here:
   - Specification management depends on the project registry and tab system, but does not need pull request or roadmap work to exist first.
 

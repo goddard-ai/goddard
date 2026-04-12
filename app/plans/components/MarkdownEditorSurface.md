@@ -1,0 +1,19 @@
+# Component: MarkdownEditorSurface
+- **Goal:** Provide a Lexical-backed markdown surface that treats markdown as the source of truth, behaves as a WYSIWYG editor first, and can render the same content in `readOnly` mode without introducing a second markdown renderer.
+- **Why now:** The old rich-document editor direction is being retired. The app now needs one markdown-first surface with identical parsing and rendering rules in both editable and read-only modes.
+- **Minimum Viable Component:** Controlled Lexical wrapper that accepts raw markdown, hydrates a constrained rich-text document, emits normalized markdown on edits, and disables editing behavior when `readOnly` is true.
+- **Props Interface:** `markdown: string`; `readOnly?: boolean`; `placeholder?: string`; `autoFocus?: boolean`; `class?: string`; `onChange?: (nextMarkdown: string) => void`; `onSelectionChange?: (selection) => void`; `onOpenLink?: (href: string) => void`.
+- **Sub-components:** Optional `MarkdownEditorToolbar` for edit affordances; Lexical plugin boundary for markdown import, markdown export, shortcuts, links, and history.
+- **State Complexity:** UI-only editor instance, focus state, and selection state. Dirty tracking, persistence, document loading, save or revert flows, and tab ownership should stay in the feature state module that owns the markdown source.
+- **Required Context:** None for the core surface. Document tabs or form flows can wrap it with their own project, tab, or action context.
+- **Electrobun RPC:** None directly. All file or shared-data reads and writes should route through existing state or SDK adapters.
+- **Markdown Ownership:** Keep canonical content as plain markdown in app state and shared contracts. Lexical editor state should remain an in-memory projection so the app stays markdown-first instead of drifting into editor-JSON ownership.
+- **Supported Markdown Scope:** Start with paragraphs, headings, bold, italic, inline code, fenced code blocks, links, block quotes, ordered and unordered lists, and thematic breaks. Treat tables, embeds, callouts, and non-markdown extension syntax as explicit follow-on work rather than silent MVP support.
+- **Read-only Strategy:** Keep `readOnly?: boolean` on `MarkdownEditorSurface` so edit and display modes share one parser, one node set, and one markdown round-trip contract. If the app later needs a document-focused surface with different chrome, breadcrumbs, outline sync, or virtualization, add a thin `MarkdownDocumentView` wrapper that composes this component in read-only mode rather than forking a second renderer.
+- **Interactions & Events:** Renders persisted markdown; applies markdown shortcuts while editing; emits markdown updates on user edits; preserves link navigation in read-only mode; reflects external markdown updates without requiring a second display implementation.
+- **Dependencies:** Lexical core packages plus the markdown import and export bindings needed for a stable round trip of the supported markdown subset. Keep the dependency footprint small and aligned with the app’s existing Preact compatibility setup.
+- **Likely Consumers:** Specification and page document tabs, action prompt editing, and any future long-form markdown form field that needs identical edit and display fidelity.
+- **Open Questions:**
+  - Do read-only document tabs need long-document virtualization immediately, or can the first pass rely on ordinary Lexical rendering?
+  - Which markdown constructs must be lossless on day one versus allowed to normalize into the supported subset?
+  - Should unsupported syntax be preserved verbatim until the user edits that block, or normalized on first save?

@@ -7,9 +7,9 @@
 - **Sub-components:** `PretextMarkdownViewport`; `PretextMarkdownBlockList`; `PretextMarkdownParagraph`; `PretextMarkdownHeading`; `PretextMarkdownCodeBlock`; `PretextMarkdownListBlock`.
 - **State Complexity:** Purely presentational for MVP. Parsing, outline state, heading visibility, and anchor restoration should stay in a dedicated document state module rather than local component state once real documents are wired in.
 - **Virtualization Model:** Virtualize block rows by default. Paragraph rows, list items with wrapped prose, and block quotes should use Pretext measurement. Non-text blocks can provide fixed or content-derived heights through the same row-layout contract.
-- **Dependencies:** The markdown surface should reuse the shared `TabViewport` and a markdown-owned block-list virtualizer, and stay thin over the existing document or MDX ownership in app state instead of inventing app-only storage.
-- **Likely Sprint Fit:** After the existing spec and MDX workflow sprint, as a follow-on that replaces or extends the current document rendering path once the shared Pretext primitives have stabilized.
+- **Dependencies:** The markdown surface should reuse the shared `TabViewport` and a markdown-owned block-list virtualizer, and stay thin over the existing document or markdown ownership in app state instead of inventing app-only storage.
+- **Likely Sprint Fit:** After the existing spec and markdown workflow sprint, as a follow-on that replaces or extends the current document rendering path once the shared Pretext primitives have stabilized.
 - **Open Questions:**
-  - Should markdown parsing stay markdown-only for MVP, or should it align with the planned MDX document path from day one?
+  - Should markdown parsing stay markdown-only for MVP, or should it align exactly with the supported `MarkdownEditorSurface` subset from day one?
   - Which block types must participate in anchor restoration and heading tracking immediately versus later?
   - Should code blocks stay unvirtualized within one row, or should very large fenced blocks gain their own inner virtualization path?
