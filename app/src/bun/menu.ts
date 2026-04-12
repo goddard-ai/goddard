@@ -2,7 +2,7 @@ import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "
 import { concat } from "radashi"
 
 import type { AppMenuAction } from "~/shared/app-menu.ts"
-import type { DebugMenuSurface } from "~/shared/debug-menu.ts"
+import { DebugMenuSurfaces, type DebugMenuSurface } from "~/shared/debug-menu.ts"
 import { ShortcutCommands } from "~/shared/shortcut-keymap.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
 
@@ -43,24 +43,16 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
     [fileMenu.closeWindow.action]: closeWindow,
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
-    [debugNavigateAction]: dispatchDebugMenuAction,
   }
 
   const debugMenu: ApplicationMenuItemConfig[] = []
   if (isDevelopmentRuntime()) {
     const debugNavigate = withParams<DebugMenuSurface>(debugNavigateAction)
 
-    for (const { surface, accelerator } of [
-      {
-        surface: "SessionChatTranscript",
-        accelerator: "Alt+CommandOrControl+9",
-      },
-      {
-        surface: "Terminal",
-      },
-    ] satisfies ReadonlyArray<{ surface: DebugMenuSurface; accelerator?: string }>) {
+    for (const surface of Object.values(DebugMenuSurfaces)) {
       const action = debugNavigate(surface)
-      debugMenu.push({ label: surface, action, accelerator })
+      actions[action] = dispatchDebugMenuAction
+      debugMenu.push({ label: surface, action })
     }
   }
 
