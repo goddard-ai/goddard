@@ -293,7 +293,7 @@ export function AppShell() {
         navigationItems={navigationItems}
         onAction={(action) => {
           if (action === "proposeTask") {
-            return
+            throw new Error("proposeTask action is not implemented.")
           }
 
           if (action === "newSession") {
