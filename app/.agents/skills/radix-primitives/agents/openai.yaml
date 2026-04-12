@@ -1,4 +1,0 @@
-interface:
-  display_name: "Radix Primitives"
-  short_description: "Guidance for accessible Radix UI work"
-  default_prompt: "Use $radix-primitives to build or debug an accessible Radix Primitives UI."
