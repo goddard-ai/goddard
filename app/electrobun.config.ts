@@ -2,14 +2,15 @@ import type { ElectrobunConfig } from "electrobun"
 
 import pkg from "./package.json" with { type: "json" }
 
-const releaseBaseUrl = `https://github.com/${process.env.GITHUB_REPOSITORY ?? "goddard-ai/goddard"}/releases/latest/download`
-
 /** Electrobun build config for the desktop host and Vite-produced webview assets. */
 export default {
   app: {
     name: "Goddard",
     identifier: "app.goddardai.org",
     version: pkg.version,
+  },
+  scripts: {
+    preBuild: "./scripts/prepare-embedded-runtime.ts",
   },
   build: {
     bun: {
@@ -33,9 +34,6 @@ export default {
     },
   },
   release: {
-    baseUrl: releaseBaseUrl,
-  },
-  scripts: {
-    preBuild: "./scripts/prepare-embedded-runtime.ts",
+    baseUrl: `https://github.com/${process.env.GITHUB_REPOSITORY ?? "goddard-ai/goddard"}/releases/latest/download`,
   },
 } satisfies ElectrobunConfig
