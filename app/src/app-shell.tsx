@@ -280,29 +280,6 @@ export function AppShell() {
     }
   })
 
-  function handleTopbarAction(action: AppShellTopbarAction) {
-    if (action === "proposeTask") {
-      return
-    }
-
-    if (action === "newSession") {
-      requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
-      return
-    }
-
-    if (action === "settings") {
-      workbenchTabSet.openOrFocusTab({
-        id: "surface:settings",
-        kind: "settings",
-        title: "Settings",
-        payload: {},
-        dirty: false,
-      })
-      setIsAppearanceDialogOpen(true)
-      return
-    }
-  }
-
   return (
     <>
       <CommandMenu
@@ -314,7 +291,27 @@ export function AppShell() {
         activeTabId={workbenchTabSet.activeTabId}
         indicator={tabStrip.indicator}
         navigationItems={navigationItems}
-        onAction={handleTopbarAction}
+        onAction={(action) => {
+          if (action === "proposeTask") {
+            return
+          }
+
+          if (action === "newSession") {
+            requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
+            return
+          }
+
+          if (action === "settings") {
+            workbenchTabSet.openOrFocusTab({
+              id: "surface:settings",
+              kind: "settings",
+              title: "Settings",
+              payload: {},
+              dirty: false,
+            })
+            setIsAppearanceDialogOpen(true)
+          }
+        }}
         onCommandMenuOpen={() => {
           setIsCommandMenuOpen(true)
         }}

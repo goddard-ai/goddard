@@ -277,11 +277,6 @@ export function ProjectsPage() {
     lastSuggestedName.value = null
   }
 
-  function openAddDialog(): void {
-    resetDraft()
-    isAddDialogOpen.value = true
-  }
-
   function closeAddDialog(): void {
     isAddDialogOpen.value = false
     resetDraft()
@@ -302,22 +297,6 @@ export function ProjectsPage() {
     }
 
     lastSuggestedName.value = suggestedName
-  }
-
-  function openProjectTab(projectPath: string): void {
-    const project = lookupProject(projectRegistry, projectPath)
-
-    if (!project) {
-      return
-    }
-
-    workbenchTabSet.openOrFocusTab({
-      id: `project:${encodeURIComponent(project.path)}`,
-      kind: "project",
-      title: project.name,
-      payload: { projectPath: project.path },
-      dirty: false,
-    })
   }
 
   function addProject(): void {
@@ -388,7 +367,8 @@ export function ProjectsPage() {
             class={cx(buttonBaseClass, primaryButtonClass)}
             type="button"
             onClick={() => {
-              openAddDialog()
+              resetDraft()
+              isAddDialogOpen.value = true
             }}
           >
             <Plus size={16} strokeWidth={2.2} />
@@ -427,7 +407,21 @@ export function ProjectsPage() {
           </div>
         ) : (
           <ProjectList
-            onOpenProjectTab={openProjectTab}
+            onOpenProjectTab={(projectPath) => {
+              const project = lookupProject(projectRegistry, projectPath)
+
+              if (!project) {
+                return
+              }
+
+              workbenchTabSet.openOrFocusTab({
+                id: `project:${encodeURIComponent(project.path)}`,
+                kind: "project",
+                title: project.name,
+                payload: { projectPath: project.path },
+                dirty: false,
+              })
+            }}
             onRemove={(projectPath) => {
               projectRegistry.removeProject(projectPath)
             }}

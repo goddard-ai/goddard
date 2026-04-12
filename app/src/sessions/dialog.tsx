@@ -56,48 +56,12 @@ export function SessionLaunchDialog() {
     draftPrompt.value = ""
   }
 
-  function setDraftAdapterId(adapterId: string | null) {
-    draftAdapterId.value = adapterId
-  }
-
-  function setDraftProjectPath(projectPath: string | null) {
-    draftProjectPath.value = projectPath
-  }
-
-  function setDraftPrompt(prompt: string) {
-    draftPrompt.value = prompt
-  }
-
   function createSessionInput() {
     return buildCreateSessionInput(draftProjectPath.value, draftAdapterId.value, draftPrompt.value)
   }
 
   function canSubmit() {
     return createSessionInput() !== null
-  }
-
-  async function launchSession() {
-    const sessionInput = createSessionInput()
-
-    if (!sessionInput) {
-      return
-    }
-
-    try {
-      const { session } = await createSession(sessionInput)
-      closeDialog()
-      workbenchTabSet.openOrFocusTab({
-        id: `session:${session.id}`,
-        kind: "sessionChat",
-        title: getSessionDisplayTitle(session),
-        payload: {
-          sessionId: session.id,
-        },
-        dirty: false,
-      })
-    } catch (error) {
-      console.error("Failed to create session.", error)
-    }
   }
 
   return (
@@ -235,10 +199,38 @@ export function SessionLaunchDialog() {
               draftAdapterId={draftAdapterId.value}
               draftProjectPath={draftProjectPath.value}
               draftPrompt={draftPrompt.value}
-              onChangeAdapterId={setDraftAdapterId}
-              onChangeProjectPath={setDraftProjectPath}
-              onChangePrompt={setDraftPrompt}
-              onSubmit={launchSession}
+              onChangeAdapterId={(adapterId) => {
+                draftAdapterId.value = adapterId
+              }}
+              onChangeProjectPath={(projectPath) => {
+                draftProjectPath.value = projectPath
+              }}
+              onChangePrompt={(prompt) => {
+                draftPrompt.value = prompt
+              }}
+              onSubmit={async () => {
+                const sessionInput = createSessionInput()
+
+                if (!sessionInput) {
+                  return
+                }
+
+                try {
+                  const { session } = await createSession(sessionInput)
+                  closeDialog()
+                  workbenchTabSet.openOrFocusTab({
+                    id: `session:${session.id}`,
+                    kind: "sessionChat",
+                    title: getSessionDisplayTitle(session),
+                    payload: {
+                      sessionId: session.id,
+                    },
+                    dirty: false,
+                  })
+                } catch (error) {
+                  console.error("Failed to create session.", error)
+                }
+              }}
               projects={projectRegistry.projectList}
             />
           </Dialog.Content>

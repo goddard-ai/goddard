@@ -206,13 +206,6 @@ export function CommandMenu(props: {
     }
   }, [props.open, search])
 
-  function handleSelect(item: CommandMenuItem): void {
-    props.onOpenChange(false)
-    void Promise.resolve(item.onSelect()).catch((error) => {
-      console.error("Failed to run command menu action.", error)
-    })
-  }
-
   return (
     <Dialog.Root
       open={props.open}
@@ -257,7 +250,10 @@ export function CommandMenu(props: {
                             keywords={item.keywords ? [...item.keywords] : undefined}
                             value={`${item.label} ${item.keywords?.join(" ") ?? ""}`}
                             onSelect={() => {
-                              handleSelect(item)
+                              props.onOpenChange(false)
+                              void Promise.resolve(item.onSelect()).catch((error) => {
+                                console.error("Failed to run command menu action.", error)
+                              })
                             }}
                           >
                             <span class={iconBadgeClass}>

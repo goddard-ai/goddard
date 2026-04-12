@@ -7,17 +7,6 @@ export function Composer(props: { onSubmit: (text: string) => Promise<void> | vo
   const draft = useSignal("")
   const canSubmit = draft.value.trim().length > 0
 
-  async function submit() {
-    const trimmedDraft = draft.value.trim()
-
-    if (trimmedDraft.length === 0) {
-      return
-    }
-
-    await props.onSubmit(trimmedDraft)
-    draft.value = ""
-  }
-
   return (
     <form
       class={css({
@@ -30,7 +19,16 @@ export function Composer(props: { onSubmit: (text: string) => Promise<void> | vo
       })}
       onSubmit={(event) => {
         event.preventDefault()
-        void submit()
+        const trimmedDraft = draft.value.trim()
+
+        if (trimmedDraft.length === 0) {
+          return
+        }
+
+        void (async () => {
+          await props.onSubmit(trimmedDraft)
+          draft.value = ""
+        })()
       }}
     >
       <textarea
