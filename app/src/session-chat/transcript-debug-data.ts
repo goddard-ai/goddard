@@ -49,7 +49,7 @@ function buildDebugMessages(): TranscriptMessage[] {
       toolCallId: "tool:opening",
       authorName: "Goddard",
       timestampLabel: "9:11 AM",
-      title: "Read transcript fixture",
+      title: "Read transcript root",
       toolKind: "read",
       status: "completed",
       content: [

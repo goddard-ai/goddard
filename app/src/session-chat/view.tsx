@@ -1,13 +1,14 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { Composer } from "./composer.tsx"
-import { buildTranscriptMessages } from "./chat.ts"
-import { Header } from "./header.tsx"
-import { Transcript } from "./transcript.tsx"
+
 import { useQueries } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { submitSessionPrompt } from "~/sessions/actions.ts"
+import { buildTranscriptMessages } from "./chat.ts"
+import { Composer } from "./composer.tsx"
+import { Header } from "./header.tsx"
+import { Transcript } from "./transcript.tsx"
 
 export function SessionChatView(props: { sessionId: string }) {
   const sessionId = props.sessionId as DaemonSession["id"]
