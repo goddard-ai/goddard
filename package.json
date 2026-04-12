@@ -24,6 +24,7 @@
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
     "acp": "bun run ./scripts/acp-session.ts",
     "goddard:daemon": "bun run ./core/daemon/src/main.ts",
+    "goddard:workforce": "bun run ./workforce/src/main.ts",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "dependencies": {
@@ -31,8 +32,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260307.1",
-    "@goddard-ai/daemon": "workspace:^",
-    "@goddard-ai/workforce": "workspace:^",
     "@types/bun": "^1.3.11",
     "@types/node": "^25.3.5",
     "@typescript/native-preview": "7.0.0-dev.20260317.1",
