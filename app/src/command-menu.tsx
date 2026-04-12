@@ -1,5 +1,6 @@
 /** Renders the app-wide command palette powered by cmdk. */
-import * as Dialog from "@radix-ui/react-dialog"
+import { Dialog } from "@ark-ui/react/dialog"
+import { Portal } from "@ark-ui/react/portal"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Command } from "cmdk"
@@ -23,9 +24,6 @@ const overlayClass = css({
 })
 
 const contentClass = css({
-  position: "fixed",
-  top: "20vh",
-  left: "50%",
   width: "min(680px, calc(100vw - 32px))",
   maxHeight: "min(520px, calc(100vh - 48px))",
   padding: "0",
@@ -34,16 +32,27 @@ const contentClass = css({
   borderRadius: "24px",
   background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
   boxShadow: "0 32px 96px rgba(6, 10, 18, 0.42)",
-  transform: "translateX(-50%)",
   overflow: "hidden",
   outline: "none",
+  opacity: "1",
+  transform: "translateY(0) scale(1)",
   transition:
     "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-  zIndex: "51",
   "@starting-style": {
     opacity: "0",
-    transform: "translateX(-50%) translateY(12px) scale(0.985)",
+    transform: "translateY(12px) scale(0.985)",
   },
+})
+
+const positionerClass = css({
+  position: "fixed",
+  inset: "0",
+  display: "grid",
+  justifyItems: "center",
+  alignContent: "start",
+  paddingTop: "20vh",
+  paddingInline: "16px",
+  zIndex: "51",
 })
 
 const commandRootClass = css({
@@ -205,62 +214,69 @@ export function CommandMenu(props: {
   }
 
   return (
-    <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay class={overlayClass} />
-        <Dialog.Content class={contentClass}>
-          <Dialog.Title class={hiddenTitleClass}>Command menu</Dialog.Title>
-          <Command
-            className={commandRootClass}
-            label="Command menu"
-            loop={true}
-            shouldFilter={true}
-          >
-            <div class={inputWrapperClass}>
-              <Search aria-hidden={true} class={searchIconClass} size={18} />
-              <Command.Input
-                autoFocus={true}
-                className={inputClass}
-                placeholder="Type a command or jump to a view"
-                value={search}
-                onValueChange={setSearch}
-              />
-            </div>
-            <Command.List className={listClass}>
-              <Command.Empty className={emptyClass}>No matching commands.</Command.Empty>
-              {groups.map((group) => (
-                <Command.Group key={group} heading={group} className={groupClass}>
-                  {props.items
-                    .filter((item) => item.group === group)
-                    .map((item) => {
-                      const Icon = item.icon
+    <Dialog.Root
+      open={props.open}
+      onOpenChange={(details: { open: boolean }) => {
+        props.onOpenChange(details.open)
+      }}
+    >
+      <Portal>
+        <Dialog.Backdrop class={overlayClass} />
+        <Dialog.Positioner class={positionerClass}>
+          <Dialog.Content class={contentClass}>
+            <Dialog.Title class={hiddenTitleClass}>Command menu</Dialog.Title>
+            <Command
+              className={commandRootClass}
+              label="Command menu"
+              loop={true}
+              shouldFilter={true}
+            >
+              <div class={inputWrapperClass}>
+                <Search aria-hidden={true} class={searchIconClass} size={18} />
+                <Command.Input
+                  autoFocus={true}
+                  className={inputClass}
+                  placeholder="Type a command or jump to a view"
+                  value={search}
+                  onValueChange={setSearch}
+                />
+              </div>
+              <Command.List className={listClass}>
+                <Command.Empty className={emptyClass}>No matching commands.</Command.Empty>
+                {groups.map((group) => (
+                  <Command.Group key={group} heading={group} className={groupClass}>
+                    {props.items
+                      .filter((item) => item.group === group)
+                      .map((item) => {
+                        const Icon = item.icon
 
-                      return (
-                        <Command.Item
-                          key={item.id}
-                          className={itemClass}
-                          keywords={item.keywords ? [...item.keywords] : undefined}
-                          value={`${item.label} ${item.keywords?.join(" ") ?? ""}`}
-                          onSelect={() => {
-                            handleSelect(item)
-                          }}
-                        >
-                          <span class={iconBadgeClass}>
-                            <Icon aria-hidden={true} size={17} strokeWidth={2} />
-                          </span>
-                          <span class={labelClass}>{item.label}</span>
-                          {item.shortcut ? (
-                            <span class={shortcutClass}>{item.shortcut}</span>
-                          ) : null}
-                        </Command.Item>
-                      )
-                    })}
-                </Command.Group>
-              ))}
-            </Command.List>
-          </Command>
-        </Dialog.Content>
-      </Dialog.Portal>
+                        return (
+                          <Command.Item
+                            key={item.id}
+                            className={itemClass}
+                            keywords={item.keywords ? [...item.keywords] : undefined}
+                            value={`${item.label} ${item.keywords?.join(" ") ?? ""}`}
+                            onSelect={() => {
+                              handleSelect(item)
+                            }}
+                          >
+                            <span class={iconBadgeClass}>
+                              <Icon aria-hidden={true} size={17} strokeWidth={2} />
+                            </span>
+                            <span class={labelClass}>{item.label}</span>
+                            {item.shortcut ? (
+                              <span class={shortcutClass}>{item.shortcut}</span>
+                            ) : null}
+                          </Command.Item>
+                        )
+                      })}
+                  </Command.Group>
+                ))}
+              </Command.List>
+            </Command>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
     </Dialog.Root>
   )
 }

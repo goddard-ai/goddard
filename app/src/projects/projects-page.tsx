@@ -1,7 +1,8 @@
+import { Dialog } from "@ark-ui/react/dialog"
+import { Portal } from "@ark-ui/react/portal"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
-import * as Dialog from "@radix-ui/react-dialog"
 import {
   ArrowUpRight,
   BadgeCheck,
@@ -17,8 +18,9 @@ import {
 } from "lucide-react"
 import type { ComponentChild } from "preact"
 import { useEffect } from "preact/hooks"
-import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
+
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { deriveProjectName } from "./project-name.ts"
 import { lookupProject, type ProjectRecord } from "./project-registry.ts"
 
@@ -192,9 +194,6 @@ const dialogOverlayClass = css({
 })
 
 const dialogContentClass = css({
-  position: "fixed",
-  top: "50%",
-  left: "50%",
   width: "min(620px, calc(100vw - 32px))",
   maxHeight: "calc(100vh - 32px)",
   overflowY: "auto",
@@ -204,13 +203,23 @@ const dialogContentClass = css({
   borderColor: "border",
   background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
   boxShadow: "0 34px 90px rgba(84, 102, 124, 0.2)",
-  transform: "translate(-50%, -50%)",
+  opacity: "1",
+  transform: "translateY(0) scale(1)",
   transition:
     "opacity 220ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1)",
+  outline: "none",
   "@starting-style": {
     opacity: "0",
-    transform: "translate(-50%, calc(-50% + 16px)) scale(0.985)",
+    transform: "translateY(16px) scale(0.985)",
   },
+})
+
+const dialogPositionerClass = css({
+  position: "fixed",
+  inset: "0",
+  display: "grid",
+  placeItems: "center",
+  padding: "16px",
 })
 
 const textInputClass = css({
@@ -756,140 +765,142 @@ function AddProjectDialog(props: {
   return (
     <Dialog.Root
       open={props.isAddDialogOpen}
-      onOpenChange={(open) => {
-        if (!open) {
+      onOpenChange={(details: { open: boolean }) => {
+        if (!details.open) {
           props.closeAddDialog()
         }
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay class={dialogOverlayClass} />
-        <Dialog.Content class={dialogContentClass}>
-          <div
-            class={css({
-              display: "flex",
-              flexDirection: "column",
-              gap: "22px",
-            })}
-          >
+      <Portal>
+        <Dialog.Backdrop class={dialogOverlayClass} />
+        <Dialog.Positioner class={dialogPositionerClass}>
+          <Dialog.Content class={dialogContentClass}>
             <div
               class={css({
                 display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: "16px",
+                flexDirection: "column",
+                gap: "22px",
               })}
             >
-              <div class={css({ display: "flex", flexDirection: "column", gap: "12px" })}>
-                <span class={eyebrowClass}>
-                  <Plus size={14} strokeWidth={2.3} />
-                  Add project
-                </span>
-                <div class={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
-                  <Dialog.Title class={titleClass}>Choose one local root</Dialog.Title>
-                  <Dialog.Description class={bodyClass}>
-                    The shared project registry only stores the path and display name.
-                  </Dialog.Description>
+              <div
+                class={css({
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                })}
+              >
+                <div class={css({ display: "flex", flexDirection: "column", gap: "12px" })}>
+                  <span class={eyebrowClass}>
+                    <Plus size={14} strokeWidth={2.3} />
+                    Add project
+                  </span>
+                  <div class={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
+                    <Dialog.Title class={titleClass}>Choose one local root</Dialog.Title>
+                    <Dialog.Description class={bodyClass}>
+                      The shared project registry only stores the path and display name.
+                    </Dialog.Description>
+                  </div>
                 </div>
+                <Dialog.CloseTrigger asChild>
+                  <button class={cx(buttonBaseClass, secondaryButtonClass)} type="button">
+                    <X size={15} strokeWidth={2.2} />
+                    Close
+                  </button>
+                </Dialog.CloseTrigger>
               </div>
-              <Dialog.Close asChild>
-                <button class={cx(buttonBaseClass, secondaryButtonClass)} type="button">
-                  <X size={15} strokeWidth={2.2} />
-                  Close
-                </button>
-              </Dialog.Close>
-            </div>
 
-            <label
-              class={css({
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-                color: "text",
-                fontSize: "0.92rem",
-                fontWeight: "650",
-              })}
-            >
-              Project path
-              <input
-                class={textInputClass}
-                placeholder="/Users/alec/dev/goddard-ai/app"
-                type="text"
-                value={props.draftPath}
-                onInput={(event) => {
-                  props.onDraftPathInput(event.currentTarget.value)
-                }}
-              />
-            </label>
-
-            <div
-              class={css({
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "10px",
-              })}
-            >
-              <button
-                class={cx(buttonBaseClass, secondaryButtonClass)}
-                type="button"
-                onClick={() => {
-                  void props.browseForProject()
-                }}
+              <label
+                class={css({
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  color: "text",
+                  fontSize: "0.92rem",
+                  fontWeight: "650",
+                })}
               >
-                <FolderSearch2 size={15} strokeWidth={2.1} />
-                Browse
-              </button>
-            </div>
+                Project path
+                <input
+                  class={textInputClass}
+                  placeholder="/Users/alec/dev/goddard-ai/app"
+                  type="text"
+                  value={props.draftPath}
+                  onInput={(event) => {
+                    props.onDraftPathInput(event.currentTarget.value)
+                  }}
+                />
+              </label>
 
-            <label
-              class={css({
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-                color: "text",
-                fontSize: "0.92rem",
-                fontWeight: "650",
-              })}
-            >
-              Display name
-              <input
-                class={textInputClass}
-                placeholder="Derived from folder name"
-                type="text"
-                value={props.draftName}
-                onInput={(event) => {
-                  props.onDraftNameInput(event.currentTarget.value)
-                }}
-              />
-            </label>
-
-            <div
-              class={css({
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "10px",
-              })}
-            >
-              <Dialog.Close asChild>
-                <button class={cx(buttonBaseClass, secondaryButtonClass)} type="button">
-                  Cancel
-                </button>
-              </Dialog.Close>
-              <button
-                class={cx(buttonBaseClass, primaryButtonClass)}
-                disabled={!props.canAddProject}
-                type="button"
-                onClick={() => {
-                  props.addProject()
-                }}
+              <div
+                class={css({
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                })}
               >
-                <Plus size={15} strokeWidth={2.2} />
-                Add project
-              </button>
+                <button
+                  class={cx(buttonBaseClass, secondaryButtonClass)}
+                  type="button"
+                  onClick={() => {
+                    void props.browseForProject()
+                  }}
+                >
+                  <FolderSearch2 size={15} strokeWidth={2.1} />
+                  Browse
+                </button>
+              </div>
+
+              <label
+                class={css({
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  color: "text",
+                  fontSize: "0.92rem",
+                  fontWeight: "650",
+                })}
+              >
+                Display name
+                <input
+                  class={textInputClass}
+                  placeholder="Derived from folder name"
+                  type="text"
+                  value={props.draftName}
+                  onInput={(event) => {
+                    props.onDraftNameInput(event.currentTarget.value)
+                  }}
+                />
+              </label>
+
+              <div
+                class={css({
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                })}
+              >
+                <Dialog.CloseTrigger asChild>
+                  <button class={cx(buttonBaseClass, secondaryButtonClass)} type="button">
+                    Cancel
+                  </button>
+                </Dialog.CloseTrigger>
+                <button
+                  class={cx(buttonBaseClass, primaryButtonClass)}
+                  disabled={!props.canAddProject}
+                  type="button"
+                  onClick={() => {
+                    props.addProject()
+                  }}
+                >
+                  <Plus size={15} strokeWidth={2.2} />
+                  Add project
+                </button>
+              </div>
             </div>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
     </Dialog.Root>
   )
 }
