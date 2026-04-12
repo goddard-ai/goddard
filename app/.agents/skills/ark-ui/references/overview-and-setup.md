@@ -6,6 +6,14 @@
 - Treat Ark UI components as part-based building blocks backed by Zag.js state machines.
 - Preserve required part structure when wrapping or abstracting components into a design system.
 
+## Upstream Docs to Remember
+
+- `Getting Started`: install Ark UI and sanity-check the first component setup.
+- `About`: confirm the cross-framework and Zag.js mental model when architecture questions arise.
+- `Changelog`: check version-specific behavior before assuming a component or prop has always worked the same way.
+- `MCP Server`: useful only when the surrounding environment is wiring Ark's official MCP server for tooling or automation.
+- `LLMs.txt`: the upstream React docs export that mirrors the official component, collection, and utility surface.
+
 ## Install and Import
 
 Install Ark UI when it is not already available:

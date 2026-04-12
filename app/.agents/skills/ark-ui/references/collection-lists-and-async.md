@@ -5,6 +5,10 @@
 - `useAsyncList`
 - `createListCollection`
 
+## Where It Shows Up
+
+These collection helpers commonly back React Ark components such as `Select`, `Combobox`, `Listbox`, and `Tags Input`. Use them instead of ad hoc array lookup when a component expects collection semantics.
+
 ## `useAsyncList`
 
 Use `useAsyncList` to manage asynchronous collection data, including loading state, errors, filtering, sorting, pagination, and cancellation.

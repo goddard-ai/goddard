@@ -1,6 +1,6 @@
 # Tree Collection
 
-Manage hierarchical data such as file systems, navigation menus, or organization charts with `createTreeCollection`.
+Manage hierarchical data such as file systems, navigation menus, or organization charts with `createTreeCollection`. This is the collection layer behind React Ark tree UIs such as `Tree View`.
 
 ## Contents
 
