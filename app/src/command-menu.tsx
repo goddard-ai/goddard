@@ -1,9 +1,9 @@
-/** Renders the app-wide command palette powered by cmdk. */
+/** Renders the app-wide command palette. */
 import { Dialog } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { Command } from "cmdk"
+import { Command } from "ark-cmdk"
 import { Search } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
@@ -11,10 +11,8 @@ import { useEffect, useState } from "preact/hooks"
 const overlayClass = css({
   position: "fixed",
   inset: "0",
-  background:
-    `radial-gradient(circle at top, color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent), transparent 44%), ` +
-    "rgba(11, 13, 17, 0.58)",
-  backdropFilter: "blur(16px)",
+  backgroundColor: "overlay",
+  backdropFilter: "blur(10px)",
   opacity: "1",
   transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   zIndex: "50",
@@ -24,14 +22,16 @@ const overlayClass = css({
 })
 
 const contentClass = css({
-  width: "min(680px, calc(100vw - 32px))",
-  maxHeight: "min(520px, calc(100vh - 48px))",
+  width: "min(560px, calc(100vw - 24px))",
+  maxHeight: "min(460px, calc(100vh - 32px))",
   padding: "0",
+  display: "flex",
+  flexDirection: "column",
   border: "1px solid",
   borderColor: "border",
-  borderRadius: "24px",
-  background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-  boxShadow: "0 32px 96px rgba(6, 10, 18, 0.42)",
+  borderRadius: "20px",
+  backgroundColor: "panel",
+  boxShadow: `0 24px 56px ${token.var("colors.shadow")}`,
   overflow: "hidden",
   outline: "none",
   opacity: "1",
@@ -50,8 +50,8 @@ const positionerClass = css({
   display: "grid",
   justifyItems: "center",
   alignContent: "start",
-  paddingTop: "20vh",
-  paddingInline: "16px",
+  paddingTop: "14vh",
+  paddingInline: "12px",
   zIndex: "51",
 })
 
@@ -67,25 +67,34 @@ const commandRootClass = css({
 const inputWrapperClass = css({
   display: "flex",
   alignItems: "center",
-  gap: "12px",
-  padding: "18px 20px 16px",
+  gap: "10px",
+  minHeight: "56px",
+  paddingInline: "16px",
   borderBottom: "1px solid",
   borderColor: "border",
+  backgroundColor: "background",
+  transition:
+    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+  _focusWithin: {
+    backgroundColor: "surface",
+    borderColor: "accent",
+  },
 })
 
 const searchIconClass = css({
+  flexShrink: "0",
   color: "muted",
 })
 
 const inputClass = css({
   width: "100%",
-  height: "32px",
+  height: "28px",
   border: "none",
   outline: "none",
   backgroundColor: "transparent",
   color: "text",
-  fontSize: "1rem",
-  fontWeight: "560",
+  fontSize: "0.94rem",
+  fontWeight: "600",
   letterSpacing: "-0.01em",
   "&::placeholder": {
     color: "muted",
@@ -93,21 +102,18 @@ const inputClass = css({
 })
 
 const listClass = css({
-  maxHeight: "420px",
+  padding: "8px",
   overflowY: "auto",
-  padding: "10px",
-})
-
-const groupClass = css({
-  "& [cmdk-group-heading]": {
-    paddingInline: "12px",
-    paddingTop: "10px",
-    paddingBottom: "8px",
-    color: token.var("colors.muted"),
-    fontSize: "0.72rem",
-    fontWeight: "700",
-    letterSpacing: "0.12em",
-    textTransform: "uppercase",
+  "& [data-scope='combobox'][data-part='item']": {
+    outline: "none",
+  },
+  "& [data-scope='combobox'][data-part='item'] + [data-scope='combobox'][data-part='item']": {
+    marginTop: "4px",
+  },
+  "& [data-scope='combobox'][data-part='item']:focus-visible > div": {
+    outline: "2px solid",
+    outlineColor: "accentStrong",
+    outlineOffset: "2px",
   },
 })
 
@@ -115,57 +121,73 @@ const itemClass = css({
   display: "grid",
   gridTemplateColumns: "auto minmax(0, 1fr) auto",
   alignItems: "center",
-  gap: "12px",
+  gap: "10px",
   width: "100%",
-  minHeight: "54px",
-  paddingInline: "12px",
-  borderRadius: "16px",
+  minHeight: "44px",
+  padding: "8px 10px",
+  border: "1px solid",
+  borderColor: "transparent",
+  borderRadius: "14px",
+  backgroundColor: "transparent",
   color: "text",
   cursor: "pointer",
   transition:
-    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-  "&[data-selected='true']": {
-    background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
-    boxShadow: `0 16px 30px color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), inset 0 0 0 1px ${token.var("colors.border")}`,
+    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+  "&[data-active='true']": {
+    backgroundColor: "surface",
+    borderColor: "accent",
+    boxShadow: `0 12px 28px ${token.var("colors.shadow")}`,
   },
 })
 
 const emptyClass = css({
   display: "grid",
   placeItems: "center",
-  minHeight: "96px",
+  minHeight: "88px",
   color: "muted",
-  fontSize: "0.92rem",
+  fontSize: "0.86rem",
+  fontWeight: "600",
 })
 
 const iconBadgeClass = css({
   display: "grid",
   placeItems: "center",
-  width: "34px",
-  height: "34px",
-  borderRadius: "12px",
-  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
+  width: "30px",
+  height: "30px",
+  borderRadius: "10px",
+  border: "1px solid",
+  borderColor: "border",
+  backgroundColor: "background",
   color: "accentStrong",
-  boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
+  transition:
+    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+  "&[data-active='true']": {
+    borderColor: "accent",
+    backgroundColor: "accent",
+    color: "accentFg",
+  },
 })
 
 const labelClass = css({
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  fontSize: "0.96rem",
+  fontSize: "0.9rem",
   fontWeight: "620",
 })
 
 const shortcutClass = css({
   paddingInline: "8px",
-  height: "24px",
+  height: "20px",
   borderRadius: "999px",
-  backgroundColor: "surface",
+  border: "1px solid",
+  borderColor: "border",
+  backgroundColor: "background",
   color: "muted",
-  fontSize: "0.75rem",
+  fontSize: "0.68rem",
   fontWeight: "700",
-  lineHeight: "24px",
+  letterSpacing: "0.04em",
+  lineHeight: "20px",
 })
 
 const hiddenTitleClass = css({
@@ -198,13 +220,19 @@ export function CommandMenu(props: {
   open: boolean
 }) {
   const [search, setSearch] = useState("")
-  const groups = Array.from(new Set(props.items.map((item) => item.group)))
 
   useEffect(() => {
     if (!props.open && search.length > 0) {
       setSearch("")
     }
   }, [props.open, search])
+
+  function handleSelect(item: CommandMenuItem): void {
+    props.onOpenChange(false)
+    void Promise.resolve(item.onSelect()).catch((error) => {
+      console.error("Failed to run command menu action.", error)
+    })
+  }
 
   return (
     <Dialog.Root
@@ -218,58 +246,44 @@ export function CommandMenu(props: {
         <Dialog.Positioner class={positionerClass}>
           <Dialog.Content class={contentClass}>
             <Dialog.Title class={hiddenTitleClass}>Command menu</Dialog.Title>
-            <Command
-              className={commandRootClass}
+            <Command.Root<CommandMenuItem>
+              class={commandRootClass}
+              itemToKeywords={(item) => item.keywords}
+              itemToString={(item) => item.label}
+              itemToValue={(item) => item.id}
+              items={props.items}
               label="Command menu"
-              loop={true}
-              shouldFilter={true}
+              onSearchChange={setSearch}
+              onSelect={handleSelect}
+              search={search}
             >
               <div class={inputWrapperClass}>
                 <Search aria-hidden={true} class={searchIconClass} size={18} />
                 <Command.Input
                   autoFocus={true}
-                  className={inputClass}
+                  class={inputClass}
                   placeholder="Type a command or jump to a view"
-                  value={search}
-                  onValueChange={setSearch}
                 />
               </div>
-              <Command.List className={listClass}>
-                <Command.Empty className={emptyClass}>No matching commands.</Command.Empty>
-                {groups.map((group) => (
-                  <Command.Group key={group} heading={group} className={groupClass}>
-                    {props.items
-                      .filter((item) => item.group === group)
-                      .map((item) => {
-                        const Icon = item.icon
+              <Command.List<CommandMenuItem>
+                class={listClass}
+                empty={<div class={emptyClass}>No matching commands.</div>}
+              >
+                {(item, state) => {
+                  const Icon = item.icon
 
-                        return (
-                          <Command.Item
-                            key={item.id}
-                            className={itemClass}
-                            keywords={item.keywords ? [...item.keywords] : undefined}
-                            value={`${item.label} ${item.keywords?.join(" ") ?? ""}`}
-                            onSelect={() => {
-                              props.onOpenChange(false)
-                              void Promise.resolve(item.onSelect()).catch((error) => {
-                                console.error("Failed to run command menu action.", error)
-                              })
-                            }}
-                          >
-                            <span class={iconBadgeClass}>
-                              <Icon aria-hidden={true} size={17} strokeWidth={2} />
-                            </span>
-                            <span class={labelClass}>{item.label}</span>
-                            {item.shortcut ? (
-                              <span class={shortcutClass}>{item.shortcut}</span>
-                            ) : null}
-                          </Command.Item>
-                        )
-                      })}
-                  </Command.Group>
-                ))}
+                  return (
+                    <div class={itemClass} data-active={state.active ? "true" : "false"}>
+                      <span class={iconBadgeClass} data-active={state.active ? "true" : "false"}>
+                        <Icon aria-hidden={true} size={16} strokeWidth={2} />
+                      </span>
+                      <span class={labelClass}>{item.label}</span>
+                      {item.shortcut ? <span class={shortcutClass}>{item.shortcut}</span> : null}
+                    </div>
+                  )
+                }}
               </Command.List>
-            </Command>
+            </Command.Root>
           </Dialog.Content>
         </Dialog.Positioner>
       </Portal>
