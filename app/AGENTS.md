@@ -17,6 +17,10 @@
   - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
   - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.
   - Do not model simple UI state in `preact-sigma`.
+  - Prefer uncontrolled form inputs when the UI does not need per-keystroke state.
+  - Use controlled inputs only when live validation, derived UI, formatting, or cross-field coordination requires it.
+  - Prefer uncontrolled open state for dialogs, popovers, tooltips, and similar overlays when no other part of the UI needs to coordinate them.
+  - Use controlled open state only when another component, keyboard shortcut, persistence rule, or async flow must drive the overlay lifecycle.
   - Keep custom Preact hooks for state management local to the component that uses them.
   - Do not extract single-use state hooks into shared modules.
 - Query cache:
