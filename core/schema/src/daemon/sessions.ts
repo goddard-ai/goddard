@@ -96,6 +96,78 @@ export const SessionPathParams = DaemonSessionIdParams
 
 export type SessionPathParams = z.infer<typeof SessionPathParams>
 
+/** Trigger categories supported by the session chat composer suggestion API. */
+export const SessionComposerSuggestionTrigger = z.enum(["at", "dollar", "slash"])
+
+export type SessionComposerSuggestionTrigger = z.infer<typeof SessionComposerSuggestionTrigger>
+
+/** Request payload used to read session-scoped composer suggestions for one trigger. */
+export const SessionComposerSuggestionsRequest = DaemonSessionIdParams.extend({
+  trigger: SessionComposerSuggestionTrigger,
+  query: z.string(),
+  limit: z.number().int().positive().optional(),
+})
+
+export type SessionComposerSuggestionsRequest = z.infer<typeof SessionComposerSuggestionsRequest>
+
+/** Filesystem-backed suggestion item returned for one `@` trigger lookup. */
+export const SessionComposerFileSuggestion = z.strictObject({
+  type: z.union([z.literal("file"), z.literal("folder")]),
+  path: z.string(),
+  uri: z.string(),
+  label: z.string(),
+  detail: z.string(),
+})
+
+export type SessionComposerFileSuggestion = z.infer<typeof SessionComposerFileSuggestion>
+
+/** Skill-backed suggestion item returned for one `$` trigger lookup. */
+export const SessionComposerSkillSuggestionSource = z.enum(["local", "global"])
+
+export type SessionComposerSkillSuggestionSource = z.infer<
+  typeof SessionComposerSkillSuggestionSource
+>
+
+/** Skill-backed suggestion item returned for one `$` trigger lookup. */
+export const SessionComposerSkillSuggestion = z.strictObject({
+  type: z.literal("skill"),
+  path: z.string(),
+  uri: z.string(),
+  label: z.string(),
+  detail: z.string(),
+  source: SessionComposerSkillSuggestionSource,
+})
+
+export type SessionComposerSkillSuggestion = z.infer<typeof SessionComposerSkillSuggestion>
+
+/** Slash-command suggestion item returned for one `/` trigger lookup. */
+export const SessionComposerSlashCommandSuggestion = z.strictObject({
+  type: z.literal("slash_command"),
+  name: z.string(),
+  description: z.string(),
+  inputHint: z.string().nullable().optional(),
+})
+
+export type SessionComposerSlashCommandSuggestion = z.infer<
+  typeof SessionComposerSlashCommandSuggestion
+>
+
+/** One suggestion item returned for the session chat composer. */
+export const SessionComposerSuggestion = z.union([
+  SessionComposerFileSuggestion,
+  SessionComposerSkillSuggestion,
+  SessionComposerSlashCommandSuggestion,
+])
+
+export type SessionComposerSuggestion = z.infer<typeof SessionComposerSuggestion>
+
+/** Response payload returned after reading session-scoped composer suggestions. */
+export const SessionComposerSuggestionsResponse = z.strictObject({
+  suggestions: z.array(SessionComposerSuggestion),
+})
+
+export type SessionComposerSuggestionsResponse = z.infer<typeof SessionComposerSuggestionsResponse>
+
 /** JSON-RPC request ids surfaced for queued and aborted prompt bookkeeping. */
 export const SessionPromptId = z.union([z.string(), z.number()])
 

@@ -313,6 +313,9 @@ export async function startDaemonServer(
     sessionHistory: async ({ id }) => {
       return sessionManager.getHistory(id)
     },
+    sessionComposerSuggestions: async (payload) => {
+      return sessionManager.getComposerSuggestions(payload)
+    },
     sessionDiagnostics: async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },

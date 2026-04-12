@@ -1,5 +1,7 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
+
 import type {
+  SessionTranscriptContentBlock,
   SessionTranscriptItem,
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
@@ -8,6 +10,7 @@ import type {
   SessionTranscriptToolLocation,
   SessionTranscriptToolStatus,
 } from "~/sessions/models.ts"
+import { promptBlocksToTranscriptContent } from "./composer-content.ts"
 
 type SessionHistoryMessage = GetSessionHistoryResponse["history"][number]
 
@@ -53,27 +56,28 @@ function hasMethod(
 }
 
 function textFromContentBlocks(blocks: unknown) {
-  if (!Array.isArray(blocks)) {
-    return null
-  }
-
-  const text = blocks
-    .map((block) =>
-      isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : "",
-    )
-    .filter(Boolean)
+  const content = promptBlocksToTranscriptContent(blocks)
+  const text = content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("\n")
     .trim()
 
   return text || null
 }
 
-function extractPromptText(message: SessionHistoryMessage) {
+function textContentBlock(text: string): SessionTranscriptContentBlock {
+  return {
+    type: "text",
+    text,
+  }
+}
+
+function extractPromptContent(message: SessionHistoryMessage) {
   if (!hasMethod(message, "session/prompt") || !isRecord(message.params)) {
-    return null
+    return []
   }
 
-  return textFromContentBlocks(message.params.prompt)
+  return promptBlocksToTranscriptContent(message.params.prompt)
 }
 
 function extractPromptRequestId(message: SessionHistoryMessage) {
@@ -342,13 +346,11 @@ function closePromptTurn(message: SessionHistoryMessage, activePromptIds: string
   }
 }
 
-function createTextRow(
-  input: Omit<SessionTranscriptTextMessage, "kind">,
-): SessionTranscriptTextMessage {
+function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   return {
     kind: "message",
     ...input,
-  }
+  } satisfies SessionTranscriptTextMessage
 }
 
 export function buildTranscriptMessages(
@@ -361,16 +363,16 @@ export function buildTranscriptMessages(
       role: "system",
       authorName: "System",
       timestampLabel: session.status,
-      text: `Working directory: ${session.cwd}`,
+      content: [textContentBlock(`Working directory: ${session.cwd}`)],
     }),
   ]
   const activePromptIds: string[] = []
   const toolRowIndexes = new Map<string, number>()
 
   for (const [index, message] of history.entries()) {
-    const promptText = extractPromptText(message)
+    const promptContent = extractPromptContent(message)
 
-    if (promptText) {
+    if (promptContent.length > 0) {
       const promptRequestId = extractPromptRequestId(message)
       if (promptRequestId) {
         activePromptIds.push(promptRequestId)
@@ -382,7 +384,7 @@ export function buildTranscriptMessages(
           role: "user",
           authorName: "You",
           timestampLabel: "Prompt",
-          text: promptText,
+          content: promptContent,
         }),
       )
       closePromptTurn(message, activePromptIds)
@@ -412,7 +414,7 @@ export function buildTranscriptMessages(
           role: "assistant",
           authorName: session.agentName,
           timestampLabel: "Update",
-          text: updateText,
+          content: [textContentBlock(updateText)],
         }),
       )
     }
@@ -426,7 +428,9 @@ export function buildTranscriptMessages(
       (item) =>
         item.kind === "message" &&
         item.role === "assistant" &&
-        item.text === session.lastAgentMessage,
+        item.content.length === 1 &&
+        item.content[0]?.type === "text" &&
+        item.content[0].text === session.lastAgentMessage,
     )
   ) {
     items.push(
@@ -435,7 +439,7 @@ export function buildTranscriptMessages(
         role: "assistant",
         authorName: session.agentName,
         timestampLabel: "Latest",
-        text: session.lastAgentMessage,
+        content: [textContentBlock(session.lastAgentMessage)],
         streaming: session.activeDaemonSession && session.status === "active",
       }),
     )

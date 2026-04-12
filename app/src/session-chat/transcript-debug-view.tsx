@@ -1,8 +1,9 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 
+import type { SessionTranscriptItem } from "~/sessions/models.ts"
 import { SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES } from "./transcript-debug-data.ts"
-import { Transcript, type TranscriptMessage } from "./transcript.tsx"
+import { Transcript } from "./transcript.tsx"
 
 const debugPageClass = css({
   display: "grid",
@@ -64,7 +65,7 @@ const debugCanvasClass = css({
 
 /** Props for the standalone transcript debug view. */
 export type TranscriptDebugViewProps = {
-  messages?: readonly TranscriptMessage[]
+  messages?: readonly SessionTranscriptItem[]
 }
 
 /** Renders the standalone transcript-debug surface used by the native development menu. */

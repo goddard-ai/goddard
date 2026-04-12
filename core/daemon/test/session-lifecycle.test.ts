@@ -9,7 +9,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
@@ -666,6 +666,196 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   expect(existsSync(worktree!.worktreeDir)).toBe(true)
   expect(existsSync(worktree!.effectiveCwd)).toBe(true)
   await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("sessionComposerSuggestions scopes `@` lookups to the session cwd and skips ignored directories", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  await mkdir(join(repoDir, "src", "nested"), { recursive: true })
+  await mkdir(join(repoDir, "node_modules", "pkg"), { recursive: true })
+  await mkdir(join(repoDir, "dist"), { recursive: true })
+  await mkdir(join(repoDir, ".git", "objects"), { recursive: true })
+  await writeFile(
+    join(repoDir, "src", "nested", "match.ts"),
+    "export const match = true\n",
+    "utf-8",
+  )
+  await writeFile(join(repoDir, "node_modules", "pkg", "ignore.ts"), "ignored\n", "utf-8")
+  await writeFile(join(repoDir, "dist", "ignore.ts"), "ignored\n", "utf-8")
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const emptyQuery = await client.send("sessionComposerSuggestions", {
+    id: created.session.id,
+    trigger: "at",
+    query: "",
+  })
+  const filtered = await client.send("sessionComposerSuggestions", {
+    id: created.session.id,
+    trigger: "at",
+    query: "match",
+  })
+
+  const emptyQueryLabels = emptyQuery.suggestions.flatMap((suggestion) =>
+    "label" in suggestion ? [suggestion.label] : [],
+  )
+
+  expect(emptyQueryLabels).toContain("src")
+  expect(emptyQueryLabels).not.toContain(".git")
+  expect(emptyQueryLabels).not.toContain("node_modules")
+  expect(filtered.suggestions).toEqual([
+    {
+      type: "file",
+      path: join(repoDir, "src", "nested", "match.ts"),
+      uri: pathToFileURL(join(repoDir, "src", "nested", "match.ts")).toString(),
+      label: "match.ts",
+      detail: "./src/nested/match.ts",
+    },
+  ])
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("sessionComposerSuggestions prefers local `$` skills over global duplicates", async () => {
+  await useTempHome()
+
+  const repoDir = await createRepoFixture()
+  const localSkillDir = join(repoDir, ".agents", "skills", "alpha")
+  const globalSkillDir = join(process.env.HOME!, ".agents", "skills")
+  await mkdir(localSkillDir, { recursive: true })
+  await mkdir(join(globalSkillDir, "alpha"), { recursive: true })
+  await mkdir(join(globalSkillDir, "beta"), { recursive: true })
+  await writeFile(join(localSkillDir, "SKILL.md"), "# alpha\n", "utf-8")
+  await writeFile(join(globalSkillDir, "alpha", "SKILL.md"), "# alpha global\n", "utf-8")
+  await writeFile(join(globalSkillDir, "beta", "SKILL.md"), "# beta global\n", "utf-8")
+
+  const daemon = await startServer({ useExistingHome: true })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const suggestions = await client.send("sessionComposerSuggestions", {
+    id: created.session.id,
+    trigger: "dollar",
+    query: "",
+  })
+
+  expect(suggestions.suggestions).toEqual([
+    {
+      type: "skill",
+      path: join(localSkillDir, "SKILL.md"),
+      uri: pathToFileURL(join(localSkillDir, "SKILL.md")).toString(),
+      label: "alpha",
+      detail: "./.agents/skills/alpha/SKILL.md",
+      source: "local",
+    },
+    {
+      type: "skill",
+      path: join(globalSkillDir, "beta", "SKILL.md"),
+      uri: pathToFileURL(join(globalSkillDir, "beta", "SKILL.md")).toString(),
+      label: "beta",
+      detail: "~/.agents/skills/beta/SKILL.md",
+      source: "global",
+    },
+  ])
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("sessionComposerSuggestions reads `/` commands from the latest ACP history update", async () => {
+  await useTempHome()
+
+  const sessionId = db.sessions.newId()
+  const acpSessionId = `acp-history-${randomUUID()}`
+  db.sessions.put(sessionId, {
+    acpSessionId,
+    status: "done",
+    stopReason: null,
+    agentName: "node",
+    cwd: process.cwd(),
+    mcpServers: [],
+    connectionMode: "history",
+    activeDaemonSession: false,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+    repository: null,
+    prNumber: null,
+    token: null,
+    permissions: null,
+    metadata: null,
+    models: null,
+  })
+  db.sessionMessages.create({
+    sessionId,
+    messages: [
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: acpSessionId,
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [
+              {
+                name: "draft",
+                description: "Older command set",
+              },
+            ],
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: acpSessionId,
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [
+              {
+                name: "plan",
+                description: "Create or revise the plan",
+                input: { hint: "What should change?" },
+              },
+              {
+                name: "summarize",
+                description: "Summarize the current progress",
+              },
+            ],
+          },
+        },
+      },
+    ],
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const suggestions = await client.send("sessionComposerSuggestions", {
+    id: sessionId,
+    trigger: "slash",
+    query: "plan",
+  })
+
+  expect(suggestions.suggestions).toEqual([
+    {
+      type: "slash_command",
+      name: "plan",
+      description: "Create or revise the plan",
+      inputHint: "What should change?",
+    },
+  ])
 })
 
 test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap output", async () => {

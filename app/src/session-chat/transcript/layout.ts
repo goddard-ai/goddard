@@ -5,16 +5,19 @@ import {
   type PrepareOptions,
   type PreparedTextWithSegments,
 } from "@chenglou/pretext"
+
 import type {
   SessionTranscriptItem,
   SessionTranscriptTextMessage,
   SessionTranscriptToolContent,
 } from "~/sessions/models.ts"
 import {
+  ATTACHMENT_ROW_HEIGHT,
   BODY_FONT,
   BODY_LINE_HEIGHT,
   BUBBLE_PADDING_X,
   BUBBLE_PADDING_Y,
+  CONTENT_BLOCK_GAP,
   META_HEIGHT,
   MIN_TEXT_WIDTH,
   NARROW_BUBBLE_WIDTH_BREAKPOINT,
@@ -131,6 +134,17 @@ function estimateLineCount(text: string, maxWidth: number) {
   )
 }
 
+function estimateTextMessageBlockHeight(
+  block: SessionTranscriptTextMessage["content"][number],
+  maxWidth: number,
+) {
+  if (block.type === "resource_link") {
+    return ATTACHMENT_ROW_HEIGHT
+  }
+
+  return estimateLineCount(block.text, maxWidth) * BODY_LINE_HEIGHT
+}
+
 export function buildToolDiffPreview(
   content: Extract<SessionTranscriptToolContent, { type: "diff" }>,
 ) {
@@ -170,9 +184,15 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
   const textWidth = getTranscriptTextWidth(message, viewportWidth)
 
   if (isTextMessage(message)) {
-    const approximateLineCount = estimateLineCount(message.text, textWidth)
+    const contentHeight = message.content.reduce((height, block, index) => {
+      return (
+        height +
+        estimateTextMessageBlockHeight(block, textWidth) +
+        (index < message.content.length - 1 ? CONTENT_BLOCK_GAP : 0)
+      )
+    }, 0)
 
-    return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP
+    return META_HEIGHT + BUBBLE_PADDING_Y + Math.max(contentHeight, BODY_LINE_HEIGHT) + ROW_GAP
   }
 
   let approximateLineCount = 2

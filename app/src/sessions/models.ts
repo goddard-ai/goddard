@@ -1,3 +1,17 @@
+/** One ordered content block rendered inside a transcript message bubble. */
+export type SessionTranscriptContentBlock =
+  | {
+      type: "text"
+      text: string
+    }
+  | {
+      type: "resource_link"
+      name: string
+      uri: string
+      title: string | null
+      description: string | null
+    }
+
 /** ACP tool kinds the session transcript currently renders. */
 export type SessionTranscriptToolKind =
   | "read"
@@ -44,7 +58,7 @@ export type SessionTranscriptTextMessage = {
   role: "assistant" | "user" | "system"
   authorName: string
   timestampLabel: string
-  text: string
+  content: readonly SessionTranscriptContentBlock[]
   streaming?: boolean
 }
 

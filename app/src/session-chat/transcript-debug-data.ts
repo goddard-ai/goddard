@@ -1,4 +1,4 @@
-import type { TranscriptMessage } from "./transcript.tsx"
+import type { SessionTranscriptItem } from "~/sessions/models.ts"
 
 const assistantMessageBodies = [
   "I mapped the shell layout and the current state modules. The next clean seam is the transcript itself, because it can be pinned down visually before any live session transport exists.",
@@ -33,15 +33,15 @@ function formatFixtureTimestamp(totalMinutes: number): string {
 }
 
 /** Builds a long deterministic transcript fixture that makes virtualization visible during debugging. */
-function buildDebugMessages(): TranscriptMessage[] {
-  const messages: TranscriptMessage[] = [
+function buildDebugMessages(): SessionTranscriptItem[] {
+  const messages: SessionTranscriptItem[] = [
     {
       kind: "message",
       id: "system:opening",
       role: "system",
       authorName: "Debug Surface",
       timestampLabel: "9:10 AM",
-      text: systemMessageBodies[0],
+      content: [{ type: "text", text: systemMessageBodies[0] }],
     },
     {
       kind: "toolCall",
@@ -92,10 +92,15 @@ function buildDebugMessages(): TranscriptMessage[] {
       role,
       authorName,
       timestampLabel: formatFixtureTimestamp(minuteCursor),
-      text:
-        role === "assistant" && index % 5 === 2
-          ? `${body}\n\nWorking note ${index + 1}: preserve readable gutters, keep row heights predictable, and let the transcript stay dumb until real session wiring arrives.`
-          : body,
+      content: [
+        {
+          type: "text",
+          text:
+            role === "assistant" && index % 5 === 2
+              ? `${body}\n\nWorking note ${index + 1}: preserve readable gutters, keep row heights predictable, and let the transcript stay dumb until real session wiring arrives.`
+              : body,
+        },
+      ],
     })
 
     if (role === "assistant" && index % 24 === 10) {

@@ -19,6 +19,7 @@ import type {
   RespondWorkforceRequest,
   RunNamedActionRequest,
   SendSessionMessageRequest,
+  SessionComposerSuggestionsRequest,
   ShutdownLoopRequest,
   ShutdownWorkforceRequest,
   StartLoopRequest,
@@ -115,6 +116,10 @@ function createSessionNamespace(client: DaemonIpcClient) {
 
     /** Reads one daemon-managed session history with session identity and connection state. */
     history: async (input: DaemonSessionIdParams) => client.send("sessionHistory", input),
+
+    /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
+    composerSuggestions: async (input: SessionComposerSuggestionsRequest) =>
+      client.send("sessionComposerSuggestions", input),
 
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: async (input: DaemonSessionIdParams) => client.send("sessionDiagnostics", input),

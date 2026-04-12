@@ -32,12 +32,13 @@ export function SessionChatView(props: { sessionId: string }) {
         scrollCacheKey={`detail:session:${session.id}:transcript`}
       />
       <Composer
-        onSubmit={async (text) => {
+        sessionId={session.id}
+        onSubmit={async (prompt) => {
           try {
             await submitSessionPrompt({
               id: session.id,
               acpId: session.acpSessionId,
-              prompt: text,
+              prompt,
             })
           } catch (error) {
             console.error("Failed to submit session prompt.", error)

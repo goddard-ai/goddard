@@ -208,6 +208,46 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(result).toBe(unsubscribe)
   })
 
+  test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      suggestions: [
+        {
+          type: "file",
+          path: "/repo/src/index.ts",
+          uri: "file:///repo/src/index.ts",
+          label: "index.ts",
+          detail: "./src/index.ts",
+        },
+      ],
+    })
+
+    await expect(
+      sdk.session.composerSuggestions({
+        id: "ses_1",
+        trigger: "at",
+        query: "index",
+      }),
+    ).resolves.toEqual({
+      suggestions: [
+        {
+          type: "file",
+          path: "/repo/src/index.ts",
+          uri: "file:///repo/src/index.ts",
+          label: "index.ts",
+          detail: "./src/index.ts",
+        },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("sessionComposerSuggestions", {
+      id: "ses_1",
+      trigger: "at",
+      query: "index",
+    })
+  })
+
   test("session.run returns an AgentSession", async () => {
     const { sdk, send, subscribe } = createSdkWithClient()
     const unsubscribe = vi.fn()

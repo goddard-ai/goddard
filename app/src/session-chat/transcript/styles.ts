@@ -92,6 +92,12 @@ export const toolBubbleClass = css({
   color: "fg.default",
 })
 
+export const transcriptContentClass = css({
+  display: "grid",
+  gap: "10px",
+  minWidth: 0,
+})
+
 export const systemTextClass = css({
   fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
   fontSize: "15px",
@@ -100,6 +106,40 @@ export const systemTextClass = css({
   letterSpacing: "0.01em",
   color: "fg.muted",
   whiteSpace: "pre-wrap",
+})
+
+export const attachmentCardClass = css({
+  display: "grid",
+  gap: "6px",
+  minWidth: 0,
+  padding: "12px 14px",
+  borderRadius: "16px",
+  border: "1px solid",
+  borderColor: "border",
+  backgroundColor: "bg.surface",
+})
+
+export const attachmentHeadingClass = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  color: "fg.default",
+  fontSize: "0.86rem",
+  fontWeight: "680",
+  lineHeight: "1.35",
+})
+
+export const attachmentIconClass = css({
+  display: "inline-flex",
+  color: "fg.muted",
+})
+
+export const attachmentDetailClass = css({
+  color: "fg.muted",
+  fontSize: "0.8rem",
+  lineHeight: "1.45",
+  overflowWrap: "anywhere",
+  wordBreak: "break-word",
 })
 
 export const toolCardClass = css({
@@ -294,4 +334,6 @@ export const MIN_TEXT_WIDTH = 144
 export const DEFAULT_ROW_HEIGHT = 132
 export const NARROW_BUBBLE_WIDTH_BREAKPOINT = 520
 export const WIDE_BUBBLE_WIDTH_BREAKPOINT = 760
+export const CONTENT_BLOCK_GAP = 10
+export const ATTACHMENT_ROW_HEIGHT = 68
 export const TOOL_DIFF_PREVIEW_LINE_LIMIT = 6

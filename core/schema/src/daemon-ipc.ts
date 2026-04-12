@@ -24,6 +24,7 @@ import {
   type CreateSessionResponse,
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
+  type SessionComposerSuggestionsResponse,
   type GetSessionResponse,
   type GetSessionWorkforceResponse,
   type GetSessionWorktreeResponse,
@@ -40,6 +41,7 @@ import {
   MountSessionWorktreeSyncRequest as MountSessionWorktreeSyncRequestSchema,
   ResolveSessionTokenRequest,
   SendSessionMessageRequest,
+  SessionComposerSuggestionsRequest,
   SessionMessageEvent,
   SyncSessionWorktreeRequest as SyncSessionWorktreeRequestSchema,
   SteerSessionRequest,
@@ -123,6 +125,10 @@ export const daemonIpcSchema = {
     sessionHistory: {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionHistoryResponse>(),
+    },
+    sessionComposerSuggestions: {
+      payload: SessionComposerSuggestionsRequest,
+      response: $type<SessionComposerSuggestionsResponse>(),
     },
     sessionDiagnostics: {
       payload: DaemonSessionIdParams,

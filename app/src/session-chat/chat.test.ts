@@ -57,7 +57,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
       role: "system",
       authorName: "System",
       timestampLabel: "active",
-      text: "Working directory: /repo-a",
+      content: [{ type: "text", text: "Working directory: /repo-a" }],
     },
     {
       kind: "message",
@@ -65,7 +65,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
       role: "user",
       authorName: "You",
       timestampLabel: "Prompt",
-      text: "Review the diff and summarize problems.",
+      content: [{ type: "text", text: "Review the diff and summarize problems." }],
     },
     {
       kind: "message",
@@ -73,7 +73,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
       role: "assistant",
       authorName: "pi",
       timestampLabel: "Update",
-      text: "I reviewed the diff and found one issue.",
+      content: [{ type: "text", text: "I reviewed the diff and found one issue." }],
     },
   ])
 })
@@ -98,8 +98,8 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
     role: "assistant",
     authorName: "pi",
     timestampLabel: "Latest",
-    text: "Ready to review the diff.",
     streaming: true,
+    content: [{ type: "text", text: "Ready to review the diff." }],
   })
 })
 
@@ -157,7 +157,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
       role: "system",
       authorName: "System",
       timestampLabel: "active",
-      text: "Working directory: /repo-a",
+      content: [{ type: "text", text: "Working directory: /repo-a" }],
     },
     {
       kind: "message",
@@ -165,7 +165,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
       role: "user",
       authorName: "You",
       timestampLabel: "Prompt",
-      text: "Inspect the transcript implementation.",
+      content: [{ type: "text", text: "Inspect the transcript implementation." }],
     },
     {
       kind: "toolCall",
