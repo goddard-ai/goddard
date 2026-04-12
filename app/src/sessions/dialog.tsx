@@ -1,30 +1,31 @@
 import { Dialog } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
-import type { AdapterCatalogEntry, CreateSessionRequest } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { useSignal } from "@preact/signals"
 import { Sparkles, X } from "lucide-react"
+import { useListener } from "preact-sigma"
+import { useEffect } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useQuery } from "~/lib/query.ts"
+import { goddardSdk } from "~/sdk.ts"
+import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { createSession } from "./actions.ts"
 import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
+import { buildCreateSessionInput } from "./session-launch.ts"
 
-export function SessionLaunchDialog(props: {
-  adapters: readonly AdapterCatalogEntry[]
-  canSubmit: boolean
-  createSessionInput: () => CreateSessionRequest | null
-  draftAdapterId: string | null
-  draftProjectPath: string | null
-  draftPrompt: string
-  isDialogOpen: boolean
-  onChangeAdapterId: (adapterId: string | null) => void
-  onChangeProjectPath: (projectPath: string | null) => void
-  onChangePrompt: (prompt: string) => void
-  onClose: () => void
-}) {
+export function SessionLaunchDialog() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
+  const isDialogOpen = useSignal(false)
+  const draftAdapterId = useSignal<string | null>(null)
+  const draftProjectPath = useSignal<string | null>(null)
+  const draftPrompt = useSignal("")
+  const adapterCatalog = useQuery(goddardSdk.adapter.list, [
+    { cwd: draftProjectPath.value ?? undefined },
+  ])
   const overlayClass = css({
     position: "fixed",
     inset: "0",
@@ -64,12 +65,57 @@ export function SessionLaunchDialog(props: {
     },
   })
 
+  useEffect(() => {
+    const availableAdapterIds = new Set(adapterCatalog.adapters.map((adapter) => adapter.id))
+    const nextAdapterId =
+      draftAdapterId.value && availableAdapterIds.has(draftAdapterId.value)
+        ? draftAdapterId.value
+        : adapterCatalog.defaultAdapterId &&
+            availableAdapterIds.has(adapterCatalog.defaultAdapterId)
+          ? adapterCatalog.defaultAdapterId
+          : (adapterCatalog.adapters[0]?.id ?? null)
+
+    if (draftAdapterId.value !== nextAdapterId) {
+      draftAdapterId.value = nextAdapterId
+    }
+  }, [adapterCatalog.adapters, adapterCatalog.defaultAdapterId, draftAdapterId.value])
+
+  useListener(globalEventHub, "sessionLaunchDialogRequested", (detail) => {
+    isDialogOpen.value = true
+    draftAdapterId.value = null
+    draftProjectPath.value = detail.preferredProjectPath
+    draftPrompt.value = ""
+  })
+
   function closeDialog() {
-    props.onClose()
+    isDialogOpen.value = false
+    draftAdapterId.value = null
+    draftProjectPath.value = null
+    draftPrompt.value = ""
+  }
+
+  function setDraftAdapterId(adapterId: string | null) {
+    draftAdapterId.value = adapterId
+  }
+
+  function setDraftProjectPath(projectPath: string | null) {
+    draftProjectPath.value = projectPath
+  }
+
+  function setDraftPrompt(prompt: string) {
+    draftPrompt.value = prompt
+  }
+
+  function createSessionInput() {
+    return buildCreateSessionInput(draftProjectPath.value, draftAdapterId.value, draftPrompt.value)
+  }
+
+  function canSubmit() {
+    return createSessionInput() !== null
   }
 
   async function launchSession() {
-    const sessionInput = props.createSessionInput()
+    const sessionInput = createSessionInput()
 
     if (!sessionInput) {
       return
@@ -77,7 +123,7 @@ export function SessionLaunchDialog(props: {
 
     try {
       const { session } = await createSession(sessionInput)
-      props.onClose()
+      closeDialog()
       workbenchTabSet.openOrFocusTab({
         id: `session:${session.id}`,
         kind: "sessionChat",
@@ -94,7 +140,7 @@ export function SessionLaunchDialog(props: {
 
   return (
     <Dialog.Root
-      open={props.isDialogOpen}
+      open={isDialogOpen.value}
       onOpenChange={(details: { open: boolean }) => {
         if (!details.open) {
           closeDialog()
@@ -181,14 +227,14 @@ export function SessionLaunchDialog(props: {
               </Dialog.CloseTrigger>
             </div>
             <LaunchForm
-              adapters={props.adapters}
-              canSubmit={props.canSubmit}
-              draftAdapterId={props.draftAdapterId}
-              draftProjectPath={props.draftProjectPath}
-              draftPrompt={props.draftPrompt}
-              onChangeAdapterId={props.onChangeAdapterId}
-              onChangeProjectPath={props.onChangeProjectPath}
-              onChangePrompt={props.onChangePrompt}
+              adapters={adapterCatalog.adapters}
+              canSubmit={canSubmit()}
+              draftAdapterId={draftAdapterId.value}
+              draftProjectPath={draftProjectPath.value}
+              draftPrompt={draftPrompt.value}
+              onChangeAdapterId={setDraftAdapterId}
+              onChangeProjectPath={setDraftProjectPath}
+              onChangePrompt={setDraftPrompt}
               onSubmit={launchSession}
               projects={projectRegistry.projectList}
             />

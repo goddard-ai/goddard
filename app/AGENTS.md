@@ -47,6 +47,7 @@
   - Use `../...` only when it does not traverse up to `src/` itself. A single `../...` is allowed when it still lands inside a child path such as `src/foo/...`, but do not use `../...` to reach `src/...` broadly.
   - Never use `../../...` or deeper upward traversal imports.
 - In UI components, prefer `useListener` from `preact-sigma` over manual `addEventListener` and `removeEventListener` wiring.
+- Avoid `forwardRef` for cross-component coordination in `app/` unless there is no simpler option. Prefer semantic actions through context or `src/shared/global-event-hub.ts`.
 - Prefer the `class` JSX prop over `className`.
 - Prefer the global `preact.` namespace for Preact types such as `preact.ComponentChildren` instead of importing those types directly.
 - Prefix reusable, pre-styled UI primitives with `Good` (for example `GoodTooltip`). Reserve that prefix for opinionated design-system components, not feature/domain modules or state.

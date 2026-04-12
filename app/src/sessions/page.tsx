@@ -10,6 +10,7 @@ import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { buildTranscriptMessages } from "~/session-chat/chat.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
+import { requestSessionLaunchDialog } from "~/shared/global-event-hub.ts"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { SessionsList } from "./list.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
@@ -23,9 +24,7 @@ function formatTimestamp(value: number) {
   }).format(new Date(value))
 }
 
-export function SessionsPage(props: {
-  onRequestSessionLaunch?: (preferredProjectPath?: string | null) => void
-}) {
+export function SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
@@ -103,11 +102,11 @@ export function SessionsPage(props: {
           sessionCount={sessions.length}
           onCreateSession={() => {
             if (selectedSession?.cwd) {
-              props.onRequestSessionLaunch?.(selectedSession.cwd)
+              requestSessionLaunchDialog(selectedSession.cwd)
               return
             }
 
-            props.onRequestSessionLaunch?.(projectRegistry.projectList[0]?.path ?? null)
+            requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
           }}
         />
         <div
@@ -119,11 +118,11 @@ export function SessionsPage(props: {
           <SessionsList
             onCreateSession={() => {
               if (selectedSession?.cwd) {
-                props.onRequestSessionLaunch?.(selectedSession.cwd)
+                requestSessionLaunchDialog(selectedSession.cwd)
                 return
               }
 
-              props.onRequestSessionLaunch?.(projectRegistry.projectList[0]?.path ?? null)
+              requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
             }}
             onOpenSession={openSession}
             onSelectSession={(sessionId) => {

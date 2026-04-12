@@ -22,20 +22,16 @@ const workbenchPanelBodyClass = css({
 const panelScrollCache = new Map<string, number>()
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
-export function AppShellWorkbenchContent(props: {
-  activeTabId: string
-  onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
-  selectedNavId: string
-}) {
+export function AppShellWorkbenchContent(props: { activeTabId: string; selectedNavId: string }) {
   return (
     <Suspense fallback={<div />}>
       {props.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
         <WorkbenchScrollPanel scrollKey={`main:${props.selectedNavId}`}>
-          <MainWorkbenchView onRequestSessionLaunch={props.onRequestSessionLaunch} />
+          <MainWorkbenchView />
         </WorkbenchScrollPanel>
       ) : (
         <WorkbenchScrollPanel scrollKey={`detail:${props.activeTabId}`}>
-          <WorkbenchTabPanel onRequestSessionLaunch={props.onRequestSessionLaunch} />
+          <WorkbenchTabPanel />
         </WorkbenchScrollPanel>
       )}
     </Suspense>
@@ -77,19 +73,15 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: preact.Compo
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
-function MainWorkbenchView(props: {
-  onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
-}) {
+function MainWorkbenchView() {
   const navigation = useNavigation()
   const ActiveNavigationComponent = getWorkbenchTabComponent(navigation.selectedNavId)
 
-  return <ActiveNavigationComponent onRequestSessionLaunch={props.onRequestSessionLaunch} />
+  return <ActiveNavigationComponent />
 }
 
 /** Renders the active closable workbench tab panel. */
-function WorkbenchTabPanel(props: {
-  onRequestSessionLaunch: (preferredProjectPath?: string | null) => void
-}) {
+function WorkbenchTabPanel() {
   const workbenchTabSet = useWorkbenchTabSet()
   const activeTab = workbenchTabSet.activeTab
 
@@ -100,10 +92,5 @@ function WorkbenchTabPanel(props: {
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
   const activeTabPayload = activeTab.payload as Record<string, unknown>
 
-  return (
-    <ActiveTabComponent
-      {...activeTabPayload}
-      onRequestSessionLaunch={props.onRequestSessionLaunch}
-    />
-  )
+  return <ActiveTabComponent {...activeTabPayload} />
 }
