@@ -1,5 +1,6 @@
 import { createShortcuts, type ShortcutMatch, type ShortcutRuntime } from "powerkeys"
 import { SigmaType, type SigmaRef } from "preact-sigma"
+
 import { desktopHost } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import {
@@ -40,7 +41,7 @@ type ShortcutRegistryShape = {
   selectedNavId: NavigationItemId
   overlayIsOpen: boolean
   overlayKind: string | null
-  runtime: SigmaRef<ShortcutRuntime>
+  runtime: SigmaRef<ShortcutRuntime> | null
   bindingIdsByCommand: Partial<Record<ShortcutCommandId, string[]>>
 }
 
@@ -121,7 +122,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
     selectedNavId: "inbox",
     overlayIsOpen: false,
     overlayKind: null,
-    runtime: null!,
+    runtime: null,
     bindingIdsByCommand: {},
   })
   .actions({
@@ -154,9 +155,15 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
 
     /** Rebuilds the runtime bindings from the current resolved keymap snapshot. */
     rebindRuntime() {
+      const runtime = this.runtime
+
+      if (!runtime) {
+        return
+      }
+
       for (const bindingIds of Object.values(this.bindingIdsByCommand)) {
         for (const bindingId of bindingIds ?? []) {
-          this.runtime.unbind(bindingId)
+          runtime.unbind(bindingId)
         }
       }
 
@@ -171,7 +178,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
 
         const commandBindingIds = expressions.map(
           (expression) =>
-            this.runtime.bind(
+            runtime.bind(
               createBindingInput(commandId, expression, (match) => {
                 this.emit(commandId, {
                   commandId,
@@ -200,7 +207,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
       this.hasClosableActiveTab = context.hasClosableActiveTab
       this.selectedNavId = context.selectedNavId
 
-      this.runtime.batchContext(getRuntimeContextSnapshot(this))
+      this.runtime?.batchContext(getRuntimeContextSnapshot(this))
     },
 
     /** Syncs overlay-derived context keys even before any initial bindings depend on them. */
@@ -208,7 +215,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
       this.overlayIsOpen = context.isOpen
       this.overlayKind = context.kind
 
-      this.runtime.batchContext(getRuntimeContextSnapshot(this))
+      this.runtime?.batchContext(getRuntimeContextSnapshot(this))
     },
   })
   .setup(function () {
@@ -230,6 +237,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
     return [
       () => {
         this.act(function () {
+          this.runtime = null
           this.bindingIdsByCommand = {}
         })
       },
