@@ -1,6 +1,5 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { css } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
 
 import { useQueries } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -24,9 +23,6 @@ export function SessionChatView(props: { sessionId: string }) {
         display: "grid",
         gridTemplateRows: "auto minmax(0, 1fr) auto",
         height: "100%",
-        background:
-          `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), transparent 28%), ` +
-          `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
       })}
     >
       <Header messageCount={messages.length} session={session} />

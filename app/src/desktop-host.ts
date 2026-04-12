@@ -1,5 +1,6 @@
 import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
+
 import type {
   AppDesktopRpc,
   DaemonRequestName,

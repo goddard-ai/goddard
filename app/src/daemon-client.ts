@@ -1,4 +1,5 @@
 import type { GoddardClient } from "@goddard-ai/sdk"
+
 import type { DaemonRequestName, DaemonRequestPayload } from "~/shared/desktop-rpc.ts"
 import { daemonSend } from "./desktop-host.ts"
 

@@ -1,4 +1,5 @@
 import { BrowserView } from "electrobun/bun"
+
 import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
 import { daemonSend } from "./daemon.ts"

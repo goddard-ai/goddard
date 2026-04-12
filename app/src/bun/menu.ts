@@ -1,5 +1,6 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { concat } from "radashi"
+
 import type { AppMenuAction } from "~/shared/app-menu.ts"
 import type { DebugMenuSurface } from "~/shared/debug-menu.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"

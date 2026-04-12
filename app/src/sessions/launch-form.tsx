@@ -1,6 +1,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import type { AdapterCatalogEntry } from "@goddard-ai/sdk"
 import { token } from "@goddard-ai/styled-system/tokens"
+
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 
 const fieldClass = css({

@@ -1,32 +1,25 @@
 import { cx } from "@goddard-ai/styled-system/css"
-import { useMemo } from "preact/hooks"
+
 import type { MessageListRow } from "../message-list.tsx"
+import { MarkdownMessage } from "../markdown-message.tsx"
 import type { SessionTranscriptTextMessage } from "~/sessions/models.ts"
-import { getTranscriptBubbleWidth, getTranscriptTextWidth, measureParagraph } from "./layout.ts"
+import { getBubbleMaxWidth } from "./layout.ts"
 import { TranscriptMetaRow } from "./meta-row.tsx"
 import {
   assistantBubbleClass,
-  assistantLineClass,
   bubbleFrameClass,
   rowClass,
   rowColumnClass,
   rowInnerClass,
   systemBubbleClass,
-  systemLineClass,
-  transcriptLineClass,
+  systemTextClass,
   userBubbleClass,
-  userLineClass,
 } from "./styles.ts"
 
-/** Renders one text transcript row with manual line rendering that matches Pretext layout. */
+/** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
 export function TextTranscriptRow(props: { row: MessageListRow<SessionTranscriptTextMessage> }) {
   const message = props.row.item
-  const paragraphMaxWidth = getTranscriptTextWidth(message, props.row.viewportWidth)
-  const paragraph = useMemo(
-    () => measureParagraph(message.text, paragraphMaxWidth),
-    [message.text, paragraphMaxWidth],
-  )
-  const bubbleWidth = getTranscriptBubbleWidth(message, props.row.viewportWidth, paragraph)
+  const bubbleWidth = getBubbleMaxWidth(props.row.viewportWidth, message)
   const alignmentStyle =
     message.role === "user"
       ? { justifyContent: "flex-end" }
@@ -41,13 +34,6 @@ export function TextTranscriptRow(props: { row: MessageListRow<SessionTranscript
         ? systemBubbleClass
         : assistantBubbleClass
 
-  const lineClass =
-    message.role === "user"
-      ? userLineClass
-      : message.role === "system"
-        ? systemLineClass
-        : assistantLineClass
-
   return (
     <article class={rowClass}>
       <div class={rowInnerClass} style={alignmentStyle}>
@@ -58,11 +44,15 @@ export function TextTranscriptRow(props: { row: MessageListRow<SessionTranscript
             alignmentStyle={alignmentStyle}
           />
           <div class={cx(bubbleFrameClass, bubbleClass)}>
-            {paragraph.lines.map((line, index) => (
-              <div key={`${message.id}:${index}`} class={cx(transcriptLineClass, lineClass)}>
-                {line.text.length > 0 ? line.text : "\u00a0"}
-              </div>
-            ))}
+            {message.role === "system" ? (
+              <div class={systemTextClass}>{message.text}</div>
+            ) : (
+              <MarkdownMessage
+                markdown={message.text}
+                role={message.role}
+                streaming={message.streaming}
+              />
+            )}
           </div>
         </div>
       </div>

@@ -1,7 +1,8 @@
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Clock3, FolderGit2, Sparkles } from "lucide-react"
-import type { DaemonSession } from "@goddard-ai/sdk"
+
 import { getSessionDisplayTitle } from "~/sessions/presentation.ts"
 
 function formatTimestamp(value: number) {

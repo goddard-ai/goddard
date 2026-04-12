@@ -4,7 +4,7 @@ const assistantMessageBodies = [
   "I mapped the shell layout and the current state modules. The next clean seam is the transcript itself, because it can be pinned down visually before any live session transport exists.",
   "I'd keep the chrome quiet and let the bubble width carry the hierarchy. The assistant replies can stay slightly narrower than the full column so long paragraphs still feel readable when the window gets wide.",
   "I ran through the likely message shapes we need to survive: short acknowledgements, long planning paragraphs, code-adjacent prose, and occasional hard line breaks when the model is outlining next steps.\n\nThat means the renderer needs stable line breaking and predictable row heights before we wire any real data.",
-  "For virtualization, the important part is avoiding hidden DOM probes on every resize. Precomputing line wraps in JavaScript lets the transcript stay fast even when the fixture has hundreds of messages.",
+  "For virtualization, the important part is avoiding hidden DOM probes on every resize. Cheap row estimates and predictable bubble widths let the transcript stay fast even when the fixture has hundreds of messages.",
   "This fixture is intentionally repetitive in structure but varied in length. It is here to expose spacing problems, not to simulate a perfect model transcript.",
   "One thing to watch in the layout pass is how single-line replies sit next to denser blocks. If the short bubbles look too lightweight, we can tighten the corner radius or slightly raise the bubble contrast.",
 ]
@@ -19,7 +19,7 @@ const userMessageBodies = [
 
 const systemMessageBodies = [
   "Debug preset: transcript-only surface with synthetic messages.",
-  "Viewport resized. Pretext line layout recomputed for the current width.",
+  "Viewport resized. Transcript row estimates recomputed for the current width.",
 ]
 
 /** Formats one deterministic clock label for the transcript fixture. */

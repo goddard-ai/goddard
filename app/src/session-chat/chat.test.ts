@@ -99,6 +99,7 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
     authorName: "pi",
     timestampLabel: "Latest",
     text: "Ready to review the diff.",
+    streaming: true,
   })
 })
 

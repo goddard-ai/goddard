@@ -1,4 +1,5 @@
 import { SigmaType } from "preact-sigma"
+
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"

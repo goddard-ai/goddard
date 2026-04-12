@@ -1,0 +1,4 @@
+interface:
+  display_name: "Comark"
+  short_description: "Guidance for Comark parsing and React rendering"
+  default_prompt: "Use $comark to implement or debug Comark parsing, plugin configuration, streaming markdown, or React rendering."

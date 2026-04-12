@@ -1,7 +1,8 @@
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { ArrowUpRight, CircleDot, FolderGit2, MessageSquareText } from "lucide-react"
-import type { DaemonSession } from "@goddard-ai/sdk"
+
 import { getSessionDisplayTitle, getSessionPreviewText } from "./presentation.ts"
 
 function formatTimeLabel(value: number) {

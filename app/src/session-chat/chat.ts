@@ -104,66 +104,66 @@ function extractToolStatus(value: unknown) {
     : undefined
 }
 
-function extractToolCallLocations(value: unknown) {
+function extractToolCallLocations(value: unknown): SessionTranscriptToolLocation[] {
   if (!Array.isArray(value)) {
     return []
   }
 
-  return value.flatMap((location) => {
+  const locations: SessionTranscriptToolLocation[] = []
+
+  for (const location of value) {
     if (!isRecord(location) || typeof location.path !== "string") {
-      return []
+      continue
     }
 
-    return [
-      {
-        path: location.path,
-        line: typeof location.line === "number" ? location.line : null,
-      } satisfies SessionTranscriptToolLocation,
-    ]
-  })
+    locations.push({
+      path: location.path,
+      line: typeof location.line === "number" ? location.line : null,
+    })
+  }
+
+  return locations
 }
 
-function extractToolCallContent(value: unknown) {
+function extractToolCallContent(value: unknown): SessionTranscriptToolContent[] {
   if (!Array.isArray(value)) {
     return []
   }
 
-  return value.flatMap((item) => {
+  const content: SessionTranscriptToolContent[] = []
+
+  for (const item of value) {
     if (!isRecord(item) || typeof item.type !== "string") {
-      return []
+      continue
     }
 
     if (item.type === "content") {
-      return [
-        {
-          type: "content",
-          text: textFromContentBlocks(item.content),
-        } satisfies SessionTranscriptToolContent,
-      ]
+      content.push({
+        type: "content",
+        text: textFromContentBlocks(item.content),
+      })
+      continue
     }
 
     if (item.type === "diff") {
-      return [
-        {
-          type: "diff",
-          path: typeof item.path === "string" ? item.path : null,
-          oldText: typeof item.oldText === "string" ? item.oldText : null,
-          newText: typeof item.newText === "string" ? item.newText : null,
-        } satisfies SessionTranscriptToolContent,
-      ]
+      content.push({
+        type: "diff",
+        path: typeof item.path === "string" ? item.path : null,
+        oldText: typeof item.oldText === "string" ? item.oldText : null,
+        newText: typeof item.newText === "string" ? item.newText : null,
+      })
+      continue
     }
 
     if (item.type === "terminal" && typeof item.terminalId === "string") {
-      return [
-        {
-          type: "terminal",
-          terminalId: item.terminalId,
-        } satisfies SessionTranscriptToolContent,
-      ]
+      content.push({
+        type: "terminal",
+        terminalId: item.terminalId,
+      })
     }
+  }
 
-    return []
-  })
+  return content
 }
 
 /** Extracts one structured tool-call update so the transcript can preserve ACP row identity. */
@@ -330,7 +330,7 @@ function applyToolCallUpdate(props: {
 }
 
 function closePromptTurn(message: SessionHistoryMessage, activePromptIds: string[]) {
-  if (!isPromptCompletionMessage(message)) {
+  if (!isPromptCompletionMessage(message) || !("id" in message) || message.id == null) {
     return
   }
 
@@ -436,6 +436,7 @@ export function buildTranscriptMessages(
         authorName: session.agentName,
         timestampLabel: "Latest",
         text: session.lastAgentMessage,
+        streaming: session.activeDaemonSession && session.status === "active",
       }),
     )
   }

@@ -19,6 +19,7 @@
   "dependencies": {
     "@ark-ui/react": "^5.36.0",
     "@chenglou/pretext": "^0.0.3",
+    "@comark/react": "0.2.1",
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
@@ -28,6 +29,7 @@
     "@xterm/headless": "^6.0.0",
     "bun-pty": "^0.4.8",
     "cmdk": "^1.1.1",
+    "comark": "0.2.1",
     "culori": "^4.0.2",
     "electrobun": "^1.16.0",
     "hash-sum": "^2.0.0",
@@ -37,7 +39,8 @@
     "preact-sigma": "^2.3.0",
     "radashi": "^12.7.2",
     "react-virtuoso": "^4.18.3",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "shiki": "4.0.2"
   },
   "devDependencies": {
     "@pandacss/dev": "^1.9.1",

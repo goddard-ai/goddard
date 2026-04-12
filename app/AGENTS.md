@@ -13,6 +13,9 @@
 - Desktop boundaries:
   - Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code.
   - UI components should render props and invoke actions, not call host APIs.
+- Tab surfaces:
+  - Do not give tab-level views or full-tab page wrappers their own background by default. The app shell owns the themed canvas.
+  - Apply visual treatment to bounded local elements such as cards, headers, panels, or bubbles instead of repainting the whole tab.
 - State ownership:
   - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
   - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.

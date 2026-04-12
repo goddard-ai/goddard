@@ -1,6 +1,7 @@
 import type { InferRequestPayload, InferResponseType, ValidRequestName } from "@goddard-ai/ipc"
 import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import type { RPCSchema } from "electrobun/bun"
+
 import type { GlobalEventEnvelope } from "./global-event-hub.ts"
 
 /** Daemon IPC schema type reused for webview-to-Bun request forwarding. */

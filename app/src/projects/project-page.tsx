@@ -1,5 +1,6 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+
 import { useProjectRegistry } from "~/app-state-context.tsx"
 import { GoodIcon } from "~/lib/good-icon.tsx"
 import { lookupProject } from "./project-registry.ts"

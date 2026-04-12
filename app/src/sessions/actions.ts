@@ -1,7 +1,8 @@
 import type { CreateSessionRequest, SessionPromptRequest } from "@goddard-ai/sdk"
-import { SESSION_LIST_LIMIT } from "./queries.ts"
+
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { SESSION_LIST_LIMIT } from "./queries.ts"
 
 /**
  * Creates one session and refreshes the visible session list afterwards.

@@ -3,6 +3,7 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
+
 import { GoodIcon } from "./lib/good-icon.tsx"
 import { GoodTooltip } from "./lib/good-tooltip.tsx"
 import type { NavigationItem, NavigationItemId } from "./navigation.ts"

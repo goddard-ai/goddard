@@ -1,6 +1,7 @@
 /** Placeholder settings surface rendered inside one closable workbench tab. */
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+
 import { GoodIcon } from "~/lib/good-icon.tsx"
 
 const pageClass = css({

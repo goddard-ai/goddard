@@ -10,9 +10,6 @@ const debugPageClass = css({
   gap: "18px",
   height: "100%",
   padding: "24px",
-  background:
-    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), transparent 30%), ` +
-    `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
 })
 
 const debugHeaderClass = css({
@@ -22,8 +19,8 @@ const debugHeaderClass = css({
   borderRadius: "26px",
   border: "1px solid",
   borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
-  boxShadow: "0 22px 56px rgba(118, 133, 150, 0.12)",
+  background: `linear-gradient(180deg, ${token.var("colors.bg.panel")} 0%, ${token.var("colors.bg.surface")} 100%)`,
+  boxShadow: `0 22px 56px ${token.var("colors.shadow")}`,
 })
 
 const debugEyebrowClass = css({
@@ -32,7 +29,7 @@ const debugEyebrowClass = css({
   width: "fit-content",
   padding: "7px 11px",
   borderRadius: "999px",
-  backgroundColor: "surface",
+  backgroundColor: "bg.surface",
   color: "accentStrong",
   fontSize: "0.72rem",
   fontWeight: "720",
@@ -41,7 +38,7 @@ const debugEyebrowClass = css({
 })
 
 const debugTitleClass = css({
-  color: "text",
+  color: "fg.default",
   fontSize: "1.6rem",
   fontWeight: "760",
   letterSpacing: "-0.03em",
@@ -50,7 +47,7 @@ const debugTitleClass = css({
 
 const debugBodyClass = css({
   maxWidth: "72ch",
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.95rem",
   lineHeight: "1.72",
 })
@@ -61,8 +58,8 @@ const debugCanvasClass = css({
   borderRadius: "28px",
   border: "1px solid",
   borderColor: "border",
-  backgroundColor: "background",
-  boxShadow: "0 28px 64px rgba(118, 133, 150, 0.14)",
+  backgroundColor: "bg.canvas",
+  boxShadow: `0 28px 64px ${token.var("colors.shadow")}`,
 })
 
 /** Props for the standalone transcript debug view. */
@@ -80,7 +77,7 @@ export function TranscriptDebugView(props: TranscriptDebugViewProps) {
         <div class={debugEyebrowClass}>Debug Surface</div>
         <h1 class={debugTitleClass}>SessionChatTranscript</h1>
         <p class={debugBodyClass}>
-          This view renders a dumb transcript with injected fixture data, Pretext-based line layout,
+          This view renders a dumb transcript with injected fixture data, Comark markdown rendering,
           and Virtuoso row virtualization. It is intentionally disconnected from live session state
           so spacing and message rhythm can be tuned in isolation first.
         </p>

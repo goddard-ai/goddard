@@ -2,6 +2,7 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { X } from "lucide-react"
+
 import { GoodIcon } from "./lib/good-icon.tsx"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import type { WorkbenchTab } from "./workbench-tab-set.ts"

@@ -1,4 +1,5 @@
 import type { BrowserWindow } from "electrobun/bun"
+
 import type { appRpc } from "./rpc.ts"
 
 let mainWindow: BrowserWindow<typeof appRpc> | null = null

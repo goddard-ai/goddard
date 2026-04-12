@@ -1,4 +1,5 @@
 import { SigmaType } from "preact-sigma"
+
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 import {
   isWorkbenchDetailTabKind,

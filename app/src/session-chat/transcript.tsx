@@ -8,10 +8,10 @@ import type {
 import { MessageList, type MessageListRow } from "./message-list.tsx"
 import { estimateTranscriptRowHeight } from "./transcript/layout.ts"
 import {
+  DEFAULT_ROW_HEIGHT,
   loadingStateClass,
   transcriptViewportClass,
   VIRTUAL_OVERSCAN_PX,
-  DEFAULT_ROW_HEIGHT,
 } from "./transcript/styles.ts"
 import { TextTranscriptRow } from "./transcript/text-row.tsx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsx"
@@ -36,7 +36,7 @@ function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
   return <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
 }
 
-/** Renders one chat transcript using Pretext paragraphs inside a Virtuoso row virtualizer. */
+/** Renders one chat transcript inside the shared message-list virtualizer. */
 export function Transcript(props: TranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
 

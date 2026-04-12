@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { wcagContrast } from "culori/fn"
+
 import { buildAppearanceDocumentState } from "./theme.ts"
 
 function contrastBetween(
@@ -62,4 +63,24 @@ test("buildAppearanceDocumentState strengthens muted and border contrast in high
   ).toBeGreaterThan(
     contrastBetween(normalContrast, "--theme-color-background", "--theme-color-border"),
   )
+})
+
+test("buildAppearanceDocumentState keeps transcript user bubbles readable in both themes", () => {
+  const light = buildAppearanceDocumentState({
+    mode: "light",
+    highContrast: false,
+    systemTheme: "light",
+  })
+  const dark = buildAppearanceDocumentState({
+    mode: "dark",
+    highContrast: false,
+    systemTheme: "dark",
+  })
+
+  expect(
+    contrastBetween(light, "--theme-color-transcript-user-bubble-end", "--theme-color-text"),
+  ).toBeGreaterThan(7)
+  expect(
+    contrastBetween(dark, "--theme-color-transcript-user-bubble-end", "--theme-color-text"),
+  ).toBeGreaterThan(6)
 })

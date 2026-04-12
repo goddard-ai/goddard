@@ -1,4 +1,5 @@
 import { SigmaTarget } from "preact-sigma"
+
 import type { AppMenuEventDetail } from "./app-menu.ts"
 import type { DebugMenuEventDetail } from "./debug-menu.ts"
 

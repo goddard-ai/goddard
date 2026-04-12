@@ -35,6 +35,19 @@ export default defineConfig({
         feedback: {
           danger: { value: "var(--theme-color-danger)" },
         },
+        transcript: {
+          glow: { value: "var(--theme-color-transcript-glow)" },
+          glowEdge: { value: "var(--theme-color-transcript-glow-edge)" },
+          userBubble: {
+            start: { value: "var(--theme-color-transcript-user-bubble-start)" },
+            end: { value: "var(--theme-color-transcript-user-bubble-end)" },
+            border: { value: "var(--theme-color-transcript-user-bubble-border)" },
+          },
+          userCode: {
+            bg: { value: "var(--theme-color-transcript-user-code-bg)" },
+            border: { value: "var(--theme-color-transcript-user-code-border)" },
+          },
+        },
       },
     },
   },

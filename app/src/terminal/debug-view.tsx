@@ -1,9 +1,10 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { useEffect, useRef, useState } from "preact/hooks"
 import { useListener, useSigma } from "preact-sigma"
-import { TerminalViewport } from "./terminal-viewport.tsx"
+import { useEffect, useRef, useState } from "preact/hooks"
+
 import { TerminalViewportModel, type TerminalViewportChunk } from "./terminal-viewport-model.ts"
+import { TerminalViewport } from "./terminal-viewport.tsx"
 
 const terminalDebugPrompt = "debug@goddard:~/workspace$ "
 

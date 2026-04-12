@@ -4,6 +4,7 @@ import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { MessageSquareText, Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
+
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"

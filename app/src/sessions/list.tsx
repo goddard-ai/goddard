@@ -1,6 +1,7 @@
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { css } from "@goddard-ai/styled-system/css"
 import { FolderPlus, Rows3 } from "lucide-react"
-import type { DaemonSession } from "@goddard-ai/sdk"
+
 import { ListRow } from "./list-row.tsx"
 
 export function SessionsList(props: {

@@ -190,6 +190,36 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
   )
   const overlay = withAlpha(mixColors(foreground, background, isDark ? 0.18 : 0.42), 0.52)
   const shadow = withAlpha(mixColors(foreground, background, isDark ? 0.08 : 0.6), 0.18)
+  const transcriptGlowBase = mixColors(accent, background, isDark ? 0.54 : 0.78)
+  const transcriptGlow = withAlpha(transcriptGlowBase, isDark ? 0.26 : 0.16)
+  const transcriptGlowEdge = withAlpha(transcriptGlowBase, 0)
+  const transcriptUserBubbleStart = mixColors(
+    panel,
+    withChroma(accentStrong, highContrast ? 0.98 : 0.78),
+    isDark ? 0.34 : 0.24,
+  )
+  const transcriptUserBubbleEnd = mixColors(
+    surface,
+    withChroma(accent, highContrast ? 0.94 : 0.74),
+    isDark ? 0.24 : 0.16,
+  )
+  const transcriptUserBubbleBorder = ensureContrast(
+    mixColors(transcriptUserBubbleStart, accentStrong, isDark ? 0.42 : 0.52),
+    background,
+    foreground,
+    highContrast ? 2.6 : 1.8,
+  )
+  const transcriptUserCodeBg = mixColors(
+    transcriptUserBubbleStart,
+    accentStrong,
+    isDark ? 0.16 : 0.12,
+  )
+  const transcriptUserCodeBorder = ensureContrast(
+    mixColors(transcriptUserBubbleBorder, accentStrong, isDark ? 0.2 : 0.18),
+    background,
+    foreground,
+    highContrast ? 2.9 : 2,
+  )
 
   return {
     "--theme-color-background": serializeColor(background),
@@ -204,6 +234,13 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
     "--theme-color-danger": serializeColor(danger),
     "--theme-color-overlay": serializeColor(overlay),
     "--theme-color-shadow": serializeColor(shadow),
+    "--theme-color-transcript-glow": serializeColor(transcriptGlow),
+    "--theme-color-transcript-glow-edge": serializeColor(transcriptGlowEdge),
+    "--theme-color-transcript-user-bubble-start": serializeColor(transcriptUserBubbleStart),
+    "--theme-color-transcript-user-bubble-end": serializeColor(transcriptUserBubbleEnd),
+    "--theme-color-transcript-user-bubble-border": serializeColor(transcriptUserBubbleBorder),
+    "--theme-color-transcript-user-code-bg": serializeColor(transcriptUserCodeBg),
+    "--theme-color-transcript-user-code-border": serializeColor(transcriptUserCodeBorder),
   }
 }
 

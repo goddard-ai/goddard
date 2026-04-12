@@ -6,9 +6,6 @@ export const transcriptViewportClass = css({
   minHeight: "100%",
   paddingInline: "20px",
   paddingBlock: "26px 32px",
-  background:
-    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 10%, transparent), transparent 26%), ` +
-    `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
 })
 
 export const loadingStateClass = css({
@@ -16,7 +13,7 @@ export const loadingStateClass = css({
   inset: "0",
   display: "grid",
   placeItems: "center",
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.94rem",
   letterSpacing: "0.01em",
   pointerEvents: "none",
@@ -41,7 +38,7 @@ export const metaRowClass = css({
   display: "flex",
   alignItems: "center",
   gap: "10px",
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.73rem",
   fontWeight: "680",
   letterSpacing: "0.08em",
@@ -49,7 +46,7 @@ export const metaRowClass = css({
 })
 
 export const metaAuthorClass = css({
-  color: "text",
+  color: "fg.default",
 })
 
 export const metaTimestampClass = css({
@@ -62,55 +59,47 @@ export const bubbleFrameClass = css({
   borderRadius: "22px",
   border: "1px solid",
   padding: "14px 16px",
-  boxShadow: "0 18px 36px rgba(112, 128, 145, 0.08)",
+  boxShadow: `0 18px 36px ${token.var("colors.shadow")}`,
 })
 
 export const assistantBubbleClass = css({
   borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
-  color: "text",
+  background: `linear-gradient(180deg, ${token.var("colors.bg.panel")} 0%, ${token.var("colors.bg.surface")} 100%)`,
+  color: "fg.default",
 })
 
 export const userBubbleClass = css({
-  borderColor: "accent",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accentStrong")} 24%, white), color-mix(in srgb, ${token.var("colors.accent")} 22%, white))`,
-  color: "#102030",
+  borderColor: "transcript.userBubble.border",
+  background:
+    `linear-gradient(180deg, ${token.var("colors.transcript.userBubble.start")} 0%, ` +
+    `${token.var("colors.transcript.userBubble.end")} 100%)`,
+  color: "fg.default",
 })
 
 export const systemBubbleClass = css({
   borderColor: "border",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.surface")} 70%, white), ${token.var("colors.surface")})`,
-  color: "muted",
-  boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${token.var("colors.border")} 70%, white)`,
+  background: `linear-gradient(180deg, ${token.var("colors.bg.surface")} 0%, ${token.var("colors.bg.panel")} 100%)`,
+  color: "fg.muted",
+  boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
 })
 
 export const toolBubbleClass = css({
   borderColor: "border",
   background:
-    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 8%, transparent), transparent 34%), ` +
-    `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.panel")} 92%, white), ${token.var("colors.background")})`,
-  color: "text",
+    `radial-gradient(circle at top right, ${token.var("colors.transcript.glow")} 0%, ` +
+    `${token.var("colors.transcript.glowEdge")} 56%), ` +
+    `linear-gradient(180deg, ${token.var("colors.bg.panel")} 0%, ${token.var("colors.bg.surface")} 100%)`,
+  color: "fg.default",
 })
 
-export const transcriptLineClass = css({
+export const systemTextClass = css({
   fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
   fontSize: "15px",
   fontWeight: "450",
   lineHeight: "24px",
   letterSpacing: "0.01em",
-  whiteSpace: "pre",
-})
-
-export const userLineClass = css({
-  color: "#102030",
-})
-
-export const assistantLineClass = css({
-  color: "text",
-})
-
-export const systemLineClass = css({
-  color: "muted",
+  color: "fg.muted",
+  whiteSpace: "pre-wrap",
 })
 
 export const toolCardClass = css({
@@ -127,7 +116,7 @@ export const toolHeaderClass = css({
 })
 
 export const toolTitleClass = css({
-  color: "text",
+  color: "fg.default",
   fontSize: "0.98rem",
   fontWeight: "700",
   letterSpacing: "-0.01em",
@@ -157,30 +146,30 @@ export const toolBadgeClass = css({
 export const toolKindBadgeClass = css({
   borderColor: "border",
   backgroundColor: "surface",
-  color: "muted",
+  color: "fg.muted",
 })
 
 export const toolPendingBadgeClass = css({
   borderColor: "border",
   backgroundColor: "surface",
-  color: "muted",
+  color: "fg.muted",
 })
 
 export const toolRunningBadgeClass = css({
   borderColor: "accent",
-  background: `color-mix(in srgb, ${token.var("colors.accent")} 12%, white)`,
+  backgroundColor: "surface",
   color: "accentStrong",
 })
 
 export const toolCompletedBadgeClass = css({
   borderColor: "accentStrong",
-  background: `color-mix(in srgb, ${token.var("colors.accentStrong")} 16%, white)`,
+  backgroundColor: "surface",
   color: "accentStrong",
 })
 
 export const toolFailedBadgeClass = css({
   borderColor: "danger",
-  background: `color-mix(in srgb, ${token.var("colors.danger")} 14%, white)`,
+  backgroundColor: "surface",
   color: "danger",
 })
 
@@ -195,7 +184,7 @@ export const toolSectionClass = css({
 })
 
 export const toolSectionLabelClass = css({
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.68rem",
   fontWeight: "700",
   letterSpacing: "0.12em",
@@ -203,7 +192,7 @@ export const toolSectionLabelClass = css({
 })
 
 export const toolTextClass = css({
-  color: "text",
+  color: "fg.default",
   fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
   fontSize: "0.94rem",
   fontWeight: "450",
@@ -223,7 +212,7 @@ export const toolDiffClass = css({
 })
 
 export const toolDiffPathClass = css({
-  color: "text",
+  color: "fg.default",
   fontFamily: '"SF Mono", "Monaco", monospace',
   fontSize: "0.83rem",
   fontWeight: "620",
@@ -231,7 +220,7 @@ export const toolDiffPathClass = css({
 })
 
 export const toolDiffPreviewClass = css({
-  color: "text",
+  color: "fg.default",
   fontFamily: '"SF Mono", "Monaco", monospace',
   fontSize: "0.82rem",
   lineHeight: "1.6",
@@ -249,7 +238,7 @@ export const toolTerminalClass = css({
 })
 
 export const toolTerminalLabelClass = css({
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.78rem",
   fontWeight: "700",
   letterSpacing: "0.08em",
@@ -257,7 +246,7 @@ export const toolTerminalLabelClass = css({
 })
 
 export const toolTerminalIdClass = css({
-  color: "text",
+  color: "fg.default",
   fontFamily: '"SF Mono", "Monaco", monospace',
   fontSize: "0.84rem",
   lineHeight: "1.6",
@@ -276,20 +265,20 @@ export const toolLocationRowClass = css({
 })
 
 export const toolLocationPathClass = css({
-  color: "text",
+  color: "fg.default",
   fontFamily: '"SF Mono", "Monaco", monospace',
   fontSize: "0.84rem",
   lineHeight: "1.6",
 })
 
 export const toolLocationLineClass = css({
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.82rem",
   lineHeight: "1.6",
 })
 
 export const toolEmptyStateClass = css({
-  color: "muted",
+  color: "fg.muted",
   fontSize: "0.88rem",
   lineHeight: "1.6",
 })

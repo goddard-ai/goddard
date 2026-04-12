@@ -45,6 +45,7 @@ export type SessionTranscriptTextMessage = {
   authorName: string
   timestampLabel: string
   text: string
+  streaming?: boolean
 }
 
 /** One normalized tool-call transcript row rendered as a dedicated tool card. */
