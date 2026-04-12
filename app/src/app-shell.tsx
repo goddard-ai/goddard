@@ -15,7 +15,6 @@ import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
 import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
 import { CommandMenu } from "./command-menu.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
-import { GoodTooltipProvider } from "./lib/good-tooltip.tsx"
 import { deriveProjectName } from "./projects/project-name.ts"
 import { buildCreateSessionInput } from "./sessions/session-launch.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
@@ -353,7 +352,7 @@ export function AppShell() {
   }
 
   return (
-    <GoodTooltipProvider>
+    <>
       <CommandMenu
         items={commandMenuItems}
         open={isCommandMenuOpen}
@@ -415,6 +414,6 @@ export function AppShell() {
           setIsAppearanceDialogOpen(isOpen)
         }}
       />
-    </GoodTooltipProvider>
+    </>
   )
 }

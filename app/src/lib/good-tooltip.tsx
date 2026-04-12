@@ -5,21 +5,6 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { ComponentChildren } from "preact"
 
-const tooltipArrowClass = css({
-  width: "10px",
-  height: "6px",
-})
-
-const tooltipArrowTipClass = css({
-  width: "10px",
-  height: "6px",
-  background: token.var("colors.background"),
-  borderTop: "1px solid",
-  borderLeft: "1px solid",
-  borderColor: "border",
-  transform: "rotate(45deg) translateY(1px)",
-})
-
 const tooltipContentClass = css({
   display: "inline-flex",
   alignItems: "center",
@@ -46,11 +31,6 @@ const tooltipContentClass = css({
   },
 })
 
-/** Provides shared tooltip timing and exclusivity across the app shell. */
-export function GoodTooltipProvider(props: { children: ComponentChildren }) {
-  return props.children
-}
-
 /** Attaches the shared app tooltip treatment to one trigger element. */
 export function GoodTooltip(props: {
   ariaLabel?: string
@@ -74,9 +54,6 @@ export function GoodTooltip(props: {
         <Tooltip.Positioner>
           <Tooltip.Content aria-label={props.ariaLabel} class={tooltipContentClass}>
             {props.content}
-            <Tooltip.Arrow class={tooltipArrowClass}>
-              <Tooltip.ArrowTip class={tooltipArrowTipClass} />
-            </Tooltip.Arrow>
           </Tooltip.Content>
         </Tooltip.Positioner>
       </Portal>
