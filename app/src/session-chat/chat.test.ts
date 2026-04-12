@@ -51,6 +51,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
 
   expect(buildTranscriptMessages(session, history)).toEqual([
     {
+      kind: "message",
       id: "ses_session-1:context",
       role: "system",
       authorName: "System",
@@ -58,6 +59,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
       text: "Working directory: /repo-a",
     },
     {
+      kind: "message",
       id: "ses_session-1:prompt:0",
       role: "user",
       authorName: "You",
@@ -65,6 +67,7 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
       text: "Review the diff and summarize problems.",
     },
     {
+      kind: "message",
       id: "ses_session-1:update:1",
       role: "assistant",
       authorName: "pi",
@@ -89,10 +92,100 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
   ] satisfies GetSessionHistoryResponse["history"]
 
   expect(buildTranscriptMessages(session, history).at(-1)).toEqual({
+    kind: "message",
     id: "ses_session-1:latest",
     role: "assistant",
     authorName: "pi",
     timestampLabel: "Latest",
     text: "Ready to review the diff.",
   })
+})
+
+test("buildTranscriptMessages merges tool_call updates into one stable tool row", () => {
+  const session = createSession(null)
+  const history = [
+    {
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: "session/prompt",
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: "text", text: "Inspect the transcript implementation." }],
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "tool-1",
+          title: "Read transcript.tsx",
+          kind: "read",
+          status: "in_progress",
+          locations: [{ path: "/repo-a/app/src/session-chat/transcript.tsx", line: 12 }],
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "tool-1",
+          status: "completed",
+          content: [
+            {
+              type: "content",
+              content: [{ type: "text", text: "Loaded transcript layout and measured row logic." }],
+            },
+          ],
+        },
+      },
+    },
+  ] satisfies GetSessionHistoryResponse["history"]
+
+  expect(buildTranscriptMessages(session, history)).toEqual([
+    {
+      kind: "message",
+      id: "ses_session-1:context",
+      role: "system",
+      authorName: "System",
+      timestampLabel: "active",
+      text: "Working directory: /repo-a",
+    },
+    {
+      kind: "message",
+      id: "ses_session-1:prompt:0",
+      role: "user",
+      authorName: "You",
+      timestampLabel: "Prompt",
+      text: "Inspect the transcript implementation.",
+    },
+    {
+      kind: "toolCall",
+      id: "prompt-1:tool:tool-1",
+      toolCallId: "tool-1",
+      authorName: "pi",
+      timestampLabel: "Tool",
+      title: "Read transcript.tsx",
+      toolKind: "read",
+      status: "completed",
+      content: [
+        {
+          type: "content",
+          text: "Loaded transcript layout and measured row logic.",
+        },
+      ],
+      locations: [
+        {
+          path: "/repo-a/app/src/session-chat/transcript.tsx",
+          line: 12,
+        },
+      ],
+    },
+  ])
 })

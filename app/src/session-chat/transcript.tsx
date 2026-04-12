@@ -9,6 +9,13 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useMemo } from "preact/hooks"
 import { MessageList, type MessageListRow } from "./message-list.tsx"
+import type {
+  SessionTranscriptItem,
+  SessionTranscriptTextMessage,
+  SessionTranscriptToolCall,
+  SessionTranscriptToolContent,
+  SessionTranscriptToolStatus,
+} from "~/sessions/models.ts"
 
 const transcriptViewportClass = css({
   position: "relative",
@@ -97,6 +104,14 @@ const systemBubbleClass = css({
   boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${token.var("colors.border")} 72%, ${token.var("colors.background")})`,
 })
 
+const toolBubbleClass = css({
+  borderColor: "border",
+  background:
+    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 8%, transparent), transparent 34%), ` +
+    `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.panel")} 92%, white), ${token.var("colors.background")})`,
+  color: "text",
+})
+
 const transcriptLineClass = css({
   fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
   fontSize: "15px",
@@ -118,6 +133,187 @@ const systemLineClass = css({
   color: "muted",
 })
 
+const toolCardClass = css({
+  display: "grid",
+  gap: "14px",
+})
+
+const toolHeaderClass = css({
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: "12px",
+  flexWrap: "wrap",
+})
+
+const toolTitleClass = css({
+  color: "text",
+  fontSize: "0.98rem",
+  fontWeight: "700",
+  letterSpacing: "-0.01em",
+  lineHeight: "1.35",
+})
+
+const toolBadgeRowClass = css({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "8px",
+})
+
+const toolBadgeClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: "24px",
+  paddingInline: "10px",
+  borderRadius: "999px",
+  border: "1px solid",
+  fontSize: "0.72rem",
+  fontWeight: "700",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
+})
+
+const toolKindBadgeClass = css({
+  borderColor: "border",
+  backgroundColor: "surface",
+  color: "muted",
+})
+
+const toolPendingBadgeClass = css({
+  borderColor: "border",
+  backgroundColor: "surface",
+  color: "muted",
+})
+
+const toolRunningBadgeClass = css({
+  borderColor: "accent",
+  background: `color-mix(in srgb, ${token.var("colors.accent")} 12%, white)`,
+  color: "accentStrong",
+})
+
+const toolCompletedBadgeClass = css({
+  borderColor: "accentStrong",
+  background: `color-mix(in srgb, ${token.var("colors.accentStrong")} 16%, white)`,
+  color: "accentStrong",
+})
+
+const toolFailedBadgeClass = css({
+  borderColor: "danger",
+  background: `color-mix(in srgb, ${token.var("colors.danger")} 14%, white)`,
+  color: "danger",
+})
+
+const toolBodyClass = css({
+  display: "grid",
+  gap: "12px",
+})
+
+const toolSectionClass = css({
+  display: "grid",
+  gap: "8px",
+})
+
+const toolSectionLabelClass = css({
+  color: "muted",
+  fontSize: "0.68rem",
+  fontWeight: "700",
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+})
+
+const toolTextClass = css({
+  color: "text",
+  fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
+  fontSize: "0.94rem",
+  fontWeight: "450",
+  lineHeight: "1.65",
+  letterSpacing: "0.01em",
+  whiteSpace: "pre-wrap",
+})
+
+const toolDiffClass = css({
+  display: "grid",
+  gap: "8px",
+  padding: "12px 14px",
+  borderRadius: "16px",
+  border: "1px solid",
+  borderColor: "border",
+  backgroundColor: "background",
+})
+
+const toolDiffPathClass = css({
+  color: "text",
+  fontFamily: '"SF Mono", "Monaco", monospace',
+  fontSize: "0.83rem",
+  fontWeight: "620",
+  lineHeight: "1.5",
+})
+
+const toolDiffPreviewClass = css({
+  color: "text",
+  fontFamily: '"SF Mono", "Monaco", monospace',
+  fontSize: "0.82rem",
+  lineHeight: "1.6",
+  whiteSpace: "pre-wrap",
+})
+
+const toolTerminalClass = css({
+  display: "grid",
+  gap: "6px",
+  padding: "12px 14px",
+  borderRadius: "16px",
+  border: "1px dashed",
+  borderColor: "border",
+  backgroundColor: "background",
+})
+
+const toolTerminalLabelClass = css({
+  color: "muted",
+  fontSize: "0.78rem",
+  fontWeight: "700",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+})
+
+const toolTerminalIdClass = css({
+  color: "text",
+  fontFamily: '"SF Mono", "Monaco", monospace',
+  fontSize: "0.84rem",
+  lineHeight: "1.6",
+})
+
+const toolLocationListClass = css({
+  display: "grid",
+  gap: "8px",
+})
+
+const toolLocationRowClass = css({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "8px",
+  alignItems: "baseline",
+})
+
+const toolLocationPathClass = css({
+  color: "text",
+  fontFamily: '"SF Mono", "Monaco", monospace',
+  fontSize: "0.84rem",
+  lineHeight: "1.6",
+})
+
+const toolLocationLineClass = css({
+  color: "muted",
+  fontSize: "0.82rem",
+  lineHeight: "1.6",
+})
+
+const toolEmptyStateClass = css({
+  color: "muted",
+  fontSize: "0.88rem",
+  lineHeight: "1.6",
+})
+
 const BODY_FONT = '450 15px "SF Pro Text", "Segoe UI", sans-serif'
 const BODY_LINE_HEIGHT = 24
 const META_HEIGHT = 32
@@ -129,9 +325,10 @@ const MIN_TEXT_WIDTH = 144
 const DEFAULT_ROW_HEIGHT = 132
 const NARROW_BUBBLE_WIDTH_BREAKPOINT = 520
 const WIDE_BUBBLE_WIDTH_BREAKPOINT = 760
+const TOOL_DIFF_PREVIEW_LINE_LIMIT = 6
 
 /** Linearly interpolates one value within an inclusive range. */
-function lerp(start: number, end: number, progress: number): number {
+function lerp(start: number, end: number, progress: number) {
   return start + (end - start) * progress
 }
 
@@ -145,14 +342,8 @@ type PretextParagraphMeasurement = {
   maxLineWidth: number
 }
 
-/** One transcript message rendered in the dumb visual transcript surface. */
-export type TranscriptMessage = {
-  id: string
-  role: "assistant" | "user" | "system"
-  authorName: string
-  timestampLabel: string
-  text: string
-}
+/** One transcript row rendered by the session chat surface. */
+export type TranscriptMessage = SessionTranscriptItem
 
 /** Props accepted by the dumb session transcript component. */
 export type TranscriptProps = {
@@ -162,12 +353,40 @@ export type TranscriptProps = {
   scrollCacheKey?: string
 }
 
+function isTextMessage(message: TranscriptMessage): message is SessionTranscriptTextMessage {
+  return message.kind === "message"
+}
+
+function getToolStatusBadgeClass(status: SessionTranscriptToolStatus) {
+  if (status === "completed") {
+    return toolCompletedBadgeClass
+  }
+
+  if (status === "failed") {
+    return toolFailedBadgeClass
+  }
+
+  if (status === "in_progress") {
+    return toolRunningBadgeClass
+  }
+
+  return toolPendingBadgeClass
+}
+
+function formatToolKindLabel(toolKind: SessionTranscriptToolCall["toolKind"]) {
+  return toolKind === "switch_mode"
+    ? "Switch mode"
+    : `${toolKind.slice(0, 1).toUpperCase()}${toolKind.slice(1)}`
+}
+
+function formatToolStatusLabel(status: SessionTranscriptToolStatus) {
+  return status === "in_progress"
+    ? "Running"
+    : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
+}
+
 /** Returns the cached prepared representation for one transcript paragraph. */
-function prepareParagraph(
-  text: string,
-  font: string,
-  whiteSpace?: PrepareOptions["whiteSpace"],
-): PreparedTextWithSegments {
+function prepareParagraph(text: string, font: string, whiteSpace?: PrepareOptions["whiteSpace"]) {
   const cacheKey = `${font}::${whiteSpace ?? "normal"}::${text}`
   const cachedPrepared = preparedParagraphCache.get(cacheKey)
 
@@ -196,11 +415,11 @@ function measureParagraph(text: string, maxWidth: number): PretextParagraphMeasu
   }
 }
 
-/** Returns the maximum bubble width available for one message role at the current viewport width. */
-function getBubbleMaxWidth(viewportWidth: number, role: TranscriptMessage["role"]): number {
+/** Returns the maximum bubble width available for one transcript row at the current viewport width. */
+function getBubbleMaxWidth(viewportWidth: number, message: TranscriptMessage) {
   const safeViewportWidth = Math.max(280, viewportWidth - 48)
 
-  if (role === "system") {
+  if (isTextMessage(message) && message.role === "system") {
     return Math.max(240, Math.min(560, safeViewportWidth - 56))
   }
 
@@ -223,18 +442,18 @@ function getBubbleMaxWidth(viewportWidth: number, role: TranscriptMessage["role"
 }
 
 /** Returns the maximum text width available inside one transcript bubble. */
-function getTranscriptTextWidth(message: TranscriptMessage, viewportWidth: number): number {
-  const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message.role)
+function getTranscriptTextWidth(message: TranscriptMessage, viewportWidth: number) {
+  const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message)
   return Math.max(MIN_TEXT_WIDTH, bubbleMaxWidth - BUBBLE_PADDING_X)
 }
 
 /** Builds the rendered transcript bubble width from one measured paragraph. */
 function getTranscriptBubbleWidth(
-  message: TranscriptMessage,
+  message: SessionTranscriptTextMessage,
   viewportWidth: number,
   paragraph: PretextParagraphMeasurement,
-): number {
-  const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message.role)
+) {
+  const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message)
 
   return Math.max(
     Math.min(bubbleMaxWidth, paragraph.maxLineWidth + BUBBLE_PADDING_X),
@@ -242,18 +461,79 @@ function getTranscriptBubbleWidth(
   )
 }
 
-/** Rough row estimate used by Virtuoso before the real transcript row is measured. */
-function estimateTranscriptRowHeight(message: TranscriptMessage, viewportWidth: number): number {
-  const textWidth = getTranscriptTextWidth(message, viewportWidth)
-  const approximateCharactersPerLine = Math.max(12, Math.floor(textWidth / 7.6))
-  const normalizedLength = message.text.replace(/\s+/g, " ").trim().length
-  const explicitBreakCount = Math.max(0, message.text.split("\n").length - 1)
-  const approximateLineCount = Math.max(
+function estimateLineCount(text: string, maxWidth: number) {
+  const approximateCharactersPerLine = Math.max(12, Math.floor(maxWidth / 7.6))
+  const normalizedLength = text.replace(/\s+/g, " ").trim().length
+  const explicitBreakCount = Math.max(0, text.split("\n").length - 1)
+
+  return Math.max(
     1,
     Math.ceil(normalizedLength / approximateCharactersPerLine) + explicitBreakCount,
   )
+}
 
-  return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP
+function buildToolDiffPreview(content: Extract<SessionTranscriptToolContent, { type: "diff" }>) {
+  const previewLines: string[] = []
+  const oldLines = content.oldText?.split("\n").filter(Boolean) ?? []
+  const newLines = content.newText?.split("\n").filter(Boolean) ?? []
+
+  for (const line of oldLines.slice(0, Math.ceil(TOOL_DIFF_PREVIEW_LINE_LIMIT / 2))) {
+    previewLines.push(`- ${line}`)
+  }
+
+  for (const line of newLines.slice(0, Math.ceil(TOOL_DIFF_PREVIEW_LINE_LIMIT / 2))) {
+    previewLines.push(`+ ${line}`)
+  }
+
+  if (oldLines.length + newLines.length > TOOL_DIFF_PREVIEW_LINE_LIMIT) {
+    previewLines.push("…")
+  }
+
+  return previewLines.join("\n").trim() || "Patch content available."
+}
+
+function getToolContentPreview(content: SessionTranscriptToolContent) {
+  if (content.type === "content") {
+    return content.text?.trim() || "Structured tool output."
+  }
+
+  if (content.type === "diff") {
+    return `${content.path ?? "Edited file"}\n${buildToolDiffPreview(content)}`
+  }
+
+  return `Terminal: ${content.terminalId}`
+}
+
+/** Rough row estimate used by Virtuoso before the real transcript row is measured. */
+function estimateTranscriptRowHeight(message: TranscriptMessage, viewportWidth: number) {
+  const textWidth = getTranscriptTextWidth(message, viewportWidth)
+
+  if (isTextMessage(message)) {
+    const approximateLineCount = estimateLineCount(message.text, textWidth)
+
+    return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP
+  }
+
+  let approximateLineCount = 2
+
+  approximateLineCount += estimateLineCount(message.title, textWidth)
+
+  for (const content of message.content) {
+    approximateLineCount += 1
+    approximateLineCount += estimateLineCount(getToolContentPreview(content), textWidth)
+  }
+
+  if (message.locations.length > 0) {
+    approximateLineCount += 1
+    for (const location of message.locations) {
+      approximateLineCount += estimateLineCount(
+        `${location.path}${location.line ? `:${location.line}` : ""}`,
+        textWidth,
+      )
+    }
+  }
+
+  return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 28
 }
 
 /** Renders one chat transcript using Pretext paragraphs inside a Virtuoso row virtualizer. */
@@ -279,8 +559,21 @@ export function Transcript(props: TranscriptProps) {
   )
 }
 
-/** Renders one transcript row with manual line rendering that matches Pretext layout. */
-function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
+function renderMetaRow(props: {
+  authorName: string
+  timestampLabel: string
+  alignmentStyle: { justifyContent: string }
+}) {
+  return (
+    <div class={metaRowClass} style={props.alignmentStyle}>
+      <span class={metaAuthorClass}>{props.authorName}</span>
+      <span class={metaTimestampClass}>{props.timestampLabel}</span>
+    </div>
+  )
+}
+
+/** Renders one text transcript row with manual line rendering that matches Pretext layout. */
+function TextTranscriptRow(props: { row: MessageListRow<SessionTranscriptTextMessage> }) {
   const message = props.row.item
   const paragraphMaxWidth = getTranscriptTextWidth(message, props.row.viewportWidth)
   const paragraph = useMemo(
@@ -289,13 +582,6 @@ function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
   )
   const bubbleWidth = getTranscriptBubbleWidth(message, props.row.viewportWidth, paragraph)
   const alignmentStyle =
-    message.role === "user"
-      ? { justifyContent: "flex-end" }
-      : message.role === "system"
-        ? { justifyContent: "center" }
-        : { justifyContent: "flex-start" }
-
-  const metaAlignmentStyle =
     message.role === "user"
       ? { justifyContent: "flex-end" }
       : message.role === "system"
@@ -320,10 +606,11 @@ function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
     <article class={rowClass}>
       <div class={rowInnerClass} style={alignmentStyle}>
         <div class={rowColumnClass} style={{ width: `${bubbleWidth}px` }}>
-          <div class={metaRowClass} style={metaAlignmentStyle}>
-            <span class={metaAuthorClass}>{message.authorName}</span>
-            <span class={metaTimestampClass}>{message.timestampLabel}</span>
-          </div>
+          {renderMetaRow({
+            authorName: message.authorName,
+            timestampLabel: message.timestampLabel,
+            alignmentStyle,
+          })}
           <div class={cx(bubbleFrameClass, bubbleClass)}>
             {paragraph.lines.map((line, index) => (
               <div key={`${message.id}:${index}`} class={cx(transcriptLineClass, lineClass)}>
@@ -335,4 +622,116 @@ function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
       </div>
     </article>
   )
+}
+
+function renderToolContent(content: SessionTranscriptToolContent, key: string) {
+  if (content.type === "content") {
+    return (
+      <section key={key} class={toolSectionClass}>
+        <span class={toolSectionLabelClass}>Output</span>
+        <div class={toolTextClass}>{content.text?.trim() || "Structured tool output."}</div>
+      </section>
+    )
+  }
+
+  if (content.type === "diff") {
+    return (
+      <section key={key} class={toolSectionClass}>
+        <span class={toolSectionLabelClass}>Diff</span>
+        <div class={toolDiffClass}>
+          {content.path ? <div class={toolDiffPathClass}>{content.path}</div> : null}
+          <div class={toolDiffPreviewClass}>{buildToolDiffPreview(content)}</div>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section key={key} class={toolSectionClass}>
+      <span class={toolSectionLabelClass}>Terminal</span>
+      <div class={toolTerminalClass}>
+        <span class={toolTerminalLabelClass}>Terminal Session</span>
+        <span class={toolTerminalIdClass}>{content.terminalId}</span>
+      </div>
+    </section>
+  )
+}
+
+function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) {
+  if (locations.length === 0) {
+    return null
+  }
+
+  return (
+    <section class={toolSectionClass}>
+      <span class={toolSectionLabelClass}>Locations</span>
+      <div class={toolLocationListClass}>
+        {locations.map((location, index) => (
+          <div
+            key={`${location.path}:${location.line ?? "none"}:${index}`}
+            class={toolLocationRowClass}
+          >
+            <span class={toolLocationPathClass}>{location.path}</span>
+            {location.line != null ? (
+              <span class={toolLocationLineClass}>Line {location.line}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/** Renders one transcript tool row with dedicated status and payload sections. */
+function ToolTranscriptRow(props: { row: MessageListRow<SessionTranscriptToolCall> }) {
+  const message = props.row.item
+  const bubbleWidth = getBubbleMaxWidth(props.row.viewportWidth, message)
+
+  return (
+    <article class={rowClass}>
+      <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
+        <div class={rowColumnClass} style={{ width: `${bubbleWidth}px` }}>
+          {renderMetaRow({
+            authorName: message.authorName,
+            timestampLabel: message.timestampLabel,
+            alignmentStyle: { justifyContent: "flex-start" },
+          })}
+          <div class={cx(bubbleFrameClass, toolBubbleClass)}>
+            <div class={toolCardClass}>
+              <div class={toolHeaderClass}>
+                <div class={toolTitleClass}>{message.title}</div>
+                <div class={toolBadgeRowClass}>
+                  <span class={cx(toolBadgeClass, toolKindBadgeClass)}>
+                    {formatToolKindLabel(message.toolKind)}
+                  </span>
+                  <span class={cx(toolBadgeClass, getToolStatusBadgeClass(message.status))}>
+                    {formatToolStatusLabel(message.status)}
+                  </span>
+                </div>
+              </div>
+              {message.content.length > 0 || message.locations.length > 0 ? (
+                <div class={toolBodyClass}>
+                  {message.content.map((content, index) =>
+                    renderToolContent(content, `${message.id}:content:${index}`),
+                  )}
+                  {renderToolLocations(message.locations)}
+                </div>
+              ) : (
+                <div class={toolEmptyStateClass}>No tool output was attached to this call.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+/** Renders one transcript row using the row-specific presentation path. */
+function TranscriptRow(props: { row: MessageListRow<TranscriptMessage> }) {
+  if (props.row.item.kind === "toolCall") {
+    return <ToolTranscriptRow row={props.row as MessageListRow<SessionTranscriptToolCall>} />
+  }
+
+  return <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
 }

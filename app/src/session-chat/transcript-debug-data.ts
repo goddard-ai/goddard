@@ -36,11 +36,41 @@ function formatFixtureTimestamp(totalMinutes: number): string {
 function buildDebugMessages(): TranscriptMessage[] {
   const messages: TranscriptMessage[] = [
     {
+      kind: "message",
       id: "system:opening",
       role: "system",
       authorName: "Debug Surface",
       timestampLabel: "9:10 AM",
       text: systemMessageBodies[0],
+    },
+    {
+      kind: "toolCall",
+      id: "tool:opening",
+      toolCallId: "tool:opening",
+      authorName: "Goddard",
+      timestampLabel: "9:11 AM",
+      title: "Read transcript fixture",
+      toolKind: "read",
+      status: "completed",
+      content: [
+        {
+          type: "content",
+          text: "Loaded the debug transcript fixture and verified that the current layout path supports long-form tool output.",
+        },
+        {
+          type: "diff",
+          path: "/repo/app/src/session-chat/transcript.tsx",
+          oldText: "const transcriptViewportClass = css({",
+          newText:
+            'const transcriptViewportClass = css({\n  position: "relative",\n  minHeight: "100%",',
+        },
+      ],
+      locations: [
+        {
+          path: "/repo/app/src/session-chat/transcript.tsx",
+          line: 1,
+        },
+      ],
     },
   ]
 
@@ -57,6 +87,7 @@ function buildDebugMessages(): TranscriptMessage[] {
           : systemMessageBodies[index % systemMessageBodies.length]
 
     messages.push({
+      kind: "message",
       id: `${role}:${index}`,
       role,
       authorName,
@@ -66,6 +97,40 @@ function buildDebugMessages(): TranscriptMessage[] {
           ? `${body}\n\nWorking note ${index + 1}: preserve readable gutters, keep row heights predictable, and let the transcript stay dumb until real session wiring arrives.`
           : body,
     })
+
+    if (role === "assistant" && index % 24 === 10) {
+      messages.push({
+        kind: "toolCall",
+        id: `tool:${index}`,
+        toolCallId: `tool:${index}`,
+        authorName: "Goddard",
+        timestampLabel: formatFixtureTimestamp(minuteCursor + 1),
+        title: index % 48 === 10 ? "Search layout references" : "Execute transcript probe",
+        toolKind: index % 48 === 10 ? "search" : "execute",
+        status: index % 48 === 10 ? "in_progress" : "failed",
+        content:
+          index % 48 === 10
+            ? [
+                {
+                  type: "content",
+                  text: "Scanning nearby transcript modules for spacing, width-estimation, and virtualization assumptions.",
+                },
+              ]
+            : [
+                {
+                  type: "terminal",
+                  terminalId: `term-${index}`,
+                },
+              ],
+        locations: [
+          {
+            path: `/repo/app/src/session-chat/example-${index}.tsx`,
+            line: 18 + index,
+          },
+        ],
+      })
+      minuteCursor += 1
+    }
 
     minuteCursor += role === "assistant" ? 4 : role === "user" ? 2 : 1
   }
