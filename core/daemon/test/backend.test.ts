@@ -1,6 +1,7 @@
 import { InMemoryBackendControlPlane, startBackendServer } from "@goddard-ai/backend"
 import { expect, test } from "bun:test"
-import { createBackendClient } from "../src/backend.ts"
+
+import { BackendUnauthenticatedError, createBackendClient } from "../src/backend.ts"
 
 test("daemon backend client creates PRs and checks managed status through rouzer route helpers", async () => {
   const controlPlane = new InMemoryBackendControlPlane()
@@ -111,6 +112,23 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   } finally {
     subscription?.close()
     await Bun.sleep(10)
+    await server.close()
+  }
+})
+
+test("daemon backend client reports stream auth failures as unauthenticated errors", async () => {
+  const controlPlane = new InMemoryBackendControlPlane()
+  const server = await startBackendServer(controlPlane, { port: 0 })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const client = createBackendClient({
+      baseUrl,
+      getAuthorizationHeader: () => "Bearer invalid-token",
+    })
+
+    await expect(client.stream.subscribe()).rejects.toBeInstanceOf(BackendUnauthenticatedError)
+  } finally {
     await server.close()
   }
 })

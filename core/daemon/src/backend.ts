@@ -17,6 +17,24 @@ type FetchLike = typeof fetch
 /** Listener signature used by daemon-owned backend stream subscriptions. */
 type StreamHandler = (event?: unknown) => void
 
+const notAuthenticatedMessage = "Not authenticated. Run login first."
+
+/** Error thrown when a daemon backend call requires a login session that is not available. */
+export class BackendUnauthenticatedError extends Error {
+  constructor(message = notAuthenticatedMessage) {
+    super(message)
+    this.name = "BackendUnauthenticatedError"
+  }
+}
+
+/** Returns whether a daemon backend failure was caused by missing or invalid authentication. */
+export function isBackendUnauthenticatedError(error: unknown) {
+  return (
+    error instanceof BackendUnauthenticatedError ||
+    (error instanceof Error && error.name === "BackendUnauthenticatedError")
+  )
+}
+
 /** Constructor options for the daemon's direct backend client. */
 export type BackendClientOptions = {
   baseUrl: string
@@ -151,7 +169,11 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         })
 
         if (!response.ok) {
-          throw new Error(`Stream request failed (${response.status}): ${await response.text()}`)
+          const message = `Stream request failed (${response.status}): ${await response.text()}`
+          if (response.status === 401) {
+            throw new BackendUnauthenticatedError(message)
+          }
+          throw new Error(message)
         }
 
         if (!response.body) {
@@ -183,7 +205,7 @@ async function requireAuthorizationHeader(
 ): Promise<string> {
   const authorization = await getAuthorizationHeader?.()
   if (!authorization) {
-    throw new Error("Not authenticated. Run login first.")
+    throw new BackendUnauthenticatedError()
   }
 
   return authorization

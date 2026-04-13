@@ -1,10 +1,10 @@
+import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test } from "bun:test"
 
-import type { BackendClient } from "../src/backend.ts"
+import { BackendUnauthenticatedError, type BackendClient } from "../src/backend.ts"
 import { runDaemon, type RunDeps } from "../src/daemon.ts"
 import {
   createDaemonUrl,
@@ -60,6 +60,7 @@ function createMockBackendClient(
   input: {
     subscription?: MockStreamSubscription
     onSubscribe?: () => void
+    subscribeError?: unknown
   } = {},
 ): BackendClient {
   return {
@@ -103,6 +104,9 @@ function createMockBackendClient(
     stream: {
       subscribe: async () => {
         input.onSubscribe?.()
+        if (input.subscribeError) {
+          throw input.subscribeError
+        }
         return input.subscription ?? new MockStreamSubscription()
       },
     },
@@ -356,6 +360,60 @@ test("daemon run can subscribe without IPC and ignores feedback that requires th
       (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
     ),
   ).toBe(true)
+})
+
+test("daemon run keeps IPC available when stream startup is unauthenticated", async () => {
+  let subCalls = 0
+  const startIpcCalls: Array<{ socketPath: string; agentBinDir: string }> = []
+
+  const { logs, result: exitCode } = await captureLogs((io) =>
+    runDaemon(
+      {
+        baseUrl: "",
+        socketPath: "/tmp/degraded-auth.sock",
+        agentBinDir: "/tmp/custom-agent-bin",
+        logMode: "json",
+      },
+      {
+        io,
+        createBackendClient: async () =>
+          createMockBackendClient({
+            onSubscribe: () => {
+              subCalls += 1
+            },
+            subscribeError: new BackendUnauthenticatedError(),
+          }),
+        startIpcServer: async (_client, options) => {
+          startIpcCalls.push(options)
+          return {
+            daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdegraded-auth.sock",
+            socketPath: "/tmp/degraded-auth.sock",
+            close: async () => {},
+          }
+        },
+        waitForShutdown: async (close) => {
+          await close()
+        },
+      },
+    ),
+  )
+
+  expect(exitCode).toBe(0)
+  expect(subCalls).toBe(1)
+  expect(startIpcCalls).toEqual([
+    {
+      socketPath: "/tmp/degraded-auth.sock",
+      agentBinDir: "/tmp/custom-agent-bin",
+    },
+  ])
+  expect(
+    logs.some(
+      (entry) => entry.event === "repo.subscription_degraded" && entry.reason === "unauthenticated",
+    ),
+  ).toBe(true)
+  expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
+  expect(logs.some((entry) => entry.event === "daemon.run_failed")).toBe(false)
+  expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
 })
 
 test("daemon run defaults to concise pretty terminal logs", async () => {

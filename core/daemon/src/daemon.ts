@@ -1,13 +1,18 @@
 import type { RepoEvent } from "@goddard-ai/schema/backend"
-import { createBackendClient, type BackendClient } from "./backend.ts"
+
+import {
+  createBackendClient,
+  type BackendClient,
+  isBackendUnauthenticatedError,
+} from "./backend.ts"
 import { createConfigManager, type ConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"
 import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
-import { runPrFeedbackFlow, type PrFeedbackFlowInput } from "./pr-feedback-run.ts"
 import { db } from "./persistence/store.ts"
+import { runPrFeedbackFlow, type PrFeedbackFlowInput } from "./pr-feedback-run.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
@@ -102,7 +107,23 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
     const activeIpcServer = ipcServer
     // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
     const runningPrs = new Set<string>()
-    const subscription = enableStream ? await client.stream.subscribe() : null
+    let subscription: Awaited<ReturnType<BackendClient["stream"]["subscribe"]>> | null = null
+
+    if (enableStream) {
+      try {
+        subscription = await client.stream.subscribe()
+      } catch (error) {
+        const authError = error instanceof Error ? error : new Error(String(error))
+        if (!isBackendUnauthenticatedError(authError)) {
+          throw authError
+        }
+
+        logger.log("repo.subscription_degraded", {
+          reason: "unauthenticated",
+          errorMessage: authError.message,
+        })
+      }
+    }
 
     if (subscription) {
       logger.log(
