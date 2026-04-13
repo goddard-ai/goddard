@@ -47,6 +47,7 @@
     "shiki": "4.0.2"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.8.9",
     "@pandacss/dev": "^1.9.1",
     "@preact/preset-vite": "^2.10.5",
     "@spiriit/vite-plugin-svg-spritemap": "7.0.0",
