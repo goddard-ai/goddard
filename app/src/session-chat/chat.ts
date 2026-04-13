@@ -24,6 +24,23 @@ type ParsedToolCallUpdate = {
   locations?: SessionTranscriptToolLocation[]
 }
 
+type ParsedTranscriptSessionUpdate =
+  | {
+      kind: "agentMessageChunk"
+      text: string
+    }
+  | {
+      kind: "toolCall"
+      toolCallUpdate: ParsedToolCallUpdate
+    }
+  | {
+      kind: "ignored"
+    }
+  | {
+      kind: "unsupported"
+      reason: string
+    }
+
 const TOOL_KINDS = new Set<SessionTranscriptToolKind>([
   "read",
   "edit",
@@ -42,6 +59,13 @@ const TOOL_STATUSES = new Set<SessionTranscriptToolStatus>([
   "in_progress",
   "completed",
   "failed",
+])
+
+const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
+  "available_commands_update",
+  "config_option_update",
+  "current_mode_update",
+  "session_info_update",
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -171,9 +195,7 @@ function extractToolCallContent(value: unknown): SessionTranscriptToolContent[] 
 }
 
 /** Extracts one structured tool-call update so the transcript can preserve ACP row identity. */
-function extractToolCallUpdate(message: SessionHistoryMessage) {
-  const update = extractSessionUpdate(message)
-
+function extractToolCallUpdate(update: Record<string, unknown> | null) {
   if (
     !update ||
     (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") ||
@@ -212,60 +234,80 @@ function extractToolCallUpdate(message: SessionHistoryMessage) {
   return toolCallUpdate
 }
 
-function collectTextFragments(value: unknown, fragments: string[], depth = 0) {
-  if (depth > 5) {
-    return
+function extractAgentMessageChunkText(update: Record<string, unknown>) {
+  if (update.sessionUpdate !== "agent_message_chunk") {
+    return undefined
   }
 
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-
-    if (trimmed) {
-      fragments.push(trimmed)
-    }
-    return
+  if (
+    !isRecord(update.content) ||
+    update.content.type !== "text" ||
+    typeof update.content.text !== "string"
+  ) {
+    return null
   }
 
-  const blockText = textFromContentBlocks(value)
-
-  if (blockText) {
-    fragments.push(blockText)
-    return
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectTextFragments(item, fragments, depth + 1)
-    }
-    return
-  }
-
-  if (!isRecord(value)) {
-    return
-  }
-
-  for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === "sessionId" || key === "cwd") {
-      continue
-    }
-
-    collectTextFragments(nestedValue, fragments, depth + 1)
-  }
+  return update.content.text
 }
 
-function extractUpdateText(message: SessionHistoryMessage) {
+function parseTranscriptSessionUpdate(
+  message: SessionHistoryMessage,
+): ParsedTranscriptSessionUpdate | null {
   if (!hasMethod(message, "session/update")) {
     return null
   }
 
-  if (extractToolCallUpdate(message)) {
-    return null
+  const update = extractSessionUpdate(message)
+
+  if (!update || typeof update.sessionUpdate !== "string") {
+    return {
+      kind: "unsupported",
+      reason: "session/update is missing a string sessionUpdate discriminator.",
+    }
   }
 
-  const fragments: string[] = []
-  collectTextFragments(message.params, fragments)
-  const uniqueFragments = [...new Set(fragments)]
-  return uniqueFragments.join("\n").trim() || null
+  const toolCallUpdate = extractToolCallUpdate(update)
+
+  if (toolCallUpdate) {
+    return {
+      kind: "toolCall",
+      toolCallUpdate,
+    }
+  }
+
+  const agentMessageChunkText = extractAgentMessageChunkText(update)
+
+  if (agentMessageChunkText !== undefined) {
+    if (agentMessageChunkText === null) {
+      return {
+        kind: "unsupported",
+        reason: "agent_message_chunk is missing text content.",
+      }
+    }
+
+    return {
+      kind: "agentMessageChunk",
+      text: agentMessageChunkText,
+    }
+  }
+
+  if (TRANSCRIPT_IGNORED_SESSION_UPDATES.has(update.sessionUpdate)) {
+    return {
+      kind: "ignored",
+    }
+  }
+
+  return {
+    kind: "unsupported",
+    reason: `Unsupported transcript session/update payload: ${update.sessionUpdate}`,
+  }
+}
+
+function reportUnsupportedTranscriptMessage(message: SessionHistoryMessage, reason: string) {
+  console.error("Unsupported session-chat transcript message.", {
+    reason,
+    message,
+  })
 }
 
 function isPromptCompletionMessage(message: SessionHistoryMessage) {
@@ -284,6 +326,58 @@ function fallbackToolTitle(toolKind: SessionTranscriptToolKind) {
   }
 
   return `${toolKind.slice(0, 1).toUpperCase()}${toolKind.slice(1)} tool`
+}
+
+function applyAgentMessageChunk(props: {
+  agentRowIndexes: Map<string, number>
+  items: SessionTranscriptItem[]
+  session: DaemonSession
+  text: string
+  turnId: string
+}) {
+  if (props.text.length === 0) {
+    return
+  }
+
+  const rowKey = `${props.turnId}:agent`
+  const rowIndex = props.agentRowIndexes.get(rowKey)
+
+  if (rowIndex == null) {
+    props.agentRowIndexes.set(
+      rowKey,
+      props.items.push(
+        createTextRow({
+          id: rowKey,
+          role: "assistant",
+          authorName: props.session.agentName,
+          timestampLabel: "Update",
+          content: [textContentBlock(props.text)],
+          streaming: true,
+        }),
+      ) - 1,
+    )
+    return
+  }
+
+  const existingRow = props.items[rowIndex]
+
+  if (existingRow?.kind !== "message" || existingRow.role !== "assistant") {
+    console.error("Session-chat transcript agent row is in an invalid state.", {
+      existingRow,
+      rowKey,
+    })
+    return
+  }
+
+  const existingText = existingRow.content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("")
+
+  props.items[rowIndex] = {
+    ...existingRow,
+    content: [textContentBlock(`${existingText}${props.text}`)],
+    streaming: true,
+  }
 }
 
 /** Applies one ACP tool update to the transcript, updating an existing card when identities match. */
@@ -333,16 +427,38 @@ function applyToolCallUpdate(props: {
   }
 }
 
-function closePromptTurn(message: SessionHistoryMessage, activePromptIds: string[]) {
-  if (!isPromptCompletionMessage(message) || !("id" in message) || message.id == null) {
+function closePromptTurn(props: {
+  activePromptIds: string[]
+  agentRowIndexes: Map<string, number>
+  items: SessionTranscriptItem[]
+  message: SessionHistoryMessage
+}) {
+  if (
+    !isPromptCompletionMessage(props.message) ||
+    !("id" in props.message) ||
+    props.message.id == null
+  ) {
     return
   }
 
-  const resolvedPromptId = String(message.id)
-  const promptIndex = activePromptIds.lastIndexOf(resolvedPromptId)
+  const resolvedPromptId = String(props.message.id)
+  const promptIndex = props.activePromptIds.lastIndexOf(resolvedPromptId)
+
+  const agentRowIndex = props.agentRowIndexes.get(`${resolvedPromptId}:agent`)
+
+  if (agentRowIndex != null) {
+    const agentRow = props.items[agentRowIndex]
+
+    if (agentRow?.kind === "message" && agentRow.role === "assistant" && agentRow.streaming) {
+      props.items[agentRowIndex] = {
+        ...agentRow,
+        streaming: false,
+      }
+    }
+  }
 
   if (promptIndex > -1) {
-    activePromptIds.splice(promptIndex, 1)
+    props.activePromptIds.splice(promptIndex, 1)
   }
 }
 
@@ -367,6 +483,7 @@ export function buildTranscriptMessages(
     }),
   ]
   const activePromptIds: string[] = []
+  const agentRowIndexes = new Map<string, number>()
   const toolRowIndexes = new Map<string, number>()
 
   for (const [index, message] of history.entries()) {
@@ -387,39 +504,53 @@ export function buildTranscriptMessages(
           content: promptContent,
         }),
       )
-      closePromptTurn(message, activePromptIds)
-      continue
-    }
-
-    const toolCallUpdate = extractToolCallUpdate(message)
-
-    if (toolCallUpdate) {
-      applyToolCallUpdate({
+      closePromptTurn({
+        activePromptIds,
+        agentRowIndexes,
         items,
-        toolRowIndexes,
-        session,
-        turnId: activePromptIds.at(-1) ?? `${session.id}:orphan`,
-        toolCallUpdate,
+        message,
       })
-      closePromptTurn(message, activePromptIds)
       continue
     }
 
-    const updateText = extractUpdateText(message)
+    const sessionUpdate = parseTranscriptSessionUpdate(message)
 
-    if (updateText) {
-      items.push(
-        createTextRow({
-          id: `${session.id}:update:${index}`,
-          role: "assistant",
-          authorName: session.agentName,
-          timestampLabel: "Update",
-          content: [textContentBlock(updateText)],
-        }),
-      )
+    if (sessionUpdate) {
+      if (sessionUpdate.kind === "toolCall") {
+        applyToolCallUpdate({
+          items,
+          toolRowIndexes,
+          session,
+          turnId: activePromptIds.at(-1) ?? `${session.id}:orphan`,
+          toolCallUpdate: sessionUpdate.toolCallUpdate,
+        })
+      } else if (sessionUpdate.kind === "agentMessageChunk") {
+        applyAgentMessageChunk({
+          agentRowIndexes,
+          items,
+          session,
+          text: sessionUpdate.text,
+          turnId: activePromptIds.at(-1) ?? `${session.id}:orphan`,
+        })
+      } else if (sessionUpdate.kind === "unsupported") {
+        reportUnsupportedTranscriptMessage(message, sessionUpdate.reason)
+      }
+
+      closePromptTurn({
+        activePromptIds,
+        agentRowIndexes,
+        items,
+        message,
+      })
+      continue
     }
 
-    closePromptTurn(message, activePromptIds)
+    closePromptTurn({
+      activePromptIds,
+      agentRowIndexes,
+      items,
+      message,
+    })
   }
 
   if (

@@ -29,7 +29,7 @@ function createSession(lastAgentMessage: string | null) {
   } satisfies DaemonSession
 }
 
-test("buildTranscriptMessages parses prompt and update events without duplicating the latest message", () => {
+test("buildTranscriptMessages uses agent_message_chunk content without duplicating the latest message", () => {
   const session = createSession("I reviewed the diff and found one issue.")
   const history = [
     {
@@ -45,7 +45,14 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
       jsonrpc: "2.0",
       method: "session/update",
       params: {
-        value: "I reviewed the diff and found one issue.",
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "I reviewed the diff and found one issue.",
+          },
+        },
       },
     },
   ] satisfies GetSessionHistoryResponse["history"]
@@ -69,11 +76,12 @@ test("buildTranscriptMessages parses prompt and update events without duplicatin
     },
     {
       kind: "message",
-      id: "ses_session-1:update:1",
+      id: "prompt-1:agent",
       role: "assistant",
       authorName: "pi",
       timestampLabel: "Update",
       content: [{ type: "text", text: "I reviewed the diff and found one issue." }],
+      streaming: true,
     },
   ])
 })
@@ -101,6 +109,84 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
     streaming: true,
     content: [{ type: "text", text: "Ready to review the diff." }],
   })
+})
+
+test("buildTranscriptMessages accumulates agent_message_chunk updates into one assistant row", () => {
+  const session = createSession(null)
+  const history = [
+    {
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: "session/prompt",
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: "text", text: "Summarize the transcript renderer." }],
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "# Summary",
+          },
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "\n\n- Uses Comark",
+          },
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      result: {
+        stopReason: "end_turn",
+      },
+    },
+  ] satisfies GetSessionHistoryResponse["history"]
+
+  expect(buildTranscriptMessages(session, history)).toEqual([
+    {
+      kind: "message",
+      id: "ses_session-1:context",
+      role: "system",
+      authorName: "System",
+      timestampLabel: "active",
+      content: [{ type: "text", text: "Working directory: /repo-a" }],
+    },
+    {
+      kind: "message",
+      id: "ses_session-1:prompt:0",
+      role: "user",
+      authorName: "You",
+      timestampLabel: "Prompt",
+      content: [{ type: "text", text: "Summarize the transcript renderer." }],
+    },
+    {
+      kind: "message",
+      id: "prompt-1:agent",
+      role: "assistant",
+      authorName: "pi",
+      timestampLabel: "Update",
+      content: [{ type: "text", text: "# Summary\n\n- Uses Comark" }],
+      streaming: false,
+    },
+  ])
 })
 
 test("buildTranscriptMessages merges tool_call updates into one stable tool row", () => {
@@ -190,4 +276,86 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
       ],
     },
   ])
+})
+
+test("buildTranscriptMessages ignores routed session/update payloads without rendering transcript text", () => {
+  const session = createSession(null)
+  const history = [
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            {
+              name: "plan",
+              description: "Create or revise the plan",
+            },
+          ],
+        },
+      },
+    },
+  ] satisfies GetSessionHistoryResponse["history"]
+
+  expect(buildTranscriptMessages(session, history)).toEqual([
+    {
+      kind: "message",
+      id: "ses_session-1:context",
+      role: "system",
+      authorName: "System",
+      timestampLabel: "active",
+      content: [{ type: "text", text: "Working directory: /repo-a" }],
+    },
+  ])
+})
+
+test("buildTranscriptMessages logs an error instead of flattening unsupported session/update payloads", () => {
+  const session = createSession(null)
+  const history = [
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "mystery_update",
+          content: {
+            type: "text",
+            text: "This should not render.",
+          },
+        },
+      },
+    },
+  ] satisfies GetSessionHistoryResponse["history"]
+
+  const errors: unknown[][] = []
+  const originalConsoleError = console.error
+  console.error = (...args) => {
+    errors.push(args)
+  }
+
+  try {
+    expect(buildTranscriptMessages(session, history)).toEqual([
+      {
+        kind: "message",
+        id: "ses_session-1:context",
+        role: "system",
+        authorName: "System",
+        timestampLabel: "active",
+        content: [{ type: "text", text: "Working directory: /repo-a" }],
+      },
+    ])
+  } finally {
+    console.error = originalConsoleError
+  }
+
+  expect(errors).toHaveLength(1)
+  expect(errors[0]?.[0]).toBe("Unsupported session-chat transcript message.")
+  expect(errors[0]?.[1]).toEqual(
+    expect.objectContaining({
+      reason: "Unsupported transcript session/update payload: mystery_update",
+    }),
+  )
 })
