@@ -51,7 +51,7 @@
         "lucide-react": "^1.7.0",
         "powerkeys": "^0.1.0",
         "preact": "11.0.0-beta.1",
-        "preact-comark": "^0.2.4",
+        "preact-comark": "0.2.4",
         "preact-in-motion": "^0.2.9",
         "preact-sigma": "^2.3.0",
         "radashi": "^12.7.2",
