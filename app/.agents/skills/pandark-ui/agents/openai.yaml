@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pandark UI"
+  short_description: "Compact UI guidance for Panda + Ark"
+  default_prompt: "Use $pandark-ui to build a compact, accessible Panda CSS and Ark UI product surface with the app's existing components and recipes."

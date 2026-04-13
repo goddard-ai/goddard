@@ -21,6 +21,11 @@
       "sourceType": "local",
       "computedHash": "58982aae9f068cfddc3fffd4cf259caa3803a36f3b921a36c1fda97f26d98515"
     },
+    "pandark-ui": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "1b54468cb14cec9e78276402a30a281c65eba0bbb43d1f908afb11929aee14de"
+    },
     "preact-sigma": {
       "source": "/Users/alec/dev/skills/packages",
       "sourceType": "local",
