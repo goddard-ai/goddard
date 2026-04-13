@@ -19,7 +19,6 @@ export type ShortcutDispatchSource = "keyboard" | "native-menu" | "programmatic"
 
 /** One emitted shortcut command dispatch shared across keyboard, menu, and programmatic sources. */
 export type ShortcutDispatchDetail = {
-  commandId: ShortcutCommandId
   source: ShortcutDispatchSource
   match?: ShortcutMatch
 }
@@ -29,19 +28,18 @@ type ShortcutRegistryEvents = {
 }
 
 type ShortcutRegistryShape = {
+  runtime: SigmaRef<ShortcutRuntime>
   selectedProfileId: KeymapProfileId
   overrides: Partial<Record<ShortcutCommandId, string[] | null>>
   resolvedBindings: Partial<Record<ShortcutCommandId, string[]>>
   loadError: string | null
   writeError: string | null
   isHydrated: boolean
-  activeScopes: string[]
   activeTabKind: WorkbenchTabKind
   hasClosableActiveTab: boolean
   selectedNavId: NavigationItemId
   overlayIsOpen: boolean
   overlayKind: string | null
-  runtime: SigmaRef<ShortcutRuntime> | null
   bindingIdsByCommand: Partial<Record<ShortcutCommandId, string[]>>
 }
 
@@ -69,12 +67,7 @@ function cloneResolvedBindings(bindings: ResolvedShortcutBindings) {
   ) as Partial<Record<ShortcutCommandId, string[]>>
 }
 
-function getRuntimeContextSnapshot(
-  state: Pick<
-    ShortcutRegistryShape,
-    "activeTabKind" | "hasClosableActiveTab" | "selectedNavId" | "overlayIsOpen" | "overlayKind"
-  >,
-) {
+function getRuntimeContextSnapshot(state: ShortcutRegistryShape) {
   return {
     "workbench.activeTabKind": state.activeTabKind,
     "workbench.hasClosableActiveTab": state.hasClosableActiveTab,
@@ -116,21 +109,14 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
     loadError: null,
     writeError: null,
     isHydrated: false,
-    activeScopes: [],
     activeTabKind: "main",
     hasClosableActiveTab: false,
     selectedNavId: "inbox",
     overlayIsOpen: false,
     overlayKind: null,
-    runtime: null,
     bindingIdsByCommand: {},
   })
   .actions({
-    /** Emits one shortcut command so all listeners observe the same typed dispatch path. */
-    dispatch(commandId: ShortcutCommandId, detail: Omit<ShortcutDispatchDetail, "commandId">) {
-      this.emit(commandId, { commandId, ...detail })
-    },
-
     /** Loads the persisted user keymap from the Bun host and reapplies the effective bindings. */
     async hydrateKeymap() {
       const response = await desktopHost.readShortcutKeymap()
@@ -151,19 +137,14 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
       this.loadError = loadError
       this.isHydrated = true
       this.rebindRuntime()
+      this.commit()
     },
 
     /** Rebuilds the runtime bindings from the current resolved keymap snapshot. */
     rebindRuntime() {
-      const runtime = this.runtime
-
-      if (!runtime) {
-        return
-      }
-
       for (const bindingIds of Object.values(this.bindingIdsByCommand)) {
         for (const bindingId of bindingIds ?? []) {
-          runtime.unbind(bindingId)
+          this.runtime.unbind(bindingId)
         }
       }
 
@@ -176,18 +157,17 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
           continue
         }
 
-        const commandBindingIds = expressions.map(
-          (expression) =>
-            runtime.bind(
-              createBindingInput(commandId, expression, (match) => {
-                this.emit(commandId, {
-                  commandId,
-                  source: "keyboard",
-                  match,
-                })
-              }),
-            ).id,
-        )
+        const commandBindingIds = expressions.map((expression) => {
+          const commandBinding = this.runtime.bind(
+            createBindingInput(commandId, expression, (match) => {
+              this.emit(commandId, {
+                source: "keyboard",
+                match,
+              })
+            }),
+          )
+          return commandBinding.id
+        })
 
         if (commandBindingIds.length > 0) {
           nextBindingIds[commandId] = commandBindingIds
@@ -195,6 +175,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
       }
 
       this.bindingIdsByCommand = nextBindingIds
+      this.commit()
     },
 
     /** Syncs workbench-derived context keys used by `when` clauses and future shortcut UI. */
@@ -207,7 +188,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
       this.hasClosableActiveTab = context.hasClosableActiveTab
       this.selectedNavId = context.selectedNavId
 
-      this.runtime?.batchContext(getRuntimeContextSnapshot(this))
+      this.runtime.batchContext(getRuntimeContextSnapshot(this))
     },
 
     /** Syncs overlay-derived context keys even before any initial bindings depend on them. */
@@ -215,21 +196,11 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
       this.overlayIsOpen = context.isOpen
       this.overlayKind = context.kind
 
-      this.runtime?.batchContext(getRuntimeContextSnapshot(this))
+      this.runtime.batchContext(getRuntimeContextSnapshot(this))
     },
   })
   .setup(function () {
-    const runtime = createShortcuts({
-      target: document,
-      editablePolicy: "ignore-editable",
-      getActiveScopes: () => this.activeScopes,
-      onError: (error, info) => {
-        console.error("Shortcut runtime error.", error, info)
-      },
-    })
-
     this.act(function () {
-      this.runtime = runtime
       this.runtime.batchContext(getRuntimeContextSnapshot(this))
       this.rebindRuntime()
     })
@@ -237,16 +208,31 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
     return [
       () => {
         this.act(function () {
-          this.runtime = null
           this.bindingIdsByCommand = {}
         })
       },
-      runtime,
+      this.runtime,
     ]
   })
 
 /** Runtime instance type for the shared shortcut registry model. */
 export interface ShortcutRegistry extends InstanceType<typeof ShortcutRegistry> {}
 
+let activeScopes: string[] = []
+
 /** Module-scoped shortcut registry singleton shared across the app shell. */
-export const shortcutRegistry = new ShortcutRegistry()
+export const shortcutRegistry = new ShortcutRegistry({
+  runtime: createShortcuts({
+    target: document,
+    editablePolicy: "ignore-editable",
+    getActiveScopes: () => activeScopes,
+    onError: (error, info) => {
+      console.error("Shortcut runtime error.", error, info)
+    },
+  }),
+})
+
+/** Updates the active scopes for the shortcut registry. */
+export function setActiveScopes(scopes: string[]) {
+  activeScopes = scopes
+}
