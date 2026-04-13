@@ -126,7 +126,7 @@ export const globalCss = defineGlobalStyles({
 
   ":where(a, button, input, select, textarea, summary, [tabindex], [data-scope][data-part]):focus-visible":
     {
-      outline: "2px solid {colors.accent}",
+      outline: "2px solid {colors.focus}",
       outlineOffset: "2px",
     },
 

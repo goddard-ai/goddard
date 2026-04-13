@@ -181,6 +181,7 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
     foreground,
     highContrast ? 4.8 : 3.8,
   )
+  const focus = accentStrong
   const accentFg = chooseOnAccent(accentStrong, background, foreground)
   const danger = ensureContrast(
     withChroma(seeds.danger, highContrast ? 1.08 : 1),
@@ -228,6 +229,7 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
     "--theme-color-border": serializeColor(border),
     "--theme-color-text": serializeColor(foreground),
     "--theme-color-muted": serializeColor(muted),
+    "--theme-color-focus": serializeColor(focus),
     "--theme-color-accent": serializeColor(accent),
     "--theme-color-accent-strong": serializeColor(accentStrong),
     "--theme-color-accent-fg": serializeColor(accentFg),

@@ -19,6 +19,7 @@ export default defineConfig({
         border: { value: "var(--theme-color-border)" },
         text: { value: "var(--theme-color-text)" },
         muted: { value: "var(--theme-color-muted)" },
+        focus: { value: "var(--theme-color-focus)" },
         accent: { value: "var(--theme-color-accent)" },
         accentStrong: { value: "var(--theme-color-accent-strong)" },
         accentFg: { value: "var(--theme-color-accent-fg)" },

@@ -39,6 +39,9 @@ test("buildAppearanceDocumentState keeps default text readable against the canva
   expect(
     contrastBetween(documentState, "--theme-color-background", "--theme-color-accent"),
   ).toBeGreaterThan(2.7)
+  expect(
+    contrastBetween(documentState, "--theme-color-background", "--theme-color-focus"),
+  ).toBeGreaterThan(3.7)
 })
 
 test("buildAppearanceDocumentState strengthens muted and border contrast in high-contrast mode", () => {
