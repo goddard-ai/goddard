@@ -12,6 +12,15 @@
 - `Daemon Session`
   - The durable identity for one daemon-managed agent interaction.
   - Why: so creation, connection, history, diagnostics, and access control all refer to the same unit of work.
+- `Session Title`
+  - The short human-readable label attached to one daemon session.
+  - Why: so hosts can identify sessions in lists, tabs, and headers without exposing raw ids or long prompt text.
+- `Text Model Config`
+  - The persisted `{ provider, model }` JSON shape validated by `ai-sdk-json-schema`.
+  - Why: so multiple features can reuse one shared config surface for selecting AI SDK text models.
+- `Title Generator Config`
+  - The persisted shared configuration that selects one reusable text model config for session title generation.
+  - Why: so title generation can be configured independently from the session agent's own model settings while still reusing shared provider setup.
 - `Session Metadata`
   - Structured context attached to a daemon session.
   - Why: so auxiliary work context such as workforce ownership can travel with the session without being embedded in prompt text.

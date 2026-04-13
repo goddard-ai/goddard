@@ -1,5 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { type TextModelConfig, textModelConfigSchema } from "ai-sdk-json-schema"
 import { z } from "zod"
+
 import { type ACPAdapterName, ACPAdapterNames } from "./acp-adapters.ts"
 import { AgentDistribution } from "./agent-distribution.ts"
 import { DaemonSessionMetadata } from "./daemon/store.ts"
@@ -251,11 +253,27 @@ export const WorktreesConfig = z
 
 export type WorktreesConfig = z.infer<typeof WorktreesConfig>
 
+/** Schema for persisted session-title generation defaults loaded from JSON. */
+export const SessionTitlesConfig = z
+  .strictObject({
+    generator: textModelConfigSchema
+      .optional()
+      .describe("Text model selection used for background session title generation."),
+  })
+  .describe("Persisted session title-generation defaults loaded from JSON.")
+
+export type SessionTitlesConfig = z.infer<typeof SessionTitlesConfig> & {
+  generator?: TextModelConfig
+}
+
 /** Schema for the shared root config document. */
 export const UserConfig = z
   .strictObject({
     worktrees: WorktreesConfig.optional().describe(
       "Default settings for daemon-managed worktrees.",
+    ),
+    sessionTitles: SessionTitlesConfig.optional().describe(
+      "Default settings for background session title generation.",
     ),
     session: StaticSessionParams.optional().describe(
       "Default session settings applied to all sessions.",
@@ -322,5 +340,6 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   z.globalRegistry.add(WorktreeBootstrapPackageManager, { id: "WorktreeBootstrapPackageManager" })
   z.globalRegistry.add(WorktreeBootstrapConfig, { id: "WorktreeBootstrapConfig" })
   z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
+  z.globalRegistry.add(SessionTitlesConfig, { id: "SessionTitlesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })
 }

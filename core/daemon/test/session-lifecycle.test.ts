@@ -140,6 +140,106 @@ test("daemon persists ACP stop reasons on the session record", async () => {
   expect(db.sessions.get(created.session.id)?.stopReason).toBe("end_turn")
 })
 
+test("daemon creates placeholder session titles before any user prompt is sent", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(created.session.title).toBe("New session")
+  expect(created.session.titleState).toBe("placeholder")
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("daemon derives a fallback title immediately when the session starts with an initial prompt", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Review the worktree bootstrap flow for race conditions.",
+  })
+
+  expect(created.session.title).toBe("Review the worktree bootstrap flow for")
+  expect(created.session.titleState).toBe("fallback")
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("daemon promotes placeholder titles after the first later prompt is accepted", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: buildPromptMessage(
+      created.session.acpSessionId,
+      "prompt-title-1",
+      "Audit the retry policy for loop failures.",
+    ),
+  })
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.titleState === "fallback")
+
+  expect(db.sessions.get(created.session.id)).toMatchObject({
+    title: "Audit the retry policy for loop",
+    titleState: "fallback",
+  })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("daemon marks pending title generation as failed when provider config is present but unusable", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    sessionTitles: {
+      generator: {
+        provider: "openai",
+        model: "gpt-4.1-mini",
+      },
+    },
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Summarize the retry failure mode.",
+  })
+
+  expect(created.session.title).toBe("Summarize the retry failure mode")
+  expect(created.session.titleState).toBe("pending")
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.titleState === "failed")
+
+  expect(db.sessions.get(created.session.id)).toMatchObject({
+    title: "Summarize the retry failure mode",
+    titleState: "failed",
+  })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
 test("daemon lists adapters through the shared registry service and config default", async () => {
   await useTempHome()
   const repoDir = await createRepoFixture()
@@ -1022,6 +1122,16 @@ function runGit(cwd: string, args: string[]) {
 
 async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
   const configPath = getLocalConfigPath(repoDir)
+  await mkdir(dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ $schema: rootConfigSchemaUrl, ...config }, null, 2)}\n`,
+    "utf-8",
+  )
+}
+
+async function writeGlobalRootConfig(config: Record<string, unknown>) {
+  const configPath = getGlobalConfigPath()
   await mkdir(dirname(configPath), { recursive: true })
   await writeFile(
     configPath,

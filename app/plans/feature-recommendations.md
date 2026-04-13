@@ -29,7 +29,7 @@
   - Why deferred:
     - You explicitly punted on settings for now, even though `spec/configuration.md` implies a future need for operator-facing config editing and workspace preferences.
   - Potential future plans:
-    - Components: `SettingsPage`, `ConfigScopeSwitcher`, `JsonConfigEditor`, `WorkspacePreferencesPanel`
+    - Components: `SettingsPage`, `ConfigScopeSwitcher`, `TextModelSelector`, `JsonConfigEditor`, `WorkspacePreferencesPanel`
     - State: `ConfigurationState`, `WorkspacePreferencesState`
 
 - 5. Extension Catalog and Connectivity Diagnostics

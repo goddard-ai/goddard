@@ -45,6 +45,7 @@ import { ReadableStream } from "node:stream/web"
 import { pathToFileURL } from "node:url"
 import { omit } from "radashi"
 
+import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
 import type { ConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath } from "../config.ts"
 import { SessionContext } from "../context.ts"
@@ -78,6 +79,7 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import type { ACPRegistryService } from "./registry.ts"
+import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
   resolveGitRepoRoot,
   reuseExistingWorktree,
@@ -122,6 +124,10 @@ type ExistingSessionArtifacts = {
   worktree: SessionWorktreeState | null
   workforceRecord: PersistedSessionWorkforceRecord | null
 }
+
+type SessionTitleGeneratorConfig = NonNullable<
+  NonNullable<UserConfig["sessionTitles"]>["generator"]
+>
 
 /** Returns true when one filesystem path currently exists. */
 async function pathExists(path: string): Promise<boolean> {
@@ -1237,6 +1243,8 @@ function createSessionRecordUpdate(params: {
   sessionMetadata: DaemonSessionMetadata | null | undefined
   existingSession: PersistedSessionRecord | null
   exitAfterInitialPrompt: boolean
+  title: string
+  titleState: DaemonSession["titleState"]
 }) {
   const connectionMode: SessionConnectionMode = params.exitAfterInitialPrompt ? "history" : "live"
 
@@ -1246,6 +1254,8 @@ function createSessionRecordUpdate(params: {
     stopReason: params.initialized.stopReason ?? params.existingSession?.stopReason ?? null,
     agentName: agentNameFromInput(params.request.agent),
     cwd: params.cwd,
+    title: params.existingSession?.title ?? params.title,
+    titleState: params.existingSession?.titleState ?? params.titleState,
     mcpServers: params.request.mcpServers,
     connectionMode,
     activeDaemonSession: !params.exitAfterInitialPrompt,
@@ -1491,6 +1501,8 @@ export function createSessionManager(input: {
   registryService: ACPRegistryService
 }): SessionManager {
   const activeSessions = new Map<SessionId, ActiveSession>()
+  const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
+  const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
   const worktreeSyncRuntimes = new Map<SessionId, WorktreeSyncRuntime>()
   const worktreePluginManager = createWorktreePluginManager({
     configManager: input.configManager,
@@ -1595,6 +1607,159 @@ export function createSessionManager(input: {
       sessionId,
       events: [event],
     })
+  }
+
+  /** Starts one detached title-generation task for a session whose fallback title is already persisted. */
+  function queueSessionTitleGeneration(params: {
+    id: SessionId
+    generatorConfig: SessionTitleGeneratorConfig
+    fallbackTitle: string
+    promptText: string
+    diagnosticLogger?: ReturnType<typeof createLogger>
+  }) {
+    if (pendingSessionTitleGenerations.has(params.id)) {
+      return
+    }
+
+    const task = (async () => {
+      const sessionRecord = db.sessions.get(params.id) ?? null
+      if (!sessionRecord || sessionRecord.titleState !== "pending") {
+        return
+      }
+
+      await emitDiagnostic(
+        params.id,
+        "session_title_generation_started",
+        {
+          provider: params.generatorConfig.provider,
+          model: params.generatorConfig.model,
+        },
+        params.diagnosticLogger,
+      )
+
+      try {
+        const loadedTextModel = await loadDaemonTextModel(params.generatorConfig)
+        const generatedTitle = await generateSessionTitle({
+          model: loadedTextModel.model,
+          promptText: params.promptText,
+        })
+        if (!generatedTitle) {
+          throw new Error("Generated session title was empty or invalid.")
+        }
+
+        await updateSession(
+          params.id,
+          {
+            title: generatedTitle,
+            titleState: "generated",
+          },
+          undefined,
+          params.diagnosticLogger,
+        )
+        await emitDiagnostic(
+          params.id,
+          "session_title_generated",
+          {
+            provider: loadedTextModel.descriptor.provider,
+            model: loadedTextModel.descriptor.model,
+            title: generatedTitle,
+          },
+          params.diagnosticLogger,
+        )
+      } catch (error) {
+        await updateSession(
+          params.id,
+          {
+            title: params.fallbackTitle,
+            titleState: "failed",
+          },
+          undefined,
+          params.diagnosticLogger,
+        )
+        await emitDiagnostic(
+          params.id,
+          "session_title_generation_failed",
+          {
+            provider: params.generatorConfig.provider,
+            model: params.generatorConfig.model,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          },
+          params.diagnosticLogger,
+        )
+      }
+    })().finally(() => {
+      pendingSessionTitleGenerations.delete(params.id)
+    })
+
+    pendingSessionTitleGenerations.set(params.id, task)
+  }
+
+  /** Initializes the first prompt-derived title for placeholder sessions without blocking prompt flow. */
+  function queueSessionTitlePreparation(params: {
+    id: SessionId
+    prompt: string | acp.ContentBlock[]
+    diagnosticLogger?: ReturnType<typeof createLogger>
+  }) {
+    const sessionRecord = db.sessions.get(params.id) ?? null
+    if (
+      !sessionRecord ||
+      sessionRecord.titleState !== "placeholder" ||
+      pendingSessionTitlePreparations.has(params.id)
+    ) {
+      return
+    }
+
+    const task = (async () => {
+      let generatorConfig = input.configManager.getLastKnownRootConfig(sessionRecord.cwd)?.config
+        .sessionTitles?.generator
+
+      if (!generatorConfig) {
+        try {
+          generatorConfig = (await input.configManager.getRootConfig(sessionRecord.cwd)).config
+            .sessionTitles?.generator
+        } catch {}
+      }
+
+      const preparedTitle = prepareSessionTitle(params.prompt, generatorConfig)
+      if (preparedTitle.titleState === "placeholder" || !preparedTitle.promptText) {
+        return
+      }
+
+      await updateSession(
+        params.id,
+        {
+          title: preparedTitle.title,
+          titleState: preparedTitle.titleState,
+        },
+        undefined,
+        params.diagnosticLogger,
+      )
+
+      if (preparedTitle.titleState === "pending" && preparedTitle.generatorConfig) {
+        queueSessionTitleGeneration({
+          id: params.id,
+          generatorConfig: preparedTitle.generatorConfig,
+          fallbackTitle: preparedTitle.title,
+          promptText: preparedTitle.promptText,
+          diagnosticLogger: params.diagnosticLogger,
+        })
+      }
+    })()
+      .catch(async (error) => {
+        await emitDiagnostic(
+          params.id,
+          "session_title_generation_failed",
+          {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          },
+          params.diagnosticLogger,
+        )
+      })
+      .finally(() => {
+        pendingSessionTitlePreparations.delete(params.id)
+      })
+
+    pendingSessionTitlePreparations.set(params.id, task)
   }
 
   async function setConnectionMode(
@@ -1947,6 +2112,25 @@ export function createSessionManager(input: {
                 errorMessage: error instanceof Error ? error.message : String(error),
               })
             }
+          }
+        }
+
+        const titleBackfill = backfillSessionTitle({
+          title: session.title,
+          titleState: session.titleState,
+          initiative: session.initiative,
+          history: messagesRecord?.messages ?? [],
+        })
+        if (titleBackfill) {
+          const sessionDocument = db.sessions.get(session.id) ?? null
+          if (sessionDocument) {
+            db.sessions.update(session.id, titleBackfill)
+          }
+
+          if (session.titleState === "pending" && titleBackfill.titleState === "failed") {
+            await emitDiagnostic(session.id, "session_title_generation_failed", {
+              reason: "daemon_reconciliation",
+            })
           }
         }
 
@@ -2493,6 +2677,10 @@ export function createSessionManager(input: {
       (shouldResolveConfiguredWorktreePlugins(params.request, existingArtifacts.worktree)
         ? await worktreePluginManager.getPlugins(params.request.cwd)
         : undefined)
+    const preparedTitle = prepareSessionTitle(
+      params.request.initialPrompt,
+      resolvedConfig?.sessionTitles?.generator,
+    )
     const resolvedRegistry = resolvedConfig?.registry
     const worktree = await resolveLaunchWorktree({
       sessionId: id,
@@ -2639,6 +2827,8 @@ export function createSessionManager(input: {
         sessionMetadata,
         existingSession,
         exitAfterInitialPrompt,
+        title: preparedTitle.title,
+        titleState: preparedTitle.titleState,
       })
 
       persistLaunchedSession({
@@ -2661,6 +2851,20 @@ export function createSessionManager(input: {
         },
         sessionLogger,
       )
+
+      if (
+        preparedTitle.titleState === "pending" &&
+        preparedTitle.generatorConfig &&
+        preparedTitle.promptText
+      ) {
+        queueSessionTitleGeneration({
+          id,
+          generatorConfig: preparedTitle.generatorConfig,
+          fallbackTitle: preparedTitle.title,
+          promptText: preparedTitle.promptText,
+          diagnosticLogger: sessionLogger,
+        })
+      }
 
       if (exitAfterInitialPrompt) {
         const completedSession = await completeOneShotLaunch({
@@ -2974,6 +3178,11 @@ export function createSessionManager(input: {
         throw new IpcClientError("Queued prompt messages must include a JSON-RPC id")
       }
 
+      queueSessionTitlePreparation({
+        id: active.id,
+        prompt: message.params.prompt,
+        diagnosticLogger: active.logger,
+      })
       active.promptQueue.push({
         requestId: message.id,
         prompt: [...message.params.prompt],
@@ -3008,6 +3217,11 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${id} is not active`)
     }
 
+    queueSessionTitlePreparation({
+      id: active.id,
+      prompt,
+      diagnosticLogger: active.logger,
+    })
     const requestId = randomUUID()
     const response = new Promise<acp.PromptResponse>((resolve, reject) => {
       active.promptQueue.push({

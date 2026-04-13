@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
+
 import { DaemonSessionId } from "../common/params.ts"
 
 export const DaemonSessionConnectionMode = z.enum(["live", "history", "none"])
@@ -27,6 +28,16 @@ export const DaemonSessionStatus = z.enum([
 ])
 
 export type DaemonSessionStatus = z.output<typeof DaemonSessionStatus>
+
+export const DaemonSessionTitleState = z.enum([
+  "placeholder",
+  "fallback",
+  "pending",
+  "generated",
+  "failed",
+])
+
+export type DaemonSessionTitleState = z.output<typeof DaemonSessionTitleState>
 
 /**
  * Durable PR permission scope persisted with one daemon-managed session.
@@ -56,6 +67,8 @@ export const DaemonSession = z.strictObject({
   stopReason: DaemonSessionStopReason.nullable().default(null),
   agentName: z.string(),
   cwd: z.string(),
+  title: z.string().default("New session"),
+  titleState: DaemonSessionTitleState.default("placeholder"),
   mcpServers: z.custom<acp.McpServer[]>(),
   connectionMode: DaemonSessionConnectionMode.default("none"),
   activeDaemonSession: z.boolean().default(false),

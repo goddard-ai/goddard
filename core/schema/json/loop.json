@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
     "session": {
@@ -8,17 +8,13 @@
       "properties": {
         "agent": {
           "description": "Agent to run. Use an installed adapter id or an inline agent distribution manifest.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/AgentSetting"
-            }
-          ]
+          "$ref": "#/$defs/AgentSetting"
         },
         "mcpServers": {
           "description": "Additional MCP server definitions to attach to the session.",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/McpServer"
+            "$ref": "#/$defs/McpServer"
           }
         },
         "env": {
@@ -103,7 +99,7 @@
   },
   "required": ["$schema"],
   "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "AgentSetting": {
       "anyOf": [
         {
@@ -450,7 +446,6 @@
         "crow-cli",
         "cursor",
         "deepagents",
-        "dimcode",
         "factory-droid",
         "fast-agent",
         "gemini",

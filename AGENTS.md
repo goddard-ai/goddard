@@ -26,6 +26,7 @@
 
 - Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task requires refactoring.
 - Prefer readability and local reasoning over new abstractions.
+- Avoid extracting local helpers that are only used once; prefer inline logic until reuse or a clear readability win justifies abstraction.
 - Do not declare explicit function return types.
 - Add human-readable `/** ... */` description comments to:
   - exported modules
