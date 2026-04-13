@@ -19,6 +19,7 @@ import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
+const chunkingAgentPath = createRequire(import.meta.url).resolve("./fixtures/chunking-agent.mjs")
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -141,6 +142,93 @@ test("daemon persists ACP stop reasons on the session record", async () => {
 
   expect(created.session.stopReason).toBe("end_turn")
   expect(db.sessions.get(created.session.id)?.stopReason).toBe("end_turn")
+})
+
+test("daemon coalesces stored agent message chunks while keeping the live stream granular", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(chunkingAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const liveChunks: string[] = []
+  const unsubscribe = await client.subscribe(
+    { name: "sessionMessage", filter: { id: created.session.id } },
+    (payload) => {
+      const message = payload.message as {
+        method?: string
+        params?: {
+          update?: {
+            content?: { text?: string }
+            sessionUpdate?: string
+          }
+        }
+      }
+
+      if (message.method !== "session/update") {
+        return
+      }
+
+      if (message.params?.update?.sessionUpdate === "agent_message_chunk") {
+        liveChunks.push(message.params.update.content?.text ?? "")
+      }
+    },
+  )
+
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
+  })
+
+  await waitFor(async () => {
+    return db.sessions.get(created.session.id)?.stopReason === "end_turn" && liveChunks.length === 3
+  })
+
+  await Promise.resolve(unsubscribe()).catch(() => {})
+
+  expect(liveChunks).toEqual(["Chunked ", "response", "."])
+
+  const history = await client.send("sessionHistory", { id: created.session.id })
+  const chunkMessages = history.history.filter((message) => {
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      "method" in message &&
+      message.method === "session/update" &&
+      "params" in message &&
+      typeof message.params === "object" &&
+      message.params !== null &&
+      "update" in message.params &&
+      typeof message.params.update === "object" &&
+      message.params.update !== null &&
+      "sessionUpdate" in message.params.update &&
+      message.params.update.sessionUpdate === "agent_message_chunk"
+    )
+  })
+
+  expect(chunkMessages).toHaveLength(1)
+  expect(chunkMessages[0]).toMatchObject({
+    method: "session/update",
+    params: {
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "Chunked response.",
+        },
+      },
+    },
+  })
+
+  const messagesRecord =
+    db.sessionMessages.first({
+      where: { sessionId: created.session.id },
+    }) ?? null
+  expect(messagesRecord?.messages).toEqual(history.history)
 })
 
 test("daemon creates placeholder session titles before any user prompt is sent", async () => {

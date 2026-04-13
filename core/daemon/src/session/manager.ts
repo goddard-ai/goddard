@@ -152,6 +152,88 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+/** Parsed shape for one stored `agent_message_chunk` text update that can be merged in history. */
+type AgentMessageChunkParts = {
+  params: Record<string, unknown>
+  update: Record<string, unknown>
+  content: Record<string, unknown> & {
+    type: "text"
+    text: string
+  }
+}
+
+/** Extracts one mergeable streamed agent text chunk from ACP session history. */
+function getAgentMessageChunkParts(message: acp.AnyMessage) {
+  if (
+    !isRecord(message) ||
+    "method" in message === false ||
+    message.method !== acp.CLIENT_METHODS.session_update
+  ) {
+    return null
+  }
+
+  const params = "params" in message && isRecord(message.params) ? message.params : null
+  if (!params) {
+    return null
+  }
+
+  const update = params && isRecord(params.update) ? params.update : null
+  if (!update || update.sessionUpdate !== "agent_message_chunk") {
+    return null
+  }
+
+  const content = isRecord(update.content) ? update.content : null
+  if (!content || content.type !== "text" || typeof content.text !== "string") {
+    return null
+  }
+
+  return {
+    params,
+    update,
+    content: {
+      ...content,
+      type: "text",
+      text: content.text,
+    },
+  } satisfies AgentMessageChunkParts
+}
+
+/** Appends one ACP history entry while folding adjacent streamed agent text chunks together. */
+function appendSessionHistoryMessage(history: acp.AnyMessage[], message: acp.AnyMessage) {
+  const previousChunk = history.length > 0 ? getAgentMessageChunkParts(history.at(-1)!) : null
+  const nextChunk = getAgentMessageChunkParts(message)
+
+  if (previousChunk && nextChunk) {
+    history[history.length - 1] = {
+      ...message,
+      params: {
+        ...nextChunk.params,
+        update: {
+          ...nextChunk.update,
+          content: {
+            ...nextChunk.content,
+            text: `${previousChunk.content.text}${nextChunk.content.text}`,
+          },
+        },
+      },
+    }
+    return
+  }
+
+  history.push(message)
+}
+
+/** Rebuilds one history stream using the daemon's chunk-coalescing persistence rules. */
+function coalesceSessionHistoryMessages(messages: readonly acp.AnyMessage[]) {
+  const history: acp.AnyMessage[] = []
+
+  for (const message of messages) {
+    appendSessionHistoryMessage(history, message)
+  }
+
+  return history
+}
+
 /** Bounds the chat-composer suggestion limit to one small stable range. */
 function normalizeComposerSuggestionLimit(limit: number | undefined) {
   return Math.min(
@@ -1216,16 +1298,19 @@ function resolveInitialSessionHistory(params: {
   existingMessagesRecord: PersistedSessionMessagesRecord | null
 }) {
   if (!params.existingMessagesRecord) {
-    return [...params.initialized.history]
+    return coalesceSessionHistoryMessages(params.initialized.history)
   }
 
   if (params.initialized.acpSessionId === params.existingSession?.acpSessionId) {
     return params.existingMessagesRecord.messages.length > 0
-      ? [...params.existingMessagesRecord.messages]
-      : [...params.initialized.history]
+      ? coalesceSessionHistoryMessages(params.existingMessagesRecord.messages)
+      : coalesceSessionHistoryMessages(params.initialized.history)
   }
 
-  return [...params.existingMessagesRecord.messages, ...params.initialized.history]
+  return coalesceSessionHistoryMessages([
+    ...params.existingMessagesRecord.messages,
+    ...params.initialized.history,
+  ])
 }
 
 /** Builds the persisted daemon session record written after ACP session initialization completes. */
@@ -1544,15 +1629,17 @@ export function createSessionManager(input: {
   async function appendHistory(id: SessionId, message: acp.AnyMessage): Promise<void> {
     const active = activeSessions.get(id)
     if (active) {
-      active.history.push(message)
+      appendSessionHistoryMessage(active.history, message)
     }
     const historyRecord =
       db.sessionMessages.first({
         where: { sessionId: id },
       }) ?? null
     if (historyRecord) {
+      const messages = [...historyRecord.messages]
+      appendSessionHistoryMessage(messages, message)
       db.sessionMessages.update(historyRecord.id, {
-        messages: [...historyRecord.messages, message],
+        messages,
       })
       return
     }
