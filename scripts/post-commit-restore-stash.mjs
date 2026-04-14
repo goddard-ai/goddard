@@ -34,6 +34,14 @@ const findStashRef = (stashSha) => {
   return null
 }
 
+/** Clear the pending restore marker when the target stash entry is already gone. */
+const skipMissingStashRestore = (pendingRestoreFile, stashSha) => {
+  rmSync(pendingRestoreFile, { force: true })
+  console.warn(
+    `Skipping post-commit stash restore because ${stashSha} is no longer in the stash list.`,
+  )
+}
+
 const pendingRestoreFile = gitPath("goddard/pre-commit-stash.json")
 
 let pendingRestore
@@ -56,17 +64,19 @@ if (!pendingRestore.stashSha) {
 const stashRef = findStashRef(pendingRestore.stashSha)
 
 if (!stashRef) {
-  rmSync(pendingRestoreFile, { force: true })
-  console.error(
-    `Could not find the pending pre-commit stash ${pendingRestore.stashSha}. It may have already been restored or dropped.`,
-  )
-  process.exit(1)
+  skipMissingStashRestore(pendingRestoreFile, pendingRestore.stashSha)
+  process.exit(0)
 }
 
 try {
   run("git", ["stash", "pop", "--quiet", stashRef])
   rmSync(pendingRestoreFile, { force: true })
-} catch (error) {
+} catch {
+  if (!findStashRef(pendingRestore.stashSha)) {
+    skipMissingStashRestore(pendingRestoreFile, pendingRestore.stashSha)
+    process.exit(0)
+  }
+
   console.error(
     `Failed to restore the hidden unstaged changes from ${stashRef}. Git kept the stash entry intact; resolve the worktree conflict and rerun \`bun run postcommit:restore-stash\` if needed.`,
   )
