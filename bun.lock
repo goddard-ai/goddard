@@ -53,7 +53,7 @@
         "preact": "11.0.0-beta.1",
         "preact-comark": "0.2.4",
         "preact-in-motion": "^0.2.9",
-        "preact-sigma": "^2.3.0",
+        "preact-sigma": "^3.0.1",
         "radashi": "^12.7.2",
         "react-virtuoso": "^4.18.3",
         "sharp": "^0.34.5",
@@ -1994,7 +1994,7 @@
 
     "preact-in-motion": ["preact-in-motion@0.2.9", "", { "peerDependencies": { "motion": ">=12", "preact": ">=10" } }, "sha512-HRX0DibCW9LGLewfdIPvYnkiONdu2yUTi+EAsNVGQKk4kiOlPMBJgTYp40bTgx1lFLgKMzMOFZTt8nGz0feSfg=="],
 
-    "preact-sigma": ["preact-sigma@2.3.0", "", { "dependencies": { "@preact/signals": "^2.8.2", "immer": "^11.1.4", "preact": "11.0.0-beta.1" } }, "sha512-lyJ2LWSuJb7XKl3IR870uM+nTiSuO7GCIn+lsUBnck8OUKW1B3QH2DFP+4FV6ndPnbGoAAt3Kfrt+sfx+aQ3Tw=="],
+    "preact-sigma": ["preact-sigma@3.0.1", "", { "dependencies": { "@preact/signals": "^2.8.2", "immer": "^11.1.4", "preact": "11.0.0-beta.1" } }, "sha512-rbGAgSkBPLPQck2vcpRGIptEzyOiCBngO6JnEJCf1LJKyj85LkeXYlXn5tbuF07sdiEIqI7XwUFiBJ/z34TQmA=="],
 
     "prettier": ["prettier@3.2.5", "", { "bin": { "prettier": "bin/prettier.cjs" } }, "sha512-3/GWa9aOC0YeD7LUfvOG2NiDyhOWRvt1k+rcKhOuYnMY24iiCphgneUfJDyFXd6rZCAnuLBv6UeAULtrhT/F4A=="],
 
