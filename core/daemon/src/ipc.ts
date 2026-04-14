@@ -5,9 +5,4 @@ export {
   getDefaultDaemonSocketPath,
   readSocketPathFromDaemonUrl,
 } from "./ipc/socket.ts"
-export type {
-  AuthorizedSession,
-  BackendPrClient,
-  DaemonServer,
-  DaemonServerDeps,
-} from "./ipc/types.ts"
+export type { BackendPrClient, DaemonServer } from "./ipc/types.ts"

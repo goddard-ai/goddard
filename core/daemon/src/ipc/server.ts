@@ -29,12 +29,11 @@ import {
   createConfigAdapterCatalogEntries,
   mergeAdapterCatalogEntries,
 } from "../session/registry-catalog.ts"
-import type { BackendPrClient, DaemonServer, DaemonServerDeps } from "./types.ts"
+import type { BackendPrClient, DaemonServer } from "./types.ts"
 
 export async function startDaemonServer(
   client: BackendPrClient,
   options: { socketPath?: string; agentBinDir?: string } = {},
-  deps: DaemonServerDeps = {},
 ): Promise<DaemonServer> {
   const logger = createLogger()
   const setupContext = SetupContext.get()
@@ -46,74 +45,70 @@ export async function startDaemonServer(
     })
   const socketPath = runtime.socketPath
   const daemonUrl = createDaemonUrl(socketPath)
-  const setupConfigManager = setupContext?.configManager
-  const configManager = deps.configManager ?? setupConfigManager ?? createConfigManager()
-  const ownsConfigManager = deps.configManager == null && setupConfigManager == null
-  const resolveSubmitRequest = deps.resolveSubmitRequest ?? resolveSubmitRequestFromGit
-  const resolveReplyRequest = deps.resolveReplyRequest ?? resolveReplyRequestFromGit
-  const getSessionByToken =
-    deps.getSessionByToken ??
-    (async (token: string) => {
-      const sessionRecord =
-        db.sessions.first({
-          where: { token },
-        }) ?? null
-      if (!sessionRecord?.permissions) {
-        return null
-      }
-
-      return {
-        sessionId: sessionRecord.id,
-        owner: sessionRecord.permissions.owner,
-        repo: sessionRecord.permissions.repo,
-        allowedPrNumbers: sessionRecord.permissions.allowedPrNumbers,
-      }
-    })
-  const addAllowedPrToSession =
-    deps.addAllowedPrToSession ??
-    (async (sessionId: DaemonSession["id"], prNumber: number) => {
-      const sessionRecord = db.sessions.get(sessionId)
-      if (!sessionRecord?.permissions) {
-        return
-      }
-
-      db.sessions.update(sessionId, (record) => {
-        if (!record.permissions || record.permissions.allowedPrNumbers.includes(prNumber)) {
-          return record
-        }
-
-        return {
-          ...record,
-          permissions: {
-            ...record.permissions,
-            allowedPrNumbers: [...record.permissions.allowedPrNumbers, prNumber],
-          },
-        }
-      })
-    })
-  const recordPullRequest =
-    deps.recordPullRequest ??
-    (async (record) => {
-      const existingRecord =
-        db.pullRequests.first({
-          where: {
-            host: record.host,
-            owner: record.owner,
-            repo: record.repo,
-            prNumber: record.prNumber,
-          },
-        }) ?? null
-      return existingRecord
-        ? db.pullRequests.put(existingRecord.id, record)
-        : db.pullRequests.create(record)
-    })
+  const configManager = setupContext?.configManager ?? createConfigManager()
+  const ownsConfigManager = setupContext == null
 
   await prepareSocketPath(socketPath)
-  const registryService = (deps.createRegistryService ?? createACPRegistryService)()
+  const registryService = createACPRegistryService()
 
   let sessionManager!: SessionManager
   let loopManager!: LoopManager
   let workforceManager!: WorkforceManager
+
+  async function getSessionByToken(token: string) {
+    const sessionRecord =
+      db.sessions.first({
+        where: { token },
+      }) ?? null
+    if (!sessionRecord?.permissions) {
+      return null
+    }
+
+    return {
+      sessionId: sessionRecord.id,
+      owner: sessionRecord.permissions.owner,
+      repo: sessionRecord.permissions.repo,
+      allowedPrNumbers: sessionRecord.permissions.allowedPrNumbers,
+    }
+  }
+
+  async function addAllowedPrToSession(sessionId: DaemonSession["id"], prNumber: number) {
+    const sessionRecord = db.sessions.get(sessionId)
+    if (!sessionRecord?.permissions) {
+      return
+    }
+
+    db.sessions.update(sessionId, (record) => {
+      if (!record.permissions || record.permissions.allowedPrNumbers.includes(prNumber)) {
+        return record
+      }
+
+      return {
+        ...record,
+        permissions: {
+          ...record.permissions,
+          allowedPrNumbers: [...record.permissions.allowedPrNumbers, prNumber],
+        },
+      }
+    })
+  }
+
+  async function recordPullRequest(
+    record: Parameters<typeof db.pullRequests.create>[0],
+  ) {
+    const existingRecord =
+      db.pullRequests.first({
+        where: {
+          host: record.host,
+          owner: record.owner,
+          repo: record.repo,
+          prNumber: record.prNumber,
+        },
+      }) ?? null
+    return existingRecord
+      ? db.pullRequests.put(existingRecord.id, record)
+      : db.pullRequests.create(record)
+  }
 
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
@@ -231,7 +226,7 @@ export async function startDaemonServer(
         throw new IpcClientError("Session is not scoped to a repository")
       }
 
-      const resolvedInput = await resolveSubmitRequest({
+      const resolvedInput = await resolveSubmitRequestFromGit({
         cwd: payload.cwd,
         title: payload.title,
         body: payload.body,
@@ -265,7 +260,7 @@ export async function startDaemonServer(
         throw new IpcClientError("Session is not scoped to a repository")
       }
 
-      const resolvedInput = await resolveReplyRequest({
+      const resolvedInput = await resolveReplyRequestFromGit({
         cwd: payload.cwd,
         message: payload.message,
         prNumber: payload.prNumber,
@@ -574,11 +569,11 @@ export async function startDaemonServer(
       ipcServer.publish("sessionMessage", { id, message })
     },
   })
-  loopManager = (deps.createLoopManager ?? createLoopManager)({
+  loopManager = createLoopManager({
     sessionManager,
     resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configManager),
   })
-  workforceManager = (deps.createWorkforceManager ?? ((input) => createWorkforceManager(input)))({
+  workforceManager = createWorkforceManager({
     sessionManager,
     publishEvent(payload) {
       ipcServer.publish("workforceEvent", payload)
