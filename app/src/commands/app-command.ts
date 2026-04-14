@@ -121,6 +121,7 @@ export function useAppCommand(command: AppCommand, listener: (match?: ShortcutMa
 
 export function resolveAppCommand(id: AppCommandId): AppCommand | null {
   const [namespaceKey, commandKey] = id.split(".")
-  const command = (AppCommand as any)[namespaceKey][commandKey]
+  const namespace = (AppCommand as any)[namespaceKey]
+  const command = namespace?.[commandKey]
   return command ?? null
 }
