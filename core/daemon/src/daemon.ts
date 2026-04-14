@@ -5,14 +5,14 @@ import {
   type BackendClient,
   isBackendUnauthenticatedError,
 } from "./backend.ts"
-import { createConfigManager, type ConfigManager } from "./config-manager.ts"
+import { createConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"
 import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
 import { db } from "./persistence/store.ts"
-import { runPrFeedbackFlow, type PrFeedbackFlowInput } from "./pr-feedback-run.ts"
+import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
@@ -24,35 +24,9 @@ export type RunInput = {
   logMode?: LogMode
 }
 
-/** Output sinks used by the daemon for structured log lines. */
-export type Io = {
-  stdout: (line: string) => void
-  stderr: (line: string) => void
-}
-
-/** Optional test seams and runtime overrides for daemon startup. */
-export type RunDeps = {
-  createBackendClient?: (baseUrl: string) => Promise<BackendClient> | BackendClient
-  createConfigManager?: () => ConfigManager
-  startIpcServer?: (
-    client: BackendClient,
-    options: { socketPath: string; agentBinDir: string },
-  ) => Promise<DaemonServer>
-  runPrFeedbackFlow?: (input: PrFeedbackFlowInput) => Promise<number> | number
-  waitForShutdown?: (close: () => void | Promise<void>) => Promise<void>
-  io?: Io
-}
-
-const defaultIo: Io = {
-  stdout: (line) => process.stdout.write(`${line}\n`),
-  stderr: (line) => process.stderr.write(`${line}\n`),
-}
-
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
-export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<number> {
-  const io = deps.io ?? defaultIo
+export async function runDaemon(input: RunInput): Promise<number> {
   const restoreLogging = configureLogging({
-    writeLine: io.stdout,
     mode: input.logMode ?? "pretty",
   })
   const logger = createLogger()
@@ -63,23 +37,7 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
     socketPath: input.socketPath,
     agentBinDir: input.agentBinDir,
   })
-  const createBackendClientImpl = deps.createBackendClient ?? defaultCreateBackendClient
-  const configManager = (deps.createConfigManager ?? createConfigManager)()
-  const startIpcServer =
-    deps.startIpcServer ??
-    ((client, options) =>
-      startDaemonServer(client, {
-        socketPath: options.socketPath,
-        agentBinDir: options.agentBinDir,
-      }))
-  const runPrFeedbackFlowImpl =
-    deps.runPrFeedbackFlow ??
-    ((prFeedbackFlowInput) =>
-      runPrFeedbackFlow({
-        ...prFeedbackFlowInput,
-        configManager,
-      }))
-  const waitForShutdownImpl = deps.waitForShutdown ?? waitForShutdown
+  const configManager = createConfigManager()
   let ipcServer: DaemonServer | undefined
 
   try {
@@ -94,10 +52,10 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
       return 0
     }
 
-    const client = await createBackendClientImpl(runtime.baseUrl)
+    const client = await defaultCreateBackendClient(runtime.baseUrl)
     if (enableIpc) {
       ipcServer = await SetupContext.run({ runtime, configManager }, () =>
-        startIpcServer(client, {
+        startDaemonServer(client, {
           socketPath: runtime.socketPath,
           agentBinDir: runtime.agentBinDir,
         }),
@@ -182,11 +140,12 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
             logger.log("pr_feedback.launch", {
               prompt: createPayloadPreview(prompt),
             })
-            const exitCode = await runPrFeedbackFlowImpl({
+            const exitCode = await runPrFeedbackFlow({
               event,
               prompt,
               daemonUrl: activeIpcServer.daemonUrl,
               agentBinDir: runtime.agentBinDir,
+              configManager,
             })
             logger.log("pr_feedback.finish", {
               exitCode,
@@ -202,7 +161,7 @@ export async function runDaemon(input: RunInput, deps: RunDeps = {}): Promise<nu
       })
     }
 
-    await waitForShutdownImpl(() =>
+    await waitForShutdown(() =>
       Promise.all([
         subscription ? Promise.resolve(subscription.close()) : Promise.resolve(),
         activeIpcServer ? activeIpcServer.close() : Promise.resolve(),
