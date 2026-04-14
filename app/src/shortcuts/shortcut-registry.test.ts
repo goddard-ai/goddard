@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import { createShortcuts } from "powerkeys"
 
-const { ShortcutCommands } = await import("../shared/shortcut-keymap.ts")
+const { appCommandBus } = await import("../commands/app-command-bus.ts")
+const { AppCommand: AppCommands } = await import("../commands/app-command.ts")
+const { ShortcutBindingCommands } = await import("../shared/shortcut-keymap.ts")
 const { ShortcutRegistry } = await import("./shortcut-registry.ts")
 
 /** Creates one registry instance with an isolated document-like event boundary. */
@@ -30,9 +32,10 @@ function dispatchKeydown(target: EventTarget, init: KeyboardEventInit) {
   )
 }
 
-test("keydown emits one typed shortcut command event", () => {
+test("keydown dispatches one typed app command event", () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const events: Array<{
+    preferredProjectPath: string | null
     source: "keyboard" | "native-menu" | "programmatic"
     match?: {
       combo: string
@@ -46,13 +49,13 @@ test("keydown emits one typed shortcut command event", () => {
     }
   }> = []
 
-  const unsubscribe = registry.on(ShortcutCommands.newSession, (detail) => {
+  const unsubscribe = appCommandBus.on(AppCommands.newSession, (detail) => {
     events.push(detail)
   })
   registry.applyKeymapSnapshot(
     "goddard",
     {
-      [ShortcutCommands.newSession]: ["Alt+n"],
+      [ShortcutBindingCommands.newSession]: ["Alt+n"],
     },
     null,
   )
@@ -66,6 +69,7 @@ test("keydown emits one typed shortcut command event", () => {
 
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
+      preferredProjectPath: null,
       source: "keyboard",
       match: {
         combo: "Alt+n",
@@ -91,15 +95,15 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
     registry.applyKeymapSnapshot(
       "goddard",
       {
-        [ShortcutCommands.newSession]: ["Mod+Shift+n"],
-        [ShortcutCommands.openInbox]: null,
+        [ShortcutBindingCommands.newSession]: ["Mod+Shift+n"],
+        [ShortcutBindingCommands.openInbox]: null,
       },
       null,
     )
 
     expect(registry.isHydrated).toBe(true)
-    expect(registry.resolvedBindings[ShortcutCommands.newSession]).toEqual(["Mod+Shift+n"])
-    expect(registry.resolvedBindings[ShortcutCommands.openInbox]).toBeUndefined()
+    expect(registry.resolvedBindings[ShortcutBindingCommands.newSession]).toEqual(["Mod+Shift+n"])
+    expect(registry.resolvedBindings[ShortcutBindingCommands.openInbox]).toBeUndefined()
   } finally {
     cleanup()
   }

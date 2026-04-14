@@ -1,9 +1,8 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { concat } from "radashi"
 
-import type { AppMenuAction } from "~/shared/app-menu.ts"
+import type { AppCommandId } from "~/shared/app-commands.ts"
 import { DebugMenuSurfaces, type DebugMenuSurface } from "~/shared/debug-menu.ts"
-import { ShortcutCommands } from "~/shared/shortcut-keymap.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
 
 const fileMenu = {
@@ -34,12 +33,10 @@ const viewMenu = {
   },
 } as const
 
-const debugNavigateAction = "debug:navigate"
-
 /** Installs the native application menu so platform accelerators work inside the desktop shell. */
 export function installApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
-  const actions: Record<string, (window: BrowserWindow, params: unknown) => void> = {
-    [fileMenu.closeTab.action]: dispatchAppMenuAction(ShortcutCommands.closeActiveTab),
+  const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
+    [fileMenu.closeTab.action]: dispatchAppMenuAction("closeActiveTab"),
     [fileMenu.closeWindow.action]: closeWindow,
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
@@ -47,11 +44,9 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
 
   const debugMenu: ApplicationMenuItemConfig[] = []
   if (isDevelopmentRuntime()) {
-    const debugNavigate = withParams<DebugMenuSurface>(debugNavigateAction)
-
     for (const surface of Object.values(DebugMenuSurfaces)) {
-      const action = debugNavigate(surface)
-      actions[action] = dispatchDebugMenuAction
+      const action = `debug:${surface}`
+      actions[action] = dispatchDebugMenuAction(surface)
       debugMenu.push({ label: surface, action })
     }
   }
@@ -121,11 +116,11 @@ function inspectWindow(window: BrowserWindow): void {
 }
 
 /** Dispatches one app menu action into the active webview. */
-function dispatchAppMenuAction(action: AppMenuAction) {
+function dispatchAppMenuAction(command: AppCommandId) {
   return (_window: BrowserWindow): void => {
     dispatchGlobalEvent({
       name: "appMenu",
-      detail: { action },
+      detail: { command },
     })
   }
 }
@@ -136,16 +131,13 @@ function closeWindow(window: BrowserWindow): void {
 }
 
 /** Dispatches one development-menu surface request into the active webview. */
-function dispatchDebugMenuAction(_window: BrowserWindow, params: unknown): void {
-  dispatchGlobalEvent({
-    name: "debugMenu",
-    detail: { surface: params as DebugMenuSurface },
-  })
-}
-
-/** Creates a function that dispatches one action with one parameter. */
-function withParams<T>(action: string) {
-  return (params: T) => `${action}/${JSON.stringify(params)}`
+function dispatchDebugMenuAction(surface: DebugMenuSurface) {
+  return (_window: BrowserWindow): void => {
+    dispatchGlobalEvent({
+      name: "debugMenu",
+      detail: { surface },
+    })
+  }
 }
 
 /** Returns whether the current Bun runtime should expose development-only menu items. */

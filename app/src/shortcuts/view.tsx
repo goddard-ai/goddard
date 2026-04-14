@@ -1,7 +1,8 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 
 import { useShortcutRegistry } from "~/app-state-context.tsx"
-import { shortcutCommandDefinitions, ShortcutCommands } from "~/shared/shortcut-keymap.ts"
+import { appCommandDefinitions } from "~/commands/app-command"
+import { shortcutBindingDefinitions, ShortcutBindingCommands } from "~/shared/shortcut-keymap.ts"
 
 const pageClass = css({
   display: "grid",
@@ -128,18 +129,19 @@ function formatExpressions(expressions?: readonly string[]) {
   return expressions && expressions.length > 0 ? expressions.join("\n") : "Unbound"
 }
 
-/** Renders the detail-tab browser for registered shortcut commands and their active bindings. */
+/** Renders the detail-tab browser for shortcut-bindable commands and their active bindings. */
 export function KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
-  const commandRows = Object.values(ShortcutCommands).map((commandId) => {
-    const definition = shortcutCommandDefinitions[commandId]
+  const commandRows = Object.values(ShortcutBindingCommands).map((commandId) => {
+    const definition = appCommandDefinitions[commandId]
+    const bindingDefinition = shortcutBindingDefinitions[commandId]
 
     return {
       commandId,
       label: definition.label,
       description: definition.description,
       expressions: shortcutRegistry.resolvedBindings[commandId],
-      whenClause: definition.when ?? "Always",
+      whenClause: bindingDefinition.when ?? "Always",
     }
   })
 
@@ -150,8 +152,8 @@ export function KeyboardShortcutsView(props: { class?: string }) {
         <div class={css({ display: "grid", gap: "10px" })}>
           <h1 class={titleClass}>Keyboard Shortcuts</h1>
           <p class={descriptionClass}>
-            Browse every registered shortcut command, inspect the active binding source, and check
-            which commands are currently gated by a `when` clause. Search, recording search, and
+            Browse every shortcut-bindable command, inspect the active binding source, and check
+            which bindings are currently gated by a `when` clause. Search, recording search, and
             rebinding land in the next slices.
           </p>
         </div>

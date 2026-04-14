@@ -6,11 +6,12 @@ import { MessageSquareText, Sparkles } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { dispatchAppCommand } from "~/commands/app-command-bus.ts"
+import { AppCommand } from "~/commands/app-command.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { buildTranscriptMessages } from "~/session-chat/chat.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
-import { requestSessionLaunchDialog } from "~/shared/global-event-hub.ts"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { SessionsList } from "./list.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
@@ -70,6 +71,13 @@ export function SessionsPage() {
     })
   }
 
+  function dispatchNewSessionCommand(preferredProjectPath: string | null) {
+    dispatchAppCommand(AppCommand.newSession, {
+      source: "programmatic",
+      preferredProjectPath,
+    })
+  }
+
   return (
     <div
       class={css({
@@ -102,11 +110,11 @@ export function SessionsPage() {
           sessionCount={sessions.length}
           onCreateSession={() => {
             if (selectedSession?.cwd) {
-              requestSessionLaunchDialog(selectedSession.cwd)
+              dispatchNewSessionCommand(selectedSession.cwd)
               return
             }
 
-            requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
+            dispatchNewSessionCommand(projectRegistry.projectList[0]?.path ?? null)
           }}
         />
         <div
@@ -118,11 +126,11 @@ export function SessionsPage() {
           <SessionsList
             onCreateSession={() => {
               if (selectedSession?.cwd) {
-                requestSessionLaunchDialog(selectedSession.cwd)
+                dispatchNewSessionCommand(selectedSession.cwd)
                 return
               }
 
-              requestSessionLaunchDialog(projectRegistry.projectList[0]?.path ?? null)
+              dispatchNewSessionCommand(projectRegistry.projectList[0]?.path ?? null)
             }}
             onOpenSession={openSession}
             onSelectSession={(sessionId) => {

@@ -3,12 +3,12 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useState } from "preact/hooks"
 
+import { AppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
 import { getWorkbenchTabIcon, type WorkbenchTab } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
-import { type AppShellTopbarAction } from "./config.ts"
 
 const accentColor = token.var("colors.accent")
 const accentStrongColor = token.var("colors.accentStrong")
@@ -50,7 +50,6 @@ export function AppShellChrome(props: {
     id: NavigationItemId
     label: string
   }>
-  onAction: (action: AppShellTopbarAction) => void
   onCommandMenuOpen: () => void
   onNavigationSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
   onTabClose: (id: string) => void
@@ -208,10 +207,9 @@ export function AppShellChrome(props: {
             })}
           >
             <ActionButton
-              action="proposeTask"
               ariaLabel="Propose task"
-              icon="what-next"
-              onAction={props.onAction}
+              icon={<InlineSvgIcon icon="what-next" size="17px 12px" />}
+              onAction={AppCommand.proposeTask}
             />
             <span
               class={css({
@@ -223,10 +221,9 @@ export function AppShellChrome(props: {
               })}
             />
             <ActionButton
-              action="newSession"
               ariaLabel="New session"
-              icon="new-session"
-              onAction={props.onAction}
+              icon={<InlineSvgIcon icon="new-session" size="16px 16px" />}
+              onAction={AppCommand.newSession}
             />
           </div>
           <button
@@ -246,7 +243,7 @@ export function AppShellChrome(props: {
             )}
             type="button"
             onClick={() => {
-              props.onAction("settings")
+              AppCommand.openSettings()
             }}
           >
             <InlineSvgIcon icon="settings" size="15px" />
@@ -409,10 +406,9 @@ function AppShellSidebarSection(props: {
 }
 
 function ActionButton(props: {
-  action: Exclude<AppShellTopbarAction, "settings">
   ariaLabel: string
-  icon: SvgIconName
-  onAction: (action: AppShellTopbarAction) => void
+  icon: preact.JSX.Element
+  onAction: () => void
 }) {
   return (
     <button
@@ -430,13 +426,10 @@ function ActionButton(props: {
       )}
       type="button"
       onClick={() => {
-        props.onAction(props.action)
+        props.onAction()
       }}
     >
-      <InlineSvgIcon
-        icon={props.icon}
-        size={props.action === "proposeTask" ? "17px 12px" : "16px 16px"}
-      />
+      {props.icon}
     </button>
   )
 }

@@ -1,37 +1,27 @@
 import { createShortcuts, type ShortcutMatch, type ShortcutRuntime } from "powerkeys"
 import { SigmaType, type SigmaRef } from "preact-sigma"
 
+import { createAppCommandDetail } from "~/commands/app-command"
+import { dispatchAppCommand } from "~/commands/app-command-bus.ts"
 import { desktopHost } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import {
   createDefaultShortcutKeymapFile,
   resolveShortcutBindings,
-  shortcutCommandDefinitions,
-  ShortcutCommands,
+  ShortcutBindingCommands,
+  shortcutBindingDefinitions,
   type KeymapProfileId,
   type ResolvedShortcutBindings,
-  type ShortcutCommandId,
+  type ShortcutBindingCommandId,
   type ShortcutKeymapOverride,
 } from "~/shared/shortcut-keymap.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
 
-export type ShortcutDispatchSource = "keyboard" | "native-menu" | "programmatic"
-
-/** One emitted shortcut command dispatch shared across keyboard, menu, and programmatic sources. */
-export type ShortcutDispatchDetail = {
-  source: ShortcutDispatchSource
-  match?: ShortcutMatch
-}
-
-type ShortcutRegistryEvents = {
-  [TCommandId in ShortcutCommandId]: ShortcutDispatchDetail
-}
-
 type ShortcutRegistryShape = {
   runtime: SigmaRef<ShortcutRuntime>
   selectedProfileId: KeymapProfileId
-  overrides: Partial<Record<ShortcutCommandId, string[] | null>>
-  resolvedBindings: Partial<Record<ShortcutCommandId, string[]>>
+  overrides: Partial<Record<ShortcutBindingCommandId, string[] | null>>
+  resolvedBindings: Partial<Record<ShortcutBindingCommandId, string[]>>
   loadError: string | null
   writeError: string | null
   isHydrated: boolean
@@ -40,7 +30,7 @@ type ShortcutRegistryShape = {
   selectedNavId: NavigationItemId
   overlayIsOpen: boolean
   overlayKind: string | null
-  bindingIdsByCommand: Partial<Record<ShortcutCommandId, string[]>>
+  bindingIdsByCommand: Partial<Record<ShortcutBindingCommandId, string[]>>
 }
 
 function getDefaultResolvedBindings() {
@@ -51,20 +41,20 @@ function getDefaultResolvedBindings() {
 }
 
 function cloneShortcutOverrides(
-  overrides: Partial<Record<ShortcutCommandId, ShortcutKeymapOverride>>,
+  overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>>,
 ) {
   return Object.fromEntries(
     Object.entries(overrides).map(([commandId, expressions]) => [
       commandId,
       expressions === null ? null : [...expressions],
     ]),
-  ) as Partial<Record<ShortcutCommandId, string[] | null>>
+  ) as Partial<Record<ShortcutBindingCommandId, string[] | null>>
 }
 
 function cloneResolvedBindings(bindings: ResolvedShortcutBindings) {
   return Object.fromEntries(
     Object.entries(bindings).map(([commandId, expressions]) => [commandId, [...expressions]]),
-  ) as Partial<Record<ShortcutCommandId, string[]>>
+  ) as Partial<Record<ShortcutBindingCommandId, string[]>>
 }
 
 function getRuntimeContextSnapshot(state: ShortcutRegistryShape) {
@@ -78,11 +68,11 @@ function getRuntimeContextSnapshot(state: ShortcutRegistryShape) {
 }
 
 function createBindingInput(
-  commandId: ShortcutCommandId,
+  commandId: ShortcutBindingCommandId,
   expression: string,
   handler: (match: ShortcutMatch) => void,
 ) {
-  const definition = shortcutCommandDefinitions[commandId]
+  const definition = shortcutBindingDefinitions[commandId]
 
   return {
     ...(expression.includes(" ") ? { sequence: expression } : { combo: expression }),
@@ -99,9 +89,7 @@ function createBindingInput(
 }
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
-export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutRegistryEvents>(
-  "ShortcutRegistry",
-)
+export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRegistry")
   .defaultState({
     selectedProfileId: "goddard",
     overrides: {},
@@ -128,7 +116,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
     /** Replaces the active profile and override snapshot, then reapplies runtime bindings. */
     applyKeymapSnapshot(
       profile: KeymapProfileId,
-      overrides: Partial<Record<ShortcutCommandId, ShortcutKeymapOverride>>,
+      overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>>,
       loadError: string | null,
     ) {
       this.selectedProfileId = profile
@@ -148,9 +136,9 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
         }
       }
 
-      const nextBindingIds: Partial<Record<ShortcutCommandId, string[]>> = {}
+      const nextBindingIds: Partial<Record<ShortcutBindingCommandId, string[]>> = {}
 
-      for (const commandId of Object.values(ShortcutCommands)) {
+      for (const commandId of Object.values(ShortcutBindingCommands)) {
         const expressions = this.resolvedBindings[commandId]
 
         if (!expressions) {
@@ -160,10 +148,13 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape, ShortcutReg
         const commandBindingIds = expressions.map((expression) => {
           const commandBinding = this.runtime.bind(
             createBindingInput(commandId, expression, (match) => {
-              this.emit(commandId, {
-                source: "keyboard",
-                match,
-              })
+              dispatchAppCommand(
+                commandId,
+                createAppCommandDetail(commandId, {
+                  source: "keyboard",
+                  match,
+                }),
+              )
             }),
           )
           return commandBinding.id

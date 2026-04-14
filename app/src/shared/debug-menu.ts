@@ -6,8 +6,3 @@ export const DebugMenuSurfaces = {
   SessionChatTranscript: "SessionChatTranscript",
   Terminal: "Terminal",
 } as const satisfies Record<DebugMenuSurface, DebugMenuSurface>
-
-/** Payload carried by one native debug-menu event. */
-export type DebugMenuEventDetail = {
-  surface: DebugMenuSurface
-}

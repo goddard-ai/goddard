@@ -1,18 +1,12 @@
 import { SigmaTarget } from "preact-sigma"
 
-import type { AppMenuEventDetail } from "./app-menu.ts"
-import type { DebugMenuEventDetail } from "./debug-menu.ts"
-
-/** Payload carried by one app-wide session launch dialog request. */
-export type SessionLaunchDialogRequestDetail = {
-  preferredProjectPath: string | null
-}
+import type { AppCommandId } from "./app-commands.ts"
+import type { DebugMenuSurface } from "./debug-menu.ts"
 
 /** Shared typed global events dispatched across the active webview. */
 export type GlobalEvents = {
-  appMenu: AppMenuEventDetail
-  debugMenu: DebugMenuEventDetail
-  sessionLaunchDialogRequested: SessionLaunchDialogRequestDetail
+  appMenu: { command: AppCommandId }
+  debugMenu: { surface: DebugMenuSurface }
 }
 
 /** One supported global event name. */
@@ -34,14 +28,4 @@ export const globalEventHub = new SigmaTarget<GlobalEvents>()
 /** Dispatches one typed global event on the singleton hub. */
 export function dispatchGlobalEvent(event: GlobalEventEnvelope) {
   globalEventHub.emit(event.name, event.detail)
-}
-
-/** Requests that the shared session launch dialog open with an optional project preselection. */
-export function requestSessionLaunchDialog(preferredProjectPath?: string | null) {
-  dispatchGlobalEvent({
-    name: "sessionLaunchDialogRequested",
-    detail: {
-      preferredProjectPath: preferredProjectPath ?? null,
-    },
-  })
 }

@@ -1,27 +1,28 @@
 import type { EditablePolicy, KeyEventType } from "powerkeys"
 
-export const ShortcutCommands = {
-  closeActiveTab: "workbench.closeActiveTab",
-  newSession: "session.new",
-  openKeyboardShortcuts: "workbench.openKeyboardShortcuts",
-  openInbox: "navigation.openInbox",
-  openSessions: "navigation.openSessions",
-  openSearch: "navigation.openSearch",
-  openSpecs: "navigation.openSpecs",
-  openTasks: "navigation.openTasks",
-  openRoadmap: "navigation.openRoadmap",
+import { AppCommand } from "../commands/app-command.ts"
+
+export const ShortcutBindingCommands = {
+  closeActiveTab: AppCommand.closeActiveTab,
+  newSession: AppCommand.newSession,
+  openKeyboardShortcuts: AppCommand.openKeyboardShortcuts,
+  openInbox: AppCommand.openInbox,
+  openSessions: AppCommand.openSessions,
+  openSearch: AppCommand.openSearch,
+  openSpecs: AppCommand.openSpecs,
+  openTasks: AppCommand.openTasks,
+  openRoadmap: AppCommand.openRoadmap,
 } as const
 
-/** Stable shortcut command ids used across the app, keymap storage, and Bun host bridge. */
-export type ShortcutCommandId = (typeof ShortcutCommands)[keyof typeof ShortcutCommands]
+/** Stable shortcut-bindable command ids used across the app keymap and Bun host bridge. */
+export type ShortcutBindingCommandId =
+  (typeof ShortcutBindingCommands)[keyof typeof ShortcutBindingCommands]
 
 /** One built-in keymap profile identifier. */
 export type KeymapProfileId = "goddard"
 
-/** One code-owned shortcut command definition. */
-export type ShortcutCommandDefinition = {
-  label: string
-  description: string
+/** One code-owned shortcut binding definition. */
+export type ShortcutBindingDefinition = {
   scope?: string | string[]
   when?: string
   keyEvent?: KeyEventType
@@ -30,29 +31,28 @@ export type ShortcutCommandDefinition = {
   preventDefault?: boolean
   stopPropagation?: boolean
   allowRepeat?: boolean
-  nativeMenuAction?: boolean
 }
 
-/** One persisted override value for a shortcut command. */
+/** One persisted override value for a shortcut-bindable command. */
 export type ShortcutKeymapOverride = readonly string[] | null
 
 /** One persisted shortcut keymap file stored under the user-scoped Goddard directory. */
 export type UserShortcutKeymapFile = {
   version: 1
   profile: KeymapProfileId
-  overrides: Partial<Record<ShortcutCommandId, ShortcutKeymapOverride>>
+  overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>>
 }
 
 /** One built-in shortcut keymap profile. */
 export type ShortcutKeymapProfile = {
   id: KeymapProfileId
   label: string
-  bindings: Partial<Record<ShortcutCommandId, readonly string[]>>
+  bindings: Partial<Record<ShortcutBindingCommandId, readonly string[]>>
 }
 
-/** Complete definition table for every declared shortcut command id. */
-export type ShortcutCommandDefinitionTable = {
-  [commandId in ShortcutCommandId]: ShortcutCommandDefinition
+/** Complete definition table for every declared shortcut-bindable command id. */
+export type ShortcutBindingDefinitionTable = {
+  [commandId in ShortcutBindingCommandId]: ShortcutBindingDefinition
 }
 
 /** Complete built-in profile table keyed by profile id. */
@@ -61,55 +61,36 @@ export type ShortcutKeymapProfileTable = {
 }
 
 /** Effective shortcut expressions after one built-in profile is merged with user overrides. */
-export type ResolvedShortcutBindings = Partial<Record<ShortcutCommandId, readonly string[]>>
+export type ResolvedShortcutBindings = Partial<Record<ShortcutBindingCommandId, readonly string[]>>
 
-/** Human-facing metadata for each shortcut command. */
-export const shortcutCommandDefinitions: ShortcutCommandDefinitionTable = {
-  [ShortcutCommands.closeActiveTab]: {
-    label: "Close Active Tab",
-    description: "Closes the current closable workbench tab.",
+/** Keyboard binding configuration for each shortcut-bindable command. */
+export const shortcutBindingDefinitions: ShortcutBindingDefinitionTable = {
+  [ShortcutBindingCommands.closeActiveTab]: {
     when: "workbench.hasClosableActiveTab",
     preventDefault: true,
-    nativeMenuAction: true,
   },
-  [ShortcutCommands.newSession]: {
-    label: "New Session",
-    description: "Opens the new-session dialog from the app shell.",
+  [ShortcutBindingCommands.newSession]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openKeyboardShortcuts]: {
-    label: "Open Keyboard Shortcuts",
-    description: "Opens the keyboard shortcut browser in a detail tab.",
+  [ShortcutBindingCommands.openKeyboardShortcuts]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openInbox]: {
-    label: "Open Inbox",
-    description: "Selects the Inbox main workbench view.",
+  [ShortcutBindingCommands.openInbox]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openSessions]: {
-    label: "Open Sessions",
-    description: "Selects the Sessions main workbench view.",
+  [ShortcutBindingCommands.openSessions]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openSearch]: {
-    label: "Open Search",
-    description: "Selects the Search main workbench view.",
+  [ShortcutBindingCommands.openSearch]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openSpecs]: {
-    label: "Open Specs",
-    description: "Selects the Specs main workbench view.",
+  [ShortcutBindingCommands.openSpecs]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openTasks]: {
-    label: "Open Tasks",
-    description: "Selects the Tasks main workbench view.",
+  [ShortcutBindingCommands.openTasks]: {
     preventDefault: true,
   },
-  [ShortcutCommands.openRoadmap]: {
-    label: "Open Roadmap",
-    description: "Selects the Roadmap main workbench view.",
+  [ShortcutBindingCommands.openRoadmap]: {
     preventDefault: true,
   },
 }
@@ -120,14 +101,14 @@ export const shortcutKeymapProfiles: ShortcutKeymapProfileTable = {
     id: "goddard",
     label: "Goddard",
     bindings: {
-      [ShortcutCommands.closeActiveTab]: ["Mod+w"],
-      [ShortcutCommands.newSession]: ["Mod+n"],
-      [ShortcutCommands.openInbox]: ["Alt+1"],
-      [ShortcutCommands.openSessions]: ["Alt+2"],
-      [ShortcutCommands.openSearch]: ["Alt+3"],
-      [ShortcutCommands.openSpecs]: ["Alt+4"],
-      [ShortcutCommands.openTasks]: ["Alt+5"],
-      [ShortcutCommands.openRoadmap]: ["Alt+6"],
+      [ShortcutBindingCommands.closeActiveTab]: ["Mod+w"],
+      [ShortcutBindingCommands.newSession]: ["Mod+n"],
+      [ShortcutBindingCommands.openInbox]: ["Alt+1"],
+      [ShortcutBindingCommands.openSessions]: ["Alt+2"],
+      [ShortcutBindingCommands.openSearch]: ["Alt+3"],
+      [ShortcutBindingCommands.openSpecs]: ["Alt+4"],
+      [ShortcutBindingCommands.openTasks]: ["Alt+5"],
+      [ShortcutBindingCommands.openRoadmap]: ["Alt+6"],
     },
   },
 }
@@ -141,11 +122,11 @@ export function createDefaultShortcutKeymapFile(): UserShortcutKeymapFile {
   }
 }
 
-/** Returns whether one runtime string matches a known shortcut command id. */
-export function isShortcutCommandId(value: unknown): value is ShortcutCommandId {
+/** Returns whether one runtime string matches a known shortcut-bindable command id. */
+export function isShortcutBindingCommandId(value: unknown): value is ShortcutBindingCommandId {
   return (
     typeof value === "string" &&
-    Object.values(ShortcutCommands).includes(value as ShortcutCommandId)
+    Object.values(ShortcutBindingCommands).includes(value as ShortcutBindingCommandId)
   )
 }
 
@@ -178,10 +159,10 @@ export function parseShortcutKeymapFile(value: unknown) {
     return null
   }
 
-  const overrides: Partial<Record<ShortcutCommandId, ShortcutKeymapOverride>> = {}
+  const overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>> = {}
 
   for (const [commandId, expressionList] of Object.entries(candidate.overrides)) {
-    if (!isShortcutCommandId(commandId)) {
+    if (!isShortcutBindingCommandId(commandId)) {
       return null
     }
 
@@ -211,11 +192,11 @@ export function parseShortcutKeymapFile(value: unknown) {
 /** Resolves one built-in profile plus optional user overrides into effective bindings. */
 export function resolveShortcutBindings(
   profileId: KeymapProfileId,
-  overrides: Partial<Record<ShortcutCommandId, ShortcutKeymapOverride>> = {},
+  overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>> = {},
 ) {
   const resolvedBindings = { ...shortcutKeymapProfiles[profileId].bindings }
 
-  for (const commandId of Object.values(ShortcutCommands)) {
+  for (const commandId of Object.values(ShortcutBindingCommands)) {
     const override = overrides[commandId]
 
     if (override === undefined) {

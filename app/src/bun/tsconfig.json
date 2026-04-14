@@ -22,5 +22,11 @@
     "declarationMap": true,
     "customConditions": ["source", "import", "default"]
   },
-  "include": [".", "../shared", "../types.d.ts"]
+  "include": [
+    ".",
+    "../shared",
+    "../types.d.ts",
+    "../commands/app-command.test.ts",
+    "../commands/app-command.ts"
+  ]
 }

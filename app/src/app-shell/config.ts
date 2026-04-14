@@ -1,8 +1,5 @@
 import type { NavigationItemId } from "~/navigation.ts"
 
-/** Stable action ids used by the merged shell's top bar. */
-export type AppShellTopbarAction = "proposeTask" | "newSession" | "settings"
-
 /** One grouped section in the left app shell rail. */
 type AppShellSection = {
   group: "primary" | "secondary"

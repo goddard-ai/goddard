@@ -16,7 +16,7 @@ import { LaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 import { buildCreateSessionInput } from "./session-launch.ts"
 
-export function SessionLaunchDialog() {
+export default function SessionLaunchDialog() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const isDialogOpen = useSignal(false)
