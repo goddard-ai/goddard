@@ -1,8 +1,9 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 
 import { useShortcutRegistry } from "~/app-state-context.tsx"
-import { appCommandDefinitions } from "~/commands/app-command"
-import { shortcutBindingDefinitions, ShortcutBindingCommands } from "~/shared/shortcut-keymap.ts"
+import { AppCommand } from "~/commands/app-command.ts"
+import type { AppCommandId } from "~/shared/app-commands.ts"
+import { shortcutBindingCommandIds } from "~/shared/shortcut-keymap.ts"
 
 const pageClass = css({
   display: "grid",
@@ -129,19 +130,22 @@ function formatExpressions(expressions?: readonly string[]) {
   return expressions && expressions.length > 0 ? expressions.join("\n") : "Unbound"
 }
 
+function formatWhenClause(commandId: AppCommandId) {
+  return commandId === "closeActiveTab" ? "workbench.hasClosableActiveTab" : "Always"
+}
+
 /** Renders the detail-tab browser for shortcut-bindable commands and their active bindings. */
 export function KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
-  const commandRows = Object.values(ShortcutBindingCommands).map((commandId) => {
-    const definition = appCommandDefinitions[commandId]
-    const bindingDefinition = shortcutBindingDefinitions[commandId]
+  const commandRows = shortcutBindingCommandIds.map((commandId) => {
+    const definition = AppCommand[commandId]
 
     return {
       commandId,
       label: definition.label,
       description: definition.description,
       expressions: shortcutRegistry.resolvedBindings[commandId],
-      whenClause: bindingDefinition.when ?? "Always",
+      whenClause: formatWhenClause(commandId),
     }
   })
 

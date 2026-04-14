@@ -1,3 +1,3 @@
-import type { AppCommand } from "~/commands/app-command.ts"
+import type { AppCommand, AppCommandFunction } from "~/commands/app-command.ts"
 
-export type AppCommandId = keyof typeof AppCommand
+export type AppCommandId = AppCommand extends AppCommandFunction<infer Id> ? Id : never

@@ -12,7 +12,7 @@ import { useListener } from "preact-sigma"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { AppearanceDialog } from "~/appearance/appearance-dialog.tsx"
-import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { AppCommand, resolveAppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { browseForProject } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import { lookupProject } from "~/projects/project-registry.ts"
@@ -171,7 +171,7 @@ export function AppShell() {
       icon: FolderOpen,
       keywords: ["browse", "directory", "project", "add"],
       label: "Open folder",
-      onSelect: AppCommand.openFolder,
+      onSelect: AppCommand.projects.openFolder,
     },
     {
       id: "view-projects",
@@ -179,7 +179,7 @@ export function AppShell() {
       icon: FolderKanban,
       keywords: ["navigation", "projects"],
       label: "View projects",
-      onSelect: AppCommand.openProjects,
+      onSelect: AppCommand.navigation.openProjects,
     },
     {
       id: "view-inbox",
@@ -187,7 +187,7 @@ export function AppShell() {
       icon: Inbox,
       keywords: ["navigation", "inbox"],
       label: "View inbox",
-      onSelect: AppCommand.openInbox,
+      onSelect: AppCommand.navigation.openInbox,
     },
     {
       id: "view-sessions",
@@ -195,7 +195,7 @@ export function AppShell() {
       icon: Rows3,
       keywords: ["navigation", "sessions"],
       label: "View sessions",
-      onSelect: AppCommand.openSessions,
+      onSelect: AppCommand.navigation.openSessions,
     },
     {
       id: "view-specs",
@@ -203,7 +203,7 @@ export function AppShell() {
       icon: ScrollText,
       keywords: ["navigation", "specs", "documents"],
       label: "View specs",
-      onSelect: AppCommand.openSpecs,
+      onSelect: AppCommand.navigation.openSpecs,
     },
     {
       id: "view-tasks",
@@ -211,7 +211,7 @@ export function AppShell() {
       icon: ListTodo,
       keywords: ["navigation", "tasks"],
       label: "View tasks",
-      onSelect: AppCommand.openTasks,
+      onSelect: AppCommand.navigation.openTasks,
     },
     {
       id: "view-roadmap",
@@ -219,7 +219,7 @@ export function AppShell() {
       icon: Route,
       keywords: ["navigation", "roadmap", "plan"],
       label: "View roadmap",
-      onSelect: AppCommand.openRoadmap,
+      onSelect: AppCommand.navigation.openRoadmap,
     },
     {
       id: "view-keyboard-shortcuts",
@@ -227,12 +227,12 @@ export function AppShell() {
       icon: Keyboard,
       keywords: ["shortcuts", "keyboard", "bindings", "keys"],
       label: "View keyboard shortcuts",
-      onSelect: AppCommand.openKeyboardShortcuts,
+      onSelect: AppCommand.navigation.openKeyboardShortcuts,
     },
   ] as const
 
   useListener(globalEventHub, "appMenu", ({ command }) => {
-    AppCommand[command]()
+    resolveAppCommand(command)()
   })
 
   useListener(globalEventHub, "debugMenu", ({ surface }) => {

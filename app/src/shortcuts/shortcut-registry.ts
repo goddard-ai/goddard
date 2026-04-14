@@ -8,12 +8,11 @@ import type { NavigationItemId } from "~/navigation.ts"
 import {
   createDefaultShortcutKeymapFile,
   resolveShortcutBindings,
-  ShortcutBindingCommands,
-  shortcutBindingDefinitions,
   type KeymapProfileId,
   type ResolvedShortcutBindings,
   type ShortcutBindingCommandId,
   type ShortcutKeymapOverride,
+  shortcutBindingCommandIds,
 } from "~/shared/shortcut-keymap.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
 
@@ -72,18 +71,10 @@ function createBindingInput(
   expression: string,
   handler: (match: ShortcutMatch) => void,
 ) {
-  const definition = shortcutBindingDefinitions[commandId]
-
   return {
     ...(expression.includes(" ") ? { sequence: expression } : { combo: expression }),
-    scope: definition.scope,
-    when: definition.when,
-    keyEvent: definition.keyEvent,
-    priority: definition.priority,
-    editablePolicy: definition.editablePolicy,
-    preventDefault: definition.preventDefault,
-    stopPropagation: definition.stopPropagation,
-    allowRepeat: definition.allowRepeat,
+    when: commandId === "closeActiveTab" ? "workbench.hasClosableActiveTab" : undefined,
+    preventDefault: true,
     handler,
   }
 }
@@ -138,7 +129,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
 
       const nextBindingIds: Partial<Record<ShortcutBindingCommandId, string[]>> = {}
 
-      for (const commandId of Object.values(ShortcutBindingCommands)) {
+      for (const commandId of shortcutBindingCommandIds) {
         const expressions = this.resolvedBindings[commandId]
 
         if (!expressions) {

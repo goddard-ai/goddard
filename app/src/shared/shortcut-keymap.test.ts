@@ -4,8 +4,17 @@ import {
   createDefaultShortcutKeymapFile,
   parseShortcutKeymapFile,
   resolveShortcutBindings,
-  ShortcutBindingCommands,
 } from "./shortcut-keymap.ts"
+
+const newSession = "newSession" as const
+const openInbox = "openInbox" as const
+const openKeyboardShortcuts = "openKeyboardShortcuts" as const
+const closeActiveTab = "closeActiveTab" as const
+const openSessions = "openSessions" as const
+const openSearch = "openSearch" as const
+const openSpecs = "openSpecs" as const
+const openTasks = "openTasks" as const
+const openRoadmap = "openRoadmap" as const
 
 test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
   expect(
@@ -13,16 +22,16 @@ test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
       version: 1,
       profile: "goddard",
       overrides: {
-        [ShortcutBindingCommands.newSession]: ["Mod+Shift+n"],
-        [ShortcutBindingCommands.openKeyboardShortcuts]: null,
+        [newSession]: ["Mod+Shift+n"],
+        [openKeyboardShortcuts]: null,
       },
     }),
   ).toEqual({
     version: 1,
     profile: "goddard",
     overrides: {
-      [ShortcutBindingCommands.newSession]: ["Mod+Shift+n"],
-      [ShortcutBindingCommands.openKeyboardShortcuts]: null,
+      [newSession]: ["Mod+Shift+n"],
+      [openKeyboardShortcuts]: null,
     },
   })
 })
@@ -43,7 +52,7 @@ test("parseShortcutKeymapFile rejects empty override arrays and unknown command 
       version: 1,
       profile: "goddard",
       overrides: {
-        [ShortcutBindingCommands.newSession]: [],
+        [newSession]: [],
       },
     }),
   ).toBeNull()
@@ -54,16 +63,16 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
 
   expect(
     resolveShortcutBindings(defaultFile.profile, {
-      [ShortcutBindingCommands.newSession]: ["Mod+Shift+n"],
-      [ShortcutBindingCommands.openInbox]: null,
+      [newSession]: ["Mod+Shift+n"],
+      [openInbox]: null,
     }),
   ).toEqual({
-    [ShortcutBindingCommands.closeActiveTab]: ["Mod+w"],
-    [ShortcutBindingCommands.newSession]: ["Mod+Shift+n"],
-    [ShortcutBindingCommands.openSessions]: ["Alt+2"],
-    [ShortcutBindingCommands.openSearch]: ["Alt+3"],
-    [ShortcutBindingCommands.openSpecs]: ["Alt+4"],
-    [ShortcutBindingCommands.openTasks]: ["Alt+5"],
-    [ShortcutBindingCommands.openRoadmap]: ["Alt+6"],
+    [closeActiveTab]: ["Mod+w"],
+    [newSession]: ["Mod+Shift+n"],
+    [openSessions]: ["Alt+2"],
+    [openSearch]: ["Alt+3"],
+    [openSpecs]: ["Alt+4"],
+    [openTasks]: ["Alt+5"],
+    [openRoadmap]: ["Alt+6"],
   })
 })

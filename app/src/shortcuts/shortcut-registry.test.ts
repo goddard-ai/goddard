@@ -3,8 +3,10 @@ import { createShortcuts } from "powerkeys"
 
 const { appCommandBus } = await import("../commands/app-command-bus.ts")
 const { AppCommand: AppCommands } = await import("../commands/app-command.ts")
-const { ShortcutBindingCommands } = await import("../shared/shortcut-keymap.ts")
 const { ShortcutRegistry } = await import("./shortcut-registry.ts")
+
+const newSession = "newSession" as const
+const openInbox = "openInbox" as const
 
 /** Creates one registry instance with an isolated document-like event boundary. */
 function createTestRegistry() {
@@ -55,7 +57,7 @@ test("keydown dispatches one typed app command event", () => {
   registry.applyKeymapSnapshot(
     "goddard",
     {
-      [ShortcutBindingCommands.newSession]: ["Alt+n"],
+      [newSession]: ["Alt+n"],
     },
     null,
   )
@@ -95,15 +97,15 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
     registry.applyKeymapSnapshot(
       "goddard",
       {
-        [ShortcutBindingCommands.newSession]: ["Mod+Shift+n"],
-        [ShortcutBindingCommands.openInbox]: null,
+        [newSession]: ["Mod+Shift+n"],
+        [openInbox]: null,
       },
       null,
     )
 
     expect(registry.isHydrated).toBe(true)
-    expect(registry.resolvedBindings[ShortcutBindingCommands.newSession]).toEqual(["Mod+Shift+n"])
-    expect(registry.resolvedBindings[ShortcutBindingCommands.openInbox]).toBeUndefined()
+    expect(registry.resolvedBindings[newSession]).toEqual(["Mod+Shift+n"])
+    expect(registry.resolvedBindings[openInbox]).toBeUndefined()
   } finally {
     cleanup()
   }
