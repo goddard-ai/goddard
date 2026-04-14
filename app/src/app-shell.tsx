@@ -264,6 +264,9 @@ export function AppShell() {
         activeTabId={workbenchTabSet.activeTabId}
         indicator={tabStrip.indicator}
         navigationItems={navigationItems}
+        onCommandMenuOpen={() => {
+          AppCommand.navigation.openCommandMenu()
+        }}
         onNavigationSelect={selectNavigationSurface}
         onTabClose={(id) => {
           workbenchTabSet.closeTab(id)
