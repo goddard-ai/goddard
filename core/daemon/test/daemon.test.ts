@@ -54,7 +54,6 @@ test("daemon package ships agent-bin wrappers for goddard and workforce", async 
 
 test(
   "daemon run subscribes once and launches managed PR feedback sessions across repositories",
-  { timeout: 20000 },
   async () => {
     await useTempHome()
     await writeGlobalRootConfig({
@@ -203,11 +202,11 @@ test(
     ).toEqual([0, 0])
     expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },
+  { timeout: 20000 },
 )
 
 test(
   "daemon run can start only the IPC server when stream is disabled",
-  { timeout: 10000 },
   async () => {
     await useTempHome()
     const backend = await startBackendHarness()
@@ -245,11 +244,11 @@ test(
     expect(logs.some((entry) => entry.event === "ipc.server_listening")).toBe(true)
     expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },
+  { timeout: 10000 },
 )
 
 test(
   "daemon run can subscribe without IPC and ignores feedback that requires the PR feedback flow",
-  { timeout: 10000 },
   async () => {
     await useTempHome()
     const backend = await startBackendHarness()
@@ -299,11 +298,11 @@ test(
       ),
     ).toBe(true)
   },
+  { timeout: 10000 },
 )
 
 test(
   "daemon run keeps IPC available when stream startup is unauthenticated",
-  { timeout: 10000 },
   async () => {
     await useTempHome()
     const backend = await startBackendHarness({
@@ -354,6 +353,7 @@ test(
     expect(logs.some((entry) => entry.event === "daemon.run_failed")).toBe(false)
     expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },
+  { timeout: 10000 },
 )
 
 test("daemon run defaults to concise pretty terminal logs", async () => {
