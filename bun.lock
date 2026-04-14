@@ -48,13 +48,14 @@
         "culori": "^4.0.2",
         "electrobun": "^1.16.0",
         "hash-sum": "^2.0.0",
+        "immer": "^11.1.4",
         "lexical": "^0.30.0",
         "lucide-react": "^1.7.0",
         "powerkeys": "^0.1.0",
         "preact": "11.0.0-beta.1",
         "preact-comark": "0.2.4",
         "preact-in-motion": "^0.2.9",
-        "preact-sigma": "^3.0.1",
+        "preact-sigma": "^4.0.0",
         "radashi": "^12.7.2",
         "react-virtuoso": "^4.18.3",
         "sharp": "^0.34.5",
@@ -1995,7 +1996,7 @@
 
     "preact-in-motion": ["preact-in-motion@0.2.9", "", { "peerDependencies": { "motion": ">=12", "preact": ">=10" } }, "sha512-HRX0DibCW9LGLewfdIPvYnkiONdu2yUTi+EAsNVGQKk4kiOlPMBJgTYp40bTgx1lFLgKMzMOFZTt8nGz0feSfg=="],
 
-    "preact-sigma": ["preact-sigma@3.0.1", "", { "dependencies": { "@preact/signals": "^2.8.2", "immer": "^11.1.4", "preact": "11.0.0-beta.1" } }, "sha512-rbGAgSkBPLPQck2vcpRGIptEzyOiCBngO6JnEJCf1LJKyj85LkeXYlXn5tbuF07sdiEIqI7XwUFiBJ/z34TQmA=="],
+    "preact-sigma": ["preact-sigma@4.0.0", "", { "peerDependencies": { "@preact/signals": ">=2", "immer": ">=11", "preact": ">=10" } }, "sha512-STq+7llZPo6Uk32ZHk0/RggqABEAISx6pE9bYe4HfNgK0rulJ/lEZHbgc0L2c3kMDPHKgr1QDbQYwug3AJQWJQ=="],
 
     "prettier": ["prettier@3.2.5", "", { "bin": { "prettier": "bin/prettier.cjs" } }, "sha512-3/GWa9aOC0YeD7LUfvOG2NiDyhOWRvt1k+rcKhOuYnMY24iiCphgneUfJDyFXd6rZCAnuLBv6UeAULtrhT/F4A=="],
 
