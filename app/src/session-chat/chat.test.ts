@@ -16,6 +16,8 @@ function createSession(lastAgentMessage: string | null) {
     activeDaemonSession: true,
     token: null,
     permissions: null,
+    title: "New session",
+    titleState: "placeholder",
     repository: null,
     prNumber: null,
     metadata: null,
