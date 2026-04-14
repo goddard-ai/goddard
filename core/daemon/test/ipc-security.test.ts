@@ -2,7 +2,8 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import type { KindInput, KindOutput } from "kindstore"
-import { mkdtemp, rm } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DaemonServer } from "../src/ipc.ts"
@@ -71,6 +72,20 @@ test("daemon submit request requires a valid session token", async () => {
 })
 
 test("daemon hides unexpected handler crashes from IPC clients", async () => {
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "trusted",
+    repo: "widgets",
+    branch: "feature/secure-daemon",
+  })
+  seedAuthorizedSession({
+    sessionId: "ses_crash",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+
   const daemon = await startServer({
     sdk: {
       pr: {
@@ -80,23 +95,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
         reply: async () => ({ success: true }),
       },
     },
-    auth: {
-      getSessionByToken: async () => ({
-        sessionId: "ses_crash",
-        owner: "trusted",
-        repo: "widgets",
-        allowedPrNumbers: [],
-      }),
-      addAllowedPr: async () => undefined,
-    },
-    resolveSubmitRequest: async () => ({
-      owner: "trusted",
-      repo: "widgets",
-      title: "Ship daemon security",
-      body: "Done.",
-      head: "feature/secure-daemon",
-      base: "main",
-    }),
+    useExistingHome: true,
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -104,7 +103,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
     await expect(
       client.send("prSubmit", {
         token: "tok_session",
-        cwd: process.cwd(),
+        cwd: repoDir,
         title: "Ship daemon security",
         body: "Done.",
       }),
@@ -541,6 +540,56 @@ async function seedWorkforceSession(input: {
   })
 }
 
+function seedAuthorizedSession(input: {
+  sessionId: DaemonSession["id"]
+  token: string
+  owner: string
+  repo: string
+  allowedPrNumbers: number[]
+}) {
+  db.sessions.put(input.sessionId, {
+    acpSessionId: `acp-${input.sessionId}`,
+    status: "active",
+    agentName: "pi",
+    cwd: process.cwd(),
+    mcpServers: [],
+    connectionMode: "none",
+    activeDaemonSession: false,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+    repository: null,
+    prNumber: null,
+    token: input.token,
+    permissions: {
+      owner: input.owner,
+      repo: input.repo,
+      allowedPrNumbers: input.allowedPrNumbers,
+    },
+    metadata: null,
+    models: null,
+  })
+}
+
+async function createGitRepoFixture(input: {
+  owner: string
+  repo: string
+  branch: string
+}): Promise<string> {
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-repo-"))
+  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+  await writeFile(join(repoDir, "README.md"), "# fixture\n", "utf8")
+  runGit(repoDir, ["init"])
+  runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  runGit(repoDir, ["config", "user.name", "Bot"])
+  runGit(repoDir, ["add", "README.md"])
+  runGit(repoDir, ["commit", "-m", "init"])
+  runGit(repoDir, ["checkout", "-b", input.branch])
+  runGit(repoDir, ["remote", "add", "origin", `https://github.com/${input.owner}/${input.repo}.git`])
+  return repoDir
+}
+
 function createStaticWorkforceManager(
   onAppend: (
     rootDir: string,
@@ -605,6 +654,15 @@ function buildWorkforceStatus(rootDir: string) {
     suspendedRequestCount: 0,
     failedRequestCount: 0,
   }
+}
+
+function runGit(cwd: string, args: string[]) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+  })
+
+  expect(result.status).toBe(0)
 }
 
 async function captureLogs(
