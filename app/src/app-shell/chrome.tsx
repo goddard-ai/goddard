@@ -209,7 +209,7 @@ export function AppShellChrome(props: {
             <ActionButton
               ariaLabel="Propose task"
               icon={<InlineSvgIcon icon="what-next" size="17px 12px" />}
-              onAction={AppCommand.proposeTask}
+              onAction={AppCommand.navigation.openProposeTaskDialog}
             />
             <span
               class={css({
@@ -223,7 +223,7 @@ export function AppShellChrome(props: {
             <ActionButton
               ariaLabel="New session"
               icon={<InlineSvgIcon icon="new-session" size="16px 16px" />}
-              onAction={AppCommand.newSession}
+              onAction={AppCommand.navigation.openNewSessionDialog}
             />
           </div>
           <button
@@ -243,7 +243,7 @@ export function AppShellChrome(props: {
             )}
             type="button"
             onClick={() => {
-              AppCommand.openSettings()
+              AppCommand.navigation.openSettings()
             }}
           >
             <InlineSvgIcon icon="settings" size="15px" />

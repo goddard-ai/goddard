@@ -107,9 +107,13 @@ export type AppCommand = (typeof AppCommand)[keyof typeof AppCommand] extends in
     : never
   : never
 
-export const appCommandList = Object.values(AppCommand).flatMap((commands) =>
-  Object.values(commands),
+export const appCommandList = Object.values(AppCommand).flatMap(
+  (commands) => Object.values(commands) as AppCommand[],
 )
+
+export function onAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
+  return appCommandBus.on(command.id, listener)
+}
 
 export function useAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
   useListener(appCommandBus, command.id, listener)

@@ -1,12 +1,8 @@
-import { expect, test } from "bun:test"
+import { expect, test, vi } from "bun:test"
 import { createShortcuts } from "powerkeys"
 
-const { appCommandBus } = await import("../commands/app-command-bus.ts")
-const { AppCommand: AppCommands } = await import("../commands/app-command.ts")
+const { AppCommand, onAppCommand } = await import("../commands/app-command.ts")
 const { ShortcutRegistry } = await import("./shortcut-registry.ts")
-
-const newSession = "newSession" as const
-const openInbox = "openInbox" as const
 
 /** Creates one registry instance with an isolated document-like event boundary. */
 function createTestRegistry() {
@@ -36,28 +32,13 @@ function dispatchKeydown(target: EventTarget, init: KeyboardEventInit) {
 
 test("keydown dispatches one typed app command event", () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
-  const events: Array<{
-    preferredProjectPath: string | null
-    source: "keyboard" | "native-menu" | "programmatic"
-    match?: {
-      combo: string
-      event: {
-        key: string
-        modifiers: {
-          alt: boolean
-        }
-      }
-      matchedScope: string
-    }
-  }> = []
+  const listener = vi.fn()
 
-  const unsubscribe = appCommandBus.on(AppCommands.newSession, (detail) => {
-    events.push(detail)
-  })
+  const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, listener)
   registry.applyKeymapSnapshot(
     "goddard",
     {
-      [newSession]: ["Alt+n"],
+      "navigation.openNewSessionDialog": ["Alt+n"],
     },
     null,
   )
@@ -69,19 +50,13 @@ test("keydown dispatches one typed app command event", () => {
       altKey: true,
     })
 
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({
-      preferredProjectPath: null,
-      source: "keyboard",
-      match: {
-        combo: "Alt+n",
-        event: {
-          key: "n",
-          modifiers: {
-            alt: true,
-          },
+    expect(listener).toHaveBeenCalledWith({
+      combo: "Alt+n",
+      event: {
+        key: "n",
+        modifiers: {
+          alt: true,
         },
-        matchedScope: "root",
       },
     })
   } finally {
@@ -97,15 +72,15 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
     registry.applyKeymapSnapshot(
       "goddard",
       {
-        [newSession]: ["Mod+Shift+n"],
-        [openInbox]: null,
+        "navigation.openNewSessionDialog": ["Mod+Shift+n"],
+        "navigation.openInbox": null,
       },
       null,
     )
 
     expect(registry.isHydrated).toBe(true)
-    expect(registry.resolvedBindings[newSession]).toEqual(["Mod+Shift+n"])
-    expect(registry.resolvedBindings[openInbox]).toBeUndefined()
+    expect(registry.resolvedBindings["navigation.openNewSessionDialog"]).toEqual(["Mod+Shift+n"])
+    expect(registry.resolvedBindings["navigation.openInbox"]).toBeUndefined()
   } finally {
     cleanup()
   }

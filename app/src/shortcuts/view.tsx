@@ -1,9 +1,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 
 import { useShortcutRegistry } from "~/app-state-context.tsx"
-import { AppCommand } from "~/commands/app-command.ts"
-import type { AppCommandId } from "~/shared/app-commands.ts"
-import { shortcutBindingCommandIds } from "~/shared/shortcut-keymap.ts"
+import { appCommandList } from "~/commands/app-command.ts"
 
 const pageClass = css({
   display: "grid",
@@ -112,12 +110,6 @@ const labelClass = css({
   letterSpacing: "-0.02em",
 })
 
-const descriptionTextClass = css({
-  color: "rgba(212, 219, 226, 0.64)",
-  fontSize: "13px",
-  lineHeight: "1.55",
-})
-
 const monoValueClass = css({
   fontFamily: '"IBM Plex Mono", "SFMono-Regular", "Menlo", monospace',
   fontSize: "12px",
@@ -126,28 +118,13 @@ const monoValueClass = css({
   whiteSpace: "pre-wrap",
 })
 
-function formatExpressions(expressions?: readonly string[]) {
-  return expressions && expressions.length > 0 ? expressions.join("\n") : "Unbound"
-}
-
-function formatWhenClause(commandId: AppCommandId) {
-  return commandId === "closeActiveTab" ? "workbench.hasClosableActiveTab" : "Always"
-}
-
 /** Renders the detail-tab browser for shortcut-bindable commands and their active bindings. */
-export function KeyboardShortcutsView(props: { class?: string }) {
+export default function KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
-  const commandRows = shortcutBindingCommandIds.map((commandId) => {
-    const definition = AppCommand[commandId]
-
-    return {
-      commandId,
-      label: definition.label,
-      description: definition.description,
-      expressions: shortcutRegistry.resolvedBindings[commandId],
-      whenClause: formatWhenClause(commandId),
-    }
-  })
+  const commandRows = appCommandList.map((command) => ({
+    command,
+    bindings: shortcutRegistry.resolvedBindings[command.id] ?? [null],
+  }))
 
   return (
     <section class={cx(pageClass, props.class)}>
@@ -191,20 +168,32 @@ export function KeyboardShortcutsView(props: { class?: string }) {
           <span>Shortcut</span>
           <span>When</span>
         </div>
-        {commandRows.map((row) => (
-          <article key={row.commandId} class={rowClass}>
-            <div class={labelColumnClass}>
-              <div class={labelClass}>{row.label}</div>
-              <div class={monoValueClass}>{row.commandId}</div>
-              <div class={descriptionTextClass}>{row.description}</div>
-            </div>
-            <div class={monoValueClass}>{formatExpressions(row.expressions)}</div>
-            <div class={monoValueClass}>{row.whenClause}</div>
-          </article>
-        ))}
+        {commandRows.flatMap((row) => {
+          return row.bindings.map((binding) => {
+            const bindingId = binding
+              ? typeof binding === "string"
+                ? binding
+                : (binding.combo ?? binding.sequence)
+              : null
+
+            return (
+              <article
+                key={bindingId ? `${row.command.id}:${bindingId}` : row.command.id}
+                class={rowClass}
+              >
+                <div class={labelColumnClass}>
+                  <div class={labelClass}>{row.command.label}</div>
+                  <div class={monoValueClass}>{row.command.id}</div>
+                </div>
+                <div class={monoValueClass}>{bindingId ?? "–"}</div>
+                <div class={monoValueClass}>
+                  {binding && typeof binding !== "string" ? binding.when : "–"}
+                </div>
+              </article>
+            )
+          })
+        })}
       </div>
     </section>
   )
 }
-
-export default KeyboardShortcutsView

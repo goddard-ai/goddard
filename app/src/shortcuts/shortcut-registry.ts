@@ -1,26 +1,25 @@
-import { createShortcuts, type ShortcutMatch, type ShortcutRuntime } from "powerkeys"
+import { castDraft } from "immer"
+import { BindingInput, createShortcuts, type ShortcutRuntime } from "powerkeys"
 import { SigmaType, type SigmaRef } from "preact-sigma"
 
-import { createAppCommandDetail } from "~/commands/app-command"
-import { dispatchAppCommand } from "~/commands/app-command-bus.ts"
+import { appCommandList } from "~/commands/app-command.ts"
 import { desktopHost } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
+import { AppCommandId } from "~/shared/app-commands.ts"
 import {
   createDefaultShortcutKeymapFile,
   resolveShortcutBindings,
+  ShortcutKeymapBindings,
+  ShortcutKeymapOverrides,
   type KeymapProfileId,
-  type ResolvedShortcutBindings,
-  type ShortcutBindingCommandId,
-  type ShortcutKeymapOverride,
-  shortcutBindingCommandIds,
 } from "~/shared/shortcut-keymap.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
 
 type ShortcutRegistryShape = {
   runtime: SigmaRef<ShortcutRuntime>
   selectedProfileId: KeymapProfileId
-  overrides: Partial<Record<ShortcutBindingCommandId, string[] | null>>
-  resolvedBindings: Partial<Record<ShortcutBindingCommandId, string[]>>
+  overrides: ShortcutKeymapOverrides
+  resolvedBindings: ShortcutKeymapBindings
   loadError: string | null
   writeError: string | null
   isHydrated: boolean
@@ -29,31 +28,12 @@ type ShortcutRegistryShape = {
   selectedNavId: NavigationItemId
   overlayIsOpen: boolean
   overlayKind: string | null
-  bindingIdsByCommand: Partial<Record<ShortcutBindingCommandId, string[]>>
+  bindingIdsByCommand: Partial<Record<AppCommandId, string[]>>
 }
 
 function getDefaultResolvedBindings() {
   const defaultKeymap = createDefaultShortcutKeymapFile()
-  return cloneResolvedBindings(
-    resolveShortcutBindings(defaultKeymap.profile, defaultKeymap.overrides),
-  )
-}
-
-function cloneShortcutOverrides(
-  overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>>,
-) {
-  return Object.fromEntries(
-    Object.entries(overrides).map(([commandId, expressions]) => [
-      commandId,
-      expressions === null ? null : [...expressions],
-    ]),
-  ) as Partial<Record<ShortcutBindingCommandId, string[] | null>>
-}
-
-function cloneResolvedBindings(bindings: ResolvedShortcutBindings) {
-  return Object.fromEntries(
-    Object.entries(bindings).map(([commandId, expressions]) => [commandId, [...expressions]]),
-  ) as Partial<Record<ShortcutBindingCommandId, string[]>>
+  return resolveShortcutBindings(defaultKeymap.profile, defaultKeymap.overrides)
 }
 
 function getRuntimeContextSnapshot(state: ShortcutRegistryShape) {
@@ -63,19 +43,6 @@ function getRuntimeContextSnapshot(state: ShortcutRegistryShape) {
     "navigation.selectedNavId": state.selectedNavId,
     "overlay.isOpen": state.overlayIsOpen,
     "overlay.kind": state.overlayKind,
-  }
-}
-
-function createBindingInput(
-  commandId: ShortcutBindingCommandId,
-  expression: string,
-  handler: (match: ShortcutMatch) => void,
-) {
-  return {
-    ...(expression.includes(" ") ? { sequence: expression } : { combo: expression }),
-    when: commandId === "closeActiveTab" ? "workbench.hasClosableActiveTab" : undefined,
-    preventDefault: true,
-    handler,
   }
 }
 
@@ -107,12 +74,12 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
     /** Replaces the active profile and override snapshot, then reapplies runtime bindings. */
     applyKeymapSnapshot(
       profile: KeymapProfileId,
-      overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>>,
+      overrides: ShortcutKeymapOverrides,
       loadError: string | null,
     ) {
       this.selectedProfileId = profile
-      this.overrides = cloneShortcutOverrides(overrides)
-      this.resolvedBindings = cloneResolvedBindings(resolveShortcutBindings(profile, overrides))
+      this.overrides = castDraft(overrides)
+      this.resolvedBindings = castDraft(resolveShortcutBindings(profile, overrides))
       this.loadError = loadError
       this.isHydrated = true
       this.rebindRuntime()
@@ -127,32 +94,30 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
         }
       }
 
-      const nextBindingIds: Partial<Record<ShortcutBindingCommandId, string[]>> = {}
+      const nextBindingIds: Partial<Record<AppCommandId, string[]>> = {}
 
-      for (const commandId of shortcutBindingCommandIds) {
-        const expressions = this.resolvedBindings[commandId]
-
+      for (const command of appCommandList) {
+        const expressions = this.resolvedBindings[command.id]
         if (!expressions) {
           continue
         }
 
         const commandBindingIds = expressions.map((expression) => {
-          const commandBinding = this.runtime.bind(
-            createBindingInput(commandId, expression, (match) => {
-              dispatchAppCommand(
-                commandId,
-                createAppCommandDetail(commandId, {
-                  source: "keyboard",
-                  match,
-                }),
-              )
-            }),
-          )
+          let input: BindingInput
+          if (typeof expression !== "string") {
+            input = { ...expression, handler: command }
+          } else if (expression.includes(" ")) {
+            input = { sequence: expression, handler: command }
+          } else {
+            input = { combo: expression, handler: command }
+          }
+
+          const commandBinding = this.runtime.bind(input)
           return commandBinding.id
         })
 
         if (commandBindingIds.length > 0) {
-          nextBindingIds[commandId] = commandBindingIds
+          nextBindingIds[command.id] = commandBindingIds
         }
       }
 
