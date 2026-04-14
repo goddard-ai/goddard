@@ -1,5 +1,9 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import {
+  getAcpRegistryCacheDir,
+  getGlobalConfigPath,
+  getLocalConfigPath,
+} from "@goddard-ai/paths/node"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
@@ -242,6 +246,41 @@ test("daemon marks pending title generation as failed when provider config is pr
 test("daemon lists adapters through the shared registry service and config default", async () => {
   await useTempHome()
   const repoDir = await createRepoFixture()
+  const registryCacheDir = getAcpRegistryCacheDir()
+  const adapterDir = join(registryCacheDir, "pi-acp")
+  await mkdir(join(registryCacheDir, ".git"), { recursive: true })
+  await mkdir(adapterDir, { recursive: true })
+  await writeFile(
+    join(registryCacheDir, ".goddard-registry-state.json"),
+    JSON.stringify({
+      lastAttemptedSyncAt: "2026-04-11T00:00:00.000Z",
+      lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+      lastError: null,
+    }),
+    "utf8",
+  )
+  await writeFile(
+    join(adapterDir, "agent.json"),
+    JSON.stringify(
+      {
+        id: "pi-acp",
+        name: "pi ACP",
+        version: "0.0.25",
+        description: "ACP adapter for pi coding agent",
+        repository: "https://github.com/svkozak/pi-acp",
+        authors: ["Sergii Kozak <svkozak@gmail.com>"],
+        license: "MIT",
+        distribution: {
+          npx: {
+            package: "pi-acp@0.0.25",
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  )
   await writeFile(
     getGlobalConfigPath(),
     JSON.stringify({
@@ -252,73 +291,19 @@ test("daemon lists adapters through the shared registry service and config defau
     "utf8",
   )
 
-  const daemon = await startServer({
-    useExistingHome: true,
-    deps: {
-      createRegistryService: () => ({
-        listAdapters: async () => ({
-          adapters: [
-            {
-              id: "pi-acp",
-              name: "pi ACP",
-              version: "0.0.25",
-              description: "ACP adapter for pi coding agent",
-              repository: "https://github.com/svkozak/pi-acp",
-              authors: ["Sergii Kozak <svkozak@gmail.com>"],
-              license: "MIT",
-              distribution: {
-                npx: {
-                  package: "pi-acp@0.0.25",
-                },
-              },
-              unofficial: true,
-              source: "registry",
-            },
-          ],
-          registrySource: "cache",
-          lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
-          stale: false,
-          lastError: null,
-        }),
-        getAdapter: async (id: string) => ({
-          adapter:
-            id === "pi-acp"
-              ? {
-                  id: "pi-acp",
-                  name: "pi ACP",
-                  version: "0.0.25",
-                  description: "ACP adapter for pi coding agent",
-                  repository: "https://github.com/svkozak/pi-acp",
-                  authors: ["Sergii Kozak <svkozak@gmail.com>"],
-                  license: "MIT",
-                  distribution: {
-                    npx: {
-                      package: "pi-acp@0.0.25",
-                    },
-                  },
-                  unofficial: true,
-                  source: "registry",
-                }
-              : null,
-          adapters: [],
-          registrySource: "cache",
-          lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
-          stale: false,
-          lastError: null,
-        }),
-      }),
-    },
-  })
+  const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
   const response = await client.send("adapterList", { cwd: repoDir })
 
   expect(response.defaultAdapterId).toBe("pi-acp")
   expect(response.registrySource).toBe("cache")
+  expect(response.lastSuccessfulSyncAt).toBe("2026-04-11T00:00:00.000Z")
   expect(response.adapters).toHaveLength(1)
   expect(response.adapters[0]).toMatchObject({
     id: "pi-acp",
     unofficial: true,
+    source: "registry",
   })
 })
 
