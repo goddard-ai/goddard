@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import type { BackendPrClient } from "../src/ipc/types.ts"
@@ -75,13 +76,6 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
     repo: "widgets",
     branch: "feature/secure-daemon",
   })
-  seedAuthorizedSession({
-    sessionId: "ses_crash",
-    token: "tok_session",
-    owner: "trusted",
-    repo: "widgets",
-    allowedPrNumbers: [],
-  })
 
   const daemon = await startServer({
     sdk: {
@@ -93,6 +87,13 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
       },
     },
     useExistingHome: true,
+  })
+  seedAuthorizedSession({
+    sessionId: "ses_crash",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -118,13 +119,6 @@ test("daemon submit request enforces trusted repo context and records created PR
     owner: "evil",
     repo: "fork",
     branch: "feature/secure-daemon",
-  })
-  seedAuthorizedSession({
-    sessionId: "ses_42",
-    token: "tok_session",
-    owner: "trusted",
-    repo: "widgets",
-    allowedPrNumbers: [],
   })
 
   const createCalls: Array<Record<string, unknown>> = []
@@ -159,6 +153,13 @@ test("daemon submit request enforces trusted repo context and records created PR
       },
     },
     useExistingHome: true,
+  })
+  seedAuthorizedSession({
+    sessionId: "ses_42",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -218,6 +219,8 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
     repo: "fork",
     branch: "pr-12",
   })
+
+  const daemon = await startServer({ useExistingHome: true })
   seedAuthorizedSession({
     sessionId: "ses_7",
     token: "tok_session",
@@ -225,8 +228,6 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
     repo: "widgets",
     allowedPrNumbers: [7],
   })
-
-  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
@@ -245,6 +246,8 @@ test("daemon reply request records pull request checkout locations", async () =>
     repo: "fork",
     branch: "pr-12",
   })
+
+  const daemon = await startServer({ useExistingHome: true })
   seedAuthorizedSession({
     sessionId: "ses_12",
     token: "tok_session",
@@ -252,8 +255,6 @@ test("daemon reply request records pull request checkout locations", async () =>
     repo: "widgets",
     allowedPrNumbers: [12],
   })
-
-  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await client.send("prReply", {
@@ -289,14 +290,14 @@ test("daemon workforce request rejects mismatched roots for token-backed session
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-b-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
   cleanup.push(() => rm(otherRootDir, { recursive: true, force: true }))
+
+  const daemon = await startServer({ useExistingHome: true })
   await seedWorkforceSession({
     sessionId,
     token,
     rootDir,
     requestId: "req-mismatch",
   })
-
-  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
@@ -317,14 +318,14 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-d-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
   cleanup.push(() => rm(otherRootDir, { recursive: true, force: true }))
+
+  const daemon = await startServer({ useExistingHome: true })
   await seedWorkforceSession({
     sessionId,
     token,
     rootDir,
     requestId: "req-respond",
   })
-
-  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
@@ -342,6 +343,8 @@ test("daemon workforce request rejects token-backed sessions without a workforce
   const token = "workforce-token-no-root"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-e-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+
+  const daemon = await startServer({ useExistingHome: true })
   await seedWorkforceSession({
     sessionId,
     token,
@@ -349,8 +352,6 @@ test("daemon workforce request rejects token-backed sessions without a workforce
     requestId: "req-no-root",
     includeRootDir: false,
   })
-
-  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
@@ -515,7 +516,12 @@ async function createGitRepoFixture(input: {
   runGit(repoDir, ["add", "README.md"])
   runGit(repoDir, ["commit", "-m", "init"])
   runGit(repoDir, ["checkout", "-b", input.branch])
-  runGit(repoDir, ["remote", "add", "origin", `https://github.com/${input.owner}/${input.repo}.git`])
+  runGit(repoDir, [
+    "remote",
+    "add",
+    "origin",
+    `https://github.com/${input.owner}/${input.repo}.git`,
+  ])
   return repoDir
 }
 
