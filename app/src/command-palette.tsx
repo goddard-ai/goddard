@@ -10,6 +10,7 @@ import { useEffect, useState } from "preact/hooks"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
+import { shortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 
 /** One actionable item shown in the command palette. */
 type CommandMenuItem = {
@@ -198,6 +199,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
               >
                 {(item, state) => {
                   const Icon = item.icon
+                  const shortcut = shortcutRegistry.resolvedBindings[item.command.id]
 
                   return (
                     <div
@@ -259,7 +261,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                       >
                         {item.label}
                       </span>
-                      {item.shortcut ? (
+                      {shortcut ? (
                         <span
                           class={css({
                             paddingInline: "8px",
@@ -275,7 +277,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                             lineHeight: "20px",
                           })}
                         >
-                          {item.shortcut}
+                          {shortcut}
                         </span>
                       ) : null}
                     </div>
