@@ -1,13 +1,3 @@
-import {
-  FolderKanban,
-  FolderOpen,
-  Inbox,
-  Keyboard,
-  ListTodo,
-  Route,
-  Rows3,
-  ScrollText,
-} from "lucide-react"
 import { useListener } from "preact-sigma"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
@@ -26,7 +16,6 @@ import {
   useShortcutRegistry,
   useWorkbenchTabSet,
 } from "./app-state-context.tsx"
-import { CommandMenu } from "./command-menu.tsx"
 import { CommandDialog } from "./commands/command-dialog.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { deriveProjectName } from "./projects/project-name.ts"
@@ -102,7 +91,6 @@ export function AppShell() {
   const projectRegistry = useProjectRegistry()
   const shortcutRegistry = useShortcutRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false)
   const [isAppearanceDialogOpen, setIsAppearanceDialogOpen] = useState(false)
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
@@ -164,75 +152,8 @@ export function AppShell() {
     workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
   }
 
-  const commandMenuItems = [
-    {
-      id: "open-folder",
-      group: "Actions",
-      icon: FolderOpen,
-      keywords: ["browse", "directory", "project", "add"],
-      label: "Open folder",
-      onSelect: AppCommand.projects.openFolder,
-    },
-    {
-      id: "view-projects",
-      group: "Views",
-      icon: FolderKanban,
-      keywords: ["navigation", "projects"],
-      label: "View projects",
-      onSelect: AppCommand.navigation.openProjects,
-    },
-    {
-      id: "view-inbox",
-      group: "Views",
-      icon: Inbox,
-      keywords: ["navigation", "inbox"],
-      label: "View inbox",
-      onSelect: AppCommand.navigation.openInbox,
-    },
-    {
-      id: "view-sessions",
-      group: "Views",
-      icon: Rows3,
-      keywords: ["navigation", "sessions"],
-      label: "View sessions",
-      onSelect: AppCommand.navigation.openSessions,
-    },
-    {
-      id: "view-specs",
-      group: "Views",
-      icon: ScrollText,
-      keywords: ["navigation", "specs", "documents"],
-      label: "View specs",
-      onSelect: AppCommand.navigation.openSpecs,
-    },
-    {
-      id: "view-tasks",
-      group: "Views",
-      icon: ListTodo,
-      keywords: ["navigation", "tasks"],
-      label: "View tasks",
-      onSelect: AppCommand.navigation.openTasks,
-    },
-    {
-      id: "view-roadmap",
-      group: "Views",
-      icon: Route,
-      keywords: ["navigation", "roadmap", "plan"],
-      label: "View roadmap",
-      onSelect: AppCommand.navigation.openRoadmap,
-    },
-    {
-      id: "view-keyboard-shortcuts",
-      group: "Views",
-      icon: Keyboard,
-      keywords: ["shortcuts", "keyboard", "bindings", "keys"],
-      label: "View keyboard shortcuts",
-      onSelect: AppCommand.navigation.openKeyboardShortcuts,
-    },
-  ] as const
-
   useListener(globalEventHub, "appMenu", ({ command }) => {
-    resolveAppCommand(command)()
+    resolveAppCommand(command)?.()
   })
 
   useListener(globalEventHub, "debugMenu", ({ surface }) => {
@@ -258,13 +179,13 @@ export function AppShell() {
     }
   })
 
-  useAppCommand(AppCommand.closeActiveTab, () => {
+  useAppCommand(AppCommand.workbench.closeActiveTab, () => {
     if (workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
       workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
     }
   })
 
-  useAppCommand(AppCommand.openKeyboardShortcuts, () => {
+  useAppCommand(AppCommand.navigation.openKeyboardShortcuts, () => {
     workbenchTabSet.openOrFocusTab({
       id: "workbench:keyboard-shortcuts",
       kind: "keyboardShortcuts",
@@ -274,35 +195,35 @@ export function AppShell() {
     })
   })
 
-  useAppCommand(AppCommand.openInbox, () => {
+  useAppCommand(AppCommand.navigation.openInbox, () => {
     selectNavigationSurface("inbox")
   })
 
-  useAppCommand(AppCommand.openProjects, () => {
+  useAppCommand(AppCommand.navigation.openProjects, () => {
     selectNavigationSurface("projects")
   })
 
-  useAppCommand(AppCommand.openSessions, () => {
+  useAppCommand(AppCommand.navigation.openSessions, () => {
     selectNavigationSurface("sessions")
   })
 
-  useAppCommand(AppCommand.openSearch, () => {
+  useAppCommand(AppCommand.navigation.openSearch, () => {
     selectNavigationSurface("search")
   })
 
-  useAppCommand(AppCommand.openSpecs, () => {
+  useAppCommand(AppCommand.navigation.openSpecs, () => {
     selectNavigationSurface("specs")
   })
 
-  useAppCommand(AppCommand.openTasks, () => {
+  useAppCommand(AppCommand.navigation.openTasks, () => {
     selectNavigationSurface("tasks")
   })
 
-  useAppCommand(AppCommand.openRoadmap, () => {
+  useAppCommand(AppCommand.navigation.openRoadmap, () => {
     selectNavigationSurface("roadmap")
   })
 
-  useAppCommand(AppCommand.openFolder, async () => {
+  useAppCommand(AppCommand.projects.openFolder, async () => {
     const selectedPath = await browseForProject()
 
     if (!selectedPath) {
@@ -322,7 +243,7 @@ export function AppShell() {
     selectNavigationSurface("projects")
   })
 
-  useAppCommand(AppCommand.openSettings, () => {
+  useAppCommand(AppCommand.navigation.openSettings, () => {
     workbenchTabSet.openOrFocusTab({
       id: "surface:settings",
       kind: "settings",
@@ -333,36 +254,16 @@ export function AppShell() {
     setIsAppearanceDialogOpen(true)
   })
 
-  useListener(window, "keydown", (event) => {
-    const keyboardEvent = event as KeyboardEvent
-
-    if (keyboardEvent.defaultPrevented || keyboardEvent.altKey || keyboardEvent.isComposing) {
-      return
-    }
-
-    if (
-      (keyboardEvent.metaKey || keyboardEvent.ctrlKey) &&
-      keyboardEvent.key.toLowerCase() === "k"
-    ) {
-      keyboardEvent.preventDefault()
-      setIsCommandMenuOpen((open) => !open)
-    }
-  })
-
   return (
     <>
-      <CommandMenu
-        items={commandMenuItems}
-        open={isCommandMenuOpen}
-        onOpenChange={setIsCommandMenuOpen}
+      <CommandDialog
+        command={AppCommand.navigation.openCommandMenu}
+        content={() => import("~/command-palette.tsx")}
       />
       <AppShellChrome
         activeTabId={workbenchTabSet.activeTabId}
         indicator={tabStrip.indicator}
         navigationItems={navigationItems}
-        onCommandMenuOpen={() => {
-          setIsCommandMenuOpen(true)
-        }}
         onNavigationSelect={selectNavigationSurface}
         onTabClose={(id) => {
           workbenchTabSet.closeTab(id)
@@ -395,7 +296,7 @@ export function AppShell() {
         />
       </AppShellChrome>
       <CommandDialog
-        command={AppCommand.newSession}
+        command={AppCommand.navigation.openNewSessionDialog}
         content={() => import("~/sessions/dialog.tsx")}
       />
       <AppearanceDialog

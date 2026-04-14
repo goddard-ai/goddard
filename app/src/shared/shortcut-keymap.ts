@@ -1,3 +1,4 @@
+import { AppCommand, appCommandIds, resolveAppCommand } from "~/commands/app-command.ts"
 import type { AppCommandId } from "./app-commands.ts"
 
 /** One built-in keymap profile identifier. */
@@ -50,14 +51,6 @@ export function createDefaultShortcutKeymapFile(): UserShortcutKeymapFile {
   }
 }
 
-/** Returns whether one runtime string matches a known shortcut-bindable command id. */
-export function isShortcutBindingCommandId(value: unknown): value is ShortcutBindingCommandId {
-  return (
-    typeof value === "string" &&
-    shortcutBindingCommandIds.includes(value as ShortcutBindingCommandId)
-  )
-}
-
 /** Returns whether one runtime string matches a shipped keymap profile id. */
 export function isKeymapProfileId(value: unknown): value is KeymapProfileId {
   return typeof value === "string" && value in shortcutKeymapProfiles
@@ -75,7 +68,7 @@ export function parseShortcutKeymapFile(value: unknown) {
     overrides?: unknown
   }
 
-  if (candidate.version !== 1 || !isKeymapProfileId(candidate.profile)) {
+  if (candidate.version !== 1) {
     return null
   }
 
@@ -87,15 +80,20 @@ export function parseShortcutKeymapFile(value: unknown) {
     return null
   }
 
-  const overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>> = {}
+  if (!isKeymapProfileId(candidate.profile)) {
+    candidate.profile = "goddard" satisfies KeymapProfileId
+  }
+
+  const overrides: Partial<Record<AppCommandId, ShortcutKeymapOverride>> = {}
 
   for (const [commandId, expressionList] of Object.entries(candidate.overrides)) {
-    if (!isShortcutBindingCommandId(commandId)) {
-      return null
+    const command = resolveAppCommand(commandId as AppCommandId)
+    if (!command) {
+      continue
     }
 
     if (expressionList === null) {
-      overrides[commandId] = null
+      overrides[command.id] = null
       continue
     }
 
@@ -107,7 +105,7 @@ export function parseShortcutKeymapFile(value: unknown) {
       return null
     }
 
-    overrides[commandId] = expressionList
+    overrides[command.id] = expressionList
   }
 
   return {
@@ -120,11 +118,11 @@ export function parseShortcutKeymapFile(value: unknown) {
 /** Resolves one built-in profile plus optional user overrides into effective bindings. */
 export function resolveShortcutBindings(
   profileId: KeymapProfileId,
-  overrides: Partial<Record<ShortcutBindingCommandId, ShortcutKeymapOverride>> = {},
+  overrides: Partial<Record<AppCommandId, ShortcutKeymapOverride>> = {},
 ) {
   const resolvedBindings = { ...shortcutKeymapProfiles[profileId].bindings }
 
-  for (const commandId of shortcutBindingCommandIds) {
+  for (const commandId of appCommandIds) {
     const override = overrides[commandId]
 
     if (override === undefined) {

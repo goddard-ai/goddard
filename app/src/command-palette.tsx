@@ -1,5 +1,5 @@
 /** Renders the app-wide command palette. */
-import { Dialog } from "@ark-ui/react/dialog"
+import { Dialog, UseDialogReturn } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
 import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
@@ -8,38 +8,31 @@ import { Search } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
 
+import type { AppCommandId } from "~/shared/app-commands.ts"
+import { AppCommand, appCommandList } from "./commands/app-command.ts"
+
 /** One actionable item shown in the command palette. */
 type CommandMenuItem = {
-  id: string
+  command: AppCommand
+  id: AppCommandId
   icon: LucideIcon
   keywords?: readonly string[]
   label: string
-  onSelect: () => void | Promise<void>
-  shortcut?: string
 }
 
-/** Renders the searchable command palette dialog. */
-export function CommandMenu(props: {
-  items: readonly CommandMenuItem[]
-  onOpenChange: (open: boolean) => void
-  open: boolean
-}) {
-  const [search, setSearch] = useState("")
+export default function CommandPalette(props: { dialog: UseDialogReturn }) {
+  const { open } = props.dialog
 
+  const [search, setSearch] = useState("")
   useEffect(() => {
-    if (!props.open && search.length > 0) {
+    if (!open && search.length > 0) {
       setSearch("")
     }
-  }, [props.open, search])
+  }, [open, search])
 
   return (
-    <Dialog.Root
-      open={props.open}
-      onOpenChange={(details: { open: boolean }) => {
-        props.onOpenChange(details.open)
-      }}
-    >
-      <Portal>
+    <Portal>
+      <Dialog.Root>
         <Dialog.Backdrop
           class={css({
             position: "fixed",
@@ -105,7 +98,7 @@ export function CommandMenu(props: {
             >
               Command menu
             </Dialog.Title>
-            <Command.Root<CommandMenuItem>
+            <Command.Root<AppCommand>
               class={css({
                 display: "flex",
                 flexDirection: "column",
@@ -114,17 +107,15 @@ export function CommandMenu(props: {
                 background: "transparent",
                 color: "text",
               })}
-              itemToKeywords={(item) => item.keywords}
-              itemToString={(item) => item.label}
-              itemToValue={(item) => item.id}
-              items={props.items}
+              itemToKeywords={(command) => command.keywords}
+              itemToString={(command) => command.label}
+              itemToValue={(command) => command.id}
+              items={appCommandList}
               label="Command menu"
               onSearchChange={setSearch}
-              onSelect={(item) => {
-                props.onOpenChange(false)
-                void Promise.resolve(item.onSelect()).catch((error) => {
-                  console.error("Failed to run command menu action.", error)
-                })
+              onSelect={(command) => {
+                props.dialog.setOpen(false)
+                command()
               }}
               search={search}
             >
@@ -294,7 +285,7 @@ export function CommandMenu(props: {
             </Command.Root>
           </Dialog.Content>
         </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
+      </Dialog.Root>
+    </Portal>
   )
 }
