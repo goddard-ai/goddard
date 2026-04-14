@@ -1,1 +1,13 @@
+pending_restore_file="$(git rev-parse --git-path goddard/pre-commit-stash.json)"
+rebase_merge_dir="$(git rev-parse --git-path rebase-merge)"
+rebase_apply_dir="$(git rev-parse --git-path rebase-apply)"
+
+if [ -d "$rebase_merge_dir" ] || [ -d "$rebase_apply_dir" ]; then
+  exit 0
+fi
+
+if [ ! -f "$pending_restore_file" ]; then
+  exit 0
+fi
+
 bun run postcommit:restore-stash
