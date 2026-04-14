@@ -215,29 +215,27 @@ test("daemon submit request enforces trusted repo context and records created PR
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
-  const daemon = await startServer({
-    auth: {
-      getSessionByToken: async () => ({
-        sessionId: "ses_7",
-        owner: "trusted",
-        repo: "widgets",
-        allowedPrNumbers: [7],
-      }),
-      addAllowedPr: async () => undefined,
-    },
-    resolveReplyRequest: async () => ({
-      owner: "trusted",
-      repo: "widgets",
-      prNumber: 12,
-      body: "Updated per review",
-    }),
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "evil",
+    repo: "fork",
+    branch: "pr-12",
   })
+  seedAuthorizedSession({
+    sessionId: "ses_7",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [7],
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
     client.send("prReply", {
       token: "tok_session",
-      cwd: process.cwd(),
+      cwd: repoDir,
       message: "Updated per review",
     }),
   ).rejects.toThrow(/not allowed/i)
