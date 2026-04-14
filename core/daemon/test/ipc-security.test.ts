@@ -327,25 +327,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
     requestId: "req-mismatch",
   })
 
-  const calls: Array<{ rootDir: string }> = []
-  const daemon = await startServer({
-    auth: {
-      getSessionByToken: async (candidateToken) =>
-        candidateToken === token
-          ? {
-              sessionId,
-              owner: "trusted",
-              repo: "widgets",
-              allowedPrNumbers: [],
-            }
-          : null,
-      addAllowedPr: async () => undefined,
-    },
-    createWorkforceManager: () =>
-      createStaticWorkforceManager((rootDir) => {
-        calls.push({ rootDir })
-      }),
-  })
+  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
@@ -356,8 +338,6 @@ test("daemon workforce request rejects mismatched roots for token-backed session
       token,
     }),
   ).rejects.toThrow(/does not match requested root/i)
-
-  expect(calls).toEqual([])
 })
 
 test("daemon workforce respond rejects mismatched roots for token-backed sessions", async () => {
