@@ -1015,9 +1015,7 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
   expect(db.sessions.findMany()).toHaveLength(sessionCountBefore)
 })
 
-async function startServer(
-  options: { useExistingHome?: boolean; deps?: Parameters<typeof startDaemonServer>[2] } = {},
-): Promise<DaemonServer> {
+async function startServer(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
   if (!options.useExistingHome) {
     await useTempHome()
   }
@@ -1052,7 +1050,6 @@ async function startServer(
       },
     },
     { socketPath },
-    options.deps,
   )
 
   cleanup.push(async () => {

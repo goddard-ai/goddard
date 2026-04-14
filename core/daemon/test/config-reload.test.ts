@@ -169,7 +169,7 @@ test(
 
     const configManager = createConfigManager()
     cleanup.push(() => configManager.close())
-    const daemon = await startServer(configManager, { useSetupContext: true })
+    const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstRun = await client.send("actionRun", {
@@ -223,7 +223,7 @@ test(
 
     const configManager = createConfigManager()
     cleanup.push(() => configManager.close())
-    const daemon = await startServer(configManager, { useSetupContext: true })
+    const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstExitCode = await runPrFeedbackFlow({
@@ -296,10 +296,7 @@ function createFeedbackEvent(): FeedbackEvent {
   }
 }
 
-async function startServer(
-  configManager: ReturnType<typeof createConfigManager>,
-  options: { useSetupContext?: boolean } = {},
-) {
+async function startServer(configManager: ReturnType<typeof createConfigManager>) {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-daemon-"))
   const runtime = resolveRuntimeConfig({
     socketPath: join(socketDir, "daemon.sock"),
@@ -330,22 +327,12 @@ async function startServer(
       reply: async () => ({ success: true }),
     },
   }
-  const daemon = options.useSetupContext
-    ? await SetupContext.run({ runtime, configManager }, () =>
-        startDaemonServer(daemonClient, {
-          socketPath: runtime.socketPath,
-          agentBinDir: runtime.agentBinDir,
-        }),
-      )
-    : await startDaemonServer(
-        daemonClient,
-        {
-          socketPath: runtime.socketPath,
-        },
-        {
-          configManager,
-        },
-      )
+  const daemon = await SetupContext.run({ runtime, configManager }, () =>
+    startDaemonServer(daemonClient, {
+      socketPath: runtime.socketPath,
+      agentBinDir: runtime.agentBinDir,
+    }),
+  )
   cleanup.push(async () => {
     await daemon.close()
     await rm(socketDir, { recursive: true, force: true })

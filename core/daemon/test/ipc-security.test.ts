@@ -1,7 +1,6 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterAll, afterEach, expect, test } from "bun:test"
-import type { KindInput, KindOutput } from "kindstore"
 import { spawnSync } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -9,10 +8,8 @@ import { join } from "node:path"
 import type { DaemonServer } from "../src/ipc.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import type { BackendPrClient } from "../src/ipc/types.ts"
-import type { WorkforceActorContext } from "../src/context.ts"
 import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
-import type { WorkforceManager, WorkforceManagerMutation } from "../src/workforce/manager.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -368,27 +365,10 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 
 type StartServerOptions = {
   useExistingHome?: boolean
-  createWorkforceManager?: NonNullable<
-    Parameters<typeof startDaemonServer>[2]
-  >["createWorkforceManager"]
   sdk?: {
     auth?: Partial<BackendPrClient["auth"]>
     pr?: Partial<BackendPrClient["pr"]>
   }
-  auth?: {
-    getSessionByToken?: (token: string) => Promise<{
-      sessionId: DaemonSession["id"]
-      owner: string
-      repo: string
-      allowedPrNumbers: number[]
-    } | null>
-    addAllowedPr?: (sessionId: DaemonSession["id"], prNumber: number) => Promise<void>
-  }
-  recordPullRequest?: (
-    record: KindInput<typeof db.schema.pullRequests>,
-  ) => Promise<KindOutput<typeof db.schema.pullRequests>>
-  resolveSubmitRequest?: (input: any) => Promise<any>
-  resolveReplyRequest?: (input: any) => Promise<any>
 }
 
 async function startServer(options: StartServerOptions = {}): Promise<DaemonServer> {
@@ -434,30 +414,6 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
       },
     },
     { socketPath },
-    {
-      resolveSubmitRequest:
-        options.resolveSubmitRequest ??
-        (async () => ({
-          owner: "trusted",
-          repo: "widgets",
-          title: "default",
-          body: "",
-          head: "feature/default",
-          base: "main",
-        })),
-      resolveReplyRequest:
-        options.resolveReplyRequest ??
-        (async () => ({
-          owner: "trusted",
-          repo: "widgets",
-          prNumber: 12,
-          body: "reply",
-        })),
-      getSessionByToken: options.auth?.getSessionByToken,
-      addAllowedPrToSession: options.auth?.addAllowedPr,
-      recordPullRequest: options.recordPullRequest,
-      createWorkforceManager: options.createWorkforceManager,
-    },
   )
 
   cleanup.push(async () => {
@@ -561,72 +517,6 @@ async function createGitRepoFixture(input: {
   runGit(repoDir, ["checkout", "-b", input.branch])
   runGit(repoDir, ["remote", "add", "origin", `https://github.com/${input.owner}/${input.repo}.git`])
   return repoDir
-}
-
-function createStaticWorkforceManager(
-  onAppend: (
-    rootDir: string,
-    mutation: WorkforceManagerMutation,
-    actor: WorkforceActorContext,
-  ) => void,
-): WorkforceManager {
-  return {
-    startWorkforce: async (rootDir: string) => buildWorkforce(rootDir),
-    getWorkforce: async (rootDir: string) => buildWorkforce(rootDir),
-    listWorkforces: async () => [],
-    shutdownWorkforce: async () => true,
-    appendWorkforceEvent: async (
-      rootDir: string,
-      mutation: WorkforceManagerMutation,
-      actor?: WorkforceActorContext,
-    ) => {
-      onAppend(
-        rootDir,
-        mutation,
-        actor ?? {
-          sessionId: null,
-          rootDir: null,
-          agentId: null,
-          requestId: null,
-        },
-      )
-      return {
-        workforce: buildWorkforceStatus(rootDir),
-        requestId:
-          mutation.type === "request"
-            ? "req-1"
-            : "requestId" in mutation
-              ? (mutation.requestId ?? null)
-              : null,
-      }
-    },
-    close: async () => {},
-  }
-}
-
-function buildWorkforce(rootDir: string) {
-  return {
-    ...buildWorkforceStatus(rootDir),
-    config: {
-      version: 1 as const,
-      defaultAgent: "pi-acp",
-      rootAgentId: "root",
-      agents: [],
-    },
-  }
-}
-
-function buildWorkforceStatus(rootDir: string) {
-  return {
-    state: "running" as const,
-    rootDir,
-    configPath: `${rootDir}/.goddard/workforce.json`,
-    ledgerPath: `${rootDir}/.goddard/ledger.jsonl`,
-    activeRequestCount: 0,
-    queuedRequestCount: 0,
-    suspendedRequestCount: 0,
-    failedRequestCount: 0,
-  }
 }
 
 function runGit(cwd: string, args: string[]) {
