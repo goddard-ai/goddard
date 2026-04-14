@@ -242,54 +242,44 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
 })
 
 test("daemon reply request records pull request checkout locations", async () => {
-  const recordedLocations: Array<{
-    host: "github"
-    owner: string
-    repo: string
-    prNumber: number
-    cwd: string
-  }> = []
-
-  const daemon = await startServer({
-    auth: {
-      getSessionByToken: async () => ({
-        sessionId: "ses_12",
-        owner: "trusted",
-        repo: "widgets",
-        allowedPrNumbers: [12],
-      }),
-      addAllowedPr: async () => undefined,
-    },
-    recordPullRequest: async (record) => {
-      recordedLocations.push(record)
-      return {
-        id: db.pullRequests.newId(),
-        ...record,
-        updatedAt: Date.now(),
-      }
-    },
-    resolveReplyRequest: async () => ({
-      owner: "evil",
-      repo: "fork",
-      prNumber: 12,
-      body: "Updated per review",
-    }),
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "evil",
+    repo: "fork",
+    branch: "pr-12",
   })
+  seedAuthorizedSession({
+    sessionId: "ses_12",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [12],
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await client.send("prReply", {
     token: "tok_session",
-    cwd: process.cwd(),
+    cwd: repoDir,
     message: "Updated per review",
   })
 
-  expect(recordedLocations).toEqual([
+  expect(
+    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }) => ({
+      host,
+      owner,
+      repo,
+      prNumber,
+      cwd,
+    })),
+  ).toEqual([
     {
       host: "github",
       owner: "trusted",
       repo: "widgets",
       prNumber: 12,
-      cwd: process.cwd(),
+      cwd: repoDir,
     },
   ])
 })
