@@ -98,6 +98,51 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
 })
 
+test("daemon workforce event stream rejects inactive repositories", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
+  const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-ipc-"))
+  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+
+  const daemon = await startDaemonServer(
+    {
+      auth: {
+        startDeviceFlow: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        completeDeviceFlow: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        logout: async () => {},
+      },
+      pr: {
+        create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
+        reply: async () => ({ success: true }),
+      },
+    },
+    {
+      socketPath: join(socketDir, "daemon.sock"),
+    },
+  )
+  cleanup.push(async () => {
+    await daemon.close()
+    await rm(socketDir, { recursive: true, force: true })
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
+
+  await expect(
+    client.subscribe({ name: "workforceEvent", filter: { rootDir } }, () => {}),
+  ).rejects.toThrow(`No workforce is running for ${normalizedRootDir}`)
+})
+
 test("workforce manager reuses one runtime per normalized repository root", async () => {
   const created: string[] = []
   const manager = createWorkforceManager({
