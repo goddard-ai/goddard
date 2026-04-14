@@ -223,7 +223,7 @@ test(
 
     const configManager = createConfigManager()
     cleanup.push(() => configManager.close())
-    const daemon = await startServer(configManager)
+    const daemon = await startServer(configManager, { useSetupContext: true })
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstExitCode = await runPrFeedbackFlow({
