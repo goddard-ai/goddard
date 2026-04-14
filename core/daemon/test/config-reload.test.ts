@@ -6,6 +6,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createConfigManager } from "../src/config-manager.ts"
+import { resolveRuntimeConfig } from "../src/config.ts"
+import { SetupContext } from "../src/context.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
@@ -167,7 +169,7 @@ test(
 
     const configManager = createConfigManager()
     cleanup.push(() => configManager.close())
-    const daemon = await startServer(configManager)
+    const daemon = await startServer(configManager, { useSetupContext: true })
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstRun = await client.send("actionRun", {
@@ -294,42 +296,56 @@ function createFeedbackEvent(): FeedbackEvent {
   }
 }
 
-async function startServer(configManager: ReturnType<typeof createConfigManager>) {
+async function startServer(
+  configManager: ReturnType<typeof createConfigManager>,
+  options: { useSetupContext?: boolean } = {},
+) {
   const socketDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-daemon-"))
-  const daemon = await startDaemonServer(
-    {
-      auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        whoami: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        logout: async () => {},
-      },
-      pr: {
-        create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
-        reply: async () => ({ success: true }),
-      },
+  const runtime = resolveRuntimeConfig({
+    socketPath: join(socketDir, "daemon.sock"),
+  })
+  const daemonClient = {
+    auth: {
+      startDeviceFlow: async () => ({
+        deviceCode: "dev_1",
+        userCode: "ABCD-1234",
+        verificationUri: "https://github.com/login/device",
+        expiresIn: 900,
+        interval: 5,
+      }),
+      completeDeviceFlow: async () => ({
+        token: "tok_1",
+        githubUsername: "alec",
+        githubUserId: 42,
+      }),
+      whoami: async () => ({
+        token: "tok_1",
+        githubUsername: "alec",
+        githubUserId: 42,
+      }),
+      logout: async () => {},
     },
-    {
-      socketPath: join(socketDir, "daemon.sock"),
+    pr: {
+      create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
+      reply: async () => ({ success: true }),
     },
-    {
-      configManager,
-    },
-  )
+  }
+  const daemon = options.useSetupContext
+    ? await SetupContext.run({ runtime, configManager }, () =>
+        startDaemonServer(daemonClient, {
+          socketPath: runtime.socketPath,
+          agentBinDir: runtime.agentBinDir,
+        }),
+      )
+    : await startDaemonServer(
+        daemonClient,
+        {
+          socketPath: runtime.socketPath,
+        },
+        {
+          configManager,
+        },
+      )
   cleanup.push(async () => {
     await daemon.close()
     await rm(socketDir, { recursive: true, force: true })
