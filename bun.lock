@@ -30,6 +30,7 @@
       "name": "@goddard-ai/app",
       "version": "0.1.0",
       "dependencies": {
+        "@agentclientprotocol/sdk": "^0.19.0",
         "@ark-ui/react": "^5.36.0",
         "@chenglou/pretext": "^0.0.3",
         "@goddard-ai/daemon-client": "workspace:^",
@@ -115,7 +116,7 @@
         "goddard-daemon": "./dist/main.mjs",
       },
       "dependencies": {
-        "@agentclientprotocol/sdk": "^0.15.0",
+        "@agentclientprotocol/sdk": "^0.19.0",
         "@ai-sdk/anthropic": "^3.0.69",
         "@ai-sdk/google": "^3.0.62",
         "@ai-sdk/openai": "^3.0.52",
@@ -180,7 +181,7 @@
       "name": "@goddard-ai/schema",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "^0.15.0",
+        "@agentclientprotocol/sdk": "^0.19.0",
         "@goddard-ai/ipc": "workspace:^",
         "ai-sdk-json-schema": "^0.1.0",
         "rouzer": "^2.0.0",
@@ -191,7 +192,7 @@
       "name": "@goddard-ai/sdk",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "^0.15.0",
+        "@agentclientprotocol/sdk": "^0.19.0",
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
@@ -218,7 +219,7 @@
     },
   },
   "packages": {
-    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@0.15.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-TH4utu23Ix8ec34srBHmDD4p3HI0cYleS1jN9lghRczPfhFlMBNrQgZWeBBe12DWy27L11eIrtciY2MXFSEiDg=="],
+    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@0.19.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-U9I8ws9WTOk6jCBAWpXefGSDgVXn14/kV6HFzwWGcstQ02mOQgClMAROHmoIn9GqZbDBDEOkdIbP4P4TEMQdug=="],
 
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@3.0.69", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.23" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-LshR7X3pFugY0o41G2VKTmg1XoGpSl7uoYWfzk6zjVZLhCfeFiwgpOga+eTV4XY1VVpZwKVqRnkDbIL7K2eH5g=="],
 

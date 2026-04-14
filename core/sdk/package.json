@@ -29,7 +29,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.15.0",
+    "@agentclientprotocol/sdk": "^0.19.0",
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/schema": "workspace:^"

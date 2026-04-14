@@ -35,7 +35,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.15.0",
+    "@agentclientprotocol/sdk": "^0.19.0",
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.62",
     "@ai-sdk/openai": "^3.0.52",

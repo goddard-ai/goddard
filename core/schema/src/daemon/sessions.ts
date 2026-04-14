@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
+
 import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId, DaemonSessionIdParams } from "../common/params.ts"
@@ -65,6 +66,7 @@ export const SessionWorktree = z.strictObject({
 })
 
 export type SessionWorktree = z.infer<typeof SessionWorktree>
+
 /** Request payload used to create one daemon-managed session. */
 export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
@@ -297,9 +299,7 @@ export type SyncSessionWorktreeRequest = z.infer<typeof SyncSessionWorktreeReque
 /** Request payload used to unmount sync from one daemon-managed session worktree. */
 export const UnmountSessionWorktreeSyncRequest = DaemonSessionIdParams
 
-export type UnmountSessionWorktreeSyncRequest = z.infer<
-  typeof UnmountSessionWorktreeSyncRequest
->
+export type UnmountSessionWorktreeSyncRequest = z.infer<typeof UnmountSessionWorktreeSyncRequest>
 
 /** Response payload returned after one daemon-managed worktree sync mutation. */
 export type MutateSessionWorktreeResponse = SessionIdentity & {

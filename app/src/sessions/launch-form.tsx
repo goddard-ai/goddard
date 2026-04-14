@@ -1,8 +1,12 @@
+import { type ListAdaptersResponse } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
-import type { AdapterCatalogEntry } from "@goddard-ai/sdk"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { computed, createModel, signal } from "@preact/signals"
+import { Suspense } from "preact/compat"
 
+import { useQuery } from "~/lib/query.ts"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
+import { goddardSdk } from "~/sdk.ts"
 
 const fieldClass = css({
   display: "grid",
@@ -34,20 +38,124 @@ const controlClass = css({
   },
 })
 
-export function LaunchForm(props: {
-  adapters: readonly AdapterCatalogEntry[]
-  canSubmit: boolean
-  draftAdapterId: string | null
-  draftProjectPath: string | null
-  draftPrompt: string
-  onChangeAdapterId: (adapterId: string | null) => void
-  onChangeProjectPath: (projectPath: string | null) => void
-  onChangePrompt: (prompt: string) => void
+/** Session launch form state shared across the dialog and form body. */
+export const SessionLaunchFormState = createModel(function () {
+  const draftAdapterId = signal<string | null>(null)
+  const draftProjectPath = signal<string | null>(null)
+  const draftPrompt = signal("")
+  const adapterCatalog = signal<ListAdaptersResponse | null>(null)
+
+  const sessionInput = computed(() => {
+    const agent = draftAdapterId.value
+    const cwd = draftProjectPath.value
+    const initialPrompt = draftPrompt.value
+
+    if (!agent || !cwd || !initialPrompt) {
+      return null
+    }
+
+    return {
+      agent,
+      cwd,
+      mcpServers: [],
+      systemPrompt: "",
+      initialPrompt,
+    }
+  })
+  const selectedAdapter = computed(
+    () =>
+      adapterCatalog.value?.adapters.find((adapter) => adapter.id === draftAdapterId.value) ?? null,
+  )
+
+  function syncAdapterSelection(nextAdapterCatalog: ListAdaptersResponse | null) {
+    if (!nextAdapterCatalog) {
+      draftAdapterId.value = null
+      return
+    }
+
+    const availableAdapterIds = new Set(nextAdapterCatalog.adapters.map((adapter) => adapter.id))
+    const nextAdapterId =
+      draftAdapterId.value && availableAdapterIds.has(draftAdapterId.value)
+        ? draftAdapterId.value
+        : nextAdapterCatalog.defaultAdapterId &&
+            availableAdapterIds.has(nextAdapterCatalog.defaultAdapterId)
+          ? nextAdapterCatalog.defaultAdapterId
+          : (nextAdapterCatalog.adapters[0]?.id ?? null)
+
+    if (draftAdapterId.value !== nextAdapterId) {
+      draftAdapterId.value = nextAdapterId
+    }
+  }
+
+  adapterCatalog.subscribe(syncAdapterSelection)
+
+  return {
+    adapterCatalog,
+    canSubmit: computed(() => sessionInput.value !== null),
+    draftAdapterId,
+    draftProjectPath,
+    draftPrompt,
+    reset(preferredProjectPath: string | null = null) {
+      const previousProjectPath = draftProjectPath.value
+      draftAdapterId.value = null
+      draftProjectPath.value = preferredProjectPath
+      draftPrompt.value = ""
+
+      if (preferredProjectPath === previousProjectPath) {
+        syncAdapterSelection(adapterCatalog.value)
+      }
+    },
+    selectedAdapter,
+    sessionInput,
+  }
+})
+
+/** One live model instance for the session launch dialog form. */
+export type SessionLaunchFormState = InstanceType<typeof SessionLaunchFormState>
+
+/** Resolves the adapter list for the selected project and writes it into the form model. */
+function AdapterSelect(props: { form: SessionLaunchFormState }) {
+  const { form } = props
+  const adapterCatalog = useQuery(goddardSdk.adapter.list, [
+    { cwd: form.draftProjectPath.value ?? undefined },
+  ])
+
+  form.adapterCatalog.value = adapterCatalog
+
+  return (
+    <select
+      class={cx(
+        controlClass,
+        css({
+          height: "48px",
+          paddingInline: "16px",
+        }),
+      )}
+      value={form.draftAdapterId.value ?? ""}
+      onInput={(event) => {
+        form.draftAdapterId.value = event.currentTarget.value || null
+      }}
+    >
+      <option value="">Select an adapter</option>
+      {adapterCatalog.adapters.map((adapter) => (
+        <option key={adapter.id} value={adapter.id}>
+          {adapter.name}
+          {adapter.unofficial ? " (Unofficial)" : ""}
+          {` · ${adapter.version}`}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+/** Renders the session launch form around one shared form model object. */
+export function SessionLaunchForm(props: {
+  form: SessionLaunchFormState
   onSubmit: () => Promise<void> | void
   projects: readonly ProjectRecord[]
 }) {
-  const selectedAdapter =
-    props.adapters.find((adapter) => adapter.id === props.draftAdapterId) ?? null
+  const { form } = props
+  const selectedAdapter = form.selectedAdapter.value
 
   return (
     <form
@@ -70,9 +178,9 @@ export function LaunchForm(props: {
               paddingInline: "16px",
             }),
           )}
-          value={props.draftProjectPath ?? ""}
+          value={form.draftProjectPath.value ?? ""}
           onInput={(event) => {
-            props.onChangeProjectPath(event.currentTarget.value || null)
+            form.draftProjectPath.value = event.currentTarget.value || null
           }}
         >
           <option value="">Select a project</option>
@@ -83,31 +191,29 @@ export function LaunchForm(props: {
           ))}
         </select>
       </label>
+
       <label class={fieldClass}>
         <span class={labelClass}>Adapter</span>
-        <select
-          class={cx(
-            controlClass,
-            css({
-              height: "48px",
-              paddingInline: "16px",
-            }),
-          )}
-          value={props.draftAdapterId ?? ""}
-          onInput={(event) => {
-            props.onChangeAdapterId(event.currentTarget.value || null)
-          }}
+        <Suspense
+          fallback={
+            <select
+              class={cx(
+                controlClass,
+                css({
+                  height: "48px",
+                  paddingInline: "16px",
+                }),
+              )}
+              disabled
+            >
+              <option>Loading adapters...</option>
+            </select>
+          }
         >
-          <option value="">Select an adapter</option>
-          {props.adapters.map((adapter) => (
-            <option key={adapter.id} value={adapter.id}>
-              {adapter.name}
-              {adapter.unofficial ? " (Unofficial)" : ""}
-              {` · ${adapter.version}`}
-            </option>
-          ))}
-        </select>
+          <AdapterSelect form={form} />
+        </Suspense>
       </label>
+
       {selectedAdapter ? (
         <div
           class={css({
@@ -158,6 +264,7 @@ export function LaunchForm(props: {
           </p>
         </div>
       ) : null}
+
       <label class={fieldClass}>
         <span class={labelClass}>Launch prompt</span>
         <textarea
@@ -171,12 +278,13 @@ export function LaunchForm(props: {
             }),
           )}
           placeholder="Describe the first thing this session should do."
-          value={props.draftPrompt}
+          value={form.draftPrompt.value}
           onInput={(event) => {
-            props.onChangePrompt(event.currentTarget.value)
+            form.draftPrompt.value = event.currentTarget.value
           }}
         />
       </label>
+
       <div
         class={css({
           display: "flex",
@@ -204,7 +312,7 @@ export function LaunchForm(props: {
               opacity: "0.52",
             },
           })}
-          disabled={!props.canSubmit}
+          disabled={!form.canSubmit.value}
           type="submit"
         >
           Launch session

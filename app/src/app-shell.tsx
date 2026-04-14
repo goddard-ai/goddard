@@ -1,4 +1,3 @@
-import { useDialog } from "@ark-ui/react/dialog"
 import {
   FolderKanban,
   FolderOpen,
@@ -10,7 +9,6 @@ import {
   ScrollText,
 } from "lucide-react"
 import { useListener } from "preact-sigma"
-import { lazy, Suspense } from "preact/compat"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { AppearanceDialog } from "~/appearance/appearance-dialog.tsx"
@@ -29,12 +27,11 @@ import {
   useWorkbenchTabSet,
 } from "./app-state-context.tsx"
 import { CommandMenu } from "./command-menu.tsx"
+import { CommandDialog } from "./commands/command-dialog.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { deriveProjectName } from "./projects/project-name.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
-
-const SessionLaunchDialog = lazy(() => import("~/sessions/dialog.tsx"))
 
 function useAppShellTabStrip(
   activeTabId: string,
@@ -267,11 +264,6 @@ export function AppShell() {
     }
   })
 
-  const sessionLaunchDialog = useDialog()
-  useAppCommand(AppCommand.newSession, () => {
-    sessionLaunchDialog.setOpen(true)
-  })
-
   useAppCommand(AppCommand.openKeyboardShortcuts, () => {
     workbenchTabSet.openOrFocusTab({
       id: "workbench:keyboard-shortcuts",
@@ -402,11 +394,10 @@ export function AppShell() {
           selectedNavId={navigation.selectedNavId}
         />
       </AppShellChrome>
-      {sessionLaunchDialog.open && (
-        <Suspense fallback={<div />}>
-          <SessionLaunchDialog />
-        </Suspense>
-      )}
+      <CommandDialog
+        command={AppCommand.newSession}
+        content={() => import("~/sessions/dialog.tsx")}
+      />
       <AppearanceDialog
         isOpen={isAppearanceDialogOpen}
         onOpenChange={(isOpen) => {
