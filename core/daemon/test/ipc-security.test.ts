@@ -381,21 +381,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
     includeRootDir: false,
   })
 
-  const daemon = await startServer({
-    auth: {
-      getSessionByToken: async (candidateToken) =>
-        candidateToken === token
-          ? {
-              sessionId,
-              owner: "trusted",
-              repo: "widgets",
-              allowedPrNumbers: [],
-            }
-          : null,
-      addAllowedPr: async () => undefined,
-    },
-    createWorkforceManager: () => createStaticWorkforceManager(() => {}),
-  })
+  const daemon = await startServer({ useExistingHome: true })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
