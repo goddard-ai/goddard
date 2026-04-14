@@ -1,6 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getLocalConfigPath } from "@goddard-ai/paths/node"
-import { getGlobalConfigPath } from "@goddard-ai/paths/node"
+import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"

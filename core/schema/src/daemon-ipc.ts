@@ -1,5 +1,6 @@
 import { $type, IpcSchema } from "@goddard-ai/ipc"
 import { z } from "zod"
+
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { DaemonSessionIdParams } from "./common/params.ts"
 import { type ListAdaptersResponse, ListAdaptersRequest } from "./daemon-adapters.ts"
@@ -29,12 +30,9 @@ import {
   type GetSessionWorkforceResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
-  type MountSessionWorktreeSyncRequest,
   type MutateSessionWorktreeResponse,
   type ShutdownSessionResponse,
-  type SyncSessionWorktreeRequest,
   type SteerSessionResponse,
-  type UnmountSessionWorktreeSyncRequest,
   CancelSessionRequest,
   CreateSessionRequest,
   ListSessionsRequest,

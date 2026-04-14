@@ -4,11 +4,6 @@ import type { ToJSONSchemaParams } from "zod/v4/core"
 
 import { ActionConfig, LoopConfig, UserConfig, registerConfigSchemas } from "./config.ts"
 
-type GeneratedSchemaArtifact = {
-  name: string
-  jsonSchema: Record<string, unknown>
-}
-
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }

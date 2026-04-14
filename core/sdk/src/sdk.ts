@@ -2,7 +2,6 @@ import type * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
-import type { ListAdaptersRequest } from "@goddard-ai/schema/daemon"
 import type {
   CancelSessionRequest,
   CancelWorkforceRequest,
@@ -10,6 +9,7 @@ import type {
   CreateWorkforceRequest,
   DiscoverWorkforceCandidatesRequest,
   GetLoopRequest,
+  ListAdaptersRequest,
   GetWorkforceRequest,
   InitializeWorkforceRequest,
   ListSessionsRequest,
@@ -34,10 +34,14 @@ import type {
   UpdateWorkforceRequest,
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
-import type { SessionParams } from "./session.ts"
+
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
-import { createSessionPromptMessage, type SessionPromptRequest } from "./session.ts"
+import {
+  createSessionPromptMessage,
+  type SessionParams,
+  type SessionPromptRequest,
+} from "./session.ts"
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
