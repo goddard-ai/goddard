@@ -6,15 +6,15 @@ import {
   resolveShortcutBindings,
 } from "./shortcut-keymap.ts"
 
-const newSession = "newSession" as const
-const openInbox = "openInbox" as const
-const openKeyboardShortcuts = "openKeyboardShortcuts" as const
-const closeActiveTab = "closeActiveTab" as const
-const openSessions = "openSessions" as const
-const openSearch = "openSearch" as const
-const openSpecs = "openSpecs" as const
-const openTasks = "openTasks" as const
-const openRoadmap = "openRoadmap" as const
+const newSession = "navigation.openNewSessionDialog" as const
+const openInbox = "navigation.openInbox" as const
+const openKeyboardShortcuts = "navigation.openKeyboardShortcuts" as const
+const closeActiveTab = "workbench.closeActiveTab" as const
+const openSessions = "navigation.openSessions" as const
+const openSearch = "navigation.openSearch" as const
+const openSpecs = "navigation.openSpecs" as const
+const openTasks = "navigation.openTasks" as const
+const openRoadmap = "navigation.openRoadmap" as const
 
 test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
   expect(
@@ -36,7 +36,7 @@ test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
   })
 })
 
-test("parseShortcutKeymapFile rejects empty override arrays and unknown command ids", () => {
+test("parseShortcutKeymapFile ignores unknown command ids and rejects empty override arrays", () => {
   expect(
     parseShortcutKeymapFile({
       version: 1,
@@ -45,7 +45,11 @@ test("parseShortcutKeymapFile rejects empty override arrays and unknown command 
         unknown: ["Mod+k"],
       },
     }),
-  ).toBeNull()
+  ).toEqual({
+    version: 1,
+    profile: "goddard",
+    overrides: {},
+  })
 
   expect(
     parseShortcutKeymapFile({
@@ -67,7 +71,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
       [openInbox]: null,
     }),
   ).toEqual({
-    [closeActiveTab]: ["Mod+w"],
+    [closeActiveTab]: [{ combo: "Mod+w", when: "workbench.hasClosableActiveTab" }],
     [newSession]: ["Mod+Shift+n"],
     [openSessions]: ["Alt+2"],
     [openSearch]: ["Alt+3"],
