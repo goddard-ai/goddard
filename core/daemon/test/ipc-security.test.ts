@@ -116,15 +116,21 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
 })
 
 test("daemon submit request enforces trusted repo context and records created PR access", async () => {
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "evil",
+    repo: "fork",
+    branch: "feature/secure-daemon",
+  })
+  seedAuthorizedSession({
+    sessionId: "ses_42",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+
   const createCalls: Array<Record<string, unknown>> = []
-  const recordedPrs: Array<{ sessionId: string; prNumber: number }> = []
-  const recordedLocations: Array<{
-    host: "github"
-    owner: string
-    repo: string
-    prNumber: number
-    cwd: string
-  }> = []
 
   const daemon = await startServer({
     sdk: {
@@ -155,43 +161,14 @@ test("daemon submit request enforces trusted repo context and records created PR
         reply: async () => ({ success: true }),
       },
     },
-    auth: {
-      getSessionByToken: async (token) => {
-        expect(token).toBe("tok_session")
-        return {
-          sessionId: "ses_42",
-          owner: "trusted",
-          repo: "widgets",
-          allowedPrNumbers: [],
-        }
-      },
-      addAllowedPr: async (sessionId, prNumber) => {
-        recordedPrs.push({ sessionId, prNumber })
-      },
-    },
-    recordPullRequest: async (record) => {
-      recordedLocations.push(record)
-      return {
-        id: db.pullRequests.newId(),
-        ...record,
-        updatedAt: Date.now(),
-      }
-    },
-    resolveSubmitRequest: async () => ({
-      owner: "evil",
-      repo: "fork",
-      title: "Ship daemon security",
-      body: "Done.",
-      head: "feature/secure-daemon",
-      base: "main",
-    }),
+    useExistingHome: true,
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
     await client.send("prSubmit", {
       token: "tok_session",
-      cwd: process.cwd(),
+      cwd: repoDir,
       title: "Ship daemon security",
       body: "Done.",
     })
@@ -207,14 +184,22 @@ test("daemon submit request enforces trusted repo context and records created PR
       base: "main",
     },
   ])
-  expect(recordedPrs).toEqual([{ sessionId: "ses_42", prNumber: 42 }])
-  expect(recordedLocations).toEqual([
+  expect(db.sessions.get("ses_42")?.permissions?.allowedPrNumbers).toEqual([42])
+  expect(
+    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }) => ({
+      host,
+      owner,
+      repo,
+      prNumber,
+      cwd,
+    })),
+  ).toEqual([
     {
       host: "github",
       owner: "trusted",
       repo: "widgets",
       prNumber: 42,
-      cwd: process.cwd(),
+      cwd: repoDir,
     },
   ])
 
