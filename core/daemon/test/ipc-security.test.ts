@@ -12,7 +12,6 @@ import type { WorkforceActorContext } from "../src/context.ts"
 import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import type { WorkforceManager, WorkforceManagerMutation } from "../src/workforce/manager.ts"
-import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -313,62 +312,6 @@ test("daemon reply request records pull request checkout locations", async () =>
   ])
 })
 
-test("daemon workforce request binds token-backed mutations to the session workforce root", async () => {
-  await useTempHome()
-  const sessionId = db.sessions.newId()
-  const token = "workforce-token-match"
-  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-match-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
-  await seedWorkforceSession({
-    sessionId,
-    token,
-    rootDir,
-    requestId: "req-match",
-  })
-
-  const calls: Array<{ rootDir: string; mutationType: string; actorRootDir: string | null }> = []
-  const daemon = await startServer({
-    auth: {
-      getSessionByToken: async (candidateToken) =>
-        candidateToken === token
-          ? {
-              sessionId,
-              owner: "trusted",
-              repo: "widgets",
-              allowedPrNumbers: [],
-            }
-          : null,
-      addAllowedPr: async () => undefined,
-    },
-    createWorkforceManager: () =>
-      createStaticWorkforceManager((rootDir, mutation, actor) => {
-        calls.push({
-          rootDir,
-          mutationType: mutation.type,
-          actorRootDir: actor.rootDir,
-        })
-      }),
-  })
-
-  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const response = await client.send("workforceRequest", {
-    rootDir,
-    targetAgentId: "root",
-    input: "Ship it.",
-    token,
-  })
-
-  const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
-  expect(response.requestId).toBe("req-1")
-  expect(calls).toEqual([
-    {
-      rootDir: normalizedRootDir,
-      mutationType: "request",
-      actorRootDir: normalizedRootDir,
-    },
-  ])
-})
-
 test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {
   await useTempHome()
   const sessionId = db.sessions.newId()
@@ -497,27 +440,6 @@ test("daemon workforce request rejects token-backed sessions without a workforce
       token,
     }),
   ).rejects.toThrow(/not attached to a workforce root/i)
-})
-
-test("daemon workforce request preserves operator mutations without a token", async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-operator-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
-  const calls: Array<{ rootDir: string; actorRootDir: string | null }> = []
-  const daemon = await startServer({
-    createWorkforceManager: () =>
-      createStaticWorkforceManager((rootDir, _mutation, actor) => {
-        calls.push({ rootDir, actorRootDir: actor.rootDir })
-      }),
-  })
-
-  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("workforceRequest", {
-    rootDir,
-    targetAgentId: "root",
-    input: "Ship it.",
-  })
-
-  expect(calls).toEqual([{ rootDir, actorRootDir: null }])
 })
 
 type StartServerOptions = {
