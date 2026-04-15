@@ -1,11 +1,12 @@
 import { css } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 import { Folder } from "lucide-react"
 import { Suspense } from "preact/compat"
 import { useEffect } from "preact/hooks"
 
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { Composer } from "~/session-chat/composer.tsx"
+import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsx"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsx"
 import {
   sessionLaunchAdapterCardClass,
@@ -16,6 +17,77 @@ import {
   SessionLaunchPreviewSelectors,
 } from "./launch-form-selectors.tsx"
 import { filterSlashCommandSuggestions, type SessionLaunchFormState } from "./launch-form-state.ts"
+
+const launchInputClasses = {
+  form: css({
+    display: "grid",
+    gap: "12px",
+  }),
+  editorFrame: css({
+    position: "relative",
+    borderRadius: "14px",
+    border: "1px solid",
+    borderColor: "border",
+    backgroundColor: "background",
+    transition:
+      "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    _focusWithin: {
+      borderColor: "accentStrong",
+      boxShadow: `0 0 0 3px color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent)`,
+    },
+  }),
+  contentEditable: css({
+    width: "100%",
+    minHeight: "124px",
+    padding: "12px 14px",
+    color: "text",
+    fontSize: "0.9rem",
+    lineHeight: "1.55",
+    outline: "none",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  }),
+  placeholder: css({
+    position: "absolute",
+    inset: "12px 14px auto",
+    color: "muted",
+    fontSize: "0.9rem",
+    lineHeight: "1.55",
+    pointerEvents: "none",
+  }),
+  footer: css({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  }),
+  helperText: css({
+    color: "muted",
+    fontSize: "0.82rem",
+    lineHeight: "1.55",
+  }),
+  submitButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    minWidth: "124px",
+    height: "40px",
+    paddingInline: "14px",
+    borderRadius: "12px",
+    border: "1px solid",
+    borderColor: "accent",
+    backgroundColor: "surface",
+    color: "text",
+    fontSize: "0.88rem",
+    fontWeight: "640",
+    cursor: "pointer",
+    _disabled: {
+      cursor: "not-allowed",
+      opacity: "0.52",
+    },
+  }),
+} satisfies SessionInputClasses
 
 export function SessionLaunchForm(props: {
   form: SessionLaunchFormState
@@ -124,8 +196,8 @@ export function SessionLaunchForm(props: {
         <SessionLaunchPreviewSelectors form={form} />
       </Suspense>
 
-      <Composer
-        appearance="launch"
+      <SessionInput
+        classes={launchInputClasses}
         helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
         loadSuggestions={async (input) => {
           const cwd = form.draftProjectPath.value
