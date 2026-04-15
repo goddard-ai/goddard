@@ -1,5 +1,6 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import {
   GODDARD_ACP_REGISTRY_CACHE_DIRECTORY,
   GODDARD_CACHE_DIRECTORY_NAME,
@@ -7,6 +8,7 @@ import {
   GODDARD_CONFIG_FILENAME,
   GODDARD_DATABASE_FILENAME,
   GODDARD_DAEMON_SOCKET_FILENAME,
+  GODDARD_DEVELOPMENT_DATA_DIRECTORY,
   GODDARD_DIRECTORY_NAME,
   GODDARD_MANAGED_PR_LOCATIONS_FILENAME,
   GODDARD_SESSION_PERMISSIONS_FILENAME,
@@ -18,6 +20,13 @@ import {
 /** Resolves the active home directory, preferring an explicit override for tests and Bun runs. */
 function resolveHomeDir(): string {
   return process.env.HOME || homedir()
+}
+
+/** Returns whether the active process should isolate daemon persistence under the development root. */
+function usesDevelopmentDataProfile(): boolean {
+  return (
+    process.env.GODDARD_DATA_PROFILE === "development" || process.env.NODE_ENV === "development"
+  )
 }
 
 /** Returns the user-scoped global `.goddard` directory. */
@@ -77,6 +86,14 @@ export function getAuthTokenPath(): string {
 
 /** Returns the daemon SQLite database path. */
 export function getDatabasePath(): string {
+  if (usesDevelopmentDataProfile()) {
+    return join(
+      getGoddardGlobalDir(),
+      GODDARD_DEVELOPMENT_DATA_DIRECTORY,
+      GODDARD_DATABASE_FILENAME,
+    )
+  }
+
   return join(getGoddardGlobalDir(), GODDARD_DATABASE_FILENAME)
 }
 

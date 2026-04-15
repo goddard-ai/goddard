@@ -16,6 +16,9 @@ export const GODDARD_AUTH_TOKEN_FILENAME = "credentials.json"
 /** Filename used for the daemon SQLite database. */
 export const GODDARD_DATABASE_FILENAME = "goddard.db"
 
+/** Directory name used for development-only daemon persistence. */
+export const GODDARD_DEVELOPMENT_DATA_DIRECTORY = "development"
+
 /** Directory name used for daemon session-state JSON payloads. */
 export const GODDARD_SESSION_STATE_DIRECTORY = "session-state"
 

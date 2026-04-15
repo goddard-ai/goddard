@@ -6,6 +6,7 @@ import { Updater } from "electrobun/bun"
 import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
+
 import {
   daemonServiceName,
   embeddedRuntimeDirName,
@@ -88,6 +89,16 @@ async function resolveDaemonBaseUrl() {
   return channel === "dev" ? "http://127.0.0.1:8787" : "https://goddardai.org/api"
 }
 
+/** Returns the daemon data profile the desktop host should install for the active app channel. */
+async function resolveDaemonDataProfile() {
+  if (process.env.GODDARD_DATA_PROFILE) {
+    return process.env.GODDARD_DATA_PROFILE
+  }
+
+  const channel = await Updater.localInfo.channel()
+  return channel === "dev" ? "development" : undefined
+}
+
 /** Reads the last runtime hash installed by the desktop app when present. */
 async function readInstalledDaemonState() {
   const source = await readFile(daemonInstallStatePath, "utf8").catch(() => null)
@@ -133,6 +144,7 @@ async function installUnixDaemonService(
   runtime: PreparedDaemonRuntime,
   baseUrl: string,
 ) {
+  const dataProfile = await resolveDaemonDataProfile()
   const servicemanLauncherPath = join(
     resolveEmbeddedRuntimeRoot(),
     manifest.serviceman.launcherPath,
@@ -171,6 +183,10 @@ async function installUnixDaemonService(
     runtime.agentBinDir,
   )
 
+  if (dataProfile) {
+    args.push("--data-profile", dataProfile)
+  }
+
   runManagedCommand(args, {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME,
@@ -179,6 +195,7 @@ async function installUnixDaemonService(
 
 /** Installs the daemon autostart entry in the user Run registry and launches the current binary now. */
 async function installWindowsDaemonStartup(runtime: PreparedDaemonRuntime, baseUrl: string) {
+  const dataProfile = await resolveDaemonDataProfile()
   const daemonArgs = [
     runtime.daemonExecutablePath,
     "run",
@@ -189,6 +206,11 @@ async function installWindowsDaemonStartup(runtime: PreparedDaemonRuntime, baseU
     "--agent-bin-dir",
     runtime.agentBinDir,
   ]
+
+  if (dataProfile) {
+    daemonArgs.push("--data-profile", dataProfile)
+  }
+
   const runKeyCommand = daemonArgs.map(quoteWindowsCommandArgument).join(" ")
 
   runManagedCommand([

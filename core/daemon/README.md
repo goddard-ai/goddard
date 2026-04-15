@@ -17,6 +17,7 @@ The daemon now resolves its runtime configuration from one explicit contract:
 - Backend URL: `--base-url` or `GODDARD_BASE_URL`
 - IPC socket path: `--socket-path` or `GODDARD_DAEMON_SOCKET_PATH`
 - Agent wrapper directory: `--agent-bin-dir` or `GODDARD_AGENT_BIN_DIR`
+- Data profile: `--data-profile` or `GODDARD_DATA_PROFILE`
 
 When the daemon launches agent sessions, it prepends the resolved agent-bin directory to `PATH` and injects:
 
@@ -44,7 +45,7 @@ Custom worktree plugins are loaded from the global Goddard config only. The daem
 }
 ```
 
-If no values are provided, the daemon falls back to the standard local backend URL and the default socket path under `~/.goddard`.
+If no values are provided, the daemon falls back to the standard local backend URL and the default socket path under `~/.goddard`. The default data profile keeps kindstore data in `~/.goddard/goddard.db`; the `development` data profile isolates it under `~/.goddard/development/goddard.db`.
 
 ## Standalone Build
 

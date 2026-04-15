@@ -3,6 +3,6 @@
   "include": ["./**/*.ts"],
   "exclude": [],
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["bun", "node"]
   }
 }

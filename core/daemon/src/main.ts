@@ -15,6 +15,7 @@ import {
 declare const __VERSION__: string
 
 const daemonRunFeatures = ["ipc", "stream"] as const
+const daemonDataProfiles = ["development", "production"] as const
 
 /** Falls back to a placeholder version when the build-time constant is unavailable. */
 function getPackageVersion(): string {
@@ -54,6 +55,15 @@ function resolveLogMode(options: { json: boolean; verbose: boolean }) {
   return "pretty" as const
 }
 
+/** Persists the selected daemon data profile before runtime modules initialize the store. */
+function applyDataProfile(value?: (typeof daemonDataProfiles)[number]) {
+  if (!value) {
+    return
+  }
+
+  process.env.GODDARD_DATA_PROFILE = value
+}
+
 /** Runs the daemon CLI with the provided process arguments. */
 export async function main(argv = process.argv.slice(2)) {
   const app = subcommands({
@@ -81,6 +91,12 @@ export async function main(argv = process.argv.slice(2)) {
             long: "agent-bin-dir",
             description: "Directory containing agent executables used by daemon-managed sessions",
           }),
+          dataProfile: option({
+            type: optional(oneOf(daemonDataProfiles)),
+            long: "data-profile",
+            description:
+              "Persistence profile for daemon-managed data. Use development to isolate local dev data from the default profile.",
+          }),
           json: flag({
             long: "json",
             description: "Render raw structured daemon logs as JSON lines",
@@ -97,6 +113,8 @@ export async function main(argv = process.argv.slice(2)) {
           }),
         },
         handler: async (args) => {
+          applyDataProfile(args.dataProfile)
+
           // Load the runtime only when executing `run` so `--help` stays side-effect free.
           const { runDaemon } = await import("./daemon.ts")
           const featureFlags = resolveRunFeatureFlags(args.features)
