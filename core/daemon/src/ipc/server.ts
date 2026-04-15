@@ -6,6 +6,7 @@ import type { DaemonSession, SubscribeWorkforceEventsRequest } from "@goddard-ai
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
+
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
@@ -16,6 +17,11 @@ import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/
 import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createSessionManager, type SessionManager } from "../session/manager.ts"
 import {
+  createConfigAdapterCatalogEntries,
+  mergeAdapterCatalogEntries,
+} from "../session/registry-catalog.ts"
+import { createACPRegistryService } from "../session/registry.ts"
+import {
   discoverWorkforceInitCandidates,
   initializeWorkforce,
   resolveRepositoryRoot,
@@ -24,11 +30,6 @@ import { createWorkforceManager, type WorkforceManager } from "../workforce/inde
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
-import { createACPRegistryService } from "../session/registry.ts"
-import {
-  createConfigAdapterCatalogEntries,
-  mergeAdapterCatalogEntries,
-} from "../session/registry-catalog.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
 
 export async function startDaemonServer(
@@ -93,9 +94,7 @@ export async function startDaemonServer(
     })
   }
 
-  async function recordPullRequest(
-    record: Parameters<typeof db.pullRequests.create>[0],
-  ) {
+  async function recordPullRequest(record: Parameters<typeof db.pullRequests.create>[0]) {
     const existingRecord =
       db.pullRequests.first({
         where: {
@@ -305,8 +304,8 @@ export async function startDaemonServer(
         session: await sessionManager.connectSession(id),
       }
     },
-    sessionHistory: async ({ id }) => {
-      return sessionManager.getHistory(id)
+    sessionHistory: async (params) => {
+      return sessionManager.getHistory(params)
     },
     sessionComposerSuggestions: async (payload) => {
       return sessionManager.getComposerSuggestions(payload)

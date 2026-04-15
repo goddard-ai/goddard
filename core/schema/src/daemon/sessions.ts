@@ -6,6 +6,9 @@ import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId, DaemonSessionIdParams } from "../common/params.ts"
 import {
   DaemonSessionMetadata,
+  DaemonSessionStopReason,
+  DaemonSessionTurnCompletionKind,
+  DaemonSessionTurnPromptRequestId,
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
   type DaemonWorkforce,
@@ -97,6 +100,14 @@ export type ListSessionsRequest = z.infer<typeof ListSessionsRequest>
 export const SessionPathParams = DaemonSessionIdParams
 
 export type SessionPathParams = z.infer<typeof SessionPathParams>
+
+/** Request payload used to read one page of daemon-managed session turn history. */
+export const GetSessionHistoryRequest = DaemonSessionIdParams.extend({
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+})
+
+export type GetSessionHistoryRequest = z.infer<typeof GetSessionHistoryRequest>
 
 /** Trigger categories supported by the session chat composer suggestion API. */
 export const SessionComposerSuggestionTrigger = z.enum(["at", "dollar", "slash"])
@@ -269,10 +280,39 @@ export type GetSessionResponse = {
   session: DaemonSession
 }
 
+/** One persisted or in-progress prompt turn returned by the session history API. */
+export const SessionHistoryTurn = z.strictObject({
+  turnId: z.string(),
+  sequence: z.number().int().nonnegative(),
+  promptRequestId: DaemonSessionTurnPromptRequestId,
+  startedAt: z.string(),
+  completedAt: z.string().nullable(),
+  completionKind: DaemonSessionTurnCompletionKind.nullable(),
+  stopReason: DaemonSessionStopReason.nullable(),
+  messages: z.custom<acp.AnyMessage[]>(),
+})
+
+/** One persisted or in-progress prompt turn returned by the session history API. */
+export interface SessionHistoryTurn {
+  turnId: string
+  sequence: number
+  promptRequestId: string | number
+  startedAt: string
+  completedAt: string | null
+  completionKind: "result" | "error" | null
+  stopReason: z.output<typeof DaemonSessionStopReason> | null
+  messages: acp.AnyMessage[]
+}
+
+/** One ACP message carried inside a session history turn. */
+export type SessionHistoryMessage = SessionHistoryTurn["messages"][number]
+
 /** Response payload returned after one daemon-managed session history fetch. */
 export type GetSessionHistoryResponse = SessionIdentity & {
   connection: SessionConnection
-  history: acp.AnyMessage[]
+  turns: SessionHistoryTurn[]
+  nextCursor: string | null
+  hasMore: boolean
 }
 
 /** Full session diagnostic payload returned on demand for debugging and tests. */

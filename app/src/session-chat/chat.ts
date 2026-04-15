@@ -1,4 +1,4 @@
-import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
+import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@goddard-ai/sdk"
 
 import type {
   SessionTranscriptContentBlock,
@@ -11,8 +11,6 @@ import type {
   SessionTranscriptToolStatus,
 } from "~/sessions/models.ts"
 import { promptBlocksToTranscriptContent } from "./composer-content.ts"
-
-type SessionHistoryMessage = GetSessionHistoryResponse["history"][number]
 
 type ParsedToolCallUpdate = {
   updateKind: "tool_call" | "tool_call_update"
@@ -102,14 +100,6 @@ function extractPromptContent(message: SessionHistoryMessage) {
   }
 
   return promptBlocksToTranscriptContent(message.params.prompt)
-}
-
-function extractPromptRequestId(message: SessionHistoryMessage) {
-  if (!hasMethod(message, "session/prompt") || !("id" in message) || message.id == null) {
-    return null
-  }
-
-  return String(message.id)
 }
 
 function extractSessionUpdate(message: SessionHistoryMessage) {
@@ -310,16 +300,6 @@ function reportUnsupportedTranscriptMessage(message: SessionHistoryMessage, reas
   })
 }
 
-function isPromptCompletionMessage(message: SessionHistoryMessage) {
-  if (!isRecord(message) || !("id" in message) || message.id == null) {
-    return false
-  }
-
-  return (
-    ("result" in message && message.result != null) || ("error" in message && message.error != null)
-  )
-}
-
 function fallbackToolTitle(toolKind: SessionTranscriptToolKind) {
   if (toolKind === "switch_mode") {
     return "Switch mode"
@@ -332,6 +312,7 @@ function applyAgentMessageChunk(props: {
   agentRowIndexes: Map<string, number>
   items: SessionTranscriptItem[]
   session: DaemonSession
+  streaming: boolean
   text: string
   turnId: string
 }) {
@@ -352,7 +333,7 @@ function applyAgentMessageChunk(props: {
           authorName: props.session.agentName,
           timestampLabel: "Update",
           content: [textContentBlock(props.text)],
-          streaming: true,
+          streaming: props.streaming,
         }),
       ) - 1,
     )
@@ -376,7 +357,7 @@ function applyAgentMessageChunk(props: {
   props.items[rowIndex] = {
     ...existingRow,
     content: [textContentBlock(`${existingText}${props.text}`)],
-    streaming: true,
+    streaming: props.streaming,
   }
 }
 
@@ -427,41 +408,6 @@ function applyToolCallUpdate(props: {
   }
 }
 
-function closePromptTurn(props: {
-  activePromptIds: string[]
-  agentRowIndexes: Map<string, number>
-  items: SessionTranscriptItem[]
-  message: SessionHistoryMessage
-}) {
-  if (
-    !isPromptCompletionMessage(props.message) ||
-    !("id" in props.message) ||
-    props.message.id == null
-  ) {
-    return
-  }
-
-  const resolvedPromptId = String(props.message.id)
-  const promptIndex = props.activePromptIds.lastIndexOf(resolvedPromptId)
-
-  const agentRowIndex = props.agentRowIndexes.get(`${resolvedPromptId}:agent`)
-
-  if (agentRowIndex != null) {
-    const agentRow = props.items[agentRowIndex]
-
-    if (agentRow?.kind === "message" && agentRow.role === "assistant" && agentRow.streaming) {
-      props.items[agentRowIndex] = {
-        ...agentRow,
-        streaming: false,
-      }
-    }
-  }
-
-  if (promptIndex > -1) {
-    props.activePromptIds.splice(promptIndex, 1)
-  }
-}
-
 function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   return {
     kind: "message",
@@ -471,7 +417,7 @@ function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
 
 export function buildTranscriptMessages(
   session: DaemonSession,
-  history: readonly SessionHistoryMessage[],
+  turns: readonly SessionHistoryTurn[],
 ) {
   const items: SessionTranscriptItem[] = [
     createTextRow({
@@ -482,75 +428,62 @@ export function buildTranscriptMessages(
       content: [textContentBlock(`Working directory: ${session.cwd}`)],
     }),
   ]
-  const activePromptIds: string[] = []
   const agentRowIndexes = new Map<string, number>()
   const toolRowIndexes = new Map<string, number>()
 
-  for (const [index, message] of history.entries()) {
-    const promptContent = extractPromptContent(message)
+  for (const turn of turns) {
+    const isStreamingTurn = turn.completedAt === null
 
-    if (promptContent.length > 0) {
-      const promptRequestId = extractPromptRequestId(message)
-      if (promptRequestId) {
-        activePromptIds.push(promptRequestId)
+    for (const [messageIndex, message] of turn.messages.entries()) {
+      const promptContent = extractPromptContent(message)
+
+      if (promptContent.length > 0) {
+        items.push(
+          createTextRow({
+            id: `${turn.turnId}:prompt:${messageIndex}`,
+            role: "user",
+            authorName: "You",
+            timestampLabel: "Prompt",
+            content: promptContent,
+          }),
+        )
+        continue
       }
 
-      items.push(
-        createTextRow({
-          id: `${session.id}:prompt:${index}`,
-          role: "user",
-          authorName: "You",
-          timestampLabel: "Prompt",
-          content: promptContent,
-        }),
-      )
-      closePromptTurn({
-        activePromptIds,
-        agentRowIndexes,
-        items,
-        message,
-      })
-      continue
-    }
+      const sessionUpdate = parseTranscriptSessionUpdate(message)
 
-    const sessionUpdate = parseTranscriptSessionUpdate(message)
+      if (sessionUpdate) {
+        if (sessionUpdate.kind === "toolCall") {
+          applyToolCallUpdate({
+            items,
+            toolRowIndexes,
+            session,
+            turnId: turn.turnId,
+            toolCallUpdate: sessionUpdate.toolCallUpdate,
+          })
+          continue
+        }
 
-    if (sessionUpdate) {
-      if (sessionUpdate.kind === "toolCall") {
-        applyToolCallUpdate({
-          items,
-          toolRowIndexes,
-          session,
-          turnId: activePromptIds.at(-1) ?? `${session.id}:orphan`,
-          toolCallUpdate: sessionUpdate.toolCallUpdate,
-        })
-      } else if (sessionUpdate.kind === "agentMessageChunk") {
-        applyAgentMessageChunk({
-          agentRowIndexes,
-          items,
-          session,
-          text: sessionUpdate.text,
-          turnId: activePromptIds.at(-1) ?? `${session.id}:orphan`,
-        })
-      } else if (sessionUpdate.kind === "unsupported") {
+        if (sessionUpdate.kind === "agentMessageChunk") {
+          applyAgentMessageChunk({
+            agentRowIndexes,
+            items,
+            session,
+            streaming: isStreamingTurn,
+            text: sessionUpdate.text,
+            turnId: turn.turnId,
+          })
+          continue
+        }
+
+        if (sessionUpdate.kind === "ignored") {
+          continue
+        }
+
         reportUnsupportedTranscriptMessage(message, sessionUpdate.reason)
+        continue
       }
-
-      closePromptTurn({
-        activePromptIds,
-        agentRowIndexes,
-        items,
-        message,
-      })
-      continue
     }
-
-    closePromptTurn({
-      activePromptIds,
-      agentRowIndexes,
-      items,
-      message,
-    })
   }
 
   if (

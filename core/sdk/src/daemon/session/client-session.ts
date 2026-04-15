@@ -1,6 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonSession,
+  GetSessionHistoryRequest,
+  GetSessionHistoryResponse,
+} from "@goddard-ai/schema/daemon"
 
 /** Managed agent session connected to the daemon over IPC. */
 export class AgentSession {
@@ -54,12 +58,14 @@ export class AgentSession {
     })
   }
 
-  /** Retrieves the message history for the connected agent session. */
-  async getHistory(): Promise<acp.AnyMessage[]> {
-    const response = await this.daemonClient.send("sessionHistory", {
+  /** Retrieves one page of turn history for the connected agent session. */
+  async getHistoryPage(
+    input: Omit<GetSessionHistoryRequest, "id"> = {},
+  ): Promise<GetSessionHistoryResponse> {
+    return this.daemonClient.send("sessionHistory", {
       id: this.sessionId,
+      ...input,
     })
-    return response.history
   }
 
   /** Shuts down the connected agent session on the daemon. */

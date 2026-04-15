@@ -3,7 +3,8 @@ import {
   DaemonPullRequest,
   DaemonSession,
   DaemonSessionDiagnostics,
-  DaemonSessionMessages,
+  DaemonSessionTurn,
+  DaemonSessionTurnDraft,
   DaemonWorkforce,
   DaemonWorktree,
 } from "@goddard-ai/schema/daemon/store"
@@ -37,7 +38,21 @@ const schema = {
       id: "desc",
     }),
 
-  sessionMessages: kind("msg", DaemonSessionMessages).index("sessionId", { type: "text" }),
+  sessionTurns: kind("trn", DaemonSessionTurn)
+    .index("sessionId", { type: "text" })
+    .index("sequence", { type: "integer" })
+    .multi("sessionId_sequence", {
+      sessionId: "asc",
+      sequence: "desc",
+    }),
+
+  sessionTurnDrafts: kind("drf", DaemonSessionTurnDraft)
+    .index("sessionId", { type: "text" })
+    .index("sequence", { type: "integer" })
+    .multi("sessionId_sequence", {
+      sessionId: "asc",
+      sequence: "desc",
+    }),
 
   sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", { type: "text" }),
 

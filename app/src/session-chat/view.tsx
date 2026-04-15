@@ -11,11 +11,11 @@ import { Transcript } from "./transcript.tsx"
 
 export function SessionChatView(props: { sessionId: string }) {
   const sessionId = props.sessionId as DaemonSession["id"]
-  const [{ history }, { session }] = useQueries([
+  const [history, { session }] = useQueries([
     [goddardSdk.session.history, [{ id: sessionId }]],
     [goddardSdk.session.get, [{ id: sessionId }]],
   ])
-  const messages = buildTranscriptMessages(session, history)
+  const messages = buildTranscriptMessages(session, history.turns)
 
   return (
     <div

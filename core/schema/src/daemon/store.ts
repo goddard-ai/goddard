@@ -58,6 +58,11 @@ export const DaemonSessionMetadata = z
 
 export type DaemonSessionMetadata = z.infer<typeof DaemonSessionMetadata>
 
+/** One ACP slash command persisted on the daemon session for composer suggestions. */
+export const DaemonSessionAvailableCommands = z.custom<acp.AvailableCommand[]>()
+
+export type DaemonSessionAvailableCommands = z.output<typeof DaemonSessionAvailableCommands>
+
 /**
  * Persisted daemon-managed session record stored in kindstore.
  */
@@ -82,6 +87,7 @@ export const DaemonSession = z.strictObject({
   permissions: DaemonSessionPermissions.nullable().default(null),
   metadata: DaemonSessionMetadata.nullable().default(null),
   models: z.custom<acp.SessionModelState>().nullable().default(null),
+  availableCommands: DaemonSessionAvailableCommands.default([]),
 })
 
 export type DaemonSession = z.output<typeof DaemonSession> & {
@@ -90,16 +96,50 @@ export type DaemonSession = z.output<typeof DaemonSession> & {
   updatedAt: number
 }
 
+/** Stable prompt request id stored on one persisted turn or active-turn draft. */
+export const DaemonSessionTurnPromptRequestId = z.union([z.string(), z.number().int()])
+
+export type DaemonSessionTurnPromptRequestId = z.output<typeof DaemonSessionTurnPromptRequestId>
+
+/** Completion category stored for one persisted daemon session turn. */
+export const DaemonSessionTurnCompletionKind = z.enum(["result", "error"])
+
+export type DaemonSessionTurnCompletionKind = z.output<typeof DaemonSessionTurnCompletionKind>
+
 /**
- * Persisted ACP history record stored for one daemon-managed session.
+ * Persisted completed or interrupted turn stored for one daemon-managed session.
  */
-export const DaemonSessionMessages = z.strictObject({
+export const DaemonSessionTurn = z.strictObject({
   sessionId: DaemonSessionId,
+  turnId: z.string(),
+  sequence: z.number().int().nonnegative(),
+  promptRequestId: DaemonSessionTurnPromptRequestId,
+  startedAt: z.string(),
+  completedAt: z.string().nullable().default(null),
+  completionKind: DaemonSessionTurnCompletionKind.nullable().default(null),
+  stopReason: DaemonSessionStopReason.nullable().default(null),
   messages: z.custom<acp.AnyMessage[]>(),
 })
 
-export type DaemonSessionMessages = z.output<typeof DaemonSessionMessages> & {
-  id: `msg_${string}`
+export type DaemonSessionTurn = z.output<typeof DaemonSessionTurn> & {
+  id: `trn_${string}`
+}
+
+/**
+ * Mutable active-turn draft stored while one prompt is still in progress.
+ */
+export const DaemonSessionTurnDraft = z.strictObject({
+  sessionId: DaemonSessionId,
+  turnId: z.string(),
+  sequence: z.number().int().nonnegative(),
+  promptRequestId: DaemonSessionTurnPromptRequestId,
+  startedAt: z.string(),
+  updatedAt: z.string(),
+  messages: z.custom<acp.AnyMessage[]>(),
+})
+
+export type DaemonSessionTurnDraft = z.output<typeof DaemonSessionTurnDraft> & {
+  id: `drf_${string}`
 }
 
 /**

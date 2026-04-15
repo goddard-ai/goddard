@@ -28,69 +28,32 @@ function createSession(lastAgentMessage: string | null) {
     initiative: null,
     lastAgentMessage,
     models: null,
+    availableCommands: [],
   } satisfies DaemonSession
 }
 
-test("buildTranscriptMessages uses agent_message_chunk content without duplicating the latest message", () => {
-  const session = createSession("I reviewed the diff and found one issue.")
-  const history = [
+function createTurns(
+  messages: GetSessionHistoryResponse["turns"][number]["messages"],
+  overrides: Partial<GetSessionHistoryResponse["turns"][number]> = {},
+): GetSessionHistoryResponse["turns"] {
+  return [
     {
-      jsonrpc: "2.0",
-      id: "prompt-1",
-      method: "session/prompt",
-      params: {
-        sessionId: session.acpSessionId,
-        prompt: [{ type: "text", text: "Review the diff and summarize problems." }],
-      },
+      turnId: "turn-1",
+      sequence: 1,
+      promptRequestId: "prompt-1",
+      startedAt: "2026-04-14T00:00:00.000Z",
+      completedAt: "2026-04-14T00:00:01.000Z",
+      completionKind: "result",
+      stopReason: "end_turn",
+      messages,
+      ...overrides,
     },
-    {
-      jsonrpc: "2.0",
-      method: "session/update",
-      params: {
-        sessionId: session.acpSessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: {
-            type: "text",
-            text: "I reviewed the diff and found one issue.",
-          },
-        },
-      },
-    },
-  ] satisfies GetSessionHistoryResponse["history"]
+  ]
+}
 
-  expect(buildTranscriptMessages(session, history)).toEqual([
-    {
-      kind: "message",
-      id: "ses_session-1:context",
-      role: "system",
-      authorName: "System",
-      timestampLabel: "active",
-      content: [{ type: "text", text: "Working directory: /repo-a" }],
-    },
-    {
-      kind: "message",
-      id: "ses_session-1:prompt:0",
-      role: "user",
-      authorName: "You",
-      timestampLabel: "Prompt",
-      content: [{ type: "text", text: "Review the diff and summarize problems." }],
-    },
-    {
-      kind: "message",
-      id: "prompt-1:agent",
-      role: "assistant",
-      authorName: "pi",
-      timestampLabel: "Update",
-      content: [{ type: "text", text: "I reviewed the diff and found one issue." }],
-      streaming: true,
-    },
-  ])
-})
-
-test("buildTranscriptMessages appends the latest daemon summary when history has no assistant update yet", () => {
+test("buildTranscriptMessages appends the latest daemon summary when turns have no assistant update yet", () => {
   const session = createSession("Ready to review the diff.")
-  const history = [
+  const turns = createTurns([
     {
       jsonrpc: "2.0",
       id: "prompt-1",
@@ -100,9 +63,9 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
         prompt: [{ type: "text", text: "Review the current diff." }],
       },
     },
-  ] satisfies GetSessionHistoryResponse["history"]
+  ])
 
-  expect(buildTranscriptMessages(session, history).at(-1)).toEqual({
+  expect(buildTranscriptMessages(session, turns).at(-1)).toEqual({
     kind: "message",
     id: "ses_session-1:latest",
     role: "assistant",
@@ -115,7 +78,7 @@ test("buildTranscriptMessages appends the latest daemon summary when history has
 
 test("buildTranscriptMessages accumulates agent_message_chunk updates into one assistant row", () => {
   const session = createSession(null)
-  const history = [
+  const turns = createTurns([
     {
       jsonrpc: "2.0",
       id: "prompt-1",
@@ -153,16 +116,9 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
         },
       },
     },
-    {
-      jsonrpc: "2.0",
-      id: "prompt-1",
-      result: {
-        stopReason: "end_turn",
-      },
-    },
-  ] satisfies GetSessionHistoryResponse["history"]
+  ])
 
-  expect(buildTranscriptMessages(session, history)).toEqual([
+  expect(buildTranscriptMessages(session, turns)).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -173,7 +129,7 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
     },
     {
       kind: "message",
-      id: "ses_session-1:prompt:0",
+      id: "turn-1:prompt:0",
       role: "user",
       authorName: "You",
       timestampLabel: "Prompt",
@@ -181,7 +137,7 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
     },
     {
       kind: "message",
-      id: "prompt-1:agent",
+      id: "turn-1:agent",
       role: "assistant",
       authorName: "pi",
       timestampLabel: "Update",
@@ -193,7 +149,7 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
 
 test("buildTranscriptMessages merges tool_call updates into one stable tool row", () => {
   const session = createSession(null)
-  const history = [
+  const turns = createTurns([
     {
       jsonrpc: "2.0",
       id: "prompt-1",
@@ -236,9 +192,9 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
         },
       },
     },
-  ] satisfies GetSessionHistoryResponse["history"]
+  ])
 
-  expect(buildTranscriptMessages(session, history)).toEqual([
+  expect(buildTranscriptMessages(session, turns)).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -249,7 +205,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
     },
     {
       kind: "message",
-      id: "ses_session-1:prompt:0",
+      id: "turn-1:prompt:0",
       role: "user",
       authorName: "You",
       timestampLabel: "Prompt",
@@ -257,7 +213,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
     },
     {
       kind: "toolCall",
-      id: "prompt-1:tool:tool-1",
+      id: "turn-1:tool:tool-1",
       toolCallId: "tool-1",
       authorName: "pi",
       timestampLabel: "Tool",
@@ -282,7 +238,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
 
 test("buildTranscriptMessages ignores routed session/update payloads without rendering transcript text", () => {
   const session = createSession(null)
-  const history = [
+  const turns = createTurns([
     {
       jsonrpc: "2.0",
       method: "session/update",
@@ -299,9 +255,9 @@ test("buildTranscriptMessages ignores routed session/update payloads without ren
         },
       },
     },
-  ] satisfies GetSessionHistoryResponse["history"]
+  ])
 
-  expect(buildTranscriptMessages(session, history)).toEqual([
+  expect(buildTranscriptMessages(session, turns)).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -315,7 +271,7 @@ test("buildTranscriptMessages ignores routed session/update payloads without ren
 
 test("buildTranscriptMessages logs an error instead of flattening unsupported session/update payloads", () => {
   const session = createSession(null)
-  const history = [
+  const turns = createTurns([
     {
       jsonrpc: "2.0",
       method: "session/update",
@@ -330,7 +286,7 @@ test("buildTranscriptMessages logs an error instead of flattening unsupported se
         },
       },
     },
-  ] satisfies GetSessionHistoryResponse["history"]
+  ])
 
   const errors: unknown[][] = []
   const originalConsoleError = console.error
@@ -339,7 +295,7 @@ test("buildTranscriptMessages logs an error instead of flattening unsupported se
   }
 
   try {
-    expect(buildTranscriptMessages(session, history)).toEqual([
+    expect(buildTranscriptMessages(session, turns)).toEqual([
       {
         kind: "message",
         id: "ses_session-1:context",

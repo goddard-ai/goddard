@@ -193,22 +193,24 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
   expect(liveChunks).toEqual(["Chunked ", "response", "."])
 
   const history = await client.send("sessionHistory", { id: created.session.id })
-  const chunkMessages = history.history.filter((message) => {
-    return (
-      typeof message === "object" &&
-      message !== null &&
-      "method" in message &&
-      message.method === "session/update" &&
-      "params" in message &&
-      typeof message.params === "object" &&
-      message.params !== null &&
-      "update" in message.params &&
-      typeof message.params.update === "object" &&
-      message.params.update !== null &&
-      "sessionUpdate" in message.params.update &&
-      message.params.update.sessionUpdate === "agent_message_chunk"
-    )
-  })
+  const chunkMessages = history.turns
+    .flatMap((turn) => turn.messages)
+    .filter((message) => {
+      return (
+        typeof message === "object" &&
+        message !== null &&
+        "method" in message &&
+        message.method === "session/update" &&
+        "params" in message &&
+        typeof message.params === "object" &&
+        message.params !== null &&
+        "update" in message.params &&
+        typeof message.params.update === "object" &&
+        message.params.update !== null &&
+        "sessionUpdate" in message.params.update &&
+        message.params.update.sessionUpdate === "agent_message_chunk"
+      )
+    })
 
   expect(chunkMessages).toHaveLength(1)
   expect(chunkMessages[0]).toMatchObject({
@@ -224,11 +226,12 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
     },
   })
 
-  const messagesRecord =
-    db.sessionMessages.first({
+  const turnRecord =
+    db.sessionTurns.first({
       where: { sessionId: created.session.id },
     }) ?? null
-  expect(messagesRecord?.messages).toEqual(history.history)
+  expect(history.turns).toHaveLength(1)
+  expect(turnRecord?.messages).toEqual(history.turns[0]?.messages)
 })
 
 test("daemon creates placeholder session titles before any user prompt is sent", async () => {
@@ -422,10 +425,18 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     },
     metadata: null,
     models: null,
+    availableCommands: [],
   } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(sessionId, sessionRecord)
-  db.sessionMessages.create({
+  db.sessionTurns.create({
     sessionId,
+    turnId: "turn-restart-1",
+    sequence: 1,
+    promptRequestId: "prompt-restart-1",
+    startedAt: "2026-04-14T00:00:00.000Z",
+    completedAt: "2026-04-14T00:00:01.000Z",
+    completionKind: "result",
+    stopReason: "end_turn",
     messages: [{ jsonrpc: "2.0", method: "session/update", params: { value: "persisted" } }],
   })
   db.sessionDiagnostics.create({
@@ -443,7 +454,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
 
   const history = await client.send("sessionHistory", { id: sessionId })
   expect(history.connection.mode).toBe("history")
-  expect(history.history).toHaveLength(1)
+  expect(history.turns).toHaveLength(1)
 
   const diagnostics = await client.send("sessionDiagnostics", { id: sessionId })
   expect(
@@ -453,6 +464,92 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   await expect(client.send("sessionResolveToken", { token: "tok-restart-1" })).rejects.toThrow(
     /invalid session token/i,
   )
+})
+
+test("daemon promotes interrupted turn drafts into incomplete turn history on restart", async () => {
+  await useTempHome()
+
+  const sessionId = db.sessions.newId()
+  const acpSessionId = `acp-draft-${randomUUID()}`
+  db.sessions.put(sessionId, {
+    acpSessionId,
+    status: "active",
+    agentName: "node",
+    cwd: process.cwd(),
+    mcpServers: [],
+    connectionMode: "live",
+    activeDaemonSession: true,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    lastAgentMessage: null,
+    repository: null,
+    prNumber: null,
+    token: "tok-draft-1",
+    permissions: {
+      owner: "acme",
+      repo: "widgets",
+      allowedPrNumbers: [42],
+    },
+    metadata: null,
+    models: null,
+    availableCommands: [],
+  })
+  db.sessionTurnDrafts.create({
+    sessionId,
+    turnId: "turn-draft-1",
+    sequence: 1,
+    promptRequestId: "prompt-draft-1",
+    startedAt: "2026-04-14T00:00:00.000Z",
+    updatedAt: "2026-04-14T00:00:00.050Z",
+    messages: [
+      buildPromptMessage(acpSessionId, "prompt-draft-1", "Continue the review."),
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: acpSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Partial response" },
+          },
+        },
+      },
+    ],
+  })
+  db.sessionDiagnostics.create({
+    sessionId,
+    events: [],
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const history = await client.send("sessionHistory", { id: sessionId })
+
+  expect(history.turns).toHaveLength(1)
+  expect(history.turns[0]).toMatchObject({
+    turnId: "turn-draft-1",
+    sequence: 1,
+    promptRequestId: "prompt-draft-1",
+    completedAt: null,
+    completionKind: null,
+    stopReason: null,
+  })
+  expect(
+    db.sessionTurnDrafts.first({
+      where: { sessionId },
+    }) ?? null,
+  ).toBeNull()
+  expect(
+    db.sessionTurns.first({
+      where: { sessionId },
+    }),
+  ).toMatchObject({
+    turnId: "turn-draft-1",
+    completedAt: null,
+    completionKind: null,
+  })
 })
 
 test("multiple clients can observe the same live session stream independently", async () => {
@@ -968,46 +1065,15 @@ test("sessionComposerSuggestions reads `/` commands from the latest ACP history 
     permissions: null,
     metadata: null,
     models: null,
-  })
-  db.sessionMessages.create({
-    sessionId,
-    messages: [
+    availableCommands: [
       {
-        jsonrpc: "2.0",
-        method: "session/update",
-        params: {
-          sessionId: acpSessionId,
-          update: {
-            sessionUpdate: "available_commands_update",
-            availableCommands: [
-              {
-                name: "draft",
-                description: "Older command set",
-              },
-            ],
-          },
-        },
+        name: "plan",
+        description: "Create or revise the plan",
+        input: { hint: "What should change?" },
       },
       {
-        jsonrpc: "2.0",
-        method: "session/update",
-        params: {
-          sessionId: acpSessionId,
-          update: {
-            sessionUpdate: "available_commands_update",
-            availableCommands: [
-              {
-                name: "plan",
-                description: "Create or revise the plan",
-                input: { hint: "What should change?" },
-              },
-              {
-                name: "summarize",
-                description: "Summarize the current progress",
-              },
-            ],
-          },
-        },
+        name: "summarize",
+        description: "Summarize the current progress",
       },
     ],
   })

@@ -18,12 +18,14 @@ import type {
   DaemonSessionMetadata,
   DaemonSessionStatus,
   GetSessionDiagnosticsResponse,
+  GetSessionHistoryRequest,
   GetSessionHistoryResponse,
   GetSessionWorkforceResponse,
   GetSessionWorktreeResponse,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
   SessionComposerFileSuggestion,
+  SessionHistoryTurn,
   SessionComposerSkillSuggestion,
   SessionComposerSlashCommandSuggestion,
   InitialPromptOption,
@@ -81,6 +83,21 @@ import {
 import type { ACPRegistryService } from "./registry.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
+  type ActiveTurnBuffer,
+  appendSessionHistoryMessage,
+  createInitializedHistoryTurn,
+  getAvailableCommandsFromMessage,
+  getLatestAvailableCommands,
+  isTurnTerminalMessage,
+  type SessionTurnPromptRequestId,
+  shouldFlushTurnDraftImmediately,
+  toCompletedTurnInput,
+  toSessionHistoryTurnFromActiveTurn,
+  toSessionHistoryTurnFromDraft,
+  toSessionHistoryTurnFromRecord,
+  toTurnDraftInput,
+} from "./turn-history.ts"
+import {
   resolveGitRepoRoot,
   reuseExistingWorktree,
   toPreparedSessionWorktree,
@@ -114,12 +131,13 @@ const DEFAULT_COMPOSER_SUGGESTION_LIMIT = 20
 const MAX_COMPOSER_SUGGESTION_LIMIT = 50
 const COMPOSER_IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"])
 
-type PersistedSessionMessagesRecord = KindOutput<typeof db.schema.sessionMessages>
+type PersistedSessionTurnDraftRecord = KindOutput<typeof db.schema.sessionTurnDrafts>
 type PersistedSessionWorktreeRecord = KindOutput<typeof db.schema.worktrees>
 type PersistedSessionWorkforceRecord = KindOutput<typeof db.schema.workforces>
 
 type ExistingSessionArtifacts = {
-  messagesRecord: PersistedSessionMessagesRecord | null
+  draftRecord: PersistedSessionTurnDraftRecord | null
+  nextTurnSequence: number
   worktreeRecord: PersistedSessionWorktreeRecord | null
   worktree: SessionWorktreeState | null
   workforceRecord: PersistedSessionWorkforceRecord | null
@@ -150,88 +168,6 @@ async function readDirectoryEntries(path: string) {
 /** Returns true when one unknown value is a plain object record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
-}
-
-/** Parsed shape for one stored `agent_message_chunk` text update that can be merged in history. */
-type AgentMessageChunkParts = {
-  params: Record<string, unknown>
-  update: Record<string, unknown>
-  content: Record<string, unknown> & {
-    type: "text"
-    text: string
-  }
-}
-
-/** Extracts one mergeable streamed agent text chunk from ACP session history. */
-function getAgentMessageChunkParts(message: acp.AnyMessage) {
-  if (
-    !isRecord(message) ||
-    "method" in message === false ||
-    message.method !== acp.CLIENT_METHODS.session_update
-  ) {
-    return null
-  }
-
-  const params = "params" in message && isRecord(message.params) ? message.params : null
-  if (!params) {
-    return null
-  }
-
-  const update = params && isRecord(params.update) ? params.update : null
-  if (!update || update.sessionUpdate !== "agent_message_chunk") {
-    return null
-  }
-
-  const content = isRecord(update.content) ? update.content : null
-  if (!content || content.type !== "text" || typeof content.text !== "string") {
-    return null
-  }
-
-  return {
-    params,
-    update,
-    content: {
-      ...content,
-      type: "text",
-      text: content.text,
-    },
-  } satisfies AgentMessageChunkParts
-}
-
-/** Appends one ACP history entry while folding adjacent streamed agent text chunks together. */
-function appendSessionHistoryMessage(history: acp.AnyMessage[], message: acp.AnyMessage) {
-  const previousChunk = history.length > 0 ? getAgentMessageChunkParts(history.at(-1)!) : null
-  const nextChunk = getAgentMessageChunkParts(message)
-
-  if (previousChunk && nextChunk) {
-    history[history.length - 1] = {
-      ...message,
-      params: {
-        ...nextChunk.params,
-        update: {
-          ...nextChunk.update,
-          content: {
-            ...nextChunk.content,
-            text: `${previousChunk.content.text}${nextChunk.content.text}`,
-          },
-        },
-      },
-    }
-    return
-  }
-
-  history.push(message)
-}
-
-/** Rebuilds one history stream using the daemon's chunk-coalescing persistence rules. */
-function coalesceSessionHistoryMessages(messages: readonly acp.AnyMessage[]) {
-  const history: acp.AnyMessage[] = []
-
-  for (const message of messages) {
-    appendSessionHistoryMessage(history, message)
-  }
-
-  return history
 }
 
 /** Bounds the chat-composer suggestion limit to one small stable range. */
@@ -480,44 +416,16 @@ async function getSkillComposerSuggestions(cwd: string, query: string, limit: nu
   return suggestions
 }
 
-/** Extracts the latest ACP slash-command update recorded in one session history stream. */
-function getLatestAvailableCommands(history: acp.AnyMessage[]) {
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const message = history[index]
-    const params = matchAcpRequest<{ update?: unknown }>(message, acp.CLIENT_METHODS.session_update)
-
-    if (!params) {
-      continue
-    }
-
-    const update = params.update
-
-    if (
-      !isRecord(update) ||
-      update.sessionUpdate !== "available_commands_update" ||
-      Array.isArray(update.availableCommands) === false
-    ) {
-      continue
-    }
-
-    return update.availableCommands.filter((command): command is acp.AvailableCommand => {
-      return (
-        isRecord(command) &&
-        typeof command.name === "string" &&
-        typeof command.description === "string"
-      )
-    })
-  }
-
-  return []
-}
-
 /** Filters the latest ACP slash commands into session composer suggestion items. */
-function getSlashComposerSuggestions(history: acp.AnyMessage[], query: string, limit: number) {
+function getSlashComposerSuggestions(
+  availableCommands: readonly acp.AvailableCommand[],
+  query: string,
+  limit: number,
+) {
   const normalizedQuery = query.trim().toLowerCase()
   const suggestions: SessionComposerSlashCommandSuggestion[] = []
 
-  for (const command of getLatestAvailableCommands(history)) {
+  for (const command of availableCommands) {
     const inputHint =
       isRecord(command.input) && typeof command.input.hint === "string" ? command.input.hint : null
 
@@ -545,6 +453,28 @@ function getSlashComposerSuggestions(history: acp.AnyMessage[], query: string, l
   return suggestions
 }
 
+/** Reads the highest persisted turn sequence across completed turns and any durable draft. */
+function resolveLatestStoredTurnSequence(id: SessionId) {
+  const latestTurn =
+    db.sessionTurns.first({
+      where: { sessionId: id },
+      orderBy: {
+        sessionId: "asc",
+        sequence: "desc",
+      },
+    }) ?? null
+  const draft =
+    db.sessionTurnDrafts.first({
+      where: { sessionId: id },
+      orderBy: {
+        sessionId: "asc",
+        sequence: "desc",
+      },
+    }) ?? null
+
+  return Math.max(latestTurn?.sequence ?? 0, draft?.sequence ?? 0)
+}
+
 /** Loads any persisted session-side artifacts that need to be reused during launch. */
 function resolveExistingSessionArtifacts(
   id: SessionId,
@@ -552,15 +482,16 @@ function resolveExistingSessionArtifacts(
 ) {
   if (!existingSession) {
     return {
-      messagesRecord: null,
+      draftRecord: null,
+      nextTurnSequence: 1,
       worktreeRecord: null,
       worktree: null,
       workforceRecord: null,
     } satisfies ExistingSessionArtifacts
   }
 
-  const messagesRecord =
-    db.sessionMessages.first({
+  const draftRecord =
+    db.sessionTurnDrafts.first({
       where: { sessionId: id },
     }) ?? null
   const worktreeRecord =
@@ -573,7 +504,8 @@ function resolveExistingSessionArtifacts(
     }) ?? null
 
   return {
-    messagesRecord,
+    draftRecord,
+    nextTurnSequence: resolveLatestStoredTurnSequence(id) + 1,
     worktreeRecord,
     worktree: toSessionWorktreeState(worktreeRecord),
     workforceRecord,
@@ -670,7 +602,8 @@ type ActiveSession = {
     close: () => Promise<void>
   }
   status: DaemonSessionStatus
-  history: acp.AnyMessage[]
+  nextTurnSequence: number
+  activeTurn: ActiveTurnBuffer<PersistedSessionTurnDraftRecord["id"]> | null
   isFirstPrompt: boolean
   systemPrompt: string
   lastPermissionRequest: PermissionRequest | null
@@ -713,7 +646,7 @@ export type SessionManager = {
   listSessions: (params: ListSessionsRequest) => Promise<ListSessionsResponse>
   connectSession: (id: SessionId) => Promise<DaemonSession>
   getSession: (id: SessionId) => Promise<DaemonSession>
-  getHistory: (id: SessionId) => Promise<GetSessionHistoryResponse>
+  getHistory: (params: GetSessionHistoryRequest) => Promise<GetSessionHistoryResponse>
   getComposerSuggestions: (
     params: SessionComposerSuggestionsRequest,
   ) => Promise<SessionComposerSuggestionsResponse>
@@ -804,9 +737,9 @@ function toConnectionState(input: {
   }
 }
 
-/** Chooses the archived connection mode from whether any session history survived persistence. */
-function archivedConnectionMode(historyLength: number): SessionConnectionMode {
-  return historyLength > 0 ? "history" : "none"
+/** Chooses the archived connection mode from whether any session turn history survived persistence. */
+function archivedConnectionMode(hasHistory: boolean): SessionConnectionMode {
+  return hasHistory ? "history" : "none"
 }
 
 /** Merges structured session metadata layers while dropping empty results. */
@@ -1140,6 +1073,9 @@ async function initializeSession(params: {
     status: DaemonSessionStatus
     isFirstPrompt: boolean
     history: acp.AnyMessage[]
+    initialPromptRequestId: SessionTurnPromptRequestId | null
+    initialPromptStartedAt: string | null
+    initialPromptCompletedAt: string | null
     acpSessionId: string
     models?: acp.SessionModelState | null
     stopReason: acp.PromptResponse["stopReason"] | null
@@ -1174,6 +1110,9 @@ async function initializeSession(params: {
     let isFirstPrompt = true
     let acpSessionId: string
     let models: acp.SessionModelState | null | undefined
+    let initialPromptRequestId: SessionTurnPromptRequestId | null = null
+    let initialPromptStartedAt: string | null = null
+    let initialPromptCompletedAt: string | null = null
     let stopReason: acp.PromptResponse["stopReason"] | null = null
 
     if (
@@ -1194,8 +1133,11 @@ async function initializeSession(params: {
     }
 
     if (params.request.initialPrompt !== undefined) {
+      initialPromptRequestId = randomUUID()
+      initialPromptStartedAt = new Date().toISOString()
       const initialMessage = {
         jsonrpc: "2.0",
+        id: initialPromptRequestId,
         method: acp.AGENT_METHODS.session_prompt,
         params: createInitialPromptRequest({
           sessionId: acpSessionId,
@@ -1209,6 +1151,12 @@ async function initializeSession(params: {
       params.onMessageWrite?.(initialMessage)
 
       const response = await agent.prompt(initialMessage.params)
+      initialPromptCompletedAt = new Date().toISOString()
+      history.push({
+        jsonrpc: "2.0",
+        id: initialPromptRequestId,
+        result: response,
+      } satisfies acp.AnyMessage)
       stopReason = response.stopReason
       switch (response.stopReason) {
         case "cancelled":
@@ -1231,6 +1179,9 @@ async function initializeSession(params: {
       status,
       isFirstPrompt,
       history,
+      initialPromptRequestId,
+      initialPromptStartedAt,
+      initialPromptCompletedAt,
       acpSessionId,
       models,
       stopReason,
@@ -1291,28 +1242,6 @@ async function resolveLaunchWorktree(params: {
   )
 }
 
-/** Merges any persisted history with the ACP initialization frames produced during launch. */
-function resolveInitialSessionHistory(params: {
-  initialized: InitializedSession
-  existingSession: PersistedSessionRecord | null
-  existingMessagesRecord: PersistedSessionMessagesRecord | null
-}) {
-  if (!params.existingMessagesRecord) {
-    return coalesceSessionHistoryMessages(params.initialized.history)
-  }
-
-  if (params.initialized.acpSessionId === params.existingSession?.acpSessionId) {
-    return params.existingMessagesRecord.messages.length > 0
-      ? coalesceSessionHistoryMessages(params.existingMessagesRecord.messages)
-      : coalesceSessionHistoryMessages(params.initialized.history)
-  }
-
-  return coalesceSessionHistoryMessages([
-    ...params.existingMessagesRecord.messages,
-    ...params.initialized.history,
-  ])
-}
-
 /** Builds the persisted daemon session record written after ACP session initialization completes. */
 function createSessionRecordUpdate(params: {
   initialized: InitializedSession
@@ -1330,6 +1259,7 @@ function createSessionRecordUpdate(params: {
   exitAfterInitialPrompt: boolean
   title: string
   titleState: DaemonSession["titleState"]
+  availableCommands: acp.AvailableCommand[]
 }) {
   const connectionMode: SessionConnectionMode = params.exitAfterInitialPrompt ? "history" : "live"
 
@@ -1350,6 +1280,7 @@ function createSessionRecordUpdate(params: {
     permissions: params.nextPermission,
     metadata: params.sessionMetadata ?? null,
     models: params.initialized.models ?? params.existingSession?.models ?? null,
+    availableCommands: params.availableCommands,
     errorMessage: null,
     blockedReason: null,
     initiative: null,
@@ -1361,24 +1292,15 @@ function createSessionRecordUpdate(params: {
 function persistLaunchedSession(params: {
   id: SessionId
   existingSession: PersistedSessionRecord | null
-  existingMessagesRecord: PersistedSessionMessagesRecord | null
+  initialTurn: SessionHistoryTurn | null
   existingWorktreeRecord: PersistedSessionWorktreeRecord | null
   existingWorkforceRecord: PersistedSessionWorkforceRecord | null
-  initialHistory: acp.AnyMessage[]
   worktree: PreparedSessionWorktree | null
   workforceMetadata: CreateSessionRequest["workforce"] | undefined
   sessionRecord: ReturnType<typeof createSessionRecordUpdate>
 }) {
-  if (params.existingMessagesRecord) {
-    db.sessionMessages.put(params.existingMessagesRecord.id, {
-      sessionId: params.id,
-      messages: params.initialHistory,
-    })
-  } else {
-    db.sessionMessages.create({
-      sessionId: params.id,
-      messages: params.initialHistory,
-    })
+  if (params.initialTurn) {
+    db.sessionTurns.create(toCompletedTurnInput(params.id, params.initialTurn))
   }
 
   if (params.worktree) {
@@ -1626,44 +1548,195 @@ export function createSessionManager(input: {
     }
   }
 
-  async function appendHistory(id: SessionId, message: acp.AnyMessage): Promise<void> {
-    const active = activeSessions.get(id)
-    if (active) {
-      appendSessionHistoryMessage(active.history, message)
-    }
-    const historyRecord =
-      db.sessionMessages.first({
-        where: { sessionId: id },
-      }) ?? null
-    if (historyRecord) {
-      const messages = [...historyRecord.messages]
-      appendSessionHistoryMessage(messages, message)
-      db.sessionMessages.update(historyRecord.id, {
-        messages,
-      })
+  function clearTurnDraftFlushTimer(activeTurn: ActiveTurnBuffer | null) {
+    if (!activeTurn?.flushTimer) {
       return
     }
 
-    db.sessionMessages.create({
-      sessionId: id,
-      messages: [message],
+    clearTimeout(activeTurn.flushTimer)
+    activeTurn.flushTimer = null
+  }
+
+  async function updateSessionAvailableCommands(
+    sessionId: SessionId,
+    availableCommands: acp.AvailableCommand[],
+  ) {
+    const sessionRecord = db.sessions.get(sessionId) ?? null
+    if (!sessionRecord) {
+      return
+    }
+
+    db.sessions.update(sessionId, {
+      availableCommands,
     })
   }
 
-  /** Returns the stored ACP message history for one session regardless of liveness. */
-  function readSessionHistoryMessages(id: SessionId) {
-    const active = activeSessions.get(id)
-
-    if (active) {
-      return [...active.history]
+  async function flushActiveTurnDraft(active: ActiveSession, reason: string): Promise<void> {
+    const activeTurn = active.activeTurn
+    if (!activeTurn) {
+      return
     }
 
+    clearTurnDraftFlushTimer(activeTurn)
+    const existingDraft =
+      (activeTurn.draftId && db.sessionTurnDrafts.get(activeTurn.draftId)) ||
+      db.sessionTurnDrafts.first({
+        where: { sessionId: active.id },
+      }) ||
+      null
+    const draftInput = toTurnDraftInput(active.id, activeTurn)
+
+    if (existingDraft) {
+      activeTurn.draftId = existingDraft.id
+      db.sessionTurnDrafts.put(existingDraft.id, draftInput)
+    } else {
+      activeTurn.draftId = db.sessionTurnDrafts.create(draftInput).id
+    }
+
+    await emitDiagnostic(
+      active.id,
+      "session_turn_draft_flushed",
+      {
+        reason,
+        turnId: activeTurn.turnId,
+        sequence: activeTurn.sequence,
+        messageCount: activeTurn.messages.length,
+      },
+      active.logger,
+    )
+  }
+
+  function scheduleActiveTurnDraftFlush(active: ActiveSession, reason: string, immediate = false) {
+    const activeTurn = active.activeTurn
+    if (!activeTurn) {
+      return Promise.resolve()
+    }
+
+    if (immediate) {
+      return flushActiveTurnDraft(active, reason)
+    }
+
+    clearTurnDraftFlushTimer(activeTurn)
+    activeTurn.flushTimer = setTimeout(() => {
+      void flushActiveTurnDraft(active, reason).catch(() => {})
+    }, 100)
+    return Promise.resolve()
+  }
+
+  async function persistTurnDraftAsInterruptedTurn(
+    sessionId: SessionId,
+    draftRecord: PersistedSessionTurnDraftRecord,
+    diagnosticLogger: ReturnType<typeof createLogger>,
+  ) {
+    const existingTurn =
+      db.sessionTurns.first({
+        where: { sessionId, sequence: draftRecord.sequence },
+      }) ?? null
+
+    if (existingTurn?.turnId === draftRecord.turnId) {
+      db.sessionTurnDrafts.delete(draftRecord.id)
+      return existingTurn
+    }
+
+    const turn = toSessionHistoryTurnFromDraft(draftRecord)
+    const createdTurn = existingTurn
+      ? db.sessionTurns.put(existingTurn.id, toCompletedTurnInput(sessionId, turn))
+      : db.sessionTurns.create(toCompletedTurnInput(sessionId, turn))
+
+    db.sessionTurnDrafts.delete(draftRecord.id)
+    await emitDiagnostic(
+      sessionId,
+      "session_turn_draft_promoted",
+      {
+        turnId: draftRecord.turnId,
+        sequence: draftRecord.sequence,
+      },
+      diagnosticLogger,
+    )
+    return createdTurn
+  }
+
+  async function appendTurnScopedMessage(active: ActiveSession, message: acp.AnyMessage) {
+    const availableCommands = getAvailableCommandsFromMessage(message)
+    if (availableCommands) {
+      await updateSessionAvailableCommands(active.id, availableCommands)
+    }
+
+    const activeTurn = active.activeTurn
+    if (!activeTurn) {
+      return
+    }
+
+    appendSessionHistoryMessage(activeTurn.messages, message)
+    await scheduleActiveTurnDraftFlush(
+      active,
+      shouldFlushTurnDraftImmediately(activeTurn, message) ? "boundary" : "stream",
+      shouldFlushTurnDraftImmediately(activeTurn, message),
+    )
+  }
+
+  async function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {
+    const activeTurn = active.activeTurn
+    if (!activeTurn || !isTurnTerminalMessage(activeTurn, message)) {
+      return
+    }
+
+    const completionKind = "error" in message ? "error" : "result"
+    const stopReason =
+      completionKind === "result"
+        ? (getAcpMessageResult<acp.PromptResponse>(message)?.stopReason ?? null)
+        : null
+    const completedTurn: SessionHistoryTurn = {
+      turnId: activeTurn.turnId,
+      sequence: activeTurn.sequence,
+      promptRequestId: activeTurn.promptRequestId,
+      startedAt: activeTurn.startedAt,
+      completedAt: new Date().toISOString(),
+      completionKind,
+      stopReason,
+      messages: [...activeTurn.messages],
+    }
+
+    await flushActiveTurnDraft(active, "completion")
+    db.batch(() => {
+      db.sessionTurns.create(toCompletedTurnInput(active.id, completedTurn))
+      if (activeTurn.draftId) {
+        db.sessionTurnDrafts.delete(activeTurn.draftId)
+      } else {
+        const draftRecord =
+          db.sessionTurnDrafts.first({
+            where: { sessionId: active.id },
+          }) ?? null
+        if (draftRecord) {
+          db.sessionTurnDrafts.delete(draftRecord.id)
+        }
+      }
+    })
+    clearTurnDraftFlushTimer(activeTurn)
+    active.activeTurn = null
+    active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
+    await emitDiagnostic(
+      active.id,
+      "session_turn_persisted",
+      {
+        turnId: completedTurn.turnId,
+        sequence: completedTurn.sequence,
+        completionKind: completedTurn.completionKind,
+        stopReason: completedTurn.stopReason ?? undefined,
+        messageCount: completedTurn.messages.length,
+      },
+      active.logger,
+    )
+  }
+
+  function hasPersistedTurnHistory(sessionId: SessionId) {
     return (
-      (
-        db.sessionMessages.first({
-          where: { sessionId: id },
-        }) ?? null
-      )?.messages ?? []
+      db.sessionTurns.first({
+        where: { sessionId },
+      }) != null ||
+      db.sessionTurnDrafts.first({
+        where: { sessionId },
+      }) != null
     )
   }
 
@@ -2160,17 +2233,6 @@ export function createSessionManager(input: {
 
     await Promise.all(
       persistedSessions.map(async (session) => {
-        const messagesRecord =
-          db.sessionMessages.first({
-            where: { sessionId: session.id },
-          }) ?? null
-        if (!messagesRecord) {
-          db.sessionMessages.create({
-            sessionId: session.id,
-            messages: [],
-          })
-        }
-
         const diagnosticsRecord =
           db.sessionDiagnostics.first({
             where: { sessionId: session.id },
@@ -2202,11 +2264,23 @@ export function createSessionManager(input: {
           }
         }
 
+        const draftRecord =
+          db.sessionTurnDrafts.first({
+            where: { sessionId: session.id },
+          }) ?? null
         const titleBackfill = backfillSessionTitle({
           title: session.title,
           titleState: session.titleState,
           initiative: session.initiative,
-          history: messagesRecord?.messages ?? [],
+          history: [
+            ...db.sessionTurns
+              .findMany({
+                where: { sessionId: session.id },
+              })
+              .sort((left, right) => left.sequence - right.sequence)
+              .flatMap((turn) => turn.messages),
+            ...(draftRecord?.messages ?? []),
+          ],
         })
         if (titleBackfill) {
           const sessionDocument = db.sessions.get(session.id) ?? null
@@ -2219,6 +2293,9 @@ export function createSessionManager(input: {
               reason: "daemon_reconciliation",
             })
           }
+        }
+        if (draftRecord) {
+          await persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
         }
 
         if (
@@ -2235,7 +2312,11 @@ export function createSessionManager(input: {
               permissions: null,
             })
           }
-          await setConnectionMode(session.id, "history", false)
+          await setConnectionMode(
+            session.id,
+            archivedConnectionMode(hasPersistedTurnHistory(session.id)),
+            false,
+          )
           await emitDiagnostic(session.id, "session_reconciled_after_restart", {
             previousStatus: session.status,
           })
@@ -2244,7 +2325,7 @@ export function createSessionManager(input: {
 
         await setConnectionMode(
           session.id,
-          archivedConnectionMode(messagesRecord?.messages.length ?? 0),
+          archivedConnectionMode(hasPersistedTurnHistory(session.id)),
           false,
         )
         if (session.permissions) {
@@ -2267,8 +2348,13 @@ export function createSessionManager(input: {
   async function publishSessionMessage(
     active: ActiveSession,
     message: acp.AnyMessage,
+    options: {
+      persistTurnMessage?: boolean
+    } = {},
   ): Promise<void> {
-    await appendHistory(active.id, message)
+    if (options.persistTurnMessage !== false) {
+      await appendTurnScopedMessage(active, message)
+    }
     input.publish(active.id, message)
   }
 
@@ -2277,6 +2363,8 @@ export function createSessionManager(input: {
     message: acp.AnyMessage,
     options: {
       updateStatus?: boolean
+      persistTurnMessage?: boolean
+      onBeforePublish?: (message: acp.AnyMessage) => Promise<void> | void
     } = {},
   ): Promise<void> {
     if (
@@ -2322,7 +2410,10 @@ export function createSessionManager(input: {
       },
       active.logger,
     )
-    await publishSessionMessage(active, message)
+    await options.onBeforePublish?.(message)
+    await publishSessionMessage(active, message, {
+      persistTurnMessage: options.persistTurnMessage,
+    })
     await active.writer.write(message)
   }
 
@@ -2349,6 +2440,25 @@ export function createSessionManager(input: {
       method: string
       params: acp.PromptRequest
     }
+    const existingDraft =
+      db.sessionTurnDrafts.first({
+        where: { sessionId: active.id },
+      }) ?? null
+    if (existingDraft) {
+      await persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
+      active.nextTurnSequence = resolveLatestStoredTurnSequence(active.id) + 1
+    }
+
+    const activeTurn: ActiveTurnBuffer<PersistedSessionTurnDraftRecord["id"]> = {
+      turnId: randomUUID(),
+      sequence: active.nextTurnSequence,
+      promptRequestId: nextPrompt.requestId,
+      startedAt: new Date().toISOString(),
+      messages: [],
+      flushTimer: null,
+      draftId: null,
+    }
+    active.activeTurn = activeTurn
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
 
@@ -2360,8 +2470,29 @@ export function createSessionManager(input: {
     }
 
     try {
-      await writeImmediateMessage(active, message)
+      await emitDiagnostic(
+        active.id,
+        "session_turn_started",
+        {
+          turnId: activeTurn.turnId,
+          sequence: activeTurn.sequence,
+          promptRequestId: activeTurn.promptRequestId,
+        },
+        active.logger,
+      )
+      await writeImmediateMessage(active, message, {
+        persistTurnMessage: false,
+        onBeforePublish: async (resolvedMessage) => {
+          appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
+          await flushActiveTurnDraft(active, "start")
+        },
+      })
     } catch (error) {
+      if (activeTurn.draftId) {
+        db.sessionTurnDrafts.delete(activeTurn.draftId)
+      }
+      clearTurnDraftFlushTimer(active.activeTurn)
+      active.activeTurn = null
       if (active.blockingPromptRequestId === nextPrompt.requestId) {
         active.blockingPromptRequestId = null
       }
@@ -2555,7 +2686,7 @@ export function createSessionManager(input: {
     token: string
     agentProcess: AgentProcessHandle
     initialized: InitializedSession
-    initialHistory: acp.AnyMessage[]
+    nextTurnSequence: number
     sessionLogger: ReturnType<typeof createLogger>
     systemPrompt: string
   }) {
@@ -2591,7 +2722,8 @@ export function createSessionManager(input: {
       writer,
       subscription: { close: async () => {} },
       status: params.initialized.status,
-      history: params.initialHistory,
+      nextTurnSequence: params.nextTurnSequence,
+      activeTurn: null,
       isFirstPrompt: params.initialized.isFirstPrompt,
       systemPrompt: params.systemPrompt,
       lastPermissionRequest: null,
@@ -2651,11 +2783,13 @@ export function createSessionManager(input: {
       }
 
       await publishSessionMessage(activeSession, message)
+      await finalizeActiveTurn(activeSession, message)
       await handleSteerBoundary(activeSession, message)
       await processPromptQueue(activeSession)
     })
 
     const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
+      await flushActiveTurnDraft(activeSession, "agent_process_exit").catch(() => {})
       activeSessions.delete(activeSession.id)
       await stopWorktreeSyncRuntime(activeSession.id)
       rejectPendingPrompts(
@@ -2710,7 +2844,7 @@ export function createSessionManager(input: {
 
       await setConnectionMode(
         activeSession.id,
-        archivedConnectionMode(activeSession.history.length),
+        archivedConnectionMode(hasPersistedTurnHistory(activeSession.id)),
         false,
       )
       await emitDiagnostic(
@@ -2899,11 +3033,15 @@ export function createSessionManager(input: {
       })
       sessionContext.acpSessionId = initialized.acpSessionId
 
-      const initialHistory = resolveInitialSessionHistory({
+      const latestAvailableCommands = getLatestAvailableCommands(initialized.history)
+      const availableCommands = latestAvailableCommands ?? existingSession?.availableCommands ?? []
+      const initialTurn = createInitializedHistoryTurn({
         initialized,
-        existingSession,
-        existingMessagesRecord: existingArtifacts.messagesRecord,
+        sequence: existingArtifacts.nextTurnSequence,
       })
+      const nextTurnSequence = initialTurn
+        ? initialTurn.sequence + 1
+        : existingArtifacts.nextTurnSequence
       const sessionRecord = createSessionRecordUpdate({
         initialized,
         request: params.request,
@@ -2916,15 +3054,15 @@ export function createSessionManager(input: {
         exitAfterInitialPrompt,
         title: preparedTitle.title,
         titleState: preparedTitle.titleState,
+        availableCommands,
       })
 
       persistLaunchedSession({
         id,
         existingSession,
-        existingMessagesRecord: existingArtifacts.messagesRecord,
+        initialTurn,
         existingWorktreeRecord: existingArtifacts.worktreeRecord,
         existingWorkforceRecord: existingArtifacts.workforceRecord,
-        initialHistory,
         worktree,
         workforceMetadata,
         sessionRecord,
@@ -2970,7 +3108,7 @@ export function createSessionManager(input: {
         token,
         agentProcess,
         initialized,
-        initialHistory,
+        nextTurnSequence,
         sessionLogger,
         systemPrompt: params.request.systemPrompt,
       })
@@ -2989,12 +3127,15 @@ export function createSessionManager(input: {
         await mountedWorktreeSyncHost.unmount().catch(() => {})
       }
       if (!existingSession) {
-        const messagesRecord =
-          db.sessionMessages.first({
+        for (const turnRecord of db.sessionTurns.findMany({ where: { sessionId: id } })) {
+          await Promise.resolve(db.sessionTurns.delete(turnRecord.id)).catch(() => {})
+        }
+        const draftRecord =
+          db.sessionTurnDrafts.first({
             where: { sessionId: id },
           }) ?? null
-        if (messagesRecord) {
-          await Promise.resolve(db.sessionMessages.delete(messagesRecord.id)).catch(() => {})
+        if (draftRecord) {
+          await Promise.resolve(db.sessionTurnDrafts.delete(draftRecord.id)).catch(() => {})
         }
         const diagnosticsRecord =
           db.sessionDiagnostics.first({
@@ -3073,10 +3214,75 @@ export function createSessionManager(input: {
     return getSession(id)
   }
 
-  async function getHistory(id: SessionId): Promise<GetSessionHistoryResponse> {
+  function readLatestTurnDraft(id: SessionId) {
+    const draftRecord =
+      db.sessionTurnDrafts.first({
+        where: { sessionId: id },
+        orderBy: {
+          sessionId: "asc",
+          sequence: "desc",
+        },
+      }) ?? null
+    if (!draftRecord) {
+      return null
+    }
+
+    const latestTurn =
+      db.sessionTurns.first({
+        where: { sessionId: id },
+        orderBy: {
+          sessionId: "asc",
+          sequence: "desc",
+        },
+      }) ?? null
+    if (latestTurn?.turnId === draftRecord.turnId) {
+      db.sessionTurnDrafts.delete(draftRecord.id)
+      return null
+    }
+
+    return draftRecord
+  }
+
+  async function getHistory(params: GetSessionHistoryRequest): Promise<GetSessionHistoryResponse> {
     await ready
-    const session = await getSession(id)
-    const history = readSessionHistoryMessages(id)
+    const session = await getSession(params.id)
+    const pageSize = normalizeSessionPageSize(params.limit)
+    let page: ReturnType<typeof db.sessionTurns.findPage>
+
+    try {
+      page = db.sessionTurns.findPage({
+        where: { sessionId: params.id },
+        orderBy: {
+          sessionId: "asc",
+          sequence: "desc",
+        },
+        limit: pageSize,
+        after: params.cursor ?? undefined,
+      })
+    } catch {
+      throw new IpcClientError("Invalid session history cursor")
+    }
+
+    const turns = [...page.items].reverse().map(toSessionHistoryTurnFromRecord)
+    if (!params.cursor) {
+      const active = activeSessions.get(params.id)
+
+      if (active?.activeTurn) {
+        turns.push(toSessionHistoryTurnFromActiveTurn(active.activeTurn))
+      } else {
+        const draftRecord = readLatestTurnDraft(params.id)
+        if (draftRecord) {
+          turns.push(toSessionHistoryTurnFromDraft(draftRecord))
+        }
+      }
+    }
+
+    await emitDiagnostic(params.id, "session_history_read", {
+      persistedTurnCount: page.items.length,
+      returnedTurnCount: turns.length,
+      hasCursor: params.cursor != null,
+      hasMore: page.next != null,
+    }).catch(() => {})
 
     return {
       id: session.id,
@@ -3085,7 +3291,9 @@ export function createSessionManager(input: {
         mode: session.connectionMode,
         activeDaemonSession: session.activeDaemonSession,
       }),
-      history,
+      turns,
+      nextCursor: page.next ?? null,
+      hasMore: page.next != null,
     }
   }
 
@@ -3112,11 +3320,7 @@ export function createSessionManager(input: {
     }
 
     return {
-      suggestions: getSlashComposerSuggestions(
-        readSessionHistoryMessages(session.id),
-        params.query,
-        limit,
-      ),
+      suggestions: getSlashComposerSuggestions(session.availableCommands, params.query, limit),
     }
   }
 
