@@ -73,7 +73,10 @@ describe("@goddard-ai/sdk session namespace", () => {
       id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [
-        { requestId: "prompt-2", prompt: [{ type: "text", text: "Queued follow-up" }] },
+        {
+          requestId: "prompt-2",
+          prompt: [{ type: "text", text: "Queued follow-up" }],
+        },
       ],
     })
 
@@ -81,11 +84,16 @@ describe("@goddard-ai/sdk session namespace", () => {
       id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [
-        { requestId: "prompt-2", prompt: [{ type: "text", text: "Queued follow-up" }] },
+        {
+          requestId: "prompt-2",
+          prompt: [{ type: "text", text: "Queued follow-up" }],
+        },
       ],
     })
 
-    expect(send).toHaveBeenCalledWith("sessionCancel", { id: "ses_daemon-session-1" })
+    expect(send).toHaveBeenCalledWith("sessionCancel", {
+      id: "ses_daemon-session-1",
+    })
   })
 
   test("session.steer forwards one replacement prompt to sessionSteer", async () => {
@@ -167,8 +175,12 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenNthCalledWith(1, "sessionWorktreeSyncMount", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(2, "sessionWorktreeSync", { id: "ses_1" })
-    expect(send).toHaveBeenNthCalledWith(3, "sessionWorktreeSyncUnmount", { id: "ses_1" })
+    expect(send).toHaveBeenNthCalledWith(2, "sessionWorktreeSync", {
+      id: "ses_1",
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "sessionWorktreeSyncUnmount", {
+      id: "ses_1",
+    })
   })
 
   test("session.subscribe passes the daemon-side session filter and unwraps messages", async () => {
@@ -181,7 +193,10 @@ describe("@goddard-ai/sdk session namespace", () => {
         target: Parameters<GoddardClient["subscribe"]>[0],
         handler: Parameters<GoddardClient["subscribe"]>[1],
       ) => {
-        expect(target).toEqual({ name: "sessionMessage", filter: { id: "ses_1" } })
+        expect(target).toEqual({
+          name: "sessionMessage",
+          filter: { id: "ses_1" },
+        })
         handler({
           id: "ses_1",
           message: {
@@ -249,6 +264,116 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session.draftSuggestions forwards launch-dialog suggestion reads", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      suggestions: [
+        {
+          type: "skill",
+          path: "/repo/.agents/skills/checks/SKILL.md",
+          uri: "file:///repo/.agents/skills/checks/SKILL.md",
+          label: "checks",
+          detail: "./.agents/skills/checks/SKILL.md",
+          source: "local",
+        },
+      ],
+    })
+
+    await expect(
+      sdk.session.draftSuggestions({
+        cwd: "/repo",
+        trigger: "dollar",
+        query: "check",
+      }),
+    ).resolves.toEqual({
+      suggestions: [
+        {
+          type: "skill",
+          path: "/repo/.agents/skills/checks/SKILL.md",
+          uri: "file:///repo/.agents/skills/checks/SKILL.md",
+          label: "checks",
+          detail: "./.agents/skills/checks/SKILL.md",
+          source: "local",
+        },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("sessionDraftSuggestions", {
+      cwd: "/repo",
+      trigger: "dollar",
+      query: "check",
+    })
+  })
+
+  test("session.launchPreview forwards launch capability inspection requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      repoRoot: "/repo",
+      branches: [
+        { name: "main", current: true },
+        { name: "feature-a", current: false },
+      ],
+      models: {
+        currentModelId: "gpt-5.4",
+        availableModels: [
+          {
+            modelId: "gpt-5.4",
+            name: "GPT-5.4",
+            description: "Balanced frontier model",
+          },
+        ],
+      },
+      configOptions: [],
+      slashCommands: [
+        {
+          type: "slash_command",
+          name: "plan",
+          description: "Create or revise the plan",
+          inputHint: "What should change?",
+        },
+      ],
+    })
+
+    await expect(
+      sdk.session.launchPreview({
+        agent: "pi-acp",
+        cwd: "/repo",
+      }),
+    ).resolves.toEqual({
+      repoRoot: "/repo",
+      branches: [
+        { name: "main", current: true },
+        { name: "feature-a", current: false },
+      ],
+      models: {
+        currentModelId: "gpt-5.4",
+        availableModels: [
+          {
+            modelId: "gpt-5.4",
+            name: "GPT-5.4",
+            description: "Balanced frontier model",
+          },
+        ],
+      },
+      configOptions: [],
+      slashCommands: [
+        {
+          type: "slash_command",
+          name: "plan",
+          description: "Create or revise the plan",
+          inputHint: "What should change?",
+        },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("sessionLaunchPreview", {
+      agent: "pi-acp",
+      cwd: "/repo",
+    })
+  })
+
   test("session.run returns an AgentSession", async () => {
     const { sdk, send, subscribe } = createSdkWithClient()
     const unsubscribe = vi.fn()
@@ -267,6 +392,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       cwd: "/tmp/project",
       mcpServers: [],
       systemPrompt: "Keep responses short.",
+      initialModelId: "gpt-5.4-mini",
+      initialConfigOptions: [
+        {
+          configId: "thinking",
+          value: "high",
+        },
+      ],
     })
 
     expect(session).toBeInstanceOf(AgentSession)
@@ -278,6 +410,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       worktree: undefined,
       mcpServers: [],
       systemPrompt: "Keep responses short.",
+      initialModelId: "gpt-5.4-mini",
+      initialConfigOptions: [
+        {
+          configId: "thinking",
+          value: "high",
+        },
+      ],
       env: undefined,
       repository: undefined,
       prNumber: undefined,
@@ -302,7 +441,10 @@ describe("@goddard-ai/sdk session namespace", () => {
         target: Parameters<GoddardClient["subscribe"]>[0],
         handler: Parameters<GoddardClient["subscribe"]>[1],
       ) => {
-        expect(target).toEqual({ name: "workforceEvent", filter: { rootDir: "/repo" } })
+        expect(target).toEqual({
+          name: "workforceEvent",
+          filter: { rootDir: "/repo" },
+        })
         handler({
           rootDir: "/repo",
           event: {
@@ -384,7 +526,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       abortedQueue: [],
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("sessionCancel", { id: "ses_daemon-session-1" })
+    expect(daemonSend).toHaveBeenCalledWith("sessionCancel", {
+      id: "ses_daemon-session-1",
+    })
   })
 
   test("AgentSession.steer uses the daemon-owned steer path", async () => {

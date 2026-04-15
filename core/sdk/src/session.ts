@@ -7,15 +7,19 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   DaemonSession,
-  SessionComposerSuggestionsRequest,
-  SessionComposerSuggestionsResponse,
   DaemonSessionMetadata,
   GetSessionHistoryResponse,
   GetSessionHistoryRequest,
-  SessionHistoryMessage,
-  SessionHistoryTurn,
+  InitialSessionConfigOption,
   ListSessionsRequest,
   ListSessionsResponse,
+  SessionComposerSuggestionsRequest,
+  SessionComposerSuggestionsResponse,
+  SessionDraftSuggestionsRequest,
+  SessionHistoryMessage,
+  SessionHistoryTurn,
+  SessionLaunchPreviewRequest,
+  SessionLaunchPreviewResponse,
   SessionWorkforceParams,
   SessionWorktreeParams,
   ShutdownSessionResponse,
@@ -28,9 +32,13 @@ export type {
   GetSessionHistoryRequest,
   SessionHistoryMessage,
   GetSessionHistoryResponse,
+  InitialSessionConfigOption,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
+  SessionDraftSuggestionsRequest,
   SessionHistoryTurn,
+  SessionLaunchPreviewRequest,
+  SessionLaunchPreviewResponse,
   ListSessionsRequest,
   ListSessionsResponse,
   ShutdownSessionResponse,
@@ -50,7 +58,9 @@ export function createSessionPromptMessage(input: SessionPromptRequest) {
     params: {
       sessionId: input.acpId,
       prompt:
-        typeof input.prompt === "string" ? [{ type: "text", text: input.prompt }] : input.prompt,
+        typeof input.prompt === "string"
+          ? [{ type: "text", text: input.prompt }]
+          : input.prompt,
     },
   } satisfies acp.AnyMessage
 }
@@ -69,6 +79,8 @@ interface BaseSessionParams {
   workforce?: SessionWorkforceOptions
   mcpServers: acp.McpServer[]
   systemPrompt?: string
+  initialModelId?: string
+  initialConfigOptions?: InitialSessionConfigOption[]
   env?: Record<string, string>
   repository?: string
   prNumber?: number

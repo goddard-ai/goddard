@@ -15,6 +15,11 @@ const openSearch = "navigation.openSearch" as const
 const openSpecs = "navigation.openSpecs" as const
 const openTasks = "navigation.openTasks" as const
 const openRoadmap = "navigation.openRoadmap" as const
+const openCommandPalette = "navigation.openCommandPalette" as const
+const openProjectSelector = "sessionInput.openProjectSelector" as const
+const openModelSelector = "sessionInput.openModelSelector" as const
+const toggleThinkingLevel = "sessionInput.toggleThinkingLevel" as const
+const submitSessionInput = "sessionInput.submit" as const
 
 test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
   expect(
@@ -80,11 +85,16 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     }),
   ).toEqual({
     [closeActiveTab]: ["Mod+w"],
+    [openCommandPalette]: ["Mod+p"],
     [newSession]: ["Mod+Shift+n"],
     [openSessions]: ["Alt+2"],
     [openSearch]: ["Alt+3"],
     [openSpecs]: ["Alt+4"],
     [openTasks]: ["Alt+5"],
     [openRoadmap]: ["Alt+6"],
+    [openProjectSelector]: ["Mod+p"],
+    [openModelSelector]: ["Mod+Shift+m"],
+    [toggleThinkingLevel]: ["Mod+t"],
+    [submitSessionInput]: ["Mod+Enter"],
   })
 })

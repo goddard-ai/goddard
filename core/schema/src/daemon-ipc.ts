@@ -25,12 +25,13 @@ import {
   type CreateSessionResponse,
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
-  type SessionComposerSuggestionsResponse,
   type GetSessionResponse,
   type GetSessionWorkforceResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
   type MutateSessionWorktreeResponse,
+  type SessionComposerSuggestionsResponse,
+  type SessionLaunchPreviewResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
   CancelSessionRequest,
@@ -41,6 +42,8 @@ import {
   ResolveSessionTokenRequest,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
+  SessionDraftSuggestionsRequest,
+  SessionLaunchPreviewRequest,
   SessionMessageEvent,
   SyncSessionWorktreeRequest as SyncSessionWorktreeRequestSchema,
   SteerSessionRequest,
@@ -128,6 +131,14 @@ export const daemonIpcSchema = {
     sessionComposerSuggestions: {
       payload: SessionComposerSuggestionsRequest,
       response: $type<SessionComposerSuggestionsResponse>(),
+    },
+    sessionDraftSuggestions: {
+      payload: SessionDraftSuggestionsRequest,
+      response: $type<SessionComposerSuggestionsResponse>(),
+    },
+    sessionLaunchPreview: {
+      payload: SessionLaunchPreviewRequest,
+      response: $type<SessionLaunchPreviewResponse>(),
     },
     sessionDiagnostics: {
       payload: DaemonSessionIdParams,

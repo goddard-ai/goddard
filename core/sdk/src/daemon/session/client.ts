@@ -179,6 +179,8 @@ export async function runSession(
           workforce: params.workforce,
           mcpServers: params.mcpServers,
           systemPrompt: params.systemPrompt ?? "",
+          initialModelId: params.initialModelId,
+          initialConfigOptions: params.initialConfigOptions,
           env: params.env,
           repository: params.repository,
           prNumber: params.prNumber,

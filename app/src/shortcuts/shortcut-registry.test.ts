@@ -25,6 +25,11 @@ function createTestRegistry() {
   commandContext.activeTabKind.value = "main"
   commandContext.hasClosableActiveTab.value = false
   commandContext.selectedNavId.value = "inbox"
+  commandContext.sessionInputActive.value = false
+  commandContext.sessionInputCanSubmit.value = false
+  commandContext.sessionInputHasModelSelector.value = false
+  commandContext.sessionInputHasProjectSelector.value = false
+  commandContext.sessionInputHasThinkingLevel.value = false
 
   return {
     registry,
@@ -223,6 +228,48 @@ test("active shortcut scopes drive availability checks", () => {
 
     expect(isCommandAvailable(registry.runtime, { scope: "editor" })).toBe(true)
   } finally {
+    cleanup()
+  }
+})
+
+test("session input context lets launch-dialog selectors override the global palette binding", () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const paletteMatches: unknown[] = []
+  const projectMatches: unknown[] = []
+
+  const stopPalette = onAppCommand(AppCommand.navigation.openCommandPalette, (match) => {
+    paletteMatches.push(match)
+  })
+  const stopProject = onAppCommand(AppCommand.sessionInput.openProjectSelector, (match) => {
+    projectMatches.push(match)
+  })
+
+  try {
+    registry.applyKeymapSnapshot("goddard", {}, null)
+
+    dispatchKeydown(runtimeDocument, {
+      key: "p",
+      code: "KeyP",
+      ctrlKey: true,
+    })
+
+    expect(paletteMatches).toHaveLength(1)
+    expect(projectMatches).toHaveLength(0)
+
+    commandContext.sessionInputActive.value = true
+    commandContext.sessionInputHasProjectSelector.value = true
+
+    dispatchKeydown(runtimeDocument, {
+      key: "p",
+      code: "KeyP",
+      ctrlKey: true,
+    })
+
+    expect(paletteMatches).toHaveLength(1)
+    expect(projectMatches).toHaveLength(1)
+  } finally {
+    stopPalette()
+    stopProject()
     cleanup()
   }
 })

@@ -6,20 +6,101 @@ import { X } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { commandContext } from "~/commands/command-context.ts"
 import { createSession } from "./actions.ts"
-import { SessionLaunchForm, SessionLaunchFormState } from "./launch-form.tsx"
+import { SessionLaunchFormState } from "./launch-form-state.ts"
+import { SessionLaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 
 export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
+  const hasModelSelector =
+    (form.launchPreview.value?.models?.availableModels.length ?? 0) > 0 && props.dialog.open
+  const hasProjectSelector = projectRegistry.projectList.length > 0 && props.dialog.open
+  const hasThinkingLevel = form.thinkingOption.value !== null && props.dialog.open
+  const canSubmit = form.canSubmit.value && props.dialog.open
+
+  async function launchSession() {
+    const sessionInput = form.sessionInput.value
+
+    if (!sessionInput) {
+      return
+    }
+
+    try {
+      const { session } = await createSession(sessionInput)
+      props.dialog.setOpen(false)
+      form.reset()
+      workbenchTabSet.openOrFocusTab({
+        id: `session:${session.id}`,
+        kind: "sessionChat",
+        title: getSessionDisplayTitle(session),
+        payload: {
+          sessionId: session.id,
+        },
+        dirty: false,
+      })
+    } catch (error) {
+      console.error("Failed to create session.", error)
+    }
+  }
 
   useEffect(() => {
     if (props.dialog.open) {
       form.reset()
     }
   }, [form, props.dialog.open])
+
+  useEffect(() => {
+    commandContext.sessionInputActive.value = props.dialog.open
+    commandContext.sessionInputCanSubmit.value = canSubmit
+    commandContext.sessionInputHasModelSelector.value = hasModelSelector
+    commandContext.sessionInputHasProjectSelector.value = hasProjectSelector
+    commandContext.sessionInputHasThinkingLevel.value = hasThinkingLevel
+
+    return () => {
+      commandContext.sessionInputActive.value = false
+      commandContext.sessionInputCanSubmit.value = false
+      commandContext.sessionInputHasModelSelector.value = false
+      commandContext.sessionInputHasProjectSelector.value = false
+      commandContext.sessionInputHasThinkingLevel.value = false
+    }
+  }, [canSubmit, hasModelSelector, hasProjectSelector, hasThinkingLevel, props.dialog.open])
+
+  useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    form.setOpenPicker("project")
+  })
+
+  useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    form.setOpenPicker("model")
+  })
+
+  useAppCommand(AppCommand.sessionInput.toggleThinkingLevel, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    form.toggleThinkingLevel()
+  })
+
+  useAppCommand(AppCommand.sessionInput.submit, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    void launchSession()
+  })
 
   return (
     <Portal>
@@ -49,14 +130,14 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
       >
         <Dialog.Content
           class={css({
-            width: "min(640px, calc(100vw - 32px))",
+            width: "min(880px, calc(100vw - 32px))",
             maxHeight: "calc(100vh - 32px)",
             display: "flex",
             flexDirection: "column",
-            gap: "18px",
+            gap: "16px",
             overflowY: "auto",
-            padding: "20px",
-            borderRadius: "18px",
+            padding: "18px",
+            borderRadius: "20px",
             border: "1px solid",
             borderColor: "border",
             backgroundColor: "panel",
@@ -71,84 +152,48 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
             },
           })}
         >
-          <header
+          <Dialog.Title
             class={css({
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "space-between",
-              gap: "16px",
+              position: "absolute",
+              width: "1px",
+              height: "1px",
+              padding: "0",
+              margin: "-1px",
+              overflow: "hidden",
+              clip: "rect(0, 0, 0, 0)",
+              whiteSpace: "nowrap",
+              border: "0",
             })}
           >
-            <div class={css({ display: "grid", gap: "6px" })}>
-              <Dialog.Title
-                class={css({
-                  color: "text",
-                  fontSize: "1.2rem",
-                  fontWeight: "700",
-                  lineHeight: "1.25",
-                })}
-              >
-                Launch session
-              </Dialog.Title>
-              <Dialog.Description
-                class={css({
+            Launch session
+          </Dialog.Title>
+          <Dialog.CloseTrigger asChild>
+            <button
+              class={cx(
+                css({
+                  position: "absolute",
+                  top: "12px",
+                  right: "12px",
+                  display: "grid",
+                  placeItems: "center",
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "10px",
+                  border: "1px solid",
+                  borderColor: "border",
+                  backgroundColor: "background",
                   color: "muted",
-                  fontSize: "0.9rem",
-                  lineHeight: "1.6",
-                })}
-              >
-                Choose a project, adapter, and first prompt. The new chat tab opens immediately
-                after creation.
-              </Dialog.Description>
-            </div>
-            <Dialog.CloseTrigger asChild>
-              <button
-                class={cx(
-                  css({
-                    display: "grid",
-                    placeItems: "center",
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "10px",
-                    border: "1px solid",
-                    borderColor: "border",
-                    backgroundColor: "background",
-                    color: "muted",
-                    cursor: "pointer",
-                  }),
-                )}
-                type="button"
-              >
-                <X size={16} strokeWidth={2.2} />
-              </button>
-            </Dialog.CloseTrigger>
-          </header>
+                  cursor: "pointer",
+                }),
+              )}
+              type="button"
+            >
+              <X size={16} strokeWidth={2.2} />
+            </button>
+          </Dialog.CloseTrigger>
           <SessionLaunchForm
             form={form}
-            onSubmit={async () => {
-              const sessionInput = form.sessionInput.value
-
-              if (!sessionInput) {
-                return
-              }
-
-              try {
-                const { session } = await createSession(sessionInput)
-                props.dialog.setOpen(false)
-                form.reset()
-                workbenchTabSet.openOrFocusTab({
-                  id: `session:${session.id}`,
-                  kind: "sessionChat",
-                  title: getSessionDisplayTitle(session),
-                  payload: {
-                    sessionId: session.id,
-                  },
-                  dirty: false,
-                })
-              } catch (error) {
-                console.error("Failed to create session.", error)
-              }
-            }}
+            onSubmit={launchSession}
             projects={projectRegistry.projectList}
           />
         </Dialog.Content>

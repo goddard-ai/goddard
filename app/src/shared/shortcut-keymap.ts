@@ -1,6 +1,8 @@
 import type { BindingInput } from "powerkeys"
 import { z } from "zod"
 
+import type { AppCommandId } from "./app-commands.ts"
+
 export type ShortcutBindingObject = (
   | { combo: string; sequence?: undefined }
   | { sequence: string; combo?: undefined }
@@ -23,14 +25,19 @@ export const shortcutKeymapProfiles = {
     id: "goddard",
     label: "Goddard",
     bindings: {
-      "workbench.closeActiveTab": ["Mod+w"],
-      "navigation.openNewSessionDialog": ["Mod+n"],
       "navigation.openInbox": ["Alt+1"],
       "navigation.openSessions": ["Alt+2"],
       "navigation.openSearch": ["Alt+3"],
       "navigation.openSpecs": ["Alt+4"],
       "navigation.openTasks": ["Alt+5"],
       "navigation.openRoadmap": ["Alt+6"],
+      "navigation.openCommandPalette": ["Mod+p"],
+      "navigation.openNewSessionDialog": ["Mod+n"],
+      "sessionInput.openProjectSelector": ["Mod+p"],
+      "sessionInput.openModelSelector": ["Mod+Shift+m"],
+      "sessionInput.toggleThinkingLevel": ["Mod+t"],
+      "sessionInput.submit": ["Mod+Enter"],
+      "workbench.closeActiveTab": ["Mod+w"],
     },
   },
 } satisfies Record<string, ShortcutKeymapProfile>
@@ -52,7 +59,7 @@ const ShortcutBinding = z.union([z.string().min(1), ShortcutBindingObject])
 
 export type ShortcutBinding = z.infer<typeof ShortcutBinding>
 
-export type ShortcutKeymapBindings = Partial<Record<string, readonly ShortcutBinding[]>>
+export type ShortcutKeymapBindings = Partial<Record<AppCommandId, readonly ShortcutBinding[]>>
 
 export const ShortcutKeymapOverrides = z.record(
   z.string(),
@@ -92,19 +99,26 @@ export function resolveShortcutBindings(
   profileId: KeymapProfileId,
   overrides: ShortcutKeymapOverrides = {},
 ) {
+  const profileBindings = shortcutKeymapProfiles[profileId].bindings
   const resolvedBindings: ShortcutKeymapBindings = {
-    ...shortcutKeymapProfiles[profileId].bindings,
+    ...profileBindings,
   }
 
   for (const commandId of Object.keys(overrides)) {
+    if (!(commandId in profileBindings)) {
+      continue
+    }
+
     const override = overrides[commandId]
+    const typedCommandId = commandId as AppCommandId
+
     if (override === undefined) {
       continue
     }
     if (override === null) {
-      delete resolvedBindings[commandId]
+      delete resolvedBindings[typedCommandId]
     } else {
-      resolvedBindings[commandId] = override
+      resolvedBindings[typedCommandId] = override
     }
   }
 

@@ -62,14 +62,33 @@ export const defaultPlugin: WorktreePlugin = {
             stdin: "ignore",
           },
         )
+
+        await runCommand("git", ["checkout", "-B", options.branchName, "FETCH_HEAD"], {
+          cwd: worktreeDir,
+          stdin: "ignore",
+        })
+        return worktreeDir
       }
 
-      await runCommand("git", ["checkout", options.branchName], {
-        cwd: worktreeDir,
-        stdin: "ignore",
-      })
+      await runCommand(
+        "git",
+        options.baseBranchName
+          ? ["checkout", "-B", options.branchName, options.baseBranchName]
+          : ["checkout", "-B", options.branchName],
+        {
+          cwd: worktreeDir,
+          stdin: "ignore",
+        },
+      )
     } catch {
-      // Ignore error.
+      try {
+        await runCommand("git", ["checkout", options.branchName], {
+          cwd: worktreeDir,
+          stdin: "ignore",
+        })
+      } catch {
+        // Ignore error.
+      }
     }
 
     return worktreeDir
@@ -78,6 +97,7 @@ export const defaultPlugin: WorktreePlugin = {
   async cleanup(worktreeDir: string, _branchName: string) {
     try {
       const wtResult = await runCommand("git", ["worktree", "remove", "--force", worktreeDir], {
+        cwd: worktreeDir,
         stdin: "ignore",
       })
 

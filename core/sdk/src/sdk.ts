@@ -21,6 +21,8 @@ import type {
   RunNamedActionRequest,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
+  SessionDraftSuggestionsRequest,
+  SessionLaunchPreviewRequest,
   ShutdownLoopRequest,
   ShutdownWorkforceRequest,
   StartLoopRequest,
@@ -125,6 +127,14 @@ function createSessionNamespace(client: DaemonIpcClient) {
     /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
     composerSuggestions: async (input: SessionComposerSuggestionsRequest) =>
       client.send("sessionComposerSuggestions", input),
+
+    /** Reads draft composer suggestions that only depend on one repository cwd. */
+    draftSuggestions: async (input: SessionDraftSuggestionsRequest) =>
+      client.send("sessionDraftSuggestions", input),
+
+    /** Loads launch-time adapter and repository capabilities before a session is created. */
+    launchPreview: async (input: SessionLaunchPreviewRequest) =>
+      client.send("sessionLaunchPreview", input),
 
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: async (input: DaemonSessionIdParams) => client.send("sessionDiagnostics", input),

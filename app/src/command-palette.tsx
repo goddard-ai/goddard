@@ -208,7 +208,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                     {Icon ? (
                       <Icon
                         aria-hidden={true}
-                        class={css({
+                        className={css({
                           color: state.active ? "text" : "muted",
                         })}
                         size={16}

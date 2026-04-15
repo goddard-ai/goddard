@@ -29,6 +29,7 @@ export type SessionWorktreeSyncParams = z.infer<typeof SessionWorktreeSyncParams
 /** Worktree options accepted by the daemon session API. */
 export const SessionWorktreeParams = z.strictObject({
   enabled: z.boolean().optional(),
+  baseBranchName: z.string().optional(),
   sync: SessionWorktreeSyncParams.optional(),
 })
 
@@ -71,6 +72,21 @@ export const SessionWorktree = z.strictObject({
 export type SessionWorktree = z.infer<typeof SessionWorktree>
 
 /** Request payload used to create one daemon-managed session. */
+export const InitialSessionConfigOption = z.union([
+  z.strictObject({
+    configId: z.string(),
+    type: z.literal("boolean"),
+    value: z.boolean(),
+  }),
+  z.strictObject({
+    configId: z.string(),
+    value: z.string(),
+  }),
+])
+
+export type InitialSessionConfigOption = z.infer<typeof InitialSessionConfigOption>
+
+/** Request payload used to create one daemon-managed session. */
 export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
   cwd: z.string(),
@@ -78,6 +94,8 @@ export const CreateSessionRequest = z.strictObject({
   workforce: SessionWorkforceParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string(),
+  initialModelId: z.string().optional(),
+  initialConfigOptions: z.array(InitialSessionConfigOption).optional(),
   env: z.record(z.string(), z.string()).optional(),
   repository: z.string().optional(),
   prNumber: z.number().int().optional(),
@@ -114,6 +132,11 @@ export const SessionComposerSuggestionTrigger = z.enum(["at", "dollar", "slash"]
 
 export type SessionComposerSuggestionTrigger = z.infer<typeof SessionComposerSuggestionTrigger>
 
+/** Trigger categories supported by the launch dialog composer suggestion API. */
+export const SessionDraftSuggestionTrigger = z.enum(["at", "dollar"])
+
+export type SessionDraftSuggestionTrigger = z.infer<typeof SessionDraftSuggestionTrigger>
+
 /** Request payload used to read session-scoped composer suggestions for one trigger. */
 export const SessionComposerSuggestionsRequest = DaemonSessionIdParams.extend({
   trigger: SessionComposerSuggestionTrigger,
@@ -122,6 +145,16 @@ export const SessionComposerSuggestionsRequest = DaemonSessionIdParams.extend({
 })
 
 export type SessionComposerSuggestionsRequest = z.infer<typeof SessionComposerSuggestionsRequest>
+
+/** Request payload used to read draft composer suggestions before a session exists. */
+export const SessionDraftSuggestionsRequest = z.strictObject({
+  cwd: z.string(),
+  trigger: SessionDraftSuggestionTrigger,
+  query: z.string(),
+  limit: z.number().int().positive().optional(),
+})
+
+export type SessionDraftSuggestionsRequest = z.infer<typeof SessionDraftSuggestionsRequest>
 
 /** Filesystem-backed suggestion item returned for one `@` trigger lookup. */
 export const SessionComposerFileSuggestion = z.strictObject({
@@ -180,6 +213,31 @@ export const SessionComposerSuggestionsResponse = z.strictObject({
 })
 
 export type SessionComposerSuggestionsResponse = z.infer<typeof SessionComposerSuggestionsResponse>
+
+/** One selectable git branch returned for the launch-session flow. */
+export const SessionLaunchBranch = z.strictObject({
+  name: z.string(),
+  current: z.boolean(),
+})
+
+export type SessionLaunchBranch = z.infer<typeof SessionLaunchBranch>
+
+/** Request payload used to inspect launch-time adapter and repository capabilities. */
+export const SessionLaunchPreviewRequest = z.strictObject({
+  agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
+  cwd: z.string(),
+})
+
+export type SessionLaunchPreviewRequest = z.infer<typeof SessionLaunchPreviewRequest>
+
+/** Response payload returned after loading launch-time adapter and repository capabilities. */
+export type SessionLaunchPreviewResponse = {
+  repoRoot: string | null
+  branches: SessionLaunchBranch[]
+  models: acp.SessionModelState | null
+  configOptions: acp.SessionConfigOption[]
+  slashCommands: SessionComposerSlashCommandSuggestion[]
+}
 
 /** JSON-RPC request ids surfaced for queued and aborted prompt bookkeeping. */
 export const SessionPromptId = z.union([z.string(), z.number()])

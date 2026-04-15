@@ -248,7 +248,7 @@ export function AppShell() {
   return (
     <>
       <CommandDialog
-        command={AppCommand.navigation.openCommandMenu}
+        command={AppCommand.navigation.openCommandPalette}
         content={() => import("~/command-palette.tsx")}
       />
       <AppShellChrome
@@ -256,7 +256,7 @@ export function AppShell() {
         indicator={tabStrip.indicator}
         navigationItems={navigationItems}
         onCommandMenuOpen={() => {
-          AppCommand.navigation.openCommandMenu()
+          AppCommand.navigation.openCommandPalette()
         }}
         onNavigationSelect={selectNavigationSurface}
         onTabClose={(id) => {
