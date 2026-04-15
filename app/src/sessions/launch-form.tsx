@@ -1,6 +1,7 @@
 import { css } from "@goddard-ai/styled-system/css"
 import { Folder } from "lucide-react"
 import { Suspense } from "preact/compat"
+import { useEffect } from "preact/hooks"
 
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -30,6 +31,21 @@ export function SessionLaunchForm(props: {
     icon: Folder,
   }))
   const selectedAdapter = form.selectedAdapter.value
+
+  useEffect(() => {
+    const nextProjectPath = props.projects.some(
+      (project) => project.path === form.draftProjectPath.value,
+    )
+      ? form.draftProjectPath.value
+      : (props.projects[0]?.path ?? null)
+
+    if (nextProjectPath === form.draftProjectPath.value) {
+      return
+    }
+
+    form.draftProjectPath.value = nextProjectPath
+    form.launchPreview.value = null
+  }, [form, props.projects])
 
   return (
     <div class={sessionLaunchSectionClass}>
