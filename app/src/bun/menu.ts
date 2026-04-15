@@ -21,6 +21,10 @@ const fileMenu = {
 
 const viewMenu = {
   label: "View",
+  commandPalette: {
+    label: "Command Palette",
+    action: "view:command-palette",
+  },
   reload: {
     label: "Reload",
     action: "view:reload",
@@ -38,6 +42,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
   const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
     [fileMenu.closeTab.action]: dispatchAppMenuAction("closeActiveTab"),
     [fileMenu.closeWindow.action]: closeWindow,
+    [viewMenu.commandPalette.action]: dispatchAppMenuAction("openCommandMenu"),
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
   }
@@ -77,6 +82,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
     {
       label: viewMenu.label,
       submenu: [
+        viewMenu.commandPalette,
         viewMenu.reload,
         {
           label: "Developer",

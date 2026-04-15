@@ -18,7 +18,7 @@ import {
 } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
-import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { deriveProjectName } from "./project-name.ts"
 import { lookupProject, type ProjectRecord } from "./project-registry.ts"
@@ -245,6 +245,7 @@ const textInputClass = css({
 
 /** Renders the projects page plus its local add-project modal flow. */
 export function ProjectsPage() {
+  const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const selectedProjectPath = useSignal<string | null>(projectRegistry.projectList[0]?.path ?? null)
@@ -423,6 +424,7 @@ export function ProjectsPage() {
               })
             }}
             onRemove={(projectPath) => {
+              projectContext.removeProject(projectPath)
               projectRegistry.removeProject(projectPath)
             }}
             onSelect={(projectPath) => {

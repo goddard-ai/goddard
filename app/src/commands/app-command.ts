@@ -63,6 +63,9 @@ export const AppCommand = defineAppCommands({
     openNewSessionDialog: {
       label: "Open New Session Dialog",
     },
+    openSwitchProject: {
+      label: "Switch Project",
+    },
     openCommandMenu: {
       label: "Open Command Menu",
     },

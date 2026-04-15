@@ -7,6 +7,7 @@ import {
 } from "./shortcut-keymap.ts"
 
 const newSession = "navigation.openNewSessionDialog" as const
+const openSwitchProject = "navigation.openSwitchProject" as const
 const openInbox = "navigation.openInbox" as const
 const openKeyboardShortcuts = "navigation.openKeyboardShortcuts" as const
 const closeActiveTab = "workbench.closeActiveTab" as const
@@ -81,6 +82,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
   ).toEqual({
     [closeActiveTab]: ["Mod+w"],
     [newSession]: ["Mod+Shift+n"],
+    [openSwitchProject]: ["Mod+o"],
     [openSessions]: ["Alt+2"],
     [openSearch]: ["Alt+3"],
     [openSpecs]: ["Alt+4"],

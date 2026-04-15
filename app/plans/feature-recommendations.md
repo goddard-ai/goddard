@@ -23,7 +23,6 @@
     - The app now has a project management page, but project home pages, status bars, or richer per-project dashboards remain undefined.
   - Potential future plans:
     - Components: `ProjectHomeView`, `ProjectStatusBar`
-    - State: `ProjectContextState`
 
 - 4. Configuration and Settings Editing
   - Why deferred:

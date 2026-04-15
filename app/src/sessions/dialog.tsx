@@ -6,21 +6,22 @@ import { useModel } from "@preact/signals"
 import { Sparkles, X } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
-import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { createSession } from "./actions.ts"
 import { SessionLaunchForm, SessionLaunchFormState } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 
 export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) {
+  const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
 
   useEffect(() => {
     if (props.dialog.open) {
-      form.reset()
+      form.reset(projectContext.activeProjectPath)
     }
-  }, [form, props.dialog.open])
+  }, [form, projectContext, props.dialog.open])
 
   return (
     <Portal>
@@ -153,6 +154,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
               }
 
               try {
+                const projectPath = form.draftProjectPath.value
                 const { session } = await createSession(sessionInput)
                 props.dialog.setOpen(false)
                 form.reset()
@@ -161,6 +163,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
                   kind: "sessionChat",
                   title: getSessionDisplayTitle(session),
                   payload: {
+                    projectPath,
                     sessionId: session.id,
                   },
                   dirty: false,

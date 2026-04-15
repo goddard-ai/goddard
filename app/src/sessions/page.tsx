@@ -3,8 +3,9 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Sparkles } from "lucide-react"
 
-import { useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { useQuery } from "~/lib/query.ts"
+import { findNearestProjectPath } from "~/projects/project-context.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 import { ListToolbar } from "./list-toolbar.tsx"
@@ -12,6 +13,7 @@ import { SessionsList } from "./list.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 
 export default function SessionsPage() {
+  const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
 
   const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
@@ -28,6 +30,7 @@ export default function SessionsPage() {
       kind: "sessionChat",
       title: getSessionDisplayTitle(session),
       payload: {
+        projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
         sessionId: session.id,
       },
       dirty: false,

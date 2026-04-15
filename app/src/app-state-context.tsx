@@ -2,6 +2,7 @@ import { createContext } from "preact"
 import { useSigma } from "preact-sigma"
 import { useContext, useEffect } from "preact/hooks"
 
+import { ProjectContext } from "~/projects/project-context.ts"
 import { ProjectRegistry } from "~/projects/project-registry.ts"
 import { shortcutRegistry, type ShortcutRegistry } from "~/shortcuts/shortcut-registry.ts"
 import { Appearance } from "./appearance/appearance.ts"
@@ -11,6 +12,7 @@ import { WorkbenchTabSet } from "./workbench-tab-set.ts"
 
 const appearanceContext = createContext<Appearance | null>(null)
 const navigationContext = createContext<Navigation | null>(null)
+const projectContextContext = createContext<ProjectContext | null>(null)
 const projectRegistryContext = createContext<ProjectRegistry | null>(null)
 const shortcutRegistryContext = createContext<ShortcutRegistry | null>(null)
 const workbenchTabSetContext = createContext<WorkbenchTabSet | null>(null)
@@ -32,6 +34,7 @@ export function AppStateProvider(props: {
     [props.initialAppearanceSnapshot],
   )
   const navigation = useSigma(() => new Navigation())
+  const projectContext = useSigma(() => new ProjectContext())
   const projectRegistry = useSigma(() => new ProjectRegistry())
   const workbenchTabSet = useSigma(() => new WorkbenchTabSet())
 
@@ -42,6 +45,7 @@ export function AppStateProvider(props: {
     navigation.hydrateNavigation()
     workbenchTabSet.hydrateTabsFromStore()
     projectRegistry.loadProjects()
+    projectContext.hydrate(projectRegistry.projectList.map((project) => project.path))
     void shortcutRegistry.hydrateKeymap()
 
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -60,18 +64,20 @@ export function AppStateProvider(props: {
       mediaQuery.removeEventListener("change", syncSystemTheme)
       cleanupShortcutRegistry()
     }
-  }, [appearance, navigation, projectRegistry, workbenchTabSet])
+  }, [appearance, navigation, projectContext, projectRegistry, workbenchTabSet])
 
   return (
     <appearanceContext.Provider value={appearance}>
       <navigationContext.Provider value={navigation}>
-        <projectRegistryContext.Provider value={projectRegistry}>
-          <shortcutRegistryContext.Provider value={shortcutRegistry}>
-            <workbenchTabSetContext.Provider value={workbenchTabSet}>
-              {props.children}
-            </workbenchTabSetContext.Provider>
-          </shortcutRegistryContext.Provider>
-        </projectRegistryContext.Provider>
+        <projectContextContext.Provider value={projectContext}>
+          <projectRegistryContext.Provider value={projectRegistry}>
+            <shortcutRegistryContext.Provider value={shortcutRegistry}>
+              <workbenchTabSetContext.Provider value={workbenchTabSet}>
+                {props.children}
+              </workbenchTabSetContext.Provider>
+            </shortcutRegistryContext.Provider>
+          </projectRegistryContext.Provider>
+        </projectContextContext.Provider>
       </navigationContext.Provider>
     </appearanceContext.Provider>
   )
@@ -83,6 +89,10 @@ export function useAppearance() {
 
 export function useNavigation() {
   return requireContext(useContext(navigationContext), "navigationContext")
+}
+
+export function useProjectContext() {
+  return requireContext(useContext(projectContextContext), "projectContextContext")
 }
 
 export function useProjectRegistry() {

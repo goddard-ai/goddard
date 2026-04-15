@@ -25,6 +25,7 @@ export const shortcutKeymapProfiles = {
     bindings: {
       "workbench.closeActiveTab": ["Mod+w"],
       "navigation.openNewSessionDialog": ["Mod+n"],
+      "navigation.openSwitchProject": ["Mod+o"],
       "navigation.openInbox": ["Alt+1"],
       "navigation.openSessions": ["Alt+2"],
       "navigation.openSearch": ["Alt+3"],

@@ -82,6 +82,39 @@ test("keydown dispatches one typed app command event", () => {
   }
 })
 
+test("default keymap dispatches switch-project from Mod+o", () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+
+  const unsubscribe = onAppCommand(AppCommand.navigation.openSwitchProject, (match) => {
+    matches.push(match)
+  })
+
+  try {
+    registry.applyKeymapSnapshot("goddard", {}, null)
+
+    dispatchKeydown(runtimeDocument, {
+      key: "o",
+      code: "KeyO",
+      ctrlKey: true,
+    })
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      combo: "Ctrl+o",
+      event: {
+        key: "o",
+        modifiers: {
+          ctrl: true,
+        },
+      },
+    })
+  } finally {
+    unsubscribe()
+    cleanup()
+  }
+})
+
 test("applyKeymapSnapshot replaces previous bindings instead of accumulating them", () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
