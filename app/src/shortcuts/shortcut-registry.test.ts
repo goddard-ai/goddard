@@ -1,16 +1,28 @@
-import { expect, test, vi } from "bun:test"
+import { expect, test } from "bun:test"
 import { createShortcuts } from "powerkeys"
 
-const { AppCommand, onAppCommand } = await import("../commands/app-command.ts")
-const { ShortcutRegistry } = await import("./shortcut-registry.ts")
+import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
+import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
+import { ShortcutRegistry } from "./shortcut-registry.ts"
 
 /** Creates one registry instance with an isolated document-like event boundary. */
 function createTestRegistry() {
   const runtimeDocument = document.implementation.createHTMLDocument("shortcut-registry-test")
   const registry = new ShortcutRegistry({
-    runtime: createShortcuts({ target: runtimeDocument }),
+    runtime: createShortcuts({
+      target: runtimeDocument,
+      editablePolicy: "ignore-editable",
+      getActiveScopes: () => commandContext.activeScopes.peek(),
+      onError: (error, info) => {
+        console.error("Shortcut runtime error.", error, info)
+      },
+    }),
   })
   const cleanup = registry.setup()
+  commandContext.activeScopes.value = []
+  commandContext.activeTabKind.value = "main"
+  commandContext.hasClosableActiveTab.value = false
+  commandContext.selectedNavId.value = "inbox"
 
   return {
     registry,
@@ -32,9 +44,11 @@ function dispatchKeydown(target: EventTarget, init: KeyboardEventInit) {
 
 test("keydown dispatches one typed app command event", () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
-  const listener = vi.fn()
+  const matches: unknown[] = []
 
-  const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, listener)
+  const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, (match) => {
+    matches.push(match)
+  })
   registry.applyKeymapSnapshot(
     "goddard",
     {
@@ -50,7 +64,8 @@ test("keydown dispatches one typed app command event", () => {
       altKey: true,
     })
 
-    expect(listener).toHaveBeenCalledWith({
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
       combo: "Alt+n",
       event: {
         key: "n",
@@ -86,25 +101,74 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
   }
 })
 
-test("syncWorkbenchContext and syncOverlayContext track the initial runtime context surface", () => {
+test("command-owned when clauses gate both dispatch and palette availability", () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+
+  const unsubscribe = onAppCommand(AppCommand.workbench.closeActiveTab, (match) => {
+    matches.push(match)
+  })
+
+  try {
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
+
+    dispatchKeydown(runtimeDocument, {
+      key: "w",
+      code: "KeyW",
+      ctrlKey: true,
+    })
+
+    expect(matches).toEqual([])
+
+    commandContext.hasClosableActiveTab.value = true
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
+
+    dispatchKeydown(runtimeDocument, {
+      key: "w",
+      code: "KeyW",
+      ctrlKey: true,
+    })
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      combo: "Ctrl+w",
+      event: {
+        key: "w",
+        modifiers: {
+          ctrl: true,
+        },
+      },
+    })
+  } finally {
+    unsubscribe()
+    cleanup()
+  }
+})
+
+test("hasClosableActiveTab drives runtime availability for closeActiveTab", () => {
   const { registry, cleanup } = createTestRegistry()
 
   try {
-    registry.syncWorkbenchContext({
-      activeTabKind: "main",
-      hasClosableActiveTab: false,
-      selectedNavId: "sessions",
-    })
-    registry.syncOverlayContext({
-      isOpen: true,
-      kind: "shortcut-capture",
-    })
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
 
-    expect(registry.activeTabKind).toBe("main")
-    expect(registry.hasClosableActiveTab).toBe(false)
-    expect(registry.selectedNavId).toBe("sessions")
-    expect(registry.overlayIsOpen).toBe(true)
-    expect(registry.overlayKind).toBe("shortcut-capture")
+    commandContext.hasClosableActiveTab.value = true
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
+  } finally {
+    cleanup()
+  }
+})
+
+test("active shortcut scopes drive availability checks", () => {
+  const { registry, cleanup } = createTestRegistry()
+
+  try {
+    expect(isCommandAvailable(registry.runtime, { scope: "editor" })).toBe(false)
+
+    commandContext.activeScopes.value = ["editor"]
+
+    expect(isCommandAvailable(registry.runtime, { scope: "editor" })).toBe(true)
   } finally {
     cleanup()
   }

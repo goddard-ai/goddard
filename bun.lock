@@ -51,7 +51,7 @@
         "immer": "^11.1.4",
         "lexical": "^0.30.0",
         "lucide-react": "^1.7.0",
-        "powerkeys": "^0.1.0",
+        "powerkeys": "^0.1.1",
         "preact": "11.0.0-beta.1",
         "preact-comark": "0.2.4",
         "preact-in-motion": "^0.2.9",
@@ -1988,7 +1988,7 @@
 
     "postcss-value-parser": ["postcss-value-parser@4.2.0", "", {}, "sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ=="],
 
-    "powerkeys": ["powerkeys@0.1.0", "", { "dependencies": { "@casbin/expression-eval": "^5.3.0" } }, "sha512-v/oBcAJ81ayXd1WaaUwoxrRWhVizOalQZcD3rHz/gi+JyesMYFCwKofWQV1L5VdF3/wpADeQDVKCugPa9V9xKQ=="],
+    "powerkeys": ["powerkeys@0.1.1", "", { "dependencies": { "@casbin/expression-eval": "^5.3.0" } }, "sha512-uXF4azfWl++cw0D2LItNTnY5Y8I+e2F0JYW3GLr3V/9LyYIT3ApeiYvDddIb57fs0Beh1dBZwq/KQv44fT5/0Q=="],
 
     "preact": ["preact@11.0.0-beta.1", "", {}, "sha512-HEG7hlrCoGpESpCgvuOwt9v7nfqd3/FQCMY8OTrohIN/k6JGcVTWMUOm7+WtWkHd6uQrEYNyQUNgBG4JsDmhRQ=="],
 

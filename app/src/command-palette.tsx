@@ -5,24 +5,15 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Command } from "ark-cmdk"
 import { Search } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
 
-import type { AppCommandId } from "~/shared/app-commands.ts"
+import { useShortcutRegistry } from "./app-state-context.tsx"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
-import { shortcutRegistry } from "./shortcuts/shortcut-registry.ts"
-
-/** One actionable item shown in the command palette. */
-type CommandMenuItem = {
-  command: AppCommand
-  id: AppCommandId
-  icon: LucideIcon
-  keywords?: readonly string[]
-  label: string
-}
+import { isCommandAvailable } from "./commands/command-context.ts"
 
 export default function CommandPalette(props: { dialog: UseDialogReturn }) {
   const { open } = props.dialog
+  const shortcutRegistry = useShortcutRegistry()
 
   const [search, setSearch] = useState("")
   useEffect(() => {
@@ -30,6 +21,10 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
       setSearch("")
     }
   }, [open, search])
+
+  const visibleCommands = appCommandList.filter((command) =>
+    isCommandAvailable(shortcutRegistry.runtime, command),
+  )
 
   return (
     <Portal>
@@ -111,7 +106,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
               itemToKeywords={(command) => command.keywords}
               itemToString={(command) => command.label}
               itemToValue={(command) => command.id}
-              items={appCommandList}
+              items={visibleCommands}
               label="Command menu"
               onSearchChange={setSearch}
               onSelect={(command) => {
@@ -165,7 +160,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                   placeholder="Type a command or jump to a view"
                 />
               </div>
-              <Command.List<CommandMenuItem>
+              <Command.List<AppCommand>
                 class={css({
                   padding: "8px",
                   overflowY: "auto",
@@ -198,14 +193,17 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                 }
               >
                 {(item, state) => {
-                  const Icon = item.icon
-                  const shortcut = shortcutRegistry.resolvedBindings[item.command.id]
+                  const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
+                  const shortcut =
+                    typeof shortcutBinding === "string"
+                      ? shortcutBinding
+                      : (shortcutBinding?.combo ?? shortcutBinding?.sequence)
 
                   return (
                     <div
                       class={css({
                         display: "grid",
-                        gridTemplateColumns: "auto minmax(0, 1fr) auto",
+                        gridTemplateColumns: "minmax(0, 1fr) auto",
                         alignItems: "center",
                         gap: "10px",
                         width: "100%",
@@ -227,29 +225,6 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                       })}
                       data-active={state.active ? "true" : "false"}
                     >
-                      <span
-                        class={css({
-                          display: "grid",
-                          placeItems: "center",
-                          width: "30px",
-                          height: "30px",
-                          borderRadius: "10px",
-                          border: "1px solid",
-                          borderColor: "border",
-                          backgroundColor: "background",
-                          color: "accentStrong",
-                          transition:
-                            "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-                          "&[data-active='true']": {
-                            borderColor: "accent",
-                            backgroundColor: "accent",
-                            color: "accentFg",
-                          },
-                        })}
-                        data-active={state.active ? "true" : "false"}
-                      >
-                        <Icon aria-hidden={true} size={16} strokeWidth={2} />
-                      </span>
                       <span
                         class={css({
                           overflow: "hidden",

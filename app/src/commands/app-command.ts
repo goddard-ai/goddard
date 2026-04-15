@@ -1,4 +1,4 @@
-import type { ShortcutMatch } from "powerkeys"
+import type { RunnableInput, ShortcutMatch } from "powerkeys"
 import { SigmaTarget, useListener } from "preact-sigma"
 import { mapValues } from "radashi"
 
@@ -6,7 +6,7 @@ import type { AppCommandId } from "~/shared/app-commands.ts"
 
 const appCommandBus = new SigmaTarget<Record<string, ShortcutMatch | undefined>>()
 
-type AppCommandDefinition = {
+type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
   label: string
   /** Optional icon for the command menu. */
@@ -53,6 +53,7 @@ export const AppCommand = defineAppCommands({
   workbench: {
     closeActiveTab: {
       label: "Close Active Tab",
+      when: "workbench.hasClosableActiveTab",
     },
   },
   navigation: {

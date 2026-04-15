@@ -71,7 +71,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
       [openInbox]: null,
     }),
   ).toEqual({
-    [closeActiveTab]: [{ combo: "Mod+w", when: "workbench.hasClosableActiveTab" }],
+    [closeActiveTab]: ["Mod+w"],
     [newSession]: ["Mod+Shift+n"],
     [openSessions]: ["Alt+2"],
     [openSearch]: ["Alt+3"],

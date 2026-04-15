@@ -187,7 +187,9 @@ export default function KeyboardShortcutsView(props: { class?: string }) {
                 </div>
                 <div class={monoValueClass}>{bindingId ?? "–"}</div>
                 <div class={monoValueClass}>
-                  {binding && typeof binding !== "string" ? binding.when : "–"}
+                  {(binding && typeof binding !== "string" ? binding.when : undefined) ??
+                    row.command.when ??
+                    "–"}
                 </div>
               </article>
             )

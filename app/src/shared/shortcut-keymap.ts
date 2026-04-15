@@ -29,7 +29,7 @@ export const shortcutKeymapProfiles = {
     id: "goddard",
     label: "Goddard",
     bindings: {
-      "workbench.closeActiveTab": [{ combo: "Mod+w", when: "workbench.hasClosableActiveTab" }],
+      "workbench.closeActiveTab": ["Mod+w"],
       "navigation.openNewSessionDialog": ["Mod+n"],
       "navigation.openInbox": ["Alt+1"],
       "navigation.openSessions": ["Alt+2"],

@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { AppearanceDialog } from "~/appearance/appearance-dialog.tsx"
 import { AppCommand, resolveAppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { commandContext } from "~/commands/command-context.ts"
 import { browseForProject } from "~/desktop-host.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import { lookupProject } from "~/projects/project-registry.ts"
@@ -10,12 +11,7 @@ import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
 import { appShellSections } from "./app-shell/config.ts"
 import { AppShellWorkbenchContent } from "./app-shell/views.tsx"
-import {
-  useNavigation,
-  useProjectRegistry,
-  useShortcutRegistry,
-  useWorkbenchTabSet,
-} from "./app-state-context.tsx"
+import { useNavigation, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsx"
 import { CommandDialog } from "./commands/command-dialog.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
 import { deriveProjectName } from "./projects/project-name.ts"
@@ -89,7 +85,6 @@ function useAppShellTabStrip(
 export function AppShell() {
   const navigation = useNavigation()
   const projectRegistry = useProjectRegistry()
-  const shortcutRegistry = useShortcutRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const [isAppearanceDialogOpen, setIsAppearanceDialogOpen] = useState(false)
   const tabStrip = useAppShellTabStrip(
@@ -122,12 +117,11 @@ export function AppShell() {
   const activeTabKind = workbenchTabSet.activeTab?.kind ?? WORKBENCH_PRIMARY_TAB.kind
 
   useEffect(() => {
-    shortcutRegistry.syncWorkbenchContext({
-      activeTabKind,
-      hasClosableActiveTab: workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id,
-      selectedNavId: navigation.selectedNavId,
-    })
-  }, [activeTabKind, navigation.selectedNavId, shortcutRegistry, workbenchTabSet.activeTabId])
+    commandContext.activeTabKind.value = activeTabKind
+    commandContext.hasClosableActiveTab.value =
+      workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id
+    commandContext.selectedNavId.value = navigation.selectedNavId
+  }, [activeTabKind, navigation.selectedNavId, workbenchTabSet.activeTabId])
 
   function openNavigationSurfaceTab(kind: NavigationItemId) {
     const nextNavigationItem =
