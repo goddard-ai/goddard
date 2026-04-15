@@ -8,15 +8,17 @@ import { ShortcutRegistry } from "./shortcut-registry.ts"
 /** Creates one registry instance with an isolated document-like event boundary. */
 function createTestRegistry() {
   const runtimeDocument = document.implementation.createHTMLDocument("shortcut-registry-test")
+  const runtime = createShortcuts({
+    target: runtimeDocument,
+    editablePolicy: "ignore-editable",
+    getActiveScopes: () => commandContext.activeScopes.peek(),
+    onError: (error, info) => {
+      console.error("Shortcut runtime error.", error, info)
+    },
+  })
   const registry = new ShortcutRegistry({
-    runtime: createShortcuts({
-      target: runtimeDocument,
-      editablePolicy: "ignore-editable",
-      getActiveScopes: () => commandContext.activeScopes.peek(),
-      onError: (error, info) => {
-        console.error("Shortcut runtime error.", error, info)
-      },
-    }),
+    runtime,
+    bindingSet: runtime.createBindingSet(),
   })
   const cleanup = registry.setup()
   commandContext.activeScopes.value = []
@@ -74,6 +76,57 @@ test("keydown dispatches one typed app command event", () => {
         },
       },
     })
+  } finally {
+    unsubscribe()
+    cleanup()
+  }
+})
+
+test("applyKeymapSnapshot replaces previous bindings instead of accumulating them", () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+
+  const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, (match) => {
+    matches.push(match)
+  })
+
+  try {
+    registry.applyKeymapSnapshot(
+      "goddard",
+      {
+        "navigation.openNewSessionDialog": ["Alt+n"],
+      },
+      null,
+    )
+
+    dispatchKeydown(runtimeDocument, {
+      key: "n",
+      code: "KeyN",
+      altKey: true,
+    })
+
+    registry.applyKeymapSnapshot(
+      "goddard",
+      {
+        "navigation.openNewSessionDialog": ["Shift+n"],
+      },
+      null,
+    )
+
+    dispatchKeydown(runtimeDocument, {
+      key: "n",
+      code: "KeyN",
+      altKey: true,
+    })
+
+    dispatchKeydown(runtimeDocument, {
+      key: "N",
+      code: "KeyN",
+      shiftKey: true,
+    })
+
+    expect(matches).toHaveLength(2)
+    expect(matches.map((match) => (match as { combo: string }).combo)).toEqual(["Alt+n", "Shift+n"])
   } finally {
     unsubscribe()
     cleanup()

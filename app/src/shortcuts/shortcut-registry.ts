@@ -1,12 +1,11 @@
 import { effect } from "@preact/signals"
 import { castDraft } from "immer"
-import { BindingInput, createShortcuts, type ShortcutRuntime } from "powerkeys"
+import { createShortcuts, type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
 import { SigmaType, type SigmaRef } from "preact-sigma"
 
 import { appCommandList } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
 import { desktopHost } from "~/desktop-host.ts"
-import { AppCommandId } from "~/shared/app-commands.ts"
 import {
   createDefaultShortcutKeymapFile,
   resolveShortcutBindings,
@@ -17,13 +16,13 @@ import {
 
 type ShortcutRegistryShape = {
   runtime: SigmaRef<ShortcutRuntime>
+  bindingSet: SigmaRef<BindingSet>
   selectedProfileId: KeymapProfileId
   overrides: ShortcutKeymapOverrides
   resolvedBindings: ShortcutKeymapBindings
   loadError: string | null
   writeError: string | null
   isHydrated: boolean
-  bindingIdsByCommand: Partial<Record<AppCommandId, string[]>>
 }
 
 function getDefaultResolvedBindings() {
@@ -40,7 +39,6 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
     loadError: null,
     writeError: null,
     isHydrated: false,
-    bindingIdsByCommand: {},
   })
   .actions({
     /** Loads the persisted user keymap from the Bun host and reapplies the effective bindings. */
@@ -68,13 +66,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
 
     /** Rebuilds the runtime bindings from the current resolved keymap snapshot. */
     rebindRuntime() {
-      for (const bindingIds of Object.values(this.bindingIdsByCommand)) {
-        for (const bindingId of bindingIds ?? []) {
-          this.runtime.unbind(bindingId)
-        }
-      }
-
-      const nextBindingIds: Partial<Record<AppCommandId, string[]>> = {}
+      const nextBindings: BindingSpec[] = []
 
       for (const command of appCommandList) {
         const expressions = this.resolvedBindings[command.id]
@@ -82,42 +74,33 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
           continue
         }
 
-        const commandBindingIds = expressions.map((expression) => {
-          let input: BindingInput
+        for (const expression of expressions) {
           if (typeof expression !== "string") {
-            input = {
+            nextBindings.push({
               scope: command.scope,
               when: command.when,
               ...expression,
               handler: command,
-            }
+            })
           } else if (expression.includes(" ")) {
-            input = {
+            nextBindings.push({
               sequence: expression,
               scope: command.scope,
               when: command.when,
               handler: command,
-            }
+            })
           } else {
-            input = {
+            nextBindings.push({
               combo: expression,
               scope: command.scope,
               when: command.when,
               handler: command,
-            }
+            })
           }
-
-          const commandBinding = this.runtime.bind(input)
-          return commandBinding.id
-        })
-
-        if (commandBindingIds.length > 0) {
-          nextBindingIds[command.id] = commandBindingIds
         }
       }
 
-      this.bindingIdsByCommand = nextBindingIds
-      this.commit()
+      this.bindingSet.replace(nextBindings)
     },
   })
   .setup(function () {
@@ -132,9 +115,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
     return [
       () => {
         disposeContextSync()
-        this.act(function () {
-          this.bindingIdsByCommand = {}
-        })
+        this.bindingSet.dispose()
       },
       this.runtime,
     ]
@@ -144,13 +125,16 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
 export interface ShortcutRegistry extends InstanceType<typeof ShortcutRegistry> {}
 
 /** Module-scoped shortcut registry singleton shared across the app shell. */
+const runtime = createShortcuts({
+  target: document,
+  editablePolicy: "ignore-editable",
+  getActiveScopes: () => commandContext.activeScopes.peek(),
+  onError: (error, info) => {
+    console.error("Shortcut runtime error.", error, info)
+  },
+})
+
 export const shortcutRegistry = new ShortcutRegistry({
-  runtime: createShortcuts({
-    target: document,
-    editablePolicy: "ignore-editable",
-    getActiveScopes: () => commandContext.activeScopes.peek(),
-    onError: (error, info) => {
-      console.error("Shortcut runtime error.", error, info)
-    },
-  }),
+  runtime,
+  bindingSet: runtime.createBindingSet(),
 })
