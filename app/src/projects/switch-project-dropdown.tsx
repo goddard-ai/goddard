@@ -1,38 +1,59 @@
-import { css, cx } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
-import { useListener } from "preact-sigma"
-import { FolderOpen, Search } from "lucide-react"
+import { Popover } from "@ark-ui/react/popover"
+import { css } from "@goddard-ai/styled-system/css"
+import { Search } from "lucide-react"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import type { ProjectRecord } from "./project-registry.ts"
 
-const dropdownClass = css({
-  position: "absolute",
-  top: "calc(100% + 10px)",
-  left: "0",
+const triggerClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  width: "100%",
+  height: "28px",
+  paddingInline: "12px",
+  border: "none",
+  borderRadius: "6px",
+  backgroundColor: "panel",
+  color: "muted",
+  cursor: "pointer",
+  textAlign: "left",
+  transition:
+    "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+  _hover: {
+    backgroundColor: "surface",
+    color: "text",
+  },
+  _focusVisible: {
+    outline: "2px solid",
+    outlineColor: "accentStrong",
+    outlineOffset: "2px",
+  },
+})
+
+const contentClass = css({
   display: "grid",
   gap: "8px",
-  width: "100%",
+  width: "var(--reference-width)",
   minWidth: "320px",
+  marginTop: "10px",
   padding: "10px",
   border: "1px solid",
   borderColor: "border",
-  borderRadius: "18px",
-  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
-  boxShadow: `0 24px 56px ${token.var("colors.shadow")}`,
-  zIndex: "10",
+  borderRadius: "14px",
+  backgroundColor: "background",
+  outline: "none",
 })
 
 const inputShellClass = css({
   display: "flex",
   alignItems: "center",
   gap: "10px",
-  minHeight: "42px",
+  minHeight: "38px",
   paddingInline: "12px",
-  borderRadius: "12px",
+  borderRadius: "10px",
   border: "1px solid",
   borderColor: "border",
-  backgroundColor: "background",
+  backgroundColor: "surface",
   color: "muted",
   transition:
     "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
@@ -58,28 +79,29 @@ const inputClass = css({
 
 const listClass = css({
   display: "grid",
-  gap: "4px",
-  maxHeight: "320px",
+  gap: "2px",
+  maxHeight: "280px",
   overflowY: "auto",
+  listStyle: "none",
+  padding: "0",
+  margin: "0",
 })
 
 const itemClass = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  alignItems: "center",
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
   gap: "12px",
   width: "100%",
-  minHeight: "52px",
-  padding: "10px 12px",
-  border: "1px solid",
-  borderColor: "transparent",
-  borderRadius: "14px",
+  minHeight: "44px",
+  padding: "8px 10px",
+  border: "none",
+  borderRadius: "10px",
   backgroundColor: "transparent",
   color: "text",
   cursor: "pointer",
   textAlign: "left",
-  transition:
-    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+  transition: "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
   _focusVisible: {
     outline: "2px solid",
     outlineColor: "accentStrong",
@@ -87,9 +109,19 @@ const itemClass = css({
   },
   "&[data-highlighted='true']": {
     backgroundColor: "surface",
-    borderColor: "accent",
-    boxShadow: `0 12px 28px ${token.var("colors.shadow")}`,
   },
+})
+
+const hiddenLabelClass = css({
+  position: "absolute",
+  width: "1px",
+  height: "1px",
+  padding: "0",
+  margin: "-1px",
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: "0",
 })
 
 type SwitchProjectItem =
@@ -118,8 +150,8 @@ function projectMatchesSearch(project: ProjectRecord, search: string) {
 
 /** Renders the header-anchored searchable project switcher dropdown. */
 export function SwitchProjectDropdown(props: {
+  activeProjectLabel: string
   activeProjectPath: string | null
-  containerRef: { current: HTMLDivElement | null }
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
   onOpenFolder: () => Promise<void> | void
@@ -128,7 +160,6 @@ export function SwitchProjectDropdown(props: {
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const rootRef = useRef<HTMLDivElement | null>(null)
   const [search, setSearch] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)
 
@@ -151,16 +182,7 @@ export function SwitchProjectDropdown(props: {
     if (!props.isOpen) {
       setSearch("")
       setHighlightedIndex(0)
-      return
     }
-
-    setSearch("")
-    setHighlightedIndex(0)
-
-    queueMicrotask(() => {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    })
   }, [props.isOpen])
 
   useEffect(() => {
@@ -183,28 +205,6 @@ export function SwitchProjectDropdown(props: {
     })
   }, [highlightedItemId, props.isOpen])
 
-  useListener(document, "mousedown", (event) => {
-    if (!props.isOpen) {
-      return
-    }
-
-    const target = event.target
-
-    if (!(target instanceof Node)) {
-      return
-    }
-
-    if (rootRef.current?.contains(target) || props.containerRef.current?.contains(target)) {
-      return
-    }
-
-    props.onOpenChange(false)
-  })
-
-  if (!props.isOpen) {
-    return null
-  }
-
   function activateItem(item: SwitchProjectItem | undefined) {
     if (!item) {
       return
@@ -221,183 +221,196 @@ export function SwitchProjectDropdown(props: {
   }
 
   return (
-    <div ref={rootRef} class={dropdownClass}>
-      <div class={inputShellClass}>
-        <Search aria-hidden={true} size={16} strokeWidth={2.1} />
-        <input
-          ref={inputRef}
-          class={inputClass}
-          placeholder="Search projects"
-          value={search}
-          onInput={(event) => {
-            setSearch(event.currentTarget.value)
-            setHighlightedIndex(0)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault()
-              setHighlightedIndex((currentIndex) =>
-                items.length === 0 ? 0 : Math.min(currentIndex + 1, items.length - 1),
-              )
-              return
-            }
+    <Popover.Root
+      closeOnInteractOutside={true}
+      initialFocusEl={() => inputRef.current}
+      lazyMount={true}
+      open={props.isOpen}
+      portalled={false}
+      positioning={{ placement: "bottom", sameWidth: true }}
+      unmountOnExit={true}
+      onOpenChange={(details) => {
+        props.onOpenChange(details.open)
+      }}
+    >
+      <Popover.Trigger asChild>
+        <button aria-label="Switch project" class={triggerClass} type="button">
+          <span
+            class={css({
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: "13px",
+              fontWeight: "400",
+              letterSpacing: "0.02em",
+              lineHeight: "1.21",
+            })}
+          >
+            {props.activeProjectLabel}
+          </span>
+        </button>
+      </Popover.Trigger>
 
-            if (event.key === "ArrowUp") {
-              event.preventDefault()
-              setHighlightedIndex((currentIndex) => Math.max(currentIndex - 1, 0))
-              return
-            }
+      <Popover.Positioner>
+        <Popover.Content class={contentClass}>
+          <label class={inputShellClass}>
+            <span class={hiddenLabelClass}>Search projects</span>
+            <Search aria-hidden={true} size={16} strokeWidth={2.1} />
+            <input
+              ref={inputRef}
+              class={inputClass}
+              placeholder="Search projects"
+              value={search}
+              onInput={(event) => {
+                setSearch(event.currentTarget.value)
+                setHighlightedIndex(0)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault()
+                  setHighlightedIndex((currentIndex) =>
+                    items.length === 0 ? 0 : Math.min(currentIndex + 1, items.length - 1),
+                  )
+                  return
+                }
 
-            if (event.key === "Enter") {
-              event.preventDefault()
-              activateItem(items[highlightedIndex])
-              return
-            }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault()
+                  setHighlightedIndex((currentIndex) => Math.max(currentIndex - 1, 0))
+                  return
+                }
 
-            if (event.key === "Escape") {
-              event.preventDefault()
-              props.onOpenChange(false)
-            }
-          }}
-        />
-      </div>
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  activateItem(items[highlightedIndex])
+                  return
+                }
+              }}
+            />
+          </label>
 
-      {items.length > 0 ? (
-        <div class={listClass}>
-          {items.map((item, index) => {
-            const isHighlighted = highlightedIndex === index
+          {items.length > 0 ? (
+            <ul class={listClass}>
+              {items.map((item, index) => {
+                const isHighlighted = highlightedIndex === index
 
-            if (item.kind === "open-folder") {
-              return (
-                <button
-                  key={item.id}
-                  ref={(element) => {
-                    itemRefs.current[item.id] = element
-                  }}
-                  class={itemClass}
-                  data-highlighted={isHighlighted ? "true" : "false"}
-                  type="button"
-                  onMouseEnter={() => {
-                    setHighlightedIndex(index)
-                  }}
-                  onClick={() => {
-                    activateItem(item)
-                  }}
-                >
-                  <span class={css({ display: "grid", gap: "3px", minWidth: "0" })}>
-                    <span
-                      class={css({
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "10px",
-                        minWidth: "0",
-                        fontSize: "0.9rem",
-                        fontWeight: "650",
-                      })}
+                if (item.kind === "open-folder") {
+                  return (
+                    <li key={item.id}>
+                      <button
+                        ref={(element) => {
+                          itemRefs.current[item.id] = element
+                        }}
+                        class={itemClass}
+                        data-highlighted={isHighlighted ? "true" : "false"}
+                        type="button"
+                        onMouseEnter={() => {
+                          setHighlightedIndex(index)
+                        }}
+                        onClick={() => {
+                          activateItem(item)
+                        }}
+                      >
+                        <span class={css({ display: "grid", gap: "2px", minWidth: "0" })}>
+                          <span
+                            class={css({
+                              fontSize: "0.88rem",
+                              fontWeight: "650",
+                            })}
+                          >
+                            Open folder…
+                          </span>
+                          <span
+                            class={css({
+                              color: "muted",
+                              fontSize: "0.76rem",
+                              lineHeight: "1.4",
+                            })}
+                          >
+                            Add a local project from your filesystem.
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  )
+                }
+
+                const isActiveProject = props.activeProjectPath === item.project.path
+
+                return (
+                  <li key={item.id}>
+                    <button
+                      ref={(element) => {
+                        itemRefs.current[item.id] = element
+                      }}
+                      class={itemClass}
+                      data-highlighted={isHighlighted ? "true" : "false"}
+                      type="button"
+                      onMouseEnter={() => {
+                        setHighlightedIndex(index)
+                      }}
+                      onClick={() => {
+                        activateItem(item)
+                      }}
                     >
-                      <FolderOpen size={16} strokeWidth={2} />
-                      <span>Open folder…</span>
-                    </span>
-                    <span
-                      class={css({
-                        color: "muted",
-                        fontSize: "0.76rem",
-                        lineHeight: "1.5",
-                      })}
-                    >
-                      Add a local project from your filesystem.
-                    </span>
-                  </span>
-                </button>
-              )
-            }
+                      <span class={css({ display: "grid", gap: "2px", minWidth: "0" })}>
+                        <span
+                          class={css({
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            fontSize: "0.88rem",
+                            fontWeight: "650",
+                          })}
+                        >
+                          {item.project.name}
+                        </span>
+                        <span
+                          class={css({
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            color: "muted",
+                            fontSize: "0.76rem",
+                            lineHeight: "1.4",
+                          })}
+                        >
+                          {item.project.path}
+                        </span>
+                      </span>
 
-            const isActiveProject = props.activeProjectPath === item.project.path
-
-            return (
-              <button
-                key={item.id}
-                ref={(element) => {
-                  itemRefs.current[item.id] = element
-                }}
-                class={itemClass}
-                data-highlighted={isHighlighted ? "true" : "false"}
-                type="button"
-                onMouseEnter={() => {
-                  setHighlightedIndex(index)
-                }}
-                onClick={() => {
-                  activateItem(item)
-                }}
-              >
-                <span class={css({ display: "grid", gap: "3px", minWidth: "0" })}>
-                  <span
-                    class={css({
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      fontSize: "0.9rem",
-                      fontWeight: "650",
-                    })}
-                  >
-                    {item.project.name}
-                  </span>
-                  <span
-                    class={css({
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      color: "muted",
-                      fontSize: "0.76rem",
-                      lineHeight: "1.5",
-                    })}
-                  >
-                    {item.project.path}
-                  </span>
-                </span>
-
-                <span
-                  class={cx(
-                    css({
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minWidth: "42px",
-                      height: "22px",
-                      paddingInline: "8px",
-                      borderRadius: "999px",
-                      border: "1px solid",
-                      borderColor: "border",
-                      backgroundColor: "background",
-                      color: "muted",
-                      fontSize: "0.68rem",
-                      fontWeight: "700",
-                      letterSpacing: "0.04em",
-                    }),
-                    isActiveProject ? css({ color: "accentStrong", borderColor: "accent" }) : null,
-                  )}
-                >
-                  {isActiveProject ? "Active" : "Project"}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      ) : (
-        <div
-          class={css({
-            display: "grid",
-            placeItems: "center",
-            minHeight: "88px",
-            color: "muted",
-            fontSize: "0.84rem",
-            fontWeight: "600",
-          })}
-        >
-          No matching projects.
-        </div>
-      )}
-    </div>
+                      {isActiveProject ? (
+                        <span
+                          class={css({
+                            color: "accentStrong",
+                            fontSize: "0.72rem",
+                            fontWeight: "600",
+                            whiteSpace: "nowrap",
+                          })}
+                        >
+                          Active
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <p
+              class={css({
+                margin: "0",
+                padding: "10px",
+                color: "muted",
+                fontSize: "0.84rem",
+              })}
+            >
+              No matching projects.
+            </p>
+          )}
+        </Popover.Content>
+      </Popover.Positioner>
+    </Popover.Root>
   )
 }
 

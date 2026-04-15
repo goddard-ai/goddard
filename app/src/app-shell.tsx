@@ -97,7 +97,6 @@ export function AppShell() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const [isProjectSwitchOpen, setIsProjectSwitchOpen] = useState(false)
-  const projectSwitchContainerRef = useRef<HTMLDivElement | null>(null)
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
     navigation.selectedNavId,
@@ -353,14 +352,9 @@ export function AppShell() {
       />
       <AppShellChrome
         activeTabId={workbenchTabSet.activeTabId}
-        activeProjectLabel={activeProject?.name ?? "Open project"}
         indicator={tabStrip.indicator}
-        isProjectSwitchOpen={isProjectSwitchOpen}
         navigationItems={navigationItems}
         onNavigationSelect={selectNavigationSurface}
-        onProjectSwitchToggle={() => {
-          setIsProjectSwitchOpen((current) => !current)
-        }}
         onTabClose={(id) => {
           workbenchTabSet.closeTab(id)
         }}
@@ -380,8 +374,8 @@ export function AppShell() {
         }}
         projectSwitcher={
           <SwitchProjectDropdown
+            activeProjectLabel={activeProject?.name ?? "Open project"}
             activeProjectPath={activeProject?.path ?? null}
-            containerRef={projectSwitchContainerRef}
             isOpen={isProjectSwitchOpen}
             projects={orderedProjects}
             onOpenChange={(isOpen) => {
@@ -395,7 +389,6 @@ export function AppShell() {
             }}
           />
         }
-        projectSwitchContainerRef={projectSwitchContainerRef}
         selectedNavigationId={navigation.selectedNavId}
         selectedNavigationLabel={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
         setTabRef={(id, element) => {

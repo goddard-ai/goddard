@@ -38,14 +38,12 @@ const actionButtonClass = css({
 /** Renders the merged shell chrome around the active workbench content. */
 export function AppShellChrome(props: {
   activeTabId: string
-  activeProjectLabel: string
   children?: preact.ComponentChildren
   indicator: {
     left: number
     opacity: number
     width: number
   }
-  isProjectSwitchOpen: boolean
   navigationItems: Array<{
     group: "primary" | "secondary"
     icon: SvgIconName
@@ -53,14 +51,12 @@ export function AppShellChrome(props: {
     label: string
   }>
   onNavigationSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
-  onProjectSwitchToggle: () => void
   onTabClose: (id: string) => void
   onTabDragEnd: () => void
   onTabDragEnter: (id: string) => void
   onTabDragStart: (id: string) => void
   onTabSelect: (id: string) => void
   projectSwitcher?: preact.ComponentChildren
-  projectSwitchContainerRef: { current: HTMLDivElement | null }
   selectedNavigationId: NavigationItemId
   selectedNavigationLabel: string
   setTabRef: (id: string, element: HTMLDivElement | null) => void
@@ -139,61 +135,7 @@ export function AppShellChrome(props: {
             "electrobun-webkit-app-region-no-drag",
           )}
         >
-          <div
-            ref={props.projectSwitchContainerRef}
-            class={css({ position: "relative", width: "100%" })}
-          >
-            <button
-              aria-expanded={props.isProjectSwitchOpen}
-              aria-label="Switch project"
-              class={css({
-                display: "inline-grid",
-                gridTemplateColumns: "auto minmax(0, 1fr)",
-                alignItems: "center",
-                gap: "10px",
-                width: "100%",
-                height: "28px",
-                paddingInline: "12px",
-                border: "none",
-                borderRadius: "6px",
-                backgroundColor: "panel",
-                color: "muted",
-                cursor: "pointer",
-                textAlign: "left",
-                transition:
-                  "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-                _hover: {
-                  backgroundColor: "surface",
-                  color: "text",
-                },
-                _focusVisible: {
-                  outline: "2px solid",
-                  outlineColor: "accentStrong",
-                  outlineOffset: "2px",
-                },
-              })}
-              type="button"
-              onClick={props.onProjectSwitchToggle}
-            >
-              <span class={css({ width: "14px", height: "14px", color: "accentStrong" })}>
-                <InlineSvgIcon icon="tabs/projects" size="14px" />
-              </span>
-              <span
-                class={css({
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  fontSize: "13px",
-                  fontWeight: "400",
-                  letterSpacing: "0.02em",
-                  lineHeight: "1.21",
-                })}
-              >
-                {props.activeProjectLabel}
-              </span>
-            </button>
-            {props.projectSwitcher}
-          </div>
+          <div class={css({ position: "relative", width: "100%" })}>{props.projectSwitcher}</div>
         </div>
         <div
           class={cx(
