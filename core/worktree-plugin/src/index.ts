@@ -15,6 +15,11 @@ export interface WorktreeSetupOptions {
   branchName: string
 
   /**
+   * Optional existing branch to seed the new worktree branch from.
+   */
+  baseBranchName?: string
+
+  /**
    * The default directory name to use for created worktrees.
    */
   defaultDirName?: string

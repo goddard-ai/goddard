@@ -41,6 +41,17 @@ export const worktrunkPlugin: WorktreePlugin = {
             if (line.includes(`[${options.branchName}]`)) {
               const wtPath = line.split(" ")[0]
               if (wtPath) {
+                if (options.baseBranchName) {
+                  await runCommand(
+                    "git",
+                    ["checkout", "-B", options.branchName, options.baseBranchName],
+                    {
+                      cwd: wtPath,
+                      stdin: "ignore",
+                    },
+                  )
+                }
+
                 return wtPath
               }
             }

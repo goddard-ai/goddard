@@ -41,6 +41,11 @@ export interface CreateWorktreeOptions extends WorktreeOptions {
   branchName: string
 
   /**
+   * Optional existing branch to seed the new worktree branch from.
+   */
+  baseBranchName?: string
+
+  /**
    * The requested working directory that should be mapped inside the created worktree.
    */
   requestedCwd?: string
@@ -187,6 +192,7 @@ function createSetupOptions(options: CreateWorktreeOptions) {
   return {
     cwd: options.cwd,
     branchName: options.branchName,
+    baseBranchName: options.baseBranchName,
     defaultDirName: options.defaultPluginDirName,
   }
 }

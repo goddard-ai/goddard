@@ -10,7 +10,12 @@ type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
   label: string
   /** Optional icon for the command menu. */
-  icon?: preact.FunctionComponent<{ className?: string }>
+  icon?: preact.FunctionComponent<{
+    className?: string
+    size?: number
+    strokeWidth?: number
+    "aria-hidden"?: boolean
+  }>
   /** Optional keywords for filtering in the command menu. */
   keywords?: readonly string[]
   /** Optional autocomplete description for JSON keymap files. */
@@ -66,8 +71,9 @@ export const AppCommand = defineAppCommands({
     openSwitchProject: {
       label: "Switch Project",
     },
-    openCommandMenu: {
+    openCommandPalette: {
       label: "Open Command Menu",
+      when: "!sessionInput.isActive",
     },
     openKeyboardShortcuts: {
       label: "Open Keyboard Shortcuts",
@@ -101,6 +107,24 @@ export const AppCommand = defineAppCommands({
     openFolder: {
       label: "Projects: Open Folder",
       description: "Open a project from your filesystem.",
+    },
+  },
+  sessionInput: {
+    openProjectSelector: {
+      label: "Session Input: Open Project Selector",
+      when: "sessionInput.hasProjectSelector",
+    },
+    openModelSelector: {
+      label: "Session Input: Open Model Selector",
+      when: "sessionInput.hasModelSelector",
+    },
+    toggleThinkingLevel: {
+      label: "Session Input: Toggle Thinking Level",
+      when: "sessionInput.hasThinkingLevel",
+    },
+    submit: {
+      label: "Session Input: Submit",
+      when: "sessionInput.canSubmit",
     },
   },
 })

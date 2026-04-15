@@ -42,7 +42,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
   const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
     [fileMenu.closeTab.action]: dispatchAppMenuAction("closeActiveTab"),
     [fileMenu.closeWindow.action]: closeWindow,
-    [viewMenu.commandPalette.action]: dispatchAppMenuAction("openCommandMenu"),
+    [viewMenu.commandPalette.action]: dispatchAppMenuAction("openCommandPalette"),
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
   }

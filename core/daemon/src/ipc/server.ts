@@ -310,6 +310,12 @@ export async function startDaemonServer(
     sessionComposerSuggestions: async (payload) => {
       return sessionManager.getComposerSuggestions(payload)
     },
+    sessionDraftSuggestions: async (payload) => {
+      return sessionManager.getDraftSuggestions(payload)
+    },
+    sessionLaunchPreview: async (payload) => {
+      return sessionManager.getLaunchPreview(payload)
+    },
     sessionDiagnostics: async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },

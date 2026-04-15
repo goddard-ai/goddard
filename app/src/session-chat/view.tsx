@@ -47,7 +47,15 @@ export function SessionChatView(props: { sessionId: string }) {
         scrollCacheKey={`detail:session:${session.id}:transcript`}
       />
       <Composer
-        sessionId={session.id}
+        loadSuggestions={async (input) => {
+          const response = await goddardSdk.session.composerSuggestions({
+            id: session.id,
+            trigger: input.trigger,
+            query: input.query,
+          })
+
+          return response.suggestions
+        }}
         onSubmit={async (prompt) => {
           try {
             await submitSessionPrompt({

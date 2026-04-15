@@ -1,8 +1,4 @@
-import type {
-  DaemonSession,
-  SessionComposerSuggestionsResponse,
-  SessionPromptRequest,
-} from "@goddard-ai/sdk"
+import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
@@ -32,7 +28,19 @@ import { BookOpen, Command, File, Folder, LoaderCircle, SendHorizontal } from "l
 import { useListener } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
-import { goddardSdk } from "~/sdk.ts"
+import {
+  inputMenuBodyClass,
+  inputMenuButtonActiveClass,
+  inputMenuButtonClass,
+  inputMenuClass,
+  inputMenuDetailClass,
+  inputMenuEmptyClass,
+  inputMenuFilterClass,
+  inputMenuHeaderClass,
+  inputMenuIconClass,
+  inputMenuLabelClass,
+  inputMenuListClass,
+} from "~/session-input/menu-styles.ts"
 import {
   $createComposerChipNode,
   ComposerChipNode,
@@ -40,9 +48,13 @@ import {
 } from "./composer-chip-node.tsx"
 import { hasPromptContent, serializeComposerEditorState } from "./composer-content.ts"
 
-type ComposerSuggestion = SessionComposerSuggestionsResponse["suggestions"][number]
-type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
-type ComposerTrigger = "at" | "dollar" | "slash"
+export type ComposerSuggestion = SessionComposerSuggestionsResponse["suggestions"][number]
+export type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
+export type ComposerTrigger = "at" | "dollar" | "slash"
+export type ComposerSuggestionLoader = (input: {
+  trigger: ComposerTrigger
+  query: string
+}) => Promise<readonly ComposerSuggestion[]>
 
 type ComposerMenuState = {
   trigger: ComposerTrigger
@@ -131,116 +143,6 @@ const submitButtonClass = css({
     cursor: "not-allowed",
     opacity: "0.52",
   },
-})
-
-const menuClass = css({
-  position: "fixed",
-  zIndex: 30,
-  display: "grid",
-  gap: "10px",
-  width: "min(360px, calc(100vw - 32px))",
-  maxHeight: "min(420px, calc(100vh - 32px))",
-  padding: "12px",
-  borderRadius: "18px",
-  border: "1px solid",
-  borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
-  boxShadow: "0 24px 60px rgba(98, 112, 128, 0.24)",
-})
-
-const menuHeaderClass = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  color: "muted",
-  fontSize: "0.76rem",
-  fontWeight: "720",
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-})
-
-const filterInputClass = css({
-  width: "100%",
-  height: "38px",
-  paddingInline: "12px",
-  borderRadius: "12px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "background",
-  color: "text",
-  fontSize: "0.88rem",
-  outline: "none",
-  _focusVisible: {
-    borderColor: "accentStrong",
-    boxShadow: `0 0 0 3px color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent)`,
-  },
-})
-
-const suggestionListClass = css({
-  display: "grid",
-  gap: "6px",
-  minHeight: "64px",
-  overflowY: "auto",
-})
-
-const suggestionButtonClass = css({
-  display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr)",
-  alignItems: "start",
-  gap: "10px",
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: "14px",
-  border: "1px solid transparent",
-  backgroundColor: "transparent",
-  color: "text",
-  cursor: "pointer",
-  textAlign: "left",
-  transition: "background-color 120ms ease, border-color 120ms ease",
-})
-
-const suggestionButtonActiveClass = css({
-  borderColor: "accent",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accent")} 14%, white), color-mix(in srgb, ${token.var("colors.accent")} 8%, white))`,
-})
-
-const suggestionIconClass = css({
-  display: "grid",
-  placeItems: "center",
-  width: "28px",
-  height: "28px",
-  borderRadius: "999px",
-  backgroundColor: "surface",
-  color: "muted",
-})
-
-const suggestionBodyClass = css({
-  display: "grid",
-  gap: "2px",
-  minWidth: "0",
-})
-
-const suggestionLabelClass = css({
-  fontSize: "0.87rem",
-  fontWeight: "680",
-  lineHeight: "1.35",
-})
-
-const suggestionDetailClass = css({
-  color: "muted",
-  fontSize: "0.8rem",
-  lineHeight: "1.45",
-  wordBreak: "break-word",
-})
-
-const suggestionEmptyClass = css({
-  display: "grid",
-  placeItems: "center",
-  minHeight: "80px",
-  color: "muted",
-  fontSize: "0.84rem",
-  textAlign: "center",
-  paddingInline: "12px",
 })
 
 const composerInitialConfig = {
@@ -610,8 +512,12 @@ function ComposerPlugins(props: {
 }
 
 export function Composer(props: {
-  sessionId: DaemonSession["id"]
+  loadSuggestions: ComposerSuggestionLoader
   onSubmit: (prompt: ComposerPromptBlocks) => Promise<void> | void
+  onPromptChange?: (prompt: ComposerPromptBlocks) => void
+  placeholder?: string
+  helperText?: string
+  submitLabel?: string
 }) {
   const formRef = useRef<HTMLFormElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -624,12 +530,15 @@ export function Composer(props: {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const suggestionRequestIdRef = useRef(0)
+  const placeholder = props.placeholder ?? "Add the next instruction for this session."
+  const helperText =
+    props.helperText ??
+    "Enter sends, Shift+Enter inserts a newline, and @, $, or / open suggestions."
+  const submitLabel = props.submitLabel ?? "Send"
 
   const canSubmit = hasPromptContent(promptBlocks) && menu === null && !isSubmitting
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
-  const composerPlaceholder = (
-    <div class={placeholderClass}>Add the next instruction for this session.</div>
-  )
+  const composerPlaceholder = <div class={placeholderClass}>{placeholder}</div>
 
   function focusEditor() {
     queueMicrotask(() => {
@@ -663,6 +572,7 @@ export function Composer(props: {
     try {
       await props.onSubmit(promptBlocks)
       setPromptBlocks([])
+      props.onPromptChange?.([])
 
       if (editorRef.current) {
         clearComposerEditor(editorRef.current)
@@ -699,9 +609,8 @@ export function Composer(props: {
     suggestionRequestIdRef.current = requestId
     setIsLoadingSuggestions(true)
 
-    void goddardSdk.session
-      .composerSuggestions({
-        id: props.sessionId,
+    void props
+      .loadSuggestions({
         trigger: menu.trigger,
         query: menu.query,
       })
@@ -710,7 +619,7 @@ export function Composer(props: {
           return
         }
 
-        setSuggestions(response.suggestions)
+        setSuggestions([...response])
         setSelectedIndex(0)
       })
       .catch((error) => {
@@ -727,7 +636,7 @@ export function Composer(props: {
           setIsLoadingSuggestions(false)
         }
       })
-  }, [menu, props.sessionId])
+  }, [menu, props.loadSuggestions])
 
   useEffect(() => {
     if (!menu) {
@@ -794,7 +703,7 @@ export function Composer(props: {
             ErrorBoundary={LexicalErrorBoundary}
             contentEditable={
               <ContentEditable
-                aria-placeholder="Add the next instruction for this session."
+                aria-placeholder={placeholder}
                 class={contentEditableClass}
                 placeholder={composerPlaceholder}
               />
@@ -810,7 +719,10 @@ export function Composer(props: {
             onEditorReady={(editor) => {
               editorRef.current = editor
             }}
-            onPromptBlocksChange={setPromptBlocks}
+            onPromptBlocksChange={(nextPromptBlocks) => {
+              setPromptBlocks(nextPromptBlocks)
+              props.onPromptChange?.(nextPromptBlocks)
+            }}
             onSubmit={() => {
               void submitPrompt()
             }}
@@ -824,16 +736,16 @@ export function Composer(props: {
       {menu ? (
         <div
           ref={menuRef}
-          class={menuClass}
+          class={inputMenuClass}
           style={{
             left: `${menu.anchorLeft}px`,
             top: `${menu.anchorTop}px`,
           }}
         >
-          <div class={menuHeaderClass}>{getMenuHeading(menu.trigger)}</div>
+          <div class={inputMenuHeaderClass}>{getMenuHeading(menu.trigger)}</div>
           <input
             ref={filterInputRef}
-            class={filterInputClass}
+            class={inputMenuFilterClass}
             placeholder="Type to filter"
             value={menu.query}
             onInput={(event) => {
@@ -877,9 +789,9 @@ export function Composer(props: {
               }
             }}
           />
-          <div class={suggestionListClass}>
+          <div class={inputMenuListClass}>
             {isLoadingSuggestions ? (
-              <div class={suggestionEmptyClass}>
+              <div class={inputMenuEmptyClass}>
                 <span
                   class={css({
                     display: "inline-flex",
@@ -892,14 +804,14 @@ export function Composer(props: {
                 </span>
               </div>
             ) : suggestions.length === 0 ? (
-              <div class={suggestionEmptyClass}>No matches for this trigger yet.</div>
+              <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
             ) : (
               suggestions.map((suggestion, index) => (
                 <button
                   key={suggestionKey(suggestion)}
                   class={cx(
-                    suggestionButtonClass,
-                    index === selectedIndex ? suggestionButtonActiveClass : undefined,
+                    inputMenuButtonClass,
+                    index === selectedIndex ? inputMenuButtonActiveClass : undefined,
                   )}
                   type="button"
                   onMouseDown={(event) => {
@@ -912,12 +824,12 @@ export function Composer(props: {
                     acceptSuggestion(suggestion)
                   }}
                 >
-                  <span class={suggestionIconClass} aria-hidden="true">
+                  <span class={inputMenuIconClass} aria-hidden="true">
                     <SuggestionIcon suggestion={suggestion} />
                   </span>
-                  <span class={suggestionBodyClass}>
-                    <span class={suggestionLabelClass}>{getSuggestionLabel(suggestion)}</span>
-                    <span class={suggestionDetailClass}>{getSuggestionDetail(suggestion)}</span>
+                  <span class={inputMenuBodyClass}>
+                    <span class={inputMenuLabelClass}>{getSuggestionLabel(suggestion)}</span>
+                    <span class={inputMenuDetailClass}>{getSuggestionDetail(suggestion)}</span>
                   </span>
                 </button>
               ))
@@ -927,12 +839,9 @@ export function Composer(props: {
       ) : null}
 
       <div class={footerClass}>
-        <p class={helperTextClass}>
-          `Enter` sends, `Shift+Enter` inserts a newline, and `@`, `$`, or `/` open session-scoped
-          suggestions.
-        </p>
+        <p class={helperTextClass}>{helperText}</p>
         <button class={submitButtonClass} disabled={!canSubmit} type="submit">
-          Send
+          {submitLabel}
           <SendHorizontal size={15} strokeWidth={2.2} />
         </button>
       </div>

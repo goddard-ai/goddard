@@ -347,7 +347,7 @@ export function AppShell() {
   return (
     <>
       <CommandDialog
-        command={AppCommand.navigation.openCommandMenu}
+        command={AppCommand.navigation.openCommandPalette}
         content={() => import("~/command-palette.tsx")}
       />
       <AppShellChrome
