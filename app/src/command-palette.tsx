@@ -2,7 +2,6 @@
 import { Dialog, UseDialogReturn } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
 import { css } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
 import { Command } from "ark-cmdk"
 import { Search } from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
@@ -28,241 +27,230 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
 
   return (
     <Portal>
-      <Dialog.Root>
-        <Dialog.Backdrop
+      <Dialog.Backdrop
+        class={css({
+          position: "fixed",
+          inset: "0",
+          backgroundColor: "overlay",
+          backdropFilter: "blur(6px)",
+          opacity: "1",
+          transition: "opacity 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+          zIndex: "50",
+          "@starting-style": {
+            opacity: "0",
+          },
+        })}
+      />
+      <Dialog.Positioner
+        class={css({
+          position: "fixed",
+          inset: "0",
+          display: "grid",
+          justifyItems: "center",
+          alignContent: "start",
+          padding: "56px 12px 12px",
+          zIndex: "51",
+        })}
+      >
+        <Dialog.Content
           class={css({
-            position: "fixed",
-            inset: "0",
-            backgroundColor: "overlay",
-            backdropFilter: "blur(10px)",
+            width: "min(560px, calc(100vw - 24px))",
+            maxHeight: "min(480px, calc(100vh - 68px))",
+            padding: "0",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: "0",
+            border: "1px solid",
+            borderColor: "border",
+            borderRadius: "16px",
+            backgroundColor: "panel",
+            overflow: "hidden",
+            outline: "none",
             opacity: "1",
-            transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-            zIndex: "50",
+            transform: "translateY(0)",
+            transition:
+              "opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1)",
             "@starting-style": {
               opacity: "0",
+              transform: "translateY(8px)",
             },
           })}
-        />
-        <Dialog.Positioner
-          class={css({
-            position: "fixed",
-            inset: "0",
-            display: "grid",
-            justifyItems: "center",
-            alignContent: "start",
-            paddingTop: "14vh",
-            paddingInline: "12px",
-            zIndex: "51",
-          })}
         >
-          <Dialog.Content
+          <Dialog.Title
             class={css({
-              width: "min(560px, calc(100vw - 24px))",
-              maxHeight: "min(460px, calc(100vh - 32px))",
+              position: "absolute",
+              width: "1px",
+              height: "1px",
               padding: "0",
-              display: "flex",
-              flexDirection: "column",
-              border: "1px solid",
-              borderColor: "border",
-              borderRadius: "20px",
-              backgroundColor: "panel",
-              boxShadow: `0 24px 56px ${token.var("colors.shadow")}`,
+              margin: "-1px",
               overflow: "hidden",
-              outline: "none",
-              opacity: "1",
-              transform: "translateY(0) scale(1)",
-              transition:
-                "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-              "@starting-style": {
-                opacity: "0",
-                transform: "translateY(12px) scale(0.985)",
-              },
+              clip: "rect(0, 0, 0, 0)",
+              whiteSpace: "nowrap",
+              border: "0",
             })}
           >
-            <Dialog.Title
-              class={css({
-                position: "absolute",
-                width: "1px",
-                height: "1px",
-                padding: "0",
-                margin: "-1px",
-                overflow: "hidden",
-                clip: "rect(0, 0, 0, 0)",
-                whiteSpace: "nowrap",
-                border: "0",
-              })}
-            >
-              Command menu
-            </Dialog.Title>
-            <Command.Root<AppCommand>
+            Command menu
+          </Dialog.Title>
+          <Command.Root<AppCommand>
+            class={css({
+              display: "flex",
+              flexDirection: "column",
+              minHeight: "0",
+              width: "100%",
+              background: "transparent",
+              color: "text",
+            })}
+            itemToKeywords={(command) => command.keywords}
+            itemToString={(command) => command.label}
+            itemToValue={(command) => command.id}
+            items={visibleCommands}
+            label="Command menu"
+            onSearchChange={setSearch}
+            onSelect={(command) => {
+              props.dialog.setOpen(false)
+              command()
+            }}
+            search={search}
+          >
+            <div
               class={css({
                 display: "flex",
-                flexDirection: "column",
-                minHeight: "0",
-                width: "100%",
-                background: "transparent",
-                color: "text",
+                alignItems: "center",
+                gap: "10px",
+                minHeight: "48px",
+                paddingInline: "14px",
+                borderBottom: "1px solid",
+                borderColor: "border",
               })}
-              itemToKeywords={(command) => command.keywords}
-              itemToString={(command) => command.label}
-              itemToValue={(command) => command.id}
-              items={visibleCommands}
-              label="Command menu"
-              onSearchChange={setSearch}
-              onSelect={(command) => {
-                props.dialog.setOpen(false)
-                command()
-              }}
-              search={search}
             >
-              <div
+              <Search
+                aria-hidden={true}
                 class={css({
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  minHeight: "56px",
-                  paddingInline: "16px",
-                  borderBottom: "1px solid",
-                  borderColor: "border",
-                  backgroundColor: "background",
-                  transition:
-                    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-                  _focusWithin: {
-                    backgroundColor: "surface",
-                    borderColor: "accent",
-                  },
+                  flexShrink: "0",
+                  color: "muted",
                 })}
-              >
-                <Search
-                  aria-hidden={true}
-                  class={css({
-                    flexShrink: "0",
+                size={16}
+              />
+              <Command.Input
+                autoFocus={true}
+                class={css({
+                  width: "100%",
+                  height: "24px",
+                  border: "none",
+                  outline: "none",
+                  backgroundColor: "transparent",
+                  color: "text",
+                  fontSize: "0.9rem",
+                  "&::placeholder": {
                     color: "muted",
-                  })}
-                  size={18}
-                />
-                <Command.Input
-                  autoFocus={true}
-                  class={css({
-                    width: "100%",
-                    height: "28px",
-                    border: "none",
-                    outline: "none",
-                    backgroundColor: "transparent",
-                    color: "text",
-                    fontSize: "0.94rem",
-                    fontWeight: "600",
-                    letterSpacing: "-0.01em",
-                    "&::placeholder": {
-                      color: "muted",
-                    },
-                  })}
-                  placeholder="Type a command or jump to a view"
-                />
-              </div>
-              <Command.List<AppCommand>
-                class={css({
-                  padding: "8px",
-                  overflowY: "auto",
-                  "& [data-scope='combobox'][data-part='item']": {
-                    outline: "none",
-                  },
-                  "& [data-scope='combobox'][data-part='item'] + [data-scope='combobox'][data-part='item']":
-                    {
-                      marginTop: "4px",
-                    },
-                  "& [data-scope='combobox'][data-part='item']:focus-visible > div": {
-                    outline: "2px solid",
-                    outlineColor: "accentStrong",
-                    outlineOffset: "2px",
                   },
                 })}
-                empty={
+                placeholder="Type a command"
+              />
+            </div>
+            <Command.List<AppCommand>
+              class={css({
+                padding: "6px",
+                overflowY: "auto",
+                "& [data-scope='combobox'][data-part='item']": {
+                  outline: "none",
+                },
+                "& [data-scope='combobox'][data-part='item']:focus-visible": {
+                  outline: "2px solid",
+                  outlineColor: "accentStrong",
+                  outlineOffset: "-2px",
+                  borderRadius: "10px",
+                },
+              })}
+              empty={
+                <div
+                  class={css({
+                    padding: "20px 14px",
+                    color: "muted",
+                    fontSize: "0.88rem",
+                    textAlign: "center",
+                  })}
+                >
+                  No matching commands.
+                </div>
+              }
+            >
+              {(item, state) => {
+                const Icon = item.icon
+                const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
+                const shortcut =
+                  typeof shortcutBinding === "string"
+                    ? shortcutBinding
+                    : (shortcutBinding?.combo ?? shortcutBinding?.sequence)
+
+                return (
                   <div
                     class={css({
                       display: "grid",
-                      placeItems: "center",
-                      minHeight: "88px",
-                      color: "muted",
-                      fontSize: "0.86rem",
-                      fontWeight: "600",
+                      gridTemplateColumns: Icon
+                        ? "16px minmax(0, 1fr) auto"
+                        : "minmax(0, 1fr) auto",
+                      alignItems: "center",
+                      gap: "10px",
+                      width: "100%",
+                      minHeight: "40px",
+                      padding: "8px 10px",
+                      borderRadius: "10px",
+                      backgroundColor: "transparent",
+                      color: "text",
+                      cursor: "pointer",
+                      "&[data-active='true']": {
+                        backgroundColor: "surface",
+                      },
                     })}
+                    data-active={state.active ? "true" : "false"}
                   >
-                    No matching commands.
-                  </div>
-                }
-              >
-                {(item, state) => {
-                  const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
-                  const shortcut =
-                    typeof shortcutBinding === "string"
-                      ? shortcutBinding
-                      : (shortcutBinding?.combo ?? shortcutBinding?.sequence)
-
-                  return (
-                    <div
+                    {Icon ? (
+                      <Icon
+                        aria-hidden={true}
+                        class={css({
+                          color: state.active ? "text" : "muted",
+                        })}
+                        size={16}
+                        strokeWidth={2}
+                      />
+                    ) : null}
+                    <span
                       class={css({
-                        display: "grid",
-                        gridTemplateColumns: "minmax(0, 1fr) auto",
-                        alignItems: "center",
-                        gap: "10px",
-                        width: "100%",
-                        minHeight: "44px",
-                        padding: "8px 10px",
-                        border: "1px solid",
-                        borderColor: "transparent",
-                        borderRadius: "14px",
-                        backgroundColor: "transparent",
-                        color: "text",
-                        cursor: "pointer",
-                        transition:
-                          "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-                        "&[data-active='true']": {
-                          backgroundColor: "surface",
-                          borderColor: "accent",
-                          boxShadow: `0 12px 28px ${token.var("colors.shadow")}`,
-                        },
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontSize: "0.9rem",
+                        fontWeight: "600",
                       })}
-                      data-active={state.active ? "true" : "false"}
                     >
+                      {item.label}
+                    </span>
+                    {shortcut ? (
                       <span
                         class={css({
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          fontSize: "0.9rem",
-                          fontWeight: "620",
+                          paddingInline: "6px",
+                          minWidth: "0",
+                          height: "20px",
+                          borderRadius: "6px",
+                          border: "1px solid",
+                          borderColor: "border",
+                          backgroundColor: "background",
+                          color: "muted",
+                          fontSize: "0.7rem",
+                          lineHeight: "18px",
                         })}
                       >
-                        {item.label}
+                        {shortcut}
                       </span>
-                      {shortcut ? (
-                        <span
-                          class={css({
-                            paddingInline: "8px",
-                            height: "20px",
-                            borderRadius: "999px",
-                            border: "1px solid",
-                            borderColor: "border",
-                            backgroundColor: "background",
-                            color: "muted",
-                            fontSize: "0.68rem",
-                            fontWeight: "700",
-                            letterSpacing: "0.04em",
-                            lineHeight: "20px",
-                          })}
-                        >
-                          {shortcut}
-                        </span>
-                      ) : null}
-                    </div>
-                  )
-                }}
-              </Command.List>
-            </Command.Root>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Dialog.Root>
+                    ) : null}
+                  </div>
+                )
+              }}
+            </Command.List>
+          </Command.Root>
+        </Dialog.Content>
+      </Dialog.Positioner>
     </Portal>
   )
 }

@@ -1,6 +1,6 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { css } from "@goddard-ai/styled-system/css"
-import { FolderPlus, Rows3 } from "lucide-react"
+import { Plus } from "lucide-react"
 
 import { ListRow } from "./list-row.tsx"
 
@@ -18,9 +18,9 @@ export function SessionsList(props: {
       <div
         class={css({
           display: "grid",
-          placeItems: "center",
+          alignContent: "start",
           minHeight: "320px",
-          padding: "40px",
+          padding: "20px",
           color: "muted",
         })}
       >
@@ -34,11 +34,10 @@ export function SessionsList(props: {
       <div
         class={css({
           display: "grid",
-          placeItems: "center",
+          alignContent: "start",
           minHeight: "320px",
-          padding: "40px",
+          padding: "20px",
           color: "muted",
-          textAlign: "center",
         })}
       >
         <div class={css({ display: "grid", gap: "10px", maxWidth: "28rem" })}>
@@ -68,34 +67,13 @@ export function SessionsList(props: {
       <div
         class={css({
           display: "grid",
-          placeItems: "center",
-          minHeight: "320px",
-          padding: "40px",
+          alignContent: "start",
+          gap: "12px",
+          minHeight: "220px",
+          padding: "20px",
         })}
       >
-        <div
-          class={css({
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "14px",
-            maxWidth: "28rem",
-            textAlign: "center",
-          })}
-        >
-          <div
-            class={css({
-              display: "grid",
-              placeItems: "center",
-              width: "48px",
-              height: "48px",
-              borderRadius: "18px",
-              backgroundColor: "surface",
-              color: "accentStrong",
-            })}
-          >
-            <Rows3 size={20} strokeWidth={1.9} />
-          </div>
+        <div class={css({ display: "grid", gap: "8px", maxWidth: "28rem" })}>
           <h2
             class={css({
               color: "text",
@@ -109,60 +87,67 @@ export function SessionsList(props: {
             class={css({
               color: "muted",
               fontSize: "0.93rem",
-              lineHeight: "1.7",
+              lineHeight: "1.6",
             })}
           >
-            The list and chat tab are wired. Launch one session to seed the first transcript.
+            Launch one session to seed the first transcript.
           </p>
-          <button
-            class={css({
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-              height: "40px",
-              paddingInline: "14px",
-              borderRadius: "14px",
-              border: "1px solid",
-              borderColor: "border",
-              backgroundColor: "background",
-              color: "text",
-              fontSize: "0.88rem",
-              fontWeight: "640",
-              cursor: "pointer",
-            })}
-            type="button"
-            onClick={props.onCreateSession}
-          >
-            <FolderPlus size={16} strokeWidth={2.1} />
-            Create the first session
-          </button>
+          <div>
+            <button
+              class={css({
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                height: "36px",
+                paddingInline: "12px",
+                borderRadius: "10px",
+                border: "1px solid",
+                borderColor: "accent",
+                backgroundColor: "surface",
+                color: "text",
+                fontSize: "0.86rem",
+                fontWeight: "600",
+                cursor: "pointer",
+              })}
+              type="button"
+              onClick={props.onCreateSession}
+            >
+              <Plus size={16} strokeWidth={2.1} />
+              New session
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div
+    <ul
       class={css({
-        display: "grid",
-        gap: "14px",
-        padding: "18px",
+        listStyle: "none",
+        margin: "0",
+        padding: "0",
+        "& > li + li": {
+          borderTop: "1px solid",
+          borderColor: "border",
+        },
       })}
     >
       {props.sessions.map((session) => (
-        <ListRow
-          key={session.id}
-          isSelected={session.id === props.selectedSessionId}
-          onOpen={() => {
-            props.onOpenSession(session.id)
-          }}
-          onSelect={() => {
-            props.onSelectSession(session.id)
-          }}
-          session={session}
-        />
+        <li key={session.id}>
+          <ListRow
+            isSelected={session.id === props.selectedSessionId}
+            onOpen={() => {
+              props.onOpenSession(session.id)
+            }}
+            onSelect={() => {
+              props.onSelectSession(session.id)
+            }}
+            session={session}
+          />
+        </li>
       ))}
-    </div>
+    </ul>
   )
 }

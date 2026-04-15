@@ -1,21 +1,8 @@
 import { Dialog } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
 import { css, cx } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
-import {
-  ArrowUpRight,
-  BadgeCheck,
-  CheckCircle2,
-  Folder,
-  FolderKanban,
-  FolderSearch2,
-  PencilLine,
-  Plus,
-  Sparkles,
-  Trash2,
-  X,
-} from "lucide-react"
+import { ArrowUpRight, FolderSearch2, Plus, Trash2, X } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
@@ -29,47 +16,34 @@ const panelClass = css({
   minHeight: "0",
   border: "1px solid",
   borderColor: "border",
-  borderRadius: "28px",
-  background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-  boxShadow: "0 28px 80px rgba(121, 138, 160, 0.12)",
-})
-
-const eyebrowClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "8px",
-  width: "fit-content",
-  padding: "8px 12px",
-  borderRadius: "999px",
-  backgroundColor: "surface",
-  color: "accentStrong",
-  fontSize: "0.72rem",
-  fontWeight: "700",
-  letterSpacing: "0.16em",
-  textTransform: "uppercase",
-  boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
+  borderRadius: "16px",
+  backgroundColor: "panel",
+  overflow: "hidden",
 })
 
 const titleClass = css({
   color: "text",
-  fontSize: "1.55rem",
-  fontWeight: "760",
-  letterSpacing: "-0.03em",
-  lineHeight: "1.1",
+  fontSize: "1.25rem",
+  fontWeight: "700",
+  lineHeight: "1.25",
 })
 
 const bodyClass = css({
   color: "muted",
-  fontSize: "0.95rem",
-  lineHeight: "1.7",
+  fontSize: "0.9rem",
+  lineHeight: "1.6",
 })
 
 const quietLabelClass = css({
   color: "muted",
   fontSize: "0.78rem",
-  fontWeight: "700",
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
+  fontWeight: "600",
+})
+
+const labelClass = css({
+  color: "text",
+  fontSize: "0.84rem",
+  fontWeight: "600",
 })
 
 const buttonBaseClass = css({
@@ -78,23 +52,18 @@ const buttonBaseClass = css({
   justifyContent: "center",
   gap: "8px",
   minWidth: "0",
-  height: "40px",
-  paddingInline: "14px",
-  borderRadius: "14px",
+  height: "36px",
+  paddingInline: "12px",
+  borderRadius: "10px",
   border: "1px solid",
-  fontSize: "0.88rem",
-  fontWeight: "640",
+  fontSize: "0.86rem",
+  fontWeight: "600",
   cursor: "pointer",
   transition:
-    "transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _active: {
-    transform: "scale(0.97)",
-  },
+    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
   _disabled: {
     cursor: "not-allowed",
     opacity: "0.48",
-    boxShadow: "none",
-    transform: "none",
   },
 })
 
@@ -112,13 +81,12 @@ const secondaryButtonClass = css({
 
 const primaryButtonClass = css({
   borderColor: "accent",
-  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
+  backgroundColor: "surface",
   color: "text",
-  boxShadow: `0 12px 28px color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent)`,
   "@media (hover: hover) and (pointer: fine)": {
     _hover: {
       borderColor: "accentStrong",
-      boxShadow: `0 18px 34px color-mix(in srgb, ${token.var("colors.accent")} 18%, transparent)`,
+      backgroundColor: "background",
     },
   },
 })
@@ -136,55 +104,11 @@ const dangerButtonClass = css({
   },
 })
 
-const iconBadgeClass = css({
-  display: "grid",
-  placeItems: "center",
-  width: "42px",
-  height: "42px",
-  borderRadius: "16px",
-  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
-  color: "accentStrong",
-  boxShadow: `0 14px 28px color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent), inset 0 0 0 1px ${token.var("colors.border")}`,
-  flexShrink: "0",
-})
-
-const rowClass = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  gap: "20px",
-  padding: "18px",
-  borderRadius: "22px",
-  border: "1px solid",
-  borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
-  transition:
-    "transform 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-  cursor: "pointer",
-  outline: "none",
-  _active: {
-    transform: "scale(0.992)",
-  },
-  _focusVisible: {
-    boxShadow: `0 0 0 3px color-mix(in srgb, ${token.var("colors.accent")} 18%, transparent)`,
-  },
-  "@media (hover: hover) and (pointer: fine)": {
-    _hover: {
-      transform: "translateY(-1px)",
-      borderColor: "accent",
-      boxShadow: `0 18px 32px color-mix(in srgb, ${token.var("colors.accent")} 10%, transparent)`,
-    },
-  },
-  "&[data-selected='true']": {
-    borderColor: "accentStrong",
-    boxShadow: `0 18px 40px color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), inset 0 0 0 1px color-mix(in srgb, ${token.var("colors.accentStrong")} 18%, transparent)`,
-  },
-})
-
 const dialogOverlayClass = css({
   position: "fixed",
   inset: "0",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accentStrong")} 10%, rgba(23, 29, 36, 0.24)), rgba(23, 29, 36, 0.34))`,
-  backdropFilter: "blur(10px)",
+  backgroundColor: "overlay",
+  backdropFilter: "blur(6px)",
   opacity: "1",
   transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   "@starting-style": {
@@ -193,23 +117,22 @@ const dialogOverlayClass = css({
 })
 
 const dialogContentClass = css({
-  width: "min(620px, calc(100vw - 32px))",
+  width: "min(560px, calc(100vw - 32px))",
   maxHeight: "calc(100vh - 32px)",
   overflowY: "auto",
-  padding: "28px",
-  borderRadius: "30px",
+  padding: "20px",
+  borderRadius: "16px",
   border: "1px solid",
   borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-  boxShadow: "0 34px 90px rgba(84, 102, 124, 0.2)",
+  backgroundColor: "panel",
   opacity: "1",
-  transform: "translateY(0) scale(1)",
+  transform: "translateY(0)",
   transition:
-    "opacity 220ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1)",
+    "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   outline: "none",
   "@starting-style": {
     opacity: "0",
-    transform: "translateY(16px) scale(0.985)",
+    transform: "translateY(8px)",
   },
 })
 
@@ -223,20 +146,19 @@ const dialogPositionerClass = css({
 
 const textInputClass = css({
   width: "100%",
-  height: "48px",
-  paddingInline: "16px",
-  borderRadius: "16px",
+  height: "40px",
+  paddingInline: "12px",
+  borderRadius: "10px",
   border: "1px solid",
   borderColor: "border",
   backgroundColor: "background",
   color: "text",
-  fontSize: "0.95rem",
+  fontSize: "0.9rem",
   outline: "none",
   transition:
-    "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
   _focusVisible: {
     borderColor: "accentStrong",
-    boxShadow: `0 0 0 3px color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent)`,
   },
   _disabled: {
     opacity: "0.7",
@@ -326,12 +248,9 @@ export function ProjectsPage() {
       class={css({
         display: "grid",
         gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)",
-        gap: "22px",
+        gap: "20px",
         height: "100%",
-        padding: "26px",
-        background:
-          `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), transparent 36%), ` +
-          `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
+        padding: "24px",
         "@media (max-width: 1040px)": {
           gridTemplateColumns: "1fr",
         },
@@ -344,25 +263,14 @@ export function ProjectsPage() {
             alignItems: "flex-start",
             justifyContent: "space-between",
             gap: "16px",
-            padding: "26px 28px 20px",
+            padding: "20px",
             borderBottom: "1px solid",
             borderColor: "border",
           })}
         >
-          <div
-            class={css({ display: "flex", flexDirection: "column", gap: "12px", minWidth: "0" })}
-          >
-            <span class={eyebrowClass}>
-              <Sparkles size={14} strokeWidth={2} />
-              Machine-wide scope
-            </span>
-            <div class={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
-              <h1 class={titleClass}>Projects</h1>
-              <p class={bodyClass}>
-                Keep an explicit set of local roots for sessions, specs, tasks, pull requests, and
-                the rest of the workbench.
-              </p>
-            </div>
+          <div class={css({ display: "grid", gap: "6px", minWidth: "0" })}>
+            <h1 class={titleClass}>Projects</h1>
+            <p class={bodyClass}>Keep an explicit set of local roots available to the workbench.</p>
           </div>
           <button
             class={cx(buttonBaseClass, primaryButtonClass)}
@@ -381,29 +289,30 @@ export function ProjectsPage() {
           <div
             class={css({
               display: "grid",
-              placeItems: "center",
-              minHeight: "320px",
-              padding: "40px",
+              alignContent: "start",
+              gap: "12px",
+              minHeight: "220px",
+              padding: "20px",
             })}
           >
-            <div
-              class={css({
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "16px",
-                maxWidth: "34rem",
-                textAlign: "center",
-              })}
-            >
-              <div class={iconBadgeClass}>
-                <FolderKanban size={20} strokeWidth={1.9} />
-              </div>
+            <div class={css({ display: "grid", gap: "8px", maxWidth: "30rem" })}>
               <h2 class={titleClass}>No projects yet</h2>
               <p class={bodyClass}>
-                Add a local directory to establish the app&apos;s explicit working set. Nothing is
-                inferred until you choose it.
+                Add a local directory to establish the app&apos;s explicit working set.
               </p>
+              <div>
+                <button
+                  class={cx(buttonBaseClass, primaryButtonClass)}
+                  type="button"
+                  onClick={() => {
+                    resetDraft()
+                    isAddDialogOpen.value = true
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2.2} />
+                  Add project
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -439,70 +348,44 @@ export function ProjectsPage() {
       <aside class={panelClass}>
         <div
           class={css({
-            display: "flex",
-            flexDirection: "column",
-            gap: "18px",
-            padding: "26px",
+            display: "grid",
+            gap: "16px",
+            padding: "20px",
           })}
         >
-          <span class={eyebrowClass}>
-            <PencilLine size={14} strokeWidth={2} />
-            Inspector
-          </span>
+          <div class={css({ display: "grid", gap: "6px" })}>
+            <h2
+              class={css({
+                color: "text",
+                fontSize: "1rem",
+                fontWeight: "700",
+              })}
+            >
+              Project details
+            </h2>
+            <p class={bodyClass}>
+              {selectedProject
+                ? "Selected project metadata for the current workspace."
+                : "Select a project to inspect its configured path and display name."}
+            </p>
+          </div>
           {selectedProject ? (
             <>
-              <div class={css({ display: "flex", alignItems: "center", gap: "14px" })}>
-                <div class={iconBadgeClass}>
-                  <Folder size={18} strokeWidth={1.95} />
-                </div>
-                <div
-                  class={css({
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px",
-                    minWidth: "0",
-                  })}
-                >
-                  <h2 class={titleClass}>{selectedProject.name}</h2>
-                  <p class={bodyClass}>Selected root for the current workspace scope.</p>
-                </div>
-              </div>
-
-              <div
+              <h3
                 class={css({
-                  display: "grid",
-                  gap: "12px",
+                  color: "text",
+                  fontSize: "1.05rem",
+                  fontWeight: "700",
                 })}
               >
-                <InfoCard
-                  icon={<Folder size={16} strokeWidth={1.95} />}
-                  label="Path"
-                  value={selectedProject.path}
-                />
-                <InfoCard
-                  icon={<BadgeCheck size={16} strokeWidth={1.95} />}
-                  label="Display name"
-                  value={selectedProject.name}
-                />
+                {selectedProject.name}
+              </h3>
+              <div class={css({ display: "grid", gap: "12px" })}>
+                <InfoCard label="Path" value={selectedProject.path} />
+                <InfoCard label="Display name" value={selectedProject.name} />
               </div>
-
-              <p class={bodyClass}>
-                Projects stay intentionally lightweight here: one local path plus one display name.
-                Git-specific checks and deeper capability discovery can be layered in where a real
-                screen actually needs them.
-              </p>
             </>
-          ) : (
-            <>
-              <div class={iconBadgeClass}>
-                <FolderSearch2 size={20} strokeWidth={1.9} />
-              </div>
-              <h2 class={titleClass}>No project selected</h2>
-              <p class={bodyClass}>
-                Pick a row from the list to inspect its path and configured display name.
-              </p>
-            </>
-          )}
+          ) : null}
         </div>
       </aside>
 
@@ -543,27 +426,31 @@ function ProjectList(props: {
   onOpenProjectTab: (id: string) => void
 }) {
   return (
-    <div
+    <ul
       class={css({
-        display: "flex",
-        flexDirection: "column",
-        gap: "12px",
+        listStyle: "none",
+        margin: "0",
+        padding: "0",
         minHeight: "0",
-        padding: "14px",
         overflowY: "auto",
+        "& > li + li": {
+          borderTop: "1px solid",
+          borderColor: "border",
+        },
       })}
     >
       {props.projects.map((project) => (
-        <ProjectListRow
-          key={project.path}
-          isSelected={props.selectedProjectPath === project.path}
-          onOpenProjectTab={props.onOpenProjectTab}
-          onRemove={props.onRemove}
-          onSelect={props.onSelect}
-          project={project}
-        />
+        <li key={project.path}>
+          <ProjectListRow
+            isSelected={props.selectedProjectPath === project.path}
+            onOpenProjectTab={props.onOpenProjectTab}
+            onRemove={props.onRemove}
+            onSelect={props.onSelect}
+            project={project}
+          />
+        </li>
       ))}
-    </div>
+    </ul>
   )
 }
 
@@ -576,94 +463,77 @@ function ProjectListRow(props: {
   onOpenProjectTab: (id: string) => void
 }) {
   return (
-    <div
-      class={rowClass}
-      data-selected={props.isSelected}
-      role="button"
-      tabIndex={0}
-      onClick={() => {
-        props.onSelect(props.project.path)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          props.onSelect(props.project.path)
-        }
-      }}
+    <article
+      class={css({
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gap: "12px",
+        padding: "14px 16px",
+        borderInlineStart: "2px solid",
+        borderInlineStartColor: props.isSelected ? "accent" : "transparent",
+        backgroundColor: props.isSelected ? "surface" : "transparent",
+      })}
     >
-      <div
+      <button
         class={css({
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "14px",
+          display: "grid",
+          gap: "4px",
           minWidth: "0",
+          padding: "0",
+          border: "none",
+          background: "transparent",
+          color: "inherit",
+          textAlign: "left",
+          cursor: "pointer",
         })}
+        type="button"
+        onClick={() => {
+          props.onSelect(props.project.path)
+        }}
       >
-        <div class={iconBadgeClass}>
-          <Folder size={18} strokeWidth={1.95} />
-        </div>
         <div
           class={css({
             display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-            minWidth: "0",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "8px",
           })}
         >
-          <div
+          <h3
             class={css({
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: "10px",
+              color: "text",
+              fontSize: "0.96rem",
+              fontWeight: "600",
+              lineHeight: "1.4",
             })}
           >
-            <h3
+            {props.project.name}
+          </h3>
+          {props.isSelected ? (
+            <span
               class={css({
-                color: "text",
-                fontSize: "1rem",
-                fontWeight: "720",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
+                color: "accentStrong",
+                fontSize: "0.78rem",
+                fontWeight: "600",
               })}
             >
-              {props.project.name}
-            </h3>
-            {props.isSelected ? (
-              <span
-                class={css({
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "6px 10px",
-                  borderRadius: "999px",
-                  backgroundColor: "surface",
-                  color: "accentStrong",
-                  fontSize: "0.76rem",
-                  fontWeight: "700",
-                  boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
-                })}
-              >
-                <CheckCircle2 size={13} strokeWidth={2.3} />
-                Selected
-              </span>
-            ) : null}
-          </div>
-          <p
-            class={css({
-              color: "muted",
-              fontFamily: '"SF Mono", "JetBrains Mono", "Menlo", monospace',
-              fontSize: "0.8rem",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            })}
-          >
-            {props.project.path}
-          </p>
+              Selected
+            </span>
+          ) : null}
         </div>
-      </div>
+        <p
+          class={css({
+            color: "muted",
+            fontFamily: '"SF Mono", "JetBrains Mono", "Menlo", monospace',
+            fontSize: "0.8rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          })}
+        >
+          {props.project.path}
+        </p>
+      </button>
 
       <div
         class={css({
@@ -695,53 +565,36 @@ function ProjectListRow(props: {
           Remove
         </button>
       </div>
-    </div>
+    </article>
   )
 }
 
 /** Renders one small inspector card. */
-function InfoCard(props: { icon: preact.ComponentChild; label: string; value: string }) {
+function InfoCard(props: { label: string; value: string }) {
   return (
-    <div
+    <dl
       class={css({
         display: "grid",
-        gridTemplateColumns: "40px minmax(0, 1fr)",
-        gap: "12px",
-        padding: "14px",
-        borderRadius: "20px",
+        gap: "4px",
+        padding: "12px",
+        borderRadius: "12px",
         border: "1px solid",
         borderColor: "border",
-        backgroundColor: "surface",
       })}
     >
-      <div
+      <dt class={quietLabelClass}>{props.label}</dt>
+      <dd
         class={css({
-          display: "grid",
-          placeItems: "center",
-          width: "40px",
-          height: "40px",
-          borderRadius: "14px",
-          backgroundColor: "background",
-          color: "accentStrong",
-          boxShadow: `inset 0 0 0 1px ${token.var("colors.border")}`,
+          margin: "0",
+          color: "text",
+          fontWeight: "600",
+          lineHeight: "1.6",
+          wordBreak: "break-word",
         })}
       >
-        {props.icon}
-      </div>
-      <div class={css({ display: "flex", flexDirection: "column", gap: "6px", minWidth: "0" })}>
-        <span class={quietLabelClass}>{props.label}</span>
-        <span
-          class={css({
-            color: "text",
-            fontWeight: "630",
-            lineHeight: "1.6",
-            wordBreak: "break-word",
-          })}
-        >
-          {props.value}
-        </span>
-      </div>
-    </div>
+        {props.value}
+      </dd>
+    </dl>
   )
 }
 
@@ -770,14 +623,17 @@ function AddProjectDialog(props: {
         <Dialog.Backdrop class={dialogOverlayClass} />
         <Dialog.Positioner class={dialogPositionerClass}>
           <Dialog.Content class={dialogContentClass}>
-            <div
+            <form
               class={css({
-                display: "flex",
-                flexDirection: "column",
-                gap: "22px",
+                display: "grid",
+                gap: "16px",
               })}
+              onSubmit={(event) => {
+                event.preventDefault()
+                props.addProject()
+              }}
             >
-              <div
+              <header
                 class={css({
                   display: "flex",
                   alignItems: "flex-start",
@@ -785,37 +641,40 @@ function AddProjectDialog(props: {
                   gap: "16px",
                 })}
               >
-                <div class={css({ display: "flex", flexDirection: "column", gap: "12px" })}>
-                  <span class={eyebrowClass}>
-                    <Plus size={14} strokeWidth={2.3} />
-                    Add project
-                  </span>
-                  <div class={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
-                    <Dialog.Title class={titleClass}>Choose one local root</Dialog.Title>
-                    <Dialog.Description class={bodyClass}>
-                      The shared project registry only stores the path and display name.
-                    </Dialog.Description>
-                  </div>
+                <div class={css({ display: "grid", gap: "6px" })}>
+                  <Dialog.Title class={titleClass}>Add project</Dialog.Title>
+                  <Dialog.Description class={bodyClass}>
+                    Choose one local root and optionally adjust the display name.
+                  </Dialog.Description>
                 </div>
                 <Dialog.CloseTrigger asChild>
-                  <button class={cx(buttonBaseClass, secondaryButtonClass)} type="button">
+                  <button
+                    class={css({
+                      display: "grid",
+                      placeItems: "center",
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "10px",
+                      border: "1px solid",
+                      borderColor: "border",
+                      backgroundColor: "background",
+                      color: "muted",
+                      cursor: "pointer",
+                    })}
+                    type="button"
+                  >
                     <X size={15} strokeWidth={2.2} />
-                    Close
                   </button>
                 </Dialog.CloseTrigger>
-              </div>
+              </header>
 
               <label
                 class={css({
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                  color: "text",
-                  fontSize: "0.92rem",
-                  fontWeight: "650",
+                  display: "grid",
+                  gap: "6px",
                 })}
               >
-                Project path
+                <span class={labelClass}>Project path</span>
                 <input
                   class={textInputClass}
                   placeholder="/Users/alec/dev/goddard-ai/app"
@@ -830,8 +689,7 @@ function AddProjectDialog(props: {
               <div
                 class={css({
                   display: "flex",
-                  flexWrap: "wrap",
-                  gap: "10px",
+                  justifyContent: "flex-start",
                 })}
               >
                 <button
@@ -848,15 +706,11 @@ function AddProjectDialog(props: {
 
               <label
                 class={css({
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                  color: "text",
-                  fontSize: "0.92rem",
-                  fontWeight: "650",
+                  display: "grid",
+                  gap: "6px",
                 })}
               >
-                Display name
+                <span class={labelClass}>Display name</span>
                 <input
                   class={textInputClass}
                   placeholder="Derived from folder name"
@@ -872,7 +726,7 @@ function AddProjectDialog(props: {
                 class={css({
                   display: "flex",
                   justifyContent: "flex-end",
-                  gap: "10px",
+                  gap: "8px",
                 })}
               >
                 <Dialog.CloseTrigger asChild>
@@ -892,7 +746,7 @@ function AddProjectDialog(props: {
                   Add project
                 </button>
               </div>
-            </div>
+            </form>
           </Dialog.Content>
         </Dialog.Positioner>
       </Portal>
