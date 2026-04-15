@@ -1,7 +1,9 @@
 import { getShortcutKeymapPath } from "@goddard-ai/paths/node"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { parseShortcutKeymapFile, type UserShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
+import { z } from "zod"
+
+import { UserShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 
 /** Result of reading the persisted user shortcut keymap file. */
 export type ReadShortcutKeymapResult = {
@@ -15,17 +17,17 @@ export async function readShortcutKeymap() {
 
   try {
     const parsed = JSON.parse(await readFile(keymapPath, "utf-8")) as unknown
-    const keymap = parseShortcutKeymapFile(parsed)
+    const keymap = UserShortcutKeymapFile.safeParse(parsed)
 
-    if (!keymap) {
+    if (!keymap.success) {
       return {
         keymap: null,
-        error: `Shortcut keymap at ${keymapPath} is invalid.`,
+        error: `Shortcut keymap at ${keymapPath} is invalid: ${z.prettifyError(keymap.error)}`,
       } satisfies ReadShortcutKeymapResult
     }
 
     return {
-      keymap,
+      keymap: keymap.data,
       error: null,
     } satisfies ReadShortcutKeymapResult
   } catch (error) {
@@ -38,7 +40,7 @@ export async function readShortcutKeymap() {
 
     return {
       keymap: null,
-      error: `Failed to read shortcut keymap at ${keymapPath}.`,
+      error: `Failed to read shortcut keymap at ${keymapPath}: ${getErrorMessage(error)}`,
     } satisfies ReadShortcutKeymapResult
   }
 }
@@ -56,4 +58,13 @@ export async function writeShortcutKeymap(keymap: UserShortcutKeymapFile) {
 /** Returns whether one unknown read failure means the keymap file does not exist yet. */
 function isFileMissingError(error: unknown) {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT")
+}
+
+/** Returns one readable message for an unknown shortcut keymap read failure. */
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  return typeof error === "string" && error.length > 0 ? error : "Unknown error."
 }

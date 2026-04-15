@@ -1,17 +1,11 @@
-import { BindingInput } from "powerkeys"
-
-import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
-import type { AppCommandId } from "./app-commands.ts"
+import type { BindingInput } from "powerkeys"
+import { z } from "zod"
 
 export type ShortcutBindingObject = (
   | { combo: string; sequence?: undefined }
   | { sequence: string; combo?: undefined }
 ) &
   Omit<Extract<BindingInput, object>, "handler">
-
-export type ShortcutBinding = string | ShortcutBindingObject
-
-export type ShortcutKeymapBindings = Partial<Record<AppCommandId, readonly ShortcutBinding[]>>
 
 /** One built-in keymap profile identifier. */
 export type KeymapProfileId = keyof typeof shortcutKeymapProfiles
@@ -41,22 +35,37 @@ export const shortcutKeymapProfiles = {
   },
 } satisfies Record<string, ShortcutKeymapProfile>
 
-export type ShortcutKeymapOverrides = Partial<
-  Record<AppCommandId, readonly ShortcutBinding[] | null>
->
+const defaultKeymapProfileId = "goddard" satisfies KeymapProfileId
 
-/** One persisted shortcut keymap file stored under the user-scoped Goddard directory. */
-export type UserShortcutKeymapFile = {
-  version: 1
-  profile: KeymapProfileId
-  overrides: ShortcutKeymapOverrides
-}
+const ShortcutBindingObject = z.union([
+  z.looseObject({
+    combo: z.string().min(1),
+    sequence: z.undefined().optional(),
+  }),
+  z.looseObject({
+    sequence: z.string().min(1),
+    combo: z.undefined().optional(),
+  }),
+]) as z.ZodType<ShortcutBindingObject>
+
+const ShortcutBinding = z.union([z.string().min(1), ShortcutBindingObject])
+
+export type ShortcutBinding = z.infer<typeof ShortcutBinding>
+
+export type ShortcutKeymapBindings = Partial<Record<string, readonly ShortcutBinding[]>>
+
+export const ShortcutKeymapOverrides = z.record(
+  z.string(),
+  z.union([z.array(ShortcutBinding).nonempty(), z.null()]),
+)
+
+export type ShortcutKeymapOverrides = z.infer<typeof ShortcutKeymapOverrides>
 
 /** Returns one empty user keymap file using the default built-in profile. */
 export function createDefaultShortcutKeymapFile(): UserShortcutKeymapFile {
   return {
     version: 1,
-    profile: "goddard",
+    profile: defaultKeymapProfileId,
     overrides: {},
   }
 }
@@ -66,64 +75,17 @@ export function isKeymapProfileId(value: unknown): value is KeymapProfileId {
   return typeof value === "string" && value in shortcutKeymapProfiles
 }
 
-/** Parses one unknown JSON payload into a shortcut keymap file when valid. */
-export function parseShortcutKeymapFile(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null
-  }
+/** Schema for one persisted shortcut keymap file stored under the user-scoped Goddard directory. */
+export const UserShortcutKeymapFile = z.object({
+  version: z.literal(1),
+  profile: z.preprocess(
+    (value: unknown) => (isKeymapProfileId(value) ? value : defaultKeymapProfileId),
+    z.custom<KeymapProfileId>(isKeymapProfileId),
+  ),
+  overrides: ShortcutKeymapOverrides,
+})
 
-  const candidate = value as {
-    version?: unknown
-    profile?: unknown
-    overrides?: unknown
-  }
-
-  if (candidate.version !== 1) {
-    return null
-  }
-
-  if (
-    !candidate.overrides ||
-    typeof candidate.overrides !== "object" ||
-    Array.isArray(candidate.overrides)
-  ) {
-    return null
-  }
-
-  if (!isKeymapProfileId(candidate.profile)) {
-    candidate.profile = "goddard" satisfies KeymapProfileId
-  }
-
-  const overrides: ShortcutKeymapOverrides = {}
-
-  for (const [commandId, expressionList] of Object.entries(candidate.overrides)) {
-    const command = resolveAppCommand(commandId as AppCommandId)
-    if (!command) {
-      continue
-    }
-
-    if (expressionList === null) {
-      overrides[command.id] = null
-      continue
-    }
-
-    if (
-      !Array.isArray(expressionList) ||
-      expressionList.length === 0 ||
-      expressionList.some((expression) => typeof expression !== "string" || expression.length === 0)
-    ) {
-      return null
-    }
-
-    overrides[command.id] = expressionList
-  }
-
-  return {
-    version: 1,
-    profile: candidate.profile,
-    overrides,
-  }
-}
+export type UserShortcutKeymapFile = z.infer<typeof UserShortcutKeymapFile>
 
 /** Resolves one built-in profile plus optional user overrides into effective bindings. */
 export function resolveShortcutBindings(
@@ -134,15 +96,15 @@ export function resolveShortcutBindings(
     ...shortcutKeymapProfiles[profileId].bindings,
   }
 
-  for (const command of appCommandList) {
-    const override = overrides[command.id]
+  for (const commandId of Object.keys(overrides)) {
+    const override = overrides[commandId]
     if (override === undefined) {
       continue
     }
     if (override === null) {
-      delete resolvedBindings[command.id]
+      delete resolvedBindings[commandId]
     } else {
-      resolvedBindings[command.id] = override
+      resolvedBindings[commandId] = override
     }
   }
 

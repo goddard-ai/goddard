@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 
 import {
   createDefaultShortcutKeymapFile,
-  parseShortcutKeymapFile,
+  UserShortcutKeymapFile,
   resolveShortcutBindings,
 } from "./shortcut-keymap.ts"
 
@@ -18,7 +18,7 @@ const openRoadmap = "navigation.openRoadmap" as const
 
 test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
   expect(
-    parseShortcutKeymapFile({
+    UserShortcutKeymapFile.safeParse({
       version: 1,
       profile: "goddard",
       overrides: {
@@ -27,18 +27,21 @@ test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
       },
     }),
   ).toEqual({
-    version: 1,
-    profile: "goddard",
-    overrides: {
-      [newSession]: ["Mod+Shift+n"],
-      [openKeyboardShortcuts]: null,
+    success: true,
+    data: {
+      version: 1,
+      profile: "goddard",
+      overrides: {
+        [newSession]: ["Mod+Shift+n"],
+        [openKeyboardShortcuts]: null,
+      },
     },
   })
 })
 
-test("parseShortcutKeymapFile ignores unknown command ids and rejects empty override arrays", () => {
+test("parseShortcutKeymapFile keeps unknown command ids and rejects empty override arrays", () => {
   expect(
-    parseShortcutKeymapFile({
+    UserShortcutKeymapFile.safeParse({
       version: 1,
       profile: "goddard",
       overrides: {
@@ -46,20 +49,25 @@ test("parseShortcutKeymapFile ignores unknown command ids and rejects empty over
       },
     }),
   ).toEqual({
-    version: 1,
-    profile: "goddard",
-    overrides: {},
+    success: true,
+    data: {
+      version: 1,
+      profile: "goddard",
+      overrides: {
+        unknown: ["Mod+k"],
+      },
+    },
   })
 
   expect(
-    parseShortcutKeymapFile({
+    UserShortcutKeymapFile.safeParse({
       version: 1,
       profile: "goddard",
       overrides: {
         [newSession]: [],
       },
-    }),
-  ).toBeNull()
+    }).success,
+  ).toBe(false)
 })
 
 test("resolveShortcutBindings applies unbind and replacement overrides over the built-in profile", () => {
