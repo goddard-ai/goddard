@@ -17,6 +17,7 @@
 - Any new user-facing capability added in `app/` that depends on shared data loading, shared data mutation, or system configuration must also be implemented in `core/sdk/` in the same PR.
 - UI-only behavior does not require `core/sdk/` parity. Do not replicate presentation-only features, interaction affordances, or UI configuration in the SDK.
 - Do not ship `app/` ahead of `core/sdk/` when the feature depends on shared data or system configuration. If `core/sdk/` cannot support that behavior yet, treat the `app/` work as incomplete.
+- When adding new UI components or interactive elements in `app/`, use the local `pandark-ui` skill to align Panda CSS and Ark UI composition with the existing design system.
 - `spec/` is the canonical source of product behavior and intent.
 - Do not edit `spec/` unless explicitly asked.
 - Do not knowingly let code, docs, or tests diverge from `spec/`.
