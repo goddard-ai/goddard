@@ -109,6 +109,7 @@ export function SessionLaunchForm(props: {
       </Suspense>
 
       <Composer
+        appearance="launch"
         helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
         loadSuggestions={async (input) => {
           const cwd = form.draftProjectPath.value

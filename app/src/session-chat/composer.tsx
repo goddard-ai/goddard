@@ -1,3 +1,4 @@
+import { Portal } from "@ark-ui/react/portal"
 import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
@@ -55,6 +56,7 @@ export type ComposerSuggestionLoader = (input: {
   trigger: ComposerTrigger
   query: string
 }) => Promise<readonly ComposerSuggestion[]>
+type SessionInputAppearance = "chat" | "launch"
 
 type ComposerMenuState = {
   trigger: ComposerTrigger
@@ -144,6 +146,113 @@ const submitButtonClass = css({
     opacity: "0.52",
   },
 })
+
+const launchInputClass = css({
+  display: "grid",
+  gap: "12px",
+})
+
+const launchEditorFrameClass = css({
+  position: "relative",
+  borderRadius: "14px",
+  border: "1px solid",
+  borderColor: "border",
+  backgroundColor: "background",
+  transition:
+    "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+  _focusWithin: {
+    borderColor: "accentStrong",
+    boxShadow: `0 0 0 3px color-mix(in srgb, ${token.var("colors.accent")} 12%, transparent)`,
+  },
+})
+
+const launchContentEditableClass = css({
+  width: "100%",
+  minHeight: "124px",
+  padding: "12px 14px",
+  color: "text",
+  fontSize: "0.9rem",
+  lineHeight: "1.55",
+  outline: "none",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+})
+
+const launchPlaceholderClass = css({
+  position: "absolute",
+  inset: "12px 14px auto",
+  color: "muted",
+  fontSize: "0.9rem",
+  lineHeight: "1.55",
+  pointerEvents: "none",
+})
+
+const launchFooterClass = css({
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+})
+
+const launchHelperTextClass = css({
+  color: "muted",
+  fontSize: "0.82rem",
+  lineHeight: "1.55",
+})
+
+const launchSubmitButtonClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+  minWidth: "124px",
+  height: "40px",
+  paddingInline: "14px",
+  borderRadius: "12px",
+  border: "1px solid",
+  borderColor: "accent",
+  backgroundColor: "surface",
+  color: "text",
+  fontSize: "0.88rem",
+  fontWeight: "640",
+  cursor: "pointer",
+  _disabled: {
+    cursor: "not-allowed",
+    opacity: "0.52",
+  },
+})
+
+const sessionInputAppearanceClasses = {
+  chat: {
+    formClass: composerFormClass,
+    editorFrameClass,
+    contentEditableClass,
+    placeholderClass,
+    footerClass,
+    helperTextClass,
+    submitButtonClass,
+  },
+  launch: {
+    formClass: launchInputClass,
+    editorFrameClass: launchEditorFrameClass,
+    contentEditableClass: launchContentEditableClass,
+    placeholderClass: launchPlaceholderClass,
+    footerClass: launchFooterClass,
+    helperTextClass: launchHelperTextClass,
+    submitButtonClass: launchSubmitButtonClass,
+  },
+} satisfies Record<
+  SessionInputAppearance,
+  {
+    formClass: string
+    editorFrameClass: string
+    contentEditableClass: string
+    placeholderClass: string
+    footerClass: string
+    helperTextClass: string
+    submitButtonClass: string
+  }
+>
 
 const composerInitialConfig = {
   namespace: "session-chat-composer",
@@ -518,6 +627,7 @@ export function Composer(props: {
   placeholder?: string
   helperText?: string
   submitLabel?: string
+  appearance?: SessionInputAppearance
 }) {
   const formRef = useRef<HTMLFormElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -530,6 +640,8 @@ export function Composer(props: {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const suggestionRequestIdRef = useRef(0)
+  const appearance = props.appearance ?? "chat"
+  const appearanceClasses = sessionInputAppearanceClasses[appearance]
   const placeholder = props.placeholder ?? "Add the next instruction for this session."
   const helperText =
     props.helperText ??
@@ -538,7 +650,7 @@ export function Composer(props: {
 
   const canSubmit = hasPromptContent(promptBlocks) && menu === null && !isSubmitting
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
-  const composerPlaceholder = <div class={placeholderClass}>{placeholder}</div>
+  const composerPlaceholder = <div class={appearanceClasses.placeholderClass}>{placeholder}</div>
 
   function focusEditor() {
     queueMicrotask(() => {
@@ -691,20 +803,20 @@ export function Composer(props: {
   return (
     <form
       ref={formRef}
-      class={composerFormClass}
+      class={appearanceClasses.formClass}
       onSubmit={(event) => {
         event.preventDefault()
         void submitPrompt()
       }}
     >
       <LexicalComposer initialConfig={composerInitialConfig}>
-        <div class={editorFrameClass}>
+        <div class={appearanceClasses.editorFrameClass}>
           <PlainTextPlugin
             ErrorBoundary={LexicalErrorBoundary}
             contentEditable={
               <ContentEditable
                 aria-placeholder={placeholder}
-                class={contentEditableClass}
+                class={appearanceClasses.contentEditableClass}
                 placeholder={composerPlaceholder}
               />
             }
@@ -734,113 +846,115 @@ export function Composer(props: {
       </LexicalComposer>
 
       {menu ? (
-        <div
-          ref={menuRef}
-          class={inputMenuClass}
-          style={{
-            left: `${menu.anchorLeft}px`,
-            top: `${menu.anchorTop}px`,
-          }}
-        >
-          <div class={inputMenuHeaderClass}>{getMenuHeading(menu.trigger)}</div>
-          <input
-            ref={filterInputRef}
-            class={inputMenuFilterClass}
-            placeholder="Type to filter"
-            value={menu.query}
-            onInput={(event) => {
-              setMenu((currentMenu) =>
-                currentMenu
-                  ? {
-                      ...currentMenu,
-                      query: event.currentTarget.value,
-                    }
-                  : null,
-              )
+        <Portal>
+          <div
+            ref={menuRef}
+            class={inputMenuClass}
+            style={{
+              left: `${menu.anchorLeft}px`,
+              top: `${menu.anchorTop}px`,
             }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                setSelectedIndex((currentIndex) =>
-                  suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
+          >
+            <div class={inputMenuHeaderClass}>{getMenuHeading(menu.trigger)}</div>
+            <input
+              ref={filterInputRef}
+              class={inputMenuFilterClass}
+              placeholder="Type to filter"
+              value={menu.query}
+              onInput={(event) => {
+                setMenu((currentMenu) =>
+                  currentMenu
+                    ? {
+                        ...currentMenu,
+                        query: event.currentTarget.value,
+                      }
+                    : null,
                 )
-                return
-              }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault()
+                  setSelectedIndex((currentIndex) =>
+                    suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
+                  )
+                  return
+                }
 
-              if (event.key === "ArrowUp") {
-                event.preventDefault()
-                setSelectedIndex((currentIndex) =>
-                  suggestions.length === 0
-                    ? 0
-                    : (currentIndex - 1 + suggestions.length) % suggestions.length,
-                )
-                return
-              }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault()
+                  setSelectedIndex((currentIndex) =>
+                    suggestions.length === 0
+                      ? 0
+                      : (currentIndex - 1 + suggestions.length) % suggestions.length,
+                  )
+                  return
+                }
 
-              if (event.key === "Enter") {
-                event.preventDefault()
-                acceptHighlightedSuggestion()
-                return
-              }
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  acceptHighlightedSuggestion()
+                  return
+                }
 
-              if (event.key === "Escape") {
-                event.preventDefault()
-                closeMenu({ removeToken: true })
-              }
-            }}
-          />
-          <div class={inputMenuListClass}>
-            {isLoadingSuggestions ? (
-              <div class={inputMenuEmptyClass}>
-                <span
-                  class={css({
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  })}
-                >
-                  <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-                  Loading suggestions...
-                </span>
-              </div>
-            ) : suggestions.length === 0 ? (
-              <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
-            ) : (
-              suggestions.map((suggestion, index) => (
-                <button
-                  key={suggestionKey(suggestion)}
-                  class={cx(
-                    inputMenuButtonClass,
-                    index === selectedIndex ? inputMenuButtonActiveClass : undefined,
-                  )}
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                  }}
-                  onMouseEnter={() => {
-                    setSelectedIndex(index)
-                  }}
-                  onClick={() => {
-                    acceptSuggestion(suggestion)
-                  }}
-                >
-                  <span class={inputMenuIconClass} aria-hidden="true">
-                    <SuggestionIcon suggestion={suggestion} />
+                if (event.key === "Escape") {
+                  event.preventDefault()
+                  closeMenu({ removeToken: true })
+                }
+              }}
+            />
+            <div class={inputMenuListClass}>
+              {isLoadingSuggestions ? (
+                <div class={inputMenuEmptyClass}>
+                  <span
+                    class={css({
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    })}
+                  >
+                    <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+                    Loading suggestions...
                   </span>
-                  <span class={inputMenuBodyClass}>
-                    <span class={inputMenuLabelClass}>{getSuggestionLabel(suggestion)}</span>
-                    <span class={inputMenuDetailClass}>{getSuggestionDetail(suggestion)}</span>
-                  </span>
-                </button>
-              ))
-            )}
+                </div>
+              ) : suggestions.length === 0 ? (
+                <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
+              ) : (
+                suggestions.map((suggestion, index) => (
+                  <button
+                    key={suggestionKey(suggestion)}
+                    class={cx(
+                      inputMenuButtonClass,
+                      index === selectedIndex ? inputMenuButtonActiveClass : undefined,
+                    )}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                    }}
+                    onMouseEnter={() => {
+                      setSelectedIndex(index)
+                    }}
+                    onClick={() => {
+                      acceptSuggestion(suggestion)
+                    }}
+                  >
+                    <span class={inputMenuIconClass} aria-hidden="true">
+                      <SuggestionIcon suggestion={suggestion} />
+                    </span>
+                    <span class={inputMenuBodyClass}>
+                      <span class={inputMenuLabelClass}>{getSuggestionLabel(suggestion)}</span>
+                      <span class={inputMenuDetailClass}>{getSuggestionDetail(suggestion)}</span>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
-        </div>
+        </Portal>
       ) : null}
 
-      <div class={footerClass}>
-        <p class={helperTextClass}>{helperText}</p>
-        <button class={submitButtonClass} disabled={!canSubmit} type="submit">
+      <div class={appearanceClasses.footerClass}>
+        <p class={appearanceClasses.helperTextClass}>{helperText}</p>
+        <button class={appearanceClasses.submitButtonClass} disabled={!canSubmit} type="submit">
           {submitLabel}
           <SendHorizontal size={15} strokeWidth={2.2} />
         </button>
