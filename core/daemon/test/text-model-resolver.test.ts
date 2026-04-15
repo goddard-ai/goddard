@@ -29,6 +29,10 @@ test("loadDaemonTextModel uses daemon-owned lazy imports for bundled providers",
         factory: { apiKey: "test-key" },
         model: { topK: 3 },
       },
+      installationRoot: join(tmpdir(), "goddard-unused-bundled-root"),
+      installMissingPackage: async () => {
+        throw new Error("bundled providers should not install packages")
+      },
       moduleLoaders: {
         "@ai-sdk/google": async () => ({
           createGoogleGenerativeAI(factoryOptions: unknown) {
@@ -65,15 +69,15 @@ test("loadDaemonTextModel installs and loads non-bundled providers from an exter
     },
     {
       installationRoot,
-      resolveLoadPlan: (() => {
+      resolveModules: (() => {
         let attemptCount = 0
 
-        return ({ config, descriptor, installationRoot }) => {
+        return (plan, { installationRoot }) => {
           attemptCount += 1
           if (attemptCount === 1) {
             throw new MissingProviderPackageError({
-              packageName: descriptor.packageName,
-              specifier: descriptor.packageName,
+              packageName: plan.descriptor.packageName,
+              specifier: plan.modules[0]?.specifier ?? plan.descriptor.packageName,
               installationRoot,
             })
           }
@@ -87,43 +91,30 @@ test("loadDaemonTextModel installs and loads non-bundled providers from an exter
           )
 
           return {
-            descriptor: {
-              ...descriptor,
-              model: config.model,
-            },
-            adapterId: descriptor.packageName,
-            modules: [
-              {
-                role: "provider-factory",
-                specifier: descriptor.packageName,
-                resolvedPath,
-                fileUrl: pathToFileURL(resolvedPath).href,
-                exportName: "createVertex",
-              },
-            ],
-            operations: [
-              {
-                kind: "create-binding",
-                binding: "provider",
-                moduleRole: "provider-factory",
-                options: undefined,
-              },
-              {
-                kind: "invoke-binding",
-                binding: "textModel",
-                targetBinding: "provider",
-                args: [{ kind: "value", value: config.model }],
-              },
-            ],
-            resultBinding: "textModel",
+            ...plan,
+            stage: "resolved",
+            modules: plan.modules.map((module) => ({
+              ...module,
+              resolvedPath,
+              fileUrl: pathToFileURL(resolvedPath).href,
+            })),
           }
         }
       })(),
-      installMissingPackage: async ({ installPackageName, installationRoot }) => {
+      installMissingPackage: async ({
+        installPackageName,
+        installationRoot: providerInstallationRoot,
+      }) => {
         installRequestCount += 1
         expect(installPackageName).toBe("@ai-sdk/google-vertex")
+        expect(providerInstallationRoot).toBe(installationRoot)
 
-        const packageDir = join(installationRoot, "node_modules", "@ai-sdk", "google-vertex")
+        const packageDir = join(
+          providerInstallationRoot,
+          "node_modules",
+          "@ai-sdk",
+          "google-vertex",
+        )
         await mkdir(packageDir, { recursive: true })
         await writeFile(
           join(packageDir, "package.json"),
