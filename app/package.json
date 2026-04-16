@@ -57,7 +57,6 @@
     "@types/culori": "^4.0.1",
     "chokidar": "^5.0.0",
     "postcss": "^8.5.8",
-    "procband": "^0.3.0",
     "react": "npm:@preact/compat",
     "react-dom": "npm:@preact/compat",
     "vite": "^8.0.3"
