@@ -20,6 +20,8 @@ async function main() {
   supervise({
     command: "electrobun",
     args: ["dev", "--watch"],
+    detached: true,
+    parentExitSignal: "SIGTERM",
   })
 }
 

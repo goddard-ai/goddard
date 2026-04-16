@@ -18,7 +18,7 @@
         "husky": "^9.1.7",
         "oxfmt": "^0.36.0",
         "oxlint": "^1.51.0",
-        "procband": "^0.3.0",
+        "procband": "^0.3.2",
         "radashi": "^12.7.2",
         "tsdown": "^0.21.0",
         "turbo": "^2.9.6",
@@ -2005,7 +2005,7 @@
 
     "prismjs": ["prismjs@1.30.0", "", {}, "sha512-DEvV2ZF2r2/63V+tK8hQvrR2ZGn10srHbXviTlcv7Kpzw8jWiNTqbVgjO3IY8RxrrOUF8VPMQQFysYYYv0YZxw=="],
 
-    "procband": ["procband@0.3.0", "", { "dependencies": { "@alloc/tree-kill": "^1.4.0", "ansi-styles": "^6.2.3" } }, "sha512-Xuqmayyqwdpw22xGlMSzjhHCTzPa5G13VMkuMwHc6NcTjiADw9HccL/PpIKEsdVG3UQ6yplD4uP6dxHmK0J9iA=="],
+    "procband": ["procband@0.3.2", "", { "dependencies": { "@alloc/tree-kill": "^1.4.0", "ansi-styles": "^6.2.3" } }, "sha512-jXs8Y39CTawwB9EnPm752MjpM16u3/jXY80NeFRCPFTzb3XRSC566nmwto8wkI6I5PqG+UbrL1FeQ6VEnm057w=="],
 
     "process": ["process@0.11.10", "", {}, "sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A=="],
 
