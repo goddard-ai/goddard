@@ -1,7 +1,6 @@
 import { Portal } from "@ark-ui/react/portal"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
-import { useEffect, useRef } from "preact/hooks"
 
 import type { SessionInputMenuState } from "./input-lexical.tsx"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsx"
@@ -12,7 +11,6 @@ import {
   inputMenuClass,
   inputMenuDetailClass,
   inputMenuEmptyClass,
-  inputMenuFilterClass,
   inputMenuHeaderClass,
   inputMenuIconClass,
   inputMenuLabelClass,
@@ -71,33 +69,11 @@ export function SessionInputMenu(props: {
   isLoadingSuggestions: boolean
   menu: SessionInputMenuState | null
   menuRef: preact.RefObject<HTMLDivElement | null>
-  onAcceptHighlighted: () => void
   onAcceptSuggestion: (suggestion: SessionInputSuggestion) => void
-  onClose: () => void
   onHighlight: (index: number) => void
-  onHighlightNext: () => void
-  onHighlightPrevious: () => void
-  onQueryChange: (query: string) => void
   selectedIndex: number
   suggestions: readonly SessionInputSuggestion[]
 }) {
-  const filterInputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    if (!props.menu) {
-      return
-    }
-
-    const input = filterInputRef.current
-
-    if (!input) {
-      return
-    }
-
-    input.focus()
-    input.setSelectionRange(input.value.length, input.value.length)
-  }, [props.menu])
-
   if (!props.menu) {
     return null
   }
@@ -113,39 +89,6 @@ export function SessionInputMenu(props: {
         }}
       >
         <div class={inputMenuHeaderClass}>{getMenuHeading(props.menu.trigger)}</div>
-        <input
-          ref={filterInputRef}
-          class={inputMenuFilterClass}
-          placeholder="Type to filter"
-          value={props.menu.query}
-          onInput={(event) => {
-            props.onQueryChange(event.currentTarget.value)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault()
-              props.onHighlightNext()
-              return
-            }
-
-            if (event.key === "ArrowUp") {
-              event.preventDefault()
-              props.onHighlightPrevious()
-              return
-            }
-
-            if (event.key === "Enter") {
-              event.preventDefault()
-              props.onAcceptHighlighted()
-              return
-            }
-
-            if (event.key === "Escape") {
-              event.preventDefault()
-              props.onClose()
-            }
-          }}
-        />
         <div class={inputMenuListClass}>
           {props.isLoadingSuggestions ? (
             <div class={inputMenuEmptyClass}>

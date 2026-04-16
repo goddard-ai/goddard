@@ -14,6 +14,8 @@ import {
   $isRangeSelection,
   $isTextNode,
   COMMAND_PRIORITY_HIGH,
+  KEY_ARROW_DOWN_COMMAND,
+  KEY_ARROW_UP_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
 } from "lexical"
@@ -225,22 +227,6 @@ export function clearSessionInputEditor(editor: LexicalEditor) {
   )
 }
 
-export function removeTriggerToken(editor: LexicalEditor, menu: SessionInputMenuState) {
-  editor.update(
-    () => {
-      const targetNode = $getNodeByKey(menu.nodeKey)
-
-      if (!$isTextNode(targetNode)) {
-        return
-      }
-
-      targetNode.spliceText(menu.startOffset, menu.endOffset - menu.startOffset, "", false)
-      targetNode.select(menu.startOffset, menu.startOffset)
-    },
-    { discrete: true },
-  )
-}
-
 export function insertSessionInputSuggestion(
   editor: LexicalEditor,
   menu: SessionInputMenuState,
@@ -273,10 +259,12 @@ export function insertSessionInputSuggestion(
 export function SessionInputPlugins(props: {
   menu: SessionInputMenuState | null
   onEditorReady: (editor: LexicalEditor) => void
+  onDismissMenu: () => void
+  onHighlightNext: () => void
+  onHighlightPrevious: () => void
+  onMenuChange: (menu: SessionInputMenuState | null) => void
   onPromptBlocksChange: (blocks: SessionInputPromptBlocks) => void
-  onTriggerDetected: (menu: SessionInputMenuState) => void
   onSubmit: () => void
-  onCancelMenu: () => void
   onAcceptMenu: () => void
 }) {
   const [editor] = useLexicalComposerContext()
@@ -287,17 +275,14 @@ export function SessionInputPlugins(props: {
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
-      if (props.menu) {
-        return
-      }
-
       const detectedMenu = editorState.read(() => detectSessionInputMenuState())
 
       if (!detectedMenu) {
+        props.onMenuChange(null)
         return
       }
 
-      props.onTriggerDetected({
+      props.onMenuChange({
         trigger: detectedMenu.trigger,
         query: detectedMenu.query,
         nodeKey: detectedMenu.nodeKey,
@@ -328,6 +313,32 @@ export function SessionInputPlugins(props: {
       },
       COMMAND_PRIORITY_HIGH,
     )
+    const unregisterArrowDown = editor.registerCommand(
+      KEY_ARROW_DOWN_COMMAND,
+      (event) => {
+        if (!props.menu) {
+          return false
+        }
+
+        event?.preventDefault()
+        props.onHighlightNext()
+        return true
+      },
+      COMMAND_PRIORITY_HIGH,
+    )
+    const unregisterArrowUp = editor.registerCommand(
+      KEY_ARROW_UP_COMMAND,
+      (event) => {
+        if (!props.menu) {
+          return false
+        }
+
+        event?.preventDefault()
+        props.onHighlightPrevious()
+        return true
+      },
+      COMMAND_PRIORITY_HIGH,
+    )
     const unregisterEscape = editor.registerCommand(
       KEY_ESCAPE_COMMAND,
       (event) => {
@@ -336,7 +347,7 @@ export function SessionInputPlugins(props: {
         }
 
         event?.preventDefault()
-        props.onCancelMenu()
+        props.onDismissMenu()
         return true
       },
       COMMAND_PRIORITY_HIGH,
@@ -344,6 +355,8 @@ export function SessionInputPlugins(props: {
 
     return () => {
       unregisterEnter()
+      unregisterArrowDown()
+      unregisterArrowUp()
       unregisterEscape()
     }
   }, [editor, props])

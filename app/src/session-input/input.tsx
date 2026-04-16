@@ -12,7 +12,6 @@ import { hasPromptContent } from "~/session-chat/composer-content.ts"
 import {
   clearSessionInputEditor,
   insertSessionInputSuggestion,
-  removeTriggerToken,
   SessionInputPlugins,
   sessionInputInitialConfig,
   type SessionInputMenuState,
@@ -36,6 +35,8 @@ export type SessionInputClasses = {
   submitButton: string
 }
 
+type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
+
 export function SessionInput(props: {
   classes?: Partial<SessionInputClasses>
   loadSuggestions: SessionInputSuggestionLoader
@@ -48,6 +49,7 @@ export function SessionInput(props: {
   const formRef = useRef<HTMLFormElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
+  const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
   const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>([])
   const [menu, setMenu] = useState<SessionInputMenuState | null>(null)
   const [suggestions, setSuggestions] = useState<SessionInputSuggestion[]>([])
@@ -66,26 +68,68 @@ export function SessionInput(props: {
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
   const sessionInputPlaceholder = <div class={classes.placeholder}>{placeholder}</div>
 
+  function clearMenuState() {
+    setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
+    setSuggestions((currentSuggestions) =>
+      currentSuggestions.length === 0 ? currentSuggestions : [],
+    )
+    setSelectedIndex((currentIndex) => (currentIndex === 0 ? currentIndex : 0))
+    setIsLoadingSuggestions((currentIsLoading) => (currentIsLoading ? false : currentIsLoading))
+  }
+
   function focusEditor() {
     queueMicrotask(() => {
       editorRef.current?.focus()
     })
   }
 
-  function closeMenu(options: { removeToken: boolean }) {
-    const activeEditor = editorRef.current
-    const activeMenu = menu
-
-    setMenu(null)
-    setSuggestions([])
-    setSelectedIndex(0)
-    setIsLoadingSuggestions(false)
-
-    if (options.removeToken && activeEditor && activeMenu) {
-      removeTriggerToken(activeEditor, activeMenu)
+  function hideMenu(options?: { dismissCurrentContext?: boolean; preserveFocus?: boolean }) {
+    if (options?.dismissCurrentContext && menu) {
+      dismissedMenuRef.current = {
+        trigger: menu.trigger,
+        nodeKey: menu.nodeKey,
+        startOffset: menu.startOffset,
+      }
+    } else {
+      dismissedMenuRef.current = null
     }
 
-    focusEditor()
+    clearMenuState()
+
+    if (options?.preserveFocus) {
+      focusEditor()
+    }
+  }
+
+  function isDismissedMenu(menuState: SessionInputMenuState) {
+    return (
+      dismissedMenuRef.current?.trigger === menuState.trigger &&
+      dismissedMenuRef.current?.nodeKey === menuState.nodeKey &&
+      dismissedMenuRef.current?.startOffset === menuState.startOffset
+    )
+  }
+
+  function isSameMenuState(
+    currentMenu: SessionInputMenuState | null,
+    nextMenu: SessionInputMenuState | null,
+  ) {
+    if (currentMenu === nextMenu) {
+      return true
+    }
+
+    if (!currentMenu || !nextMenu) {
+      return false
+    }
+
+    return (
+      currentMenu.trigger === nextMenu.trigger &&
+      currentMenu.query === nextMenu.query &&
+      currentMenu.nodeKey === nextMenu.nodeKey &&
+      currentMenu.startOffset === nextMenu.startOffset &&
+      currentMenu.endOffset === nextMenu.endOffset &&
+      currentMenu.anchorLeft === nextMenu.anchorLeft &&
+      currentMenu.anchorTop === nextMenu.anchorTop
+    )
   }
 
   async function submitPrompt() {
@@ -97,6 +141,7 @@ export function SessionInput(props: {
 
     try {
       await props.onSubmit(promptBlocks)
+      dismissedMenuRef.current = null
       setPromptBlocks([])
       props.onPromptChange?.([])
 
@@ -115,10 +160,8 @@ export function SessionInput(props: {
     }
 
     insertSessionInputSuggestion(editorRef.current, menu, suggestion)
-    setMenu(null)
-    setSuggestions([])
-    setSelectedIndex(0)
-    setIsLoadingSuggestions(false)
+    dismissedMenuRef.current = null
+    clearMenuState()
     focusEditor()
   }
 
@@ -162,7 +205,7 @@ export function SessionInput(props: {
           setIsLoadingSuggestions(false)
         }
       })
-  }, [menu, props.loadSuggestions])
+  }, [menu?.nodeKey, menu?.query, menu?.startOffset, menu?.trigger, props.loadSuggestions])
 
   useEffect(() => {
     setSelectedIndex((currentIndex) => {
@@ -189,7 +232,7 @@ export function SessionInput(props: {
       return
     }
 
-    closeMenu({ removeToken: true })
+    hideMenu()
   })
 
   useListener(window, "resize", () => {
@@ -197,7 +240,7 @@ export function SessionInput(props: {
       return
     }
 
-    closeMenu({ removeToken: true })
+    hideMenu()
   })
 
   return (
@@ -225,11 +268,42 @@ export function SessionInput(props: {
           <SessionInputPlugins
             menu={menu}
             onAcceptMenu={acceptHighlightedSuggestion}
-            onCancelMenu={() => {
-              closeMenu({ removeToken: true })
+            onDismissMenu={() => {
+              hideMenu({
+                dismissCurrentContext: true,
+                preserveFocus: true,
+              })
             }}
             onEditorReady={(editor) => {
               editorRef.current = editor
+            }}
+            onHighlightNext={() => {
+              setSelectedIndex((currentIndex) =>
+                suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
+              )
+            }}
+            onHighlightPrevious={() => {
+              setSelectedIndex((currentIndex) =>
+                suggestions.length === 0
+                  ? 0
+                  : (currentIndex - 1 + suggestions.length) % suggestions.length,
+              )
+            }}
+            onMenuChange={(nextMenu) => {
+              if (!nextMenu) {
+                dismissedMenuRef.current = null
+                clearMenuState()
+                return
+              }
+
+              if (isDismissedMenu(nextMenu)) {
+                clearMenuState()
+                return
+              }
+
+              setMenu((currentMenu) =>
+                isSameMenuState(currentMenu, nextMenu) ? currentMenu : nextMenu,
+              )
             }}
             onPromptBlocksChange={(nextPromptBlocks) => {
               setPromptBlocks(nextPromptBlocks)
@@ -237,9 +311,6 @@ export function SessionInput(props: {
             }}
             onSubmit={() => {
               void submitPrompt()
-            }}
-            onTriggerDetected={(nextMenu) => {
-              setMenu(nextMenu)
             }}
           />
         </div>
@@ -251,35 +322,9 @@ export function SessionInput(props: {
         menuRef={menuRef}
         selectedIndex={selectedIndex}
         suggestions={suggestions}
-        onAcceptHighlighted={acceptHighlightedSuggestion}
         onAcceptSuggestion={acceptSuggestion}
-        onClose={() => {
-          closeMenu({ removeToken: true })
-        }}
         onHighlight={(index) => {
           setSelectedIndex(index)
-        }}
-        onHighlightNext={() => {
-          setSelectedIndex((currentIndex) =>
-            suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
-          )
-        }}
-        onHighlightPrevious={() => {
-          setSelectedIndex((currentIndex) =>
-            suggestions.length === 0
-              ? 0
-              : (currentIndex - 1 + suggestions.length) % suggestions.length,
-          )
-        }}
-        onQueryChange={(query) => {
-          setMenu((currentMenu) =>
-            currentMenu
-              ? {
-                  ...currentMenu,
-                  query,
-                }
-              : null,
-          )
         }}
       />
 
