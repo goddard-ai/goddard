@@ -5,125 +5,6 @@ import { useEffect, useRef, useState } from "preact/hooks"
 
 import type { ProjectRecord } from "./project-registry.ts"
 
-const triggerClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  width: "100%",
-  height: "28px",
-  paddingInline: "12px",
-  border: "none",
-  borderRadius: "6px",
-  backgroundColor: "panel",
-  color: "muted",
-  cursor: "pointer",
-  textAlign: "left",
-  transition:
-    "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _hover: {
-    backgroundColor: "surface",
-    color: "text",
-  },
-  _focusVisible: {
-    outline: "2px solid",
-    outlineColor: "accentStrong",
-    outlineOffset: "2px",
-  },
-})
-
-const contentClass = css({
-  display: "grid",
-  gap: "8px",
-  width: "var(--reference-width)",
-  minWidth: "320px",
-  marginTop: "10px",
-  padding: "10px",
-  border: "1px solid",
-  borderColor: "border",
-  borderRadius: "14px",
-  backgroundColor: "background",
-  outline: "none",
-})
-
-const inputShellClass = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "10px",
-  minHeight: "38px",
-  paddingInline: "12px",
-  borderRadius: "10px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "surface",
-  color: "muted",
-  transition:
-    "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _focusWithin: {
-    borderColor: "accent",
-    backgroundColor: "surface",
-  },
-})
-
-const inputClass = css({
-  width: "100%",
-  height: "28px",
-  border: "none",
-  outline: "none",
-  backgroundColor: "transparent",
-  color: "text",
-  fontSize: "0.9rem",
-  fontWeight: "600",
-  "&::placeholder": {
-    color: "muted",
-  },
-})
-
-const listClass = css({
-  display: "grid",
-  gap: "2px",
-  maxHeight: "280px",
-  overflowY: "auto",
-  listStyle: "none",
-  padding: "0",
-  margin: "0",
-})
-
-const itemClass = css({
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: "12px",
-  width: "100%",
-  minHeight: "44px",
-  padding: "8px 10px",
-  border: "none",
-  borderRadius: "10px",
-  backgroundColor: "transparent",
-  color: "text",
-  cursor: "pointer",
-  textAlign: "left",
-  transition: "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _focusVisible: {
-    outline: "2px solid",
-    outlineColor: "accentStrong",
-    outlineOffset: "2px",
-  },
-  "&[data-highlighted='true']": {
-    backgroundColor: "surface",
-  },
-})
-
-const hiddenLabelClass = css({
-  position: "absolute",
-  width: "1px",
-  height: "1px",
-  padding: "0",
-  margin: "-1px",
-  overflow: "hidden",
-  clip: "rect(0, 0, 0, 0)",
-  whiteSpace: "nowrap",
-  border: "0",
-})
-
 type SwitchProjectItem =
   | {
       id: "open-folder"
@@ -234,7 +115,34 @@ export function SwitchProjectDropdown(props: {
       }}
     >
       <Popover.Trigger asChild>
-        <button aria-label="Switch project" class={triggerClass} type="button">
+        <button
+          aria-label="Switch project"
+          class={css({
+            display: "inline-flex",
+            alignItems: "center",
+            width: "100%",
+            height: "28px",
+            paddingInline: "12px",
+            border: "none",
+            borderRadius: "6px",
+            backgroundColor: "panel",
+            color: "muted",
+            cursor: "pointer",
+            textAlign: "left",
+            transition:
+              "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+            _hover: {
+              backgroundColor: "surface",
+              color: "text",
+            },
+            _focusVisible: {
+              outline: "2px solid",
+              outlineColor: "accentStrong",
+              outlineOffset: "2px",
+            },
+          })}
+          type="button"
+        >
           <span
             class={css({
               overflow: "hidden",
@@ -252,13 +160,72 @@ export function SwitchProjectDropdown(props: {
       </Popover.Trigger>
 
       <Popover.Positioner>
-        <Popover.Content class={contentClass}>
-          <label class={inputShellClass}>
-            <span class={hiddenLabelClass}>Search projects</span>
+        <Popover.Content
+          class={css({
+            display: "grid",
+            gap: "8px",
+            width: "var(--reference-width)",
+            minWidth: "320px",
+            marginTop: "10px",
+            padding: "10px",
+            border: "1px solid",
+            borderColor: "border",
+            borderRadius: "14px",
+            backgroundColor: "background",
+            outline: "none",
+          })}
+        >
+          <label
+            class={css({
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              minHeight: "38px",
+              paddingInline: "12px",
+              borderRadius: "10px",
+              border: "1px solid",
+              borderColor: "border",
+              backgroundColor: "surface",
+              color: "muted",
+              transition:
+                "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+              _focusWithin: {
+                borderColor: "accent",
+                backgroundColor: "surface",
+              },
+            })}
+          >
+            <span
+              class={css({
+                position: "absolute",
+                width: "1px",
+                height: "1px",
+                padding: "0",
+                margin: "-1px",
+                overflow: "hidden",
+                clip: "rect(0, 0, 0, 0)",
+                whiteSpace: "nowrap",
+                border: "0",
+              })}
+            >
+              Search projects
+            </span>
             <Search aria-hidden={true} size={16} strokeWidth={2.1} />
             <input
               ref={inputRef}
-              class={inputClass}
+              class={css({
+                width: "100%",
+                height: "28px",
+                border: "none",
+                outline: "none",
+                backgroundColor: "transparent",
+                color: "text",
+                fontSize: "0.9rem",
+                fontWeight: "600",
+                "&::placeholder": {
+                  color: "muted",
+                },
+              })}
               placeholder="Search projects"
               value={search}
               onInput={(event) => {
@@ -290,7 +257,17 @@ export function SwitchProjectDropdown(props: {
           </label>
 
           {items.length > 0 ? (
-            <ul class={listClass}>
+            <ul
+              class={css({
+                display: "grid",
+                gap: "2px",
+                maxHeight: "280px",
+                overflowY: "auto",
+                listStyle: "none",
+                padding: "0",
+                margin: "0",
+              })}
+            >
               {items.map((item, index) => {
                 const isHighlighted = highlightedIndex === index
 
@@ -301,7 +278,30 @@ export function SwitchProjectDropdown(props: {
                         ref={(element) => {
                           itemRefs.current[item.id] = element
                         }}
-                        class={itemClass}
+                        class={css({
+                          display: "flex",
+                          alignItems: "flex-start",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                          width: "100%",
+                          minHeight: "44px",
+                          padding: "8px 10px",
+                          border: "none",
+                          borderRadius: "10px",
+                          backgroundColor: "transparent",
+                          color: "text",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+                          _focusVisible: {
+                            outline: "2px solid",
+                            outlineColor: "accentStrong",
+                            outlineOffset: "2px",
+                          },
+                          "&[data-highlighted='true']": {
+                            backgroundColor: "surface",
+                          },
+                        })}
                         data-highlighted={isHighlighted ? "true" : "false"}
                         type="button"
                         onMouseEnter={() => {
@@ -343,7 +343,30 @@ export function SwitchProjectDropdown(props: {
                       ref={(element) => {
                         itemRefs.current[item.id] = element
                       }}
-                      class={itemClass}
+                      class={css({
+                        display: "flex",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        width: "100%",
+                        minHeight: "44px",
+                        padding: "8px 10px",
+                        border: "none",
+                        borderRadius: "10px",
+                        backgroundColor: "transparent",
+                        color: "text",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        transition: "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+                        _focusVisible: {
+                          outline: "2px solid",
+                          outlineColor: "accentStrong",
+                          outlineOffset: "2px",
+                        },
+                        "&[data-highlighted='true']": {
+                          backgroundColor: "surface",
+                        },
+                      })}
                       data-highlighted={isHighlighted ? "true" : "false"}
                       type="button"
                       onMouseEnter={() => {
