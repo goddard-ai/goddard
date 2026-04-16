@@ -30,6 +30,13 @@ This file should stay shorter than the former `app/best-practices.md`. Keep only
 - Only operate on local roots the user explicitly adds to the app's project scope, and pass project identity through state and tab payloads for project-scoped workflows.
 - Maintain one authenticated user-scoped activity stream and fan normalized events into inbox, sessions, and pull-request state.
 
+## Surface Composition
+
+- Keep shared presentational primitives near the surface that owns them when multiple sections reuse the same layout or control treatment.
+- Keep section files focused on semantics, labels, and state wiring, and keep generic surface layout and control styling in the owning surface.
+- Prefer plain document-flow utility surfaces over decorative headers, hero treatments, or stacked containers unless the product explicitly requires stronger framing.
+- Keep styles inline when they are used once. Promote them to named primitives only when repeated structure makes the surface easier to read and keep consistent.
+
 ## Alignment
 
 - If a planned feature conflicts with `spec/app.md` or shared contracts, call out the mismatch before implementing around it.
