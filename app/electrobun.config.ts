@@ -21,7 +21,7 @@ export default {
       dist: "views/main",
       ".generated/embedded-runtime": "embedded-runtime",
     },
-    watch: [],
+    watchIgnore: ["src", "src/**"],
     mac: {
       icons: "assets/icon.iconset",
     },
