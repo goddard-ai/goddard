@@ -54,7 +54,7 @@
     "ai-sdk-json-schema": "^0.2.0",
     "cmd-ts": "^0.15.0",
     "hash-sum": "^2.0.0",
-    "kindstore": "^0.4.1",
+    "kindstore": "^0.4.4",
     "kleur": "^4.1.5",
     "node-stream-zip": "^1.15.0",
     "radashi": "^12.7.2",

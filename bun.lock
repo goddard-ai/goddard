@@ -4,9 +4,6 @@
   "workspaces": {
     "": {
       "name": "goddard",
-      "dependencies": {
-        "kindstore": "0.4.1",
-      },
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20260307.1",
         "@types/bun": "^1.3.11",
@@ -136,7 +133,7 @@
         "ai-sdk-json-schema": "^0.2.0",
         "cmd-ts": "^0.15.0",
         "hash-sum": "^2.0.0",
-        "kindstore": "^0.4.1",
+        "kindstore": "^0.4.4",
         "kleur": "^4.1.5",
         "node-stream-zip": "^1.15.0",
         "radashi": "^12.7.2",
@@ -1737,7 +1734,7 @@
 
     "jws": ["jws@4.0.1", "", { "dependencies": { "jwa": "^2.0.1", "safe-buffer": "^5.0.1" } }, "sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA=="],
 
-    "kindstore": ["kindstore@0.4.1", "", { "dependencies": { "ulid": "^3.0.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-id9VL6e3GnuZYy4DxL71Ienhr5JYxztj0CS/g8ucanDSSSUrLNB6CQEZQUJCtPOUKCi5l/iMVHM6an1Ix8OZpA=="],
+    "kindstore": ["kindstore@0.4.4", "", { "dependencies": { "ulid": "^3.0.2" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-CjcLnQf1AAtKIoJU9hjJ9Yln1yy4MTj39ebu6ARZHs7E83j73eE0H9qiCRfhZQmVZYX2fZA1601/I9VelcSf3g=="],
 
     "kleur": ["kleur@4.1.5", "", {}, "sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ=="],
 
