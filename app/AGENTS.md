@@ -25,6 +25,7 @@
   - Use controlled inputs only when live validation, derived UI, formatting, or cross-field coordination requires it.
   - Prefer uncontrolled open state for dialogs, popovers, tooltips, and similar overlays when no other part of the UI needs to coordinate them.
   - Use controlled open state only when another component, keyboard shortcut, persistence rule, or async flow must drive the overlay lifecycle.
+  - When a dialog component accepts `dialog: UseDialogReturn`, treat it as content rendered under a parent `Dialog.RootProvider`; do not nest `Dialog.Root` inside that component.
   - Keep custom Preact hooks for state management local to the component that uses them.
   - Do not extract single-use state hooks into shared modules.
 - Query cache:
