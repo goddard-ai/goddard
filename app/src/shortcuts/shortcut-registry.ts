@@ -79,6 +79,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
             nextBindings.push({
               scope: command.scope,
               when: command.when,
+              preventDefault: true,
               ...expression,
               handler: command,
             })
@@ -88,6 +89,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
               scope: command.scope,
               when: command.when,
               handler: command,
+              preventDefault: true,
             })
           } else {
             nextBindings.push({
@@ -95,6 +97,7 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
               scope: command.scope,
               when: command.when,
               handler: command,
+              preventDefault: true,
             })
           }
         }
