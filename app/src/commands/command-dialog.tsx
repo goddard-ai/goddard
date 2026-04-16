@@ -25,7 +25,7 @@ export function CommandDialog(props: CommandDialogProps) {
   })
 
   return (
-    <Dialog.RootProvider value={dialog}>
+    <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
       <Suspense fallback={null}>
         <Content dialog={dialog} />
       </Suspense>
