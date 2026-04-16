@@ -26,6 +26,7 @@
     }
   },
   "scripts": {
+    "dev": "bun --watch run src/main.ts",
     "build": "tsdown --unused",
     "generate-acp-registry-fallback": "bun scripts/generate-acp-registry-fallback.ts",
     "build:standalone": "bun run ./scripts/build-standalone.ts",
