@@ -12,12 +12,7 @@ async function main() {
 
   await daemon.waitFor(/ipc\.server_listening/)
 
-  supervise({
-    name: "app",
-    command: "bun",
-    args: ["dev"],
-    cwd: "app",
-  })
+  await import("../app/scripts/dev.ts")
 }
 
 await main()
