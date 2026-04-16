@@ -1,7 +1,9 @@
 import { Dialog, useDialog, type UseDialogProps, type UseDialogReturn } from "@ark-ui/react/dialog"
 import { Suspense, lazy } from "preact/compat"
 import { useMemo } from "preact/hooks"
+import { concat } from "radashi"
 
+import { menuPortalId } from "~/lib/menu-portal.tsx"
 import { useAppCommand, type AppCommand } from "./app-command.ts"
 
 type CommandDialogContentModule = {
@@ -19,7 +21,13 @@ export type CommandDialogProps = {
 export function CommandDialog(props: CommandDialogProps) {
   const Content = useMemo(() => lazy(props.content), [])
 
-  const dialog = useDialog(props.dialogProps)
+  const dialog = useDialog({
+    ...props.dialogProps,
+    persistentElements: concat(
+      () => document.getElementById(menuPortalId),
+      props.dialogProps?.persistentElements,
+    ),
+  })
   useAppCommand(props.command, () => {
     dialog.setOpen(true)
   })

@@ -1,7 +1,7 @@
-import { Portal } from "@ark-ui/react/portal"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
 
+import { MenuPortal } from "~/lib/menu-portal.tsx"
 import type { SessionInputMenuState } from "./input-lexical.tsx"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsx"
 import {
@@ -79,7 +79,7 @@ export function SessionInputMenu(props: {
   }
 
   return (
-    <Portal>
+    <MenuPortal>
       <div
         ref={props.menuRef}
         class={inputMenuClass}
@@ -136,6 +136,6 @@ export function SessionInputMenu(props: {
           )}
         </div>
       </div>
-    </Portal>
+    </MenuPortal>
   )
 }

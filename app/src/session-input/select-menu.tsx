@@ -1,9 +1,9 @@
 /** Shared custom dropdown used by the launch-session selectors. */
-import { Portal } from "@ark-ui/react/portal"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { Check, ChevronDown, Circle, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
+import { MenuPortal } from "~/lib/menu-portal.tsx"
 import {
   inputMenuBodyClass,
   inputMenuButtonActiveClass,
@@ -284,7 +284,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
       </button>
 
       {props.open && menuPosition ? (
-        <Portal>
+        <MenuPortal>
           <div
             ref={menuRef}
             class={inputMenuClass}
@@ -417,7 +417,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
               )}
             </div>
           </div>
-        </Portal>
+        </MenuPortal>
       ) : null}
     </label>
   )

@@ -1,0 +1,18 @@
+import { Portal } from "@ark-ui/react/portal"
+import { useRef } from "preact/hooks"
+
+export const menuPortalId = "menu-portal"
+const menuPortalElement =
+  typeof document === "undefined" ? null : document.getElementById(menuPortalId)
+
+/** Renders menus into one shared host so dialogs can treat all custom dropdowns as persistent. */
+export function MenuPortal(props: { children?: preact.ComponentChildren }) {
+  const containerRef = useRef<HTMLElement | null>(menuPortalElement)
+  containerRef.current = menuPortalElement
+
+  if (!containerRef.current) {
+    return null
+  }
+
+  return <Portal container={containerRef}>{props.children}</Portal>
+}
