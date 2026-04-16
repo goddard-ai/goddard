@@ -35,7 +35,8 @@ This file should stay shorter than the former `app/best-practices.md`. Keep only
 - Keep shared presentational primitives near the surface that owns them when multiple sections reuse the same layout or control treatment.
 - Keep section files focused on semantics, labels, and state wiring, and keep generic surface layout and control styling in the owning surface.
 - Prefer plain document-flow utility surfaces over decorative headers, hero treatments, or stacked containers unless the product explicitly requires stronger framing.
-- Keep styles inline when they are used once. Promote them to named primitives only when repeated structure makes the surface easier to read and keep consistent.
+- Prefer sibling `*.style.ts` modules for non-trivial static `css(...)` classes so component files stay focused on structure and behavior.
+- Keep tiny, obvious single-use wrappers inline when extraction would not improve readability.
 
 ## Alignment
 
