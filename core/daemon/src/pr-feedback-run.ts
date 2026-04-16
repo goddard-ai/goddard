@@ -1,8 +1,9 @@
+import { resolveDefaultAgent } from "@goddard-ai/config"
 /** Launches daemon-managed sessions for individual PR feedback events. */
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { resolveDefaultAgent } from "@goddard-ai/config"
-import type { ConfigManager } from "./config-manager.ts"
 import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+
+import type { ConfigManager } from "./config-manager.ts"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createLogger } from "./logging.ts"

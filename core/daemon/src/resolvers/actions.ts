@@ -4,6 +4,7 @@ import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+
 import type { RootConfigProvider } from "./config.ts"
 import { readActionConfig, readCurrentRootConfig } from "./config.ts"
 

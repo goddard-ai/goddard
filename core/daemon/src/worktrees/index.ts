@@ -3,9 +3,10 @@ import type { DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 import * as fs from "node:fs"
 import * as path from "node:path"
+
 import { defaultPlugin } from "./plugins/default.ts"
-import { runCommand } from "./process.ts"
 import { worktrunkPlugin } from "./plugins/worktrunk.ts"
+import { runCommand } from "./process.ts"
 
 export type { WorktreePlugin, WorktreeSetupOptions }
 

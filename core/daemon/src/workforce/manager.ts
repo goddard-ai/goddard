@@ -1,6 +1,7 @@
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { WorkforceDescription } from "@goddard-ai/schema/daemon"
 import type { WorkforceStatus } from "@goddard-ai/schema/workforce"
+
 import type { WorkforceActorContext } from "../context.ts"
 import { createLogger } from "../logging.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"

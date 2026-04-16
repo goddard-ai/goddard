@@ -1,9 +1,10 @@
 /** Git-backed sync-session host for one primary checkout and one linked session worktree. */
 import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
+import { randomUUID } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { randomUUID } from "node:crypto"
+
 import { runCommand } from "./process.ts"
 
 /** Conflict preference used when one sync cycle merges both sides. */

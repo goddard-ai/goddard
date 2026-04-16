@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+
 import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "../src/node/index.ts"
 
 test("createDaemonIpcClient passes the explicit socket path to the injected factory", () => {

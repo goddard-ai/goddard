@@ -1,8 +1,8 @@
+import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { afterEach, expect, test } from "bun:test"
 
 const cleanupDirs: string[] = []
 const packageDir = resolve(import.meta.dirname, "..")

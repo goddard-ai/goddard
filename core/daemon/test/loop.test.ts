@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
 import { configureLogging } from "../src/logging.ts"
 import { createLoopManager } from "../src/loop/manager.ts"
 import { normalizeLoopRootDir } from "../src/loop/paths.ts"

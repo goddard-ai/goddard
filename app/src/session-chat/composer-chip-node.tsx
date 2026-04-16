@@ -1,8 +1,6 @@
 /** Lexical decorator node and shared chip data used by the session chat composer. */
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { BookOpen, Command, File, Folder } from "lucide-react"
-import type { JSX } from "preact"
 import type {
   DOMConversionMap,
   DOMExportOutput,
@@ -13,6 +11,8 @@ import type {
   SerializedLexicalNode,
 } from "lexical"
 import { $applyNodeReplacement, DecoratorNode } from "lexical"
+import { BookOpen, Command, File, Folder } from "lucide-react"
+import type { JSX } from "preact"
 
 const CHIP_DATA_ATTRIBUTE = "data-goddard-composer-chip"
 

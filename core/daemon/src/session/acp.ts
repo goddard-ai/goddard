@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { FileSink } from "bun"
 import { Readable, Writable } from "node:stream"
+
 import { createLogger } from "../logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }

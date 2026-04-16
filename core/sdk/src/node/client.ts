@@ -4,6 +4,7 @@ import type {
   DaemonIpcClientFactory,
 } from "@goddard-ai/daemon-client/node"
 import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
+
 import { resolveIpcClient, type GoddardClient } from "../ipc-client.ts"
 
 /** Node-side daemon connection options, including env-driven defaults. */

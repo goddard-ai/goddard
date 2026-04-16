@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+
 import { createGitHubApp } from "../src/github-app.ts"
 
 test("GoddardGitHubApp initialization", () => {

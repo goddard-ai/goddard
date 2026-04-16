@@ -1,10 +1,11 @@
 import { cx } from "@goddard-ai/styled-system/css"
-import type { MessageListRow } from "../message-list.tsx"
+
 import type {
   SessionTranscriptToolCall,
   SessionTranscriptToolContent,
   SessionTranscriptToolStatus,
 } from "~/sessions/models.ts"
+import type { MessageListRow } from "../message-list.tsx"
 import { buildToolDiffPreview, getBubbleMaxWidth } from "./layout.ts"
 import { TranscriptMetaRow } from "./meta-row.tsx"
 import {

@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+
 import { createConfigManager } from "../src/config-manager.ts"
 import { readMergedRootConfig } from "../src/resolvers/config.ts"
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"

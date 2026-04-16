@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+
 import { GoddardSdk } from "../src/index.ts"
 
 test("session.prompt forwards a structured ACP prompt message through sessionSend", async () => {

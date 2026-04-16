@@ -5,6 +5,7 @@ import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import * as path from "node:path"
+
 import {
   type DaemonIpcClient,
   type DaemonIpcClientFactory,

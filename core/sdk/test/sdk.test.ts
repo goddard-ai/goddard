@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { describe, expect, test, vi } from "bun:test"
+
 import { AgentSession, GoddardSdk, type GoddardClient } from "../src/index.ts"
 
 function createSdkWithClient() {

@@ -1,9 +1,10 @@
+import { afterEach, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { existsSync, realpathSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { afterEach, expect, test } from "bun:test"
+
 import { createWorktree, deleteWorktree, resolveWorktreePlugin } from "../src/worktrees/index.ts"
 import { defaultPlugin } from "../src/worktrees/plugins/default.ts"
 

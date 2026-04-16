@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+
 import { UserStream } from "../src/worker.ts"
 
 test("user stream durable object fans out published events to subscribers", async () => {

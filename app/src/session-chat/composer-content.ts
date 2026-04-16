@@ -10,6 +10,7 @@ import {
   $isLineBreakNode,
   $isTextNode,
 } from "lexical"
+
 import {
   $createComposerChipNode,
   $isComposerChipNode,

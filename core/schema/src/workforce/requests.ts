@@ -1,4 +1,5 @@
 import { z } from "zod"
+
 import type { WorkforceConfig, WorkforceLedgerEvent, WorkforceStatus } from "../workforce.ts"
 
 /** Stable request intents supported by workforce mutation APIs. */

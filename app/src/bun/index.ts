@@ -1,4 +1,5 @@
 import { BrowserWindow, Updater } from "electrobun/bun"
+
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { getMainWindow, setMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"

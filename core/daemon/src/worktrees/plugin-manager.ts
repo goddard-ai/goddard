@@ -5,6 +5,7 @@ import hashSum from "hash-sum"
 import { access } from "node:fs/promises"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
+
 import type { ConfigManager, RootConfigSnapshot } from "../config-manager.ts"
 import { createLogger } from "../logging.ts"
 

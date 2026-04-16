@@ -1,6 +1,7 @@
 /** Daemon-scoped async-context variables used during setup and runtime log correlation. */
 import { AsyncContext } from "@b9g/async-context"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
+
 import type { ConfigManager } from "./config-manager.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 

@@ -4,6 +4,7 @@ import { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { command, option, run, string, subcommands } from "cmd-ts"
 import * as fs from "node:fs/promises"
+
 import { db } from "../persistence/store.ts"
 
 async function requireSessionId(): Promise<DaemonSession["id"]> {

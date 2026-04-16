@@ -1,11 +1,11 @@
 import { mergeRootConfigLayers } from "@goddard-ai/config"
-import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
 import {
   getGlobalConfigPath,
   getGoddardGlobalDir,
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
+import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
 import { constants as fsConstants } from "node:fs"
 import { access, readFile, writeFile } from "node:fs/promises"
 import { z } from "zod"

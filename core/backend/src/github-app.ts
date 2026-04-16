@@ -1,5 +1,5 @@
-import { App } from "octokit"
 import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/schema/backend"
+import { App } from "octokit"
 
 type FetchLike = typeof fetch
 

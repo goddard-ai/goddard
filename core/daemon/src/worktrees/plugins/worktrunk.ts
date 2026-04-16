@@ -2,6 +2,7 @@
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 import * as fs from "node:fs"
 import * as path from "node:path"
+
 import { runCommand } from "../process.ts"
 
 export const worktrunkPlugin: WorktreePlugin = {

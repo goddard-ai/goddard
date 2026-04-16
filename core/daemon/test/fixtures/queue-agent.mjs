@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createInterface } from "node:readline"
 import { randomUUID } from "node:crypto"
+import { createInterface } from "node:readline"
 
 const sessionId = `queue-agent-session-${randomUUID()}`
 let activePrompt = null

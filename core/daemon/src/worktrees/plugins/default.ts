@@ -5,6 +5,7 @@ import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
+
 import { runCommand } from "../process.ts"
 
 export const defaultPlugin: WorktreePlugin = {

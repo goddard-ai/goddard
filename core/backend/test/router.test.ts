@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
-import { createBackendRouter } from "../src/api/router.ts"
+
 import { HttpError, type BackendControlPlane } from "../src/api/control-plane.ts"
+import { createBackendRouter } from "../src/api/router.ts"
 import type { Env } from "../src/env.ts"
 
 const notUsed = () => {

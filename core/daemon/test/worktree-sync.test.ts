@@ -1,9 +1,10 @@
+import { afterEach, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, expect, test } from "bun:test"
+
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
 import { WorktreeSyncSessionHost } from "../src/worktrees/sync.ts"
 
