@@ -1,7 +1,6 @@
 import { useListener } from "preact-sigma"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
-import { AppearanceDialog } from "~/appearance/appearance-dialog.tsx"
 import { AppCommand, resolveAppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
 import { browseForProject } from "~/desktop-host.ts"
@@ -86,7 +85,6 @@ export function AppShell() {
   const navigation = useNavigation()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const [isAppearanceDialogOpen, setIsAppearanceDialogOpen] = useState(false)
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
     navigation.selectedNavId,
@@ -245,7 +243,6 @@ export function AppShell() {
       payload: {},
       dirty: false,
     })
-    setIsAppearanceDialogOpen(true)
   })
 
   return (
@@ -295,12 +292,6 @@ export function AppShell() {
       <CommandDialog
         command={AppCommand.navigation.openNewSessionDialog}
         content={() => import("~/sessions/dialog.tsx")}
-      />
-      <AppearanceDialog
-        isOpen={isAppearanceDialogOpen}
-        onOpenChange={(isOpen) => {
-          setIsAppearanceDialogOpen(isOpen)
-        }}
       />
     </>
   )
