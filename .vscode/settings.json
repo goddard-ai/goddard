@@ -45,5 +45,8 @@
     "**/.agents": true,
     "**/bun.lock": true,
     "**/dist": true
+  },
+  "catppuccin-icons.associations.extensions": {
+    "style.ts": "panda-css"
   }
 }
