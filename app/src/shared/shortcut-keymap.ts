@@ -1,7 +1,6 @@
 import type { BindingInput } from "powerkeys"
 import { z } from "zod"
 
-import { resolveAppCommand } from "~/commands/app-command.ts"
 import type { AppCommandId } from "./app-commands.ts"
 
 export type ShortcutBindingObject = (
@@ -135,27 +134,19 @@ export function resolveShortcutBindings(
   profileId: KeymapProfileId,
   overrides: ShortcutKeymapOverrides = {},
 ) {
-  const profileBindings: ShortcutKeymapBindings = shortcutKeymapProfiles[profileId].bindings
   const resolvedBindings: ShortcutKeymapBindings = {
-    ...profileBindings,
+    ...shortcutKeymapProfiles[profileId].bindings,
   }
 
-  for (const commandId of Object.keys(overrides)) {
-    const typedCommandId = commandId as AppCommandId
-
-    if (!profileBindings[typedCommandId] && resolveAppCommand(typedCommandId) === null) {
-      continue
-    }
-
+  for (const commandId of Object.keys(overrides) as AppCommandId[]) {
     const override = overrides[commandId]
-
     if (override === undefined) {
       continue
     }
     if (override === null) {
-      delete resolvedBindings[typedCommandId]
+      delete resolvedBindings[commandId]
     } else {
-      resolvedBindings[typedCommandId] = override
+      resolvedBindings[commandId] = override
     }
   }
 
