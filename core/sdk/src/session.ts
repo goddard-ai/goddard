@@ -58,9 +58,7 @@ export function createSessionPromptMessage(input: SessionPromptRequest) {
     params: {
       sessionId: input.acpId,
       prompt:
-        typeof input.prompt === "string"
-          ? [{ type: "text", text: input.prompt }]
-          : input.prompt,
+        typeof input.prompt === "string" ? [{ type: "text", text: input.prompt }] : input.prompt,
     },
   } satisfies acp.AnyMessage
 }

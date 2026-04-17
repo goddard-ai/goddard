@@ -178,12 +178,7 @@ export function AppShell() {
       default:
         projectContext.applyFocusedTabProject(activeTab.id, null)
     }
-  }, [
-    projectContext,
-    projects,
-    workbenchTabSet.activeTab,
-    workbenchTabSet.activeTabId,
-  ])
+  }, [projectContext, projects, workbenchTabSet.activeTab, workbenchTabSet.activeTabId])
 
   function openNavigationSurfaceTab(kind: NavigationItemId) {
     const nextNavigationItem =

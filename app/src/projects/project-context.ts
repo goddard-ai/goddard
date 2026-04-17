@@ -1,7 +1,7 @@
 import { SigmaType } from "preact-sigma"
 
-import type { ProjectRecord } from "./project-registry.ts"
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
+import type { ProjectRecord } from "./project-registry.ts"
 
 const PROJECT_CONTEXT_STORAGE_KEY = "goddard.app.project-context.v1"
 
@@ -94,7 +94,10 @@ export function findNearestProjectPath(
       continue
     }
 
-    if (!matchedProject || normalizedProjectPath.length > normalizeProjectPath(matchedProject.path).length) {
+    if (
+      !matchedProject ||
+      normalizedProjectPath.length > normalizeProjectPath(matchedProject.path).length
+    ) {
       matchedProject = project
     }
   }
@@ -126,7 +129,10 @@ export function orderProjectsByRecentActivity(
       return 1
     }
 
-    return (registryIndexByPath.get(leftProject.path) ?? 0) - (registryIndexByPath.get(rightProject.path) ?? 0)
+    return (
+      (registryIndexByPath.get(leftProject.path) ?? 0) -
+      (registryIndexByPath.get(rightProject.path) ?? 0)
+    )
   })
 }
 
@@ -146,11 +152,16 @@ export const ProjectContext = new SigmaType<ProjectContextShape>("ProjectContext
         recentProjectPaths: [],
       })
       const focusedTabProjectPath =
-        this.focusedTabId === null ? null : this.reportedTabProjectsByTabId[this.focusedTabId] ?? null
+        this.focusedTabId === null
+          ? null
+          : (this.reportedTabProjectsByTabId[this.focusedTabId] ?? null)
 
       this.activeProjectPath = focusedTabProjectPath ?? snapshot.activeProjectPath
       this.recentProjectPaths = focusedTabProjectPath
-        ? [focusedTabProjectPath, ...snapshot.recentProjectPaths.filter((path) => path !== focusedTabProjectPath)]
+        ? [
+            focusedTabProjectPath,
+            ...snapshot.recentProjectPaths.filter((path) => path !== focusedTabProjectPath),
+          ]
         : snapshot.recentProjectPaths
       this.syncProjects(validProjectPaths)
     },
@@ -242,7 +253,9 @@ export const ProjectContext = new SigmaType<ProjectContextShape>("ProjectContext
         Object.entries(this.reportedTabProjectsByTabId).filter((entry) => entry[1] !== path),
       )
       const focusedTabProjectPath =
-        this.focusedTabId === null ? null : nextReportedTabProjectsByTabId[this.focusedTabId] ?? null
+        this.focusedTabId === null
+          ? null
+          : (nextReportedTabProjectsByTabId[this.focusedTabId] ?? null)
 
       this.recentProjectPaths = nextRecentProjectPaths
       this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId

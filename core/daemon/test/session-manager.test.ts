@@ -13,10 +13,7 @@ import {
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "../src/session/archive.ts"
-import {
-  injectSystemPrompt,
-  resolveAgentProcessSpec,
-} from "../src/session/manager.ts"
+import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/session/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME

@@ -42,21 +42,8 @@ import type {
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type { KindInput, KindOutput } from "kindstore"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import {
-  constants as fsConstants,
-  watch,
-  type Dirent,
-  type FSWatcher,
-} from "node:fs"
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises"
+import { constants as fsConstants, watch, type Dirent, type FSWatcher } from "node:fs"
+import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { Readable, Writable } from "node:stream"
@@ -68,11 +55,7 @@ import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
 import type { ConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath } from "../config.ts"
 import { SessionContext } from "../context.ts"
-import {
-  createChunkPreview,
-  createLogger,
-  createPayloadPreview,
-} from "../logging.ts"
+import { createChunkPreview, createLogger, createPayloadPreview } from "../logging.ts"
 import {
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
@@ -102,11 +85,7 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import type { ACPRegistryService } from "./registry.ts"
-import {
-  backfillSessionTitle,
-  generateSessionTitle,
-  prepareSessionTitle,
-} from "./title.ts"
+import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
   type ActiveTurnBuffer,
   appendSessionHistoryMessage,
@@ -154,15 +133,9 @@ const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
   "Queued prompt aborted before dispatch by session cancellation."
 const DEFAULT_COMPOSER_SUGGESTION_LIMIT = 20
 const MAX_COMPOSER_SUGGESTION_LIMIT = 50
-const COMPOSER_IGNORED_DIRECTORY_NAMES = new Set([
-  ".git",
-  "node_modules",
-  "dist",
-])
+const COMPOSER_IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"])
 
-type PersistedSessionTurnDraftRecord = KindOutput<
-  typeof db.schema.sessionTurnDrafts
->
+type PersistedSessionTurnDraftRecord = KindOutput<typeof db.schema.sessionTurnDrafts>
 type PersistedSessionWorktreeRecord = KindOutput<typeof db.schema.worktrees>
 type PersistedSessionWorkforceRecord = KindOutput<typeof db.schema.workforces>
 
@@ -242,11 +215,7 @@ function toFileUri(path: string) {
 }
 
 /** Produces one stable display suggestion for a file or folder under the session cwd. */
-function toFilesystemSuggestion(
-  cwd: string,
-  path: string,
-  type: "file" | "folder",
-) {
+function toFilesystemSuggestion(cwd: string, path: string, type: "file" | "folder") {
   return {
     type,
     path,
@@ -287,10 +256,7 @@ async function listComposerEntriesAtCwd(cwd: string, limit: number) {
   const suggestions: SessionComposerFileSuggestion[] = []
 
   for (const entry of entries) {
-    if (
-      entry.isDirectory() &&
-      COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)
-    ) {
+    if (entry.isDirectory() && COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)) {
       continue
     }
 
@@ -299,13 +265,7 @@ async function listComposerEntriesAtCwd(cwd: string, limit: number) {
     }
 
     const path = join(cwd, entry.name)
-    suggestions.push(
-      toFilesystemSuggestion(
-        cwd,
-        path,
-        entry.isDirectory() ? "folder" : "file",
-      ),
-    )
+    suggestions.push(toFilesystemSuggestion(cwd, path, entry.isDirectory() ? "folder" : "file"))
 
     if (suggestions.length >= limit) {
       break
@@ -316,11 +276,7 @@ async function listComposerEntriesAtCwd(cwd: string, limit: number) {
 }
 
 /** Recursively searches the session cwd subtree for matching file and folder suggestions. */
-async function searchComposerEntriesUnderCwd(
-  cwd: string,
-  query: string,
-  limit: number,
-) {
+async function searchComposerEntriesUnderCwd(cwd: string, query: string, limit: number) {
   const suggestions: SessionComposerFileSuggestion[] = []
 
   async function visit(directory: string) {
@@ -331,10 +287,7 @@ async function searchComposerEntriesUnderCwd(
     const entries = sortDirectoryEntries(await readDirectoryEntries(directory))
 
     for (const entry of entries) {
-      if (
-        entry.isDirectory() &&
-        COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)
-      ) {
+      if (entry.isDirectory() && COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)) {
         continue
       }
 
@@ -441,17 +394,11 @@ async function readSkillSuggestions(params: {
 }
 
 /** Merges local and global skill roots while preserving local name precedence. */
-async function getSkillComposerSuggestions(
-  cwd: string,
-  query: string,
-  limit: number,
-) {
+async function getSkillComposerSuggestions(cwd: string, query: string, limit: number) {
   const localRoot = await findNearestSkillRoot(cwd)
   const globalRoot = join(getUserHomeDir(), ".agents", "skills")
   const [localSuggestions, globalSuggestions] = await Promise.all([
-    localRoot
-      ? readSkillSuggestions({ cwd, root: localRoot, source: "local", query })
-      : [],
+    localRoot ? readSkillSuggestions({ cwd, root: localRoot, source: "local", query }) : [],
     readSkillSuggestions({ cwd, root: globalRoot, source: "global", query }),
   ])
   const suggestions: SessionComposerSkillSuggestion[] = []
@@ -484,9 +431,7 @@ function getSlashComposerSuggestions(
 
   for (const command of availableCommands) {
     const inputHint =
-      isRecord(command.input) && typeof command.input.hint === "string"
-        ? command.input.hint
-        : null
+      isRecord(command.input) && typeof command.input.hint === "string" ? command.input.hint : null
 
     if (
       normalizedQuery.length > 0 &&
@@ -544,18 +489,10 @@ async function getDraftComposerSuggestions(params: {
   if (params.trigger === "at") {
     return params.query.trim().length === 0
       ? await listComposerEntriesAtCwd(params.cwd, params.limit)
-      : await searchComposerEntriesUnderCwd(
-          params.cwd,
-          params.query,
-          params.limit,
-        )
+      : await searchComposerEntriesUnderCwd(params.cwd, params.query, params.limit)
   }
 
-  return await getSkillComposerSuggestions(
-    params.cwd,
-    params.query,
-    params.limit,
-  )
+  return await getSkillComposerSuggestions(params.cwd, params.query, params.limit)
 }
 
 /** Lists local git branches for one launch dialog and keeps the current branch first. */
@@ -567,12 +504,7 @@ async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
   }
 
   const result = Bun.spawn(
-    [
-      "git",
-      "for-each-ref",
-      "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)",
-      "refs/heads",
-    ],
+    ["git", "for-each-ref", "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)", "refs/heads"],
     {
       cwd: repoRoot,
       stdin: "ignore",
@@ -703,10 +635,7 @@ function toSessionWorktreeState(record: PersistedSessionWorktreeRecord | null) {
 }
 
 /** Tracks in-flight client requests so agent responses can be correlated back to session state. */
-type ClientRequestMap = Map<
-  string | number,
-  acp.AnyMessage & { method: string }
->
+type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
 
 /** Describes the concrete child-process invocation for a resolved agent distribution. */
 type AgentProcessSpec = {
@@ -764,10 +693,7 @@ type ResolvedBinaryTarget = {
 }
 
 /** Callback fired when one Bun-managed agent process exits. */
-type AgentProcessExitHandler = (
-  code: number | null,
-  signal: NodeJS.Signals | null,
-) => void
+type AgentProcessExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void
 
 /** Bun subprocess wrapper that preserves the exit hooks and stdio surface the daemon expects. */
 type AgentProcessHandle = ProcessLike & {
@@ -832,18 +758,14 @@ export type SessionManager = {
   listSessions: (params: ListSessionsRequest) => Promise<ListSessionsResponse>
   connectSession: (id: SessionId) => Promise<DaemonSession>
   getSession: (id: SessionId) => Promise<DaemonSession>
-  getHistory: (
-    params: GetSessionHistoryRequest,
-  ) => Promise<GetSessionHistoryResponse>
+  getHistory: (params: GetSessionHistoryRequest) => Promise<GetSessionHistoryResponse>
   getComposerSuggestions: (
     params: SessionComposerSuggestionsRequest,
   ) => Promise<SessionComposerSuggestionsResponse>
   getDraftSuggestions: (
     params: SessionDraftSuggestionsRequest,
   ) => Promise<SessionComposerSuggestionsResponse>
-  getLaunchPreview: (
-    params: SessionLaunchPreviewRequest,
-  ) => Promise<SessionLaunchPreviewResponse>
+  getLaunchPreview: (params: SessionLaunchPreviewRequest) => Promise<SessionLaunchPreviewResponse>
   getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
   getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
   mountWorktreeSync: (id: SessionId) => Promise<MutateSessionWorktreeResponse>
@@ -856,10 +778,7 @@ export type SessionManager = {
     id: SessionId,
     prompt: string | acp.ContentBlock[],
   ) => Promise<SteerSessionResponse>
-  promptSession: (
-    id: SessionId,
-    prompt: string | acp.ContentBlock[],
-  ) => Promise<acp.PromptResponse>
+  promptSession: (id: SessionId, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
   shutdownSession: (id: SessionId) => Promise<boolean>
   resolveSessionIdByToken: (token: string) => Promise<SessionId>
   close: () => Promise<void>
@@ -895,9 +814,7 @@ function createInitialPromptRequest(params: {
   const promptRequest: acp.PromptRequest = {
     sessionId: params.sessionId,
     prompt:
-      typeof params.prompt === "string"
-        ? [{ type: "text", text: params.prompt }]
-        : params.prompt,
+      typeof params.prompt === "string" ? [{ type: "text", text: params.prompt }] : params.prompt,
   }
 
   return params.isFirstPrompt
@@ -928,10 +845,7 @@ function isErrorSignal(signal: string | null): boolean {
 
 /** Detects one-shot sessions that should exit immediately after the initial prompt completes. */
 function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
-  return (
-    params.request.oneShot === true &&
-    params.request.initialPrompt !== undefined
-  )
+  return params.request.oneShot === true && params.request.initialPrompt !== undefined
 }
 
 /** Derives reconnectability from stored connection state without joining adjacent kinds. */
@@ -991,8 +905,7 @@ function createAgentProcessHandle(input: {
   cwd: string
   env: NodeJS.ProcessEnv
 }): AgentProcessHandle {
-  let exitState: { code: number | null; signal: NodeJS.Signals | null } | null =
-    null
+  let exitState: { code: number | null; signal: NodeJS.Signals | null } | null = null
   const exitHandlers = new Set<AgentProcessExitHandler>()
   const subprocess = Bun.spawn([input.cmd, ...input.args], {
     cwd: input.cwd,
@@ -1033,9 +946,7 @@ function createAgentProcessHandle(input: {
         })
     },
   })
-  const stdout = Readable.fromWeb(
-    subprocess.stdout as unknown as ReadableStream,
-  )
+  const stdout = Readable.fromWeb(subprocess.stdout as unknown as ReadableStream)
 
   return {
     stdin,
@@ -1062,13 +973,11 @@ function createAgentProcessHandle(input: {
 
 /** Waits until one tracked agent process reports that it has exited. */
 function waitForAgentProcessExit(process: AgentProcessHandle) {
-  return new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-    (resolve) => {
-      process.onceExit((code, signal) => {
-        resolve({ code, signal })
-      })
-    },
-  )
+  return new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    process.onceExit((code, signal) => {
+      resolve({ code, signal })
+    })
+  })
 }
 
 /** Resolves and launches the requested agent distribution for a new daemon session. */
@@ -1115,9 +1024,7 @@ export async function spawnAgentProcess(params: {
 }
 
 /** Chooses the concrete command invocation for a resolved agent distribution. */
-export async function resolveAgentProcessSpec(
-  agent: AgentDistribution,
-): Promise<AgentProcessSpec> {
+export async function resolveAgentProcessSpec(agent: AgentDistribution): Promise<AgentProcessSpec> {
   const binaryTarget = resolveBinaryTarget(agent)
   if (binaryTarget) {
     return {
@@ -1130,11 +1037,7 @@ export async function resolveAgentProcessSpec(
   if (agent.distribution.npx) {
     return {
       cmd: "npx",
-      args: [
-        "-y",
-        agent.distribution.npx.package,
-        ...(agent.distribution.npx.args ?? []),
-      ],
+      args: ["-y", agent.distribution.npx.package, ...(agent.distribution.npx.args ?? [])],
       env: agent.distribution.npx.env,
     }
   }
@@ -1142,10 +1045,7 @@ export async function resolveAgentProcessSpec(
   if (agent.distribution.uvx) {
     return {
       cmd: "uvx",
-      args: [
-        agent.distribution.uvx.package,
-        ...(agent.distribution.uvx.args ?? []),
-      ],
+      args: [agent.distribution.uvx.package, ...(agent.distribution.uvx.args ?? [])],
       env: agent.distribution.uvx.env,
     }
   }
@@ -1154,9 +1054,7 @@ export async function resolveAgentProcessSpec(
 }
 
 /** Selects the platform-specific binary target for the current runtime when available. */
-function resolveBinaryTarget(
-  agent: AgentDistribution,
-): ResolvedBinaryTarget | null {
+function resolveBinaryTarget(agent: AgentDistribution): ResolvedBinaryTarget | null {
   const platformKey = toAgentBinaryPlatform(process.platform, process.arch)
   if (!platformKey) {
     return null
@@ -1186,8 +1084,7 @@ function toAgentBinaryPlatform(
         : platform === "linux"
           ? "linux"
           : null
-  const normalizedArch =
-    arch === "arm64" ? "aarch64" : arch === "x64" ? "x86_64" : null
+  const normalizedArch = arch === "arm64" ? "aarch64" : arch === "x64" ? "x86_64" : null
   if (!normalizedPlatform || !normalizedArch) {
     return null
   }
@@ -1217,17 +1114,11 @@ async function resolveBinaryCommand(
 
   await cleanupOtherAgentBinaryInstalls(agent.id, installDir)
 
-  return await resolveInstalledBinaryCommand(
-    installDir,
-    binaryTarget.target.cmd,
-  )
+  return await resolveInstalledBinaryCommand(installDir, binaryTarget.target.cmd)
 }
 
 /** Computes the global cache directory for one archive-backed binary target. */
-function getBinaryInstallDir(
-  agent: AgentDistribution,
-  binaryTarget: ResolvedBinaryTarget,
-): string {
+function getBinaryInstallDir(agent: AgentDistribution, binaryTarget: ResolvedBinaryTarget): string {
   const archiveHash = createHash("sha256")
     .update(binaryTarget.target.archive)
     .digest("hex")
@@ -1260,11 +1151,7 @@ async function installBinaryArchive(
       cmd,
       installDir: stagedInstallDir,
     })
-    await writeFile(
-      join(stagedInstallDir, binaryInstallMarkerFileName),
-      `${archiveUrl}\n`,
-      "utf8",
-    )
+    await writeFile(join(stagedInstallDir, binaryInstallMarkerFileName), `${archiveUrl}\n`, "utf8")
     await rename(stagedInstallDir, installDir)
     await cleanupOtherAgentBinaryInstalls(agentId, installDir)
   } finally {
@@ -1293,9 +1180,7 @@ async function cleanupOtherAgentBinaryInstalls(
           entry.name.startsWith(agentPrefix) &&
           join(binariesDir, entry.name) !== activeInstallDir,
       )
-      .map((entry) =>
-        rm(join(binariesDir, entry.name), { recursive: true, force: true }),
-      ),
+      .map((entry) => rm(join(binariesDir, entry.name), { recursive: true, force: true })),
   )
 }
 
@@ -1523,17 +1408,12 @@ function createSessionRecordUpdate(params: {
   titleState: DaemonSession["titleState"]
   availableCommands: acp.AvailableCommand[]
 }) {
-  const connectionMode: SessionConnectionMode = params.exitAfterInitialPrompt
-    ? "history"
-    : "live"
+  const connectionMode: SessionConnectionMode = params.exitAfterInitialPrompt ? "history" : "live"
 
   return {
     acpSessionId: params.initialized.acpSessionId,
     status: params.initialized.status,
-    stopReason:
-      params.initialized.stopReason ??
-      params.existingSession?.stopReason ??
-      null,
+    stopReason: params.initialized.stopReason ?? params.existingSession?.stopReason ?? null,
     agentName: agentNameFromInput(params.request.agent),
     cwd: params.cwd,
     title: params.existingSession?.title ?? params.title,
@@ -1640,13 +1520,8 @@ function buildSessionLogContext(params: {
     cwd: params.cwd ?? params.request.cwd,
     oneShot: params.request.oneShot === true,
     repository:
-      typeof params.request.repository === "string"
-        ? params.request.repository
-        : undefined,
-    prNumber:
-      typeof params.request.prNumber === "number"
-        ? params.request.prNumber
-        : undefined,
+      typeof params.request.repository === "string" ? params.request.repository : undefined,
+    prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : undefined,
     workforce: params.workforce ?? params.request.workforce,
     ...params.extraContext,
   }
@@ -1663,14 +1538,8 @@ function buildSessionContext(params: {
     sessionId: params.sessionId,
     acpSessionId: null,
     cwd: params.cwd,
-    repository:
-      typeof params.request.repository === "string"
-        ? params.request.repository
-        : null,
-    prNumber:
-      typeof params.request.prNumber === "number"
-        ? params.request.prNumber
-        : null,
+    repository: typeof params.request.repository === "string" ? params.request.repository : null,
+    prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : null,
     worktreeDir: params.worktree?.state.worktreeDir ?? null,
     worktreePoweredBy: params.worktree?.state.poweredBy ?? null,
   }
@@ -1709,10 +1578,7 @@ function toAbortedQueuedPrompt(entry: {
 
 /** Creates the daemon session manager and owns reconciliation of live session processes. */
 /** Resolves or rejects one pending prompt when its agent response frame arrives. */
-function settlePendingPrompt(
-  active: ActiveSession,
-  message: acp.AnyMessage,
-): void {
+function settlePendingPrompt(active: ActiveSession, message: acp.AnyMessage): void {
   if ("id" in message === false || message.id == null) {
     return
   }
@@ -1852,10 +1718,7 @@ export function createSessionManager(input: {
     })
   }
 
-  async function flushActiveTurnDraft(
-    active: ActiveSession,
-    reason: string,
-  ): Promise<void> {
+  async function flushActiveTurnDraft(active: ActiveSession, reason: string): Promise<void> {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
       return
@@ -1890,11 +1753,7 @@ export function createSessionManager(input: {
     )
   }
 
-  function scheduleActiveTurnDraftFlush(
-    active: ActiveSession,
-    reason: string,
-    immediate = false,
-  ) {
+  function scheduleActiveTurnDraftFlush(active: ActiveSession, reason: string, immediate = false) {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
       return Promise.resolve()
@@ -1928,10 +1787,7 @@ export function createSessionManager(input: {
 
     const turn = toSessionHistoryTurnFromDraft(draftRecord)
     const createdTurn = existingTurn
-      ? db.sessionTurns.put(
-          existingTurn.id,
-          toCompletedTurnInput(sessionId, turn),
-        )
+      ? db.sessionTurns.put(existingTurn.id, toCompletedTurnInput(sessionId, turn))
       : db.sessionTurns.create(toCompletedTurnInput(sessionId, turn))
 
     db.sessionTurnDrafts.delete(draftRecord.id)
@@ -1947,10 +1803,7 @@ export function createSessionManager(input: {
     return createdTurn
   }
 
-  async function appendTurnScopedMessage(
-    active: ActiveSession,
-    message: acp.AnyMessage,
-  ) {
+  async function appendTurnScopedMessage(active: ActiveSession, message: acp.AnyMessage) {
     const availableCommands = getAvailableCommandsFromMessage(message)
     if (availableCommands) {
       await updateSessionAvailableCommands(active.id, availableCommands)
@@ -1964,17 +1817,12 @@ export function createSessionManager(input: {
     appendSessionHistoryMessage(activeTurn.messages, message)
     await scheduleActiveTurnDraftFlush(
       active,
-      shouldFlushTurnDraftImmediately(activeTurn, message)
-        ? "boundary"
-        : "stream",
+      shouldFlushTurnDraftImmediately(activeTurn, message) ? "boundary" : "stream",
       shouldFlushTurnDraftImmediately(activeTurn, message),
     )
   }
 
-  async function finalizeActiveTurn(
-    active: ActiveSession,
-    message: acp.AnyMessage,
-  ) {
+  async function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {
     const activeTurn = active.activeTurn
     if (!activeTurn || !isTurnTerminalMessage(activeTurn, message)) {
       return
@@ -2013,10 +1861,7 @@ export function createSessionManager(input: {
     })
     clearTurnDraftFlushTimer(activeTurn)
     active.activeTurn = null
-    active.nextTurnSequence = Math.max(
-      active.nextTurnSequence,
-      completedTurn.sequence + 1,
-    )
+    active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
     await emitDiagnostic(
       active.id,
       "session_turn_persisted",
@@ -2100,9 +1945,7 @@ export function createSessionManager(input: {
       )
 
       try {
-        const loadedTextModel = await loadDaemonTextModel(
-          params.generatorConfig,
-        )
+        const loadedTextModel = await loadDaemonTextModel(params.generatorConfig)
         const generatedTitle = await generateSessionTitle({
           model: loadedTextModel.model,
           promptText: params.promptText,
@@ -2146,8 +1989,7 @@ export function createSessionManager(input: {
           {
             provider: params.generatorConfig.provider,
             model: params.generatorConfig.model,
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
+            errorMessage: error instanceof Error ? error.message : String(error),
           },
           params.diagnosticLogger,
         )
@@ -2175,23 +2017,18 @@ export function createSessionManager(input: {
     }
 
     const task = (async () => {
-      let generatorConfig = input.configManager.getLastKnownRootConfig(
-        sessionRecord.cwd,
-      )?.config.sessionTitles?.generator
+      let generatorConfig = input.configManager.getLastKnownRootConfig(sessionRecord.cwd)?.config
+        .sessionTitles?.generator
 
       if (!generatorConfig) {
         try {
-          generatorConfig = (
-            await input.configManager.getRootConfig(sessionRecord.cwd)
-          ).config.sessionTitles?.generator
+          generatorConfig = (await input.configManager.getRootConfig(sessionRecord.cwd)).config
+            .sessionTitles?.generator
         } catch {}
       }
 
       const preparedTitle = prepareSessionTitle(params.prompt, generatorConfig)
-      if (
-        preparedTitle.titleState === "placeholder" ||
-        !preparedTitle.promptText
-      ) {
+      if (preparedTitle.titleState === "placeholder" || !preparedTitle.promptText) {
         return
       }
 
@@ -2205,10 +2042,7 @@ export function createSessionManager(input: {
         params.diagnosticLogger,
       )
 
-      if (
-        preparedTitle.titleState === "pending" &&
-        preparedTitle.generatorConfig
-      ) {
+      if (preparedTitle.titleState === "pending" && preparedTitle.generatorConfig) {
         queueSessionTitleGeneration({
           id: params.id,
           generatorConfig: preparedTitle.generatorConfig,
@@ -2223,8 +2057,7 @@ export function createSessionManager(input: {
           params.id,
           "session_title_generation_failed",
           {
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
+            errorMessage: error instanceof Error ? error.message : String(error),
           },
           params.diagnosticLogger,
         )
@@ -2318,20 +2151,10 @@ export function createSessionManager(input: {
     reason: string,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
-    await emitDiagnostic(
-      id,
-      "worktree.sync_started",
-      { reason },
-      diagnosticLogger,
-    )
+    await emitDiagnostic(id, "worktree.sync_started", { reason }, diagnosticLogger)
     const result = await host.syncOnce()
     for (const warning of result.warnings) {
-      await emitDiagnostic(
-        id,
-        "worktree.sync_warning",
-        { reason, warning },
-        diagnosticLogger,
-      )
+      await emitDiagnostic(id, "worktree.sync_warning", { reason, warning }, diagnosticLogger)
     }
     await emitDiagnostic(
       id,
@@ -2404,8 +2227,7 @@ export function createSessionManager(input: {
           "worktree.sync_warning",
           {
             reason,
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
+            errorMessage: error instanceof Error ? error.message : String(error),
           },
           diagnosticLogger,
         )
@@ -2420,30 +2242,25 @@ export function createSessionManager(input: {
 
     const attachWatcher = (cwd: string, side: "primary" | "worktree") => {
       try {
-        const watcher = watch(
-          cwd,
-          { persistent: false },
-          (_eventType, filename) => {
-            if (runtime.closed) {
-              return
-            }
+        const watcher = watch(cwd, { persistent: false }, (_eventType, filename) => {
+          if (runtime.closed) {
+            return
+          }
 
-            const changedPath = filename?.toString() ?? ""
-            if (changedPath.startsWith(".git")) {
-              return
-            }
+          const changedPath = filename?.toString() ?? ""
+          if (changedPath.startsWith(".git")) {
+            return
+          }
 
-            schedule(`${side}:${changedPath || "*"}`)
-          },
-        )
+          schedule(`${side}:${changedPath || "*"}`)
+        })
         watcher.on("error", (error) => {
           void emitDiagnostic(
             id,
             "worktree.sync_watcher_degraded",
             {
               side,
-              errorMessage:
-                error instanceof Error ? error.message : String(error),
+              errorMessage: error instanceof Error ? error.message : String(error),
             },
             diagnosticLogger,
           )
@@ -2456,8 +2273,7 @@ export function createSessionManager(input: {
           "worktree.sync_watcher_degraded",
           {
             side,
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
+            errorMessage: error instanceof Error ? error.message : String(error),
           },
           diagnosticLogger,
         )
@@ -2474,16 +2290,13 @@ export function createSessionManager(input: {
     worktreeRecord: PersistedSessionWorktreeRecord | SessionWorktreeState,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
-    const mounted = await findMountedWorktreeSyncSessionByPrimaryDir(
-      worktreeRecord.repoRoot,
-    )
+    const mounted = await findMountedWorktreeSyncSessionByPrimaryDir(worktreeRecord.repoRoot)
     if (!mounted || mounted.sessionId === id) {
       return
     }
 
     await stopWorktreeSyncRuntime(mounted.sessionId)
-    const previousLogger =
-      activeSessions.get(mounted.sessionId)?.logger ?? logger
+    const previousLogger = activeSessions.get(mounted.sessionId)?.logger ?? logger
     const previousHost = new WorktreeSyncSessionHost({
       sessionId: mounted.sessionId,
       primaryDir: mounted.primaryDir,
@@ -2526,11 +2339,7 @@ export function createSessionManager(input: {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        await replaceMountedWorktreeSyncIfNeeded(
-          id,
-          worktreeRecord,
-          diagnosticLogger,
-        )
+        await replaceMountedWorktreeSyncIfNeeded(id, worktreeRecord, diagnosticLogger)
         const state = await host.mount()
         await emitDiagnostic(
           id,
@@ -2596,8 +2405,7 @@ export function createSessionManager(input: {
             } catch (error) {
               await emitDiagnostic(session.id, "worktree.sync_warning", {
                 reason: "daemon_reconciliation",
-                errorMessage:
-                  error instanceof Error ? error.message : String(error),
+                errorMessage: error instanceof Error ? error.message : String(error),
               })
             }
           }
@@ -2627,25 +2435,14 @@ export function createSessionManager(input: {
             db.sessions.update(session.id, titleBackfill)
           }
 
-          if (
-            session.titleState === "pending" &&
-            titleBackfill.titleState === "failed"
-          ) {
-            await emitDiagnostic(
-              session.id,
-              "session_title_generation_failed",
-              {
-                reason: "daemon_reconciliation",
-              },
-            )
+          if (session.titleState === "pending" && titleBackfill.titleState === "failed") {
+            await emitDiagnostic(session.id, "session_title_generation_failed", {
+              reason: "daemon_reconciliation",
+            })
           }
         }
         if (draftRecord) {
-          await persistTurnDraftAsInterruptedTurn(
-            session.id,
-            draftRecord,
-            logger,
-          )
+          await persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
         }
 
         if (
@@ -2657,8 +2454,7 @@ export function createSessionManager(input: {
           if (sessionDocument) {
             db.sessions.update(session.id, {
               status: "error",
-              errorMessage:
-                "Session interrupted when the previous daemon exited unexpectedly.",
+              errorMessage: "Session interrupted when the previous daemon exited unexpectedly.",
               token: null,
               permissions: null,
             })
@@ -2692,12 +2488,8 @@ export function createSessionManager(input: {
     )
   }
 
-  function normalizePrompt(
-    prompt: string | acp.ContentBlock[],
-  ): acp.ContentBlock[] {
-    return typeof prompt === "string"
-      ? [{ type: "text", text: prompt }]
-      : [...prompt]
+  function normalizePrompt(prompt: string | acp.ContentBlock[]): acp.ContentBlock[] {
+    return typeof prompt === "string" ? [{ type: "text", text: prompt }] : [...prompt]
   }
 
   async function publishSessionMessage(
@@ -2745,29 +2537,17 @@ export function createSessionManager(input: {
 
     if (
       active.isFirstPrompt &&
-      isAcpRequest<PromptRequestMessage>(
-        message,
-        acp.AGENT_METHODS.session_prompt,
-      )
+      isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)
     ) {
       active.isFirstPrompt = false
       message.params = injectSystemPrompt(message.params, active.systemPrompt)
     }
 
     if ("id" in message && message.id != null && "method" in message) {
-      active.clientRequests.set(
-        message.id,
-        message as acp.AnyMessage & { method: string },
-      )
+      active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
     }
 
-    logAgentMessage(
-      active.logger,
-      "agent.message_write",
-      active.id,
-      active.acpSessionId,
-      message,
-    )
+    logAgentMessage(active.logger, "agent.message_write", active.id, active.acpSessionId, message)
     await emitDiagnostic(
       active.id,
       "session_message_sent",
@@ -2785,10 +2565,7 @@ export function createSessionManager(input: {
   }
 
   async function processPromptQueue(active: ActiveSession): Promise<void> {
-    if (
-      active.blockingPromptRequestId !== null ||
-      active.pendingSteer?.waitingForBoundary
-    ) {
+    if (active.blockingPromptRequestId !== null || active.pendingSteer?.waitingForBoundary) {
       return
     }
 
@@ -2815,24 +2592,19 @@ export function createSessionManager(input: {
         where: { sessionId: active.id },
       }) ?? null
     if (existingDraft) {
-      await persistTurnDraftAsInterruptedTurn(
-        active.id,
-        existingDraft,
-        active.logger,
-      )
+      await persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
       active.nextTurnSequence = resolveLatestStoredTurnSequence(active.id) + 1
     }
 
-    const activeTurn: ActiveTurnBuffer<PersistedSessionTurnDraftRecord["id"]> =
-      {
-        turnId: randomUUID(),
-        sequence: active.nextTurnSequence,
-        promptRequestId: nextPrompt.requestId,
-        startedAt: new Date().toISOString(),
-        messages: [],
-        flushTimer: null,
-        draftId: null,
-      }
+    const activeTurn: ActiveTurnBuffer<PersistedSessionTurnDraftRecord["id"]> = {
+      turnId: randomUUID(),
+      sequence: active.nextTurnSequence,
+      promptRequestId: nextPrompt.requestId,
+      startedAt: new Date().toISOString(),
+      messages: [],
+      flushTimer: null,
+      draftId: null,
+    }
     active.activeTurn = activeTurn
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
@@ -2872,9 +2644,7 @@ export function createSessionManager(input: {
         active.blockingPromptRequestId = null
       }
       active.pendingPrompts.delete(nextPrompt.requestId)
-      nextPrompt.reject?.(
-        error instanceof Error ? error : new Error(String(error)),
-      )
+      nextPrompt.reject?.(error instanceof Error ? error : new Error(String(error)))
       throw error
     }
   }
@@ -2998,9 +2768,7 @@ export function createSessionManager(input: {
     )
       ? message.params.update.sessionUpdate === "tool_call" ||
         message.params.update.sessionUpdate === "tool_call_update"
-      : "id" in message &&
-        message.id != null &&
-        message.id === steer.cancelledRequestId
+      : "id" in message && message.id != null && message.id === steer.cancelledRequestId
     if (!reachedBoundary) {
       return
     }
@@ -3048,12 +2816,7 @@ export function createSessionManager(input: {
       params.sessionLogger,
     )
     await setConnectionMode(params.id, "history", false)
-    await emitDiagnostic(
-      params.id,
-      "session_completed_one_shot",
-      undefined,
-      params.sessionLogger,
-    )
+    await emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
     await treeKill(params.agentProcess)
     await waitForAgentProcessExit(params.agentProcess)
 
@@ -3091,8 +2854,7 @@ export function createSessionManager(input: {
         },
         onMessageError: (error) => {
           params.sessionLogger.log("agent.message_handler_failed", {
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
+            errorMessage: error instanceof Error ? error.message : String(error),
           })
         },
       },
@@ -3127,22 +2889,14 @@ export function createSessionManager(input: {
         activeSession.acpSessionId,
         message,
       )
-      if (
-        isAcpRequest<PermissionRequest>(
-          message,
-          acp.CLIENT_METHODS.session_request_permission,
-        )
-      ) {
+      if (isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)) {
         activeSession.lastPermissionRequest = message
       }
 
       if ("id" in message && message.id != null) {
         const clientRequest = activeSession.clientRequests.get(message.id)
         const promptRequest = clientRequest
-          ? matchAcpRequest<acp.PromptRequest>(
-              clientRequest,
-              acp.AGENT_METHODS.session_prompt,
-            )
+          ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
           : null
         const promptResponse = promptRequest
           ? getAcpMessageResult<acp.PromptResponse>(message)
@@ -3181,32 +2935,20 @@ export function createSessionManager(input: {
       await processPromptQueue(activeSession)
     })
 
-    const handleExit = async (
-      code: number | null,
-      signal: NodeJS.Signals | null,
-    ) => {
-      await flushActiveTurnDraft(activeSession, "agent_process_exit").catch(
-        () => {},
-      )
+    const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
+      await flushActiveTurnDraft(activeSession, "agent_process_exit").catch(() => {})
       activeSessions.delete(activeSession.id)
       await stopWorktreeSyncRuntime(activeSession.id)
       rejectPendingPrompts(
         activeSession,
-        new Error(
-          `Session ${activeSession.id} ended before the prompt completed.`,
-        ),
+        new Error(`Session ${activeSession.id} ended before the prompt completed.`),
       )
       await activeSession.writer.close().catch(() => {})
       await activeSession.subscription.close().catch(() => {})
 
-      const worktreeRecord = await resolvePersistedWorktreeRecord(
-        activeSession.id,
-      )
+      const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
       if (worktreeRecord) {
-        const syncHost = createWorktreeSyncHost(
-          activeSession.id,
-          worktreeRecord,
-        )
+        const syncHost = createWorktreeSyncHost(activeSession.id, worktreeRecord)
         const mountedSyncState = await syncHost.inspect().catch(() => null)
         if (mountedSyncState) {
           try {
@@ -3226,8 +2968,7 @@ export function createSessionManager(input: {
               "worktree.sync_warning",
               {
                 reason: "agent_process_exit",
-                errorMessage:
-                  error instanceof Error ? error.message : String(error),
+                errorMessage: error instanceof Error ? error.message : String(error),
               },
               activeSession.logger,
             )
@@ -3293,10 +3034,7 @@ export function createSessionManager(input: {
     const id = existingSession?.id ?? db.sessions.newId()
     const token = params.token ?? randomBytes(32).toString("hex")
     const exitAfterInitialPrompt = shouldExitAfterInitialPrompt(params)
-    const existingArtifacts = resolveExistingSessionArtifacts(
-      id,
-      existingSession,
-    )
+    const existingArtifacts = resolveExistingSessionArtifacts(id, existingSession)
     const resolvedConfig =
       params.config ??
       (input.configManager
@@ -3304,10 +3042,7 @@ export function createSessionManager(input: {
         : undefined)
     const resolvedWorktreePlugins =
       params.worktreePlugins ??
-      (shouldResolveConfiguredWorktreePlugins(
-        params.request,
-        existingArtifacts.worktree,
-      )
+      (shouldResolveConfiguredWorktreePlugins(params.request, existingArtifacts.worktree)
         ? await worktreePluginManager.getPlugins(params.request.cwd)
         : undefined)
     const preparedTitle = prepareSessionTitle(
@@ -3323,15 +3058,11 @@ export function createSessionManager(input: {
       defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
     })
     const cwd = worktree?.state.effectiveCwd ?? params.request.cwd
-    const sessionMetadata = mergeSessionMetadata(
-      existingSession?.metadata,
-      params.request.metadata,
-    )
+    const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.request.metadata)
     const existingWorkforceMetadata = existingArtifacts.workforceRecord
       ? omit(existingArtifacts.workforceRecord, ["id", "sessionId"])
       : undefined
-    const workforceMetadata =
-      params.request.workforce ?? existingWorkforceMetadata
+    const workforceMetadata = params.request.workforce ?? existingWorkforceMetadata
     const sessionContext = buildSessionContext({
       sessionId: id,
       request: params.request,
@@ -3352,8 +3083,7 @@ export function createSessionManager(input: {
     })
 
     const scope = parseRepoScope(params.request)
-    const worktreeSyncEnabled =
-      worktree && params.request.worktree?.sync?.enabled === true
+    const worktreeSyncEnabled = worktree && params.request.worktree?.sync?.enabled === true
 
     const nextPermission = {
       owner: scope.owner,
@@ -3362,9 +3092,7 @@ export function createSessionManager(input: {
     }
 
     let sessionLogger = logger
-    sessionLogger = SessionContext.run(sessionContext, () =>
-      sessionLogger.snapshot(),
-    )
+    sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
     let mountedWorktreeSyncHost: WorktreeSyncSessionHost | null = null
 
     try {
@@ -3392,8 +3120,7 @@ export function createSessionManager(input: {
             id,
             "worktree.bootstrap_failed",
             {
-              errorMessage:
-                error instanceof Error ? error.message : String(error),
+              errorMessage: error instanceof Error ? error.message : String(error),
             },
             sessionLogger,
           )
@@ -3419,11 +3146,7 @@ export function createSessionManager(input: {
       }
 
       if (worktree && worktreeSyncEnabled) {
-        mountedWorktreeSyncHost = await mountWorktreeSyncHost(
-          id,
-          worktree.state,
-          sessionLogger,
-        )
+        mountedWorktreeSyncHost = await mountWorktreeSyncHost(id, worktree.state, sessionLogger)
       }
 
       const agentProcess = await spawnAgentProcess({
@@ -3457,11 +3180,8 @@ export function createSessionManager(input: {
       })
       sessionContext.acpSessionId = initialized.acpSessionId
 
-      const latestAvailableCommands = getLatestAvailableCommands(
-        initialized.history,
-      )
-      const availableCommands =
-        latestAvailableCommands ?? existingSession?.availableCommands ?? []
+      const latestAvailableCommands = getLatestAvailableCommands(initialized.history)
+      const availableCommands = latestAvailableCommands ?? existingSession?.availableCommands ?? []
       const initialTurn = createInitializedHistoryTurn({
         initialized,
         sequence: existingArtifacts.nextTurnSequence,
@@ -3540,11 +3260,7 @@ export function createSessionManager(input: {
         systemPrompt: params.request.systemPrompt,
       })
       if (mountedWorktreeSyncHost) {
-        await startWorktreeSyncRuntime(
-          id,
-          mountedWorktreeSyncHost,
-          sessionLogger,
-        )
+        await startWorktreeSyncRuntime(id, mountedWorktreeSyncHost, sessionLogger)
       }
       return liveSession
     } catch (error) {
@@ -3561,27 +3277,21 @@ export function createSessionManager(input: {
         for (const turnRecord of db.sessionTurns.findMany({
           where: { sessionId: id },
         })) {
-          await Promise.resolve(db.sessionTurns.delete(turnRecord.id)).catch(
-            () => {},
-          )
+          await Promise.resolve(db.sessionTurns.delete(turnRecord.id)).catch(() => {})
         }
         const draftRecord =
           db.sessionTurnDrafts.first({
             where: { sessionId: id },
           }) ?? null
         if (draftRecord) {
-          await Promise.resolve(
-            db.sessionTurnDrafts.delete(draftRecord.id),
-          ).catch(() => {})
+          await Promise.resolve(db.sessionTurnDrafts.delete(draftRecord.id)).catch(() => {})
         }
         const diagnosticsRecord =
           db.sessionDiagnostics.first({
             where: { sessionId: id },
           }) ?? null
         if (diagnosticsRecord) {
-          await Promise.resolve(
-            db.sessionDiagnostics.delete(diagnosticsRecord.id),
-          ).catch(() => {})
+          await Promise.resolve(db.sessionDiagnostics.delete(diagnosticsRecord.id)).catch(() => {})
         }
       }
       throw error
@@ -3592,9 +3302,7 @@ export function createSessionManager(input: {
     return launchSession(params)
   }
 
-  async function loadSession(
-    params: LoadSessionParams,
-  ): Promise<DaemonSession> {
+  async function loadSession(params: LoadSessionParams): Promise<DaemonSession> {
     await ready
     const existingRecord = db.sessions.get(params.id) ?? null
     const existingSession = existingRecord ?? null
@@ -3614,9 +3322,7 @@ export function createSessionManager(input: {
     return record
   }
 
-  async function listSessions(
-    params: ListSessionsRequest,
-  ): Promise<ListSessionsResponse> {
+  async function listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
     await ready
     const pageSize = normalizeSessionPageSize(params.limit)
     let page: ReturnType<typeof db.sessions.findPage>
@@ -3686,9 +3392,7 @@ export function createSessionManager(input: {
     return draftRecord
   }
 
-  async function getHistory(
-    params: GetSessionHistoryRequest,
-  ): Promise<GetSessionHistoryResponse> {
+  async function getHistory(params: GetSessionHistoryRequest): Promise<GetSessionHistoryResponse> {
     await ready
     const session = await getSession(params.id)
     const pageSize = normalizeSessionPageSize(params.limit)
@@ -3754,30 +3458,18 @@ export function createSessionManager(input: {
         suggestions:
           params.query.trim().length === 0
             ? await listComposerEntriesAtCwd(session.cwd, limit)
-            : await searchComposerEntriesUnderCwd(
-                session.cwd,
-                params.query,
-                limit,
-              ),
+            : await searchComposerEntriesUnderCwd(session.cwd, params.query, limit),
       }
     }
 
     if (params.trigger === "dollar") {
       return {
-        suggestions: await getSkillComposerSuggestions(
-          session.cwd,
-          params.query,
-          limit,
-        ),
+        suggestions: await getSkillComposerSuggestions(session.cwd, params.query, limit),
       }
     }
 
     return {
-      suggestions: getSlashComposerSuggestions(
-        session.availableCommands,
-        params.query,
-        limit,
-      ),
+      suggestions: getSlashComposerSuggestions(session.availableCommands, params.query, limit),
     }
   }
 
@@ -3818,10 +3510,7 @@ export function createSessionManager(input: {
       registryService: input.registryService,
       registry: resolvedRegistry,
     })
-    const stream = createAgentMessageStream(
-      agentProcess.stdin,
-      agentProcess.stdout,
-    )
+    const stream = createAgentMessageStream(agentProcess.stdin, agentProcess.stdout)
     let availableCommands: acp.AvailableCommand[] = []
     let previewSessionId: string | null = null
     let agent: acp.ClientSideConnection | null = null
@@ -3876,10 +3565,7 @@ export function createSessionManager(input: {
         slashCommands: getSlashComposerSuggestions(
           availableCommands,
           "",
-          Math.max(
-            DEFAULT_COMPOSER_SUGGESTION_LIMIT,
-            MAX_COMPOSER_SUGGESTION_LIMIT,
-          ),
+          Math.max(DEFAULT_COMPOSER_SUGGESTION_LIMIT, MAX_COMPOSER_SUGGESTION_LIMIT),
         ),
       }
     } finally {
@@ -3899,9 +3585,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getDiagnostics(
-    id: SessionId,
-  ): Promise<GetSessionDiagnosticsResponse> {
+  async function getDiagnostics(id: SessionId): Promise<GetSessionDiagnosticsResponse> {
     await ready
     const session = await getSession(id)
     const diagnosticsRecord =
@@ -3922,9 +3606,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getWorktree(
-    id: SessionId,
-  ): Promise<GetSessionWorktreeResponse> {
+  async function getWorktree(id: SessionId): Promise<GetSessionWorktreeResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -3933,17 +3615,12 @@ export function createSessionManager(input: {
       id: session.id,
       acpSessionId: session.acpSessionId,
       worktree: worktreeRecord
-        ? toSessionWorktreeValue(
-            worktreeRecord,
-            await resolveWorktreeSyncState(id, worktreeRecord),
-          )
+        ? toSessionWorktreeValue(worktreeRecord, await resolveWorktreeSyncState(id, worktreeRecord))
         : null,
     }
   }
 
-  async function mountWorktreeSync(
-    id: SessionId,
-  ): Promise<MutateSessionWorktreeResponse> {
+  async function mountWorktreeSync(id: SessionId): Promise<MutateSessionWorktreeResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -3952,11 +3629,7 @@ export function createSessionManager(input: {
     }
 
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    const host = await mountWorktreeSyncHost(
-      id,
-      worktreeRecord,
-      diagnosticLogger,
-    )
+    const host = await mountWorktreeSyncHost(id, worktreeRecord, diagnosticLogger)
     if (activeSessions.has(id)) {
       await startWorktreeSyncRuntime(id, host, diagnosticLogger)
     }
@@ -3970,9 +3643,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function syncWorktree(
-    id: SessionId,
-  ): Promise<MutateSessionWorktreeResponse> {
+  async function syncWorktree(id: SessionId): Promise<MutateSessionWorktreeResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -3982,18 +3653,8 @@ export function createSessionManager(input: {
 
     const host = createWorktreeSyncHost(id, worktreeRecord)
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    await emitDiagnostic(
-      id,
-      "worktree.sync_requested",
-      { reason: "manual" },
-      diagnosticLogger,
-    )
-    const result = await runWorktreeSyncCycle(
-      id,
-      host,
-      "manual",
-      diagnosticLogger,
-    )
+    await emitDiagnostic(id, "worktree.sync_requested", { reason: "manual" }, diagnosticLogger)
+    const result = await runWorktreeSyncCycle(id, host, "manual", diagnosticLogger)
     const response = await getWorktree(id)
     return {
       id: session.id,
@@ -4003,9 +3664,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function unmountWorktreeSync(
-    id: SessionId,
-  ): Promise<MutateSessionWorktreeResponse> {
+  async function unmountWorktreeSync(id: SessionId): Promise<MutateSessionWorktreeResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -4044,9 +3703,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function getWorkforce(
-    id: SessionId,
-  ): Promise<GetSessionWorkforceResponse> {
+  async function getWorkforce(id: SessionId): Promise<GetSessionWorkforceResponse> {
     await ready
     const session = await getSession(id)
     const workforceRecord =
@@ -4061,26 +3718,16 @@ export function createSessionManager(input: {
     }
   }
 
-  async function sendMessage(
-    id: SessionId,
-    message: acp.AnyMessage,
-  ): Promise<void> {
+  async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
     await ready
     const active = activeSessions.get(id)
     if (!active) {
       throw new IpcClientError(`Session ${id} is not active`)
     }
 
-    if (
-      isAcpRequest<PromptRequestMessage>(
-        message,
-        acp.AGENT_METHODS.session_prompt,
-      )
-    ) {
+    if (isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)) {
       if ("id" in message === false || message.id == null) {
-        throw new IpcClientError(
-          "Queued prompt messages must include a JSON-RPC id",
-        )
+        throw new IpcClientError("Queued prompt messages must include a JSON-RPC id")
       }
 
       queueSessionTitlePreparation({
@@ -4102,13 +3749,9 @@ export function createSessionManager(input: {
     }
 
     if (isAcpRequest(message, acp.AGENT_METHODS.session_cancel)) {
-      await abortQueuedPrompts(
-        active,
-        `Queued prompts were aborted for session ${id}.`,
-        {
-          includePendingSteer: true,
-        },
-      )
+      await abortQueuedPrompts(active, `Queued prompts were aborted for session ${id}.`, {
+        includePendingSteer: true,
+      })
       await writeImmediateMessage(active, message)
       return
     }
@@ -4200,14 +3843,12 @@ export function createSessionManager(input: {
         reject,
       }
 
-      void sendInternalCancel(active, { updateStatus: false }).catch(
-        (error) => {
-          if (active.pendingSteer?.requestId === requestId) {
-            active.pendingSteer = null
-          }
-          reject(error instanceof Error ? error : new Error(String(error)))
-        },
-      )
+      void sendInternalCancel(active, { updateStatus: false }).catch((error) => {
+        if (active.pendingSteer?.requestId === requestId) {
+          active.pendingSteer = null
+        }
+        reject(error instanceof Error ? error : new Error(String(error)))
+      })
     })
   }
 
@@ -4218,12 +3859,7 @@ export function createSessionManager(input: {
       return false
     }
 
-    await emitDiagnostic(
-      id,
-      "session_shutdown_requested",
-      undefined,
-      active.logger,
-    )
+    await emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     if (worktreeRecord) {
       const syncHost = createWorktreeSyncHost(id, worktreeRecord)
@@ -4246,8 +3882,7 @@ export function createSessionManager(input: {
             "worktree.sync_warning",
             {
               reason: "session_shutdown",
-              errorMessage:
-                error instanceof Error ? error.message : String(error),
+              errorMessage: error instanceof Error ? error.message : String(error),
             },
             active.logger,
           )

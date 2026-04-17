@@ -8,15 +8,7 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -26,12 +18,8 @@ import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
-const queueAgentPath = fileURLToPath(
-  new URL("./fixtures/queue-agent.mjs", import.meta.url),
-)
-const chunkingAgentPath = createRequire(import.meta.url).resolve(
-  "./fixtures/chunking-agent.mjs",
-)
+const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
+const chunkingAgentPath = createRequire(import.meta.url).resolve("./fixtures/chunking-agent.mjs")
 const launchPreviewAgentPath = fileURLToPath(
   new URL("./fixtures/launch-preview-agent.mjs", import.meta.url),
 )
@@ -39,9 +27,7 @@ const launchPreviewAgentPath = fileURLToPath(
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
 const originalPath = process.env.PATH
-const fastFixtureAgentPath = createRequire(import.meta.url).resolve(
-  "./fixtures/fast-acp-agent.mjs",
-)
+const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/fast-acp-agent.mjs")
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let sharedHomeDir: string | null = null
@@ -76,8 +62,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
   const created = await client.send("sessionCreate", {
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -104,8 +89,7 @@ test("daemon persists repository context into durable session storage", async ()
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
   const created = await client.send("sessionCreate", {
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -202,18 +186,11 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-1",
-      "Say hello.",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
   })
 
   await waitFor(async () => {
-    return (
-      db.sessions.get(created.session.id)?.stopReason === "end_turn" &&
-      liveChunks.length === 3
-    )
+    return db.sessions.get(created.session.id)?.stopReason === "end_turn" && liveChunks.length === 3
   })
 
   await Promise.resolve(unsubscribe()).catch(() => {})
@@ -319,9 +296,7 @@ test("daemon promotes placeholder titles after the first later prompt is accepte
     ),
   })
 
-  await waitFor(
-    async () => db.sessions.get(created.session.id)?.titleState === "fallback",
-  )
+  await waitFor(async () => db.sessions.get(created.session.id)?.titleState === "fallback")
 
   expect(db.sessions.get(created.session.id)).toMatchObject({
     title: "Audit the retry policy for loop",
@@ -356,9 +331,7 @@ test("daemon marks pending title generation as failed when provider config is pr
   expect(created.session.title).toBe("Summarize the retry failure mode")
   expect(created.session.titleState).toBe("pending")
 
-  await waitFor(
-    async () => db.sessions.get(created.session.id)?.titleState === "failed",
-  )
+  await waitFor(async () => db.sessions.get(created.session.id)?.titleState === "failed")
 
   expect(db.sessions.get(created.session.id)).toMatchObject({
     title: "Summarize the retry failure mode",
@@ -490,9 +463,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   expect(session.session.status).toBe("error")
   expect(session.session.connectionMode).toBe("history")
   expect(session.session.activeDaemonSession).toBe(false)
-  expect(session.session.errorMessage ?? "").toMatch(
-    /previous daemon exited unexpectedly/i,
-  )
+  expect(session.session.errorMessage ?? "").toMatch(/previous daemon exited unexpectedly/i)
 
   const history = await client.send("sessionHistory", { id: sessionId })
   expect(history.connection.mode).toBe("history")
@@ -500,16 +471,12 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
 
   const diagnostics = await client.send("sessionDiagnostics", { id: sessionId })
   expect(
-    diagnostics.events.some(
-      (event) => event.type === "session_reconciled_after_restart",
-    ),
+    diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
-  await expect(
-    client.send("sessionConnect", { id: sessionId }),
-  ).rejects.toThrow(/archived/i)
-  await expect(
-    client.send("sessionResolveToken", { token: "tok-restart-1" }),
-  ).rejects.toThrow(/invalid session token/i)
+  await expect(client.send("sessionConnect", { id: sessionId })).rejects.toThrow(/archived/i)
+  await expect(client.send("sessionResolveToken", { token: "tok-restart-1" })).rejects.toThrow(
+    /invalid session token/i,
+  )
 })
 
 test("daemon promotes interrupted turn drafts into incomplete turn history on restart", async () => {
@@ -549,11 +516,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     startedAt: "2026-04-14T00:00:00.000Z",
     updatedAt: "2026-04-14T00:00:00.050Z",
     messages: [
-      buildPromptMessage(
-        acpSessionId,
-        "prompt-draft-1",
-        "Continue the review.",
-      ),
+      buildPromptMessage(acpSessionId, "prompt-draft-1", "Continue the review."),
       {
         jsonrpc: "2.0",
         method: "session/update",
@@ -607,8 +570,7 @@ test("multiple clients can observe the same live session stream independently", 
   const clientA = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const clientB = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
   const created = await clientA.send("sessionCreate", {
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -645,9 +607,7 @@ test("multiple clients can observe the same live session stream independently", 
     },
   })
 
-  await waitFor(
-    async () => clientAMessages.length > 0 && clientBMessages.length > 0,
-  )
+  await waitFor(async () => clientAMessages.length > 0 && clientBMessages.length > 0)
 
   await Promise.resolve(unsubscribeA()).catch(() => {})
   await Promise.resolve(unsubscribeB()).catch(() => {})
@@ -699,27 +659,15 @@ test("daemon queues concurrent prompts per session and drains them in arrival or
   await Promise.all([
     client.send("sessionSend", {
       id: created.session.id,
-      message: buildPromptMessage(
-        created.session.acpSessionId,
-        "prompt-1",
-        "wait:40",
-      ),
+      message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "wait:40"),
     }),
     client.send("sessionSend", {
       id: created.session.id,
-      message: buildPromptMessage(
-        created.session.acpSessionId,
-        "prompt-2",
-        "second",
-      ),
+      message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "second"),
     }),
     client.send("sessionSend", {
       id: created.session.id,
-      message: buildPromptMessage(
-        created.session.acpSessionId,
-        "prompt-3",
-        "third",
-      ),
+      message: buildPromptMessage(created.session.acpSessionId, "prompt-3", "third"),
     }),
   ])
 
@@ -776,29 +724,17 @@ test("daemon cancel returns queued prompts, emits terminal errors for queued raw
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-1",
-      "hold:final-only",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "hold:final-only"),
   })
   await waitFor(async () => promptStarts.includes("hold:final-only"))
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-2",
-      "queued-second",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "queued-second"),
   })
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-3",
-      "queued-third",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-3", "queued-third"),
   })
 
   const cancelled = await client.send("sessionCancel", {
@@ -868,10 +804,7 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
         if (update?.sessionUpdate === "agent_message_chunk") {
           events.push(`chunk:${update.content?.text ?? ""}`)
         }
-        if (
-          update?.sessionUpdate === "tool_call" ||
-          update?.sessionUpdate === "tool_call_update"
-        ) {
+        if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
           events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
         }
       } else if (message.result?.stopReason && message.id) {
@@ -882,23 +815,13 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-1",
-      "hold:update-boundary",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "hold:update-boundary"),
   })
-  await waitFor(async () =>
-    events.includes("chunk:prompt_started:hold:update-boundary"),
-  )
+  await waitFor(async () => events.includes("chunk:prompt_started:hold:update-boundary"))
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-2",
-      "stale-queued",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "stale-queued"),
   })
 
   const steered = await client.send("sessionSteer", {
@@ -915,12 +838,10 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
     },
   ])
   expect(steered.response.stopReason).toBe("end_turn")
-  expect(
+  expect(events.indexOf("chunk:cancel_notice:hold:update-boundary")).toBeGreaterThan(-1)
+  expect(events.indexOf("tool_call_update:cancel_boundary:hold:update-boundary")).toBeGreaterThan(
     events.indexOf("chunk:cancel_notice:hold:update-boundary"),
-  ).toBeGreaterThan(-1)
-  expect(
-    events.indexOf("tool_call_update:cancel_boundary:hold:update-boundary"),
-  ).toBeGreaterThan(events.indexOf("chunk:cancel_notice:hold:update-boundary"))
+  )
   expect(events.indexOf("chunk:prompt_started:replacement")).toBeGreaterThan(
     events.indexOf("tool_call_update:cancel_boundary:hold:update-boundary"),
   )
@@ -961,10 +882,7 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
         if (update?.sessionUpdate === "agent_message_chunk") {
           events.push(`chunk:${update.content?.text ?? ""}`)
         }
-        if (
-          update?.sessionUpdate === "tool_call" ||
-          update?.sessionUpdate === "tool_call_update"
-        ) {
+        if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
           events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
         }
       } else if (message.result?.stopReason && message.id) {
@@ -975,23 +893,13 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-1",
-      "hold:final-only",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "hold:final-only"),
   })
-  await waitFor(async () =>
-    events.includes("chunk:prompt_started:hold:final-only"),
-  )
+  await waitFor(async () => events.includes("chunk:prompt_started:hold:final-only"))
 
   await client.send("sessionSend", {
     id: created.session.id,
-    message: buildPromptMessage(
-      created.session.acpSessionId,
-      "prompt-2",
-      "stale-queued",
-    ),
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "stale-queued"),
   })
 
   const steered = await client.send("sessionSteer", {
@@ -1008,17 +916,9 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
     },
   ])
   expect(steered.response.stopReason).toBe("end_turn")
-  expect(events.indexOf("chunk:cancel_notice:hold:final-only")).toBeGreaterThan(
-    -1,
-  )
-  expect(
-    events.some((event) => event.startsWith("tool_call:cancel_boundary:")),
-  ).toBe(false)
-  expect(
-    events.some((event) =>
-      event.startsWith("tool_call_update:cancel_boundary:"),
-    ),
-  ).toBe(false)
+  expect(events.indexOf("chunk:cancel_notice:hold:final-only")).toBeGreaterThan(-1)
+  expect(events.some((event) => event.startsWith("tool_call:cancel_boundary:"))).toBe(false)
+  expect(events.some((event) => event.startsWith("tool_call_update:cancel_boundary:"))).toBe(false)
   expect(events.indexOf("chunk:prompt_started:replacement")).toBeGreaterThan(
     events.indexOf("result:prompt-1:cancelled"),
   )
@@ -1028,8 +928,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture({ includeSrc: true })
   const requestedCwd = join(repoDir, "src")
 
@@ -1059,8 +958,7 @@ test("session worktree launch branches from the selected base branch", async () 
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture()
   const defaultBranch = readGitOutput(repoDir, ["branch", "--show-current"])
 
@@ -1084,15 +982,11 @@ test("session worktree launch branches from the selected base branch", async () 
   })
   expect(fetchedWorktree.worktree).toBeTruthy()
   expect(
-    readGitOutput(fetchedWorktree.worktree!.worktreeDir, [
-      "rev-parse",
-      "--abbrev-ref",
-      "HEAD",
-    ]),
+    readGitOutput(fetchedWorktree.worktree!.worktreeDir, ["rev-parse", "--abbrev-ref", "HEAD"]),
   ).toBe(fetchedWorktree.worktree!.branchName)
-  expect(
-    readGitOutput(fetchedWorktree.worktree!.worktreeDir, ["rev-parse", "HEAD"]),
-  ).toBe(featureHead)
+  expect(readGitOutput(fetchedWorktree.worktree!.worktreeDir, ["rev-parse", "HEAD"])).toBe(
+    featureHead,
+  )
 
   await client.send("sessionShutdown", { id: created.session.id })
 })
@@ -1110,11 +1004,7 @@ test("sessionComposerSuggestions scopes `@` lookups to the session cwd and skips
     "export const match = true\n",
     "utf-8",
   )
-  await writeFile(
-    join(repoDir, "node_modules", "pkg", "ignore.ts"),
-    "ignored\n",
-    "utf-8",
-  )
+  await writeFile(join(repoDir, "node_modules", "pkg", "ignore.ts"), "ignored\n", "utf-8")
   await writeFile(join(repoDir, "dist", "ignore.ts"), "ignored\n", "utf-8")
 
   const created = await client.send("sessionCreate", {
@@ -1165,16 +1055,8 @@ test("sessionComposerSuggestions prefers local `$` skills over global duplicates
   await mkdir(join(globalSkillDir, "alpha"), { recursive: true })
   await mkdir(join(globalSkillDir, "beta"), { recursive: true })
   await writeFile(join(localSkillDir, "SKILL.md"), "# alpha\n", "utf-8")
-  await writeFile(
-    join(globalSkillDir, "alpha", "SKILL.md"),
-    "# alpha global\n",
-    "utf-8",
-  )
-  await writeFile(
-    join(globalSkillDir, "beta", "SKILL.md"),
-    "# beta global\n",
-    "utf-8",
-  )
+  await writeFile(join(globalSkillDir, "alpha", "SKILL.md"), "# alpha global\n", "utf-8")
+  await writeFile(join(globalSkillDir, "beta", "SKILL.md"), "# beta global\n", "utf-8")
 
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -1276,11 +1158,7 @@ test("sessionDraftSuggestions reads launch-dialog `@` and `$` suggestions withou
   await mkdir(localSkillDir, { recursive: true })
   await mkdir(join(repoDir, "src"), { recursive: true })
   await writeFile(join(localSkillDir, "SKILL.md"), "# checks\n", "utf-8")
-  await writeFile(
-    join(repoDir, "src", "launch.ts"),
-    "export const launch = true\n",
-    "utf-8",
-  )
+  await writeFile(join(repoDir, "src", "launch.ts"), "export const launch = true\n", "utf-8")
 
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -1403,8 +1281,7 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture()
   const binDir = await createFakePackageManager("bun", {
     exitCode: 0,
@@ -1429,16 +1306,12 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
     systemPrompt: "Keep responses short.",
   })
 
-  const worktree = (
-    await client.send("sessionWorktree", { id: created.session.id })
-  ).worktree
+  const worktree = (await client.send("sessionWorktree", { id: created.session.id })).worktree
   expect(worktree?.sync?.status).toBe("mounted")
-  expect(
-    await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8"),
-  ).toBe("install\n")
-  expect(await readFile(join(repoDir, ".bootstrap-marker"), "utf-8")).toBe(
+  expect(await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8")).toBe(
     "install\n",
   )
+  expect(await readFile(join(repoDir, ".bootstrap-marker"), "utf-8")).toBe("install\n")
 
   await client.send("sessionShutdown", { id: created.session.id })
 })
@@ -1447,8 +1320,7 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const require = createRequire(import.meta.url)
-  const exampleAgentPath =
-    require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture()
   const binDir = await createFakePackageManager("bun", {
     exitCode: 1,
@@ -1478,9 +1350,7 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
   expect(db.sessions.findMany()).toHaveLength(sessionCountBefore)
 })
 
-async function startServer(
-  options: { useExistingHome?: boolean } = {},
-): Promise<DaemonServer> {
+async function startServer(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
   if (!options.useExistingHome) {
     await useTempHome()
   }
@@ -1535,9 +1405,7 @@ async function useTempHome(): Promise<void> {
   resetDb()
 }
 
-async function createRepoFixture(
-  options: { includeSrc?: boolean } = {},
-): Promise<string> {
+async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-repo-"))
   cleanup.push(async () => {
     await rm(repoDir, { recursive: true, force: true })
@@ -1551,11 +1419,7 @@ async function createRepoFixture(
 
   if (options.includeSrc) {
     await mkdir(join(repoDir, "src"), { recursive: true })
-    await writeFile(
-      join(repoDir, "src", "index.ts"),
-      "export const ready = true\n",
-      "utf-8",
-    )
+    await writeFile(join(repoDir, "src", "index.ts"), "export const ready = true\n", "utf-8")
   }
 
   runGit(repoDir, ["init"])
@@ -1586,10 +1450,7 @@ function readGitOutput(cwd: string, args: string[]) {
   return result.stdout.trim()
 }
 
-async function writeLocalRootConfig(
-  repoDir: string,
-  config: Record<string, unknown>,
-) {
+async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
   const configPath = getLocalConfigPath(repoDir)
   await mkdir(dirname(configPath), { recursive: true })
   await writeFile(
