@@ -1,47 +1,193 @@
-/** Presentational chrome primitives for the merged app shell layout. */
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { useState } from "preact/hooks"
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
-import { AppCommand } from "~/commands/app-command.ts"
+import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
-import { getWorkbenchTabIcon, type WorkbenchTab } from "~/workbench-tab-registry.ts"
+import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsx"
+import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 import styles from "./chrome.style.ts"
+import { appShellSections } from "./config.ts"
+import { AppShellWorkbenchContent } from "./views.tsx"
 
 const accentStrongColor = token.var("colors.accentStrong")
 const textColor = token.var("colors.text")
 
-/** Renders the merged shell chrome around the active workbench content. */
-export function AppShellChrome(props: {
-  activeTabId: string
-  children?: preact.ComponentChildren
-  indicator: {
-    left: number
-    opacity: number
-    width: number
+function useAppShellTabStrip(
+  activeTabId: string,
+  selectedNavigationId: string,
+  tabs: readonly { id: string }[],
+) {
+  const tabStripRef = useRef<HTMLDivElement | null>(null)
+  const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const dragSourceTabId = useRef<string | null>(null)
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
+
+  function syncIndicator() {
+    const activeTabElement = tabRefs.current[activeTabId]
+    const tabStripElement = tabStripRef.current
+
+    if (!activeTabElement || !tabStripElement) {
+      setIndicator((current) =>
+        current.opacity === 0 ? current : { left: current.left, width: current.width, opacity: 0 },
+      )
+      return
+    }
+
+    setIndicator({
+      left: activeTabElement.offsetLeft,
+      width: activeTabElement.offsetWidth,
+      opacity: 1,
+    })
   }
-  navigationItems: Array<{
+
+  useLayoutEffect(() => {
+    syncIndicator()
+  }, [activeTabId, selectedNavigationId, tabs])
+
+  useEffect(() => {
+    const tabStripElement = tabStripRef.current
+
+    if (!tabStripElement) {
+      return
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncIndicator()
+    })
+
+    observer.observe(tabStripElement)
+
+    for (const tabElement of Object.values(tabRefs.current)) {
+      if (tabElement) {
+        observer.observe(tabElement)
+      }
+    }
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [selectedNavigationId, tabs])
+
+  return {
+    dragSourceTabId,
+    indicator,
+    tabRefs,
+    tabStripRef,
+  }
+}
+
+/** Renders the merged shell chrome and owns its local interaction wiring. */
+export function AppShellChrome() {
+  const navigation = useNavigation()
+  const workbenchTabSet = useWorkbenchTabSet()
+  const navigationItems: Array<{
     group: "primary" | "secondary"
     icon: SvgIconName
     id: NavigationItemId
     label: string
-  }>
-  onNavigationSelect: (id: NavigationItemId, options?: { openInTab?: boolean }) => void
-  onTabClose: (id: string) => void
-  onTabDragEnd: () => void
-  onTabDragEnter: (id: string) => void
-  onTabDragStart: (id: string) => void
-  onTabSelect: (id: string) => void
-  projectSwitcher?: preact.ComponentChildren
-  selectedNavigationId: NavigationItemId
-  selectedNavigationLabel: string
-  setTabRef: (id: string, element: HTMLDivElement | null) => void
-  tabStripRef: { current: HTMLDivElement | null }
-  tabs: readonly Exclude<WorkbenchTab, WorkbenchTab<"main">>[]
-}) {
+  }> = navigation.items.map((item) => {
+    const section = appShellSections.find((candidate) => candidate.tabKinds.includes(item.id))
+
+    if (!section) {
+      throw new Error(`Missing app shell section for navigation item ${item.id}.`)
+    }
+
+    return {
+      ...item,
+      group: section.group,
+      icon: getWorkbenchTabIcon(item.id),
+    }
+  })
+  const selectedNavigation =
+    navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
+  const tabStrip = useAppShellTabStrip(
+    workbenchTabSet.activeTabId,
+    navigation.selectedNavId,
+    workbenchTabSet.tabList,
+  )
+
+  function openNavigationSurfaceTab(kind: NavigationItemId) {
+    const nextNavigationItem =
+      navigation.items.find((item) => item.id === kind) ?? navigation.selectedItem
+
+    workbenchTabSet.openOrFocusTab({
+      id: `surface:${kind}`,
+      kind,
+      title: nextNavigationItem.label,
+      payload: {},
+      dirty: false,
+    })
+  }
+
+  function selectNavigationSurface(id: NavigationItemId, options?: { openInTab?: boolean }) {
+    if (options?.openInTab) {
+      openNavigationSurfaceTab(id)
+      return
+    }
+
+    navigation.selectNavItem(id)
+    workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
+  }
+
+  useAppCommand(AppCommand.workbench.closeActiveTab, () => {
+    if (workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
+      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+    }
+  })
+
+  useAppCommand(AppCommand.navigation.openKeyboardShortcuts, () => {
+    workbenchTabSet.openOrFocusTab({
+      id: "workbench:keyboard-shortcuts",
+      kind: "keyboardShortcuts",
+      title: "Keyboard Shortcuts",
+      payload: {},
+      dirty: false,
+    })
+  })
+
+  useAppCommand(AppCommand.navigation.openInbox, () => {
+    selectNavigationSurface("inbox")
+  })
+
+  useAppCommand(AppCommand.navigation.openProjects, () => {
+    selectNavigationSurface("projects")
+  })
+
+  useAppCommand(AppCommand.navigation.openSessions, () => {
+    selectNavigationSurface("sessions")
+  })
+
+  useAppCommand(AppCommand.navigation.openSearch, () => {
+    selectNavigationSurface("search")
+  })
+
+  useAppCommand(AppCommand.navigation.openSpecs, () => {
+    selectNavigationSurface("specs")
+  })
+
+  useAppCommand(AppCommand.navigation.openTasks, () => {
+    selectNavigationSurface("tasks")
+  })
+
+  useAppCommand(AppCommand.navigation.openRoadmap, () => {
+    selectNavigationSurface("roadmap")
+  })
+
+  useAppCommand(AppCommand.navigation.openSettings, () => {
+    workbenchTabSet.openOrFocusTab({
+      id: "surface:settings",
+      kind: "settings",
+      title: "Settings",
+      payload: {},
+      dirty: false,
+    })
+  })
+
   return (
     <div class={styles.root}>
       <header
@@ -63,7 +209,7 @@ export function AppShellChrome(props: {
               width: "100%",
             })}
           >
-            {props.projectSwitcher}
+            <SwitchProjectDropdown />
           </div>
         </div>
         <div class={cx(styles.actions, "electrobun-webkit-app-region-no-drag")}>
@@ -94,45 +240,59 @@ export function AppShellChrome(props: {
       </header>
       <nav aria-label="Primary" class={styles.nav}>
         <AppShellSidebarSection
-          items={props.navigationItems.filter((item) => item.group === "primary")}
-          onNavigationSelect={props.onNavigationSelect}
-          selectedNavigationId={props.selectedNavigationId}
+          items={navigationItems.filter((item) => item.group === "primary")}
+          onNavigationSelect={selectNavigationSurface}
+          selectedNavigationId={navigation.selectedNavId}
         />
         <div aria-hidden="true" class={styles.navDivider} />
         <AppShellSidebarSection
-          items={props.navigationItems.filter((item) => item.group === "secondary")}
-          onNavigationSelect={props.onNavigationSelect}
-          selectedNavigationId={props.selectedNavigationId}
+          items={navigationItems.filter((item) => item.group === "secondary")}
+          onNavigationSelect={selectNavigationSurface}
+          selectedNavigationId={navigation.selectedNavId}
         />
       </nav>
       <div class={styles.main}>
-        <div ref={props.tabStripRef} class={styles.tabStrip}>
+        <div ref={tabStrip.tabStripRef} class={styles.tabStrip}>
           <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
             <TabButton
-              activeTabId={props.activeTabId}
+              activeTabId={workbenchTabSet.activeTabId}
               icon={getWorkbenchTabIcon("main")}
               id={WORKBENCH_PRIMARY_TAB.id}
               isHome={true}
-              onSelect={props.onTabSelect}
-              refCallback={(element) => {
-                props.setTabRef(WORKBENCH_PRIMARY_TAB.id, element)
+              onSelect={(id) => {
+                workbenchTabSet.activateTab(id)
               }}
-              title={props.selectedNavigationLabel}
+              refCallback={(element) => {
+                tabStrip.tabRefs.current[WORKBENCH_PRIMARY_TAB.id] = element
+              }}
+              title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
             />
-            {props.tabs.map((tab) => (
+            {workbenchTabSet.tabList.map((tab) => (
               <TabButton
                 key={tab.id}
-                activeTabId={props.activeTabId}
+                activeTabId={workbenchTabSet.activeTabId}
                 dirty={tab.dirty}
                 icon={getWorkbenchTabIcon(tab.kind)}
                 id={tab.id}
-                onClose={props.onTabClose}
-                onDragEnd={props.onTabDragEnd}
-                onDragEnter={props.onTabDragEnter}
-                onDragStart={props.onTabDragStart}
-                onSelect={props.onTabSelect}
+                onClose={(id) => {
+                  workbenchTabSet.closeTab(id)
+                }}
+                onDragEnd={() => {
+                  tabStrip.dragSourceTabId.current = null
+                }}
+                onDragEnter={(id) => {
+                  if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
+                    workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
+                  }
+                }}
+                onDragStart={(id) => {
+                  tabStrip.dragSourceTabId.current = id
+                }}
+                onSelect={(id) => {
+                  workbenchTabSet.activateTab(id)
+                }}
                 refCallback={(element) => {
-                  props.setTabRef(tab.id, element)
+                  tabStrip.tabRefs.current[tab.id] = element
                 }}
                 title={tab.title}
               />
@@ -141,9 +301,9 @@ export function AppShellChrome(props: {
               aria-hidden="true"
               class={styles.indicator}
               style={{
-                opacity: props.indicator.opacity,
-                transform: `translateX(${props.indicator.left}px)`,
-                width: `${props.indicator.width}px`,
+                opacity: tabStrip.indicator.opacity,
+                transform: `translateX(${tabStrip.indicator.left}px)`,
+                width: `${tabStrip.indicator.width}px`,
               }}
             />
           </div>
@@ -154,7 +314,7 @@ export function AppShellChrome(props: {
             overflow: "hidden",
           })}
         >
-          {props.children}
+          <AppShellWorkbenchContent />
         </div>
       </div>
     </div>
@@ -363,9 +523,7 @@ function TabButton(props: {
 }
 
 function InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
-  const [width, height] = props.size.includes(" ")
-    ? props.size.split(" ")
-    : [props.size, props.size]
+  const [width, height = width] = props.size.split(" ")
 
   return <GoodIcon class={styles.icon} name={props.icon} height={height} width={width} />
 }
