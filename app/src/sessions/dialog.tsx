@@ -18,6 +18,13 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
+  const hasAdapterSelector =
+    (form.adapterCatalog.value?.adapters.length ?? 0) > 0 && props.dialog.open
+  const hasBranchSelector =
+    form.draftLocation.value === "worktree" &&
+    (form.launchPreview.value?.branches.length ?? 0) > 0 &&
+    props.dialog.open
+  const hasLocationSelector = form.launchPreview.value !== null && props.dialog.open
   const hasModelSelector =
     (form.launchPreview.value?.models?.availableModels.length ?? 0) > 0 && props.dialog.open
   const hasProjectSelector = projectRegistry.projectList.length > 0 && props.dialog.open
@@ -59,6 +66,9 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
 
   useEffect(() => {
     commandContext.sessionInputActive.value = props.dialog.open
+    commandContext.sessionInputHasAdapterSelector.value = hasAdapterSelector
+    commandContext.sessionInputHasBranchSelector.value = hasBranchSelector
+    commandContext.sessionInputHasLocationSelector.value = hasLocationSelector
     commandContext.sessionInputCanSubmit.value = canSubmit
     commandContext.sessionInputHasModelSelector.value = hasModelSelector
     commandContext.sessionInputHasProjectSelector.value = hasProjectSelector
@@ -66,12 +76,24 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
 
     return () => {
       commandContext.sessionInputActive.value = false
+      commandContext.sessionInputHasAdapterSelector.value = false
+      commandContext.sessionInputHasBranchSelector.value = false
+      commandContext.sessionInputHasLocationSelector.value = false
       commandContext.sessionInputCanSubmit.value = false
       commandContext.sessionInputHasModelSelector.value = false
       commandContext.sessionInputHasProjectSelector.value = false
       commandContext.sessionInputHasThinkingLevel.value = false
     }
-  }, [canSubmit, hasModelSelector, hasProjectSelector, hasThinkingLevel, props.dialog.open])
+  }, [
+    canSubmit,
+    hasAdapterSelector,
+    hasBranchSelector,
+    hasLocationSelector,
+    hasModelSelector,
+    hasProjectSelector,
+    hasThinkingLevel,
+    props.dialog.open,
+  ])
 
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     if (!props.dialog.open) {
@@ -79,6 +101,30 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     }
 
     form.setOpenPicker("project")
+  })
+
+  useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    form.setOpenPicker("adapter")
+  })
+
+  useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    form.setOpenPicker("location")
+  })
+
+  useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    form.setOpenPicker("branch")
   })
 
   useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
@@ -89,12 +135,12 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     form.setOpenPicker("model")
   })
 
-  useAppCommand(AppCommand.sessionInput.toggleThinkingLevel, () => {
+  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
     if (!props.dialog.open) {
       return
     }
 
-    form.toggleThinkingLevel()
+    form.setOpenPicker("thinking")
   })
 
   useAppCommand(AppCommand.sessionInput.submit, () => {

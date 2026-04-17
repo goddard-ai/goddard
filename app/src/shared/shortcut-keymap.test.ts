@@ -18,8 +18,11 @@ const openTasks = "navigation.openTasks" as const
 const openRoadmap = "navigation.openRoadmap" as const
 const openCommandPalette = "navigation.openCommandPalette" as const
 const openProjectSelector = "sessionInput.openProjectSelector" as const
+const openAdapterSelector = "sessionInput.openAdapterSelector" as const
+const openLocationSelector = "sessionInput.openLocationSelector" as const
+const openBranchSelector = "sessionInput.openBranchSelector" as const
 const openModelSelector = "sessionInput.openModelSelector" as const
-const toggleThinkingLevel = "sessionInput.toggleThinkingLevel" as const
+const openThinkingLevelSelector = "sessionInput.openThinkingLevelSelector" as const
 const submitSessionInput = "sessionInput.submit" as const
 
 test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
@@ -95,8 +98,11 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openTasks]: ["Alt+5"],
     [openRoadmap]: ["Alt+6"],
     [openProjectSelector]: ["Mod+p"],
+    [openAdapterSelector]: ["Mod+Shift+a"],
+    [openLocationSelector]: ["Mod+Shift+l"],
+    [openBranchSelector]: ["Mod+Shift+b"],
     [openModelSelector]: ["Mod+Shift+m"],
-    [toggleThinkingLevel]: ["Mod+t"],
+    [openThinkingLevelSelector]: ["Mod+t"],
     [submitSessionInput]: ["Mod+Enter"],
   })
 })

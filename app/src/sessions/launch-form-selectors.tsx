@@ -1,11 +1,30 @@
-import { Bot, Command, Folder, GitBranch } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
+import { useShortcutRegistry } from "~/app-state-context.tsx"
+import { AppCommand } from "~/commands/app-command.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsx"
 import styles from "./launch-form-selectors.style.ts"
 import { flattenConfigOptionValues, type SessionLaunchFormState } from "./launch-form-state.ts"
+
+function getShortcutLabel(binding: unknown) {
+  if (typeof binding === "string") {
+    return binding
+  }
+
+  if (binding && typeof binding === "object") {
+    if ("combo" in binding && typeof binding.combo === "string") {
+      return binding.combo
+    }
+
+    if ("sequence" in binding && typeof binding.sequence === "string") {
+      return binding.sequence
+    }
+  }
+
+  return null
+}
 
 export function SessionLaunchLoadingSelect(props: { label: string }) {
   return (
@@ -15,7 +34,6 @@ export function SessionLaunchLoadingSelect(props: { label: string }) {
       items={[]}
       label={props.label}
       loading={true}
-      menuLabel={props.label}
       open={false}
       placeholder="Loading options..."
       value={null}
@@ -27,6 +45,7 @@ export function SessionLaunchLoadingSelect(props: { label: string }) {
 
 export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   const { form } = props
+  const shortcutRegistry = useShortcutRegistry()
   const adapterCatalog = useQuery(goddardSdk.adapter.list, [
     { cwd: form.draftProjectPath.value ?? undefined },
   ])
@@ -35,8 +54,10 @@ export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
     label: adapter.name,
     detail: `${adapter.version}${adapter.unofficial ? " · Unofficial" : ""}`,
     searchText: `${adapter.id}\n${adapter.description ?? ""}`,
-    icon: Command,
   }))
+  const adapterShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openAdapterSelector.id]?.[0],
+  )
 
   useEffect(() => {
     form.adapterCatalog.value = adapterCatalog
@@ -48,9 +69,9 @@ export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
       filterable={true}
       items={items}
       label="Adapter"
-      menuLabel="Adapters"
       open={form.openPicker.value === "adapter"}
       placeholder="Select an adapter"
+      shortcut={adapterShortcut}
       value={form.draftAdapterId.value}
       onOpenChange={(open) => {
         form.setOpenPicker(open ? "adapter" : null)
@@ -66,6 +87,7 @@ export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
 
 export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormState }) {
   const { form } = props
+  const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
     form.draftProjectPath.value && form.draftAdapterId.value
       ? goddardSdk.session.launchPreview
@@ -88,16 +110,12 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
     {
       value: "local",
       label: "Local checkout",
-      detail: "Start the session in the current project working tree.",
-      icon: Folder,
     },
     ...(preview?.repoRoot
       ? [
           {
             value: "worktree",
             label: "Linked worktree",
-            detail: "Create a fresh session branch from the selected git branch.",
-            icon: GitBranch,
           } satisfies SessionInputSelectItem,
         ]
       : []),
@@ -107,7 +125,6 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
       value: branch.name,
       label: branch.name,
       detail: branch.current ? "Current branch" : null,
-      icon: GitBranch,
     })) ?? []
   const modelItems: SessionInputSelectItem[] =
     preview?.models?.availableModels.map((model) => ({
@@ -115,7 +132,6 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
       label: model.name,
       detail: model.description ?? model.modelId,
       searchText: model.modelId,
-      icon: Bot,
     })) ?? []
   const thinkingItems: SessionInputSelectItem[] =
     form.thinkingOption.value?.type === "boolean"
@@ -123,14 +139,10 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           {
             value: "true",
             label: "On",
-            detail: "Enable the adapter's thinking mode.",
-            icon: Command,
           },
           {
             value: "false",
             label: "Off",
-            detail: "Use the adapter's faster non-thinking mode.",
-            icon: Command,
           },
         ]
       : form.thinkingOption.value?.type === "select"
@@ -138,9 +150,20 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
             value: option.value,
             label: option.name,
             detail: option.description ?? null,
-            icon: Command,
           }))
         : []
+  const locationShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openLocationSelector.id]?.[0],
+  )
+  const branchShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
+  )
+  const modelShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
+  )
+  const thinkingShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
+  )
 
   return (
     <>
@@ -150,9 +173,9 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           filterable={false}
           items={locationItems}
           label="Launch location"
-          menuLabel="Launch location"
           open={form.openPicker.value === "location"}
           placeholder="Choose where to launch"
+          shortcut={locationShortcut}
           value={form.draftLocation.value}
           onOpenChange={(open) => {
             form.setOpenPicker(open ? "location" : null)
@@ -166,9 +189,9 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           filterable={true}
           items={branchItems}
           label="Git branch"
-          menuLabel="Git branch"
           open={form.openPicker.value === "branch"}
           placeholder="Choose a branch"
+          shortcut={branchShortcut}
           value={form.draftBaseBranchName.value}
           onOpenChange={(open) => {
             form.setOpenPicker(open ? "branch" : null)
@@ -184,9 +207,9 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           filterable={true}
           items={modelItems}
           label="Model"
-          menuLabel="Models"
           open={form.openPicker.value === "model"}
           placeholder="Use the adapter default model"
+          shortcut={modelShortcut}
           value={form.draftModelId.value}
           onOpenChange={(open) => {
             form.setOpenPicker(open ? "model" : null)
@@ -200,9 +223,9 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           filterable={false}
           items={thinkingItems}
           label="Thinking level"
-          menuLabel="Thinking level"
           open={form.openPicker.value === "thinking"}
           placeholder="Use the adapter default"
+          shortcut={thinkingShortcut}
           value={
             typeof form.draftThinkingValue.value === "boolean"
               ? String(form.draftThinkingValue.value)

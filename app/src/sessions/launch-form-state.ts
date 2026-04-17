@@ -272,31 +272,6 @@ export const SessionLaunchFormState = createModel(function () {
       openPicker.value = nextPicker
     },
     thinkingOption,
-    toggleThinkingLevel() {
-      const resolvedThinkingOption = thinkingOption.value
-
-      if (!resolvedThinkingOption) {
-        return
-      }
-
-      if (resolvedThinkingOption.type === "boolean") {
-        draftThinkingValue.value =
-          typeof draftThinkingValue.value === "boolean"
-            ? !draftThinkingValue.value
-            : resolvedThinkingOption.currentValue
-        return
-      }
-
-      const values = flattenConfigOptionValues(resolvedThinkingOption)
-
-      if (values.length === 0) {
-        return
-      }
-
-      const currentIndex = values.findIndex((option) => option.value === draftThinkingValue.value)
-      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % values.length : 0
-      draftThinkingValue.value = values[nextIndex]?.value ?? resolvedThinkingOption.currentValue
-    },
   }
 })
 

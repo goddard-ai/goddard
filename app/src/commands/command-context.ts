@@ -9,6 +9,9 @@ const activeTabKind = signal<WorkbenchTabKind>("main")
 const hasClosableActiveTab = signal(false)
 const selectedNavId = signal<NavigationItemId>("inbox")
 const sessionInputActive = signal(false)
+const sessionInputHasAdapterSelector = signal(false)
+const sessionInputHasBranchSelector = signal(false)
+const sessionInputHasLocationSelector = signal(false)
 const sessionInputCanSubmit = signal(false)
 const sessionInputHasModelSelector = signal(false)
 const sessionInputHasProjectSelector = signal(false)
@@ -17,6 +20,9 @@ const sessionInputHasThinkingLevel = signal(false)
 const whenContext = computed(() => {
   return {
     "sessionInput.isActive": sessionInputActive.value,
+    "sessionInput.hasAdapterSelector": sessionInputHasAdapterSelector.value,
+    "sessionInput.hasBranchSelector": sessionInputHasBranchSelector.value,
+    "sessionInput.hasLocationSelector": sessionInputHasLocationSelector.value,
     "sessionInput.canSubmit": sessionInputCanSubmit.value,
     "sessionInput.hasModelSelector": sessionInputHasModelSelector.value,
     "sessionInput.hasProjectSelector": sessionInputHasProjectSelector.value,
@@ -33,6 +39,9 @@ export const commandContext = {
   hasClosableActiveTab,
   selectedNavId,
   sessionInputActive,
+  sessionInputHasAdapterSelector,
+  sessionInputHasBranchSelector,
+  sessionInputHasLocationSelector,
   sessionInputCanSubmit,
   sessionInputHasModelSelector,
   sessionInputHasProjectSelector,

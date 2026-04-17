@@ -1,7 +1,8 @@
-import { Folder } from "lucide-react"
 import { Suspense } from "preact/compat"
 import { useEffect } from "preact/hooks"
 
+import { useShortcutRegistry } from "~/app-state-context.tsx"
+import { AppCommand } from "~/commands/app-command.ts"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsx"
@@ -25,20 +26,41 @@ const launchInputClasses = {
   submitButton: styles.submitButton,
 } satisfies SessionInputClasses
 
+function getShortcutLabel(binding: unknown) {
+  if (typeof binding === "string") {
+    return binding
+  }
+
+  if (binding && typeof binding === "object") {
+    if ("combo" in binding && typeof binding.combo === "string") {
+      return binding.combo
+    }
+
+    if ("sequence" in binding && typeof binding.sequence === "string") {
+      return binding.sequence
+    }
+  }
+
+  return null
+}
+
 export function SessionLaunchForm(props: {
   form: SessionLaunchFormState
   onSubmit: () => Promise<void> | void
   projects: readonly ProjectRecord[]
 }) {
   const { form } = props
+  const shortcutRegistry = useShortcutRegistry()
   const projectItems: SessionInputSelectItem[] = props.projects.map((project) => ({
     value: project.path,
     label: project.name,
     detail: project.path,
     searchText: project.path,
-    icon: Folder,
   }))
   const selectedAdapter = form.selectedAdapter.value
+  const projectShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openProjectSelector.id]?.[0],
+  )
 
   useEffect(() => {
     const nextProjectPath = props.projects.some(
@@ -63,9 +85,9 @@ export function SessionLaunchForm(props: {
           filterable={true}
           items={projectItems}
           label="Project"
-          menuLabel="Projects"
           open={form.openPicker.value === "project"}
           placeholder="Select a project"
+          shortcut={projectShortcut}
           value={form.draftProjectPath.value}
           onOpenChange={(open) => {
             form.setOpenPicker(open ? "project" : null)
@@ -119,6 +141,7 @@ export function SessionLaunchForm(props: {
       </Suspense>
 
       <SessionInput
+        autoFocus={true}
         classes={launchInputClasses}
         helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
         loadSuggestions={async (input) => {

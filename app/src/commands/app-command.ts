@@ -115,12 +115,24 @@ export const AppCommand = defineAppCommands({
       label: "Session Input: Open Project Selector",
       when: "sessionInput.hasProjectSelector",
     },
+    openAdapterSelector: {
+      label: "Session Input: Open Adapter Selector",
+      when: "sessionInput.hasAdapterSelector",
+    },
+    openLocationSelector: {
+      label: "Session Input: Open Launch Location Selector",
+      when: "sessionInput.hasLocationSelector",
+    },
+    openBranchSelector: {
+      label: "Session Input: Open Branch Selector",
+      when: "sessionInput.hasBranchSelector",
+    },
     openModelSelector: {
       label: "Session Input: Open Model Selector",
       when: "sessionInput.hasModelSelector",
     },
-    toggleThinkingLevel: {
-      label: "Session Input: Toggle Thinking Level",
+    openThinkingLevelSelector: {
+      label: "Session Input: Open Thinking Level Selector",
       when: "sessionInput.hasThinkingLevel",
     },
     submit: {

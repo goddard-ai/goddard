@@ -26,6 +26,9 @@ function createTestRegistry() {
   commandContext.hasClosableActiveTab.value = false
   commandContext.selectedNavId.value = "inbox"
   commandContext.sessionInputActive.value = false
+  commandContext.sessionInputHasAdapterSelector.value = false
+  commandContext.sessionInputHasBranchSelector.value = false
+  commandContext.sessionInputHasLocationSelector.value = false
   commandContext.sessionInputCanSubmit.value = false
   commandContext.sessionInputHasModelSelector.value = false
   commandContext.sessionInputHasProjectSelector.value = false

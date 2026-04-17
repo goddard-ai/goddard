@@ -38,6 +38,7 @@ export type SessionInputClasses = {
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 
 export function SessionInput(props: {
+  autoFocus?: boolean
   classes?: Partial<SessionInputClasses>
   loadSuggestions: SessionInputSuggestionLoader
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void
@@ -276,6 +277,10 @@ export function SessionInput(props: {
             }}
             onEditorReady={(editor) => {
               editorRef.current = editor
+
+              if (props.autoFocus) {
+                focusEditor()
+              }
             }}
             onHighlightNext={() => {
               setSelectedIndex((currentIndex) =>
