@@ -19,18 +19,20 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
-  const hasAdapterSelector =
-    (form.adapterCatalog.value?.adapters.length ?? 0) > 0 && props.dialog.open
+  const activeProjectPath = projectContext.activeProjectPath
+  const isDialogOpen = props.dialog.open
+  const projects = projectRegistry.projectList
+  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0 && isDialogOpen
   const hasBranchSelector =
     form.draftLocation.value === "worktree" &&
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
-    props.dialog.open
-  const hasLocationSelector = form.launchPreview.value !== null && props.dialog.open
+    isDialogOpen
+  const hasLocationSelector = form.launchPreview.value !== null && isDialogOpen
   const hasModelSelector =
-    (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0 && props.dialog.open
-  const hasProjectSelector = projectRegistry.projectList.length > 0 && props.dialog.open
-  const hasThinkingLevel = form.thinkingOption.value !== null && props.dialog.open
-  const canSubmit = form.canSubmit.value && props.dialog.open
+    (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0 && isDialogOpen
+  const hasProjectSelector = projects.length > 0 && isDialogOpen
+  const hasThinkingLevel = form.thinkingOption.value !== null && isDialogOpen
+  const canSubmit = form.canSubmit.value && isDialogOpen
 
   async function launchSession() {
     const sessionInput = form.sessionInput.value
@@ -69,14 +71,70 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     }
   }
 
-  useEffect(() => {
-    if (props.dialog.open) {
-      form.reset(projectContext.activeProjectPath)
+  function openProjectSelector() {
+    if (!isDialogOpen) {
+      return
     }
-  }, [form, projectContext, props.dialog.open])
+
+    form.setOpenPicker("project")
+  }
+
+  function openAdapterSelector() {
+    if (!isDialogOpen) {
+      return
+    }
+
+    form.setOpenPicker("adapter")
+  }
+
+  function openLocationSelector() {
+    if (!isDialogOpen) {
+      return
+    }
+
+    form.setOpenPicker("location")
+  }
+
+  function openBranchSelector() {
+    if (!isDialogOpen) {
+      return
+    }
+
+    form.setOpenPicker("branch")
+  }
+
+  function openModelSelector() {
+    if (!isDialogOpen) {
+      return
+    }
+
+    form.setOpenPicker("model")
+  }
+
+  function openThinkingLevelSelector() {
+    if (!isDialogOpen) {
+      return
+    }
+
+    form.setOpenPicker("thinking")
+  }
+
+  function submitSessionLaunch() {
+    if (!isDialogOpen) {
+      return
+    }
+
+    void launchSession()
+  }
 
   useEffect(() => {
-    commandContext.sessionInputActive.value = props.dialog.open
+    if (isDialogOpen) {
+      form.reset(activeProjectPath)
+    }
+  }, [activeProjectPath, form, isDialogOpen])
+
+  useEffect(() => {
+    commandContext.sessionInputActive.value = isDialogOpen
     commandContext.sessionInputHasAdapterSelector.value = hasAdapterSelector
     commandContext.sessionInputHasBranchSelector.value = hasBranchSelector
     commandContext.sessionInputHasLocationSelector.value = hasLocationSelector
@@ -103,64 +161,16 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     hasModelSelector,
     hasProjectSelector,
     hasThinkingLevel,
-    props.dialog.open,
+    isDialogOpen,
   ])
 
-  useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    form.setOpenPicker("project")
-  })
-
-  useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    form.setOpenPicker("adapter")
-  })
-
-  useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    form.setOpenPicker("location")
-  })
-
-  useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    form.setOpenPicker("branch")
-  })
-
-  useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    form.setOpenPicker("model")
-  })
-
-  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    form.setOpenPicker("thinking")
-  })
-
-  useAppCommand(AppCommand.sessionInput.submit, () => {
-    if (!props.dialog.open) {
-      return
-    }
-
-    void launchSession()
-  })
+  useAppCommand(AppCommand.sessionInput.openProjectSelector, openProjectSelector)
+  useAppCommand(AppCommand.sessionInput.openAdapterSelector, openAdapterSelector)
+  useAppCommand(AppCommand.sessionInput.openLocationSelector, openLocationSelector)
+  useAppCommand(AppCommand.sessionInput.openBranchSelector, openBranchSelector)
+  useAppCommand(AppCommand.sessionInput.openModelSelector, openModelSelector)
+  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, openThinkingLevelSelector)
+  useAppCommand(AppCommand.sessionInput.submit, submitSessionLaunch)
 
   return (
     <DialogPortal>
@@ -180,7 +190,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
               props.dialog.setOpen(false)
             }}
             onSubmit={launchSession}
-            projects={projectRegistry.projectList}
+            projects={projects}
           />
         </Dialog.Content>
       </Dialog.Positioner>
