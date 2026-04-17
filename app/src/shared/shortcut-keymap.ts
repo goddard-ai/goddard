@@ -1,6 +1,7 @@
 import type { BindingInput } from "powerkeys"
 import { z } from "zod"
 
+import { resolveAppCommand } from "~/commands/app-command.ts"
 import type { AppCommandId } from "./app-commands.ts"
 
 export type ShortcutBindingObject = (
@@ -98,23 +99,55 @@ export const UserShortcutKeymapFile = z.object({
 
 export type UserShortcutKeymapFile = z.infer<typeof UserShortcutKeymapFile>
 
+/** Returns the canonical combo or sequence expression for one binding. */
+export function getShortcutBindingExpression(binding: ShortcutBinding | null | undefined) {
+  if (!binding) {
+    return null
+  }
+
+  return typeof binding === "string" ? binding : (binding.combo ?? binding.sequence)
+}
+
+/** Returns the binding-local `when` override when one exists. */
+export function getShortcutBindingWhen(binding: ShortcutBinding | null | undefined) {
+  return binding && typeof binding !== "string" ? binding.when : undefined
+}
+
+/** Creates one persisted binding entry from a canonical shortcut expression. */
+export function createShortcutBinding(
+  expression: string,
+  options?: Omit<ShortcutBindingObject, "combo" | "sequence">,
+): ShortcutBinding {
+  const trimmedExpression = expression.trim()
+  const hasOptions = options && Object.keys(options).length > 0
+
+  if (!hasOptions) {
+    return trimmedExpression
+  }
+
+  return trimmedExpression.includes(" ")
+    ? { ...options, sequence: trimmedExpression }
+    : { ...options, combo: trimmedExpression }
+}
+
 /** Resolves one built-in profile plus optional user overrides into effective bindings. */
 export function resolveShortcutBindings(
   profileId: KeymapProfileId,
   overrides: ShortcutKeymapOverrides = {},
 ) {
-  const profileBindings = shortcutKeymapProfiles[profileId].bindings
+  const profileBindings: ShortcutKeymapBindings = shortcutKeymapProfiles[profileId].bindings
   const resolvedBindings: ShortcutKeymapBindings = {
     ...profileBindings,
   }
 
   for (const commandId of Object.keys(overrides)) {
-    if (!(commandId in profileBindings)) {
+    const typedCommandId = commandId as AppCommandId
+
+    if (!profileBindings[typedCommandId] && resolveAppCommand(typedCommandId) === null) {
       continue
     }
 
     const override = overrides[commandId]
-    const typedCommandId = commandId as AppCommandId
 
     if (override === undefined) {
       continue

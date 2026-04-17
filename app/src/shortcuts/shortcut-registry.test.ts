@@ -3,6 +3,7 @@ import { createShortcuts } from "powerkeys"
 
 import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
+import { desktopHost } from "~/desktop-host.ts"
 import { ShortcutRegistry } from "./shortcut-registry.ts"
 
 /** Creates one registry instance with an isolated document-like event boundary. */
@@ -306,6 +307,65 @@ test("session input context lets launch-dialog selectors override the global pal
   } finally {
     stopPalette()
     stopProject()
+    cleanup()
+  }
+})
+
+test("addCommandBinding persists shortcuts for commands without built-in defaults", async () => {
+  const { registry, cleanup } = createTestRegistry()
+  const originalWriteShortcutKeymap = desktopHost.writeShortcutKeymap
+  desktopHost.writeShortcutKeymap = async (keymap) => keymap
+
+  try {
+    registry.applyKeymapSnapshot("goddard", {}, null)
+
+    expect(
+      await registry.addCommandBinding(AppCommand.navigation.openKeyboardShortcuts.id, "Mod+/"),
+    ).toBe(true)
+    expect(registry.resolvedBindings[AppCommand.navigation.openKeyboardShortcuts.id]).toEqual([
+      "Mod+/",
+    ])
+    expect(registry.overrides[AppCommand.navigation.openKeyboardShortcuts.id]).toEqual(["Mod+/"])
+  } finally {
+    desktopHost.writeShortcutKeymap = originalWriteShortcutKeymap
+    cleanup()
+  }
+})
+
+test("updateCommandBindingWhen promotes and collapses binding-local when overrides", async () => {
+  const { registry, cleanup } = createTestRegistry()
+  const originalWriteShortcutKeymap = desktopHost.writeShortcutKeymap
+  desktopHost.writeShortcutKeymap = async (keymap) => keymap
+
+  try {
+    registry.applyKeymapSnapshot("goddard", {}, null)
+
+    expect(
+      await registry.updateCommandBindingWhen(
+        AppCommand.navigation.openCommandPalette.id,
+        0,
+        "workbench.hasClosableActiveTab",
+      ),
+    ).toBe(true)
+    expect(registry.resolvedBindings[AppCommand.navigation.openCommandPalette.id]).toEqual([
+      {
+        combo: "Mod+p",
+        when: "workbench.hasClosableActiveTab",
+      },
+    ])
+
+    expect(
+      await registry.updateCommandBindingWhen(
+        AppCommand.navigation.openCommandPalette.id,
+        0,
+        AppCommand.navigation.openCommandPalette.when ?? null,
+      ),
+    ).toBe(true)
+    expect(registry.resolvedBindings[AppCommand.navigation.openCommandPalette.id]).toEqual([
+      "Mod+p",
+    ])
+  } finally {
+    desktopHost.writeShortcutKeymap = originalWriteShortcutKeymap
     cleanup()
   }
 })
