@@ -21,6 +21,9 @@
   - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
   - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.
   - Do not model simple UI state in `preact-sigma`.
+  - For singleton UI components, prefer subscribing to shared Preact context directly instead of threading pass-through JSX props through parent components just to preserve an abstraction boundary.
+  - Avoid relay-layer parents. If a parent component mostly renames or forwards context-derived values and callbacks into a single app-specific child, move that wiring closer to the child unless the parent is coordinating behavior across multiple subtrees.
+  - Keep event logic close to the event target. Do not hoist single-use UI event handlers into shell-level components unless coordination outside the local subtree requires it.
   - Prefer uncontrolled form inputs when the UI does not need per-keystroke state.
   - Use controlled inputs only when live validation, derived UI, formatting, or cross-field coordination requires it.
   - Prefer uncontrolled open state for dialogs, popovers, tooltips, and similar overlays when no other part of the UI needs to coordinate them.
