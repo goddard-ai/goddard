@@ -5,10 +5,10 @@ export default {
   form: css({
     display: "grid",
     gap: "14px",
-    padding: "16px 18px 18px",
+    padding: "14px 0 0",
     borderTop: "1px solid",
     borderColor: "border",
-    background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
+    backgroundColor: "background",
   }),
   editorFrame: css({
     position: "relative",
@@ -64,7 +64,7 @@ export default {
     borderRadius: "14px",
     border: "1px solid",
     borderColor: "accent",
-    background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
+    backgroundColor: "surface",
     color: "text",
     fontSize: "0.88rem",
     fontWeight: "680",

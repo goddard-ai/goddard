@@ -1,61 +1,23 @@
-import { cx } from "@goddard-ai/styled-system/css"
-
 import type {
   SessionTranscriptToolCall,
   SessionTranscriptToolContent,
   SessionTranscriptToolStatus,
 } from "~/sessions/models.ts"
-import type { MessageListRow } from "../message-list.tsx"
-import { buildToolDiffPreview, getBubbleMaxWidth } from "./layout.ts"
-import { TranscriptMetaRow } from "./meta-row.tsx"
+import { buildToolDiffPreview } from "./layout.ts"
 import {
-  bubbleFrameClass,
   rowClass,
   rowColumnClass,
   rowInnerClass,
-  toolBadgeClass,
-  toolBadgeRowClass,
-  toolBodyClass,
-  toolBubbleClass,
-  toolCardClass,
-  toolCompletedBadgeClass,
-  toolDiffClass,
-  toolDiffPathClass,
-  toolDiffPreviewClass,
-  toolEmptyStateClass,
-  toolFailedBadgeClass,
-  toolHeaderClass,
-  toolKindBadgeClass,
-  toolLocationLineClass,
-  toolLocationListClass,
-  toolLocationPathClass,
-  toolLocationRowClass,
-  toolPendingBadgeClass,
-  toolRunningBadgeClass,
-  toolSectionClass,
-  toolSectionLabelClass,
-  toolTerminalClass,
-  toolTerminalIdClass,
-  toolTerminalLabelClass,
-  toolTextClass,
-  toolTitleClass,
+  toolDisclosureClass,
+  toolDetailHeadingClass,
+  toolDetailItemClass,
+  toolDetailListClass,
+  toolDetailMonoClass,
+  toolDetailTextClass,
+  toolSummaryClass,
+  toolSummaryTextClass,
+  toolToggleHintClass,
 } from "./styles.ts"
-
-function getToolStatusBadgeClass(status: SessionTranscriptToolStatus) {
-  if (status === "completed") {
-    return toolCompletedBadgeClass
-  }
-
-  if (status === "failed") {
-    return toolFailedBadgeClass
-  }
-
-  if (status === "in_progress") {
-    return toolRunningBadgeClass
-  }
-
-  return toolPendingBadgeClass
-}
 
 function formatToolKindLabel(toolKind: SessionTranscriptToolCall["toolKind"]) {
   return toolKind === "switch_mode"
@@ -69,36 +31,62 @@ function formatToolStatusLabel(status: SessionTranscriptToolStatus) {
     : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
 }
 
+function buildToolGroupSummary(toolCalls: readonly SessionTranscriptToolCall[]) {
+  const visibleTitles = toolCalls.slice(0, 3).map((toolCall) => toolCall.title)
+  const moreCount = Math.max(0, toolCalls.length - visibleTitles.length)
+
+  return [
+    toolCalls.length === 1 ? "Tool call" : `${toolCalls.length} tool calls`,
+    visibleTitles.join(", "),
+    moreCount > 0 ? `+${moreCount} more` : null,
+  ]
+    .filter(Boolean)
+    .join(" \u00b7 ")
+}
+
+function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[]) {
+  const counts = {
+    pending: 0,
+    in_progress: 0,
+    completed: 0,
+    failed: 0,
+  } satisfies Record<SessionTranscriptToolStatus, number>
+
+  for (const toolCall of toolCalls) {
+    counts[toolCall.status] += 1
+  }
+
+  return Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .map(
+      ([status, count]) =>
+        `${count} ${formatToolStatusLabel(status as SessionTranscriptToolStatus).toLowerCase()}`,
+    )
+    .join(", ")
+}
+
 function renderToolContent(content: SessionTranscriptToolContent, key: string) {
   if (content.type === "content") {
     return (
-      <section key={key} class={toolSectionClass}>
-        <span class={toolSectionLabelClass}>Output</span>
-        <div class={toolTextClass}>{content.text?.trim() || "Structured tool output."}</div>
-      </section>
+      <div key={key} class={toolDetailTextClass}>
+        {content.text?.trim() || "Structured tool output."}
+      </div>
     )
   }
 
   if (content.type === "diff") {
     return (
-      <section key={key} class={toolSectionClass}>
-        <span class={toolSectionLabelClass}>Diff</span>
-        <div class={toolDiffClass}>
-          {content.path ? <div class={toolDiffPathClass}>{content.path}</div> : null}
-          <div class={toolDiffPreviewClass}>{buildToolDiffPreview(content)}</div>
-        </div>
-      </section>
+      <div key={key} class={toolDetailListClass}>
+        {content.path ? <div class={toolDetailMonoClass}>{content.path}</div> : null}
+        <div class={toolDetailMonoClass}>{buildToolDiffPreview(content)}</div>
+      </div>
     )
   }
 
   return (
-    <section key={key} class={toolSectionClass}>
-      <span class={toolSectionLabelClass}>Terminal</span>
-      <div class={toolTerminalClass}>
-        <span class={toolTerminalLabelClass}>Terminal Session</span>
-        <span class={toolTerminalIdClass}>{content.terminalId}</span>
-      </div>
-    </section>
+    <div key={key} class={toolDetailMonoClass}>
+      Terminal session {content.terminalId}
+    </div>
   )
 }
 
@@ -108,64 +96,62 @@ function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) 
   }
 
   return (
-    <section class={toolSectionClass}>
-      <span class={toolSectionLabelClass}>Locations</span>
-      <div class={toolLocationListClass}>
-        {locations.map((location, index) => (
-          <div
-            key={`${location.path}:${location.line ?? "none"}:${index}`}
-            class={toolLocationRowClass}
-          >
-            <span class={toolLocationPathClass}>{location.path}</span>
-            {location.line != null ? (
-              <span class={toolLocationLineClass}>Line {location.line}</span>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </section>
+    <div class={toolDetailListClass}>
+      {locations.map((location, index) => (
+        <div
+          key={`${location.path}:${location.line ?? "none"}:${index}`}
+          class={toolDetailMonoClass}
+        >
+          {location.path}
+          {location.line != null ? `:${location.line}` : ""}
+        </div>
+      ))}
+    </div>
   )
 }
 
-/** Renders one transcript tool row with dedicated status and payload sections. */
-export function ToolTranscriptRow(props: { row: MessageListRow<SessionTranscriptToolCall> }) {
-  const message = props.row.item
-  const bubbleWidth = getBubbleMaxWidth(props.row.viewportWidth, message)
+/** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
+export function ToolTranscriptRow(props: {
+  groupId: string
+  toolCalls: readonly SessionTranscriptToolCall[]
+}) {
+  const summary = buildToolGroupSummary(props.toolCalls)
+  const statusSummary = buildToolStatusSummary(props.toolCalls)
 
   return (
     <article class={rowClass}>
       <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
-        <div class={rowColumnClass} style={{ width: `${bubbleWidth}px` }}>
-          <TranscriptMetaRow
-            authorName={message.authorName}
-            timestampLabel={message.timestampLabel}
-            alignmentStyle={{ justifyContent: "flex-start" }}
-          />
-          <div class={cx(bubbleFrameClass, toolBubbleClass)}>
-            <div class={toolCardClass}>
-              <div class={toolHeaderClass}>
-                <div class={toolTitleClass}>{message.title}</div>
-                <div class={toolBadgeRowClass}>
-                  <span class={cx(toolBadgeClass, toolKindBadgeClass)}>
-                    {formatToolKindLabel(message.toolKind)}
-                  </span>
-                  <span class={cx(toolBadgeClass, getToolStatusBadgeClass(message.status))}>
-                    {formatToolStatusLabel(message.status)}
-                  </span>
-                </div>
-              </div>
-              {message.content.length > 0 || message.locations.length > 0 ? (
-                <div class={toolBodyClass}>
-                  {message.content.map((content, index) =>
-                    renderToolContent(content, `${message.id}:content:${index}`),
-                  )}
-                  {renderToolLocations(message.locations)}
-                </div>
-              ) : (
-                <div class={toolEmptyStateClass}>No tool output was attached to this call.</div>
-              )}
-            </div>
-          </div>
+        <div class={rowColumnClass} style={{ width: "100%" }}>
+          <details class={toolDisclosureClass}>
+            <summary class={toolSummaryClass}>
+              <span class={toolSummaryTextClass}>
+                {summary}
+                {statusSummary ? ` \u00b7 ${statusSummary}` : ""}
+              </span>
+              <span class={toolToggleHintClass}>Details</span>
+            </summary>
+            <ol class={toolDetailListClass}>
+              {props.toolCalls.map((toolCall) => (
+                <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
+                  <article>
+                    <div class={toolDetailHeadingClass}>
+                      {toolCall.title} \u00b7 {formatToolKindLabel(toolCall.toolKind)} \u00b7{" "}
+                      {formatToolStatusLabel(toolCall.status)}
+                    </div>
+                    {toolCall.content.map((content, index) =>
+                      renderToolContent(content, `${toolCall.id}:content:${index}`),
+                    )}
+                    {renderToolLocations(toolCall.locations)}
+                    {toolCall.content.length === 0 && toolCall.locations.length === 0 ? (
+                      <div class={toolDetailTextClass}>
+                        No tool output was attached to this call.
+                      </div>
+                    ) : null}
+                  </article>
+                </li>
+              ))}
+            </ol>
+          </details>
         </div>
       </div>
     </article>

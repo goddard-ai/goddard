@@ -81,7 +81,6 @@ export default {
       borderRadius: "16px",
       padding: "14px 16px",
       border: "1px solid var(--session-chat-code-block-border)",
-      boxShadow: `0 12px 24px ${token.var("colors.shadow")}`,
     },
     "& pre code": {
       display: "block",

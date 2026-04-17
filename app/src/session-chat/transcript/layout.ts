@@ -81,6 +81,10 @@ export function measureParagraph(text: string, maxWidth: number): PretextParagra
 export function getBubbleMaxWidth(viewportWidth: number, message: SessionTranscriptItem) {
   const safeViewportWidth = Math.max(280, viewportWidth - 48)
 
+  if (isTextMessage(message) && message.role === "assistant") {
+    return safeViewportWidth
+  }
+
   if (isTextMessage(message) && message.role === "system") {
     return Math.max(240, Math.min(560, safeViewportWidth - 56))
   }
@@ -106,6 +110,11 @@ export function getBubbleMaxWidth(viewportWidth: number, message: SessionTranscr
 /** Returns the maximum text width available inside one transcript bubble. */
 export function getTranscriptTextWidth(message: SessionTranscriptItem, viewportWidth: number) {
   const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message)
+
+  if (isTextMessage(message) && message.role === "assistant") {
+    return Math.max(MIN_TEXT_WIDTH, bubbleMaxWidth)
+  }
+
   return Math.max(MIN_TEXT_WIDTH, bubbleMaxWidth - BUBBLE_PADDING_X)
 }
 
@@ -192,7 +201,9 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
       )
     }, 0)
 
-    return META_HEIGHT + BUBBLE_PADDING_Y + Math.max(contentHeight, BODY_LINE_HEIGHT) + ROW_GAP
+    const bubblePaddingY = message.role === "assistant" ? 0 : BUBBLE_PADDING_Y
+
+    return META_HEIGHT + bubblePaddingY + Math.max(contentHeight, BODY_LINE_HEIGHT) + ROW_GAP
   }
 
   let approximateLineCount = 2
