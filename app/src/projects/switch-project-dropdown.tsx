@@ -43,9 +43,11 @@ export function SwitchProjectDropdown() {
   const contentRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)
+
   const projects = orderProjectsByRecentActivity(
     projectRegistry.projectList,
     projectContext.recentProjectPaths,
@@ -71,17 +73,10 @@ export function SwitchProjectDropdown() {
           kind: "project" as const,
           project,
         }))
-  const highlightedItemIndex = items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
+  const highlightedItemIndex =
+    items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
   const highlightedItem = items[highlightedItemIndex]
   const highlightedItemId = highlightedItem?.id ?? null
-
-  useAppCommand(AppCommand.navigation.openSwitchProject, () => {
-    setIsOpen(true)
-  })
-
-  useAppCommand(AppCommand.projects.openFolder, async () => {
-    await openFolderFromSwitcher()
-  })
 
   async function openFolderFromSwitcher() {
     setIsOpen(false)
@@ -124,6 +119,14 @@ export function SwitchProjectDropdown() {
       workbenchTabSet,
     })
   }
+
+  useAppCommand(AppCommand.navigation.openSwitchProject, () => {
+    setIsOpen(true)
+  })
+
+  useAppCommand(AppCommand.projects.openFolder, async () => {
+    await openFolderFromSwitcher()
+  })
 
   useEffect(() => {
     if (!isOpen) {
