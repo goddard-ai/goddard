@@ -1,5 +1,5 @@
-import { Popover } from "@ark-ui/react/popover"
 import { Search } from "lucide-react"
+import { useListener } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import type { ProjectRecord } from "./project-registry.ts"
@@ -39,6 +39,8 @@ export function SwitchProjectDropdown(props: {
   onSelectProject: (path: string) => void
   projects: readonly ProjectRecord[]
 }) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const [search, setSearch] = useState("")
@@ -66,7 +68,14 @@ export function SwitchProjectDropdown(props: {
     if (!props.isOpen) {
       setSearch("")
       setHighlightedIndex(0)
+      return
     }
+
+    queueMicrotask(() => {
+      const input = inputRef.current
+      input?.focus()
+      input?.setSelectionRange(input.value.length, input.value.length)
+    })
   }, [props.isOpen])
 
   useEffect(() => {
@@ -104,27 +113,60 @@ export function SwitchProjectDropdown(props: {
     props.onSelectProject(item.project.path)
   }
 
-  return (
-    <Popover.Root
-      closeOnInteractOutside={true}
-      initialFocusEl={() => inputRef.current}
-      lazyMount={true}
-      open={props.isOpen}
-      portalled={false}
-      positioning={{ placement: "bottom", sameWidth: true }}
-      unmountOnExit={true}
-      onOpenChange={(details) => {
-        props.onOpenChange(details.open)
-      }}
-    >
-      <Popover.Trigger asChild>
-        <button aria-label="Switch project" class={styles.trigger} type="button">
-          <span class={styles.triggerLabel}>{props.activeProjectLabel}</span>
-        </button>
-      </Popover.Trigger>
+  useListener(document, "mousedown", (event) => {
+    if (!props.isOpen) {
+      return
+    }
 
-      <Popover.Positioner>
-        <Popover.Content class={styles.content}>
+    const target = event.target
+
+    if (!(target instanceof Node)) {
+      return
+    }
+
+    if (contentRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+      return
+    }
+
+    props.onOpenChange(false)
+  })
+
+  useListener(document, "keydown", (event) => {
+    if (!props.isOpen || event.key !== "Escape") {
+      return
+    }
+
+    event.preventDefault()
+    props.onOpenChange(false)
+    queueMicrotask(() => {
+      triggerRef.current?.focus()
+    })
+  })
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        aria-expanded={props.isOpen ? "true" : "false"}
+        aria-haspopup="dialog"
+        aria-label="Switch project"
+        class={styles.trigger}
+        type="button"
+        onClick={() => {
+          props.onOpenChange(!props.isOpen)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" && !props.isOpen) {
+            event.preventDefault()
+            props.onOpenChange(true)
+          }
+        }}
+      >
+        <span class={styles.triggerLabel}>{props.activeProjectLabel}</span>
+      </button>
+
+      {props.isOpen ? (
+        <div ref={contentRef} class={styles.content}>
           <label class={styles.searchField}>
             <span class={styles.srOnly}>Search projects</span>
             <Search aria-hidden={true} size={16} strokeWidth={2.1} />
@@ -155,7 +197,6 @@ export function SwitchProjectDropdown(props: {
                 if (event.key === "Enter") {
                   event.preventDefault()
                   activateItem(items[highlightedIndex])
-                  return
                 }
               }}
             />
@@ -226,9 +267,9 @@ export function SwitchProjectDropdown(props: {
           ) : (
             <p class={styles.empty}>No matching projects.</p>
           )}
-        </Popover.Content>
-      </Popover.Positioner>
-    </Popover.Root>
+        </div>
+      ) : null}
+    </>
   )
 }
 
