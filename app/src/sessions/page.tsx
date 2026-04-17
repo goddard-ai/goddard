@@ -17,10 +17,14 @@ export default function SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const selectedSessionId = useSignal<DaemonSession["id"] | null>(null)
-
   const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
-  const selectedSession =
-    sessions.find((session) => session.id === selectedSessionId.value) ?? sessions[0] ?? null
+  const resolvedSelectedSessionId =
+    selectedSessionId.value && sessions.some((session) => session.id === selectedSessionId.value)
+      ? selectedSessionId.value
+      : (sessions[0]?.id ?? null)
+  const selectedSession = resolvedSelectedSessionId
+    ? (sessions.find((session) => session.id === resolvedSelectedSessionId) ?? null)
+    : null
   const selectedSessionUpdatedLabel = selectedSession
     ? new Intl.DateTimeFormat(undefined, {
         month: "short",
@@ -29,19 +33,6 @@ export default function SessionsPage() {
         minute: "2-digit",
       }).format(new Date(selectedSession.updatedAt))
     : null
-
-  useEffect(() => {
-    if (!selectedSessionId.value && sessions[0]) {
-      selectedSessionId.value = sessions[0].id
-    }
-
-    if (
-      selectedSessionId.value &&
-      !sessions.some((session) => session.id === selectedSessionId.value)
-    ) {
-      selectedSessionId.value = sessions[0]?.id ?? null
-    }
-  }, [sessions, selectedSessionId])
 
   function openSession(sessionId: DaemonSession["id"]) {
     const session = sessions.find((candidate) => candidate.id === sessionId)
@@ -62,24 +53,31 @@ export default function SessionsPage() {
     })
   }
 
+  function openSessionDialog() {
+    AppCommand.navigation.openNewSessionDialog()
+  }
+
+  function selectSession(sessionId: DaemonSession["id"]) {
+    selectedSessionId.value = sessionId
+  }
+
+  useEffect(() => {
+    if (selectedSessionId.value === resolvedSelectedSessionId) {
+      return
+    }
+
+    selectedSessionId.value = resolvedSelectedSessionId
+  }, [resolvedSelectedSessionId, selectedSessionId])
+
   return (
     <div class={styles.root}>
       <section class={styles.listPane}>
-        <ListToolbar
-          sessionCount={sessions.length}
-          onCreateSession={() => {
-            AppCommand.navigation.openNewSessionDialog()
-          }}
-        />
+        <ListToolbar sessionCount={sessions.length} onCreateSession={openSessionDialog} />
         <div class={styles.listBody}>
           <SessionsList
-            onCreateSession={() => {
-              AppCommand.navigation.openNewSessionDialog()
-            }}
+            onCreateSession={openSessionDialog}
             onOpenSession={openSession}
-            onSelectSession={(sessionId) => {
-              selectedSessionId.value = sessionId
-            }}
+            onSelectSession={selectSession}
             selectedSessionId={selectedSession?.id ?? null}
             sessions={sessions}
           />
