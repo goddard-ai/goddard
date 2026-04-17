@@ -1,5 +1,4 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { css } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
 import { useEffect } from "preact/hooks"
 
@@ -11,6 +10,7 @@ import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { SessionsList } from "./list.tsx"
+import styles from "./page.style.ts"
 import { getSessionDisplayTitle } from "./presentation.ts"
 
 export default function SessionsPage() {
@@ -63,42 +63,15 @@ export default function SessionsPage() {
   }
 
   return (
-    <div
-      class={css({
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)",
-        gap: "20px",
-        height: "100%",
-        padding: "24px",
-        "@media (max-width: 1040px)": {
-          gridTemplateColumns: "1fr",
-        },
-      })}
-    >
-      <section
-        class={css({
-          display: "flex",
-          flexDirection: "column",
-          minHeight: "0",
-          border: "1px solid",
-          borderColor: "border",
-          borderRadius: "16px",
-          backgroundColor: "panel",
-          overflow: "hidden",
-        })}
-      >
+    <div class={styles.root}>
+      <section class={styles.listPane}>
         <ListToolbar
           sessionCount={sessions.length}
           onCreateSession={() => {
             AppCommand.navigation.openNewSessionDialog()
           }}
         />
-        <div
-          class={css({
-            minHeight: "0",
-            overflowY: "auto",
-          })}
-        >
+        <div class={styles.listBody}>
           <SessionsList
             onCreateSession={() => {
               AppCommand.navigation.openNewSessionDialog()
@@ -112,138 +85,32 @@ export default function SessionsPage() {
           />
         </div>
       </section>
-      <aside
-        class={css({
-          display: "grid",
-          gap: "16px",
-          alignContent: "start",
-          padding: "20px",
-          border: "1px solid",
-          borderColor: "border",
-          borderRadius: "16px",
-          backgroundColor: "panel",
-        })}
-      >
-        <div class={css({ display: "grid", gap: "6px" })}>
-          <h2
-            class={css({
-              color: "text",
-              fontSize: "1rem",
-              fontWeight: "700",
-            })}
-          >
-            Session details
-          </h2>
-          <p
-            class={css({
-              color: "muted",
-              fontSize: "0.9rem",
-              lineHeight: "1.6",
-            })}
-          >
+      <aside class={styles.aside}>
+        <div class={styles.intro}>
+          <h2 class={styles.heading}>Session details</h2>
+          <p class={styles.description}>
             {selectedSession
               ? "Selected session metadata for the current workbench."
               : "Select a session to inspect its current state."}
           </p>
         </div>
         {selectedSession ? (
-          <dl class={css({ display: "grid", gap: "12px" })}>
-            <div
-              class={css({
-                display: "grid",
-                gap: "4px",
-                padding: "12px",
-                borderRadius: "12px",
-                border: "1px solid",
-                borderColor: "border",
-              })}
-            >
-              <dt
-                class={css({
-                  color: "muted",
-                  fontSize: "0.78rem",
-                  fontWeight: "600",
-                })}
-              >
-                Status
-              </dt>
-              <dd class={css({ margin: "0", color: "text", fontWeight: "600" })}>
-                {selectedSession.status}
-              </dd>
+          <dl class={styles.details}>
+            <div class={styles.detailCard}>
+              <dt class={styles.detailLabel}>Status</dt>
+              <dd class={styles.detailValue}>{selectedSession.status}</dd>
             </div>
-            <div
-              class={css({
-                display: "grid",
-                gap: "4px",
-                padding: "12px",
-                borderRadius: "12px",
-                border: "1px solid",
-                borderColor: "border",
-              })}
-            >
-              <dt
-                class={css({
-                  color: "muted",
-                  fontSize: "0.78rem",
-                  fontWeight: "600",
-                })}
-              >
-                Updated
-              </dt>
-              <dd class={css({ margin: "0", color: "text", fontWeight: "600" })}>
-                {selectedSessionUpdatedLabel}
-              </dd>
+            <div class={styles.detailCard}>
+              <dt class={styles.detailLabel}>Updated</dt>
+              <dd class={styles.detailValue}>{selectedSessionUpdatedLabel}</dd>
             </div>
-            <div
-              class={css({
-                display: "grid",
-                gap: "4px",
-                padding: "12px",
-                borderRadius: "12px",
-                border: "1px solid",
-                borderColor: "border",
-              })}
-            >
-              <dt
-                class={css({
-                  color: "muted",
-                  fontSize: "0.78rem",
-                  fontWeight: "600",
-                })}
-              >
-                Project
-              </dt>
-              <dd
-                class={css({
-                  margin: "0",
-                  color: "text",
-                  fontWeight: "600",
-                  wordBreak: "break-word",
-                })}
-              >
-                {selectedSession.cwd}
-              </dd>
+            <div class={styles.detailCard}>
+              <dt class={styles.detailLabel}>Project</dt>
+              <dd class={styles.detailValueWrap}>{selectedSession.cwd}</dd>
             </div>
-            <div
-              class={css({
-                display: "grid",
-                gap: "4px",
-                padding: "12px",
-                borderRadius: "12px",
-                border: "1px solid",
-                borderColor: "border",
-              })}
-            >
-              <dt
-                class={css({
-                  color: "muted",
-                  fontSize: "0.78rem",
-                  fontWeight: "600",
-                })}
-              >
-                Transcript
-              </dt>
-              <dd class={css({ margin: "0", color: "text", fontWeight: "600" })}>
+            <div class={styles.detailCard}>
+              <dt class={styles.detailLabel}>Transcript</dt>
+              <dd class={styles.detailValue}>
                 {selectedSession.lastAgentMessage ? "Ready" : "Waiting for first prompt"}
               </dd>
             </div>

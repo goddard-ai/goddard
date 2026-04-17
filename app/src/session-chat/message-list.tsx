@@ -1,18 +1,8 @@
-import { css } from "@goddard-ai/styled-system/css"
 import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
 
 import { useTabViewport } from "~/tab-viewport.tsx"
-
-const loadingOverlayClass = css({
-  display: "grid",
-  minHeight: "100%",
-  placeItems: "center",
-  color: "muted",
-  fontSize: "0.94rem",
-  letterSpacing: "0.01em",
-  pointerEvents: "none",
-})
+import styles from "./message-list.style.ts"
 
 const messageListStateCache = new Map<string, StateSnapshot>()
 
@@ -90,9 +80,7 @@ export function MessageList<Item>(props: MessageListProps<Item>) {
   }, [props.estimateRowHeight, props.items, viewport.width])
 
   if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
-    return (
-      props.loadingFallback ?? <div class={loadingOverlayClass}>Preparing paragraph layout...</div>
-    )
+    return props.loadingFallback ?? <div class={styles.loading}>Preparing paragraph layout...</div>
   }
 
   return (

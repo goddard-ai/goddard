@@ -1,6 +1,7 @@
 import { Dialog } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
-import { css, cx } from "@goddard-ai/styled-system/css"
+import { cx } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { ArrowUpRight, FolderSearch2, Plus, Trash2, X } from "lucide-react"
 import { useEffect } from "preact/hooks"
@@ -9,161 +10,7 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { deriveProjectName } from "./project-name.ts"
 import { lookupProject, type ProjectRecord } from "./project-registry.ts"
-
-const panelClass = css({
-  display: "flex",
-  flexDirection: "column",
-  minHeight: "0",
-  border: "1px solid",
-  borderColor: "border",
-  borderRadius: "16px",
-  backgroundColor: "panel",
-  overflow: "hidden",
-})
-
-const titleClass = css({
-  color: "text",
-  fontSize: "1.25rem",
-  fontWeight: "700",
-  lineHeight: "1.25",
-})
-
-const bodyClass = css({
-  color: "muted",
-  fontSize: "0.9rem",
-  lineHeight: "1.6",
-})
-
-const quietLabelClass = css({
-  color: "muted",
-  fontSize: "0.78rem",
-  fontWeight: "600",
-})
-
-const labelClass = css({
-  color: "text",
-  fontSize: "0.84rem",
-  fontWeight: "600",
-})
-
-const buttonBaseClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "8px",
-  minWidth: "0",
-  height: "36px",
-  paddingInline: "12px",
-  borderRadius: "10px",
-  border: "1px solid",
-  fontSize: "0.86rem",
-  fontWeight: "600",
-  cursor: "pointer",
-  transition:
-    "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _disabled: {
-    cursor: "not-allowed",
-    opacity: "0.48",
-  },
-})
-
-const secondaryButtonClass = css({
-  borderColor: "border",
-  backgroundColor: "background",
-  color: "text",
-  "@media (hover: hover) and (pointer: fine)": {
-    _hover: {
-      borderColor: "accent",
-      backgroundColor: "surface",
-    },
-  },
-})
-
-const primaryButtonClass = css({
-  borderColor: "accent",
-  backgroundColor: "surface",
-  color: "text",
-  "@media (hover: hover) and (pointer: fine)": {
-    _hover: {
-      borderColor: "accentStrong",
-      backgroundColor: "background",
-    },
-  },
-})
-
-const dangerButtonClass = css({
-  borderColor: "border",
-  backgroundColor: "background",
-  color: "muted",
-  "@media (hover: hover) and (pointer: fine)": {
-    _hover: {
-      borderColor: "danger",
-      color: "danger",
-      backgroundColor: "surface",
-    },
-  },
-})
-
-const dialogOverlayClass = css({
-  position: "fixed",
-  inset: "0",
-  backgroundColor: "overlay",
-  backdropFilter: "blur(6px)",
-  opacity: "1",
-  transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-  "@starting-style": {
-    opacity: "0",
-  },
-})
-
-const dialogContentClass = css({
-  width: "min(560px, calc(100vw - 32px))",
-  maxHeight: "calc(100vh - 32px)",
-  overflowY: "auto",
-  padding: "20px",
-  borderRadius: "16px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "panel",
-  opacity: "1",
-  transform: "translateY(0)",
-  transition:
-    "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-  outline: "none",
-  "@starting-style": {
-    opacity: "0",
-    transform: "translateY(8px)",
-  },
-})
-
-const dialogPositionerClass = css({
-  position: "fixed",
-  inset: "0",
-  display: "grid",
-  placeItems: "center",
-  padding: "16px",
-})
-
-const textInputClass = css({
-  width: "100%",
-  height: "40px",
-  paddingInline: "12px",
-  borderRadius: "10px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "background",
-  color: "text",
-  fontSize: "0.9rem",
-  outline: "none",
-  transition:
-    "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _focusVisible: {
-    borderColor: "accentStrong",
-  },
-  _disabled: {
-    opacity: "0.7",
-  },
-})
+import styles from "./projects-page.style.ts"
 
 /** Renders the projects page plus its local add-project modal flow. */
 export function ProjectsPage() {
@@ -244,36 +91,17 @@ export function ProjectsPage() {
   }
 
   return (
-    <div
-      class={css({
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)",
-        gap: "20px",
-        height: "100%",
-        padding: "24px",
-        "@media (max-width: 1040px)": {
-          gridTemplateColumns: "1fr",
-        },
-      })}
-    >
-      <section class={panelClass}>
-        <header
-          class={css({
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: "16px",
-            padding: "20px",
-            borderBottom: "1px solid",
-            borderColor: "border",
-          })}
-        >
-          <div class={css({ display: "grid", gap: "6px", minWidth: "0" })}>
-            <h1 class={titleClass}>Projects</h1>
-            <p class={bodyClass}>Keep an explicit set of local roots available to the workbench.</p>
+    <div class={styles.root}>
+      <section class={styles.panel}>
+        <header class={styles.sectionHeader}>
+          <div class={styles.sectionCopy}>
+            <h1 class={styles.title}>Projects</h1>
+            <p class={styles.body}>
+              Keep an explicit set of local roots available to the workbench.
+            </p>
           </div>
           <button
-            class={cx(buttonBaseClass, primaryButtonClass)}
+            class={cx(styles.buttonBase, styles.primaryButton)}
             type="button"
             onClick={() => {
               resetDraft()
@@ -286,23 +114,15 @@ export function ProjectsPage() {
         </header>
 
         {projects.length === 0 ? (
-          <div
-            class={css({
-              display: "grid",
-              alignContent: "start",
-              gap: "12px",
-              minHeight: "220px",
-              padding: "20px",
-            })}
-          >
-            <div class={css({ display: "grid", gap: "8px", maxWidth: "30rem" })}>
-              <h2 class={titleClass}>No projects yet</h2>
-              <p class={bodyClass}>
+          <div class={styles.empty}>
+            <div class={styles.emptyCopy}>
+              <h2 class={styles.title}>No projects yet</h2>
+              <p class={styles.body}>
                 Add a local directory to establish the app&apos;s explicit working set.
               </p>
               <div>
                 <button
-                  class={cx(buttonBaseClass, primaryButtonClass)}
+                  class={cx(styles.buttonBase, styles.primaryButton)}
                   type="button"
                   onClick={() => {
                     resetDraft()
@@ -345,25 +165,11 @@ export function ProjectsPage() {
         )}
       </section>
 
-      <aside class={panelClass}>
-        <div
-          class={css({
-            display: "grid",
-            gap: "16px",
-            padding: "20px",
-          })}
-        >
-          <div class={css({ display: "grid", gap: "6px" })}>
-            <h2
-              class={css({
-                color: "text",
-                fontSize: "1rem",
-                fontWeight: "700",
-              })}
-            >
-              Project details
-            </h2>
-            <p class={bodyClass}>
+      <aside class={styles.panel}>
+        <div class={styles.asideBody}>
+          <div class={styles.intro}>
+            <h2 class={styles.subheading}>Project details</h2>
+            <p class={styles.body}>
               {selectedProject
                 ? "Selected project metadata for the current workspace."
                 : "Select a project to inspect its configured path and display name."}
@@ -371,16 +177,8 @@ export function ProjectsPage() {
           </div>
           {selectedProject ? (
             <>
-              <h3
-                class={css({
-                  color: "text",
-                  fontSize: "1.05rem",
-                  fontWeight: "700",
-                })}
-              >
-                {selectedProject.name}
-              </h3>
-              <div class={css({ display: "grid", gap: "12px" })}>
+              <h3 class={styles.selectedTitle}>{selectedProject.name}</h3>
+              <div class={styles.cardList}>
                 <InfoCard label="Path" value={selectedProject.path} />
                 <InfoCard label="Display name" value={selectedProject.name} />
               </div>
@@ -426,19 +224,7 @@ function ProjectList(props: {
   onOpenProjectTab: (id: string) => void
 }) {
   return (
-    <ul
-      class={css({
-        listStyle: "none",
-        margin: "0",
-        padding: "0",
-        minHeight: "0",
-        overflowY: "auto",
-        "& > li + li": {
-          borderTop: "1px solid",
-          borderColor: "border",
-        },
-      })}
-    >
+    <ul class={styles.list}>
       {props.projects.map((project) => (
         <li key={project.path}>
           <ProjectListRow
@@ -464,86 +250,29 @@ function ProjectListRow(props: {
 }) {
   return (
     <article
-      class={css({
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: "12px",
-        padding: "14px 16px",
-        borderInlineStart: "2px solid",
-        borderInlineStartColor: props.isSelected ? "accent" : "transparent",
-        backgroundColor: props.isSelected ? "surface" : "transparent",
-      })}
+      class={styles.row}
+      style={{
+        borderInlineStartColor: props.isSelected ? token.var("colors.accent") : "transparent",
+        backgroundColor: props.isSelected ? token.var("colors.surface") : "transparent",
+      }}
     >
       <button
-        class={css({
-          display: "grid",
-          gap: "4px",
-          minWidth: "0",
-          padding: "0",
-          border: "none",
-          background: "transparent",
-          color: "inherit",
-          textAlign: "left",
-          cursor: "pointer",
-        })}
+        class={styles.rowButton}
         type="button"
         onClick={() => {
           props.onSelect(props.project.path)
         }}
       >
-        <div
-          class={css({
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: "8px",
-          })}
-        >
-          <h3
-            class={css({
-              color: "text",
-              fontSize: "0.96rem",
-              fontWeight: "600",
-              lineHeight: "1.4",
-            })}
-          >
-            {props.project.name}
-          </h3>
-          {props.isSelected ? (
-            <span
-              class={css({
-                color: "accentStrong",
-                fontSize: "0.78rem",
-                fontWeight: "600",
-              })}
-            >
-              Selected
-            </span>
-          ) : null}
+        <div class={styles.rowHeader}>
+          <h3 class={styles.rowTitle}>{props.project.name}</h3>
+          {props.isSelected ? <span class={styles.selectedBadge}>Selected</span> : null}
         </div>
-        <p
-          class={css({
-            color: "muted",
-            fontFamily: '"SF Mono", "JetBrains Mono", "Menlo", monospace',
-            fontSize: "0.8rem",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          })}
-        >
-          {props.project.path}
-        </p>
+        <p class={styles.path}>{props.project.path}</p>
       </button>
 
-      <div
-        class={css({
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-        })}
-      >
+      <div class={styles.rowActions}>
         <button
-          class={cx(buttonBaseClass, secondaryButtonClass)}
+          class={cx(styles.buttonBase, styles.secondaryButton)}
           type="button"
           onClick={(event) => {
             event.stopPropagation()
@@ -554,7 +283,7 @@ function ProjectListRow(props: {
           Open tab
         </button>
         <button
-          class={cx(buttonBaseClass, dangerButtonClass)}
+          class={cx(styles.buttonBase, styles.dangerButton)}
           type="button"
           onClick={(event) => {
             event.stopPropagation()
@@ -572,28 +301,9 @@ function ProjectListRow(props: {
 /** Renders one small inspector card. */
 function InfoCard(props: { label: string; value: string }) {
   return (
-    <dl
-      class={css({
-        display: "grid",
-        gap: "4px",
-        padding: "12px",
-        borderRadius: "12px",
-        border: "1px solid",
-        borderColor: "border",
-      })}
-    >
-      <dt class={quietLabelClass}>{props.label}</dt>
-      <dd
-        class={css({
-          margin: "0",
-          color: "text",
-          fontWeight: "600",
-          lineHeight: "1.6",
-          wordBreak: "break-word",
-        })}
-      >
-        {props.value}
-      </dd>
+    <dl class={styles.infoCard}>
+      <dt class={styles.quietLabel}>{props.label}</dt>
+      <dd class={styles.infoValue}>{props.value}</dd>
     </dl>
   )
 }
@@ -620,63 +330,34 @@ function AddProjectDialog(props: {
       }}
     >
       <Portal>
-        <Dialog.Backdrop class={dialogOverlayClass} />
-        <Dialog.Positioner class={dialogPositionerClass}>
-          <Dialog.Content class={dialogContentClass}>
+        <Dialog.Backdrop class={styles.dialogOverlay} />
+        <Dialog.Positioner class={styles.dialogPositioner}>
+          <Dialog.Content class={styles.dialogContent}>
             <form
-              class={css({
-                display: "grid",
-                gap: "16px",
-              })}
+              class={styles.form}
               onSubmit={(event) => {
                 event.preventDefault()
                 props.addProject()
               }}
             >
-              <header
-                class={css({
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: "16px",
-                })}
-              >
-                <div class={css({ display: "grid", gap: "6px" })}>
-                  <Dialog.Title class={titleClass}>Add project</Dialog.Title>
-                  <Dialog.Description class={bodyClass}>
+              <header class={styles.dialogHeader}>
+                <div class={styles.dialogHeaderCopy}>
+                  <Dialog.Title class={styles.title}>Add project</Dialog.Title>
+                  <Dialog.Description class={styles.body}>
                     Choose one local root and optionally adjust the display name.
                   </Dialog.Description>
                 </div>
                 <Dialog.CloseTrigger asChild>
-                  <button
-                    class={css({
-                      display: "grid",
-                      placeItems: "center",
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "10px",
-                      border: "1px solid",
-                      borderColor: "border",
-                      backgroundColor: "background",
-                      color: "muted",
-                      cursor: "pointer",
-                    })}
-                    type="button"
-                  >
+                  <button class={styles.closeButton} type="button">
                     <X size={15} strokeWidth={2.2} />
                   </button>
                 </Dialog.CloseTrigger>
               </header>
 
-              <label
-                class={css({
-                  display: "grid",
-                  gap: "6px",
-                })}
-              >
-                <span class={labelClass}>Project path</span>
+              <label class={styles.field}>
+                <span class={styles.label}>Project path</span>
                 <input
-                  class={textInputClass}
+                  class={styles.textInput}
                   placeholder="/Users/alec/dev/goddard-ai/app"
                   type="text"
                   value={props.draftPath}
@@ -686,14 +367,9 @@ function AddProjectDialog(props: {
                 />
               </label>
 
-              <div
-                class={css({
-                  display: "flex",
-                  justifyContent: "flex-start",
-                })}
-              >
+              <div class={styles.browseRow}>
                 <button
-                  class={cx(buttonBaseClass, secondaryButtonClass)}
+                  class={cx(styles.buttonBase, styles.secondaryButton)}
                   type="button"
                   onClick={() => {
                     void props.browseForProject()
@@ -704,15 +380,10 @@ function AddProjectDialog(props: {
                 </button>
               </div>
 
-              <label
-                class={css({
-                  display: "grid",
-                  gap: "6px",
-                })}
-              >
-                <span class={labelClass}>Display name</span>
+              <label class={styles.field}>
+                <span class={styles.label}>Display name</span>
                 <input
-                  class={textInputClass}
+                  class={styles.textInput}
                   placeholder="Derived from folder name"
                   type="text"
                   value={props.draftName}
@@ -722,20 +393,14 @@ function AddProjectDialog(props: {
                 />
               </label>
 
-              <div
-                class={css({
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: "8px",
-                })}
-              >
+              <div class={styles.dialogActions}>
                 <Dialog.CloseTrigger asChild>
-                  <button class={cx(buttonBaseClass, secondaryButtonClass)} type="button">
+                  <button class={cx(styles.buttonBase, styles.secondaryButton)} type="button">
                     Cancel
                   </button>
                 </Dialog.CloseTrigger>
                 <button
-                  class={cx(buttonBaseClass, primaryButtonClass)}
+                  class={cx(styles.buttonBase, styles.primaryButton)}
                   disabled={!props.canAddProject}
                   type="button"
                   onClick={() => {

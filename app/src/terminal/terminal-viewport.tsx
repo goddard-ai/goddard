@@ -1,44 +1,8 @@
-import { css, cx } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
+import { cx } from "@goddard-ai/styled-system/css"
 import { useEffect, useRef } from "preact/hooks"
 
 import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model.ts"
-
-const VIEWPORT_PADDING_PX = 18
-
-const frameClass = css({
-  display: "flex",
-  minHeight: "280px",
-  minWidth: "0",
-  borderRadius: "24px",
-  border: "1px solid",
-  borderColor: "border",
-  overflow: "hidden",
-  background: `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.panel")} 100%)`,
-  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.14)",
-})
-
-const viewportClass = css({
-  flex: "1 1 auto",
-  minWidth: "0",
-  minHeight: "0",
-  overflow: "auto",
-  padding: `${VIEWPORT_PADDING_PX}px`,
-  outline: "none",
-  whiteSpace: "pre",
-  userSelect: "text",
-  cursor: "text",
-  scrollbarWidth: "thin",
-  scrollbarColor: `${token.var("colors.accentStrong")} transparent`,
-  _focusVisible: {
-    boxShadow: `inset 0 0 0 2px color-mix(in srgb, ${token.var("colors.accent")} 26%, transparent)`,
-  },
-})
-
-const rowClass = css({
-  display: "block",
-  minWidth: "fit-content",
-})
+import styles from "./terminal-viewport.style.ts"
 
 export function TerminalViewport(props: {
   terminal: TerminalViewportModel
@@ -55,10 +19,10 @@ export function TerminalViewport(props: {
   }, [props.terminal])
 
   return (
-    <div class={cx(frameClass, props.class)}>
+    <div class={cx(styles.frame, props.class)}>
       <div
         aria-label={props.ariaLabel ?? "Terminal viewport"}
-        class={viewportClass}
+        class={styles.viewport}
         onFocus={() => {
           props.terminal.notifyFocus()
         }}
@@ -100,7 +64,7 @@ export function TerminalViewport(props: {
         tabIndex={0}
       >
         {props.terminal.viewRows.map((row) => (
-          <div class={rowClass} key={row.key}>
+          <div class={styles.row} key={row.key}>
             {row.segments.length === 0 ? " " : null}
             {row.segments.map((segment) => (
               <span key={segment.key} style={segment.style}>

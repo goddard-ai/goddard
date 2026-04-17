@@ -12,6 +12,7 @@ type AppCommandDefinition = RunnableInput & {
   /** Optional icon for the command menu. */
   icon?: preact.FunctionComponent<{
     className?: string
+    style?: preact.CSSProperties
     size?: number
     strokeWidth?: number
     "aria-hidden"?: boolean

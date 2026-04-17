@@ -1,5 +1,6 @@
 /** Shared custom dropdown used by the launch-session selectors. */
 import { css, cx } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 import { Check, ChevronDown, Circle, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
@@ -17,59 +18,7 @@ import {
   inputMenuLabelClass,
   inputMenuListClass,
 } from "./menu-styles.ts"
-
-const fieldClass = css({
-  display: "grid",
-  gap: "6px",
-})
-
-const labelClass = css({
-  color: "text",
-  fontSize: "0.84rem",
-  fontWeight: "600",
-})
-
-const triggerClass = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  alignItems: "center",
-  gap: "10px",
-  width: "100%",
-  minHeight: "42px",
-  padding: "10px 12px",
-  borderRadius: "14px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "background",
-  color: "text",
-  cursor: "pointer",
-  textAlign: "left",
-  outline: "none",
-  transition:
-    "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _focusVisible: {
-    borderColor: "accentStrong",
-    boxShadow: "0 0 0 3px color-mix(in srgb, var(--colors-accent) 16%, transparent)",
-  },
-  _disabled: {
-    cursor: "not-allowed",
-    opacity: "0.56",
-  },
-})
-
-const triggerLabelClass = css({
-  minWidth: "0",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: "0.9rem",
-  fontWeight: "600",
-})
-
-const triggerPlaceholderClass = css({
-  color: "muted",
-  fontWeight: "500",
-})
+import styles from "./select-menu.style.ts"
 
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
@@ -234,11 +183,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
   const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
 
   return (
-    <label class={fieldClass}>
-      <span class={labelClass}>{props.label}</span>
+    <label class={styles.field}>
+      <span class={styles.label}>{props.label}</span>
       <button
         ref={triggerRef}
-        class={triggerClass}
+        class={styles.trigger}
         disabled={props.disabled}
         type="button"
         onClick={() => {
@@ -269,17 +218,17 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
           }
         }}
       >
-        <span class={cx(triggerLabelClass, !selectedItem && triggerPlaceholderClass)}>
+        <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
           {selectedItem?.label ?? props.placeholder}
         </span>
         <ChevronDown
-          class={css({
-            color: props.open ? "text" : "muted",
-            transition: "transform 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-            transform: props.open ? "rotate(180deg)" : "rotate(0deg)",
-          })}
+          class={styles.chevron}
           size={16}
           strokeWidth={2.2}
+          style={{
+            color: props.open ? token.var("colors.text") : token.var("colors.muted"),
+            transform: props.open ? "rotate(180deg)" : "rotate(0deg)",
+          }}
         />
       </button>
 

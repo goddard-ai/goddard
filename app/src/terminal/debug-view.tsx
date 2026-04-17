@@ -1,92 +1,11 @@
-import { css } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
 import { useListener, useSigma } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
+import styles from "./debug-view.style.ts"
 import { TerminalViewportModel, type TerminalViewportChunk } from "./terminal-viewport-model.ts"
 import { TerminalViewport } from "./terminal-viewport.tsx"
 
 const terminalDebugPrompt = "debug@goddard:~/workspace$ "
-
-const debugPageClass = css({
-  display: "grid",
-  gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: "18px",
-  height: "100%",
-  padding: "24px",
-  background:
-    `radial-gradient(circle at top right, color-mix(in srgb, ${token.var("colors.accent")} 14%, transparent), transparent 30%), ` +
-    `linear-gradient(180deg, ${token.var("colors.background")} 0%, ${token.var("colors.surface")} 100%)`,
-})
-
-const debugHeaderClass = css({
-  display: "grid",
-  gap: "14px",
-  padding: "24px 26px",
-  borderRadius: "26px",
-  border: "1px solid",
-  borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
-  boxShadow: "0 22px 56px rgba(118, 133, 150, 0.12)",
-})
-
-const debugEyebrowClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  width: "fit-content",
-  padding: "7px 11px",
-  borderRadius: "999px",
-  backgroundColor: "surface",
-  color: "accentStrong",
-  fontSize: "0.72rem",
-  fontWeight: "720",
-  letterSpacing: "0.15em",
-  textTransform: "uppercase",
-})
-
-const debugTitleClass = css({
-  color: "text",
-  fontSize: "1.6rem",
-  fontWeight: "760",
-  letterSpacing: "-0.03em",
-  lineHeight: "1.08",
-})
-
-const debugBodyClass = css({
-  maxWidth: "76ch",
-  color: "muted",
-  fontSize: "0.95rem",
-  lineHeight: "1.72",
-})
-
-const debugMetaRowClass = css({
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "10px",
-})
-
-const debugMetaChipClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "8px 12px",
-  borderRadius: "999px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "surface",
-  color: "text",
-  fontFamily: '"IBM Plex Mono", "SFMono-Regular", "Menlo", monospace',
-  fontSize: "0.76rem",
-})
-
-const debugCanvasClass = css({
-  minHeight: "0",
-  overflow: "hidden",
-  borderRadius: "28px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "background",
-  boxShadow: "0 28px 64px rgba(118, 133, 150, 0.14)",
-})
 
 /** Props for the standalone terminal debug view. */
 export type TerminalDebugViewProps = Record<string, never>
@@ -294,22 +213,22 @@ export function TerminalDebugView(_props: TerminalDebugViewProps) {
   })
 
   return (
-    <div class={debugPageClass}>
-      <section class={debugHeaderClass}>
-        <div class={debugEyebrowClass}>Debug Surface</div>
-        <h1 class={debugTitleClass}>Terminal</h1>
-        <p class={debugBodyClass}>
+    <div class={styles.page}>
+      <section class={styles.header}>
+        <div class={styles.eyebrow}>Debug Surface</div>
+        <h1 class={styles.title}>Terminal</h1>
+        <p class={styles.body}>
           This view exercises the real terminal viewport and headless xterm model with a local
           fixture shell. It is intentionally disconnected from Bun-side PTY ownership so input echo,
           ANSI styling, and resize behavior can be tuned in isolation first.
         </p>
-        <div class={debugMetaRowClass}>
-          <div class={debugMetaChipClass}>{`${terminalSize.cols} x ${terminalSize.rows}`}</div>
-          <div class={debugMetaChipClass}>{`last command: ${lastCommand ?? "none"}`}</div>
-          <div class={debugMetaChipClass}>mode: fixture shell</div>
+        <div class={styles.metaRow}>
+          <div class={styles.metaChip}>{`${terminalSize.cols} x ${terminalSize.rows}`}</div>
+          <div class={styles.metaChip}>{`last command: ${lastCommand ?? "none"}`}</div>
+          <div class={styles.metaChip}>mode: fixture shell</div>
         </div>
       </section>
-      <section class={debugCanvasClass}>
+      <section class={styles.canvas}>
         <TerminalViewport ariaLabel="Terminal debug viewport" terminal={terminal} />
       </section>
     </div>

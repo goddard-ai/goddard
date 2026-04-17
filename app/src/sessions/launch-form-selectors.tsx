@@ -1,34 +1,11 @@
-import { css } from "@goddard-ai/styled-system/css"
 import { Bot, Command, Folder, GitBranch } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsx"
+import styles from "./launch-form-selectors.style.ts"
 import { flattenConfigOptionValues, type SessionLaunchFormState } from "./launch-form-state.ts"
-
-export const sessionLaunchSectionClass = css({
-  display: "grid",
-  gap: "14px",
-})
-
-export const sessionLaunchSelectorGridClass = css({
-  display: "grid",
-  gap: "12px",
-  "@media (min-width: 720px)": {
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  },
-})
-
-export const sessionLaunchAdapterCardClass = css({
-  display: "grid",
-  gap: "4px",
-  padding: "12px",
-  borderRadius: "14px",
-  border: "1px solid",
-  borderColor: "border",
-  backgroundColor: "background",
-})
 
 export function SessionLaunchLoadingSelect(props: { label: string }) {
   return (
@@ -167,7 +144,7 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
 
   return (
     <>
-      <div class={sessionLaunchSelectorGridClass}>
+      <div class={styles.grid}>
         <SessionInputSelect
           disabled={!form.draftProjectPath.value}
           filterable={false}
@@ -201,7 +178,7 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           }}
         />
       </div>
-      <div class={sessionLaunchSelectorGridClass}>
+      <div class={styles.grid}>
         <SessionInputSelect
           disabled={modelItems.length === 0}
           filterable={true}

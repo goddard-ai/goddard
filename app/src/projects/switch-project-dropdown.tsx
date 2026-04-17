@@ -1,9 +1,9 @@
 import { Popover } from "@ark-ui/react/popover"
-import { css } from "@goddard-ai/styled-system/css"
 import { Search } from "lucide-react"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import type { ProjectRecord } from "./project-registry.ts"
+import styles from "./switch-project-dropdown.style.ts"
 
 type SwitchProjectItem =
   | {
@@ -47,11 +47,14 @@ export function SwitchProjectDropdown(props: {
   const filteredProjects = props.projects.filter((project) => projectMatchesSearch(project, search))
   const items: SwitchProjectItem[] =
     search.trim().length === 0
-      ? [{ id: "open-folder", kind: "open-folder" }, ...filteredProjects.map((project) => ({
-          id: project.path,
-          kind: "project" as const,
-          project,
-        }))]
+      ? [
+          { id: "open-folder", kind: "open-folder" },
+          ...filteredProjects.map((project) => ({
+            id: project.path,
+            kind: "project" as const,
+            project,
+          })),
+        ]
       : filteredProjects.map((project) => ({
           id: project.path,
           kind: "project" as const,
@@ -115,117 +118,19 @@ export function SwitchProjectDropdown(props: {
       }}
     >
       <Popover.Trigger asChild>
-        <button
-          aria-label="Switch project"
-          class={css({
-            display: "inline-flex",
-            alignItems: "center",
-            width: "100%",
-            height: "28px",
-            paddingInline: "12px",
-            border: "none",
-            borderRadius: "6px",
-            backgroundColor: "panel",
-            color: "muted",
-            cursor: "pointer",
-            textAlign: "left",
-            transition:
-              "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-            _hover: {
-              backgroundColor: "surface",
-              color: "text",
-            },
-            _focusVisible: {
-              outline: "2px solid",
-              outlineColor: "accentStrong",
-              outlineOffset: "2px",
-            },
-          })}
-          type="button"
-        >
-          <span
-            class={css({
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              fontSize: "13px",
-              fontWeight: "400",
-              letterSpacing: "0.02em",
-              lineHeight: "1.21",
-            })}
-          >
-            {props.activeProjectLabel}
-          </span>
+        <button aria-label="Switch project" class={styles.trigger} type="button">
+          <span class={styles.triggerLabel}>{props.activeProjectLabel}</span>
         </button>
       </Popover.Trigger>
 
       <Popover.Positioner>
-        <Popover.Content
-          class={css({
-            display: "grid",
-            gap: "8px",
-            width: "var(--reference-width)",
-            minWidth: "320px",
-            marginTop: "10px",
-            padding: "10px",
-            border: "1px solid",
-            borderColor: "border",
-            borderRadius: "14px",
-            backgroundColor: "background",
-            outline: "none",
-          })}
-        >
-          <label
-            class={css({
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              minHeight: "38px",
-              paddingInline: "12px",
-              borderRadius: "10px",
-              border: "1px solid",
-              borderColor: "border",
-              backgroundColor: "surface",
-              color: "muted",
-              transition:
-                "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-              _focusWithin: {
-                borderColor: "accent",
-                backgroundColor: "surface",
-              },
-            })}
-          >
-            <span
-              class={css({
-                position: "absolute",
-                width: "1px",
-                height: "1px",
-                padding: "0",
-                margin: "-1px",
-                overflow: "hidden",
-                clip: "rect(0, 0, 0, 0)",
-                whiteSpace: "nowrap",
-                border: "0",
-              })}
-            >
-              Search projects
-            </span>
+        <Popover.Content class={styles.content}>
+          <label class={styles.searchField}>
+            <span class={styles.srOnly}>Search projects</span>
             <Search aria-hidden={true} size={16} strokeWidth={2.1} />
             <input
               ref={inputRef}
-              class={css({
-                width: "100%",
-                height: "28px",
-                border: "none",
-                outline: "none",
-                backgroundColor: "transparent",
-                color: "text",
-                fontSize: "0.9rem",
-                fontWeight: "600",
-                "&::placeholder": {
-                  color: "muted",
-                },
-              })}
+              class={styles.searchInput}
               placeholder="Search projects"
               value={search}
               onInput={(event) => {
@@ -257,17 +162,7 @@ export function SwitchProjectDropdown(props: {
           </label>
 
           {items.length > 0 ? (
-            <ul
-              class={css({
-                display: "grid",
-                gap: "2px",
-                maxHeight: "280px",
-                overflowY: "auto",
-                listStyle: "none",
-                padding: "0",
-                margin: "0",
-              })}
-            >
+            <ul class={styles.list}>
               {items.map((item, index) => {
                 const isHighlighted = highlightedIndex === index
 
@@ -278,30 +173,7 @@ export function SwitchProjectDropdown(props: {
                         ref={(element) => {
                           itemRefs.current[item.id] = element
                         }}
-                        class={css({
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          gap: "12px",
-                          width: "100%",
-                          minHeight: "44px",
-                          padding: "8px 10px",
-                          border: "none",
-                          borderRadius: "10px",
-                          backgroundColor: "transparent",
-                          color: "text",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          transition: "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-                          _focusVisible: {
-                            outline: "2px solid",
-                            outlineColor: "accentStrong",
-                            outlineOffset: "2px",
-                          },
-                          "&[data-highlighted='true']": {
-                            backgroundColor: "surface",
-                          },
-                        })}
+                        class={styles.item}
                         data-highlighted={isHighlighted ? "true" : "false"}
                         type="button"
                         onMouseEnter={() => {
@@ -311,22 +183,9 @@ export function SwitchProjectDropdown(props: {
                           activateItem(item)
                         }}
                       >
-                        <span class={css({ display: "grid", gap: "2px", minWidth: "0" })}>
-                          <span
-                            class={css({
-                              fontSize: "0.88rem",
-                              fontWeight: "650",
-                            })}
-                          >
-                            Open folder…
-                          </span>
-                          <span
-                            class={css({
-                              color: "muted",
-                              fontSize: "0.76rem",
-                              lineHeight: "1.4",
-                            })}
-                          >
+                        <span class={styles.itemBody}>
+                          <span class={styles.itemTitle}>Open folder…</span>
+                          <span class={styles.itemDetail}>
                             Add a local project from your filesystem.
                           </span>
                         </span>
@@ -343,30 +202,7 @@ export function SwitchProjectDropdown(props: {
                       ref={(element) => {
                         itemRefs.current[item.id] = element
                       }}
-                      class={css({
-                        display: "flex",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                        gap: "12px",
-                        width: "100%",
-                        minHeight: "44px",
-                        padding: "8px 10px",
-                        border: "none",
-                        borderRadius: "10px",
-                        backgroundColor: "transparent",
-                        color: "text",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        transition: "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-                        _focusVisible: {
-                          outline: "2px solid",
-                          outlineColor: "accentStrong",
-                          outlineOffset: "2px",
-                        },
-                        "&[data-highlighted='true']": {
-                          backgroundColor: "surface",
-                        },
-                      })}
+                      class={styles.item}
                       data-highlighted={isHighlighted ? "true" : "false"}
                       type="button"
                       onMouseEnter={() => {
@@ -376,60 +212,19 @@ export function SwitchProjectDropdown(props: {
                         activateItem(item)
                       }}
                     >
-                      <span class={css({ display: "grid", gap: "2px", minWidth: "0" })}>
-                        <span
-                          class={css({
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            fontSize: "0.88rem",
-                            fontWeight: "650",
-                          })}
-                        >
-                          {item.project.name}
-                        </span>
-                        <span
-                          class={css({
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            color: "muted",
-                            fontSize: "0.76rem",
-                            lineHeight: "1.4",
-                          })}
-                        >
-                          {item.project.path}
-                        </span>
+                      <span class={styles.itemBody}>
+                        <span class={styles.itemTitleEllipsis}>{item.project.name}</span>
+                        <span class={styles.itemDetailEllipsis}>{item.project.path}</span>
                       </span>
 
-                      {isActiveProject ? (
-                        <span
-                          class={css({
-                            color: "accentStrong",
-                            fontSize: "0.72rem",
-                            fontWeight: "600",
-                            whiteSpace: "nowrap",
-                          })}
-                        >
-                          Active
-                        </span>
-                      ) : null}
+                      {isActiveProject ? <span class={styles.activeBadge}>Active</span> : null}
                     </button>
                   </li>
                 )
               })}
             </ul>
           ) : (
-            <p
-              class={css({
-                margin: "0",
-                padding: "10px",
-                color: "muted",
-                fontSize: "0.84rem",
-              })}
-            >
-              No matching projects.
-            </p>
+            <p class={styles.empty}>No matching projects.</p>
           )}
         </Popover.Content>
       </Popover.Positioner>

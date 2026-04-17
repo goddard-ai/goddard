@@ -1,6 +1,5 @@
 /** Lexical decorator node and shared chip data used by the session chat composer. */
-import { css, cx } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
+import { cx } from "@goddard-ai/styled-system/css"
 import type {
   DOMConversionMap,
   DOMExportOutput,
@@ -14,31 +13,9 @@ import { $applyNodeReplacement, DecoratorNode } from "lexical"
 import { BookOpen, Command, File, Folder } from "lucide-react"
 import type { JSX } from "preact"
 
+import styles from "./composer-chip-node.style.ts"
+
 const CHIP_DATA_ATTRIBUTE = "data-goddard-composer-chip"
-
-const chipClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "8px",
-  minHeight: "30px",
-  paddingInline: "10px",
-  borderRadius: "999px",
-  border: "1px solid",
-  borderColor: "border",
-  background: `linear-gradient(180deg, ${token.var("colors.surface")} 0%, ${token.var("colors.background")} 100%)`,
-  color: "text",
-  boxShadow: `0 10px 20px color-mix(in srgb, ${token.var("colors.accent")} 10%, transparent)`,
-})
-
-const chipLabelClass = css({
-  fontSize: "0.84rem",
-  fontWeight: "680",
-  lineHeight: "1.2",
-})
-
-const chipMutedClass = css({
-  color: "muted",
-})
 
 /** Filesystem-backed chip data inserted for one `@` selection. */
 export type ComposerFilesystemChipData = {
@@ -168,11 +145,11 @@ function ChipIcon(props: { chip: ComposerChipData }) {
 /** Visual chip surface rendered inline by the Lexical decorator node. */
 function ComposerChipView(props: { chip: ComposerChipData }) {
   return (
-    <span class={chipClass} data-chip-kind={props.chip.kind}>
-      <span class={cx(chipMutedClass)} aria-hidden="true">
+    <span class={styles.chip} data-chip-kind={props.chip.kind}>
+      <span class={cx(styles.muted)} aria-hidden="true">
         <ChipIcon chip={props.chip} />
       </span>
-      <span class={chipLabelClass}>
+      <span class={styles.label}>
         {props.chip.kind === "slash_command" ? `/${props.chip.label}` : props.chip.label}
       </span>
     </span>

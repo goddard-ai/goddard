@@ -1,6 +1,5 @@
 import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
 import { Portal } from "@ark-ui/react/portal"
-import { css, cx } from "@goddard-ai/styled-system/css"
 import { useModel } from "@preact/signals"
 import { X } from "lucide-react"
 import { useEffect } from "preact/hooks"
@@ -9,6 +8,7 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
 import { createSession } from "./actions.ts"
+import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
 import { SessionLaunchForm } from "./launch-form.tsx"
 import { getSessionDisplayTitle } from "./presentation.ts"
@@ -107,90 +107,12 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
 
   return (
     <Portal>
-      <Dialog.Backdrop
-        class={css({
-          position: "fixed",
-          inset: "0",
-          backgroundColor: "overlay",
-          backdropFilter: "blur(6px)",
-          opacity: "1",
-          transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-          zIndex: "60",
-          "@starting-style": {
-            opacity: "0",
-          },
-        })}
-      />
-      <Dialog.Positioner
-        class={css({
-          position: "fixed",
-          inset: "0",
-          display: "grid",
-          placeItems: "center",
-          padding: "16px",
-          zIndex: "61",
-        })}
-      >
-        <Dialog.Content
-          class={css({
-            width: "min(880px, calc(100vw - 32px))",
-            maxHeight: "calc(100vh - 32px)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px",
-            overflowY: "auto",
-            padding: "18px",
-            borderRadius: "20px",
-            border: "1px solid",
-            borderColor: "border",
-            backgroundColor: "panel",
-            opacity: "1",
-            transform: "translateY(0)",
-            transition:
-              "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-            outline: "none",
-            "@starting-style": {
-              opacity: "0",
-              transform: "translateY(8px)",
-            },
-          })}
-        >
-          <Dialog.Title
-            class={css({
-              position: "absolute",
-              width: "1px",
-              height: "1px",
-              padding: "0",
-              margin: "-1px",
-              overflow: "hidden",
-              clip: "rect(0, 0, 0, 0)",
-              whiteSpace: "nowrap",
-              border: "0",
-            })}
-          >
-            Launch session
-          </Dialog.Title>
+      <Dialog.Backdrop class={styles.backdrop} />
+      <Dialog.Positioner class={styles.positioner}>
+        <Dialog.Content class={styles.content}>
+          <Dialog.Title class={styles.title}>Launch session</Dialog.Title>
           <Dialog.CloseTrigger asChild>
-            <button
-              class={cx(
-                css({
-                  position: "absolute",
-                  top: "12px",
-                  right: "12px",
-                  display: "grid",
-                  placeItems: "center",
-                  width: "32px",
-                  height: "32px",
-                  borderRadius: "10px",
-                  border: "1px solid",
-                  borderColor: "border",
-                  backgroundColor: "background",
-                  color: "muted",
-                  cursor: "pointer",
-                }),
-              )}
-              type="button"
-            >
+            <button class={styles.closeButton} type="button">
               <X size={16} strokeWidth={2.2} />
             </button>
           </Dialog.CloseTrigger>
