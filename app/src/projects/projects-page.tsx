@@ -3,7 +3,6 @@ import { cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
 import { ArrowUpRight, FolderSearch2, Plus, Trash2, X } from "lucide-react"
-import { useEffect } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
@@ -18,29 +17,26 @@ export function ProjectsPage() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
+
   const selectedProjectPath = useSignal<string | null>(projectRegistry.projectList[0]?.path ?? null)
   const isAddDialogOpen = useSignal(false)
   const draftPath = useSignal("")
   const draftName = useSignal("")
   const lastSuggestedName = useSignal<string | null>(null)
+
   const projects = projectRegistry.projectList
-  const selectedProject = selectedProjectPath.value
-    ? lookupProject(projectRegistry, selectedProjectPath.value)
+  const resolvedSelectedProjectPath =
+    selectedProjectPath.value && projectRegistry.projectsByPath[selectedProjectPath.value]
+      ? selectedProjectPath.value
+      : (projects[0]?.path ?? null)
+  const selectedProject = resolvedSelectedProjectPath
+    ? lookupProject(projectRegistry, resolvedSelectedProjectPath)
     : null
+  const draftProjectPath = draftPath.value.trim()
+  const draftProjectName = draftName.value.trim()
   const derivedProjectName = deriveProjectName(draftPath.value)
   const canAddProject =
-    draftPath.value.trim().length > 0 &&
-    (draftName.value.trim().length > 0 || derivedProjectName.length > 0)
-
-  useEffect(() => {
-    if (!selectedProjectPath.value && projects[0]) {
-      selectedProjectPath.value = projects[0].path
-    }
-
-    if (selectedProjectPath.value && !projectRegistry.projectsByPath[selectedProjectPath.value]) {
-      selectedProjectPath.value = projects[0]?.path ?? null
-    }
-  }, [projectRegistry, projects, selectedProjectPath])
+    draftProjectPath.length > 0 && (draftProjectName.length > 0 || derivedProjectName.length > 0)
 
   function resetDraft(): void {
     draftPath.value = ""
@@ -48,9 +44,29 @@ export function ProjectsPage() {
     lastSuggestedName.value = null
   }
 
+  function openAddDialog(): void {
+    resetDraft()
+    isAddDialogOpen.value = true
+  }
+
   function closeAddDialog(): void {
     isAddDialogOpen.value = false
     resetDraft()
+  }
+
+  function updateDraftPath(value: string): void {
+    draftPath.value = value
+    const suggestedName = deriveProjectName(value)
+
+    if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
+      draftName.value = suggestedName
+    }
+
+    lastSuggestedName.value = suggestedName
+  }
+
+  function updateDraftName(value: string): void {
+    draftName.value = value
   }
 
   async function browseForProject(): Promise<void> {
@@ -60,34 +76,43 @@ export function ProjectsPage() {
       return
     }
 
-    draftPath.value = selectedPath
-    const suggestedName = deriveProjectName(selectedPath)
+    updateDraftPath(selectedPath)
+  }
 
-    if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
-      draftName.value = suggestedName
-    }
+  function selectProject(projectPath: string): void {
+    selectedProjectPath.value = projectPath
+  }
 
-    lastSuggestedName.value = suggestedName
+  function removeProject(projectPath: string): void {
+    projectContext.removeProject(projectPath)
+    projectRegistry.removeProject(projectPath)
+  }
+
+  function openProjectInTab(projectPath: string): void {
+    openProjectTab({
+      projectContext,
+      projectPath,
+      projectRegistry,
+      workbenchTabSet,
+    })
   }
 
   function addProject(): void {
-    const projectPath = draftPath.value.trim()
-
-    if (projectPath.length === 0) {
+    if (draftProjectPath.length === 0) {
       return
     }
 
-    const projectName = draftName.value.trim() || deriveProjectName(projectPath)
+    const projectName = draftProjectName || deriveProjectName(draftProjectPath)
 
     if (projectName.length === 0) {
       return
     }
 
     projectRegistry.addProject({
-      path: projectPath,
+      path: draftProjectPath,
       name: projectName,
     })
-    selectedProjectPath.value = projectPath
+    selectedProjectPath.value = draftProjectPath
     closeAddDialog()
   }
 
@@ -105,8 +130,7 @@ export function ProjectsPage() {
             class={cx(styles.buttonBase, styles.primaryButton)}
             type="button"
             onClick={() => {
-              resetDraft()
-              isAddDialogOpen.value = true
+              openAddDialog()
             }}
           >
             <Plus size={16} strokeWidth={2.2} />
@@ -126,8 +150,7 @@ export function ProjectsPage() {
                   class={cx(styles.buttonBase, styles.primaryButton)}
                   type="button"
                   onClick={() => {
-                    resetDraft()
-                    isAddDialogOpen.value = true
+                    openAddDialog()
                   }}
                 >
                   <Plus size={16} strokeWidth={2.2} />
@@ -138,23 +161,11 @@ export function ProjectsPage() {
           </div>
         ) : (
           <ProjectList
-            onOpenProjectTab={(projectPath) => {
-              openProjectTab({
-                projectContext,
-                projectPath,
-                projectRegistry,
-                workbenchTabSet,
-              })
-            }}
-            onRemove={(projectPath) => {
-              projectContext.removeProject(projectPath)
-              projectRegistry.removeProject(projectPath)
-            }}
-            onSelect={(projectPath) => {
-              selectedProjectPath.value = projectPath
-            }}
+            onOpenProjectTab={openProjectInTab}
+            onRemove={removeProject}
+            onSelect={selectProject}
             projects={projects}
-            selectedProjectPath={selectedProjectPath.value}
+            selectedProjectPath={resolvedSelectedProjectPath}
           />
         )}
       </section>
@@ -189,19 +200,8 @@ export function ProjectsPage() {
         draftName={draftName.value}
         draftPath={draftPath.value}
         isAddDialogOpen={isAddDialogOpen.value}
-        onDraftNameInput={(value) => {
-          draftName.value = value
-        }}
-        onDraftPathInput={(value) => {
-          draftPath.value = value
-          const suggestedName = deriveProjectName(value)
-
-          if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
-            draftName.value = suggestedName
-          }
-
-          lastSuggestedName.value = suggestedName
-        }}
+        onDraftNameInput={updateDraftName}
+        onDraftPathInput={updateDraftPath}
       />
     </div>
   )
