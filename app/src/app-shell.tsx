@@ -393,10 +393,7 @@ export function AppShell() {
         tabStripRef={tabStrip.tabStripRef}
         tabs={workbenchTabSet.tabList}
       >
-        <AppShellWorkbenchContent
-          activeTabId={workbenchTabSet.activeTabId}
-          selectedNavId={navigation.selectedNavId}
-        />
+        <AppShellWorkbenchContent />
       </AppShellChrome>
       <CommandDialog
         command={AppCommand.navigation.openNewSessionDialog}

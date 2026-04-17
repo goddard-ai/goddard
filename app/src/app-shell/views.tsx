@@ -11,15 +11,18 @@ import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 const panelScrollCache = new Map<string, number>()
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
-export function AppShellWorkbenchContent(props: { activeTabId: string; selectedNavId: string }) {
+export function AppShellWorkbenchContent() {
+  const navigation = useNavigation()
+  const workbenchTabSet = useWorkbenchTabSet()
+
   return (
     <Suspense fallback={<div />}>
-      {props.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
-        <WorkbenchScrollPanel scrollKey={`main:${props.selectedNavId}`}>
+      {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id ? (
+        <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
           <MainWorkbenchView />
         </WorkbenchScrollPanel>
       ) : (
-        <WorkbenchScrollPanel scrollKey={`detail:${props.activeTabId}`}>
+        <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
           <WorkbenchTabPanel />
         </WorkbenchScrollPanel>
       )}
