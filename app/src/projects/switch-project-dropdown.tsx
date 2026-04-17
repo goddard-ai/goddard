@@ -2,7 +2,12 @@ import { Search } from "lucide-react"
 import { useListener } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
+import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { openProjectFromFilesystem, openProjectTab } from "./actions.ts"
+import { orderProjectsByRecentActivity } from "./project-context.ts"
 import type { ProjectRecord } from "./project-registry.ts"
+import { lookupProject } from "./project-registry.ts"
 import styles from "./switch-project-dropdown.style.ts"
 
 type SwitchProjectItem =
@@ -30,23 +35,27 @@ function projectMatchesSearch(project: ProjectRecord, search: string) {
 }
 
 /** Renders the header-anchored searchable project switcher dropdown. */
-export function SwitchProjectDropdown(props: {
-  activeProjectLabel: string
-  activeProjectPath: string | null
-  isOpen: boolean
-  onOpenChange: (isOpen: boolean) => void
-  onOpenFolder: () => Promise<void> | void
-  onSelectProject: (path: string) => void
-  projects: readonly ProjectRecord[]
-}) {
+export function SwitchProjectDropdown() {
+  const projectContext = useProjectContext()
+  const projectRegistry = useProjectRegistry()
+  const workbenchTabSet = useWorkbenchTabSet()
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const projects = orderProjectsByRecentActivity(
+    projectRegistry.projectList,
+    projectContext.recentProjectPaths,
+  )
+  const activeProject =
+    projectContext.activeProjectPath === null
+      ? null
+      : lookupProject(projectRegistry, projectContext.activeProjectPath)
 
-  const filteredProjects = props.projects.filter((project) => projectMatchesSearch(project, search))
+  const filteredProjects = projects.filter((project) => projectMatchesSearch(project, search))
   const items: SwitchProjectItem[] =
     search.trim().length === 0
       ? [
@@ -62,10 +71,62 @@ export function SwitchProjectDropdown(props: {
           kind: "project" as const,
           project,
         }))
-  const highlightedItemId = items[highlightedIndex]?.id ?? null
+  const highlightedItemIndex = items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
+  const highlightedItem = items[highlightedItemIndex]
+  const highlightedItemId = highlightedItem?.id ?? null
+
+  useAppCommand(AppCommand.navigation.openSwitchProject, () => {
+    setIsOpen(true)
+  })
+
+  useAppCommand(AppCommand.projects.openFolder, async () => {
+    await openFolderFromSwitcher()
+  })
+
+  async function openFolderFromSwitcher() {
+    setIsOpen(false)
+    await openProjectFromFilesystem({
+      projectContext,
+      projectRegistry,
+      workbenchTabSet,
+    })
+  }
+
+  function moveHighlightedIndex(delta: -1 | 1) {
+    setHighlightedIndex((currentIndex) => {
+      if (items.length === 0) {
+        return 0
+      }
+
+      const currentHighlightedIndex = Math.min(currentIndex, items.length - 1)
+
+      return delta > 0
+        ? Math.min(currentHighlightedIndex + 1, items.length - 1)
+        : Math.max(currentHighlightedIndex - 1, 0)
+    })
+  }
+
+  function activateItem(item: SwitchProjectItem | undefined) {
+    if (!item) {
+      return
+    }
+
+    if (item.kind === "open-folder") {
+      void openFolderFromSwitcher()
+      return
+    }
+
+    setIsOpen(false)
+    openProjectTab({
+      projectContext,
+      projectPath: item.project.path,
+      projectRegistry,
+      workbenchTabSet,
+    })
+  }
 
   useEffect(() => {
-    if (!props.isOpen) {
+    if (!isOpen) {
       setSearch("")
       setHighlightedIndex(0)
       return
@@ -76,45 +137,20 @@ export function SwitchProjectDropdown(props: {
       input?.focus()
       input?.setSelectionRange(input.value.length, input.value.length)
     })
-  }, [props.isOpen])
+  }, [isOpen])
 
   useEffect(() => {
-    setHighlightedIndex((currentIndex) => {
-      if (items.length === 0) {
-        return 0
-      }
-
-      return Math.min(currentIndex, items.length - 1)
-    })
-  }, [items.length])
-
-  useEffect(() => {
-    if (!props.isOpen || !highlightedItemId) {
+    if (!isOpen || !highlightedItemId) {
       return
     }
 
     itemRefs.current[highlightedItemId]?.scrollIntoView({
       block: "nearest",
     })
-  }, [highlightedItemId, props.isOpen])
-
-  function activateItem(item: SwitchProjectItem | undefined) {
-    if (!item) {
-      return
-    }
-
-    props.onOpenChange(false)
-
-    if (item.kind === "open-folder") {
-      void props.onOpenFolder()
-      return
-    }
-
-    props.onSelectProject(item.project.path)
-  }
+  }, [highlightedItemId, isOpen])
 
   useListener(document, "mousedown", (event) => {
-    if (!props.isOpen) {
+    if (!isOpen) {
       return
     }
 
@@ -128,16 +164,16 @@ export function SwitchProjectDropdown(props: {
       return
     }
 
-    props.onOpenChange(false)
+    setIsOpen(false)
   })
 
   useListener(document, "keydown", (event) => {
-    if (!props.isOpen || event.key !== "Escape") {
+    if (!isOpen || event.key !== "Escape") {
       return
     }
 
     event.preventDefault()
-    props.onOpenChange(false)
+    setIsOpen(false)
     queueMicrotask(() => {
       triggerRef.current?.focus()
     })
@@ -147,25 +183,25 @@ export function SwitchProjectDropdown(props: {
     <>
       <button
         ref={triggerRef}
-        aria-expanded={props.isOpen ? "true" : "false"}
+        aria-expanded={isOpen ? "true" : "false"}
         aria-haspopup="dialog"
         aria-label="Switch project"
         class={styles.trigger}
         type="button"
         onClick={() => {
-          props.onOpenChange(!props.isOpen)
+          setIsOpen(!isOpen)
         }}
         onKeyDown={(event) => {
-          if (event.key === "ArrowDown" && !props.isOpen) {
+          if (event.key === "ArrowDown" && !isOpen) {
             event.preventDefault()
-            props.onOpenChange(true)
+            setIsOpen(true)
           }
         }}
       >
-        <span class={styles.triggerLabel}>{props.activeProjectLabel}</span>
+        <span class={styles.triggerLabel}>{activeProject?.name ?? "Open project"}</span>
       </button>
 
-      {props.isOpen ? (
+      {isOpen ? (
         <div ref={contentRef} class={styles.content}>
           <label class={styles.searchField}>
             <span class={styles.srOnly}>Search projects</span>
@@ -182,21 +218,19 @@ export function SwitchProjectDropdown(props: {
               onKeyDown={(event) => {
                 if (event.key === "ArrowDown") {
                   event.preventDefault()
-                  setHighlightedIndex((currentIndex) =>
-                    items.length === 0 ? 0 : Math.min(currentIndex + 1, items.length - 1),
-                  )
+                  moveHighlightedIndex(1)
                   return
                 }
 
                 if (event.key === "ArrowUp") {
                   event.preventDefault()
-                  setHighlightedIndex((currentIndex) => Math.max(currentIndex - 1, 0))
+                  moveHighlightedIndex(-1)
                   return
                 }
 
                 if (event.key === "Enter") {
                   event.preventDefault()
-                  activateItem(items[highlightedIndex])
+                  activateItem(highlightedItem)
                 }
               }}
             />
@@ -205,7 +239,7 @@ export function SwitchProjectDropdown(props: {
           {items.length > 0 ? (
             <ul class={styles.list}>
               {items.map((item, index) => {
-                const isHighlighted = highlightedIndex === index
+                const isHighlighted = highlightedItemIndex === index
 
                 if (item.kind === "open-folder") {
                   return (
@@ -235,7 +269,7 @@ export function SwitchProjectDropdown(props: {
                   )
                 }
 
-                const isActiveProject = props.activeProjectPath === item.project.path
+                const isActiveProject = activeProject?.path === item.project.path
 
                 return (
                   <li key={item.id}>

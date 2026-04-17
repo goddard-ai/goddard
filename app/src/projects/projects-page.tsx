@@ -8,6 +8,7 @@ import { useEffect } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { DialogPortal } from "~/lib/dialog-portal.tsx"
+import { openProjectTab } from "./actions.ts"
 import { deriveProjectName } from "./project-name.ts"
 import { lookupProject, type ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
@@ -138,18 +139,11 @@ export function ProjectsPage() {
         ) : (
           <ProjectList
             onOpenProjectTab={(projectPath) => {
-              const project = lookupProject(projectRegistry, projectPath)
-
-              if (!project) {
-                return
-              }
-
-              workbenchTabSet.openOrFocusTab({
-                id: `project:${encodeURIComponent(project.path)}`,
-                kind: "project",
-                title: project.name,
-                payload: { projectPath: project.path },
-                dirty: false,
+              openProjectTab({
+                projectContext,
+                projectPath,
+                projectRegistry,
+                workbenchTabSet,
               })
             }}
             onRemove={(projectPath) => {

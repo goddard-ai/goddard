@@ -3,14 +3,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { AppCommand, resolveAppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
-import { browseForProject } from "~/desktop-host.ts"
 import { GoodToaster } from "~/lib/good-toaster.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
-import {
-  findNearestProjectPath,
-  orderProjectsByRecentActivity,
-} from "~/projects/project-context.ts"
-import { lookupProject } from "~/projects/project-registry.ts"
+import { findNearestProjectPath } from "~/projects/project-context.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsx"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsx"
@@ -24,7 +19,6 @@ import {
 } from "./app-state-context.tsx"
 import { CommandDialog } from "./commands/command-dialog.tsx"
 import type { SvgIconName } from "./lib/good-icon.tsx"
-import { deriveProjectName } from "./projects/project-name.ts"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
 
@@ -97,7 +91,6 @@ export function AppShell() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const [isProjectSwitchOpen, setIsProjectSwitchOpen] = useState(false)
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
     navigation.selectedNavId,
@@ -127,11 +120,6 @@ export function AppShell() {
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
   const activeTabKind = workbenchTabSet.activeTab?.kind ?? WORKBENCH_PRIMARY_TAB.kind
-  const activeProject =
-    projectContext.activeProjectPath === null
-      ? null
-      : lookupProject(projectRegistry, projectContext.activeProjectPath)
-  const orderedProjects = orderProjectsByRecentActivity(projects, projectContext.recentProjectPaths)
 
   useEffect(() => {
     commandContext.activeTabKind.value = activeTabKind
@@ -204,53 +192,6 @@ export function AppShell() {
     workbenchTabSet.activateTab(WORKBENCH_PRIMARY_TAB.id)
   }
 
-  function openProjectTab(projectPath: string) {
-    const project = lookupProject(projectRegistry, projectPath)
-
-    if (!project) {
-      return
-    }
-
-    projectContext.setActiveProject(project.path)
-    workbenchTabSet.openOrFocusTab({
-      id: `project:${encodeURIComponent(project.path)}`,
-      kind: "project",
-      title: project.name,
-      payload: { projectPath: project.path },
-      dirty: false,
-    })
-  }
-
-  async function openProjectFromFilesystem() {
-    setIsProjectSwitchOpen(false)
-
-    const selectedPath = await browseForProject()
-
-    if (!selectedPath) {
-      return
-    }
-
-    const existingProject = lookupProject(projectRegistry, selectedPath)
-    const projectName = existingProject?.name ?? deriveProjectName(selectedPath)
-    const nextProject = existingProject ?? {
-      path: selectedPath,
-      name: projectName.length > 0 ? projectName : selectedPath,
-    }
-
-    if (!existingProject) {
-      projectRegistry.addProject(nextProject)
-    }
-
-    projectContext.setActiveProject(nextProject.path)
-    workbenchTabSet.openOrFocusTab({
-      id: `project:${encodeURIComponent(nextProject.path)}`,
-      kind: "project",
-      title: nextProject.name,
-      payload: { projectPath: nextProject.path },
-      dirty: false,
-    })
-  }
-
   useListener(globalEventHub, "appMenu", ({ command }) => {
     resolveAppCommand(command)?.()
   })
@@ -294,10 +235,6 @@ export function AppShell() {
     })
   })
 
-  useAppCommand(AppCommand.navigation.openSwitchProject, () => {
-    setIsProjectSwitchOpen(true)
-  })
-
   useAppCommand(AppCommand.navigation.openInbox, () => {
     selectNavigationSurface("inbox")
   })
@@ -324,10 +261,6 @@ export function AppShell() {
 
   useAppCommand(AppCommand.navigation.openRoadmap, () => {
     selectNavigationSurface("roadmap")
-  })
-
-  useAppCommand(AppCommand.projects.openFolder, async () => {
-    await openProjectFromFilesystem()
   })
 
   useAppCommand(AppCommand.navigation.openSettings, () => {
@@ -368,23 +301,7 @@ export function AppShell() {
         onTabSelect={(id) => {
           workbenchTabSet.activateTab(id)
         }}
-        projectSwitcher={
-          <SwitchProjectDropdown
-            activeProjectLabel={activeProject?.name ?? "Open project"}
-            activeProjectPath={activeProject?.path ?? null}
-            isOpen={isProjectSwitchOpen}
-            projects={orderedProjects}
-            onOpenChange={(isOpen) => {
-              setIsProjectSwitchOpen(isOpen)
-            }}
-            onOpenFolder={async () => {
-              await openProjectFromFilesystem()
-            }}
-            onSelectProject={(projectPath) => {
-              openProjectTab(projectPath)
-            }}
-          />
-        }
+        projectSwitcher={<SwitchProjectDropdown />}
         selectedNavigationId={navigation.selectedNavId}
         selectedNavigationLabel={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
         setTabRef={(id, element) => {
