@@ -19,7 +19,7 @@ test("UserConfig accepts session title generator model config", () => {
   })
 })
 
-test("generated goddard schema embeds the text-model schema once under local defs", () => {
+test("generated goddard schema embeds the model schema once under local defs", () => {
   const goddardSchema = buildGeneratedSchemaArtifacts().find(
     (artifact: { name: string }) => artifact.name === "goddard.json",
   )?.jsonSchema as Record<string, unknown>
@@ -27,9 +27,9 @@ test("generated goddard schema embeds the text-model schema once under local def
   expect(goddardSchema.$schema).toBe("https://json-schema.org/draft/2020-12/schema")
 
   const defs = goddardSchema.$defs as Record<string, Record<string, unknown>>
-  expect(defs.TextModelConfig).toBeTruthy()
-  expect(defs.TextModelConfig?.$schema).toBeUndefined()
+  expect(defs.ModelConfig).toBeTruthy()
+  expect(defs.ModelConfig?.$schema).toBeUndefined()
   expect((defs.SessionTitlesConfig?.properties as Record<string, unknown>)?.generator).toEqual({
-    $ref: "#/$defs/TextModelConfig",
+    $ref: "#/$defs/ModelConfig",
   })
 })

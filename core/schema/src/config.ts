@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { type TextModelConfig, textModelConfigSchema } from "ai-sdk-json-schema"
+import { type ModelConfig, textModelConfigSchema } from "ai-sdk-json-schema"
 import { z } from "zod"
 
 import { type ACPAdapterName, ACPAdapterNames } from "./acp-adapters.ts"
@@ -263,7 +263,7 @@ export const SessionTitlesConfig = z
   .describe("Persisted session title-generation defaults loaded from JSON.")
 
 export type SessionTitlesConfig = z.infer<typeof SessionTitlesConfig> & {
-  generator?: TextModelConfig
+  generator?: ModelConfig
 }
 
 /** Schema for the shared root config document. */

@@ -2,17 +2,17 @@
 import { getGoddardCacheDir } from "@goddard-ai/paths/node"
 import type { LanguageModel } from "ai"
 import {
-  buildTextModelLoadPlan,
-  executeTextModelLoadPlan,
+  buildModelLoadPlan,
+  executeModelLoadPlan,
   MissingProviderPackageError,
-  type BuildTextModelLoadPlanOptions,
-  type ResolveTextModelModulesOptions,
-  type ResolvedTextModelLoadPlan,
-  type TextModelConfig,
-  type TextModelDescriptor,
-  type UnresolvedTextModelLoadPlan,
-  resolveTextModel,
-  resolveTextModelModules,
+  type BuildModelLoadPlanOptions,
+  type ModelConfig,
+  type ModelDescriptor,
+  type ResolveModelModulesOptions,
+  type ResolvedModelLoadPlan,
+  type UnresolvedModelLoadPlan,
+  resolveModel,
+  resolveModelModules,
 } from "ai-sdk-json-schema"
 import { mkdir, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
@@ -37,8 +37,8 @@ export type DaemonTextModelModuleLoader = () => Promise<Record<string, unknown>>
  * One provider-package installation request the daemon may fulfill before model loading.
  */
 export type DaemonTextModelPackageInstallRequest = {
-  config: TextModelConfig
-  descriptor: TextModelDescriptor
+  config: ModelConfig
+  descriptor: ModelDescriptor
   installationRoot: string
   packageName: string
   installPackageName: string
@@ -55,23 +55,22 @@ export type DaemonTextModelPackageInstaller = (
 /**
  * Runtime-only options used while resolving provider packages for daemon AI features.
  */
-export interface DaemonTextModelResolveOptions extends BuildTextModelLoadPlanOptions {
+export interface DaemonTextModelResolveOptions extends BuildModelLoadPlanOptions {
   installMissingPackage?: DaemonTextModelPackageInstaller | false
   moduleLoaders?: Partial<Record<string, DaemonTextModelModuleLoader>>
   installationRoot?: string
   /** Test-only override for module resolution after the daemon chooses an installation root. */
   resolveModules?: (
-    plan: UnresolvedTextModelLoadPlan,
-    options: ResolveTextModelModulesOptions,
-  ) => ResolvedTextModelLoadPlan
+    plan: UnresolvedModelLoadPlan,
+    options: ResolveModelModulesOptions,
+  ) => ResolvedModelLoadPlan
 }
 
 /**
  * One ready-to-use text model resolved from shared JSON config.
  */
 export type LoadedDaemonTextModel = {
-  config: TextModelConfig
-  descriptor: TextModelDescriptor
+  descriptor: ModelDescriptor
   model: LanguageModel
 }
 
@@ -180,13 +179,13 @@ export async function installDaemonTextModelPackage(request: DaemonTextModelPack
 
 /** Resolves one external-provider load plan and installs one missing package when daemon policy allows it. */
 async function resolveDaemonTextModelModules(
-  config: TextModelConfig,
-  descriptor: TextModelDescriptor,
-  plan: UnresolvedTextModelLoadPlan,
+  config: ModelConfig,
+  descriptor: ModelDescriptor,
+  plan: UnresolvedModelLoadPlan,
   options: DaemonTextModelResolveOptions,
 ) {
   const installationRoot = resolve(options.installationRoot ?? daemonProviderInstallationRoot)
-  const resolveModules = options.resolveModules ?? resolveTextModelModules
+  const resolveModules = options.resolveModules ?? resolveModelModules
 
   try {
     return resolveModules(plan, { installationRoot })
@@ -223,15 +222,18 @@ export async function loadDaemonTextModel(
   config: unknown,
   options: DaemonTextModelResolveOptions = {},
 ) {
-  const descriptor = resolveTextModel(config)
-  const normalizedConfig: TextModelConfig = {
-    provider: descriptor.provider,
-    model: descriptor.model,
-  }
-  const plan = buildTextModelLoadPlan(normalizedConfig, {
-    env: options.env ?? process.env,
-    packageOptions: options.packageOptions,
-  })
+  const descriptor = resolveModel("text", config)
+  const plan = buildModelLoadPlan(
+    "text",
+    {
+      provider: descriptor.provider,
+      model: descriptor.model,
+    },
+    {
+      env: options.env ?? process.env,
+      packageOptions: options.packageOptions,
+    },
+  )
 
   if (isBundledProviderPackage(descriptor.packageName)) {
     const moduleLoaders: Record<string, DaemonTextModelModuleLoader> = {
@@ -239,7 +241,7 @@ export async function loadDaemonTextModel(
       ...options.moduleLoaders,
     }
 
-    const model = (await executeTextModelLoadPlan(plan, {
+    const model = (await executeModelLoadPlan(plan, {
       async loadModule(module) {
         const moduleLoader = moduleLoaders[module.packageName] ?? moduleLoaders[module.specifier]
         if (moduleLoader) {
@@ -253,18 +255,24 @@ export async function loadDaemonTextModel(
     })) as LanguageModel
 
     return {
-      config: normalizedConfig,
       descriptor,
       model,
     }
   }
 
-  const model = (await executeTextModelLoadPlan(
-    await resolveDaemonTextModelModules(normalizedConfig, descriptor, plan, options),
+  const model = (await executeModelLoadPlan(
+    await resolveDaemonTextModelModules(
+      {
+        provider: descriptor.provider,
+        model: descriptor.model,
+      },
+      descriptor,
+      plan,
+      options,
+    ),
   )) as LanguageModel
 
   return {
-    config: normalizedConfig,
     descriptor,
     model,
   }

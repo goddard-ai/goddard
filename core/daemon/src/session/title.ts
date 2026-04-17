@@ -2,7 +2,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { InitialPromptOption } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionTitleState } from "@goddard-ai/schema/daemon/store"
 import { generateText, type LanguageModel } from "ai"
-import type { TextModelConfig } from "ai-sdk-json-schema"
+import type { ModelConfig } from "ai-sdk-json-schema"
 
 const DEFAULT_SESSION_TITLE = "New session"
 const MAX_FALLBACK_TITLE_WORDS = 6
@@ -19,7 +19,7 @@ export type PreparedSessionTitle = {
   title: string
   titleState: Extract<DaemonSessionTitleState, "placeholder" | "fallback" | "pending">
   promptText: string | null
-  generatorConfig: TextModelConfig | undefined
+  generatorConfig: ModelConfig | undefined
 }
 
 /** Returns true when one ACP content block carries plain text. */
@@ -109,7 +109,7 @@ export function createFallbackSessionTitle(promptText: string) {
 /** Computes the immediately visible title and pending state for one session prompt. */
 export function prepareSessionTitle(
   prompt: InitialPromptOption | readonly acp.ContentBlock[] | undefined,
-  generatorConfig?: TextModelConfig,
+  generatorConfig?: ModelConfig,
 ): PreparedSessionTitle {
   if (prompt === undefined) {
     return {

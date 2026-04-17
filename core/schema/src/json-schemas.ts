@@ -44,11 +44,12 @@ export function buildGeneratedSchemaArtifacts() {
       const defs = isJsonObject(jsonSchema.$defs)
         ? (jsonSchema.$defs as Record<string, unknown>)
         : ((jsonSchema.$defs = {}) as Record<string, unknown>)
-      const embeddedTextModelConfig = JSON.parse(
-        JSON.stringify(textModelConfigJsonSchema),
-      ) as Record<string, unknown>
-      delete embeddedTextModelConfig.$schema
-      defs.TextModelConfig = embeddedTextModelConfig
+      const embeddedModelConfig = JSON.parse(JSON.stringify(textModelConfigJsonSchema)) as Record<
+        string,
+        unknown
+      >
+      delete embeddedModelConfig.$schema
+      defs.ModelConfig = embeddedModelConfig
 
       const sessionTitlesDefinition = isJsonObject(defs.SessionTitlesConfig)
         ? (defs.SessionTitlesConfig as Record<string, unknown>)
@@ -68,7 +69,7 @@ export function buildGeneratedSchemaArtifacts() {
         delete generatorProperty[key]
       }
 
-      generatorProperty.$ref = "#/$defs/TextModelConfig"
+      generatorProperty.$ref = "#/$defs/ModelConfig"
     }
     return { name, jsonSchema }
   })

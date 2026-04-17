@@ -56,7 +56,7 @@ This feature is separate from the session agent's own model selection:
 
 - Title generation is an auxiliary subsystem owned by the daemon, not by the session manager's ACP runtime.
 - The daemon should use a direct provider abstraction for title generation. This is the correct seam for a dependency like Vercel `ai`.
-- `ai-sdk-json-schema@0.1.0` is available and should be treated as the source of truth for persisted text-model config validation and runtime loading helpers.
+- `ai-sdk-json-schema@0.3.0` is available and should be treated as the source of truth for persisted text-model config validation and runtime loading helpers.
 - Provider credentials should be resolved from environment variables, not persisted token values.
 - The feature should work in degraded local-only mode by falling back to deterministic prompt truncation.
 - Local root config may override global root config for title generation, but this feature does not need action-level, loop-level, or per-session overrides in v1.
@@ -101,14 +101,14 @@ This gives hosts enough information to render the visible title correctly withou
 
 Do not reuse `session.model`.
 
-Introduce a new root-level shared config section built on `ai-sdk-json-schema`'s `TextModelConfig` contract:
+Introduce a new root-level shared config section built on `ai-sdk-json-schema`'s text model config contract:
 
 ```ts
-import type { TextModelConfig } from "ai-sdk-json-schema"
+import type { ModelConfig } from "ai-sdk-json-schema"
 
 type UserConfig = {
   sessionTitles?: {
-    generator?: TextModelConfig
+    generator?: ModelConfig
   }
 }
 ```
@@ -163,9 +163,9 @@ This module should be reusable by future config-backed AI features, not owned by
 Implementation basis:
 
 - validate with `textModelConfigSchema`;
-- inspect metadata with `resolveTextModel` when helpful for diagnostics;
+- inspect metadata with `resolveModel("text", ...)` when helpful for diagnostics;
 - load runtime models with `loadTextModel` for the simple path;
-- keep `resolveTextModelLoadPlan` available if Goddard later needs explicit package-audit or module-load control.
+- keep `buildModelLoadPlan("text", ...)` available if Goddard later needs explicit package-audit or module-load control.
 
 Example responsibility split:
 

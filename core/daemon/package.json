@@ -51,7 +51,7 @@
     "@goddard-ai/worktree-plugin": "workspace:^",
     "@openrouter/ai-sdk-provider": "^2.5.1",
     "ai": "^6.0.158",
-    "ai-sdk-json-schema": "^0.2.0",
+    "ai-sdk-json-schema": "^0.3.0",
     "cmd-ts": "^0.15.0",
     "hash-sum": "^2.0.0",
     "kindstore": "^0.4.4",
