@@ -30,7 +30,7 @@
   - Use controlled open state only when another component, keyboard shortcut, persistence rule, or async flow must drive the overlay lifecycle.
   - In non-trivial components, group top-level expressions in this order when practical: consumed context/services/refs, local UI state, derived render model, local semantic actions, bridge hooks/subscriptions, then JSX.
   - Prefer derived render values over sync effects when the next value can be computed during render.
-  - Separate logical groups with blank lines. Do not add routine `// State`, `// Derived`, or similar section-label comments unless a comment explains a non-obvious bridge or correctness constraint.
+  - Separate logical groups with blank lines.
   - When a dialog component accepts `dialog: UseDialogReturn`, treat it as content rendered under a parent `Dialog.RootProvider`; do not nest `Dialog.Root` inside that component.
   - Keep custom Preact hooks for state management local to the component that uses them.
   - Do not extract single-use state hooks into shared modules.
