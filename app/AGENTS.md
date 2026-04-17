@@ -56,7 +56,9 @@
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.
 - Never destructure component props. Define component prop types inline instead of creating `Props` aliases or interfaces.
 - In UI components, prefer inline JSX callbacks for single-use handlers instead of hoisted local function declarations.
-- Do not add automated tests for UI components unless explicitly asked.
+- Automated tests in `app/` are the exception, not the default.
+- Add app tests only for extracted pure logic or fragile contracts that are hard to validate manually and likely to regress.
+- Do not add automated tests for rendered UI, styling, layout, simple RPC wiring, or fast-moving UX flows unless explicitly asked.
 - Run formatting after modifying app files.
 - When a human asks for a new task, commit any app work from the previous task before starting. If that work is unfinished, include `Next step: ...` in the commit message body.
 - Do not add module-level first-line description comments or routine component description comments unless a comment explains non-obvious behavior that the code itself does not make clear.

@@ -12,6 +12,15 @@ For the app bootstrap rules already promoted into `app/AGENTS.md`, follow that f
 
 - Prefer shared host adapters over ad hoc browser-to-host calls so new desktop capabilities follow one transport boundary.
 
+## Testing
+
+- Treat manual QA through `pnpm --dir app run dev` and the flow in `app/README.md` as the default verification path for `app/` changes.
+- Automated tests in `app/` are reserved for extracted pure logic or fragile user-visible contracts that are hard to validate manually and easy to regress.
+- Good candidates include deterministic transforms, ordering or merge rules, serialization boundaries, theme derivation, and other helpers with meaningful edge cases.
+- When app tests are warranted, keep them small and assert observable outputs rather than component internals.
+- If a change seems to require a large rendered-UI test to feel safe, first look for a better abstraction seam and move the logic behind it.
+- Do not add routine tests for rendered UI, styling, layout, simple RPC wiring, or fast-moving UX flows unless explicitly asked.
+
 ## Syntax And Naming
 
 - Do not end `preact-sigma` module names with `State`.
