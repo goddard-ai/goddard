@@ -34,6 +34,18 @@
   - non-trivial top-level functions
   - TypeScript type aliases and interfaces, except types inferred from a same-name Zod schema
 - Comments should explain the non-obvious what or why. Do not add `@param` or `@returns` boilerplate, and do not restate the code.
+- Maintain code comments when editing nearby logic. If a change makes an existing comment stale, update or remove the comment in the same patch.
+- Add a short comment when it materially improves reviewability. A comment qualifies only if all of the following are true:
+  - it explains a correctness-relevant fact that is not obvious from local names, types, and control flow
+  - without the comment, a reviewer would likely need to inspect another file, spec, test, protocol, or bug history to understand why the code is correct
+  - the explanation fits in 1-3 lines and states the non-obvious why, invariant, or constraint
+- Typical cases for reviewability comments:
+  - hidden invariants or preconditions
+  - intentional asymmetry or surprising branch/order dependence
+  - protocol, wire-format, persistence, or API contract constraints
+  - workarounds for external tool, platform, or library behavior
+  - edge-case handling where the failure mode is not locally obvious
+- Do not add comments that merely narrate the code, restate names/types, or compensate for code that should instead be renamed or simplified.
 - Minimize churn: touch as few files as possible, avoid unrelated cleanup or formatting, and do not rename or move files unless necessary.
 - If refactoring is required for correctness, keep it mechanical and separate from behavior changes when possible.
 - When uncertain, follow the existing local pattern with the lowest architectural impact.
