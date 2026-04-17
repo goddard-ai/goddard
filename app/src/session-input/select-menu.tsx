@@ -38,13 +38,16 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
   const [query, setQuery] = useState("")
   const [selectedIndex, setSelectedIndex] = useState(0)
 
+  const isMenuOpen = props.open
+  const isFilterable = props.filterable ?? false
   const selectedItem = props.items.find((item) => item.value === props.value) ?? null
   const normalizedQuery = query.trim().toLowerCase()
   const filteredItems =
-    !props.filterable || normalizedQuery.length === 0
+    !isFilterable || normalizedQuery.length === 0
       ? props.items
       : props.items.filter((item) => {
           const searchableText = [item.label, item.detail, item.searchText]
@@ -56,40 +59,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
         })
   const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
   const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
+  const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
+  const triggerLabel = selectedItem?.label ?? props.placeholder
+  const ariaLabel = `${props.label}: ${triggerLabel}`
 
-  useEffect(() => {
-    if (!props.open) {
-      setQuery("")
-      setSelectedIndex(0)
-      return
-    }
-
-    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-
-    queueMicrotask(() => {
-      if (props.filterable) {
-        const input = filterInputRef.current
-        input?.focus()
-        input?.setSelectionRange(input.value.length, input.value.length)
-        return
-      }
-
-      menuRef.current?.focus()
-    })
-  }, [filteredItemSignature, props.filterable, props.open, props.value])
-
-  useEffect(() => {
-    if (!props.open || !highlightedItem) {
-      return
-    }
-
-    itemRefs.current[highlightedItem.value]?.scrollIntoView({
-      block: "nearest",
-    })
-  }, [highlightedItem?.value, props.open])
-
-  function highlightNext(step: 1 | -1) {
+  function moveHighlightedIndex(step: 1 | -1) {
     if (filteredItems.length === 0) {
       setSelectedIndex(0)
       return
@@ -119,16 +93,44 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
     props.onOpenChange(false)
   }
 
-  const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
-  const triggerLabel = selectedItem?.label ?? props.placeholder
-  const ariaLabel = `${props.label}: ${triggerLabel}`
+  useEffect(() => {
+    if (!isMenuOpen) {
+      setQuery("")
+      setSelectedIndex(0)
+      return
+    }
+
+    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
+    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
+
+    queueMicrotask(() => {
+      if (isFilterable) {
+        const input = filterInputRef.current
+        input?.focus()
+        input?.setSelectionRange(input.value.length, input.value.length)
+        return
+      }
+
+      menuRef.current?.focus()
+    })
+  }, [filteredItemSignature, isFilterable, isMenuOpen, props.value])
+
+  useEffect(() => {
+    if (!isMenuOpen || !highlightedItem) {
+      return
+    }
+
+    itemRefs.current[highlightedItem.value]?.scrollIntoView({
+      block: "nearest",
+    })
+  }, [highlightedItem?.value, isMenuOpen])
 
   return (
     <Popover.Root
       closeOnInteractOutside={true}
-      initialFocusEl={() => (props.filterable ? filterInputRef.current : menuRef.current)}
+      initialFocusEl={() => (isFilterable ? filterInputRef.current : menuRef.current)}
       lazyMount={true}
-      open={props.open}
+      open={isMenuOpen}
       positioning={{
         gutter: 8,
         placement: "bottom-start",
@@ -152,7 +154,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
           <span class={styles.tooltipTrigger}>
             <Popover.Trigger asChild>
               <button
-                aria-expanded={props.open}
+                aria-expanded={isMenuOpen}
                 aria-haspopup="menu"
                 aria-label={ariaLabel}
                 class={styles.trigger}
@@ -169,7 +171,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                     return
                   }
 
-                  if (event.key === "Escape" && props.open) {
+                  if (event.key === "Escape" && isMenuOpen) {
                     event.preventDefault()
                     props.onOpenChange(false)
                   }
@@ -183,8 +185,8 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                   size={16}
                   strokeWidth={2.2}
                   style={{
-                    color: props.open ? token.var("colors.text") : token.var("colors.muted"),
-                    transform: props.open ? "rotate(180deg)" : "rotate(0deg)",
+                    color: isMenuOpen ? token.var("colors.text") : token.var("colors.muted"),
+                    transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
                   }}
                 />
               </button>
@@ -197,21 +199,21 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
             <Popover.Content
               ref={menuRef}
               class={styles.menu}
-              tabIndex={props.filterable ? undefined : -1}
+              tabIndex={isFilterable ? undefined : -1}
               onKeyDown={(event) => {
-                if (props.filterable) {
+                if (isFilterable) {
                   return
                 }
 
                 if (event.key === "ArrowDown") {
                   event.preventDefault()
-                  highlightNext(1)
+                  moveHighlightedIndex(1)
                   return
                 }
 
                 if (event.key === "ArrowUp") {
                   event.preventDefault()
-                  highlightNext(-1)
+                  moveHighlightedIndex(-1)
                   return
                 }
 
@@ -227,7 +229,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                 }
               }}
             >
-              {props.filterable ? (
+              {isFilterable ? (
                 <input
                   ref={filterInputRef}
                   class={styles.menuFilter}
@@ -239,13 +241,13 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown") {
                       event.preventDefault()
-                      highlightNext(1)
+                      moveHighlightedIndex(1)
                       return
                     }
 
                     if (event.key === "ArrowUp") {
                       event.preventDefault()
-                      highlightNext(-1)
+                      moveHighlightedIndex(-1)
                       return
                     }
 
