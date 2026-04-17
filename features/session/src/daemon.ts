@@ -17,6 +17,7 @@ import {
 import {
   DaemonSession,
   DaemonSessionDiagnostics,
+  DaemonSessionTurnChange,
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
   DaemonWorktree,
@@ -88,6 +89,19 @@ const sessionDb = {
     .multi("sessionId_sequence", {
       sessionId: "asc",
       sequence: "desc",
+    }),
+
+  sessionTurnChanges: kind("chg", DaemonSessionTurnChange)
+    .index("sessionId", { type: "text" })
+    .index("turnId", { type: "text" })
+    .index("sequence", { type: "integer" })
+    .multi("sessionId_sequence", {
+      sessionId: "asc",
+      sequence: "desc",
+    })
+    .multi("sessionId_turnId", {
+      sessionId: "asc",
+      turnId: "asc",
     }),
 
   sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", {
@@ -270,6 +284,7 @@ export const sessionPlugin = definePlugin({
           }),
           history: async ({ body }) => sessionManager.getHistory(body),
           changes: async ({ body: { id } }) => sessionManager.getChanges(id),
+          turnDiff: async ({ body: { id, turnId } }) => sessionManager.getTurnDiff(id, turnId),
           composerSuggestions: async ({ body }) => sessionManager.getComposerSuggestions(body),
           draftSuggestions: async ({ body }) => sessionManager.getDraftSuggestions(body),
           launchPreview: async ({ body }) => sessionManager.getLaunchPreview(body),

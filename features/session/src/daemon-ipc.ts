@@ -7,6 +7,7 @@ import {
   DeclareSessionInitiativeRequest,
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
+  GetSessionTurnDiffRequest as GetSessionTurnDiffRequestSchema,
   GetSessionWorktreeRequest,
   ListSessionsRequest,
   ReleaseSessionLaunchLeaseRequest,
@@ -31,6 +32,7 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
   type GetSessionResponse,
+  type GetSessionTurnDiffResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
   type ReleaseSessionLaunchLeaseResponse,
@@ -75,6 +77,11 @@ export const sessionIpcRoutes = defineIpcRoutes({
     changes: http.post("changes", {
       body: GetSessionChangesRequestSchema,
       response: $type<GetSessionChangesResponse>(),
+    }),
+    /** Reads one persisted git-backed turn diff for a daemon-managed session. */
+    turnDiff: http.post("turn-diff", {
+      body: GetSessionTurnDiffRequestSchema,
+      response: $type<GetSessionTurnDiffResponse>(),
     }),
     /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
     composerSuggestions: http.post("composer-suggestions", {

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
@@ -30,6 +30,7 @@ const usageAgentPath = createRequire(import.meta.url).resolve("./fixtures/usage-
 const launchPreviewAgentPath = fileURLToPath(
   new URL("./fixtures/launch-preview-agent.mjs", import.meta.url),
 )
+const gitEditAgentPath = fileURLToPath(new URL("./fixtures/git-edit-agent.mjs", import.meta.url))
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -373,6 +374,176 @@ test("daemon persists ACP stop reasons on the session record", async () => {
 
   expect(created.session.stopReason).toBe("end_turn")
   expect(db.sessions.get(created.session.id)?.stopReason).toBe("end_turn")
+})
+
+test("daemon persists git-backed turn summaries for initial one-shot prompts", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(gitEditAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: JSON.stringify({
+      type: "write",
+      path: "notes/turn.txt",
+      content: "initial turn\n",
+    }),
+    oneShot: true,
+  })
+
+  const history = await send(client, "session.history", {
+    id: created.session.id,
+  })
+  const turn = history.turns[0]
+  const turnDiff = await send(client, "session.turnDiff", {
+    id: created.session.id,
+    turnId: turn!.turnId,
+  })
+
+  expect(turn?.changeSummary).toEqual({
+    repoRoot: await realpath(repoDir),
+    startedDirty: false,
+    warnings: [],
+    changedFiles: [
+      {
+        path: "notes/turn.txt",
+        previousPath: null,
+        status: "added",
+      },
+    ],
+  })
+  expect(turnDiff).toMatchObject({
+    id: created.session.id,
+    turnId: turn?.turnId,
+    sequence: 1,
+    repoRoot: await realpath(repoDir),
+    startedDirty: false,
+    changedFiles: [
+      {
+        path: "notes/turn.txt",
+        previousPath: null,
+        status: "added",
+      },
+    ],
+  })
+  expect(turnDiff.patch).toContain("+++ b/notes/turn.txt")
+  expect(turnDiff.patch).toContain("+initial turn")
+})
+
+test("daemon computes turn diffs against the pre-turn snapshot when the repo starts dirty", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  await writeFile(join(repoDir, "README.md"), "dirty before turn\n", "utf-8")
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(gitEditAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await send(client, "session.send", {
+    id: created.session.id,
+    message: buildPromptMessage(
+      created.session.acpSessionId,
+      "prompt-dirty-1",
+      JSON.stringify({
+        type: "write",
+        path: "src/turn.txt",
+        content: "dirty turn\n",
+      }),
+    ),
+  })
+
+  await waitFor(async () => {
+    return (
+      db.sessionTurnChanges.first({
+        where: { sessionId: created.session.id },
+      }) != null
+    )
+  })
+
+  const history = await send(client, "session.history", {
+    id: created.session.id,
+  })
+  const turn = history.turns[0]
+  const turnDiff = await send(client, "session.turnDiff", {
+    id: created.session.id,
+    turnId: turn!.turnId,
+  })
+
+  expect(turn?.changeSummary).toEqual({
+    repoRoot: await realpath(repoDir),
+    startedDirty: true,
+    warnings: [],
+    changedFiles: [
+      {
+        path: "src/turn.txt",
+        previousPath: null,
+        status: "added",
+      },
+    ],
+  })
+  expect(turnDiff.patch).toContain("+++ b/src/turn.txt")
+  expect(turnDiff.patch).not.toContain("README.md")
+
+  await send(client, "session.shutdown", { id: created.session.id })
+})
+
+test("daemon leaves turn summaries empty when the session cwd is not a git repository", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const projectDir = await mkdtemp(join(tmpdir(), "goddard-daemon-non-git-"))
+  cleanup.push(async () => {
+    await rm(projectDir, { recursive: true, force: true })
+  })
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(gitEditAgentPath),
+    cwd: projectDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await send(client, "session.send", {
+    id: created.session.id,
+    message: buildPromptMessage(
+      created.session.acpSessionId,
+      "prompt-no-git-1",
+      JSON.stringify({
+        type: "write",
+        path: "scratch.txt",
+        content: "outside git\n",
+      }),
+    ),
+  })
+
+  await waitFor(async () => {
+    return (
+      db.sessionTurns.first({
+        where: { sessionId: created.session.id },
+      }) != null
+    )
+  })
+
+  const history = await send(client, "session.history", {
+    id: created.session.id,
+  })
+
+  expect(history.turns[0]?.changeSummary).toBeNull()
+  await expect(
+    send(client, "session.turnDiff", {
+      id: created.session.id,
+      turnId: history.turns[0]!.turnId,
+    }),
+  ).rejects.toThrow(/not found/i)
+
+  await send(client, "session.shutdown", { id: created.session.id })
 })
 
 test("daemon coalesces stored agent message chunks while keeping the live stream granular", async () => {

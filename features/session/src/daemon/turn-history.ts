@@ -52,11 +52,13 @@ export type CompletedSessionTurnInput = {
 /** Stored turn shape shared by completed turns and in-progress turn projections. */
 type PersistableSessionTurn = Omit<
   SessionHistoryTurn,
-  "completedAt" | "completionKind" | "stopReason"
+  "changeSummary" | "completedAt" | "completionKind" | "stopReason" | "inboxScope" | "inboxHeadline"
 > & {
   completedAt: string | null
   completionKind: "result" | "error" | null
   stopReason: DaemonSession["stopReason"]
+  inboxScope?: AttentionScope | null
+  inboxHeadline?: AttentionHeadline | null
 }
 
 /** Minimal stored draft shape needed to project a history turn. */
@@ -293,12 +295,13 @@ function toSessionHistoryTurn(record: PersistableSessionTurn) {
     stopReason: record.stopReason,
     inboxScope: record.inboxScope ?? null,
     inboxHeadline: record.inboxHeadline ?? null,
+    changeSummary: null,
     messages: [...record.messages],
   } satisfies SessionHistoryTurn
 }
 
 /** Converts one completed turn row into the API-facing history turn shape. */
-export function toSessionHistoryTurnFromRecord(record: SessionHistoryTurn) {
+export function toSessionHistoryTurnFromRecord(record: CompletedSessionTurnInput) {
   return toSessionHistoryTurn(record)
 }
 
@@ -429,6 +432,7 @@ export function createInitializedHistoryTurn(params: {
     stopReason: params.initialized.stopReason,
     inboxScope: null,
     inboxHeadline: null,
+    changeSummary: null,
     messages: coalesceSessionHistoryMessages(params.initialized.history),
   } satisfies SessionHistoryTurn
 }

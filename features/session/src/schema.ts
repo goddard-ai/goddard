@@ -149,6 +149,30 @@ export const DaemonSessionTurnCompletionKind = z.enum(["result", "error"])
 
 export type DaemonSessionTurnCompletionKind = z.output<typeof DaemonSessionTurnCompletionKind>
 
+/** Change categories recorded for one git-backed session turn file change. */
+export const DaemonSessionTurnChangedFileStatus = z.enum([
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  "copied",
+  "type_changed",
+  "unknown",
+])
+
+export type DaemonSessionTurnChangedFileStatus = z.output<typeof DaemonSessionTurnChangedFileStatus>
+
+/**
+ * One file-level change captured from the finalized git patch for a daemon-managed turn.
+ */
+export const DaemonSessionTurnChangedFile = z.strictObject({
+  path: z.string(),
+  previousPath: z.string().nullable().default(null),
+  status: DaemonSessionTurnChangedFileStatus,
+})
+
+export type DaemonSessionTurnChangedFile = z.output<typeof DaemonSessionTurnChangedFile>
+
 /**
  * Persisted completed or interrupted turn stored for one daemon-managed session.
  */
@@ -185,6 +209,27 @@ export const DaemonSessionTurnDraft = z.strictObject({
 
 export type DaemonSessionTurnDraft = z.output<typeof DaemonSessionTurnDraft> & {
   id: `drf_${string}`
+}
+
+/**
+ * Persisted git-backed change summary stored for one daemon-managed session turn.
+ */
+export const DaemonSessionTurnChange = z.strictObject({
+  sessionId: SessionId,
+  turnId: z.string(),
+  sequence: z.number().int().nonnegative(),
+  promptRequestId: DaemonSessionTurnPromptRequestId,
+  repoRoot: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string(),
+  startedDirty: z.boolean(),
+  warnings: z.array(z.string()).default([]),
+  changedFiles: z.array(DaemonSessionTurnChangedFile),
+  patch: z.string(),
+})
+
+export type DaemonSessionTurnChange = z.output<typeof DaemonSessionTurnChange> & {
+  id: `chg_${string}`
 }
 
 /**
@@ -308,6 +353,13 @@ export type GetSessionHistoryRequest = z.infer<typeof GetSessionHistoryRequest>
 export const GetSessionChangesRequest = SessionIdParams
 
 export type GetSessionChangesRequest = z.infer<typeof GetSessionChangesRequest>
+
+/** Request payload used to read one persisted turn diff for one daemon-managed session. */
+export const GetSessionTurnDiffRequest = SessionIdParams.extend({
+  turnId: z.string(),
+})
+
+export type GetSessionTurnDiffRequest = z.infer<typeof GetSessionTurnDiffRequest>
 
 /** Trigger categories supported by the session chat composer suggestion API. */
 export const SessionComposerSuggestionTrigger = z.enum(["at", "dollar", "slash"])
@@ -648,6 +700,22 @@ export type GetSessionResponse = {
   session: DaemonSession
 }
 
+/** One persisted git-backed turn change summary returned with session history when available. */
+export const SessionTurnChangeSummary = z.strictObject({
+  repoRoot: z.string(),
+  startedDirty: z.boolean(),
+  warnings: z.array(z.string()),
+  changedFiles: z.array(DaemonSessionTurnChangedFile),
+})
+
+/** One persisted git-backed turn change summary returned with session history when available. */
+export interface SessionTurnChangeSummary {
+  repoRoot: string
+  startedDirty: boolean
+  warnings: string[]
+  changedFiles: DaemonSessionTurnChangedFile[]
+}
+
 /** One persisted or in-progress prompt turn returned by the session history API. */
 export const SessionHistoryTurn = z.strictObject({
   turnId: z.string(),
@@ -659,6 +727,7 @@ export const SessionHistoryTurn = z.strictObject({
   stopReason: DaemonSessionStopReason.nullable(),
   inboxScope: z.string().nullable().optional().default(null),
   inboxHeadline: z.string().nullable().optional().default(null),
+  changeSummary: SessionTurnChangeSummary.nullable().default(null),
   messages: z.custom<acp.AnyMessage[]>(),
 })
 
@@ -673,6 +742,7 @@ export interface SessionHistoryTurn {
   stopReason: z.output<typeof DaemonSessionStopReason> | null
   inboxScope: string | null
   inboxHeadline: string | null
+  changeSummary: SessionTurnChangeSummary | null
   messages: acp.AnyMessage[]
 }
 
@@ -692,6 +762,17 @@ export type GetSessionChangesResponse = SessionIdentity & {
   workspaceRoot: string | null
   diff: string
   hasChanges: boolean
+}
+
+/** Response payload returned after reading one persisted turn diff for a daemon-managed session. */
+export type GetSessionTurnDiffResponse = SessionIdentity & {
+  turnId: string
+  sequence: number
+  repoRoot: string
+  startedDirty: boolean
+  warnings: string[]
+  changedFiles: DaemonSessionTurnChangedFile[]
+  patch: string
 }
 
 /** Full session diagnostic payload returned on demand for debugging and tests. */

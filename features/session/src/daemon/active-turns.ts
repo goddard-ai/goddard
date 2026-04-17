@@ -9,6 +9,7 @@ import type {
   SessionLifecycleField,
 } from "../schema.ts"
 import type { ActiveSession } from "./session-memory.ts"
+import { buildSessionTurnChangeRecord } from "./turn-changes.ts"
 import {
   appendSessionHistoryMessage,
   getAvailableCommandsFromMessage,
@@ -184,8 +185,10 @@ export function createActiveTurnStore(input: {
       stopReason,
       inboxScope: activeTurn.inboxScope ?? null,
       inboxHeadline: activeTurn.inboxHeadline ?? null,
+      changeSummary: null,
       messages: [...activeTurn.messages],
     }
+    const turnGitBaseline = active.activeTurnGitBaseline
 
     flushActiveTurnDraft(active, "completion")
     db.batch(() => {
@@ -204,6 +207,7 @@ export function createActiveTurnStore(input: {
     })
     clearTurnDraftFlushTimer(activeTurn)
     active.activeTurn = null
+    active.activeTurnGitBaseline = null
     active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
     input.publishSessionUpdated(active.id, ["activeTurn"])
     input.refreshIdleShutdownState(active.id, "turn_completed")
@@ -219,6 +223,22 @@ export function createActiveTurnStore(input: {
       },
       active.logger,
     )
+
+    void buildSessionTurnChangeRecord({
+      sessionId: active.id,
+      turnId: completedTurn.turnId,
+      sequence: completedTurn.sequence,
+      promptRequestId: completedTurn.promptRequestId,
+      startedAt: completedTurn.startedAt,
+      completedAt: completedTurn.completedAt,
+      baseline: turnGitBaseline,
+    }).then((completedTurnChange) => {
+      if (!completedTurnChange) {
+        return
+      }
+
+      db.sessionTurnChanges.create(completedTurnChange)
+    }).catch(() => {})
   }
 
   return {

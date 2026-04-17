@@ -331,7 +331,57 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("reviewSession routes forward the expected daemon requests", async () => {
+  test("session.turnDiff forwards turn diff reads to session.turnDiff", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      turnId: "turn-1",
+      sequence: 1,
+      repoRoot: "/repo",
+      startedDirty: false,
+      warnings: [],
+      changedFiles: [
+        {
+          path: "src/index.ts",
+          previousPath: null,
+          status: "modified",
+        },
+      ],
+      patch: "diff --git a/src/index.ts b/src/index.ts\n",
+    })
+
+    await expect(
+      sdk.session.turnDiff({
+        id: "ses_1",
+        turnId: "turn-1",
+      }),
+    ).resolves.toEqual({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      turnId: "turn-1",
+      sequence: 1,
+      repoRoot: "/repo",
+      startedDirty: false,
+      warnings: [],
+      changedFiles: [
+        {
+          path: "src/index.ts",
+          previousPath: null,
+          status: "modified",
+        },
+      ],
+      patch: "diff --git a/src/index.ts b/src/index.ts\n",
+    })
+
+    expect(send).toHaveBeenCalledWith("session.turnDiff", {
+      id: "ses_1",
+      turnId: "turn-1",
+    })
+  })
+
+  test("session worktree sync helpers forward the expected daemon requests", async () => {
     const { sdk, send } = createSdkWithClient()
     const reviewSession = {
       sessionId: "review-session-1",
