@@ -9,7 +9,7 @@ const MAX_FALLBACK_TITLE_WORDS = 6
 const MAX_SESSION_TITLE_LENGTH = 48
 const MIN_GENERATED_TITLE_WORDS = 2
 const MAX_GENERATED_TITLE_WORDS = 6
-const DAEMON_SYSTEM_PROMPT_PREFIX = '<system-prompt name="Goddard CLI">'
+const DAEMON_SYSTEM_PROMPT_PREFIX = '<system-prompt name="goddard">'
 const DAEMON_SYSTEM_PROMPT_SUFFIX = "</system-prompt>"
 
 /**

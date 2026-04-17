@@ -870,12 +870,16 @@ export function injectSystemPrompt(
   request: acp.PromptRequest,
   systemPrompt: string,
 ): acp.PromptRequest {
+  if (systemPrompt.length === 0) {
+    return request
+  }
+
   return {
     ...request,
     prompt: [
       {
         type: "text",
-        text: `<system-prompt name="Goddard CLI">${systemPrompt}</system-prompt>`,
+        text: `<system-prompt name="goddard">${systemPrompt}</system-prompt>`,
       },
       ...request.prompt,
     ],

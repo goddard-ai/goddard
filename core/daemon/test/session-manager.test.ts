@@ -1,3 +1,4 @@
+import * as acp from "@agentclientprotocol/sdk"
 import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
 import { afterEach, expect, test, vi } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
@@ -12,7 +13,10 @@ import {
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "../src/session/archive.ts"
-import { resolveAgentProcessSpec } from "../src/session/manager.ts"
+import {
+  injectSystemPrompt,
+  resolveAgentProcessSpec,
+} from "../src/session/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME
@@ -163,4 +167,31 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
   expect(firstSpec.cmd.startsWith(join(homeDir, ".goddard", "binaries"))).toBe(true)
   expect(firstSpec.cmd.endsWith(join("node-agent", "bin", "agent"))).toBe(true)
   await expect(stat(firstSpec.cmd)).resolves.toBeTruthy()
+})
+
+test("injectSystemPrompt leaves prompts unchanged when the daemon system prompt is empty", () => {
+  const request = {
+    sessionId: "acp-session-1",
+    prompt: [{ type: "text", text: "Say hello." }],
+  } satisfies acp.PromptRequest
+
+  expect(injectSystemPrompt(request, "")).toEqual(request)
+})
+
+test("injectSystemPrompt prepends the daemon system prompt with the goddard tag name", () => {
+  const request = {
+    sessionId: "acp-session-1",
+    prompt: [{ type: "text", text: "Say hello." }],
+  } satisfies acp.PromptRequest
+
+  expect(injectSystemPrompt(request, "Keep responses short.")).toEqual({
+    sessionId: "acp-session-1",
+    prompt: [
+      {
+        type: "text",
+        text: '<system-prompt name="goddard">Keep responses short.</system-prompt>',
+      },
+      { type: "text", text: "Say hello." },
+    ],
+  } satisfies acp.PromptRequest)
 })

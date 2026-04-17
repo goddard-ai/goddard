@@ -60,7 +60,7 @@ test("backfillSessionTitle restores old titles from persisted prompt history and
         prompt: [
           {
             type: "text",
-            text: '<system-prompt name="Goddard CLI">Keep responses short.</system-prompt>',
+            text: '<system-prompt name="goddard">Keep responses short.</system-prompt>',
           },
           { type: "text", text: "Audit the loop retry policy for edge cases." },
         ],
