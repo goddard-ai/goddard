@@ -171,6 +171,61 @@ export function SessionInput(props: {
     acceptSuggestion(highlightedSuggestion)
   }
 
+  function highlightNextSuggestion() {
+    setSelectedIndex((currentIndex) =>
+      suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
+    )
+  }
+
+  function highlightPreviousSuggestion() {
+    setSelectedIndex((currentIndex) =>
+      suggestions.length === 0 ? 0 : (currentIndex - 1 + suggestions.length) % suggestions.length,
+    )
+  }
+
+  function highlightSuggestion(index: number) {
+    setSelectedIndex(index)
+  }
+
+  function updateMenu(nextMenu: SessionInputMenuState | null) {
+    if (!nextMenu) {
+      dismissedMenuRef.current = null
+      clearMenuState()
+      return
+    }
+
+    if (isDismissedMenu(nextMenu)) {
+      clearMenuState()
+      return
+    }
+
+    setMenu((currentMenu) => (isSameMenuState(currentMenu, nextMenu) ? currentMenu : nextMenu))
+  }
+
+  function updatePromptBlocks(nextPromptBlocks: SessionInputPromptBlocks) {
+    setPromptBlocks(nextPromptBlocks)
+    props.onPromptChange?.(nextPromptBlocks)
+  }
+
+  function registerEditor(editor: LexicalEditor) {
+    editorRef.current = editor
+
+    if (props.autoFocus) {
+      focusEditor()
+    }
+  }
+
+  function dismissMenuFromEditor() {
+    hideMenu({
+      dismissCurrentContext: true,
+      preserveFocus: true,
+    })
+  }
+
+  function submitFromEditor() {
+    void submitPrompt()
+  }
+
   useEffect(() => {
     if (!menu) {
       return
@@ -270,55 +325,14 @@ export function SessionInput(props: {
           <SessionInputPlugins
             menu={menu}
             onAcceptMenu={acceptHighlightedSuggestion}
-            onDismissMenu={() => {
-              hideMenu({
-                dismissCurrentContext: true,
-                preserveFocus: true,
-              })
-            }}
-            onEditorReady={(editor) => {
-              editorRef.current = editor
-
-              if (props.autoFocus) {
-                focusEditor()
-              }
-            }}
-            onHighlightNext={() => {
-              setSelectedIndex((currentIndex) =>
-                suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
-              )
-            }}
-            onHighlightPrevious={() => {
-              setSelectedIndex((currentIndex) =>
-                suggestions.length === 0
-                  ? 0
-                  : (currentIndex - 1 + suggestions.length) % suggestions.length,
-              )
-            }}
-            onMenuChange={(nextMenu) => {
-              if (!nextMenu) {
-                dismissedMenuRef.current = null
-                clearMenuState()
-                return
-              }
-
-              if (isDismissedMenu(nextMenu)) {
-                clearMenuState()
-                return
-              }
-
-              setMenu((currentMenu) =>
-                isSameMenuState(currentMenu, nextMenu) ? currentMenu : nextMenu,
-              )
-            }}
-            onPromptBlocksChange={(nextPromptBlocks) => {
-              setPromptBlocks(nextPromptBlocks)
-              props.onPromptChange?.(nextPromptBlocks)
-            }}
+            onDismissMenu={dismissMenuFromEditor}
+            onEditorReady={registerEditor}
+            onHighlightNext={highlightNextSuggestion}
+            onHighlightPrevious={highlightPreviousSuggestion}
+            onMenuChange={updateMenu}
+            onPromptBlocksChange={updatePromptBlocks}
             onEscape={props.onEscape}
-            onSubmit={() => {
-              void submitPrompt()
-            }}
+            onSubmit={submitFromEditor}
           />
         </div>
       </LexicalComposer>
@@ -330,9 +344,7 @@ export function SessionInput(props: {
         selectedIndex={selectedIndex}
         suggestions={suggestions}
         onAcceptSuggestion={acceptSuggestion}
-        onHighlight={(index) => {
-          setSelectedIndex(index)
-        }}
+        onHighlight={highlightSuggestion}
       />
 
       <div class={classes.footer}>
