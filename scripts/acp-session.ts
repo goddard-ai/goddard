@@ -1,8 +1,17 @@
 #!/usr/bin/env bun
+/** ACP debugging CLI for daemon-backed sessions and raw adapters. */
+import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
+
 import { inspectAdapterSession } from "../core/daemon/src/session/inspect.ts"
 import { ACPAdapterNames } from "../core/schema/src/acp-adapters.ts"
 import { GoddardSdk } from "../core/sdk/src/node/index.ts"
+import {
+  createSessionPromptMessage,
+  type DaemonSession,
+  type GetSessionHistoryResponse,
+  type SessionHistoryTurn,
+} from "../core/sdk/src/session.ts"
 
 const DEFAULT_PROMPT =
   "Reply in two short sentences so I can verify the session update stream is working."
@@ -32,6 +41,62 @@ function isSessionUpdateMessage(message: unknown) {
     typeof message.method === "string" &&
     message.method === "session/update"
   )
+}
+
+/** Flattens paged turn history into the raw `session/update` notifications this CLI prints. */
+export function collectSessionUpdates(turns: SessionHistoryTurn[]) {
+  return turns.flatMap((turn) => turn.messages).filter(isSessionUpdateMessage)
+}
+
+/** Returns the serialized resume payload used when interactive attach is unavailable. */
+function buildResumeSnapshot(
+  session: DaemonSession,
+  history: GetSessionHistoryResponse,
+  resumed: boolean,
+) {
+  return {
+    resumed,
+    session,
+    connection: history.connection,
+    turns: history.turns,
+    nextCursor: history.nextCursor,
+    hasMore: history.hasMore,
+    sessionUpdates: collectSessionUpdates(history.turns),
+  }
+}
+
+/** Matches one JSON-RPC result or error payload for the specified prompt request id. */
+export function getPromptCompletionMessage(message: unknown, requestId: string | number) {
+  if (
+    typeof message !== "object" ||
+    message === null ||
+    "id" in message === false ||
+    message.id !== requestId
+  ) {
+    return null
+  }
+
+  if ("result" in message) {
+    return {
+      kind: "result" as const,
+      message,
+    }
+  }
+
+  if ("error" in message) {
+    return {
+      kind: "error" as const,
+      message,
+    }
+  }
+
+  return null
+}
+
+/** Returns true when one REPL command should detach from the resumed live session. */
+export function isResumeExitCommand(input: string) {
+  const normalized = input.trim().toLowerCase()
+  return normalized === "/exit" || normalized === "/quit"
 }
 
 /** Installs signal handlers that stop the session before the process exits. */
@@ -66,7 +131,7 @@ async function streamSession(args: { agent?: string; model?: string; prompt?: st
 
   process.stderr.write(
     `[acp:stream] started session ${session.sessionId}${
-      resolvedAgent ? ` with agent ${resolvedAgent}` : ""
+      resolvedAgent ? ` with agent ${resolvedAgent}` : " using the daemon-resolved default agent"
     }\n`,
   )
 
@@ -120,31 +185,143 @@ async function showAdapter(adapter: string) {
   }
 }
 
-/** Reconnects to one daemon session when possible and prints its stored session updates. */
-async function resumeSession(id: string) {
+/** Reconnects to one daemon session and attaches an interactive prompt loop when possible. */
+async function resumeSession(id: string, initialPrompt?: string) {
   const sdk = new GoddardSdk()
-  const { session } = await sdk.session.get({
-    id,
-  })
+  const [{ session }, history] = await Promise.all([
+    sdk.session.get({ id }),
+    sdk.session.history({ id }),
+  ])
+  const resumeSnapshot = buildResumeSnapshot(session, history, false)
 
-  let resumed = false
-  if (session.connection.reconnectable) {
-    await sdk.session.connect({ id })
-    resumed = true
-  } else if (session.connection.historyAvailable) {
-    process.stderr.write(
-      `[acp:resume] session ${id} is archived and no longer reconnectable; printing stored history\n`,
-    )
+  if (!history.connection.reconnectable) {
+    if (history.connection.mode === "history") {
+      cancel(`Session ${id} is archived and no longer reconnectable.`)
+    } else {
+      cancel(`Session ${id} is not reconnectable.`)
+    }
+
+    writeJson(resumeSnapshot)
+    return
   }
 
-  const history = await sdk.session.history({ id })
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("`acp resume` requires an interactive TTY when the session is reconnectable")
+  }
 
-  writeJson({
-    resumed,
-    session,
-    connection: history.connection,
-    sessionUpdates: history.history.filter(isSessionUpdateMessage),
+  await sdk.session.connect({ id })
+  intro(`Resuming ${id}`)
+  note(
+    [
+      `agent: ${session.agentName}`,
+      `cwd: ${session.cwd}`,
+      `turns loaded: ${history.turns.length}`,
+      "session messages stream below as NDJSON.",
+      "type /exit to detach from the session.",
+    ].join("\n"),
+    "ACP REPL",
+  )
+
+  const pendingPrompts = new Map<
+    string | number,
+    {
+      resolve: () => void
+      reject: (error: Error) => void
+    }
+  >()
+  const unsubscribe = await sdk.session.subscribe({ id }, (message) => {
+    logStreamMessage(message)
+
+    if (typeof message !== "object" || message === null || "id" in message === false) {
+      return
+    }
+
+    const promptId = message.id as string | number
+    const pendingPrompt = pendingPrompts.get(promptId)
+    if (!pendingPrompt) {
+      return
+    }
+
+    const completion = getPromptCompletionMessage(message, promptId)
+    if (!completion) {
+      return
+    }
+
+    pendingPrompts.delete(promptId)
+    if (completion.kind === "error") {
+      pendingPrompt.reject(new Error(JSON.stringify(completion.message)))
+      return
+    }
+
+    pendingPrompt.resolve()
   })
+
+  /** Queues one prompt into the resumed session and waits for its matching JSON-RPC completion. */
+  const sendPrompt = async (prompt: string) => {
+    const message = createSessionPromptMessage({
+      id,
+      acpId: session.acpSessionId,
+      prompt,
+    })
+    const requestId = message.id
+    if (requestId == null) {
+      throw new Error("Prompt requests must include a JSON-RPC id")
+    }
+
+    const completion = new Promise<void>((resolve, reject) => {
+      pendingPrompts.set(requestId, { resolve, reject })
+    })
+
+    try {
+      await sdk.session.send({
+        id,
+        message,
+      })
+    } catch (error) {
+      pendingPrompts.delete(requestId)
+      throw error
+    }
+
+    await completion
+  }
+
+  try {
+    const firstPrompt = initialPrompt?.trim()
+    if (firstPrompt) {
+      await sendPrompt(firstPrompt)
+    }
+
+    while (true) {
+      const nextPrompt = await text({
+        message: "Prompt",
+        placeholder: "Type a prompt or /exit",
+      })
+      if (isCancel(nextPrompt)) {
+        cancel(`Detached from session ${id}.`)
+        return
+      }
+      if (typeof nextPrompt !== "string") {
+        continue
+      }
+
+      const trimmedPrompt = nextPrompt.trim()
+      if (!trimmedPrompt) {
+        continue
+      }
+      if (isResumeExitCommand(trimmedPrompt)) {
+        outro(`Detached from session ${id}.`)
+        return
+      }
+
+      try {
+        await sendPrompt(trimmedPrompt)
+      } catch (error) {
+        log.error(error instanceof Error ? error.message : String(error))
+      }
+    }
+  } finally {
+    unsubscribe()
+  }
 }
 
 /** Prints the generated ACP adapter ids accepted by daemon-backed session creation. */
@@ -204,24 +381,36 @@ const app = subcommands({
     }),
     resume: command({
       name: "resume",
-      description: "Resume one daemon session when possible and print its session updates",
+      description: "Resume one daemon session and attach an interactive ACP prompt loop",
       args: {
         id: positional({
           type: string,
           displayName: "id",
           description: "Daemon session id to inspect",
         }),
+        prompt: positional({
+          type: optional(string),
+          displayName: "prompt",
+          description: "Optional first prompt to send before entering the REPL",
+        }),
       },
-      handler: async ({ id }) => {
-        await resumeSession(id.trim())
+      handler: async ({ id, prompt }) => {
+        await resumeSession(id.trim(), prompt)
       },
     }),
   },
 })
 
-await run(app, process.argv.slice(2)).catch((error) => {
-  process.stderr.write(
-    `[acp] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
-  )
-  process.exit(1)
-})
+/** Parses argv and runs the ACP debugging CLI. */
+async function main(argv = process.argv.slice(2)) {
+  await run(app, argv)
+}
+
+if (import.meta.main) {
+  await main().catch((error) => {
+    process.stderr.write(
+      `[acp] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    )
+    process.exit(1)
+  })
+}
