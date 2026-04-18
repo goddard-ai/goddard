@@ -71,7 +71,7 @@ export interface SessionWorkforceOptions extends SessionWorkforceParams {}
 
 /** Shared session creation fields used by both new and reconnect flows. */
 interface BaseSessionParams {
-  agent: ACPAdapterName | AgentDistribution
+  agent?: ACPAdapterName | AgentDistribution
   cwd: string
   worktree?: SessionWorktreeOptions
   workforce?: SessionWorkforceOptions

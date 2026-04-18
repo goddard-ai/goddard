@@ -431,6 +431,44 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenNthCalledWith(2, "sessionShutdown", { id: "ses_1" })
   })
 
+  test("session.run lets the daemon resolve the default agent when none is provided", async () => {
+    const { sdk, send, subscribe } = createSdkWithClient()
+    const unsubscribe = vi.fn()
+
+    subscribe.mockResolvedValueOnce(unsubscribe)
+    send.mockResolvedValueOnce({
+      session: {
+        id: "ses_2",
+        acpSessionId: "acp-session-2",
+      },
+    })
+    send.mockResolvedValueOnce({ id: "ses_2", success: true })
+
+    const session = await sdk.session.run({
+      cwd: "/tmp/project",
+      mcpServers: [],
+    })
+
+    expect(session).toBeInstanceOf(AgentSession)
+    await session!.stop()
+
+    expect(send).toHaveBeenNthCalledWith(1, "sessionCreate", {
+      agent: undefined,
+      cwd: "/tmp/project",
+      worktree: undefined,
+      mcpServers: [],
+      systemPrompt: "",
+      initialModelId: undefined,
+      initialConfigOptions: undefined,
+      env: undefined,
+      repository: undefined,
+      prNumber: undefined,
+      metadata: undefined,
+      initialPrompt: undefined,
+      oneShot: undefined,
+    })
+  })
+
   test("workforce.subscribe passes the root filter and unwraps ledger events", async () => {
     const { sdk, subscribe } = createSdkWithClient()
     const onEvent = vi.fn()

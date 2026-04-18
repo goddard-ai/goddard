@@ -1,6 +1,8 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { z } from "zod"
 
+import { ACPAdapterName } from "../acp-adapters.ts"
+import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId } from "../common/params.ts"
 
 export const DaemonSessionConnectionMode = z.enum(["live", "history", "none"])
@@ -70,12 +72,17 @@ export const DaemonSession = z.strictObject({
   acpSessionId: z.string(),
   status: DaemonSessionStatus,
   stopReason: DaemonSessionStopReason.nullable().default(null),
+  agent: z
+    .union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution])
+    .nullable()
+    .default(null),
   agentName: z.string(),
   cwd: z.string(),
   title: z.string().default("New session"),
   titleState: DaemonSessionTitleState.default("placeholder"),
   mcpServers: z.custom<acp.McpServer[]>(),
   connectionMode: DaemonSessionConnectionMode.default("none"),
+  supportsLoadSession: z.boolean().default(false),
   activeDaemonSession: z.boolean().default(false),
   errorMessage: z.string().nullable().default(null),
   blockedReason: z.string().nullable().default(null),

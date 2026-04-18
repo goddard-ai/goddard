@@ -132,6 +132,160 @@ test("daemon persists repository context into durable session storage", async ()
   await client.send("sessionShutdown", { id: created.session.id })
 })
 
+test("daemon resolves the default agent for direct session creation", async () => {
+  await useTempHome()
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+
+  await writeGlobalRootConfig({
+    session: {
+      agent: createWrappedNodeAgent(exampleAgentPath),
+    },
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  expect(created.session.agentName).toBe("Node Agent")
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("loadable sessions remain reconnectable after shutdown", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  const session = await client.send("sessionGet", { id: created.session.id })
+  const history = await client.send("sessionHistory", { id: created.session.id })
+  const promptStarts: string[] = []
+  const promptStops: string[] = []
+  const unsubscribe = await client.subscribe(
+    { name: "sessionMessage", filter: { id: created.session.id } },
+    (payload) => {
+      const message = payload.message as {
+        method?: string
+        params?: { update?: { content?: { text?: string } } }
+        result?: { stopReason?: string }
+      }
+
+      if (message.method === "session/update") {
+        const updateText = message.params?.update?.content?.text ?? ""
+        if (updateText.startsWith("prompt_started:")) {
+          promptStarts.push(updateText.slice("prompt_started:".length))
+        }
+      }
+
+      if (message.result?.stopReason) {
+        promptStops.push(message.result.stopReason)
+      }
+    },
+  )
+
+  expect(session.session.connectionMode).toBe("live")
+  expect(session.session.activeDaemonSession).toBe(false)
+  expect(history.connection).toEqual({
+    mode: "live",
+    reconnectable: true,
+    activeDaemonSession: false,
+  })
+
+  const reconnected = await client.send("sessionConnect", { id: created.session.id })
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: buildPromptMessage(
+      reconnected.session.acpSessionId,
+      "prompt-reload-1",
+      "after-shutdown",
+    ),
+  })
+  await waitFor(async () => promptStops.includes("end_turn"))
+  await Promise.resolve(unsubscribe()).catch(() => {})
+
+  expect(reconnected.session.connectionMode).toBe("live")
+  expect(reconnected.session.activeDaemonSession).toBe(true)
+  expect(promptStarts).toContain("after-shutdown")
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("loadable sessions remain reconnectable after daemon restart", async () => {
+  await useTempHome()
+
+  const daemonA = await startServer({ useExistingHome: true })
+  const clientA = createDaemonIpcClient({ daemonUrl: daemonA.daemonUrl })
+  const created = await clientA.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await daemonA.close()
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  const daemonB = await startServer({ useExistingHome: true })
+  const clientB = createDaemonIpcClient({ daemonUrl: daemonB.daemonUrl })
+  const reloadedSession = await clientB.send("sessionGet", { id: created.session.id })
+  const history = await clientB.send("sessionHistory", { id: created.session.id })
+
+  expect(reloadedSession.session.connectionMode).toBe("live")
+  expect(reloadedSession.session.activeDaemonSession).toBe(false)
+  expect(history.connection).toEqual({
+    mode: "live",
+    reconnectable: true,
+    activeDaemonSession: false,
+  })
+
+  const connected = await clientB.send("sessionConnect", { id: created.session.id })
+  expect(connected.session.connectionMode).toBe("live")
+  expect(connected.session.activeDaemonSession).toBe(true)
+
+  await clientB.send("sessionShutdown", { id: created.session.id })
+})
+
+test("session reconnect fails when the resolved agent no longer supports ACP session/load", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("sessionShutdown", { id: created.session.id })
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  db.sessions.update(created.session.id, {
+    agent: createWrappedNodeAgent(chunkingAgentPath),
+  })
+
+  await expect(client.send("sessionConnect", { id: created.session.id })).rejects.toThrow(
+    /does not support session\/load/i,
+  )
+
+  const session = await client.send("sessionGet", { id: created.session.id })
+  expect(session.session.connectionMode).toBe("live")
+  expect(session.session.activeDaemonSession).toBe(false)
+  expect(session.session.acpSessionId).toBe(created.session.acpSessionId)
+})
+
 test("daemon persists ACP stop reasons on the session record", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -413,10 +567,12 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   const sessionRecord = {
     acpSessionId,
     status: "active",
+    agent: "pi-acp",
     agentName: "node",
     cwd: process.cwd(),
     mcpServers: [],
     connectionMode: "live",
+    supportsLoadSession: false,
     activeDaemonSession: true,
     errorMessage: null,
     blockedReason: null,
@@ -487,10 +643,12 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
   db.sessions.put(sessionId, {
     acpSessionId,
     status: "active",
+    agent: "pi-acp",
     agentName: "node",
     cwd: process.cwd(),
     mcpServers: [],
     connectionMode: "live",
+    supportsLoadSession: false,
     activeDaemonSession: true,
     errorMessage: null,
     blockedReason: null,
@@ -1104,10 +1262,12 @@ test("sessionComposerSuggestions reads `/` commands from the latest ACP history 
     acpSessionId,
     status: "done",
     stopReason: null,
+    agent: "pi-acp",
     agentName: "node",
     cwd: process.cwd(),
     mcpServers: [],
     connectionMode: "history",
+    supportsLoadSession: false,
     activeDaemonSession: false,
     errorMessage: null,
     blockedReason: null,

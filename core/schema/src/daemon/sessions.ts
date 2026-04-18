@@ -88,7 +88,7 @@ export type InitialSessionConfigOption = z.infer<typeof InitialSessionConfigOpti
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateSessionRequest = z.strictObject({
-  agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
+  agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]).optional(),
   cwd: z.string(),
   worktree: SessionWorktreeParams.optional(),
   workforce: SessionWorkforceParams.optional(),

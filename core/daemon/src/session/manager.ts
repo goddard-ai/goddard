@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import treeKill, { type ProcessLike } from "@alloc/tree-kill"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
@@ -124,32 +125,30 @@ function getPackageVersion(): string {
 const logger = createLogger()
 type SessionId = DaemonSession["id"]
 
-/** Persisted daemon session record shape used when reading sessions back from kindstore. */
-type PersistedSessionRecord = KindOutput<typeof db.schema.sessions> & {
-  acpSessionId: string
+/** Daemon session document shape used when reading sessions back from kindstore. */
+type SessionDoc = KindOutput<typeof db.schema.sessions>
+type SessionTurnDraftDoc = KindOutput<typeof db.schema.sessionTurnDrafts>
+type SessionWorktreeDoc = KindOutput<typeof db.schema.worktrees>
+type SessionWorkforceDoc = KindOutput<typeof db.schema.workforces>
+
+type ExistingSessionArtifacts = {
+  draftRecord: SessionTurnDraftDoc | null
+  nextTurnSequence: number
+  worktreeRecord: SessionWorktreeDoc | null
+  worktree: SessionWorktreeState | null
+  workforceRecord: SessionWorkforceDoc | null
 }
+
+type SessionTitleGeneratorConfig = NonNullable<
+  NonNullable<UserConfig["sessionTitles"]>["generator"]
+>
+
 const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
 const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
   "Queued prompt aborted before dispatch by session cancellation."
 const DEFAULT_COMPOSER_SUGGESTION_LIMIT = 20
 const MAX_COMPOSER_SUGGESTION_LIMIT = 50
 const COMPOSER_IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"])
-
-type PersistedSessionTurnDraftRecord = KindOutput<typeof db.schema.sessionTurnDrafts>
-type PersistedSessionWorktreeRecord = KindOutput<typeof db.schema.worktrees>
-type PersistedSessionWorkforceRecord = KindOutput<typeof db.schema.workforces>
-
-type ExistingSessionArtifacts = {
-  draftRecord: PersistedSessionTurnDraftRecord | null
-  nextTurnSequence: number
-  worktreeRecord: PersistedSessionWorktreeRecord | null
-  worktree: SessionWorktreeState | null
-  workforceRecord: PersistedSessionWorkforceRecord | null
-}
-
-type SessionTitleGeneratorConfig = NonNullable<
-  NonNullable<UserConfig["sessionTitles"]>["generator"]
->
 
 /** Returns true when one filesystem path currently exists. */
 async function pathExists(path: string): Promise<boolean> {
@@ -588,10 +587,7 @@ async function applyInitialSessionConfiguration(params: {
 }
 
 /** Loads any persisted session-side artifacts that need to be reused during launch. */
-function resolveExistingSessionArtifacts(
-  id: SessionId,
-  existingSession: PersistedSessionRecord | null,
-) {
+function resolveExistingSessionArtifacts(id: SessionId, existingSession: SessionDoc | null) {
   if (!existingSession) {
     return {
       draftRecord: null,
@@ -625,7 +621,7 @@ function resolveExistingSessionArtifacts(
 }
 
 /** Removes kindstore-only identity fields from one persisted worktree record. */
-function toSessionWorktreeState(record: PersistedSessionWorktreeRecord | null) {
+function toSessionWorktreeState(record: SessionWorktreeDoc | null) {
   if (!record) {
     return null
   }
@@ -708,6 +704,7 @@ type ActiveSession = {
   acpSessionId: string
   logger: ReturnType<typeof createLogger>
   token: string
+  supportsLoadSession: boolean
   process: AgentProcessHandle
   writer: WritableStreamDefaultWriter<acp.AnyMessage>
   subscription: {
@@ -715,7 +712,7 @@ type ActiveSession = {
   }
   status: DaemonSessionStatus
   nextTurnSequence: number
-  activeTurn: ActiveTurnBuffer<PersistedSessionTurnDraftRecord["id"]> | null
+  activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> | null
   isFirstPrompt: boolean
   systemPrompt: string
   lastPermissionRequest: PermissionRequest | null
@@ -749,6 +746,11 @@ interface NewSessionParams extends SessionLaunchParams {}
 /** Stored daemon session input accepted by `SessionManager.loadSession()`. */
 interface LoadSessionParams extends SessionLaunchParams {
   id: SessionId
+}
+
+/** Internal launch request shape after the daemon has resolved the effective agent. */
+type ResolvedCreateSessionRequest = CreateSessionRequest & {
+  agent: NonNullable<CreateSessionRequest["agent"]>
 }
 
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
@@ -855,7 +857,7 @@ function toConnectionState(input: {
 }): SessionConnection {
   return {
     mode: input.mode,
-    reconnectable: input.mode === "live" && input.activeDaemonSession,
+    reconnectable: input.mode === "live",
     activeDaemonSession: input.activeDaemonSession,
   }
 }
@@ -863,6 +865,14 @@ function toConnectionState(input: {
 /** Chooses the archived connection mode from whether any session turn history survived persistence. */
 function archivedConnectionMode(hasHistory: boolean): SessionConnectionMode {
   return hasHistory ? "history" : "none"
+}
+
+/** Keeps reloadable sessions live even when the current daemon process has already detached. */
+function disconnectedConnectionMode(
+  hasHistory: boolean,
+  supportsLoadSession: boolean,
+): SessionConnectionMode {
+  return supportsLoadSession ? "live" : archivedConnectionMode(hasHistory)
 }
 
 /** Merges structured session metadata layers while dropping empty results. */
@@ -881,6 +891,24 @@ function agentNameFromInput(agent: string | AgentDistribution): string {
   }
 
   return agent.name
+}
+
+/** Returns true when the ACP adapter can reopen this session later via `session/load`. */
+function supportsSessionLoad(initialized: Pick<InitializedSession, "agentCapabilities">): boolean {
+  return initialized.agentCapabilities?.loadSession === true
+}
+
+/** Rebuilds the daemon launch request used to reconnect one previously stored session. */
+function createReconnectRequest(session: SessionDoc): CreateSessionRequest {
+  return {
+    agent: session.agent ?? undefined,
+    cwd: session.cwd,
+    mcpServers: session.mcpServers,
+    systemPrompt: "",
+    repository: session.repository ?? undefined,
+    prNumber: session.prNumber ?? undefined,
+    metadata: session.metadata ?? undefined,
+  }
 }
 
 /** Builds the child-process environment expected by session agents. */
@@ -1243,10 +1271,13 @@ async function initializeSession(params: {
     let configOptions: acp.SessionConfigOption[] | null | undefined
     let stopReason: acp.PromptResponse["stopReason"] | null = null
 
-    if (
-      params.resumeAcpId !== undefined &&
-      initializeResult.agentCapabilities?.loadSession === true
-    ) {
+    if (params.resumeAcpId !== undefined) {
+      if (initializeResult.agentCapabilities?.loadSession !== true) {
+        throw new IpcClientError(
+          `Cannot resume ACP session ${params.resumeAcpId}: agent does not support session/load`,
+        )
+      }
+
       await agent.loadSession({
         sessionId: params.resumeAcpId,
         cwd: params.request.cwd,
@@ -1392,7 +1423,7 @@ async function resolveLaunchWorktree(params: {
 /** Builds the persisted daemon session record written after ACP session initialization completes. */
 function createSessionRecordUpdate(params: {
   initialized: InitializedSession
-  request: CreateSessionRequest
+  request: ResolvedCreateSessionRequest
   cwd: string
   token: string
   scope: ReturnType<typeof parseRepoScope>
@@ -1402,24 +1433,28 @@ function createSessionRecordUpdate(params: {
     allowedPrNumbers: number[]
   }
   sessionMetadata: DaemonSessionMetadata | null | undefined
-  existingSession: PersistedSessionRecord | null
+  existingSession: SessionDoc | null
   exitAfterInitialPrompt: boolean
+  supportsLoadSession: boolean
   title: string
   titleState: DaemonSession["titleState"]
   availableCommands: acp.AvailableCommand[]
 }) {
-  const connectionMode: SessionConnectionMode = params.exitAfterInitialPrompt ? "history" : "live"
+  const connectionMode: SessionConnectionMode =
+    params.exitAfterInitialPrompt && !params.supportsLoadSession ? "history" : "live"
 
   return {
     acpSessionId: params.initialized.acpSessionId,
     status: params.initialized.status,
     stopReason: params.initialized.stopReason ?? params.existingSession?.stopReason ?? null,
+    agent: params.request.agent,
     agentName: agentNameFromInput(params.request.agent),
     cwd: params.cwd,
     title: params.existingSession?.title ?? params.title,
     titleState: params.existingSession?.titleState ?? params.titleState,
     mcpServers: params.request.mcpServers,
     connectionMode,
+    supportsLoadSession: params.supportsLoadSession,
     activeDaemonSession: !params.exitAfterInitialPrompt,
     repository: params.scope.repository,
     prNumber: params.scope.prNumber,
@@ -1438,10 +1473,10 @@ function createSessionRecordUpdate(params: {
 /** Persists the records produced by one successful session launch across all daemon-owned kinds. */
 function persistLaunchedSession(params: {
   id: SessionId
-  existingSession: PersistedSessionRecord | null
+  existingSession: SessionDoc | null
   initialTurn: SessionHistoryTurn | null
-  existingWorktreeRecord: PersistedSessionWorktreeRecord | null
-  existingWorkforceRecord: PersistedSessionWorkforceRecord | null
+  existingWorktreeRecord: SessionWorktreeDoc | null
+  existingWorkforceRecord: SessionWorkforceDoc | null
   worktree: PreparedSessionWorktree | null
   workforceMetadata: CreateSessionRequest["workforce"] | undefined
   sessionRecord: ReturnType<typeof createSessionRecordUpdate>
@@ -1510,7 +1545,7 @@ function parseRepoScope(params: { repository?: string; prNumber?: number }): {
 
 /** Builds the structured logging context shared across session lifecycle events. */
 function buildSessionLogContext(params: {
-  request: CreateSessionRequest
+  request: ResolvedCreateSessionRequest
   cwd?: string
   workforce?: CreateSessionRequest["workforce"]
   extraContext?: Record<string, unknown>
@@ -1530,7 +1565,7 @@ function buildSessionLogContext(params: {
 /** Builds the stable async context installed while one daemon session is actively doing work. */
 function buildSessionContext(params: {
   sessionId: SessionId
-  request: CreateSessionRequest
+  request: ResolvedCreateSessionRequest
   cwd: string
   worktree?: PreparedSessionWorktree | null
 }) {
@@ -1545,6 +1580,17 @@ function buildSessionContext(params: {
   }
 
   return sessionContext
+}
+
+/** Resolves the concrete launch agent so daemon session creation never depends on client fallback logic. */
+async function resolveSessionRequestAgent(
+  request: CreateSessionRequest,
+  config?: UserConfig,
+): Promise<ResolvedCreateSessionRequest> {
+  return {
+    ...request,
+    agent: request.agent ?? (await resolveDefaultAgent(config)),
+  }
 }
 
 /** Logs ACP messages in a structured form without dumping full payloads verbatim. */
@@ -1772,7 +1818,7 @@ export function createSessionManager(input: {
 
   async function persistTurnDraftAsInterruptedTurn(
     sessionId: SessionId,
-    draftRecord: PersistedSessionTurnDraftRecord,
+    draftRecord: SessionTurnDraftDoc,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     const existingTurn =
@@ -2086,7 +2132,7 @@ export function createSessionManager(input: {
   }
 
   function toSessionWorktreeValue(
-    record: PersistedSessionWorktreeRecord,
+    record: SessionWorktreeDoc,
     sync: WorktreeSyncSessionState | null,
   ) {
     const { id: _id, sessionId: _sessionId, ...worktree } = record
@@ -2098,7 +2144,7 @@ export function createSessionManager(input: {
 
   function createWorktreeSyncHost(
     sessionId: SessionId,
-    worktreeRecord: PersistedSessionWorktreeRecord | SessionWorktreeState,
+    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
   ) {
     return new WorktreeSyncSessionHost({
       sessionId,
@@ -2117,7 +2163,7 @@ export function createSessionManager(input: {
 
   async function resolveWorktreeSyncState(
     id: SessionId,
-    worktreeRecord: PersistedSessionWorktreeRecord | null,
+    worktreeRecord: SessionWorktreeDoc | null,
   ) {
     if (!worktreeRecord) {
       return null
@@ -2287,7 +2333,7 @@ export function createSessionManager(input: {
 
   async function replaceMountedWorktreeSyncIfNeeded(
     id: SessionId,
-    worktreeRecord: PersistedSessionWorktreeRecord | SessionWorktreeState,
+    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     const mounted = await findMountedWorktreeSyncSessionByPrimaryDir(worktreeRecord.repoRoot)
@@ -2332,7 +2378,7 @@ export function createSessionManager(input: {
 
   async function mountWorktreeSyncHost(
     id: SessionId,
-    worktreeRecord: PersistedSessionWorktreeRecord | SessionWorktreeState,
+    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     const host = createWorktreeSyncHost(id, worktreeRecord)
@@ -2367,7 +2413,7 @@ export function createSessionManager(input: {
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
-    let persistedSessions: PersistedSessionRecord[]
+    let persistedSessions: SessionDoc[]
 
     try {
       persistedSessions = await Promise.resolve(db.sessions.findMany())
@@ -2380,6 +2426,7 @@ export function createSessionManager(input: {
 
     await Promise.all(
       persistedSessions.map(async (session) => {
+        const supportsLoadSession = session.supportsLoadSession === true
         const diagnosticsRecord =
           db.sessionDiagnostics.first({
             where: { sessionId: session.id },
@@ -2461,7 +2508,7 @@ export function createSessionManager(input: {
           }
           await setConnectionMode(
             session.id,
-            archivedConnectionMode(hasPersistedTurnHistory(session.id)),
+            disconnectedConnectionMode(hasPersistedTurnHistory(session.id), supportsLoadSession),
             false,
           )
           await emitDiagnostic(session.id, "session_reconciled_after_restart", {
@@ -2472,7 +2519,7 @@ export function createSessionManager(input: {
 
         await setConnectionMode(
           session.id,
-          archivedConnectionMode(hasPersistedTurnHistory(session.id)),
+          disconnectedConnectionMode(hasPersistedTurnHistory(session.id), supportsLoadSession),
           false,
         )
         if (session.permissions) {
@@ -2596,7 +2643,7 @@ export function createSessionManager(input: {
       active.nextTurnSequence = resolveLatestStoredTurnSequence(active.id) + 1
     }
 
-    const activeTurn: ActiveTurnBuffer<PersistedSessionTurnDraftRecord["id"]> = {
+    const activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> = {
       turnId: randomUUID(),
       sequence: active.nextTurnSequence,
       promptRequestId: nextPrompt.requestId,
@@ -2795,6 +2842,7 @@ export function createSessionManager(input: {
     id: SessionId
     agentProcess: AgentProcessHandle
     sessionLogger: ReturnType<typeof createLogger>
+    supportsLoadSession: boolean
   }) {
     params.agentProcess.onceExit((code, signal) => {
       void emitDiagnostic(
@@ -2815,7 +2863,11 @@ export function createSessionManager(input: {
       { reason: "one_shot_completed" },
       params.sessionLogger,
     )
-    await setConnectionMode(params.id, "history", false)
+    await setConnectionMode(
+      params.id,
+      disconnectedConnectionMode(true, params.supportsLoadSession),
+      false,
+    )
     await emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
     await treeKill(params.agentProcess)
     await waitForAgentProcessExit(params.agentProcess)
@@ -2831,6 +2883,7 @@ export function createSessionManager(input: {
   async function activateLiveSession(params: {
     id: SessionId
     token: string
+    supportsLoadSession: boolean
     agentProcess: AgentProcessHandle
     initialized: InitializedSession
     nextTurnSequence: number
@@ -2865,6 +2918,7 @@ export function createSessionManager(input: {
       acpSessionId: params.initialized.acpSessionId,
       logger: params.sessionLogger,
       token: params.token,
+      supportsLoadSession: params.supportsLoadSession,
       process: params.agentProcess,
       writer,
       subscription: { close: async () => {} },
@@ -2991,7 +3045,10 @@ export function createSessionManager(input: {
 
       await setConnectionMode(
         activeSession.id,
-        archivedConnectionMode(hasPersistedTurnHistory(activeSession.id)),
+        disconnectedConnectionMode(
+          hasPersistedTurnHistory(activeSession.id),
+          activeSession.supportsLoadSession,
+        ),
         false,
       )
       await emitDiagnostic(
@@ -3028,7 +3085,7 @@ export function createSessionManager(input: {
 
   async function launchSession(
     params: SessionLaunchParams,
-    existingSession: PersistedSessionRecord | null = null,
+    existingSession: SessionDoc | null = null,
   ): Promise<DaemonSession> {
     await ready
     const id = existingSession?.id ?? db.sessions.newId()
@@ -3045,33 +3102,37 @@ export function createSessionManager(input: {
       (shouldResolveConfiguredWorktreePlugins(params.request, existingArtifacts.worktree)
         ? await worktreePluginManager.getPlugins(params.request.cwd)
         : undefined)
+    const resolvedRequest = await resolveSessionRequestAgent(params.request, resolvedConfig)
     const preparedTitle = prepareSessionTitle(
-      params.request.initialPrompt,
+      resolvedRequest.initialPrompt,
       resolvedConfig?.sessionTitles?.generator,
     )
     const resolvedRegistry = resolvedConfig?.registry
     const worktree = await resolveLaunchWorktree({
       sessionId: id,
-      request: params.request,
+      request: resolvedRequest,
       existingWorktree: existingArtifacts.worktree,
       worktreePlugins: resolvedWorktreePlugins,
       defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
     })
-    const cwd = worktree?.state.effectiveCwd ?? params.request.cwd
-    const sessionMetadata = mergeSessionMetadata(existingSession?.metadata, params.request.metadata)
+    const cwd = worktree?.state.effectiveCwd ?? resolvedRequest.cwd
+    const sessionMetadata = mergeSessionMetadata(
+      existingSession?.metadata,
+      resolvedRequest.metadata,
+    )
     const existingWorkforceMetadata = existingArtifacts.workforceRecord
       ? omit(existingArtifacts.workforceRecord, ["id", "sessionId"])
       : undefined
-    const workforceMetadata = params.request.workforce ?? existingWorkforceMetadata
+    const workforceMetadata = resolvedRequest.workforce ?? existingWorkforceMetadata
     const sessionContext = buildSessionContext({
       sessionId: id,
-      request: params.request,
+      request: resolvedRequest,
       cwd,
       worktree,
     })
 
     const sessionLogContext = buildSessionLogContext({
-      request: params.request,
+      request: resolvedRequest,
       cwd,
       workforce: workforceMetadata ?? undefined,
       extraContext: worktree
@@ -3082,8 +3143,8 @@ export function createSessionManager(input: {
         : undefined,
     })
 
-    const scope = parseRepoScope(params.request)
-    const worktreeSyncEnabled = worktree && params.request.worktree?.sync?.enabled === true
+    const scope = parseRepoScope(resolvedRequest)
+    const worktreeSyncEnabled = worktree && resolvedRequest.worktree?.sync?.enabled === true
 
     const nextPermission = {
       owner: scope.owner,
@@ -3094,6 +3155,7 @@ export function createSessionManager(input: {
     let sessionLogger = logger
     sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
     let mountedWorktreeSyncHost: WorktreeSyncSessionHost | null = null
+    let spawnedAgentProcess: AgentProcessHandle | null = null
 
     try {
       sessionLogger.log("session.launch_requested", {
@@ -3152,19 +3214,20 @@ export function createSessionManager(input: {
       const agentProcess = await spawnAgentProcess({
         daemonUrl: input.daemonUrl,
         token,
-        agent: params.request.agent,
+        agent: resolvedRequest.agent,
         cwd,
         agentBinDir: input.agentBinDir,
-        env: params.request.env,
+        env: resolvedRequest.env,
         registryService: input.registryService,
         registry: resolvedRegistry,
       })
+      spawnedAgentProcess = agentProcess
 
       const initialized = await initializeSession({
         input: agentProcess.stdin,
         output: agentProcess.stdout,
         request: {
-          ...params.request,
+          ...resolvedRequest,
           cwd,
           metadata: sessionMetadata,
         },
@@ -3182,6 +3245,7 @@ export function createSessionManager(input: {
 
       const latestAvailableCommands = getLatestAvailableCommands(initialized.history)
       const availableCommands = latestAvailableCommands ?? existingSession?.availableCommands ?? []
+      const sessionSupportsLoad = supportsSessionLoad(initialized)
       const initialTurn = createInitializedHistoryTurn({
         initialized,
         sequence: existingArtifacts.nextTurnSequence,
@@ -3191,7 +3255,7 @@ export function createSessionManager(input: {
         : existingArtifacts.nextTurnSequence
       const sessionRecord = createSessionRecordUpdate({
         initialized,
-        request: params.request,
+        request: resolvedRequest,
         cwd,
         token,
         scope,
@@ -3199,6 +3263,7 @@ export function createSessionManager(input: {
         sessionMetadata,
         existingSession,
         exitAfterInitialPrompt,
+        supportsLoadSession: sessionSupportsLoad,
         title: preparedTitle.title,
         titleState: preparedTitle.titleState,
         availableCommands,
@@ -3243,6 +3308,7 @@ export function createSessionManager(input: {
           id,
           agentProcess,
           sessionLogger,
+          supportsLoadSession: sessionSupportsLoad,
         })
         if (mountedWorktreeSyncHost) {
           await mountedWorktreeSyncHost.unmount().catch(() => {})
@@ -3253,6 +3319,7 @@ export function createSessionManager(input: {
       const liveSession = await activateLiveSession({
         id,
         token,
+        supportsLoadSession: sessionSupportsLoad,
         agentProcess,
         initialized,
         nextTurnSequence,
@@ -3269,6 +3336,10 @@ export function createSessionManager(input: {
         ...sessionLogContext,
         errorMessage: error instanceof Error ? error.message : String(error),
       })
+      if (spawnedAgentProcess && !activeSessions.has(id)) {
+        await treeKill(spawnedAgentProcess).catch(() => {})
+        await waitForAgentProcessExit(spawnedAgentProcess).catch(() => {})
+      }
       if (mountedWorktreeSyncHost) {
         await stopWorktreeSyncRuntime(id)
         await mountedWorktreeSyncHost.unmount().catch(() => {})
@@ -3350,17 +3421,32 @@ export function createSessionManager(input: {
   async function connectSession(id: SessionId): Promise<DaemonSession> {
     await ready
     const active = activeSessions.get(id)
-    if (!active) {
-      const session = await getSession(id)
-      throw new IpcClientError(
-        session.connectionMode === "history"
-          ? `Session ${id} is archived and no longer reconnectable`
-          : `Session ${id} is not reconnectable`,
-      )
+    if (active) {
+      await emitDiagnostic(id, "session_connected", undefined, active.logger)
+      return getSession(id)
     }
 
-    await emitDiagnostic(id, "session_connected", undefined, active.logger)
-    return getSession(id)
+    const session = await getSession(id)
+    if (session.connectionMode === "live" && session.supportsLoadSession && session.agent) {
+      const reloadedSession = await loadSession({
+        id,
+        request: createReconnectRequest(session),
+      })
+      const reloadedActiveSession = activeSessions.get(id)
+      await emitDiagnostic(
+        id,
+        "session_connected",
+        undefined,
+        reloadedActiveSession?.logger ?? logger,
+      )
+      return reloadedSession
+    }
+
+    throw new IpcClientError(
+      session.connectionMode === "history"
+        ? `Session ${id} is archived and no longer reconnectable`
+        : `Session ${id} is not reconnectable`,
+    )
   }
 
   function readLatestTurnDraft(id: SessionId) {
