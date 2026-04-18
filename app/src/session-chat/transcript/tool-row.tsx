@@ -10,6 +10,8 @@ import {
   rowInnerClass,
   toolDisclosureClass,
   toolDetailHeadingClass,
+  toolInlineMetaClass,
+  toolInlineSeparatorClass,
   toolDetailItemClass,
   toolDetailListClass,
   toolDetailMonoClass,
@@ -31,7 +33,7 @@ function formatToolStatusLabel(status: SessionTranscriptToolStatus) {
     : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
 }
 
-function buildToolGroupSummary(toolCalls: readonly SessionTranscriptToolCall[]) {
+function buildToolGroupSummaryParts(toolCalls: readonly SessionTranscriptToolCall[]) {
   const visibleTitles = toolCalls.slice(0, 3).map((toolCall) => toolCall.title)
   const moreCount = Math.max(0, toolCalls.length - visibleTitles.length)
 
@@ -39,9 +41,7 @@ function buildToolGroupSummary(toolCalls: readonly SessionTranscriptToolCall[]) 
     toolCalls.length === 1 ? "Tool call" : `${toolCalls.length} tool calls`,
     visibleTitles.join(", "),
     moreCount > 0 ? `+${moreCount} more` : null,
-  ]
-    .filter(Boolean)
-    .join(" \u00b7 ")
+  ].filter((part): part is string => Boolean(part))
 }
 
 function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[]) {
@@ -63,6 +63,25 @@ function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[])
         `${count} ${formatToolStatusLabel(status as SessionTranscriptToolStatus).toLowerCase()}`,
     )
     .join(", ")
+}
+
+function renderMetaParts(parts: readonly string[], keyPrefix: string) {
+  return parts.flatMap((part, index) => {
+    const partNode = <span key={`${keyPrefix}:part:${index}`}>{part}</span>
+
+    if (index === 0) {
+      return [partNode]
+    }
+
+    return [
+      <span
+        key={`${keyPrefix}:separator:${index}`}
+        aria-hidden="true"
+        class={toolInlineSeparatorClass}
+      />,
+      partNode,
+    ]
+  })
 }
 
 function renderToolContent(content: SessionTranscriptToolContent, key: string) {
@@ -115,8 +134,9 @@ export function ToolTranscriptRow(props: {
   groupId: string
   toolCalls: readonly SessionTranscriptToolCall[]
 }) {
-  const summary = buildToolGroupSummary(props.toolCalls)
+  const summaryParts = buildToolGroupSummaryParts(props.toolCalls)
   const statusSummary = buildToolStatusSummary(props.toolCalls)
+  const summaryMetaParts = statusSummary ? [...summaryParts, statusSummary] : summaryParts
 
   return (
     <article class={rowClass}>
@@ -125,8 +145,9 @@ export function ToolTranscriptRow(props: {
           <details class={toolDisclosureClass}>
             <summary class={toolSummaryClass}>
               <span class={toolSummaryTextClass}>
-                {summary}
-                {statusSummary ? ` \u00b7 ${statusSummary}` : ""}
+                <span class={toolInlineMetaClass}>
+                  {renderMetaParts(summaryMetaParts, `${props.groupId}:summary`)}
+                </span>
               </span>
               <span class={toolToggleHintClass}>Details</span>
             </summary>
@@ -135,8 +156,16 @@ export function ToolTranscriptRow(props: {
                 <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
                   <article>
                     <div class={toolDetailHeadingClass}>
-                      {toolCall.title} \u00b7 {formatToolKindLabel(toolCall.toolKind)} \u00b7{" "}
-                      {formatToolStatusLabel(toolCall.status)}
+                      <span class={toolInlineMetaClass}>
+                        {renderMetaParts(
+                          [
+                            toolCall.title,
+                            formatToolKindLabel(toolCall.toolKind),
+                            formatToolStatusLabel(toolCall.status),
+                          ],
+                          `${props.groupId}:${toolCall.id}:heading`,
+                        )}
+                      </span>
                     </div>
                     {toolCall.content.map((content, index) =>
                       renderToolContent(content, `${toolCall.id}:content:${index}`),

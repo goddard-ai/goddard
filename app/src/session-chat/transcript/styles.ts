@@ -125,6 +125,23 @@ export const toolSummaryTextClass = css({
   lineHeight: "1.5",
 })
 
+export const toolInlineMetaClass = css({
+  display: "inline-flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "6px",
+})
+
+export const toolInlineSeparatorClass = css({
+  display: "inline-flex",
+  width: "4px",
+  height: "4px",
+  flexShrink: 0,
+  borderRadius: "999px",
+  backgroundColor: "currentColor",
+  opacity: "0.55",
+})
+
 export const toolToggleHintClass = css({
   color: "fg.muted",
   fontSize: "0.82rem",
