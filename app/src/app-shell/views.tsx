@@ -65,6 +65,7 @@ function WorkbenchScrollPanel(props: { scrollKey: string; children: preact.Compo
       >
         <div
           class={css({
+            height: "100%",
             minHeight: "100%",
           })}
         >
