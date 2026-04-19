@@ -7,6 +7,7 @@ const nodeModulesBin = join(appDir, "node_modules", ".bin")
 
 /** Start Vite first, then launch Electrobun watch mode after the ready log appears. */
 async function main() {
+  process.env.NODE_ENV = "development"
   process.env.FORCE_COLOR = "1"
   process.env.PATH = `${nodeModulesBin}:${process.env.PATH}`
   process.chdir(appDir)

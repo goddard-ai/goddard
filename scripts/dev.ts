@@ -1,6 +1,7 @@
 import { supervise } from "procband"
 
 async function main() {
+  process.env.NODE_ENV = "development"
   process.env.FORCE_COLOR = "1"
 
   const daemon = supervise({
