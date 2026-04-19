@@ -63,6 +63,51 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
 
+  useEffect(() => {
+    if (!isMenuOpen) {
+      setQuery("")
+      setSelectedIndex(0)
+      return
+    }
+
+    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
+    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
+
+    const focusFrame = requestAnimationFrame(() => {
+      if (isFilterable) {
+        const input = filterInputRef.current
+
+        if (!input) {
+          return
+        }
+
+        if (document.activeElement instanceof HTMLElement && document.activeElement !== input) {
+          document.activeElement.blur()
+        }
+
+        input.focus({ preventScroll: true })
+        input.setSelectionRange(input.value.length, input.value.length)
+        return
+      }
+
+      menuRef.current?.focus({ preventScroll: true })
+    })
+
+    return () => {
+      cancelAnimationFrame(focusFrame)
+    }
+  }, [filteredItemSignature, isFilterable, isMenuOpen, props.value])
+
+  useEffect(() => {
+    if (!isMenuOpen || !highlightedItem) {
+      return
+    }
+
+    itemRefs.current[highlightedItem.value]?.scrollIntoView({
+      block: "nearest",
+    })
+  }, [highlightedItem?.value, isMenuOpen])
+
   function moveHighlightedIndex(step: 1 | -1) {
     if (filteredItems.length === 0) {
       setSelectedIndex(0)
@@ -93,38 +138,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
     props.onOpenChange(false)
   }
 
-  useEffect(() => {
-    if (!isMenuOpen) {
-      setQuery("")
-      setSelectedIndex(0)
-      return
-    }
-
-    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-
-    queueMicrotask(() => {
-      if (isFilterable) {
-        const input = filterInputRef.current
-        input?.focus()
-        input?.setSelectionRange(input.value.length, input.value.length)
-        return
-      }
-
-      menuRef.current?.focus()
-    })
-  }, [filteredItemSignature, isFilterable, isMenuOpen, props.value])
-
-  useEffect(() => {
-    if (!isMenuOpen || !highlightedItem) {
-      return
-    }
-
-    itemRefs.current[highlightedItem.value]?.scrollIntoView({
-      block: "nearest",
-    })
-  }, [highlightedItem?.value, isMenuOpen])
-
   return (
     <Popover.Root
       closeOnInteractOutside={true}
@@ -135,6 +148,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
         gutter: 8,
         placement: "bottom-start",
         sameWidth: true,
+        strategy: "fixed",
       }}
       unmountOnExit={true}
       onOpenChange={(details) => {
