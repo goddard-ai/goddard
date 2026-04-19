@@ -54,6 +54,11 @@ export function MessageList<Item>(props: MessageListProps<Item>) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
   const restoreState = scrollCacheKey ? messageListStateCache.get(scrollCacheKey) : undefined
+  const initialTopMostItemIndex = getInitialTopMostItemIndex(
+    props.items,
+    effectiveInitialScroll,
+    restoreState,
+  )
 
   useEffect(() => {
     return () => {
@@ -92,11 +97,6 @@ export function MessageList<Item>(props: MessageListProps<Item>) {
       data={props.items}
       defaultItemHeight={props.defaultRowHeight}
       heightEstimates={heightEstimates}
-      initialTopMostItemIndex={getInitialTopMostItemIndex(
-        props.items,
-        effectiveInitialScroll,
-        restoreState,
-      )}
       itemContent={(index, item) =>
         props.renderRow({
           item,
@@ -108,10 +108,20 @@ export function MessageList<Item>(props: MessageListProps<Item>) {
         main: overscanPx,
         reverse: overscanPx,
       }}
-      restoreStateFrom={restoreState}
       style={{
         minHeight: "100%",
       }}
+      {...(initialTopMostItemIndex === undefined
+        ? {}
+        : {
+            // Virtuoso treats an explicit undefined initial location as a real update.
+            initialTopMostItemIndex,
+          })}
+      {...(restoreState
+        ? {
+            restoreStateFrom: restoreState,
+          }
+        : {})}
     />
   )
 }
