@@ -26,7 +26,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     props.dialog.open
   const hasLocationSelector = form.launchPreview.value !== null && props.dialog.open
   const hasModelSelector =
-    (form.launchPreview.value?.models?.availableModels.length ?? 0) > 0 && props.dialog.open
+    (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0 && props.dialog.open
   const hasProjectSelector = projectRegistry.projectList.length > 0 && props.dialog.open
   const hasThinkingLevel = form.thinkingOption.value !== null && props.dialog.open
   const canSubmit = form.canSubmit.value && props.dialog.open

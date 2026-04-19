@@ -1,10 +1,11 @@
-import type {
-  CreateSessionRequest,
-  InitialSessionConfigOption,
-  ListAdaptersResponse,
-  SessionComposerSuggestionsResponse,
-  SessionLaunchPreviewResponse,
-  SessionPromptRequest,
+import {
+  deriveSessionLaunchModelConfig,
+  type CreateSessionRequest,
+  type InitialSessionConfigOption,
+  type ListAdaptersResponse,
+  type SessionComposerSuggestionsResponse,
+  type SessionLaunchPreviewResponse,
+  type SessionPromptRequest,
 } from "@goddard-ai/sdk"
 import { computed, createModel, signal } from "@preact/signals"
 
@@ -95,9 +96,15 @@ export const SessionLaunchFormState = createModel(function () {
     () =>
       adapterCatalog.value?.adapters.find((adapter) => adapter.id === draftAdapterId.value) ?? null,
   )
+  const launchModelConfig = computed(() =>
+    deriveSessionLaunchModelConfig({
+      models: launchPreview.value?.models ?? null,
+      configOptions: launchPreview.value?.configOptions ?? [],
+    }),
+  )
   const thinkingOption = computed(
     () =>
-      launchPreview.value?.configOptions.find((option) => option.category === "thought_level") ??
+      launchModelConfig.value.configOptions.find((option) => option.category === "thought_level") ??
       null,
   )
 
@@ -131,6 +138,11 @@ export const SessionLaunchFormState = createModel(function () {
       })
     }
 
+    const resolvedSelection = launchModelConfig.value.resolveSelection({
+      modelId: draftModelId.value,
+      configOptions: initialConfigOptions,
+    })
+
     return {
       agent,
       cwd,
@@ -143,8 +155,8 @@ export const SessionLaunchFormState = createModel(function () {
           : undefined,
       mcpServers: [],
       systemPrompt: "",
-      initialModelId: draftModelId.value ?? undefined,
-      initialConfigOptions: initialConfigOptions.length > 0 ? initialConfigOptions : undefined,
+      initialModelId: resolvedSelection.initialModelId,
+      initialConfigOptions: resolvedSelection.initialConfigOptions,
       initialPrompt,
     }
   })
@@ -182,6 +194,10 @@ export const SessionLaunchFormState = createModel(function () {
       draftLocation.value = "local"
     }
 
+    const resolvedLaunchModelConfig = deriveSessionLaunchModelConfig({
+      models: nextLaunchPreview.models ?? null,
+      configOptions: nextLaunchPreview.configOptions,
+    })
     const availableBranchNames = new Set(nextLaunchPreview.branches.map((branch) => branch.name))
     const currentBranchName =
       nextLaunchPreview.branches.find((branch) => branch.current)?.name ??
@@ -196,9 +212,9 @@ export const SessionLaunchFormState = createModel(function () {
     }
 
     const availableModelIds = new Set(
-      nextLaunchPreview.models?.availableModels.map((model) => model.modelId) ?? [],
+      resolvedLaunchModelConfig.models?.availableModels.map((model) => model.modelId) ?? [],
     )
-    const currentModelId = nextLaunchPreview.models?.currentModelId ?? null
+    const currentModelId = resolvedLaunchModelConfig.models?.currentModelId ?? null
 
     if (
       draftModelId.value === null ||
@@ -208,7 +224,9 @@ export const SessionLaunchFormState = createModel(function () {
     }
 
     const resolvedThinkingOption =
-      nextLaunchPreview.configOptions.find((option) => option.category === "thought_level") ?? null
+      resolvedLaunchModelConfig.configOptions.find(
+        (option) => option.category === "thought_level",
+      ) ?? null
 
     if (!resolvedThinkingOption) {
       draftThinkingValue.value = null
@@ -248,6 +266,7 @@ export const SessionLaunchFormState = createModel(function () {
     draftProjectPath,
     draftPromptBlocks,
     draftThinkingValue,
+    launchModelConfig,
     launchPreview,
     openPicker,
     reset(preferredProjectPath: string | null = null) {

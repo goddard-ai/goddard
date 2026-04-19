@@ -126,12 +126,13 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
       label: branch.name,
       detail: branch.current ? "Current branch" : null,
     })) ?? []
+  const previewModels = form.launchModelConfig.value.models
   const modelItems: SessionInputSelectItem[] =
-    preview?.models?.availableModels.map((model) => ({
+    previewModels?.availableModels.map((model) => ({
       value: model.modelId,
       label: model.name,
       detail: model.description ?? model.modelId,
-      searchText: model.modelId,
+      searchText: [model.name, model.description, model.modelId].filter(Boolean).join("\n"),
     })) ?? []
   const thinkingItems: SessionInputSelectItem[] =
     form.thinkingOption.value?.type === "boolean"

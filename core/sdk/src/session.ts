@@ -44,6 +44,8 @@ export type {
   ShutdownSessionResponse,
 }
 
+export { deriveSessionLaunchModelConfig } from "./session-launch-model-config.ts"
+
 export type SessionPromptRequest = {
   id: DaemonSessionId
   acpId: string
