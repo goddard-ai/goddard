@@ -1,8 +1,9 @@
-import { Dialog } from "@ark-ui/react/dialog"
+import { Dialog, useDialog, type UseDialogReturn } from "@ark-ui/react/dialog"
 import { cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { useSignal } from "@preact/signals"
+import { type Signal, useSignal } from "@preact/signals"
 import { ArrowUpRight, FolderSearch2, Plus, Trash2, X } from "lucide-react"
+import { useEffect } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
@@ -17,13 +18,8 @@ export function ProjectsPage() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-
+  const addProjectDialog = useDialog()
   const selectedProjectPath = useSignal<string | null>(projectRegistry.projectList[0]?.path ?? null)
-  const isAddDialogOpen = useSignal(false)
-  const draftPath = useSignal("")
-  const draftName = useSignal("")
-  const lastSuggestedName = useSignal<string | null>(null)
-
   const projects = projectRegistry.projectList
   const resolvedSelectedProjectPath =
     selectedProjectPath.value && projectRegistry.projectsByPath[selectedProjectPath.value]
@@ -32,52 +28,6 @@ export function ProjectsPage() {
   const selectedProject = resolvedSelectedProjectPath
     ? lookupProject(projectRegistry, resolvedSelectedProjectPath)
     : null
-  const draftProjectPath = draftPath.value.trim()
-  const draftProjectName = draftName.value.trim()
-  const derivedProjectName = deriveProjectName(draftPath.value)
-  const canAddProject =
-    draftProjectPath.length > 0 && (draftProjectName.length > 0 || derivedProjectName.length > 0)
-
-  function resetDraft(): void {
-    draftPath.value = ""
-    draftName.value = ""
-    lastSuggestedName.value = null
-  }
-
-  function openAddDialog(): void {
-    resetDraft()
-    isAddDialogOpen.value = true
-  }
-
-  function closeAddDialog(): void {
-    isAddDialogOpen.value = false
-    resetDraft()
-  }
-
-  function updateDraftPath(value: string): void {
-    draftPath.value = value
-    const suggestedName = deriveProjectName(value)
-
-    if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
-      draftName.value = suggestedName
-    }
-
-    lastSuggestedName.value = suggestedName
-  }
-
-  function updateDraftName(value: string): void {
-    draftName.value = value
-  }
-
-  async function browseForProject(): Promise<void> {
-    const selectedPath = await browseForProjectPath()
-
-    if (!selectedPath) {
-      return
-    }
-
-    updateDraftPath(selectedPath)
-  }
 
   function selectProject(projectPath: string): void {
     selectedProjectPath.value = projectPath
@@ -97,113 +47,78 @@ export function ProjectsPage() {
     })
   }
 
-  function addProject(): void {
-    if (draftProjectPath.length === 0) {
-      return
-    }
-
-    const projectName = draftProjectName || deriveProjectName(draftProjectPath)
-
-    if (projectName.length === 0) {
-      return
-    }
-
-    projectRegistry.addProject({
-      path: draftProjectPath,
-      name: projectName,
-    })
-    selectedProjectPath.value = draftProjectPath
-    closeAddDialog()
-  }
-
   return (
-    <div class={styles.root}>
-      <section class={styles.panel}>
-        <header class={styles.sectionHeader}>
-          <div class={styles.sectionCopy}>
-            <h1 class={styles.title}>Projects</h1>
-            <p class={styles.body}>
-              Keep an explicit set of local roots available to the workbench.
-            </p>
-          </div>
-          <button
-            class={cx(styles.buttonBase, styles.primaryButton)}
-            type="button"
-            onClick={() => {
-              openAddDialog()
-            }}
-          >
-            <Plus size={16} strokeWidth={2.2} />
-            Add project
-          </button>
-        </header>
-
-        {projects.length === 0 ? (
-          <div class={styles.empty}>
-            <div class={styles.emptyCopy}>
-              <h2 class={styles.title}>No projects yet</h2>
+    <Dialog.RootProvider value={addProjectDialog} lazyMount unmountOnExit>
+      <div class={styles.root}>
+        <section class={styles.panel}>
+          <header class={styles.sectionHeader}>
+            <div class={styles.sectionCopy}>
+              <h1 class={styles.title}>Projects</h1>
               <p class={styles.body}>
-                Add a local directory to establish the app&apos;s explicit working set.
+                Keep an explicit set of local roots available to the workbench.
               </p>
-              <div>
-                <button
-                  class={cx(styles.buttonBase, styles.primaryButton)}
-                  type="button"
-                  onClick={() => {
-                    openAddDialog()
-                  }}
-                >
-                  <Plus size={16} strokeWidth={2.2} />
-                  Add project
-                </button>
+            </div>
+            <Dialog.Trigger asChild>
+              <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+                <Plus size={16} strokeWidth={2.2} />
+                Add project
+              </button>
+            </Dialog.Trigger>
+          </header>
+
+          {projects.length === 0 ? (
+            <div class={styles.empty}>
+              <div class={styles.emptyCopy}>
+                <h2 class={styles.title}>No projects yet</h2>
+                <p class={styles.body}>
+                  Add a local directory to establish the app&apos;s explicit working set.
+                </p>
+                <div>
+                  <Dialog.Trigger asChild>
+                    <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+                      <Plus size={16} strokeWidth={2.2} />
+                      Add project
+                    </button>
+                  </Dialog.Trigger>
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <ProjectList
-            onOpenProjectTab={openProjectInTab}
-            onRemove={removeProject}
-            onSelect={selectProject}
-            projects={projects}
-            selectedProjectPath={resolvedSelectedProjectPath}
-          />
-        )}
-      </section>
+          ) : (
+            <ProjectList
+              onOpenProjectTab={openProjectInTab}
+              onRemove={removeProject}
+              onSelect={selectProject}
+              projects={projects}
+              selectedProjectPath={resolvedSelectedProjectPath}
+            />
+          )}
+        </section>
 
-      <aside class={styles.panel}>
-        <div class={styles.asideBody}>
-          <div class={styles.intro}>
-            <h2 class={styles.subheading}>Project details</h2>
-            <p class={styles.body}>
-              {selectedProject
-                ? "Selected project metadata for the current workspace."
-                : "Select a project to inspect its configured path and display name."}
-            </p>
+        <aside class={styles.panel}>
+          <div class={styles.asideBody}>
+            <div class={styles.intro}>
+              <h2 class={styles.subheading}>Project details</h2>
+              <p class={styles.body}>
+                {selectedProject
+                  ? "Selected project metadata for the current workspace."
+                  : "Select a project to inspect its configured path and display name."}
+              </p>
+            </div>
+            {selectedProject ? (
+              <>
+                <h3 class={styles.selectedTitle}>{selectedProject.name}</h3>
+                <div class={styles.cardList}>
+                  <InfoCard label="Path" value={selectedProject.path} />
+                  <InfoCard label="Display name" value={selectedProject.name} />
+                </div>
+              </>
+            ) : null}
           </div>
-          {selectedProject ? (
-            <>
-              <h3 class={styles.selectedTitle}>{selectedProject.name}</h3>
-              <div class={styles.cardList}>
-                <InfoCard label="Path" value={selectedProject.path} />
-                <InfoCard label="Display name" value={selectedProject.name} />
-              </div>
-            </>
-          ) : null}
-        </div>
-      </aside>
+        </aside>
 
-      <AddProjectDialog
-        addProject={addProject}
-        browseForProject={browseForProject}
-        canAddProject={canAddProject}
-        closeAddDialog={closeAddDialog}
-        draftName={draftName.value}
-        draftPath={draftPath.value}
-        isAddDialogOpen={isAddDialogOpen.value}
-        onDraftNameInput={updateDraftName}
-        onDraftPathInput={updateDraftPath}
-      />
-    </div>
+        <AddProjectDialog dialog={addProjectDialog} selectedProjectPath={selectedProjectPath} />
+      </div>
+    </Dialog.RootProvider>
   )
 }
 
@@ -304,111 +219,166 @@ function InfoCard(props: { label: string; value: string }) {
 
 /** Renders the modal flow used to add one project. */
 function AddProjectDialog(props: {
-  isAddDialogOpen: boolean
-  draftPath: string
-  draftName: string
-  canAddProject: boolean
-  closeAddDialog: () => void
-  browseForProject: () => Promise<void>
-  onDraftPathInput: (value: string) => void
-  onDraftNameInput: (value: string) => void
-  addProject: () => void
+  dialog: UseDialogReturn
+  selectedProjectPath: Signal<string | null>
 }) {
+  const projectRegistry = useProjectRegistry()
+
+  const draftPath = useSignal("")
+  const draftName = useSignal("")
+  const lastSuggestedName = useSignal<string | null>(null)
+
+  const draftProjectPath = draftPath.value.trim()
+  const draftProjectName = draftName.value.trim()
+  const derivedProjectName = deriveProjectName(draftPath.value)
+  const canAddProject =
+    draftProjectPath.length > 0 && (draftProjectName.length > 0 || derivedProjectName.length > 0)
+
+  function resetDraft(): void {
+    draftPath.value = ""
+    draftName.value = ""
+    lastSuggestedName.value = null
+  }
+
+  function updateDraftPath(value: string): void {
+    draftPath.value = value
+    const suggestedName = deriveProjectName(value)
+
+    if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
+      draftName.value = suggestedName
+    }
+
+    lastSuggestedName.value = suggestedName
+  }
+
+  function updateDraftName(value: string): void {
+    draftName.value = value
+  }
+
+  async function browseForProject(): Promise<void> {
+    const selectedPath = await browseForProjectPath()
+
+    if (!selectedPath) {
+      return
+    }
+
+    updateDraftPath(selectedPath)
+  }
+
+  function addProject(): void {
+    if (draftProjectPath.length === 0) {
+      return
+    }
+
+    const projectName = draftProjectName || deriveProjectName(draftProjectPath)
+
+    if (projectName.length === 0) {
+      return
+    }
+
+    projectRegistry.addProject({
+      path: draftProjectPath,
+      name: projectName,
+    })
+    props.selectedProjectPath.value = draftProjectPath
+    props.dialog.setOpen(false)
+    resetDraft()
+  }
+
+  useEffect(() => {
+    if (!props.dialog.open) {
+      return
+    }
+
+    resetDraft()
+  }, [props.dialog.open])
+
   return (
-    <Dialog.Root
-      open={props.isAddDialogOpen}
-      onOpenChange={(details: { open: boolean }) => {
-        if (!details.open) {
-          props.closeAddDialog()
-        }
-      }}
-    >
-      <DialogPortal>
-        <Dialog.Backdrop class={styles.dialogOverlay} />
-        <Dialog.Positioner class={styles.dialogPositioner}>
-          <Dialog.Content class={styles.dialogContent}>
-            <form
-              class={styles.form}
-              onSubmit={(event) => {
-                event.preventDefault()
-                props.addProject()
-              }}
-            >
-              <header class={styles.dialogHeader}>
-                <div class={styles.dialogHeaderCopy}>
-                  <Dialog.Title class={styles.title}>Add project</Dialog.Title>
-                  <Dialog.Description class={styles.body}>
-                    Choose one local root and optionally adjust the display name.
-                  </Dialog.Description>
-                </div>
-                <Dialog.CloseTrigger asChild>
-                  <button class={styles.closeButton} type="button">
-                    <X size={15} strokeWidth={2.2} />
-                  </button>
-                </Dialog.CloseTrigger>
-              </header>
-
-              <label class={styles.field}>
-                <span class={styles.label}>Project path</span>
-                <input
-                  class={styles.textInput}
-                  placeholder="/Users/alec/dev/goddard-ai/app"
-                  type="text"
-                  value={props.draftPath}
-                  onInput={(event) => {
-                    props.onDraftPathInput(event.currentTarget.value)
-                  }}
-                />
-              </label>
-
-              <div class={styles.browseRow}>
-                <button
-                  class={cx(styles.buttonBase, styles.secondaryButton)}
-                  type="button"
-                  onClick={() => {
-                    void props.browseForProject()
-                  }}
-                >
-                  <FolderSearch2 size={15} strokeWidth={2.1} />
-                  Browse
-                </button>
+    <DialogPortal>
+      <Dialog.Backdrop class={styles.dialogOverlay} />
+      <Dialog.Positioner class={styles.dialogPositioner}>
+        <Dialog.Content class={styles.dialogContent}>
+          <form
+            class={styles.form}
+            onSubmit={(event) => {
+              event.preventDefault()
+              addProject()
+            }}
+          >
+            <header class={styles.dialogHeader}>
+              <div class={styles.dialogHeaderCopy}>
+                <Dialog.Title class={styles.title}>Add project</Dialog.Title>
+                <Dialog.Description class={styles.body}>
+                  Choose one local root and optionally adjust the display name.
+                </Dialog.Description>
               </div>
-
-              <label class={styles.field}>
-                <span class={styles.label}>Display name</span>
-                <input
-                  class={styles.textInput}
-                  placeholder="Derived from folder name"
-                  type="text"
-                  value={props.draftName}
-                  onInput={(event) => {
-                    props.onDraftNameInput(event.currentTarget.value)
-                  }}
-                />
-              </label>
-
-              <div class={styles.dialogActions}>
-                <Dialog.CloseTrigger asChild>
-                  <button class={cx(styles.buttonBase, styles.secondaryButton)} type="button">
-                    Cancel
-                  </button>
-                </Dialog.CloseTrigger>
-                <button
-                  class={cx(styles.buttonBase, styles.primaryButton)}
-                  disabled={!props.canAddProject}
-                  type="button"
-                  onClick={() => {
-                    props.addProject()
-                  }}
-                >
-                  <Plus size={15} strokeWidth={2.2} />
-                  Add project
+              <Dialog.CloseTrigger asChild>
+                <button class={styles.closeButton} type="button">
+                  <X size={15} strokeWidth={2.2} />
                 </button>
-              </div>
-            </form>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </DialogPortal>
-    </Dialog.Root>
+              </Dialog.CloseTrigger>
+            </header>
+
+            <label class={styles.field}>
+              <span class={styles.label}>Project path</span>
+              <input
+                class={styles.textInput}
+                placeholder="/Users/alec/dev/goddard-ai/app"
+                type="text"
+                value={draftPath.value}
+                onInput={(event) => {
+                  updateDraftPath(event.currentTarget.value)
+                }}
+              />
+            </label>
+
+            <div class={styles.browseRow}>
+              <button
+                class={cx(styles.buttonBase, styles.secondaryButton)}
+                type="button"
+                onClick={() => {
+                  void browseForProject()
+                }}
+              >
+                <FolderSearch2 size={15} strokeWidth={2.1} />
+                Browse
+              </button>
+            </div>
+
+            <label class={styles.field}>
+              <span class={styles.label}>Display name</span>
+              <input
+                class={styles.textInput}
+                placeholder="Derived from folder name"
+                type="text"
+                value={draftName.value}
+                onInput={(event) => {
+                  updateDraftName(event.currentTarget.value)
+                }}
+              />
+            </label>
+
+            <div class={styles.dialogActions}>
+              <Dialog.CloseTrigger asChild>
+                <button class={cx(styles.buttonBase, styles.secondaryButton)} type="button">
+                  Cancel
+                </button>
+              </Dialog.CloseTrigger>
+              <button
+                class={cx(styles.buttonBase, styles.primaryButton)}
+                disabled={!canAddProject}
+                type="button"
+                onClick={() => {
+                  addProject()
+                }}
+              >
+                <Plus size={15} strokeWidth={2.2} />
+                Add project
+              </button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </DialogPortal>
   )
 }
