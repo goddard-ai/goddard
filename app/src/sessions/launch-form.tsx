@@ -46,6 +46,7 @@ function getShortcutLabel(binding: unknown) {
 
 export function SessionLaunchForm(props: {
   form: SessionLaunchFormState
+  onEscape?: () => void
   onSubmit: () => Promise<void> | void
   projects: readonly ProjectRecord[]
 }) {
@@ -169,6 +170,7 @@ export function SessionLaunchForm(props: {
         onPromptChange={(prompt) => {
           form.draftPromptBlocks.value = prompt
         }}
+        onEscape={props.onEscape}
         placeholder="Describe the first thing this session should do."
         submitLabel="Launch session"
         onSubmit={async () => {

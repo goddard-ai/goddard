@@ -164,6 +164,10 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
           </Dialog.CloseTrigger>
           <SessionLaunchForm
             form={form}
+            onEscape={() => {
+              // Lexical binds Escape to blur by default, so close the dialog explicitly here.
+              props.dialog.setOpen(false)
+            }}
             onSubmit={launchSession}
             projects={projectRegistry.projectList}
           />

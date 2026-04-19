@@ -264,6 +264,7 @@ export function SessionInputPlugins(props: {
   onHighlightPrevious: () => void
   onMenuChange: (menu: SessionInputMenuState | null) => void
   onPromptBlocksChange: (blocks: SessionInputPromptBlocks) => void
+  onEscape?: () => void
   onSubmit: () => void
   onAcceptMenu: () => void
 }) {
@@ -343,7 +344,13 @@ export function SessionInputPlugins(props: {
       KEY_ESCAPE_COMMAND,
       (event) => {
         if (!props.menu) {
-          return false
+          if (!props.onEscape) {
+            return false
+          }
+
+          event?.preventDefault()
+          props.onEscape()
+          return true
         }
 
         event?.preventDefault()

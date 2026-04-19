@@ -41,6 +41,7 @@ export function SessionInput(props: {
   autoFocus?: boolean
   classes?: Partial<SessionInputClasses>
   loadSuggestions: SessionInputSuggestionLoader
+  onEscape?: () => void
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void
   placeholder?: string
@@ -314,6 +315,7 @@ export function SessionInput(props: {
               setPromptBlocks(nextPromptBlocks)
               props.onPromptChange?.(nextPromptBlocks)
             }}
+            onEscape={props.onEscape}
             onSubmit={() => {
               void submitPrompt()
             }}
