@@ -34,6 +34,7 @@ export function SessionChatView(props: { sessionId: string }) {
   return (
     <main class={styles.root}>
       <Transcript
+        class={styles.transcript}
         initialScrollPosition="bottom"
         messages={messages}
         scrollCacheKey={`detail:session:${session.id}:transcript`}
