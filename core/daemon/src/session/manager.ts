@@ -18,6 +18,7 @@ import type {
   DaemonSession,
   DaemonSessionMetadata,
   DaemonSessionStatus,
+  GetSessionChangesResponse,
   GetSessionDiagnosticsResponse,
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
@@ -85,6 +86,7 @@ import {
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
+import { readSessionChanges } from "./changes.ts"
 import type { ACPRegistryService } from "./registry.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
@@ -756,6 +758,7 @@ export type SessionManager = {
   connectSession: (id: SessionId) => Promise<DaemonSession>
   getSession: (id: SessionId) => Promise<DaemonSession>
   getHistory: (params: GetSessionHistoryRequest) => Promise<GetSessionHistoryResponse>
+  getChanges: (id: SessionId) => Promise<GetSessionChangesResponse>
   getComposerSuggestions: (
     params: SessionComposerSuggestionsRequest,
   ) => Promise<SessionComposerSuggestionsResponse>
@@ -3529,6 +3532,24 @@ export function createSessionManager(input: {
     }
   }
 
+  async function getChanges(id: SessionId): Promise<GetSessionChangesResponse> {
+    await ready
+    const session = await getSession(id)
+    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
+    const changes = await readSessionChanges({
+      cwd: session.cwd,
+      worktree: worktreeRecord,
+    })
+
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      workspaceRoot: changes.workspaceRoot,
+      diff: changes.diff,
+      hasChanges: changes.hasChanges,
+    }
+  }
+
   async function getComposerSuggestions(
     params: SessionComposerSuggestionsRequest,
   ): Promise<SessionComposerSuggestionsResponse> {
@@ -4030,6 +4051,7 @@ export function createSessionManager(input: {
     connectSession,
     getSession,
     getHistory,
+    getChanges,
     getComposerSuggestions,
     getDraftSuggestions,
     getLaunchPreview,

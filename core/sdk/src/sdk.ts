@@ -9,6 +9,7 @@ import type {
   CreateWorkforceRequest,
   DiscoverWorkforceCandidatesRequest,
   GetLoopRequest,
+  GetSessionChangesRequest,
   ListAdaptersRequest,
   GetSessionHistoryRequest,
   GetWorkforceRequest,
@@ -123,6 +124,9 @@ function createSessionNamespace(client: DaemonIpcClient) {
 
     /** Reads one daemon-managed session history with session identity and connection state. */
     history: async (input: GetSessionHistoryRequest) => client.send("sessionHistory", input),
+
+    /** Reads the current git diff for one daemon-managed session workspace. */
+    changes: async (input: GetSessionChangesRequest) => client.send("sessionChanges", input),
 
     /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
     composerSuggestions: async (input: SessionComposerSuggestionsRequest) =>

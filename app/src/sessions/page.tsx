@@ -1,38 +1,27 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { useSignal } from "@preact/signals"
-import { useEffect } from "preact/hooks"
+import { useState } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
-import { AppCommand } from "~/commands/app-command.ts"
-import { useQuery } from "~/lib/query.ts"
+import { queryClient, useQuery } from "~/lib/query.ts"
 import { findNearestProjectPath } from "~/projects/project-context.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 import { ListToolbar } from "./list-toolbar.tsx"
 import { SessionsList } from "./list.tsx"
 import styles from "./page.style.ts"
-import { getSessionDisplayTitle } from "./presentation.ts"
+import {
+  filterSessionsByTitle,
+  getSessionDisplayTitle,
+  getSessionRepositoryLabel,
+} from "./presentation.ts"
 
 export default function SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const selectedSessionId = useSignal<DaemonSession["id"] | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+
   const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
-  const resolvedSelectedSessionId =
-    selectedSessionId.value && sessions.some((session) => session.id === selectedSessionId.value)
-      ? selectedSessionId.value
-      : (sessions[0]?.id ?? null)
-  const selectedSession = resolvedSelectedSessionId
-    ? (sessions.find((session) => session.id === resolvedSelectedSessionId) ?? null)
-    : null
-  const selectedSessionUpdatedLabel = selectedSession
-    ? new Intl.DateTimeFormat(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(new Date(selectedSession.updatedAt))
-    : null
+  const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
 
   function openSession(sessionId: DaemonSession["id"]) {
     const session = sessions.find((candidate) => candidate.id === sessionId)
@@ -53,68 +42,47 @@ export default function SessionsPage() {
     })
   }
 
-  function openSessionDialog() {
-    AppCommand.navigation.openNewSessionDialog()
-  }
+  function openSessionChanges(sessionId: DaemonSession["id"]) {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
 
-  function selectSession(sessionId: DaemonSession["id"]) {
-    selectedSessionId.value = sessionId
-  }
-
-  useEffect(() => {
-    if (selectedSessionId.value === resolvedSelectedSessionId) {
+    if (!session) {
       return
     }
 
-    selectedSessionId.value = resolvedSelectedSessionId
-  }, [resolvedSelectedSessionId, selectedSessionId])
+    queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
+    workbenchTabSet.openOrFocusTab({
+      id: `session-changes:${session.id}`,
+      kind: "sessionChanges",
+      title: `Changes · ${getSessionDisplayTitle(session)}`,
+      payload: {
+        sessionId: session.id,
+        sessionTitle: getSessionDisplayTitle(session),
+        repositoryLabel: getSessionRepositoryLabel(session),
+      },
+      dirty: false,
+    })
+  }
 
   return (
     <div class={styles.root}>
       <section class={styles.listPane}>
-        <ListToolbar sessionCount={sessions.length} onCreateSession={openSessionDialog} />
+        <ListToolbar
+          searchQuery={searchQuery}
+          sessionCount={sessions.length}
+          visibleSessionCount={visibleSessions.length}
+          onSearchInput={(value) => {
+            setSearchQuery(value)
+          }}
+        />
         <div class={styles.listBody}>
           <SessionsList
-            onCreateSession={openSessionDialog}
+            onOpenChanges={openSessionChanges}
             onOpenSession={openSession}
-            onSelectSession={selectSession}
-            selectedSessionId={selectedSession?.id ?? null}
-            sessions={sessions}
+            searchQuery={searchQuery}
+            sessions={visibleSessions}
           />
         </div>
       </section>
-      <aside class={styles.aside}>
-        <div class={styles.intro}>
-          <h2 class={styles.heading}>Session details</h2>
-          <p class={styles.description}>
-            {selectedSession
-              ? "Selected session metadata for the current workbench."
-              : "Select a session to inspect its current state."}
-          </p>
-        </div>
-        {selectedSession ? (
-          <dl class={styles.details}>
-            <div class={styles.detailCard}>
-              <dt class={styles.detailLabel}>Status</dt>
-              <dd class={styles.detailValue}>{selectedSession.status}</dd>
-            </div>
-            <div class={styles.detailCard}>
-              <dt class={styles.detailLabel}>Updated</dt>
-              <dd class={styles.detailValue}>{selectedSessionUpdatedLabel}</dd>
-            </div>
-            <div class={styles.detailCard}>
-              <dt class={styles.detailLabel}>Project</dt>
-              <dd class={styles.detailValueWrap}>{selectedSession.cwd}</dd>
-            </div>
-            <div class={styles.detailCard}>
-              <dt class={styles.detailLabel}>Transcript</dt>
-              <dd class={styles.detailValue}>
-                {selectedSession.lastAgentMessage ? "Ready" : "Waiting for first prompt"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-      </aside>
     </div>
   )
 }

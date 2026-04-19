@@ -1,54 +1,142 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { ArrowUpRight } from "lucide-react"
+import {
+  AlertCircle,
+  ArrowUpRight,
+  CheckCircle2,
+  CircleDot,
+  GitBranch,
+  LoaderCircle,
+  PauseCircle,
+  XCircle,
+} from "lucide-react"
 
 import styles from "./list-row.style.ts"
-import { getSessionDisplayTitle, getSessionPreviewText } from "./presentation.ts"
+import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./presentation.ts"
 
 function formatTimeLabel(value: number) {
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - value) / 60_000))
+
+  if (diffMinutes < 1) {
+    return "now"
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m`
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60)
+
+  if (diffHours < 24) {
+    return `${diffHours}h`
+  }
+
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (diffDays < 7) {
+    return `${diffDays}d`
+  }
+
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
   }).format(new Date(value))
 }
 
+function getSessionStatusPresentation(status: DaemonSession["status"]) {
+  switch (status) {
+    case "active":
+      return {
+        icon: LoaderCircle,
+        color: token.var("colors.accentStrong"),
+        label: "Running",
+      }
+    case "blocked":
+      return {
+        icon: PauseCircle,
+        color: token.var("colors.text"),
+        label: "Blocked",
+      }
+    case "done":
+      return {
+        icon: CheckCircle2,
+        color: token.var("colors.text"),
+        label: "Completed",
+      }
+    case "error":
+      return {
+        icon: AlertCircle,
+        color: token.var("colors.danger"),
+        label: "Error",
+      }
+    case "cancelled":
+      return {
+        icon: XCircle,
+        color: token.var("colors.muted"),
+        label: "Cancelled",
+      }
+    case "archived":
+      return {
+        icon: CheckCircle2,
+        color: token.var("colors.muted"),
+        label: "Archived",
+      }
+    default:
+      return {
+        icon: CircleDot,
+        color: token.var("colors.muted"),
+        label: "Idle",
+      }
+  }
+}
+
 export function ListRow(props: {
-  isSelected: boolean
   onOpen: () => void
-  onSelect: () => void
+  onOpenChanges: () => void
   session: DaemonSession
 }) {
+  const status = getSessionStatusPresentation(props.session.status)
+  const StatusIcon = status.icon
+
   return (
-    <article
-      class={styles.row}
-      style={{
-        borderInlineStartColor: props.isSelected ? token.var("colors.accent") : "transparent",
-        backgroundColor: props.isSelected ? token.var("colors.surface") : "transparent",
-      }}
-    >
-      <button class={styles.selectButton} type="button" onClick={props.onSelect}>
+    <article class={styles.row}>
+      <button class={styles.mainButton} type="button" onClick={props.onOpen}>
         <div class={styles.metaRow}>
-          <span class={styles.status}>{props.session.status}</span>
-          <span class={styles.updated}>Updated {formatTimeLabel(props.session.updatedAt)}</span>
+          <span class={styles.repoGroup}>
+            <span class={styles.statusIcon} aria-label={status.label} title={status.label}>
+              <StatusIcon size={15} strokeWidth={2.1} style={{ color: status.color }} />
+              <span class={styles.srOnly}>{status.label}</span>
+            </span>
+            <span
+              class={styles.repository}
+              title={props.session.repository?.trim() || props.session.cwd}
+            >
+              {getSessionRepositoryLabel(props.session)}
+            </span>
+          </span>
+          <time
+            class={styles.updated}
+            dateTime={new Date(props.session.updatedAt).toISOString()}
+            title={new Intl.DateTimeFormat(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(new Date(props.session.updatedAt))}
+          >
+            {formatTimeLabel(props.session.updatedAt)}
+          </time>
         </div>
-        <div class={styles.content}>
-          <h2 class={styles.title}>{getSessionDisplayTitle(props.session)}</h2>
-          <p class={styles.preview}>
-            {getSessionPreviewText(props.session) || "No transcript yet."}
-          </p>
-        </div>
-        <div class={styles.path}>
-          {props.session.lastAgentMessage ? "Transcript ready" : "Waiting for first prompt"}
-          {" · "}
-          {props.session.cwd}
-        </div>
+        <h2 class={styles.title}>{getSessionDisplayTitle(props.session)}</h2>
       </button>
-      <button class={styles.openButton} type="button" onClick={props.onOpen}>
-        Open
-        <ArrowUpRight size={15} strokeWidth={2.2} />
-      </button>
+      <div class={styles.actions} data-actions="true">
+        <button class={styles.actionButton} type="button" onClick={props.onOpenChanges}>
+          <GitBranch size={15} strokeWidth={2.1} />
+          Changes
+        </button>
+        <button class={styles.actionButton} type="button" onClick={props.onOpen}>
+          Open
+          <ArrowUpRight size={15} strokeWidth={2.2} />
+        </button>
+      </div>
     </article>
   )
 }

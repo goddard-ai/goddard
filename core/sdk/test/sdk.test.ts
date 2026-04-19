@@ -47,6 +47,30 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenCalledWith("adapterList", { cwd: "/tmp/project" })
   })
 
+  test("session.changes forwards to sessionChanges", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      workspaceRoot: "/repo",
+      diff: "diff --git a/file.ts b/file.ts\n",
+      hasChanges: true,
+    })
+
+    await expect(sdk.session.changes({ id: "ses_1" })).resolves.toEqual({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      workspaceRoot: "/repo",
+      diff: "diff --git a/file.ts b/file.ts\n",
+      hasChanges: true,
+    })
+
+    expect(send).toHaveBeenCalledWith("sessionChanges", {
+      id: "ses_1",
+    })
+  })
+
   test("session.send forwards ACP messages to sessionSend", async () => {
     const { sdk, send } = createSdkWithClient()
     const message: acp.AnyMessage = {

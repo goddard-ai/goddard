@@ -127,6 +127,11 @@ export const GetSessionHistoryRequest = DaemonSessionIdParams.extend({
 
 export type GetSessionHistoryRequest = z.infer<typeof GetSessionHistoryRequest>
 
+/** Request payload used to read the current git diff for one daemon-managed session workspace. */
+export const GetSessionChangesRequest = DaemonSessionIdParams
+
+export type GetSessionChangesRequest = z.infer<typeof GetSessionChangesRequest>
+
 /** Trigger categories supported by the session chat composer suggestion API. */
 export const SessionComposerSuggestionTrigger = z.enum(["at", "dollar", "slash"])
 
@@ -371,6 +376,13 @@ export type GetSessionHistoryResponse = SessionIdentity & {
   turns: SessionHistoryTurn[]
   nextCursor: string | null
   hasMore: boolean
+}
+
+/** Response payload returned after one daemon-managed session git-diff fetch. */
+export type GetSessionChangesResponse = SessionIdentity & {
+  workspaceRoot: string | null
+  diff: string
+  hasChanges: boolean
 }
 
 /** Full session diagnostic payload returned on demand for debugging and tests. */

@@ -45,29 +45,12 @@ export default {
     fontSize: "0.93rem",
     lineHeight: "1.6",
   }),
-  button: css({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "8px",
-    height: "36px",
-    paddingInline: "12px",
-    borderRadius: "10px",
-    border: "1px solid",
-    borderColor: "accent",
-    backgroundColor: "surface",
-    color: "text",
-    fontSize: "0.86rem",
-    fontWeight: "600",
-    cursor: "pointer",
-  }),
   list: css({
     listStyle: "none",
     margin: "0",
     padding: "0",
-    "& > li + li": {
-      borderTop: "1px solid",
-      borderColor: "border",
+    "& > li:last-child article": {
+      borderBottom: "none",
     },
   }),
 }

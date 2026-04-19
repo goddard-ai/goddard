@@ -23,6 +23,7 @@ import {
 import {
   type CancelSessionResponse,
   type CreateSessionResponse,
+  type GetSessionChangesResponse,
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
   type GetSessionResponse,
@@ -36,6 +37,7 @@ import {
   type SteerSessionResponse,
   CancelSessionRequest,
   CreateSessionRequest,
+  GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   ListSessionsRequest,
   MountSessionWorktreeSyncRequest as MountSessionWorktreeSyncRequestSchema,
@@ -127,6 +129,10 @@ export const daemonIpcSchema = {
     sessionHistory: {
       payload: GetSessionHistoryRequestSchema,
       response: $type<GetSessionHistoryResponse>(),
+    },
+    sessionChanges: {
+      payload: GetSessionChangesRequestSchema,
+      response: $type<GetSessionChangesResponse>(),
     },
     sessionComposerSuggestions: {
       payload: SessionComposerSuggestionsRequest,

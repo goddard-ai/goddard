@@ -1119,6 +1119,45 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   await client.send("sessionShutdown", { id: created.session.id })
 })
 
+test("sessionChanges reads tracked and untracked diff content from the session workspace root", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture({ includeSrc: true })
+
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: join(repoDir, "src"),
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const fetchedWorktree = await client.send("sessionWorktree", {
+    id: created.session.id,
+  })
+  expect(fetchedWorktree.worktree).toBeTruthy()
+
+  await writeFile(
+    join(fetchedWorktree.worktree!.worktreeDir, "package.json"),
+    JSON.stringify({ name: "repo", private: false }, null, 2) + "\n",
+    "utf-8",
+  )
+  await writeFile(join(fetchedWorktree.worktree!.worktreeDir, "README.md"), "# Session changes\n")
+
+  const changes = await client.send("sessionChanges", {
+    id: created.session.id,
+  })
+
+  expect(changes.workspaceRoot).toBe(fetchedWorktree.worktree!.worktreeDir)
+  expect(changes.hasChanges).toBe(true)
+  expect(changes.diff).toContain("diff --git a/package.json b/package.json")
+  expect(changes.diff).toContain("diff --git a/README.md b/README.md")
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
 test("session worktree launch branches from the selected base branch", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
