@@ -303,7 +303,10 @@ export default function KeyboardShortcutsView(props: { class?: string }) {
                     <Menu.Root
                       aria-label={`${row.label} shortcut actions`}
                       lazyMount={true}
-                      positioning={{ placement: "bottom-start" }}
+                      positioning={{
+                        fitViewport: true,
+                        placement: "bottom-start",
+                      }}
                       unmountOnExit={true}
                     >
                       <Menu.ContextTrigger

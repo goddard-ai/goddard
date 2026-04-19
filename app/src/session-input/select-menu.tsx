@@ -145,6 +145,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
       lazyMount={true}
       open={isMenuOpen}
       positioning={{
+        fitViewport: true,
         gutter: 8,
         placement: "bottom-start",
         sameWidth: true,
