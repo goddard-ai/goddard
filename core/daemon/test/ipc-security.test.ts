@@ -441,9 +441,12 @@ async function seedWorkforceSession(input: {
   const sessionRecord = {
     acpSessionId: `acp-${input.sessionId}`,
     status: "active",
+    stopReason: null,
     agent: "pi-acp",
     agentName: "pi",
     cwd: input.rootDir,
+    title: "New session",
+    titleState: "placeholder",
     mcpServers: [],
     connectionMode: "none",
     supportsLoadSession: false,
@@ -462,11 +465,12 @@ async function seedWorkforceSession(input: {
     },
     metadata: null,
     models: null,
+    availableCommands: [],
   } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(input.sessionId, sessionRecord)
   db.workforces.create({
     sessionId: input.sessionId,
-    ...(input.includeRootDir === false ? {} : { rootDir: input.rootDir }),
+    rootDir: input.includeRootDir === false ? undefined : input.rootDir,
     agentId: "root",
     requestId: input.requestId,
   })
@@ -482,9 +486,12 @@ function seedAuthorizedSession(input: {
   db.sessions.put(input.sessionId, {
     acpSessionId: `acp-${input.sessionId}`,
     status: "active",
+    stopReason: null,
     agent: "pi-acp",
     agentName: "pi",
     cwd: process.cwd(),
+    title: "New session",
+    titleState: "placeholder",
     mcpServers: [],
     connectionMode: "none",
     supportsLoadSession: false,
@@ -503,6 +510,7 @@ function seedAuthorizedSession(input: {
     },
     metadata: null,
     models: null,
+    availableCommands: [],
   })
 }
 

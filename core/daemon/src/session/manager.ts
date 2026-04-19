@@ -564,17 +564,12 @@ async function applyInitialSessionConfiguration(params: {
   }
 
   for (const option of params.request.initialConfigOptions ?? []) {
+    // ACP config option values are always string ids, even when the launch form captured
+    // a boolean choice locally.
     const response = await params.agent.setSessionConfigOption({
       sessionId: params.sessionId,
       configId: option.configId,
-      ...(option.type === "boolean"
-        ? {
-            type: "boolean" as const,
-            value: option.value,
-          }
-        : {
-            value: option.value,
-          }),
+      value: String(option.value),
     })
 
     configOptions = response.configOptions
@@ -1498,9 +1493,11 @@ function persistLaunchedSession(params: {
   }
 
   if (params.workforceMetadata) {
-    const nextWorkforce = {
+    const nextWorkforce: KindInput<typeof db.schema.workforces> = {
       sessionId: params.id,
-      ...params.workforceMetadata,
+      rootDir: params.workforceMetadata.rootDir,
+      agentId: params.workforceMetadata.agentId,
+      requestId: params.workforceMetadata.requestId,
     }
     if (params.existingWorkforceRecord) {
       db.workforces.put(params.existingWorkforceRecord.id, nextWorkforce)

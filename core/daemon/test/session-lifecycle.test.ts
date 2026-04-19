@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
+import { matchAcpRequest } from "../src/session/acp.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
@@ -567,9 +568,12 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   const sessionRecord = {
     acpSessionId,
     status: "active",
+    stopReason: null,
     agent: "pi-acp",
     agentName: "node",
     cwd: process.cwd(),
+    title: "New session",
+    titleState: "placeholder",
     mcpServers: [],
     connectionMode: "live",
     supportsLoadSession: false,
@@ -643,9 +647,12 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
   db.sessions.put(sessionId, {
     acpSessionId,
     status: "active",
+    stopReason: null,
     agent: "pi-acp",
     agentName: "node",
     cwd: process.cwd(),
+    title: "New session",
+    titleState: "placeholder",
     mcpServers: [],
     connectionMode: "live",
     supportsLoadSession: false,
@@ -1265,6 +1272,8 @@ test("sessionComposerSuggestions reads `/` commands from the latest ACP history 
     agent: "pi-acp",
     agentName: "node",
     cwd: process.cwd(),
+    title: "New session",
+    titleState: "placeholder",
     mcpServers: [],
     connectionMode: "history",
     supportsLoadSession: false,
@@ -1422,11 +1431,12 @@ test("sessionCreate applies initial model and thinking configuration before the 
   expect(
     history.turns.some((turn) =>
       turn.messages.some((message) => {
-        if (message.method !== "session/update") {
-          return false
-        }
-
-        const update = message.params?.update
+        const update = matchAcpRequest<{
+          update?: {
+            sessionUpdate?: string
+            content?: { type?: string; text?: string }
+          }
+        }>(message, "session/update")?.update
         return (
           update?.sessionUpdate === "agent_message_chunk" &&
           update.content?.type === "text" &&
