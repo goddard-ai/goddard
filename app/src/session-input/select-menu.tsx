@@ -6,6 +6,7 @@ import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsx"
+import { MenuPortal } from "~/lib/menu-portal.tsx"
 import styles from "./select-menu.style.ts"
 
 /** One item rendered inside a launch-session selector menu. */
@@ -128,7 +129,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
       initialFocusEl={() => (props.filterable ? filterInputRef.current : menuRef.current)}
       lazyMount={true}
       open={props.open}
-      portalled={false}
       positioning={{
         gutter: 8,
         placement: "bottom-start",
@@ -192,121 +192,123 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
           </span>
         </GoodTooltip>
 
-        <Popover.Positioner>
-          <Popover.Content
-            ref={menuRef}
-            class={styles.menu}
-            tabIndex={props.filterable ? undefined : -1}
-            onKeyDown={(event) => {
-              if (props.filterable) {
-                return
-              }
+        <MenuPortal>
+          <Popover.Positioner>
+            <Popover.Content
+              ref={menuRef}
+              class={styles.menu}
+              tabIndex={props.filterable ? undefined : -1}
+              onKeyDown={(event) => {
+                if (props.filterable) {
+                  return
+                }
 
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                highlightNext(1)
-                return
-              }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault()
+                  highlightNext(1)
+                  return
+                }
 
-              if (event.key === "ArrowUp") {
-                event.preventDefault()
-                highlightNext(-1)
-                return
-              }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault()
+                  highlightNext(-1)
+                  return
+                }
 
-              if (event.key === "Enter") {
-                event.preventDefault()
-                commitSelection(highlightedItem)
-                return
-              }
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  commitSelection(highlightedItem)
+                  return
+                }
 
-              if (event.key === "Escape") {
-                event.preventDefault()
-                props.onOpenChange(false)
-              }
-            }}
-          >
-            {props.filterable ? (
-              <input
-                ref={filterInputRef}
-                class={styles.menuFilter}
-                placeholder="Type to filter"
-                value={query}
-                onInput={(event) => {
-                  setQuery(event.currentTarget.value)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault()
-                    highlightNext(1)
-                    return
-                  }
+                if (event.key === "Escape") {
+                  event.preventDefault()
+                  props.onOpenChange(false)
+                }
+              }}
+            >
+              {props.filterable ? (
+                <input
+                  ref={filterInputRef}
+                  class={styles.menuFilter}
+                  placeholder="Type to filter"
+                  value={query}
+                  onInput={(event) => {
+                    setQuery(event.currentTarget.value)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault()
+                      highlightNext(1)
+                      return
+                    }
 
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault()
-                    highlightNext(-1)
-                    return
-                  }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault()
+                      highlightNext(-1)
+                      return
+                    }
 
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    commitSelection(highlightedItem)
-                    return
-                  }
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      commitSelection(highlightedItem)
+                      return
+                    }
 
-                  if (event.key === "Escape") {
-                    event.preventDefault()
-                    props.onOpenChange(false)
-                  }
-                }}
-              />
-            ) : null}
+                    if (event.key === "Escape") {
+                      event.preventDefault()
+                      props.onOpenChange(false)
+                    }
+                  }}
+                />
+              ) : null}
 
-            {props.loading ? (
-              <div class={styles.menuEmpty}>
-                <span
-                  class={css({
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
+              {props.loading ? (
+                <div class={styles.menuEmpty}>
+                  <span
+                    class={css({
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    })}
+                  >
+                    <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+                    Loading options...
+                  </span>
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div class={styles.menuEmpty}>No matching options.</div>
+              ) : (
+                <ul class={styles.menuList}>
+                  {filteredItems.map((item, index) => {
+                    const isActive = index === selectedIndex
+
+                    return (
+                      <li key={item.value}>
+                        <button
+                          ref={(element) => {
+                            itemRefs.current[item.value] = element
+                          }}
+                          class={cx(styles.menuButton, isActive && styles.menuButtonActive)}
+                          disabled={item.disabled}
+                          type="button"
+                          onMouseEnter={() => {
+                            setSelectedIndex(index)
+                          }}
+                          onClick={() => {
+                            commitSelection(item)
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      </li>
+                    )
                   })}
-                >
-                  <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-                  Loading options...
-                </span>
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div class={styles.menuEmpty}>No matching options.</div>
-            ) : (
-              <ul class={styles.menuList}>
-                {filteredItems.map((item, index) => {
-                  const isActive = index === selectedIndex
-
-                  return (
-                    <li key={item.value}>
-                      <button
-                        ref={(element) => {
-                          itemRefs.current[item.value] = element
-                        }}
-                        class={cx(styles.menuButton, isActive && styles.menuButtonActive)}
-                        disabled={item.disabled}
-                        type="button"
-                        onMouseEnter={() => {
-                          setSelectedIndex(index)
-                        }}
-                        onClick={() => {
-                          commitSelection(item)
-                        }}
-                      >
-                        {item.label}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </Popover.Content>
-        </Popover.Positioner>
+                </ul>
+              )}
+            </Popover.Content>
+          </Popover.Positioner>
+        </MenuPortal>
       </div>
     </Popover.Root>
   )
