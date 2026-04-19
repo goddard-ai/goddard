@@ -53,9 +53,14 @@
 ## Git
 
 - Use Conventional Commits: `<type>(optional-scope): <description>`.
+- Commit requested changes without waiting for a separate prompt to commit them.
 - Keep commits atomic, single-purpose, concise, and imperative.
 - Split docs-only or policy-only changes from behavior or test changes unless they are inseparable.
-- Include a body in every commit with brief bullets describing what changed and why.
+- Include a body in every commit that explains why the change exists.
+- When the reason is known or can be inferred without guessing, the body should capture the motivating intent for the change.
+- Record important context, constraints, or tradeoffs that would help the next agent understand the decision.
+- Call out notable side effects, risks, or migration notes when they exist.
+- Link issues, tickets, or design docs when they add useful context.
 - In non-interactive terminals, set `GIT_EDITOR=true` for commands that would otherwise open an editor.
 
 ## Testing
