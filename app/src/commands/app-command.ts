@@ -82,9 +82,6 @@ export const AppCommand = defineAppCommands({
     openInbox: {
       label: "Open Inbox",
     },
-    openProjects: {
-      label: "Open Projects",
-    },
     openSessions: {
       label: "Open Sessions",
     },

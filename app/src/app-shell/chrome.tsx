@@ -154,10 +154,6 @@ export function AppShellChrome() {
     selectNavigationSurface("inbox")
   })
 
-  useAppCommand(AppCommand.navigation.openProjects, () => {
-    selectNavigationSurface("projects")
-  })
-
   useAppCommand(AppCommand.navigation.openSessions, () => {
     selectNavigationSurface("sessions")
   })
