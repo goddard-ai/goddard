@@ -37,6 +37,7 @@ export type SessionInputSelectProps = {
 export function SessionInputSelect(props: SessionInputSelectProps) {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
   const [query, setQuery] = useState("")
@@ -72,30 +73,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
 
     const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
     setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-
-    const focusFrame = requestAnimationFrame(() => {
-      if (isFilterable) {
-        const input = filterInputRef.current
-
-        if (!input) {
-          return
-        }
-
-        if (document.activeElement instanceof HTMLElement && document.activeElement !== input) {
-          document.activeElement.blur()
-        }
-
-        input.focus({ preventScroll: true })
-        input.setSelectionRange(input.value.length, input.value.length)
-        return
-      }
-
-      menuRef.current?.focus({ preventScroll: true })
-    })
-
-    return () => {
-      cancelAnimationFrame(focusFrame)
-    }
   }, [filteredItemSignature, isFilterable, isMenuOpen, props.value])
 
   useEffect(() => {
@@ -140,12 +117,17 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
 
   return (
     <Popover.Root
+      autoFocus={true}
       closeOnInteractOutside={true}
+      finalFocusEl={() => triggerRef.current}
+      immediate={true}
       initialFocusEl={() => (isFilterable ? filterInputRef.current : menuRef.current)}
       lazyMount={true}
+      modal={isFilterable}
       open={isMenuOpen}
       positioning={{
         fitViewport: true,
+        getAnchorElement: () => triggerRef.current,
         gutter: 8,
         placement: "bottom-start",
         sameWidth: true,
@@ -169,6 +151,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
           <span class={styles.tooltipTrigger}>
             <Popover.Trigger asChild>
               <button
+                ref={triggerRef}
                 aria-expanded={isMenuOpen}
                 aria-haspopup="menu"
                 aria-label={ariaLabel}
