@@ -6,6 +6,7 @@ import type { DebugMenuSurface } from "./debug-menu.ts"
 /** Shared typed global events dispatched across the active webview. */
 export type GlobalEvents = {
   appMenu: { command: AppCommandId }
+  commandDialogActivated: { dialogId: string }
   debugMenu: { surface: DebugMenuSurface }
 }
 
