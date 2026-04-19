@@ -7,6 +7,7 @@ import { useEffect } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
+import { appToaster } from "~/lib/good-toaster.tsx"
 import { createSession } from "./actions.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
@@ -41,18 +42,28 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     try {
       const projectPath = form.draftProjectPath.value
       const { session } = await createSession(sessionInput)
-      props.dialog.setOpen(false)
-      form.reset()
+      const sessionTitle = getSessionDisplayTitle(session)
+
+      form.reset(projectPath)
       workbenchTabSet.openOrFocusTab({
         id: `session:${session.id}`,
         kind: "sessionChat",
-        title: getSessionDisplayTitle(session),
+        title: sessionTitle,
         payload: {
           projectPath,
           sessionId: session.id,
         },
         dirty: false,
       })
+      // Defer the toast until the submit control finishes clearing its editor after onSubmit.
+      window.setTimeout(() => {
+        appToaster.create({
+          description: sessionTitle,
+          duration: 2800,
+          title: "Session launched",
+          type: "success",
+        })
+      }, 0)
     } catch (error) {
       console.error("Failed to create session.", error)
     }

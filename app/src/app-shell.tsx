@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 import { AppCommand, resolveAppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
 import { browseForProject } from "~/desktop-host.ts"
+import { GoodToaster } from "~/lib/good-toaster.tsx"
 import type { NavigationItemId } from "~/navigation.ts"
 import {
   findNearestProjectPath,
@@ -401,6 +402,7 @@ export function AppShell() {
         command={AppCommand.navigation.openNewSessionDialog}
         content={() => import("~/sessions/dialog.tsx")}
       />
+      <GoodToaster />
     </>
   )
 }
