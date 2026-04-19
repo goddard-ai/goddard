@@ -1,10 +1,10 @@
 import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
-import { Portal } from "@ark-ui/react/portal"
 import { X } from "lucide-react"
 import type { RecordingSession } from "powerkeys"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsx"
+import { DialogPortal } from "~/lib/dialog-portal.tsx"
 import styles from "./capture-dialog.style.ts"
 
 export function KeyboardShortcutCaptureDialog(props: {
@@ -90,7 +90,7 @@ export function KeyboardShortcutCaptureDialog(props: {
   }, [props.currentExpression, props.dialog.open, shortcutRegistry.runtime])
 
   return (
-    <Portal>
+    <DialogPortal>
       <Dialog.Backdrop class={styles.backdrop} />
       <Dialog.Positioner class={styles.positioner}>
         <Dialog.Content class={styles.content}>
@@ -170,7 +170,7 @@ export function KeyboardShortcutCaptureDialog(props: {
           </div>
         </Dialog.Content>
       </Dialog.Positioner>
-    </Portal>
+    </DialogPortal>
   )
 }
 

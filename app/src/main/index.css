@@ -30,4 +30,25 @@
     background: var(--theme-color-background);
     color: var(--theme-color-text);
   }
+
+  /* Keep dialog and menu overlays in separate stacking contexts so dropdowns can sit above modal layers. */
+  #dialog-portal,
+  #menu-portal {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  #dialog-portal {
+    z-index: 60;
+  }
+
+  #menu-portal {
+    z-index: 70;
+  }
+
+  #dialog-portal > *,
+  #menu-portal > * {
+    pointer-events: auto;
+  }
 }

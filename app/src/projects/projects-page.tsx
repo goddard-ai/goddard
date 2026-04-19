@@ -1,5 +1,4 @@
 import { Dialog } from "@ark-ui/react/dialog"
-import { Portal } from "@ark-ui/react/portal"
 import { cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useSignal } from "@preact/signals"
@@ -8,6 +7,7 @@ import { useEffect } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
+import { DialogPortal } from "~/lib/dialog-portal.tsx"
 import { deriveProjectName } from "./project-name.ts"
 import { lookupProject, type ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
@@ -329,7 +329,7 @@ function AddProjectDialog(props: {
         }
       }}
     >
-      <Portal>
+      <DialogPortal>
         <Dialog.Backdrop class={styles.dialogOverlay} />
         <Dialog.Positioner class={styles.dialogPositioner}>
           <Dialog.Content class={styles.dialogContent}>
@@ -414,7 +414,7 @@ function AddProjectDialog(props: {
             </form>
           </Dialog.Content>
         </Dialog.Positioner>
-      </Portal>
+      </DialogPortal>
     </Dialog.Root>
   )
 }

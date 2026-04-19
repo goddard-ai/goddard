@@ -1,6 +1,5 @@
 /** Renders the app-wide command palette. */
 import { Dialog, UseDialogReturn } from "@ark-ui/react/dialog"
-import { Portal } from "@ark-ui/react/portal"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Command } from "ark-cmdk"
 import { Search } from "lucide-react"
@@ -10,6 +9,7 @@ import { useShortcutRegistry } from "./app-state-context.tsx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
 import { isCommandAvailable } from "./commands/command-context.ts"
+import { DialogPortal } from "./lib/dialog-portal.tsx"
 
 export default function CommandPalette(props: { dialog: UseDialogReturn }) {
   const { open } = props.dialog
@@ -27,7 +27,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
   )
 
   return (
-    <Portal>
+    <DialogPortal>
       <Dialog.Backdrop class={styles.backdrop} />
       <Dialog.Positioner class={styles.positioner}>
         <Dialog.Content class={styles.content}>
@@ -93,6 +93,6 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
           </Command.Root>
         </Dialog.Content>
       </Dialog.Positioner>
-    </Portal>
+    </DialogPortal>
   )
 }

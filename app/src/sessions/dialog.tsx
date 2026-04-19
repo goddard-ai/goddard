@@ -1,5 +1,4 @@
 import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
-import { Portal } from "@ark-ui/react/portal"
 import { useModel } from "@preact/signals"
 import { X } from "lucide-react"
 import { useEffect } from "preact/hooks"
@@ -7,6 +6,7 @@ import { useEffect } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
+import { DialogPortal } from "~/lib/dialog-portal.tsx"
 import { appToaster } from "~/lib/good-toaster.tsx"
 import { createSession } from "./actions.ts"
 import styles from "./dialog.style.ts"
@@ -163,7 +163,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
   })
 
   return (
-    <Portal>
+    <DialogPortal>
       <Dialog.Backdrop class={styles.backdrop} />
       <Dialog.Positioner class={styles.positioner}>
         <Dialog.Content class={styles.content}>
@@ -184,6 +184,6 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
           />
         </Dialog.Content>
       </Dialog.Positioner>
-    </Portal>
+    </DialogPortal>
   )
 }

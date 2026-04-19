@@ -5,7 +5,7 @@ export const menuPortalId = "menu-portal"
 const menuPortalElement =
   typeof document === "undefined" ? null : document.getElementById(menuPortalId)
 
-/** Renders menus into one shared host so dialogs can treat all custom dropdowns as persistent. */
+/** Renders menus into a shared host that layers above the dialog portal. */
 export function MenuPortal(props: { children?: preact.ComponentChildren }) {
   const containerRef = useRef<HTMLElement | null>(menuPortalElement)
   containerRef.current = menuPortalElement
