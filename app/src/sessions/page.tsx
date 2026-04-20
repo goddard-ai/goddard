@@ -65,24 +65,20 @@ export default function SessionsPage() {
 
   return (
     <div class={styles.root}>
-      <section class={styles.listPane}>
-        <ListToolbar
+      <ListToolbar
+        searchQuery={searchQuery}
+        onSearchInput={(value) => {
+          setSearchQuery(value)
+        }}
+      />
+      <div class={styles.listBody}>
+        <SessionsList
+          onOpenChanges={openSessionChanges}
+          onOpenSession={openSession}
           searchQuery={searchQuery}
-          sessionCount={sessions.length}
-          visibleSessionCount={visibleSessions.length}
-          onSearchInput={(value) => {
-            setSearchQuery(value)
-          }}
+          sessions={visibleSessions}
         />
-        <div class={styles.listBody}>
-          <SessionsList
-            onOpenChanges={openSessionChanges}
-            onOpenSession={openSession}
-            searchQuery={searchQuery}
-            sessions={visibleSessions}
-          />
-        </div>
-      </section>
+      </div>
     </div>
   )
 }

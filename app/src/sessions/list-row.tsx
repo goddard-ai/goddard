@@ -14,6 +14,18 @@ import {
 import styles from "./list-row.style.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./presentation.ts"
 
+function handleButtonLikeKeyDown(
+  event: preact.TargetedKeyboardEvent<HTMLDivElement>,
+  onPress: () => void,
+) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return
+  }
+
+  event.preventDefault()
+  onPress()
+}
+
 function formatTimeLabel(value: number) {
   const diffMinutes = Math.max(0, Math.floor((Date.now() - value) / 60_000))
 
@@ -100,39 +112,57 @@ export function ListRow(props: {
 
   return (
     <article class={styles.row}>
-      <button class={styles.mainButton} type="button" onClick={props.onOpen}>
-        <div class={styles.metaRow}>
-          <span class={styles.repoGroup}>
-            <span class={styles.statusIcon} aria-label={status.label} title={status.label}>
-              <StatusIcon size={15} strokeWidth={2.1} style={{ color: status.color }} />
-              <span class={styles.srOnly}>{status.label}</span>
-            </span>
-            <span
-              class={styles.repository}
-              title={props.session.repository?.trim() || props.session.cwd}
-            >
-              {getSessionRepositoryLabel(props.session)}
-            </span>
-          </span>
-          <time
-            class={styles.updated}
-            dateTime={new Date(props.session.updatedAt).toISOString()}
-            title={new Intl.DateTimeFormat(undefined, {
-              dateStyle: "medium",
-              timeStyle: "short",
-            }).format(new Date(props.session.updatedAt))}
-          >
-            {formatTimeLabel(props.session.updatedAt)}
-          </time>
-        </div>
+      <div
+        class={styles.mainButton}
+        role="button"
+        tabIndex={0}
+        onClick={props.onOpen}
+        onKeyDown={(event) => {
+          handleButtonLikeKeyDown(event, props.onOpen)
+        }}
+      >
+        <span class={styles.statusIcon} aria-label={status.label} title={status.label}>
+          <StatusIcon size={15} strokeWidth={2.1} style={{ color: status.color }} />
+          <span class={styles.srOnly}>{status.label}</span>
+        </span>
+        <span
+          class={styles.repository}
+          title={props.session.repository?.trim() || props.session.cwd}
+        >
+          {getSessionRepositoryLabel(props.session)}
+        </span>
         <h2 class={styles.title}>{getSessionDisplayTitle(props.session)}</h2>
-      </button>
+        <time
+          class={styles.updated}
+          dateTime={new Date(props.session.updatedAt).toISOString()}
+          title={new Intl.DateTimeFormat(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date(props.session.updatedAt))}
+        >
+          {formatTimeLabel(props.session.updatedAt)}
+        </time>
+      </div>
       <div class={styles.actions} data-actions="true">
-        <button class={styles.actionButton} type="button" onClick={props.onOpenChanges}>
+        <button
+          class={styles.actionButton}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            props.onOpenChanges()
+          }}
+        >
           <GitBranch size={15} strokeWidth={2.1} />
           Changes
         </button>
-        <button class={styles.actionButton} type="button" onClick={props.onOpen}>
+        <button
+          class={styles.actionButton}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            props.onOpen()
+          }}
+        >
           Open
           <ArrowUpRight size={15} strokeWidth={2.2} />
         </button>
