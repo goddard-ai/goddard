@@ -1718,12 +1718,12 @@ export function createSessionManager(input: {
   })
   const ready = reconcilePersistedSessions()
 
-  async function updateSession(
+  function updateSession(
     id: SessionId,
     update: Partial<KindInput<typeof db.schema.sessions>>,
     detail?: Record<string, unknown>,
     diagnosticLogger?: ReturnType<typeof createLogger>,
-  ): Promise<void> {
+  ) {
     const active = activeSessions.get(id)
     const previousRecord = db.sessions.get(id) ?? null
     const previousStatus = active?.status ?? previousRecord?.status
@@ -1736,7 +1736,7 @@ export function createSessionManager(input: {
       db.sessions.update(previousRecord.id, update)
     }
     if (update.status && previousStatus && previousStatus !== update.status) {
-      await emitDiagnostic(
+      emitDiagnostic(
         id,
         "session_status_changed",
         {
@@ -1758,7 +1758,7 @@ export function createSessionManager(input: {
     activeTurn.flushTimer = null
   }
 
-  async function updateSessionAvailableCommands(
+  function updateSessionAvailableCommands(
     sessionId: SessionId,
     availableCommands: acp.AvailableCommand[],
   ) {
@@ -1772,7 +1772,7 @@ export function createSessionManager(input: {
     })
   }
 
-  async function flushActiveTurnDraft(active: ActiveSession, reason: string): Promise<void> {
+  function flushActiveTurnDraft(active: ActiveSession, reason: string) {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
       return
@@ -1794,7 +1794,7 @@ export function createSessionManager(input: {
       activeTurn.draftId = db.sessionTurnDrafts.create(draftInput).id
     }
 
-    await emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_turn_draft_flushed",
       {
@@ -1810,21 +1810,23 @@ export function createSessionManager(input: {
   function scheduleActiveTurnDraftFlush(active: ActiveSession, reason: string, immediate = false) {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
-      return Promise.resolve()
+      return
     }
 
     if (immediate) {
-      return flushActiveTurnDraft(active, reason)
+      flushActiveTurnDraft(active, reason)
+      return
     }
 
     clearTurnDraftFlushTimer(activeTurn)
     activeTurn.flushTimer = setTimeout(() => {
-      void flushActiveTurnDraft(active, reason).catch(() => {})
+      try {
+        flushActiveTurnDraft(active, reason)
+      } catch {}
     }, 100)
-    return Promise.resolve()
   }
 
-  async function persistTurnDraftAsInterruptedTurn(
+  function persistTurnDraftAsInterruptedTurn(
     sessionId: SessionId,
     draftRecord: SessionTurnDraftDoc,
     diagnosticLogger: ReturnType<typeof createLogger>,
@@ -1845,7 +1847,7 @@ export function createSessionManager(input: {
       : db.sessionTurns.create(toCompletedTurnInput(sessionId, turn))
 
     db.sessionTurnDrafts.delete(draftRecord.id)
-    await emitDiagnostic(
+    emitDiagnostic(
       sessionId,
       "session_turn_draft_promoted",
       {
@@ -1857,10 +1859,10 @@ export function createSessionManager(input: {
     return createdTurn
   }
 
-  async function appendTurnScopedMessage(active: ActiveSession, message: acp.AnyMessage) {
+  function appendTurnScopedMessage(active: ActiveSession, message: acp.AnyMessage) {
     const availableCommands = getAvailableCommandsFromMessage(message)
     if (availableCommands) {
-      await updateSessionAvailableCommands(active.id, availableCommands)
+      updateSessionAvailableCommands(active.id, availableCommands)
     }
 
     const activeTurn = active.activeTurn
@@ -1869,14 +1871,14 @@ export function createSessionManager(input: {
     }
 
     appendSessionHistoryMessage(activeTurn.messages, message)
-    await scheduleActiveTurnDraftFlush(
+    scheduleActiveTurnDraftFlush(
       active,
       shouldFlushTurnDraftImmediately(activeTurn, message) ? "boundary" : "stream",
       shouldFlushTurnDraftImmediately(activeTurn, message),
     )
   }
 
-  async function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {
+  function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {
     const activeTurn = active.activeTurn
     if (!activeTurn || !isTurnTerminalMessage(activeTurn, message)) {
       return
@@ -1898,7 +1900,7 @@ export function createSessionManager(input: {
       messages: [...activeTurn.messages],
     }
 
-    await flushActiveTurnDraft(active, "completion")
+    flushActiveTurnDraft(active, "completion")
     db.batch(() => {
       db.sessionTurns.create(toCompletedTurnInput(active.id, completedTurn))
       if (activeTurn.draftId) {
@@ -1916,8 +1918,8 @@ export function createSessionManager(input: {
     clearTurnDraftFlushTimer(activeTurn)
     active.activeTurn = null
     active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
-    await refreshIdleShutdownState(active.id, "turn_completed")
-    await emitDiagnostic(
+    refreshIdleShutdownState(active.id, "turn_completed")
+    emitDiagnostic(
       active.id,
       "session_turn_persisted",
       {
@@ -1942,12 +1944,12 @@ export function createSessionManager(input: {
     )
   }
 
-  async function emitDiagnostic(
+  function emitDiagnostic(
     sessionId: SessionId,
     type: string,
     detail?: Record<string, unknown>,
     diagnosticLogger: ReturnType<typeof createLogger> = logger,
-  ): Promise<void> {
+  ) {
     const event: SessionDiagnosticEvent = {
       type,
       at: new Date().toISOString(),
@@ -1989,7 +1991,7 @@ export function createSessionManager(input: {
         return
       }
 
-      await emitDiagnostic(
+      emitDiagnostic(
         params.id,
         "session_title_generation_started",
         {
@@ -2009,7 +2011,7 @@ export function createSessionManager(input: {
           throw new Error("Generated session title was empty or invalid.")
         }
 
-        await updateSession(
+        updateSession(
           params.id,
           {
             title: generatedTitle,
@@ -2018,7 +2020,7 @@ export function createSessionManager(input: {
           undefined,
           params.diagnosticLogger,
         )
-        await emitDiagnostic(
+        emitDiagnostic(
           params.id,
           "session_title_generated",
           {
@@ -2029,7 +2031,7 @@ export function createSessionManager(input: {
           params.diagnosticLogger,
         )
       } catch (error) {
-        await updateSession(
+        updateSession(
           params.id,
           {
             title: params.fallbackTitle,
@@ -2038,7 +2040,7 @@ export function createSessionManager(input: {
           undefined,
           params.diagnosticLogger,
         )
-        await emitDiagnostic(
+        emitDiagnostic(
           params.id,
           "session_title_generation_failed",
           {
@@ -2087,7 +2089,7 @@ export function createSessionManager(input: {
         return
       }
 
-      await updateSession(
+      updateSession(
         params.id,
         {
           title: preparedTitle.title,
@@ -2107,8 +2109,8 @@ export function createSessionManager(input: {
         })
       }
     })()
-      .catch(async (error) => {
-        await emitDiagnostic(
+      .catch((error) => {
+        emitDiagnostic(
           params.id,
           "session_title_generation_failed",
           {
@@ -2124,11 +2126,11 @@ export function createSessionManager(input: {
     pendingSessionTitlePreparations.set(params.id, task)
   }
 
-  async function setConnectionMode(
+  function setConnectionMode(
     sessionId: SessionId,
     mode: SessionConnectionMode,
     activeDaemonSession: boolean,
-  ): Promise<void> {
+  ) {
     const sessionRecord = db.sessions.get(sessionId) ?? null
     if (!sessionRecord) {
       return
@@ -2219,14 +2221,14 @@ export function createSessionManager(input: {
   }
 
   /** Cancels one pending idle auto-shutdown timer and records the reason for that cancellation. */
-  async function cancelIdleShutdownTimer(active: ActiveSession, reason: string): Promise<void> {
+  function cancelIdleShutdownTimer(active: ActiveSession, reason: string) {
     if (!active.idleShutdownTimer) {
       return
     }
 
     clearTimeout(active.idleShutdownTimer)
     active.idleShutdownTimer = null
-    await emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_idle_shutdown_timer_cancelled",
       { reason, timeoutMs: idleSessionShutdownTimeoutMs },
@@ -2235,14 +2237,14 @@ export function createSessionManager(input: {
   }
 
   /** Re-checks whether one active session should have an idle auto-shutdown timer armed right now. */
-  async function refreshIdleShutdownState(id: SessionId, reason: string): Promise<void> {
+  function refreshIdleShutdownState(id: SessionId, reason: string) {
     const active = activeSessions.get(id)
     if (!active) {
       return
     }
 
     if (!shouldStartIdleShutdownTimer(active)) {
-      await cancelIdleShutdownTimer(active, reason)
+      cancelIdleShutdownTimer(active, reason)
       return
     }
 
@@ -2250,7 +2252,7 @@ export function createSessionManager(input: {
       return
     }
 
-    await emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_idle_shutdown_timer_started",
       { reason, timeoutMs: idleSessionShutdownTimeoutMs },
@@ -2278,7 +2280,7 @@ export function createSessionManager(input: {
       return
     }
 
-    await emitDiagnostic(
+    emitDiagnostic(
       id,
       "session_idle_shutdown_timer_expired",
       { timeoutMs: idleSessionShutdownTimeoutMs },
@@ -2291,7 +2293,7 @@ export function createSessionManager(input: {
   async function sessionSubscriberConnected(id: SessionId): Promise<void> {
     await ready
     sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
-    await refreshIdleShutdownState(id, "subscriber_connected")
+    refreshIdleShutdownState(id, "subscriber_connected")
   }
 
   /** Records one departing `sessionMessage` subscriber and starts the timer when the last one leaves. */
@@ -2303,7 +2305,7 @@ export function createSessionManager(input: {
     } else {
       sessionSubscriberCounts.set(id, current - 1)
     }
-    await refreshIdleShutdownState(id, "subscriber_disconnected")
+    refreshIdleShutdownState(id, "subscriber_disconnected")
   }
 
   async function runWorktreeSyncCycle(
@@ -2312,12 +2314,12 @@ export function createSessionManager(input: {
     reason: string,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
-    await emitDiagnostic(id, "worktree.sync_started", { reason }, diagnosticLogger)
+    emitDiagnostic(id, "worktree.sync_started", { reason }, diagnosticLogger)
     const result = await host.syncOnce()
     for (const warning of result.warnings) {
-      await emitDiagnostic(id, "worktree.sync_warning", { reason, warning }, diagnosticLogger)
+      emitDiagnostic(id, "worktree.sync_warning", { reason, warning }, diagnosticLogger)
     }
-    await emitDiagnostic(
+    emitDiagnostic(
       id,
       "worktree.sync_completed",
       {
@@ -2383,7 +2385,7 @@ export function createSessionManager(input: {
       try {
         await runWorktreeSyncCycle(id, host, reason, diagnosticLogger)
       } catch (error) {
-        await emitDiagnostic(
+        emitDiagnostic(
           id,
           "worktree.sync_warning",
           {
@@ -2416,7 +2418,7 @@ export function createSessionManager(input: {
           schedule(`${side}:${changedPath || "*"}`)
         })
         watcher.on("error", (error) => {
-          void emitDiagnostic(
+          emitDiagnostic(
             id,
             "worktree.sync_watcher_degraded",
             {
@@ -2429,7 +2431,7 @@ export function createSessionManager(input: {
         })
         runtime.watchers.push(watcher)
       } catch (error) {
-        void emitDiagnostic(
+        emitDiagnostic(
           id,
           "worktree.sync_watcher_degraded",
           {
@@ -2465,7 +2467,7 @@ export function createSessionManager(input: {
     })
     const unmounted = await previousHost.unmount()
 
-    await emitDiagnostic(
+    emitDiagnostic(
       mounted.sessionId,
       "worktree.sync_replaced",
       {
@@ -2475,7 +2477,7 @@ export function createSessionManager(input: {
       previousLogger,
     )
     for (const warning of unmounted.warnings) {
-      await emitDiagnostic(
+      emitDiagnostic(
         mounted.sessionId,
         "worktree.sync_warning",
         { reason: "replaced", warning },
@@ -2483,7 +2485,7 @@ export function createSessionManager(input: {
       )
     }
 
-    await emitDiagnostic(
+    emitDiagnostic(
       id,
       "worktree.sync_replaced",
       { previousSessionId: mounted.sessionId },
@@ -2502,7 +2504,7 @@ export function createSessionManager(input: {
       try {
         await replaceMountedWorktreeSyncIfNeeded(id, worktreeRecord, diagnosticLogger)
         const state = await host.mount()
-        await emitDiagnostic(
+        emitDiagnostic(
           id,
           "worktree.sync_mounted",
           {
@@ -2560,12 +2562,12 @@ export function createSessionManager(input: {
           if (mountedSyncState) {
             try {
               const unmounted = await syncHost.unmount()
-              await emitDiagnostic(session.id, "worktree.sync_unmounted", {
+              emitDiagnostic(session.id, "worktree.sync_unmounted", {
                 reason: "daemon_reconciliation",
                 warningCount: unmounted.warnings.length,
               })
             } catch (error) {
-              await emitDiagnostic(session.id, "worktree.sync_warning", {
+              emitDiagnostic(session.id, "worktree.sync_warning", {
                 reason: "daemon_reconciliation",
                 errorMessage: error instanceof Error ? error.message : String(error),
               })
@@ -2598,13 +2600,13 @@ export function createSessionManager(input: {
           }
 
           if (session.titleState === "pending" && titleBackfill.titleState === "failed") {
-            await emitDiagnostic(session.id, "session_title_generation_failed", {
+            emitDiagnostic(session.id, "session_title_generation_failed", {
               reason: "daemon_reconciliation",
             })
           }
         }
         if (draftRecord) {
-          await persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
+          persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
         }
 
         if (
@@ -2621,18 +2623,18 @@ export function createSessionManager(input: {
               permissions: null,
             })
           }
-          await setConnectionMode(
+          setConnectionMode(
             session.id,
             disconnectedConnectionMode(hasPersistedTurnHistory(session.id), supportsLoadSession),
             false,
           )
-          await emitDiagnostic(session.id, "session_reconciled_after_restart", {
+          emitDiagnostic(session.id, "session_reconciled_after_restart", {
             previousStatus: session.status,
           })
           return
         }
 
-        await setConnectionMode(
+        setConnectionMode(
           session.id,
           disconnectedConnectionMode(hasPersistedTurnHistory(session.id), supportsLoadSession),
           false,
@@ -2654,15 +2656,15 @@ export function createSessionManager(input: {
     return typeof prompt === "string" ? [{ type: "text", text: prompt }] : [...prompt]
   }
 
-  async function publishSessionMessage(
+  function publishSessionMessage(
     active: ActiveSession,
     message: acp.AnyMessage,
     options: {
       persistTurnMessage?: boolean
     } = {},
-  ): Promise<void> {
+  ) {
     if (options.persistTurnMessage !== false) {
-      await appendTurnScopedMessage(active, message)
+      appendTurnScopedMessage(active, message)
     }
     input.publish(active.id, message)
   }
@@ -2687,7 +2689,7 @@ export function createSessionManager(input: {
     } else if (options.updateStatus !== false) {
       const nextStatus = sessionStatusFromClientMessage(message, active.status)
       if (nextStatus) {
-        await updateSession(
+        updateSession(
           active.id,
           { status: nextStatus },
           {
@@ -2712,11 +2714,11 @@ export function createSessionManager(input: {
     }
 
     if (clearedPermissionRequest) {
-      await refreshIdleShutdownState(active.id, "permission_request_resolved")
+      refreshIdleShutdownState(active.id, "permission_request_resolved")
     }
 
     logAgentMessage(active.logger, "agent.message_write", active.id, active.acpSessionId, message)
-    await emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_message_sent",
       {
@@ -2726,7 +2728,7 @@ export function createSessionManager(input: {
       active.logger,
     )
     await options.onBeforePublish?.(message)
-    await publishSessionMessage(active, message, {
+    publishSessionMessage(active, message, {
       persistTurnMessage: options.persistTurnMessage,
     })
     await active.writer.write(message)
@@ -2760,7 +2762,7 @@ export function createSessionManager(input: {
         where: { sessionId: active.id },
       }) ?? null
     if (existingDraft) {
-      await persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
+      persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
       active.nextTurnSequence = resolveLatestStoredTurnSequence(active.id) + 1
     }
 
@@ -2784,10 +2786,10 @@ export function createSessionManager(input: {
       })
     }
 
-    await refreshIdleShutdownState(active.id, "turn_started")
+    refreshIdleShutdownState(active.id, "turn_started")
 
     try {
-      await emitDiagnostic(
+      emitDiagnostic(
         active.id,
         "session_turn_started",
         {
@@ -2801,7 +2803,7 @@ export function createSessionManager(input: {
         persistTurnMessage: false,
         onBeforePublish: async (resolvedMessage) => {
           appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
-          await flushActiveTurnDraft(active, "start")
+          flushActiveTurnDraft(active, "start")
         },
       })
     } catch (error) {
@@ -2814,7 +2816,7 @@ export function createSessionManager(input: {
         active.blockingPromptRequestId = null
       }
       active.pendingPrompts.delete(nextPrompt.requestId)
-      await refreshIdleShutdownState(active.id, "turn_start_failed")
+      refreshIdleShutdownState(active.id, "turn_start_failed")
       nextPrompt.reject?.(error instanceof Error ? error : new Error(String(error)))
       throw error
     }
@@ -2846,7 +2848,7 @@ export function createSessionManager(input: {
       abortedQueue.push(toAbortedQueuedPrompt(queuedPrompt))
       if (queuedPrompt.source === "client") {
         // Raw ACP callers need a terminal JSON-RPC response because this prompt never reached the agent.
-        await publishSessionMessage(active, {
+        publishSessionMessage(active, {
           jsonrpc: "2.0",
           id: queuedPrompt.requestId,
           error: {
@@ -2860,7 +2862,7 @@ export function createSessionManager(input: {
       queuedPrompt.reject?.(new IpcClientError(reason))
     }
 
-    await refreshIdleShutdownState(active.id, "queued_prompts_aborted")
+    refreshIdleShutdownState(active.id, "queued_prompts_aborted")
     return abortedQueue
   }
 
@@ -2913,7 +2915,7 @@ export function createSessionManager(input: {
       updateStatus: options.updateStatus,
     })
 
-    await emitDiagnostic(id, "session_turn_cancelled", {
+    emitDiagnostic(id, "session_turn_cancelled", {
       activeTurnCancelled,
       abortedQueueLength: abortedQueue.length,
     })
@@ -2959,7 +2961,7 @@ export function createSessionManager(input: {
         response,
       })
     } catch (error) {
-      await refreshIdleShutdownState(active.id, "steer_cleared")
+      refreshIdleShutdownState(active.id, "steer_cleared")
       steer.reject(error instanceof Error ? error : new Error(String(error)))
     }
   }
@@ -2971,7 +2973,7 @@ export function createSessionManager(input: {
     supportsLoadSession: boolean
   }) {
     params.agentProcess.onceExit((code, signal) => {
-      void emitDiagnostic(
+      emitDiagnostic(
         params.id,
         "agent_process_exit",
         {
@@ -2980,21 +2982,21 @@ export function createSessionManager(input: {
           nextStatus: "done",
         },
         params.sessionLogger,
-      ).catch(console.error)
+      )
     })
 
-    await updateSession(
+    updateSession(
       params.id,
       { status: "done", token: null, permissions: null },
       { reason: "one_shot_completed" },
       params.sessionLogger,
     )
-    await setConnectionMode(
+    setConnectionMode(
       params.id,
       disconnectedConnectionMode(true, params.supportsLoadSession),
       false,
     )
-    await emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
+    emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
     await treeKill(params.agentProcess)
     await waitForAgentProcessExit(params.agentProcess)
 
@@ -3072,7 +3074,7 @@ export function createSessionManager(input: {
       )
       if (isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)) {
         activeSession.lastPermissionRequest = message
-        await refreshIdleShutdownState(activeSession.id, "permission_request_started")
+        refreshIdleShutdownState(activeSession.id, "permission_request_started")
       }
 
       if ("id" in message && message.id != null) {
@@ -3087,7 +3089,7 @@ export function createSessionManager(input: {
         const nextStatus = stopReason === "end_turn" ? "done" : null
 
         if (nextStatus || stopReason) {
-          await updateSession(
+          updateSession(
             activeSession.id,
             {
               ...(nextStatus && { status: nextStatus }),
@@ -3111,15 +3113,17 @@ export function createSessionManager(input: {
         }
       }
 
-      await publishSessionMessage(activeSession, message)
-      await finalizeActiveTurn(activeSession, message)
+      publishSessionMessage(activeSession, message)
+      finalizeActiveTurn(activeSession, message)
       await handleSteerBoundary(activeSession, message)
       await processPromptQueue(activeSession)
     })
 
     const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
-      await flushActiveTurnDraft(activeSession, "agent_process_exit").catch(() => {})
-      await cancelIdleShutdownTimer(activeSession, "agent_process_exit")
+      try {
+        flushActiveTurnDraft(activeSession, "agent_process_exit")
+      } catch {}
+      cancelIdleShutdownTimer(activeSession, "agent_process_exit")
       activeSessions.delete(activeSession.id)
       await stopWorktreeSyncRuntime(activeSession.id)
       rejectPendingPrompts(
@@ -3136,7 +3140,7 @@ export function createSessionManager(input: {
         if (mountedSyncState) {
           try {
             const unmounted = await syncHost.unmount()
-            await emitDiagnostic(
+            emitDiagnostic(
               activeSession.id,
               "worktree.sync_unmounted",
               {
@@ -3146,7 +3150,7 @@ export function createSessionManager(input: {
               activeSession.logger,
             )
           } catch (error) {
-            await emitDiagnostic(
+            emitDiagnostic(
               activeSession.id,
               "worktree.sync_warning",
               {
@@ -3172,7 +3176,7 @@ export function createSessionManager(input: {
       nextUpdate.token = null
       nextUpdate.permissions = null
 
-      await setConnectionMode(
+      setConnectionMode(
         activeSession.id,
         disconnectedConnectionMode(
           hasPersistedTurnHistory(activeSession.id),
@@ -3180,7 +3184,7 @@ export function createSessionManager(input: {
         ),
         false,
       )
-      await emitDiagnostic(
+      emitDiagnostic(
         activeSession.id,
         "agent_process_exit",
         {
@@ -3191,11 +3195,13 @@ export function createSessionManager(input: {
         activeSession.logger,
       )
       if (Object.keys(nextUpdate).length > 0) {
-        await updateSession(activeSession.id, nextUpdate, {
-          reason: "agent_process_exit",
-          code,
-          signal,
-        }).catch(() => {})
+        try {
+          updateSession(activeSession.id, nextUpdate, {
+            reason: "agent_process_exit",
+            code,
+            signal,
+          })
+        } catch {}
       }
     }
 
@@ -3204,7 +3210,7 @@ export function createSessionManager(input: {
     })
 
     activeSessions.set(activeSession.id, activeSession)
-    await refreshIdleShutdownState(activeSession.id, "session_activated")
+    refreshIdleShutdownState(activeSession.id, "session_activated")
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
       throw new IpcClientError("Session not found")
@@ -3303,12 +3309,12 @@ export function createSessionManager(input: {
             repoRoot: worktree.state.repoRoot,
             worktreeDir: worktree.state.worktreeDir,
             config: resolvedConfig?.worktrees?.bootstrap,
-            onEvent: async (event) => {
-              await emitDiagnostic(id, event.type, event.detail, sessionLogger)
+            onEvent: (event) => {
+              emitDiagnostic(id, event.type, event.detail, sessionLogger)
             },
           })
         } catch (error) {
-          await emitDiagnostic(
+          emitDiagnostic(
             id,
             "worktree.bootstrap_failed",
             {
@@ -3319,14 +3325,14 @@ export function createSessionManager(input: {
           throw error
         }
       } else if (worktree && existingArtifacts.worktree) {
-        await emitDiagnostic(
+        emitDiagnostic(
           id,
           "worktree.bootstrap_skipped",
           { reason: "reused_worktree" },
           sessionLogger,
         )
       } else if (worktree && worktree.state.poweredBy !== defaultPlugin.name) {
-        await emitDiagnostic(
+        emitDiagnostic(
           id,
           "worktree.bootstrap_skipped",
           {
@@ -3409,7 +3415,7 @@ export function createSessionManager(input: {
         workforceMetadata,
         sessionRecord,
       })
-      await emitDiagnostic(
+      emitDiagnostic(
         id,
         "session_created",
         {
@@ -3552,7 +3558,7 @@ export function createSessionManager(input: {
     await ready
     const active = activeSessions.get(id)
     if (active) {
-      await emitDiagnostic(id, "session_connected", undefined, active.logger)
+      emitDiagnostic(id, "session_connected", undefined, active.logger)
       return getSession(id)
     }
 
@@ -3563,12 +3569,7 @@ export function createSessionManager(input: {
         request: createReconnectRequest(session),
       })
       const reloadedActiveSession = activeSessions.get(id)
-      await emitDiagnostic(
-        id,
-        "session_connected",
-        undefined,
-        reloadedActiveSession?.logger ?? logger,
-      )
+      emitDiagnostic(id, "session_connected", undefined, reloadedActiveSession?.logger ?? logger)
       return reloadedSession
     }
 
@@ -3642,12 +3643,12 @@ export function createSessionManager(input: {
       }
     }
 
-    await emitDiagnostic(params.id, "session_history_read", {
+    emitDiagnostic(params.id, "session_history_read", {
       persistedTurnCount: page.items.length,
       returnedTurnCount: turns.length,
       hasCursor: params.cursor != null,
       hasMore: page.next != null,
-    }).catch(() => {})
+    })
 
     return {
       id: session.id,
@@ -3887,7 +3888,7 @@ export function createSessionManager(input: {
 
     const host = createWorktreeSyncHost(id, worktreeRecord)
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    await emitDiagnostic(id, "worktree.sync_requested", { reason: "manual" }, diagnosticLogger)
+    emitDiagnostic(id, "worktree.sync_requested", { reason: "manual" }, diagnosticLogger)
     const result = await runWorktreeSyncCycle(id, host, "manual", diagnosticLogger)
     const response = await getWorktree(id)
     return {
@@ -3910,7 +3911,7 @@ export function createSessionManager(input: {
     const host = createWorktreeSyncHost(id, worktreeRecord)
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
     const result = await host.unmount()
-    await emitDiagnostic(
+    emitDiagnostic(
       id,
       "worktree.sync_unmounted",
       {
@@ -3920,12 +3921,7 @@ export function createSessionManager(input: {
       diagnosticLogger,
     )
     for (const warning of result.warnings) {
-      await emitDiagnostic(
-        id,
-        "worktree.sync_warning",
-        { reason: "manual", warning },
-        diagnosticLogger,
-      )
+      emitDiagnostic(id, "worktree.sync_warning", { reason: "manual", warning }, diagnosticLogger)
     }
 
     const response = await getWorktree(id)
@@ -3974,8 +3970,8 @@ export function createSessionManager(input: {
         prompt: [...message.params.prompt],
         source: "client",
       })
-      await refreshIdleShutdownState(active.id, "prompt_enqueued")
-      await emitDiagnostic(active.id, "session_prompt_enqueued", {
+      refreshIdleShutdownState(active.id, "prompt_enqueued")
+      emitDiagnostic(active.id, "session_prompt_enqueued", {
         requestId: message.id,
         queueLength: active.promptQueue.length,
       })
@@ -4021,8 +4017,8 @@ export function createSessionManager(input: {
     })
 
     try {
-      await refreshIdleShutdownState(active.id, "prompt_enqueued")
-      await emitDiagnostic(
+      refreshIdleShutdownState(active.id, "prompt_enqueued")
+      emitDiagnostic(
         active.id,
         "session_prompt_enqueued",
         {
@@ -4078,7 +4074,7 @@ export function createSessionManager(input: {
         resolve,
         reject,
       }
-      void refreshIdleShutdownState(active.id, "steer_started").catch(() => {})
+      refreshIdleShutdownState(active.id, "steer_started")
 
       void sendInternalCancel(active, { updateStatus: false }).catch((error) => {
         if (active.pendingSteer?.requestId === requestId) {
@@ -4096,8 +4092,8 @@ export function createSessionManager(input: {
       return false
     }
 
-    await cancelIdleShutdownTimer(active, "session_shutdown")
-    await emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
+    cancelIdleShutdownTimer(active, "session_shutdown")
+    emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     if (worktreeRecord) {
       const syncHost = createWorktreeSyncHost(id, worktreeRecord)
@@ -4105,7 +4101,7 @@ export function createSessionManager(input: {
         try {
           await stopWorktreeSyncRuntime(id)
           const result = await syncHost.unmount()
-          await emitDiagnostic(
+          emitDiagnostic(
             id,
             "worktree.sync_unmounted",
             {
@@ -4115,7 +4111,7 @@ export function createSessionManager(input: {
             active.logger,
           )
         } catch (error) {
-          await emitDiagnostic(
+          emitDiagnostic(
             id,
             "worktree.sync_warning",
             {
@@ -4149,7 +4145,7 @@ export function createSessionManager(input: {
   async function close(): Promise<void> {
     await ready
     for (const session of activeSessions.values()) {
-      await cancelIdleShutdownTimer(session, "daemon_shutdown")
+      cancelIdleShutdownTimer(session, "daemon_shutdown")
       await stopWorktreeSyncRuntime(session.id)
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
       if (worktreeRecord) {
@@ -4158,12 +4154,7 @@ export function createSessionManager(input: {
           await syncHost.unmount().catch(() => {})
         }
       }
-      await emitDiagnostic(
-        session.id,
-        "daemon_shutdown",
-        { status: session.status },
-        session.logger,
-      )
+      emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
       await session.writer.close().catch(() => {})
