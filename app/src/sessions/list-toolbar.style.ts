@@ -8,11 +8,10 @@ export default {
     width: "100%",
     height: "40px",
     paddingInline: "12px",
-    borderBottom: "1px solid",
-    borderColor: "border",
+    borderBottom: "1px solid {colors.border}",
     color: "muted",
     "&:focus-within": {
-      borderColor: "accentStrong",
+      borderBottom: "1px solid {colors.accentStrong}",
     },
   }),
   searchIcon: css({
