@@ -1,0 +1,8 @@
+{
+  "name": "bugs",
+  "private": true,
+  "devDependencies": {
+    "jsdom": "^29.0.2",
+    "vitest": "^4.1.4"
+  }
+}

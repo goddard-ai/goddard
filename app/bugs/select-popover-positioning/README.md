@@ -9,11 +9,5 @@ It confirms that when the `Popover.Positioner` is created lazily, the floating n
 Run it with:
 
 ```sh
-bun --cwd app run test:bug:select-popover-positioning
-```
-
-Or run all bug repros through the shared harness:
-
-```sh
-bun --cwd app run test:bugs
+bun run --cwd=app test:bugs select-popover-positioning
 ```

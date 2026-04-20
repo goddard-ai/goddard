@@ -15,7 +15,6 @@
     "fmt": "oxfmt",
     "test": "bun test --dots",
     "test:bugs": "vitest run --config ./bugs/vitest.config.ts",
-    "test:bug:select-popover-positioning": "vitest run --config ./bugs/vitest.config.ts ./bugs/select-popover-positioning/select-popover-positioning.test.tsx",
     "typecheck": "panda codegen && tsgo --noEmit"
   },
   "dependencies": {
@@ -58,11 +57,9 @@
     "@spiriit/vite-plugin-svg-spritemap": "7.0.0",
     "@types/culori": "^4.0.1",
     "chokidar": "^5.0.0",
-    "jsdom": "^29.0.2",
     "postcss": "^8.5.8",
     "react": "npm:@preact/compat",
     "react-dom": "npm:@preact/compat",
-    "vite": "^8.0.3",
-    "vitest": "^4.1.4"
+    "vite": "^8.0.3"
   }
 }
