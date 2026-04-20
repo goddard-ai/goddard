@@ -23,12 +23,18 @@ export default {
     },
     watchIgnore: ["src", "src/**", ".generated", ".generated/**"],
     mac: {
+      bundleCEF: true,
+      defaultRenderer: "cef",
       icons: "assets/icon.iconset",
     },
     win: {
+      bundleCEF: true,
+      defaultRenderer: "cef",
       icon: "assets/icon.png",
     },
     linux: {
+      bundleCEF: true,
+      defaultRenderer: "cef",
       icon: "assets/icon.png",
     },
   },
