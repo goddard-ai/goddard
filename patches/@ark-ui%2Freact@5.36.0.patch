@@ -1,0 +1,130 @@
+diff --git a/dist/components/popover/popover-positioner.cjs b/dist/components/popover/popover-positioner.cjs
+index 8b9ca47f23fa510d8bf77109a91445436b1f8198..aec19051b2ef6e77f05cdfc021d8ab77dd04c456 100644
+--- a/dist/components/popover/popover-positioner.cjs
++++ b/dist/components/popover/popover-positioner.cjs
+@@ -6,6 +6,7 @@ Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+ const jsxRuntime = require('react/jsx-runtime');
+ const react$1 = require('@zag-js/react');
+ const react = require('react');
++const useSafeLayoutEffect = require('../../utils/use-safe-layout-effect.cjs');
+ const factory = require('../factory.cjs');
+ const usePresenceContext = require('../presence/use-presence-context.cjs');
+ const usePopoverContext = require('./use-popover-context.cjs');
+@@ -13,10 +14,16 @@ const usePopoverContext = require('./use-popover-context.cjs');
+ const PopoverPositioner = react.forwardRef((props, ref) => {
+   const popover = usePopoverContext.usePopoverContext();
+   const presence = usePresenceContext.usePresenceContext();
+-  const mergedProps = react$1.mergeProps(popover.getPositionerProps(), props);
++  const mounting = !presence.unmounted && !presence.wasEverPresent;
++  useSafeLayoutEffect.useSafeLayoutEffect(() => {
++    if (mounting) {
++      popover.restartPositioning();
++    }
++  }, [mounting, popover]);
+   if (presence.unmounted) {
+     return null;
+   }
++  const mergedProps = react$1.mergeProps(popover.getPositionerProps(), props);
+   return /* @__PURE__ */ jsxRuntime.jsx(factory.ark.div, { ...mergedProps, ref });
+ });
+ PopoverPositioner.displayName = "PopoverPositioner";
+diff --git a/dist/components/popover/popover-positioner.js b/dist/components/popover/popover-positioner.js
+index 79b1d408d69312c21e55ccd88e30952e307287dc..5e0ba088c4e70a549f8874f7ac17199c3808b806 100644
+--- a/dist/components/popover/popover-positioner.js
++++ b/dist/components/popover/popover-positioner.js
+@@ -2,6 +2,7 @@
+ import { jsx } from 'react/jsx-runtime';
+ import { mergeProps } from '@zag-js/react';
+ import { forwardRef } from 'react';
++import { useSafeLayoutEffect } from '../../utils/use-safe-layout-effect.js';
+ import { ark } from '../factory.js';
+ import { usePresenceContext } from '../presence/use-presence-context.js';
+ import { usePopoverContext } from './use-popover-context.js';
+@@ -9,10 +10,16 @@ import { usePopoverContext } from './use-popover-context.js';
+ const PopoverPositioner = forwardRef((props, ref) => {
+   const popover = usePopoverContext();
+   const presence = usePresenceContext();
+-  const mergedProps = mergeProps(popover.getPositionerProps(), props);
++  const mounting = !presence.unmounted && !presence.wasEverPresent;
++  useSafeLayoutEffect(() => {
++    if (mounting) {
++      popover.restartPositioning();
++    }
++  }, [mounting, popover]);
+   if (presence.unmounted) {
+     return null;
+   }
++  const mergedProps = mergeProps(popover.getPositionerProps(), props);
+   return /* @__PURE__ */ jsx(ark.div, { ...mergedProps, ref });
+ });
+ PopoverPositioner.displayName = "PopoverPositioner";
+diff --git a/dist/components/presence/use-presence.cjs b/dist/components/presence/use-presence.cjs
+index 4ae677eedf08fa54c80d4f4f69f000fef950251b..146aa45e6a02d42105902ed8c760fc49c53db3ad 100644
+--- a/dist/components/presence/use-presence.cjs
++++ b/dist/components/presence/use-presence.cjs
+@@ -39,8 +39,10 @@ const usePresence = (props = {}) => {
+   const api = presence__namespace.connect(service, react$1.normalizeProps);
+   if (api.present) {
+     wasEverPresent.current = true;
++  } else if (unmountOnExit) {
++    wasEverPresent.current = false;
+   }
+-  const unmounted = !api.present && !wasEverPresent.current && lazyMount || unmountOnExit && !api.present && wasEverPresent.current;
++  const unmounted = !api.present && (wasEverPresent.current ? unmountOnExit : lazyMount);
+   const getPresenceProps = () => ({
+     "data-state": api.skip && skipAnimationOnMount ? void 0 : present ? "open" : "closed",
+     hidden: !api.present
+@@ -49,6 +51,7 @@ const usePresence = (props = {}) => {
+     ref: api.setNode,
+     getPresenceProps,
+     present: api.present,
++    wasEverPresent: wasEverPresent.current,
+     unmounted
+   };
+ };
+diff --git a/dist/components/presence/use-presence.d.cts b/dist/components/presence/use-presence.d.cts
+index b58c11128989ccf6cb2cc443cca21b0388fc75cd..42097d6e3057c14081698b0f5acc089eb0c4ea71 100644
+--- a/dist/components/presence/use-presence.d.cts
++++ b/dist/components/presence/use-presence.d.cts
+@@ -16,5 +16,6 @@ export declare const usePresence: (props?: UsePresenceProps) => {
+         hidden: boolean;
+     };
+     present: boolean;
++    wasEverPresent: boolean;
+     unmounted: boolean | undefined;
+ };
+diff --git a/dist/components/presence/use-presence.d.ts b/dist/components/presence/use-presence.d.ts
+index b58c11128989ccf6cb2cc443cca21b0388fc75cd..42097d6e3057c14081698b0f5acc089eb0c4ea71 100644
+--- a/dist/components/presence/use-presence.d.ts
++++ b/dist/components/presence/use-presence.d.ts
+@@ -16,5 +16,6 @@ export declare const usePresence: (props?: UsePresenceProps) => {
+         hidden: boolean;
+     };
+     present: boolean;
++    wasEverPresent: boolean;
+     unmounted: boolean | undefined;
+ };
+diff --git a/dist/components/presence/use-presence.js b/dist/components/presence/use-presence.js
+index 8719cd0d9518eb85f5df38ed205b1a294bf9ac92..b174851acb94d1f7cc01ad26590c8d7ceb11c910 100644
+--- a/dist/components/presence/use-presence.js
++++ b/dist/components/presence/use-presence.js
+@@ -16,8 +16,10 @@ const usePresence = (props = {}) => {
+   const api = presence.connect(service, normalizeProps);
+   if (api.present) {
+     wasEverPresent.current = true;
++  } else if (unmountOnExit) {
++    wasEverPresent.current = false;
+   }
+-  const unmounted = !api.present && !wasEverPresent.current && lazyMount || unmountOnExit && !api.present && wasEverPresent.current;
++  const unmounted = !api.present && (wasEverPresent.current ? unmountOnExit : lazyMount);
+   const getPresenceProps = () => ({
+     "data-state": api.skip && skipAnimationOnMount ? void 0 : present ? "open" : "closed",
+     hidden: !api.present
+@@ -26,6 +28,7 @@ const usePresence = (props = {}) => {
+     ref: api.setNode,
+     getPresenceProps,
+     present: api.present,
++    wasEverPresent: wasEverPresent.current,
+     unmounted
+   };
+ };

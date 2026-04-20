@@ -1,0 +1,254 @@
+diff --git a/dist/popover.connect.js b/dist/popover.connect.js
+index 54e32df9f662d793372bb0b638ee976a6f41f6ce..00dc909bf5e55868b4e4c85d6a6571e6c797de6e 100644
+--- a/dist/popover.connect.js
++++ b/dist/popover.connect.js
+@@ -64,6 +64,9 @@ function connect(service, normalize) {
+     reposition(options = {}) {
+       send({ type: "POSITIONING.SET", options });
+     },
++    restartPositioning() {
++      send({ type: "POSITIONING.RESTART" });
++    },
+     getArrowProps() {
+       return normalize.element({
+         id: dom.getArrowId(scope),
+diff --git a/dist/popover.connect.mjs b/dist/popover.connect.mjs
+index 827602da356825837a9f6467cfab73bfb5810738..e18d6a61ca2617ee56685be8f41300826f5334d3 100644
+--- a/dist/popover.connect.mjs
++++ b/dist/popover.connect.mjs
+@@ -30,6 +30,9 @@ function connect(service, normalize) {
+     reposition(options = {}) {
+       send({ type: "POSITIONING.SET", options });
+     },
++    restartPositioning() {
++      send({ type: "POSITIONING.RESTART" });
++    },
+     getArrowProps() {
+       return normalize.element({
+         id: dom.getArrowId(scope),
+diff --git a/dist/popover.machine.js b/dist/popover.machine.js
+index dc023d620eca8e476399cbf6867ad0cd717df2cd..2cf24e86b86c59d9be59f3d4d7f4597ad153c0d8 100644
+--- a/dist/popover.machine.js
++++ b/dist/popover.machine.js
+@@ -41,6 +41,19 @@ var import_focus_trap = require("@zag-js/focus-trap");
+ var import_popper = require("@zag-js/popper");
+ var import_remove_scroll = require("@zag-js/remove-scroll");
+ var dom = __toESM(require("./popover.dom.js"));
++function startPositioning({ context, prop, scope }) {
++  context.set("currentPlacement", prop("positioning").placement);
++  const anchorEl = dom.getAnchorEl(scope);
++  const getPositionerEl2 = () => dom.getPositionerEl(scope);
++  const getTriggerEl = () => anchorEl ?? dom.getActiveTriggerEl(scope, context.get("triggerValue"));
++  return (0, import_popper.getPlacement)(getTriggerEl, getPositionerEl2, {
++    ...prop("positioning"),
++    defer: true,
++    onComplete(data) {
++      context.set("currentPlacement", data.placement);
++    }
++  });
++}
+ var machine = (0, import_core.createMachine)({
+   props({ props }) {
+     return {
+@@ -84,6 +97,11 @@ var machine = (0, import_core.createMachine)({
+       }))
+     };
+   },
++  refs() {
++    return {
++      positioningCleanup: null
++    };
++  },
+   computed: {
+     currentPortalled: ({ prop }) => !!prop("modal") || !!prop("portalled")
+   },
+@@ -161,6 +179,9 @@ var machine = (0, import_core.createMachine)({
+             actions: ["invokeOnClose"]
+           }
+         ],
++        "POSITIONING.RESTART": {
++          actions: ["restartPositioning"]
++        },
+         "POSITIONING.SET": {
+           actions: ["reposition"]
+         }
+@@ -172,18 +193,14 @@ var machine = (0, import_core.createMachine)({
+       isOpenControlled: ({ prop }) => prop("open") != void 0
+     },
+     effects: {
+-      trackPositioning({ context, prop, scope }) {
+-        context.set("currentPlacement", prop("positioning").placement);
+-        const anchorEl = dom.getAnchorEl(scope);
+-        const getPositionerEl2 = () => dom.getPositionerEl(scope);
+-        const getTriggerEl = () => anchorEl ?? dom.getActiveTriggerEl(scope, context.get("triggerValue"));
+-        return (0, import_popper.getPlacement)(getTriggerEl, getPositionerEl2, {
+-          ...prop("positioning"),
+-          defer: true,
+-          onComplete(data) {
+-            context.set("currentPlacement", data.placement);
+-          }
+-        });
++      trackPositioning(params) {
++        const { refs } = params;
++        refs.get("positioningCleanup")?.();
++        refs.set("positioningCleanup", startPositioning(params));
++        return () => {
++          refs.get("positioningCleanup")?.();
++          refs.set("positioningCleanup", null);
++        };
+       },
+       trackDismissableElement({ send, prop, scope }) {
+         const getContentEl2 = () => dom.getContentEl(scope);
+@@ -250,7 +267,13 @@ var machine = (0, import_core.createMachine)({
+       }
+     },
+     actions: {
+-      reposition({ event, prop, scope, context }) {
++      restartPositioning(params) {
++        const { refs } = params;
++        refs.get("positioningCleanup")?.();
++        refs.set("positioningCleanup", startPositioning(params));
++      },
++      reposition(params) {
++        const { event, prop, scope, context } = params;
+         const anchorEl = dom.getAnchorEl(scope);
+         const getPositionerEl2 = () => dom.getPositionerEl(scope);
+         const getTriggerEl = () => anchorEl ?? dom.getActiveTriggerEl(scope, context.get("triggerValue"));
+diff --git a/dist/popover.machine.mjs b/dist/popover.machine.mjs
+index 72d23ccded22f2a357cae3c5bb2a6a099af76ca5..8cb6891afb8c420ec93b608ecc919cbbd9966063 100644
+--- a/dist/popover.machine.mjs
++++ b/dist/popover.machine.mjs
+@@ -7,6 +7,19 @@ import { trapFocus } from "@zag-js/focus-trap";
+ import { getPlacement } from "@zag-js/popper";
+ import { preventBodyScroll } from "@zag-js/remove-scroll";
+ import * as dom from "./popover.dom.mjs";
++function startPositioning({ context, prop, scope }) {
++  context.set("currentPlacement", prop("positioning").placement);
++  const anchorEl = dom.getAnchorEl(scope);
++  const getPositionerEl2 = () => dom.getPositionerEl(scope);
++  const getTriggerEl = () => anchorEl ?? dom.getActiveTriggerEl(scope, context.get("triggerValue"));
++  return getPlacement(getTriggerEl, getPositionerEl2, {
++    ...prop("positioning"),
++    defer: true,
++    onComplete(data) {
++      context.set("currentPlacement", data.placement);
++    }
++  });
++}
+ var machine = createMachine({
+   props({ props }) {
+     return {
+@@ -50,6 +63,11 @@ var machine = createMachine({
+       }))
+     };
+   },
++  refs() {
++    return {
++      positioningCleanup: null
++    };
++  },
+   computed: {
+     currentPortalled: ({ prop }) => !!prop("modal") || !!prop("portalled")
+   },
+@@ -127,6 +145,9 @@ var machine = createMachine({
+             actions: ["invokeOnClose"]
+           }
+         ],
++        "POSITIONING.RESTART": {
++          actions: ["restartPositioning"]
++        },
+         "POSITIONING.SET": {
+           actions: ["reposition"]
+         }
+@@ -138,18 +159,14 @@ var machine = createMachine({
+       isOpenControlled: ({ prop }) => prop("open") != void 0
+     },
+     effects: {
+-      trackPositioning({ context, prop, scope }) {
+-        context.set("currentPlacement", prop("positioning").placement);
+-        const anchorEl = dom.getAnchorEl(scope);
+-        const getPositionerEl2 = () => dom.getPositionerEl(scope);
+-        const getTriggerEl = () => anchorEl ?? dom.getActiveTriggerEl(scope, context.get("triggerValue"));
+-        return getPlacement(getTriggerEl, getPositionerEl2, {
+-          ...prop("positioning"),
+-          defer: true,
+-          onComplete(data) {
+-            context.set("currentPlacement", data.placement);
+-          }
+-        });
++      trackPositioning(params) {
++        const { refs } = params;
++        refs.get("positioningCleanup")?.();
++        refs.set("positioningCleanup", startPositioning(params));
++        return () => {
++          refs.get("positioningCleanup")?.();
++          refs.set("positioningCleanup", null);
++        };
+       },
+       trackDismissableElement({ send, prop, scope }) {
+         const getContentEl2 = () => dom.getContentEl(scope);
+@@ -216,7 +233,13 @@ var machine = createMachine({
+       }
+     },
+     actions: {
+-      reposition({ event, prop, scope, context }) {
++      restartPositioning(params) {
++        const { refs } = params;
++        refs.get("positioningCleanup")?.();
++        refs.set("positioningCleanup", startPositioning(params));
++      },
++      reposition(params) {
++        const { event, prop, scope, context } = params;
+         const anchorEl = dom.getAnchorEl(scope);
+         const getPositionerEl2 = () => dom.getPositionerEl(scope);
+         const getTriggerEl = () => anchorEl ?? dom.getActiveTriggerEl(scope, context.get("triggerValue"));
+diff --git a/dist/popover.types.d.mts b/dist/popover.types.d.mts
+index ae72b235cf68b38c179e36e9bbfdb74aa3f07b30..d061e699e98637b350ac2636a217f455c449edb4 100644
+--- a/dist/popover.types.d.mts
++++ b/dist/popover.types.d.mts
+@@ -136,6 +136,9 @@ interface PopoverSchema {
+     props: RequiredBy<PopoverProps, PropsWithDefault>;
+     state: "open" | "closed";
+     context: PrivateContext;
++    refs: {
++        positioningCleanup: VoidFunction | null;
++    };
+     computed: ComputedContext;
+     event: EventObject;
+     action: string;
+@@ -175,6 +178,10 @@ interface PopoverApi<T extends PropTypes = PropTypes> {
+      * Function to reposition the popover
+      */
+     reposition: (options?: Partial<PositioningOptions>) => void;
++    /**
++     * Function to restart the tracked positioning session.
++     */
++    restartPositioning: () => void;
+     getArrowProps: () => T["element"];
+     getArrowTipProps: () => T["element"];
+     getAnchorProps: () => T["element"];
+diff --git a/dist/popover.types.d.ts b/dist/popover.types.d.ts
+index ae72b235cf68b38c179e36e9bbfdb74aa3f07b30..d061e699e98637b350ac2636a217f455c449edb4 100644
+--- a/dist/popover.types.d.ts
++++ b/dist/popover.types.d.ts
+@@ -136,6 +136,9 @@ interface PopoverSchema {
+     props: RequiredBy<PopoverProps, PropsWithDefault>;
+     state: "open" | "closed";
+     context: PrivateContext;
++    refs: {
++        positioningCleanup: VoidFunction | null;
++    };
+     computed: ComputedContext;
+     event: EventObject;
+     action: string;
+@@ -175,6 +178,10 @@ interface PopoverApi<T extends PropTypes = PropTypes> {
+      * Function to reposition the popover
+      */
+     reposition: (options?: Partial<PositioningOptions>) => void;
++    /**
++     * Function to restart the tracked positioning session.
++     */
++    restartPositioning: () => void;
+     getArrowProps: () => T["element"];
+     getArrowTipProps: () => T["element"];
+     getAnchorProps: () => T["element"];
