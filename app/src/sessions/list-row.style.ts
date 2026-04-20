@@ -10,32 +10,28 @@ export default {
     paddingBlock: "8px",
     borderBottom: "1px solid",
     borderColor: "border",
+    cursor: "pointer",
+    borderRadius: "8px",
+    outline: "none",
     "@media (hover: hover) and (pointer: fine)": {
       _hover: {
         backgroundColor: "surface",
       },
-      '&:hover [data-actions="true"]': {
+      '&:hover [data-row-action="true"]': {
         opacity: 1,
         pointerEvents: "auto",
       },
+      '&:hover [data-timestamp="true"]': {
+        opacity: 0,
+      },
     },
-    '&:focus-within [data-actions="true"]': {
+    '&:focus-within [data-row-action="true"]': {
       opacity: 1,
       pointerEvents: "auto",
     },
-  }),
-  mainButton: css({
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    flex: "1",
-    minWidth: "0",
-    padding: "0",
-    color: "inherit",
-    textAlign: "left",
-    cursor: "pointer",
-    borderRadius: "8px",
-    outline: "none",
+    '&:focus-within [data-timestamp="true"]': {
+      opacity: 0,
+    },
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",
@@ -73,6 +69,7 @@ export default {
     color: "muted",
     fontSize: "0.76rem",
     flexShrink: "0",
+    transition: "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
   title: css({
     flex: "1",
@@ -86,33 +83,33 @@ export default {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   }),
-  actions: css({
-    display: "flex",
+  trailing: css({
+    position: "relative",
+    display: "grid",
     alignItems: "center",
-    gap: "6px",
-    "@media (hover: hover) and (pointer: fine)": {
-      opacity: 0,
-      pointerEvents: "none",
-      transition: "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
-    },
+    justifyItems: "end",
+    flexShrink: "0",
   }),
   actionButton: css({
+    position: "absolute",
+    insetInlineEnd: "0",
+    top: "50%",
+    transform: "translateY(-50%)",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "6px",
-    height: "30px",
-    paddingInline: "10px",
+    width: "28px",
+    height: "28px",
+    padding: "0",
     borderRadius: "9px",
     border: "1px solid",
     borderColor: "border",
     backgroundColor: "background",
     color: "text",
-    fontSize: "0.78rem",
-    fontWeight: "600",
-    cursor: "pointer",
+    opacity: 0,
+    pointerEvents: "none",
     transition:
-      "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+      "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",

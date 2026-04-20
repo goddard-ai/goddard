@@ -49,7 +49,7 @@ export default {
     listStyle: "none",
     margin: "0",
     padding: "0",
-    "& > li:last-child article": {
+    "& > li:last-child [data-session-row='true']": {
       borderBottom: "none",
     },
   }),
