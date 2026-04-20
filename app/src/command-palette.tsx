@@ -22,8 +22,10 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
     }
   }, [open, search])
 
-  const visibleCommands = appCommandList.filter((command) =>
-    isCommandAvailable(shortcutRegistry.runtime, command),
+  const visibleCommands = appCommandList.filter(
+    (command) =>
+      command.id !== "navigation.openCommandPalette" &&
+      isCommandAvailable(shortcutRegistry.runtime, command),
   )
 
   return (
