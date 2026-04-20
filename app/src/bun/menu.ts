@@ -40,9 +40,9 @@ const viewMenu = {
 /** Installs the native application menu so platform accelerators work inside the desktop shell. */
 export function installApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
   const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
-    [fileMenu.closeTab.action]: dispatchAppMenuAction("closeActiveTab"),
+    [fileMenu.closeTab.action]: dispatchAppMenuAction("workbench.closeActiveTab"),
     [fileMenu.closeWindow.action]: closeWindow,
-    [viewMenu.commandPalette.action]: dispatchAppMenuAction("openCommandPalette"),
+    [viewMenu.commandPalette.action]: dispatchAppMenuAction("navigation.openCommandPalette"),
     [viewMenu.reload.action]: reloadWindow,
     [viewMenu.inspectElement.action]: inspectWindow,
   }
