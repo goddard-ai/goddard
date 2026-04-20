@@ -781,6 +781,251 @@ test("multiple clients can observe the same live session stream independently", 
   expect(clientBMessages.length).toBeGreaterThan(0)
 })
 
+test("daemon auto-shuts down idle loadable sessions with no connected clients", async () => {
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs: 60 })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  const session = await client.send("sessionGet", { id: created.session.id })
+  expect(session.session.connectionMode).toBe("live")
+  expect(session.session.activeDaemonSession).toBe(false)
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_started",
+  )
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+
+  const reconnected = await client.send("sessionConnect", { id: created.session.id })
+  expect(reconnected.session.activeDaemonSession).toBe(true)
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("sessionMessage subscribers cancel idle auto-shutdown before expiry", async () => {
+  const idleSessionShutdownTimeoutMs = 80
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const unsubscribe = await client.subscribe(
+    { name: "sessionMessage", filter: { id: created.session.id } },
+    () => {},
+  )
+  await waitFor(async () =>
+    getDiagnosticEventTypes(created.session.id).includes("session_idle_shutdown_timer_cancelled"),
+  )
+  await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
+
+  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+
+  await Promise.resolve(unsubscribe()).catch(() => {})
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("idle auto-shutdown waits for the last sessionMessage subscriber to disconnect", async () => {
+  const idleSessionShutdownTimeoutMs = 70
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const clientA = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const clientB = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await clientA.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const unsubscribeA = await clientA.subscribe(
+    { name: "sessionMessage", filter: { id: created.session.id } },
+    () => {},
+  )
+  const unsubscribeB = await clientB.subscribe(
+    { name: "sessionMessage", filter: { id: created.session.id } },
+    () => {},
+  )
+
+  await Promise.resolve(unsubscribeA()).catch(() => {})
+  await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
+  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+
+  await Promise.resolve(unsubscribeB()).catch(() => {})
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+})
+
+test("busy loadable sessions do not time out until they become quiescent", async () => {
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs: 60 })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "wait:150"),
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 110))
+  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+})
+
+test("sessions waiting on permission responses do not time out until the permission resolves", async () => {
+  const idleSessionShutdownTimeoutMs = 60
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "permission:approve"),
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
+  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: {
+      jsonrpc: "2.0",
+      id: "permission-prompt-1",
+      result: {
+        outcome: {
+          outcome: "allow_once",
+        },
+      },
+    },
+  })
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+})
+
+test("sessions without session/load support never use idle auto-shutdown", async () => {
+  const idleSessionShutdownTimeoutMs = 60
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(chunkingAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
+
+  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
+    "session_idle_shutdown_timer_started",
+  )
+
+  await client.send("sessionShutdown", { id: created.session.id })
+})
+
+test("manual session shutdown clears any pending idle auto-shutdown timer", async () => {
+  const idleSessionShutdownTimeoutMs = 80
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await client.send("sessionShutdown", { id: created.session.id })
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
+
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_cancelled",
+  )
+  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+})
+
+test("daemon shutdown clears pending idle auto-shutdown timers", async () => {
+  const idleSessionShutdownTimeoutMs = 80
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await daemon.close()
+  await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
+
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_cancelled",
+  )
+  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+})
+
+test("agent process exit clears pending idle auto-shutdown timers", async () => {
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs: 80 })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await client.send("sessionCreate", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("sessionSend", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "exit-after-turn:20"),
+  })
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  const diagnosticTypes = getDiagnosticEventTypes(created.session.id)
+  expect(
+    diagnosticTypes.filter((type) => type === "session_idle_shutdown_timer_started").length,
+  ).toBeGreaterThanOrEqual(2)
+  expect(diagnosticTypes).toContain("session_idle_shutdown_timer_cancelled")
+  expect(diagnosticTypes).not.toContain("session_idle_shutdown_timer_expired")
+})
+
 test("daemon queues concurrent prompts per session and drains them in arrival order", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -1559,7 +1804,12 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
   expect(db.sessions.findMany()).toHaveLength(sessionCountBefore)
 })
 
-async function startServer(options: { useExistingHome?: boolean } = {}): Promise<DaemonServer> {
+async function startServer(
+  options: {
+    useExistingHome?: boolean
+    idleSessionShutdownTimeoutMs?: number
+  } = {},
+): Promise<DaemonServer> {
   if (!options.useExistingHome) {
     await useTempHome()
   }
@@ -1597,7 +1847,10 @@ async function startServer(options: { useExistingHome?: boolean } = {}): Promise
         reply: async () => ({ success: true }),
       },
     },
-    { socketPath },
+    {
+      socketPath,
+      idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+    },
   )
 
   cleanup.push(async () => {
@@ -1717,6 +1970,14 @@ function buildPromptMessage(sessionId: string, id: string, text: string) {
       prompt: [{ type: "text", text }],
     },
   }
+}
+
+function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>) {
+  return (
+    db.sessionDiagnostics.first({
+      where: { sessionId },
+    })?.events ?? []
+  ).map((event) => event.type)
 }
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000) {

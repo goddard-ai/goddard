@@ -148,6 +148,16 @@ type CreateServerConfig<TSchema extends IpcSchema> = {
   onResponseSent?: (input: ResponseSentHookInput<TSchema>) => Promise<void> | void
   onRequestFailed?: (input: RequestFailedHookInput<TSchema>) => Promise<void> | void
   beforeSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
+  afterSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
+  afterUnsubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
+}
+
+/** Runs one best-effort stream lifecycle hook without letting teardown paths throw into Node event handlers. */
+function invokeStreamLifecycleHook<TSchema extends IpcSchema>(
+  hook: ((input: SubscribeHookInput<TSchema>) => Promise<void> | void) | undefined,
+  input: SubscribeHookInput<TSchema>,
+): Promise<void> {
+  return Promise.resolve(hook?.(input))
 }
 
 /** Creates the Node IPC server for one socket-backed application schema. */
@@ -161,6 +171,8 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
     onResponseSent,
     onRequestFailed,
     beforeSubscribe,
+    afterSubscribe,
+    afterUnsubscribe,
   } = config
   const streamClients = new Set<{
     name: string
@@ -314,22 +326,54 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
       return
     }
 
+    const subscribeInput: SubscribeHookInput<TSchema> = {
+      name: name as ValidStreamName<TSchema>,
+      filter,
+    }
+    const client = { name, filter, res }
+    let removed = false
+    let subscribed = false
+    const removeClient = () => {
+      if (removed) {
+        return
+      }
+
+      removed = true
+      streamClients.delete(client)
+      if (!subscribed) {
+        return
+      }
+
+      void invokeStreamLifecycleHook(afterUnsubscribe, subscribeInput).catch(() => {})
+    }
+
+    req.on("close", removeClient)
+    res.on("close", removeClient)
+    streamClients.add(client)
+
+    try {
+      await invokeStreamLifecycleHook(afterSubscribe, subscribeInput)
+    } catch (error) {
+      removeClient()
+      const { statusCode, message } = getErrorResponse(error)
+      if (!res.destroyed && !res.writableEnded) {
+        res.writeHead(statusCode, { "Content-Type": "text/plain" })
+        res.end(message)
+      }
+      return
+    }
+
+    if (removed) {
+      return
+    }
+
+    subscribed = true
     res.writeHead(200, {
       "Content-Type": "application/x-ndjson",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     })
     res.flushHeaders()
-
-    const client = { name, filter, res }
-    streamClients.add(client)
-
-    const removeClient = () => {
-      streamClients.delete(client)
-    }
-
-    req.on("close", removeClient)
-    res.on("close", removeClient)
   }
 
   const server = http.createServer((req, res) => {

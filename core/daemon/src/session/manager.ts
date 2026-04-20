@@ -126,6 +126,7 @@ function getPackageVersion(): string {
 
 const logger = createLogger()
 type SessionId = DaemonSession["id"]
+const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
 type SessionDoc = KindOutput<typeof db.schema.sessions>
@@ -718,6 +719,7 @@ type ActiveSession = {
   promptQueue: QueuedPromptEntry[]
   blockingPromptRequestId: string | number | null
   pendingSteer: PendingSteerRequest | null
+  idleShutdownTimer: ReturnType<typeof setTimeout> | null
 }
 
 type WorktreeSyncRuntime = {
@@ -780,6 +782,8 @@ export type SessionManager = {
   ) => Promise<SteerSessionResponse>
   promptSession: (id: SessionId, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
   shutdownSession: (id: SessionId) => Promise<boolean>
+  sessionSubscriberConnected: (id: SessionId) => Promise<void>
+  sessionSubscriberDisconnected: (id: SessionId) => Promise<void>
   resolveSessionIdByToken: (token: string) => Promise<SessionId>
   close: () => Promise<void>
 }
@@ -1699,11 +1703,15 @@ export function createSessionManager(input: {
   publish: (id: SessionId, message: acp.AnyMessage) => void
   configManager: ConfigManager
   registryService: ACPRegistryService
+  idleSessionShutdownTimeoutMs?: number
 }): SessionManager {
   const activeSessions = new Map<SessionId, ActiveSession>()
+  const sessionSubscriberCounts = new Map<SessionId, number>()
   const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
   const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
   const worktreeSyncRuntimes = new Map<SessionId, WorktreeSyncRuntime>()
+  const idleSessionShutdownTimeoutMs =
+    input.idleSessionShutdownTimeoutMs ?? DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS
   const worktreePluginManager = createWorktreePluginManager({
     configManager: input.configManager,
     logger,
@@ -1908,6 +1916,7 @@ export function createSessionManager(input: {
     clearTurnDraftFlushTimer(activeTurn)
     active.activeTurn = null
     active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
+    await refreshIdleShutdownState(active.id, "turn_completed")
     await emitDiagnostic(
       active.id,
       "session_turn_persisted",
@@ -2189,6 +2198,112 @@ export function createSessionManager(input: {
     }
 
     worktreeSyncRuntimes.delete(id)
+  }
+
+  /** Returns how many `sessionMessage` stream subscribers are currently attached to one session id. */
+  function getSessionSubscriberCount(id: SessionId): number {
+    return sessionSubscriberCounts.get(id) ?? 0
+  }
+
+  /** Checks whether one live session is quiescent enough for idle auto-shutdown. */
+  function shouldStartIdleShutdownTimer(active: ActiveSession): boolean {
+    return (
+      active.supportsLoadSession &&
+      getSessionSubscriberCount(active.id) === 0 &&
+      active.activeTurn === null &&
+      active.blockingPromptRequestId === null &&
+      active.promptQueue.length === 0 &&
+      active.pendingSteer === null &&
+      active.lastPermissionRequest === null
+    )
+  }
+
+  /** Cancels one pending idle auto-shutdown timer and records the reason for that cancellation. */
+  async function cancelIdleShutdownTimer(active: ActiveSession, reason: string): Promise<void> {
+    if (!active.idleShutdownTimer) {
+      return
+    }
+
+    clearTimeout(active.idleShutdownTimer)
+    active.idleShutdownTimer = null
+    await emitDiagnostic(
+      active.id,
+      "session_idle_shutdown_timer_cancelled",
+      { reason, timeoutMs: idleSessionShutdownTimeoutMs },
+      active.logger,
+    )
+  }
+
+  /** Re-checks whether one active session should have an idle auto-shutdown timer armed right now. */
+  async function refreshIdleShutdownState(id: SessionId, reason: string): Promise<void> {
+    const active = activeSessions.get(id)
+    if (!active) {
+      return
+    }
+
+    if (!shouldStartIdleShutdownTimer(active)) {
+      await cancelIdleShutdownTimer(active, reason)
+      return
+    }
+
+    if (active.idleShutdownTimer) {
+      return
+    }
+
+    await emitDiagnostic(
+      active.id,
+      "session_idle_shutdown_timer_started",
+      { reason, timeoutMs: idleSessionShutdownTimeoutMs },
+      active.logger,
+    )
+    active.idleShutdownTimer = setTimeout(() => {
+      void handleIdleShutdownTimerExpired(active.id).catch((error) => {
+        logger.log("session_idle_shutdown_timer_failed", {
+          sessionId: active.id,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+      })
+    }, idleSessionShutdownTimeoutMs)
+  }
+
+  /** Shuts down one loadable idle session when its auto-shutdown timer expires without any reconnect. */
+  async function handleIdleShutdownTimerExpired(id: SessionId): Promise<void> {
+    const active = activeSessions.get(id)
+    if (!active) {
+      return
+    }
+
+    active.idleShutdownTimer = null
+    if (!shouldStartIdleShutdownTimer(active)) {
+      return
+    }
+
+    await emitDiagnostic(
+      id,
+      "session_idle_shutdown_timer_expired",
+      { timeoutMs: idleSessionShutdownTimeoutMs },
+      active.logger,
+    )
+    await shutdownSession(id)
+  }
+
+  /** Records one new `sessionMessage` subscriber so idle shutdown waits for every attached client to leave. */
+  async function sessionSubscriberConnected(id: SessionId): Promise<void> {
+    await ready
+    sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
+    await refreshIdleShutdownState(id, "subscriber_connected")
+  }
+
+  /** Records one departing `sessionMessage` subscriber and starts the timer when the last one leaves. */
+  async function sessionSubscriberDisconnected(id: SessionId): Promise<void> {
+    await ready
+    const current = getSessionSubscriberCount(id)
+    if (current <= 1) {
+      sessionSubscriberCounts.delete(id)
+    } else {
+      sessionSubscriberCounts.set(id, current - 1)
+    }
+    await refreshIdleShutdownState(id, "subscriber_disconnected")
   }
 
   async function runWorktreeSyncCycle(
@@ -2561,12 +2676,14 @@ export function createSessionManager(input: {
       onBeforePublish?: (message: acp.AnyMessage) => Promise<void> | void
     } = {},
   ): Promise<void> {
+    let clearedPermissionRequest = false
     if (
       active.lastPermissionRequest &&
       "id" in message &&
       message.id === active.lastPermissionRequest.id
     ) {
       active.lastPermissionRequest = null
+      clearedPermissionRequest = true
     } else if (options.updateStatus !== false) {
       const nextStatus = sessionStatusFromClientMessage(message, active.status)
       if (nextStatus) {
@@ -2592,6 +2709,10 @@ export function createSessionManager(input: {
 
     if ("id" in message && message.id != null && "method" in message) {
       active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
+    }
+
+    if (clearedPermissionRequest) {
+      await refreshIdleShutdownState(active.id, "permission_request_resolved")
     }
 
     logAgentMessage(active.logger, "agent.message_write", active.id, active.acpSessionId, message)
@@ -2663,6 +2784,8 @@ export function createSessionManager(input: {
       })
     }
 
+    await refreshIdleShutdownState(active.id, "turn_started")
+
     try {
       await emitDiagnostic(
         active.id,
@@ -2691,6 +2814,7 @@ export function createSessionManager(input: {
         active.blockingPromptRequestId = null
       }
       active.pendingPrompts.delete(nextPrompt.requestId)
+      await refreshIdleShutdownState(active.id, "turn_start_failed")
       nextPrompt.reject?.(error instanceof Error ? error : new Error(String(error)))
       throw error
     }
@@ -2736,6 +2860,7 @@ export function createSessionManager(input: {
       queuedPrompt.reject?.(new IpcClientError(reason))
     }
 
+    await refreshIdleShutdownState(active.id, "queued_prompts_aborted")
     return abortedQueue
   }
 
@@ -2834,6 +2959,7 @@ export function createSessionManager(input: {
         response,
       })
     } catch (error) {
+      await refreshIdleShutdownState(active.id, "steer_cleared")
       steer.reject(error instanceof Error ? error : new Error(String(error)))
     }
   }
@@ -2933,6 +3059,7 @@ export function createSessionManager(input: {
       promptQueue: [],
       blockingPromptRequestId: null,
       pendingSteer: null,
+      idleShutdownTimer: null,
     }
 
     activeSession.subscription = connection.subscribe(async (message) => {
@@ -2945,6 +3072,7 @@ export function createSessionManager(input: {
       )
       if (isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)) {
         activeSession.lastPermissionRequest = message
+        await refreshIdleShutdownState(activeSession.id, "permission_request_started")
       }
 
       if ("id" in message && message.id != null) {
@@ -2991,6 +3119,7 @@ export function createSessionManager(input: {
 
     const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
       await flushActiveTurnDraft(activeSession, "agent_process_exit").catch(() => {})
+      await cancelIdleShutdownTimer(activeSession, "agent_process_exit")
       activeSessions.delete(activeSession.id)
       await stopWorktreeSyncRuntime(activeSession.id)
       rejectPendingPrompts(
@@ -3075,6 +3204,7 @@ export function createSessionManager(input: {
     })
 
     activeSessions.set(activeSession.id, activeSession)
+    await refreshIdleShutdownState(activeSession.id, "session_activated")
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
       throw new IpcClientError("Session not found")
@@ -3844,6 +3974,7 @@ export function createSessionManager(input: {
         prompt: [...message.params.prompt],
         source: "client",
       })
+      await refreshIdleShutdownState(active.id, "prompt_enqueued")
       await emitDiagnostic(active.id, "session_prompt_enqueued", {
         requestId: message.id,
         queueLength: active.promptQueue.length,
@@ -3890,6 +4021,7 @@ export function createSessionManager(input: {
     })
 
     try {
+      await refreshIdleShutdownState(active.id, "prompt_enqueued")
       await emitDiagnostic(
         active.id,
         "session_prompt_enqueued",
@@ -3946,6 +4078,7 @@ export function createSessionManager(input: {
         resolve,
         reject,
       }
+      void refreshIdleShutdownState(active.id, "steer_started").catch(() => {})
 
       void sendInternalCancel(active, { updateStatus: false }).catch((error) => {
         if (active.pendingSteer?.requestId === requestId) {
@@ -3963,6 +4096,7 @@ export function createSessionManager(input: {
       return false
     }
 
+    await cancelIdleShutdownTimer(active, "session_shutdown")
     await emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     if (worktreeRecord) {
@@ -4015,6 +4149,7 @@ export function createSessionManager(input: {
   async function close(): Promise<void> {
     await ready
     for (const session of activeSessions.values()) {
+      await cancelIdleShutdownTimer(session, "daemon_shutdown")
       await stopWorktreeSyncRuntime(session.id)
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
       if (worktreeRecord) {
@@ -4066,6 +4201,8 @@ export function createSessionManager(input: {
     steerSession,
     promptSession,
     shutdownSession,
+    sessionSubscriberConnected,
+    sessionSubscriberDisconnected,
     resolveSessionIdByToken,
     close,
   }

@@ -34,7 +34,11 @@ import type { BackendPrClient, DaemonServer } from "./types.ts"
 
 export async function startDaemonServer(
   client: BackendPrClient,
-  options: { socketPath?: string; agentBinDir?: string } = {},
+  options: {
+    socketPath?: string
+    agentBinDir?: string
+    idleSessionShutdownTimeoutMs?: number
+  } = {},
 ): Promise<DaemonServer> {
   const logger = createLogger()
   const setupContext = SetupContext.get()
@@ -512,6 +516,24 @@ export async function startDaemonServer(
     },
   } satisfies Handlers<typeof daemonIpcSchema>
 
+  let publishSessionMessage: ((id: DaemonSession["id"], message: acp.AnyMessage) => void) | null =
+    null
+
+  sessionManager = createSessionManager({
+    daemonUrl,
+    agentBinDir: runtime.agentBinDir,
+    configManager,
+    registryService,
+    idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+    publish: (id, message) => {
+      if (!publishSessionMessage) {
+        throw new Error("IPC server is not ready")
+      }
+
+      publishSessionMessage(id, message)
+    },
+  })
+
   const ipcServer = createServer({
     socketPath,
     schema: daemonIpcSchema,
@@ -566,17 +588,30 @@ export async function startDaemonServer(
       // from the runtime when new ledger activity is appended.
       await workforceManager.getWorkforce(request.rootDir)
     },
-  })
+    afterSubscribe: async ({ name, filter }) => {
+      if (name !== "sessionMessage") {
+        return
+      }
 
-  sessionManager = createSessionManager({
-    daemonUrl,
-    agentBinDir: runtime.agentBinDir,
-    configManager,
-    registryService,
-    publish: (id, message) => {
-      ipcServer.publish("sessionMessage", { id, message })
+      const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
+      if (typeof sessionId === "string") {
+        await sessionManager.sessionSubscriberConnected(sessionId)
+      }
+    },
+    afterUnsubscribe: async ({ name, filter }) => {
+      if (name !== "sessionMessage") {
+        return
+      }
+
+      const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
+      if (typeof sessionId === "string") {
+        await sessionManager.sessionSubscriberDisconnected(sessionId)
+      }
     },
   })
+  publishSessionMessage = (id, message) => {
+    ipcServer.publish("sessionMessage", { id, message })
+  }
   loopManager = createLoopManager({
     sessionManager,
     resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configManager),

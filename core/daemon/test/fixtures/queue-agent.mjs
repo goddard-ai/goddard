@@ -59,6 +59,30 @@ function sendToolCallUpdate(toolCallId, title) {
   })
 }
 
+function sendPermissionRequest(requestId, text) {
+  send({
+    jsonrpc: "2.0",
+    id: requestId,
+    method: "session/request_permission",
+    params: {
+      sessionId,
+      options: [
+        {
+          kind: "allow_once",
+          name: `allow:${text}`,
+          optionId: `allow-${requestId}`,
+        },
+      ],
+      toolCall: {
+        toolCallId: `permission-${requestId}`,
+        title: `permission:${text}`,
+        kind: "other",
+        status: "in_progress",
+      },
+    },
+  })
+}
+
 function resolveCancelBoundary(text) {
   if (text === "hold:tool-boundary") {
     return "tool_call"
@@ -107,11 +131,14 @@ function finishPrompt(prompt, stopReason) {
 
 function schedulePromptCompletion(prompt) {
   const text = prompt.text
-  if (text.startsWith("hold")) {
+  if (text.startsWith("hold") || text.startsWith("permission:")) {
     return
   }
 
   const delayMs = text.startsWith("wait:") ? Number(text.slice("wait:".length)) : 5
+  const exitAfterTurnDelayMs = text.startsWith("exit-after-turn:")
+    ? Number(text.slice("exit-after-turn:".length))
+    : null
   setTimeout(
     () => {
       if (!activePrompt || activePrompt.id !== prompt.id) {
@@ -120,6 +147,14 @@ function schedulePromptCompletion(prompt) {
 
       activePrompt = null
       finishPrompt(prompt, "end_turn")
+      if (exitAfterTurnDelayMs !== null) {
+        setTimeout(
+          () => {
+            process.exit(0)
+          },
+          Number.isFinite(exitAfterTurnDelayMs) ? exitAfterTurnDelayMs : 5,
+        )
+      }
     },
     Number.isFinite(delayMs) ? delayMs : 5,
   )
@@ -200,6 +235,11 @@ rl.on("line", (line) => {
     if (activePrompt.cancelBoundary === "tool_call_update") {
       sendToolCall(activePrompt.toolCallId, `prepared_boundary:${promptText}`)
     }
+    if (promptText.startsWith("permission:")) {
+      activePrompt.permissionRequestId = `permission-${message.id}`
+      sendPermissionRequest(activePrompt.permissionRequestId, promptText)
+      return
+    }
     schedulePromptCompletion(activePrompt)
     return
   }
@@ -225,6 +265,19 @@ rl.on("line", (line) => {
     setTimeout(() => {
       finishPrompt(cancelledPrompt, "cancelled")
     }, 20)
+    return
+  }
+
+  if (
+    activePrompt &&
+    "id" in message &&
+    message.id === activePrompt.permissionRequestId &&
+    "result" in message
+  ) {
+    const resolvedPrompt = activePrompt
+    activePrompt = null
+    sendTextUpdate(`permission_resolved:${resolvedPrompt.text}`)
+    finishPrompt(resolvedPrompt, "end_turn")
     return
   }
 

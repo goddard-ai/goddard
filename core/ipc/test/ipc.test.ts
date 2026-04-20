@@ -294,6 +294,69 @@ describe("core/ipc", () => {
     ).rejects.toThrow("User alerts are disabled for blocked-user")
   })
 
+  test("fires stream lifecycle hooks and unsubscribes exactly once", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-stream-hooks-"))
+    const socketPath = join(directory, "ipc.sock")
+    const events: Array<{
+      phase: "subscribe" | "unsubscribe"
+      name: string
+      filter: unknown
+    }> = []
+    const ipcServer = createServer({
+      socketPath,
+      schema,
+      handlers: {
+        ping: () => ({ ok: true as const }),
+        echo: ({ text }) => ({ echoed: text }),
+        add: ({ a, b }) => ({ sum: a + b }),
+      },
+      afterSubscribe: ({ name, filter }) => {
+        events.push({ phase: "subscribe", name, filter })
+      },
+      afterUnsubscribe: ({ name, filter }) => {
+        events.push({ phase: "unsubscribe", name, filter })
+      },
+    })
+
+    await once(ipcServer.server, "listening")
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+      await rm(directory, { recursive: true, force: true })
+    })
+
+    const client = createNodeClient(socketPath, schema)
+    const unsubscribe = await client.subscribe(
+      { name: "userAlert", filter: { userId: "user-1" } },
+      () => {},
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    unsubscribe()
+    unsubscribe()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    expect(events).toEqual([
+      {
+        phase: "subscribe",
+        name: "userAlert",
+        filter: { userId: "user-1" },
+      },
+      {
+        phase: "unsubscribe",
+        name: "userAlert",
+        filter: { userId: "user-1" },
+      },
+    ])
+  })
+
   test("fires request-failed hooks when a handler throws", async () => {
     const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-errors-"))
     const socketPath = join(directory, "ipc.sock")
