@@ -8,6 +8,7 @@ import {
   type ValidStreamName,
 } from "./schema.ts"
 import { type IpcTransport } from "./transport.ts"
+import { toValidationClientError } from "./validation.ts"
 
 /** Normalizes shorthand and object stream definitions into optional filter schemas. */
 function getStreamSchemas<S extends IpcSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
@@ -57,7 +58,16 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
     ...args: RequestArguments<S, K>
   ): Promise<InferResponseType<S, K>> {
     const definition = schema.requests[name]
-    const validPayload = definition.payload?.parse(args[0])
+    let validPayload
+    try {
+      validPayload = definition.payload?.parse(args[0])
+    } catch (error) {
+      throw toValidationClientError(error, {
+        schema: definition.payload,
+        fallbackMessage: "Request payload is invalid",
+      })
+    }
+
     return await transport.send(name, validPayload)
   }
 
@@ -76,7 +86,15 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
       throw new Error(`Stream ${name} does not accept filter params`)
     }
 
-    const validFilter = filter !== undefined ? filterSchema?.parse(filter) : undefined
+    let validFilter
+    try {
+      validFilter = filter !== undefined ? filterSchema?.parse(filter) : undefined
+    } catch (error) {
+      throw toValidationClientError(error, {
+        schema: filterSchema,
+        fallbackMessage: `Stream ${name} filter is invalid`,
+      })
+    }
 
     return await Promise.resolve(
       transport.subscribe(name, validFilter, (streamPayload) => {

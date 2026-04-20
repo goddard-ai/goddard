@@ -137,12 +137,29 @@ describe("core/ipc", () => {
     await expect(client.send("add", { a: 2, b: "3" } as never)).rejects.toThrow()
   })
 
+  test("describes the expected payload shape when a request payload object is omitted", async () => {
+    const { client } = await createFixture()
+    const expectedMessage = ["Expected input shape:", "{", "  text: string", "}"].join("\n")
+
+    await expect((client.send as any)("echo")).rejects.toThrow(expectedMessage)
+  })
+
   test("returns a structured error for unknown requests", async () => {
     const { socketPath } = await createFixture()
 
     await expect(postRaw(socketPath, { name: "missing", payload: {} })).resolves.toEqual({
       statusCode: 400,
       body: JSON.stringify({ error: "Unknown request: missing" }),
+    })
+  })
+
+  test("returns the expected payload shape when a raw request omits its payload object", async () => {
+    const { socketPath } = await createFixture()
+    const expectedMessage = ["Expected input shape:", "{", "  text: string", "}"].join("\n")
+
+    await expect(postRaw(socketPath, { name: "echo" })).resolves.toEqual({
+      statusCode: 400,
+      body: JSON.stringify({ error: expectedMessage }),
     })
   })
 

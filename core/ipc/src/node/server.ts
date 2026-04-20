@@ -1,6 +1,5 @@
 import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
-import { z } from "zod"
 
 import { IpcClientError } from "../errors.ts"
 import {
@@ -11,6 +10,7 @@ import {
   type ValidStreamName,
 } from "../schema.ts"
 import { type Handlers } from "../types.ts"
+import { toValidationClientError } from "../validation.ts"
 
 const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
 
@@ -19,23 +19,6 @@ function getErrorResponse(error: unknown): { statusCode: number; message: string
   return error instanceof IpcClientError
     ? { statusCode: 400, message: error.message }
     : { statusCode: 500, message: INTERNAL_SERVER_ERROR_MESSAGE }
-}
-
-/** Re-classifies validation and parse failures as client-visible IPC errors. */
-function toClientError(error: unknown, fallbackMessage: string): IpcClientError {
-  if (error instanceof IpcClientError) {
-    return error
-  }
-
-  if (error instanceof z.ZodError) {
-    return new IpcClientError(z.prettifyError(error), { cause: error })
-  }
-
-  if (error instanceof Error) {
-    return new IpcClientError(fallbackMessage, { cause: error })
-  }
-
-  return new IpcClientError(fallbackMessage)
 }
 
 /** Writes one JSON response to the socket-backed HTTP response. */
@@ -209,7 +192,9 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
       try {
         message = JSON.parse(body) as { name?: unknown; payload?: unknown }
       } catch (error) {
-        throw toClientError(error, "Request body must be valid JSON")
+        throw toValidationClientError(error, {
+          fallbackMessage: "Request body must be valid JSON",
+        })
       }
 
       if (typeof message.name !== "string") {
@@ -226,7 +211,10 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
         try {
           payload = routeDef.payload.parse(message.payload)
         } catch (error) {
-          throw toClientError(error, "Request payload is invalid")
+          throw toValidationClientError(error, {
+            schema: routeDef.payload,
+            fallbackMessage: "Request payload is invalid",
+          })
         }
       }
 
@@ -294,21 +282,27 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
         try {
           parsedFilter = JSON.parse(rawFilter)
         } catch (error) {
-          throw toClientError(error, "Stream filter must be valid JSON")
+          throw toValidationClientError(error, {
+            fallbackMessage: "Stream filter must be valid JSON",
+          })
         }
       }
 
-      filter =
-        rawFilter && filterSchema
-          ? (filterSchema.parse(parsedFilter) as InferStreamFilter<
-              TSchema,
-              ValidStreamName<TSchema>
-            >)
-          : undefined
+      if (rawFilter && filterSchema) {
+        try {
+          filter = filterSchema.parse(parsedFilter) as InferStreamFilter<
+            TSchema,
+            ValidStreamName<TSchema>
+          >
+        } catch (error) {
+          throw toValidationClientError(error, {
+            schema: filterSchema,
+            fallbackMessage: "Stream filter is invalid",
+          })
+        }
+      }
     } catch (error) {
-      const { statusCode, message } = getErrorResponse(
-        error instanceof IpcClientError ? error : toClientError(error, "Stream filter is invalid"),
-      )
+      const { statusCode, message } = getErrorResponse(error)
       res.writeHead(statusCode, { "Content-Type": "text/plain" })
       res.end(message)
       return
