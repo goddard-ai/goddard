@@ -43,6 +43,11 @@ export function ensureDaemonRuntime() {
 
 /** Reads the app-bundled manifest, installs runtime files, and starts or updates the daemon service. */
 async function ensureDaemonRuntimeInner() {
+  if (isDevelopmentRuntime()) {
+    await ensureDevelopmentDaemonRuntime()
+    return { daemonUrl }
+  }
+
   const manifest = await readEmbeddedRuntimeManifest()
   const baseUrl = await resolveDaemonBaseUrl()
   const installedState = await readInstalledDaemonState()
@@ -67,11 +72,31 @@ async function ensureDaemonRuntimeInner() {
   return { daemonUrl }
 }
 
+/** In development, reuse the separately watched daemon process instead of the app-bundled runtime. */
+async function ensureDevelopmentDaemonRuntime() {
+  try {
+    await waitForDaemonReady(5_000)
+  } catch {
+    throw new Error(
+      "Development mode expects a running Goddard daemon. Start `bun run dev` from the workspace root, or launch `core/daemon` before starting the app.",
+    )
+  }
+}
+
 /** Reads the app-bundled daemon runtime manifest copied into Electrobun resources. */
 async function readEmbeddedRuntimeManifest() {
   return JSON.parse(
     await readFile(join(resolveEmbeddedRuntimeRoot(), "manifest.json"), "utf8"),
   ) as EmbeddedRuntimeManifest
+}
+
+/** Returns whether the Bun host should reuse the external development daemon. */
+function isDevelopmentRuntime() {
+  return (
+    process.env.NODE_ENV === "development" ||
+    Bun.env.NODE_ENV === "development" ||
+    Bun.argv.some((argument) => argument === "--watch" || argument === "dev")
+  )
 }
 
 /** Returns the Electrobun resource directory containing the daemon runtime payload. */
@@ -239,8 +264,8 @@ async function installWindowsDaemonStartup(runtime: PreparedDaemonRuntime, baseU
 }
 
 /** Waits for the daemon IPC endpoint to accept health checks after install or restart. */
-async function waitForDaemonReady() {
-  const deadline = Date.now() + 15_000
+async function waitForDaemonReady(timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
     if (await pingDaemon().catch(() => false)) {

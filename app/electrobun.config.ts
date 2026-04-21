@@ -2,6 +2,8 @@ import type { ElectrobunConfig } from "electrobun"
 
 import pkg from "./package.json" with { type: "json" }
 
+const shouldBuildEmbeddedRuntime = process.env.NODE_ENV !== "development"
+
 /** Electrobun build config for the desktop host and Vite-produced webview assets. */
 export default {
   app: {
@@ -10,7 +12,9 @@ export default {
     version: pkg.version,
   },
   scripts: {
-    preBuild: "./scripts/prepare-embedded-runtime.ts",
+    ...(shouldBuildEmbeddedRuntime && {
+      preBuild: "./scripts/prepare-embedded-runtime.ts",
+    }),
   },
   build: {
     bun: {
@@ -19,7 +23,9 @@ export default {
     },
     copy: {
       dist: "views/main",
-      ".generated/embedded-runtime": "embedded-runtime",
+      ...(shouldBuildEmbeddedRuntime && {
+        ".generated/embedded-runtime": "embedded-runtime",
+      }),
     },
     watchIgnore: ["src", "src/**", ".generated", ".generated/**"],
     mac: {

@@ -32,6 +32,11 @@ const embeddedRuntimeDir = join(appDir, ".generated", embeddedRuntimeDirName)
 
 /** Builds and stages the daemon runtime payload copied into Electrobun resources. */
 async function main() {
+  if (process.env.NODE_ENV === "development") {
+    await rm(embeddedRuntimeDir, { recursive: true, force: true })
+    return
+  }
+
   const os = resolveTargetOs()
   const arch = resolveTargetArch()
   const bunTarget = resolveBunCompileTarget(os, arch)
