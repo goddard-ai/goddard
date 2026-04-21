@@ -122,6 +122,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
       finalFocusEl={() => triggerRef.current}
       immediate={true}
       initialFocusEl={() => (isFilterable ? filterInputRef.current : menuRef.current)}
+      lazyMount={true}
       modal={isFilterable}
       open={isMenuOpen}
       positioning={{
@@ -132,6 +133,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
         sameWidth: true,
         strategy: "fixed",
       }}
+      unmountOnExit={true}
       onOpenChange={(details) => {
         props.onOpenChange(details.open)
       }}
