@@ -516,24 +516,6 @@ export async function startDaemonServer(
     },
   } satisfies Handlers<typeof daemonIpcSchema>
 
-  let publishSessionMessage: ((id: DaemonSession["id"], message: acp.AnyMessage) => void) | null =
-    null
-
-  sessionManager = createSessionManager({
-    daemonUrl,
-    agentBinDir: runtime.agentBinDir,
-    configManager,
-    registryService,
-    idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
-    publish: (id, message) => {
-      if (!publishSessionMessage) {
-        throw new Error("IPC server is not ready")
-      }
-
-      publishSessionMessage(id, message)
-    },
-  })
-
   const ipcServer = createServer({
     socketPath,
     schema: daemonIpcSchema,
@@ -575,47 +557,53 @@ export async function startDaemonServer(
       })
     },
     beforeSubscribe: async ({ name, filter }) => {
-      if (name !== "workforceEvent") {
-        return
-      }
+      if (name === "workforceEvent") {
+        const request = filter as SubscribeWorkforceEventsRequest | undefined
+        if (!request) {
+          throw new IpcClientError("Missing workforce event filter")
+        }
 
-      const request = filter as SubscribeWorkforceEventsRequest | undefined
-      if (!request) {
-        throw new IpcClientError("Missing workforce event filter")
+        // Subscription setup only validates that this workforce is active; events are
+        // still pushed later from the runtime when new ledger activity is appended.
+        await workforceManager.getWorkforce(request.rootDir)
       }
-
-      // Subscription setup only validates that this workforce is active; events are still pushed later
-      // from the runtime when new ledger activity is appended.
-      await workforceManager.getWorkforce(request.rootDir)
     },
     afterSubscribe: async ({ name, filter }) => {
-      if (name !== "sessionMessage") {
-        return
-      }
-
-      const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
-      if (typeof sessionId === "string") {
-        await sessionManager.sessionSubscriberConnected(sessionId)
+      if (name === "sessionMessage") {
+        const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
+        if (typeof sessionId === "string") {
+          await sessionManager.sessionSubscriberConnected(sessionId)
+        }
       }
     },
     afterUnsubscribe: async ({ name, filter }) => {
-      if (name !== "sessionMessage") {
-        return
-      }
-
-      const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
-      if (typeof sessionId === "string") {
-        await sessionManager.sessionSubscriberDisconnected(sessionId)
+      if (name === "sessionMessage") {
+        const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
+        if (typeof sessionId === "string") {
+          await sessionManager.sessionSubscriberDisconnected(sessionId)
+        }
       }
     },
   })
-  publishSessionMessage = (id, message) => {
-    ipcServer.publish("sessionMessage", { id, message })
-  }
+
+  sessionManager = createSessionManager({
+    daemonUrl,
+    agentBinDir: runtime.agentBinDir,
+    configManager,
+    registryService,
+    idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+    publish(id, message) {
+      ipcServer.publish("sessionMessage", { id, message })
+    },
+  })
+
   loopManager = createLoopManager({
     sessionManager,
-    resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configManager),
+    resolveLoopStartRequest(input) {
+      return resolveNamedLoopStartRequest(input, configManager)
+    },
   })
+
   workforceManager = createWorkforceManager({
     sessionManager,
     publishEvent(payload) {
