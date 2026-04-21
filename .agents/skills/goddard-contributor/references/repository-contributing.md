@@ -26,13 +26,16 @@ For bootstrap rules such as repository state, shared behavior, patch discipline,
 
 ## Testing Policy
 
+- Before adding or changing tests, consult this section through `goddard-contributor`.
 - Add or update tests when behavior changes, unless a deeper `AGENTS.md` narrows that subtree.
 - Prefer small tests around observable behavior. Do not rewrite tests solely to match refactors or introduce a large new testing pattern in a narrow area.
 - Keep the rest of the test suite lean and intentional.
+- Prefer a brief local code comment over a new test when the goal is to preserve a non-obvious implementation detail, platform workaround, or other Chesterton's Fence-style invariant that is already adequately covered by existing observable behavior.
 - Do not use repository-local `bun:test` mocking or stubbing APIs such as `vi.mock`, `vi.doMock`, `vi.hoisted`, `vi.fn`, `vi.spyOn`, `vi.mocked`, `vi.stubGlobal`, `vi.stubEnv`, `vi.unstubAllGlobals`, or `vi.unstubAllEnvs`, or similar helper methods such as `mockImplementation`, `mockResolvedValue`, or `mockReturnValue`, except at explicit non-local third-party integration boundaries.
 - Treat first-party packages, local modules, Node stdlib seams, prompt libraries, Tauri host APIs, `console`, `process`, and local daemon or client wrappers as non-exception cases.
 - Prefer real temp directories, temp `HOME`, copied fixtures, real git repositories, real worktrees, real daemon servers, subprocess-based CLI tests, and real ACP fixture processes over fake layers.
 - Remove tests that only prove one first-party wrapper calls another unless they protect a meaningful user-visible contract not covered elsewhere.
+- Remove tests that only lock down basic first-party behavior, implementation choices, or wrapper-to-wrapper plumbing that a local comment can explain well enough.
 - Use `expect` rather than `assert` in `bun:test` files.
 - For daemon logging tests, capture logs through explicit seams such as `configureDaemonLogging({ writeLine })` instead of spying on stdout.
 - For CLI tests, capture real subprocess output instead of spying on `console` or `process`.

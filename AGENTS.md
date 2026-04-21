@@ -60,6 +60,7 @@
 
 ## Testing
 
+- Before adding or changing tests, use `goddard-contributor` and follow its repo-wide testing policy.
 - When running the full workspace test suite from the repository root, use `bun run test`.
 - Do not use `bun test` at the repository root; it bypasses the workspace package test scripts and monorepo orchestration.
 

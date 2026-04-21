@@ -392,21 +392,21 @@ describe("core/ipc", () => {
     await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Add is disabled")
   })
 
-  test("rewords missing IPC socket send failures", async () => {
+  test("rewords missing IPC endpoint send failures", async () => {
     const missingSocketPath = join(tmpdir(), "goddard-ipc-missing-send.sock")
     const client = createNodeClient(missingSocketPath, schema)
 
     await expect(client.send("ping")).rejects.toThrow(
-      `Could not connect to IPC socket at ${missingSocketPath}.`,
+      `Could not connect to IPC endpoint at ${missingSocketPath}.`,
     )
   })
 
-  test("rewords missing IPC socket subscribe failures", async () => {
+  test("rewords missing IPC endpoint subscribe failures", async () => {
     const missingSocketPath = join(tmpdir(), "goddard-ipc-missing-subscribe.sock")
     const client = createNodeClient(missingSocketPath, schema)
 
     await expect(client.subscribe("systemAlert", () => {})).rejects.toThrow(
-      `Could not connect to IPC socket at ${missingSocketPath}.`,
+      `Could not connect to IPC endpoint at ${missingSocketPath}.`,
     )
   })
 

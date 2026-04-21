@@ -25,6 +25,7 @@ Use this skill after reading the applicable `AGENTS.md` files. It is the reposit
 
 - When editing `app/`, usually read `references/app-contributing.md` and `references/app-best-practices.md`.
 - When building or refactoring app forms, also read `references/app-form-patterns.md`.
-- When changing tests or deciding whether to add tests, read `references/repository-contributing.md`.
+- When changing tests or deciding whether to add tests, read `references/repository-contributing.md` before editing code.
 - When changing tests or deciding whether to add tests in `app/`, also read `references/app-contributing.md`.
+- Testing default: keep tests for meaningful observable behavior or fragile contracts; prefer a brief code comment over a new test when the goal is just to preserve implementation-detail context, a platform workaround, or a Chesterton's Fence-style invariant.
 - When changing naming, states, roles, identifiers, or ownership rules, read the relevant `glossary.md` before editing code.
