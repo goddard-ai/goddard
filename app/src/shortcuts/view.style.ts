@@ -43,7 +43,6 @@ export default {
     fontSize: "0.92rem",
     outline: "none",
     _focusVisible: {
-      borderColor: "accentStrong",
       outline: "2px solid",
       outlineColor: "accentStrong",
       outlineOffset: "2px",

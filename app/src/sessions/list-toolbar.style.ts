@@ -10,9 +10,6 @@ export default {
     paddingInline: "12px",
     borderBottom: "1px solid {colors.border}",
     color: "muted",
-    "&:focus-within": {
-      borderBottom: "1px solid {colors.accentStrong}",
-    },
   }),
   searchIcon: css({
     flexShrink: "0",

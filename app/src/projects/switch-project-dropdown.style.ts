@@ -62,12 +62,6 @@ export default {
     borderColor: "border",
     backgroundColor: "surface",
     color: "muted",
-    transition:
-      "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-    _focusWithin: {
-      borderColor: "accent",
-      backgroundColor: "surface",
-    },
   }),
   srOnly: css({
     position: "absolute",
