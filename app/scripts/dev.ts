@@ -1,4 +1,4 @@
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { supervise } from "procband"
 
@@ -9,7 +9,9 @@ const nodeModulesBin = join(appDir, "node_modules", ".bin")
 async function main() {
   process.env.NODE_ENV = "development"
   process.env.FORCE_COLOR = "1"
-  process.env.PATH = `${nodeModulesBin}:${process.env.PATH}`
+  process.env.PATH = process.env.PATH
+    ? `${nodeModulesBin}${delimiter}${process.env.PATH}`
+    : nodeModulesBin
   process.chdir(appDir)
 
   const vite = supervise({

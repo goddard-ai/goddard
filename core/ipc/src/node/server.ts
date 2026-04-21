@@ -55,6 +55,10 @@ async function readBody(req: http.IncomingMessage): Promise<string> {
 
 /** Removes one stale socket path while tolerating races with other cleanup. */
 function safeUnlink(socketPath: string): void {
+  if (readNetworkOrigin(socketPath)) {
+    return
+  }
+
   if (!existsSync(socketPath)) {
     return
   }
@@ -350,10 +354,30 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
   })
 
   safeUnlink(socketPath)
-  server.listen(socketPath)
+  const networkOrigin = readNetworkOrigin(socketPath)
+  if (networkOrigin) {
+    // Windows falls back to loopback HTTP here because Bun's Node-compatible HTTP server does not
+    // reliably bind daemon control traffic on local pipe paths.
+    server.listen(
+      networkOrigin.port ? Number.parseInt(networkOrigin.port, 10) : 80,
+      networkOrigin.hostname,
+    )
+  } else {
+    server.listen(socketPath)
+  }
   server.on("close", () => {
     safeUnlink(socketPath)
   })
 
   return { server, publish }
+}
+
+/** Parses one IPC target into a loopback URL when the server should bind over TCP. */
+function readNetworkOrigin(socketPath: string) {
+  try {
+    const url = new URL(socketPath)
+    return url.protocol === "http:" ? url : null
+  } catch {
+    return null
+  }
 }

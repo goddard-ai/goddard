@@ -39,12 +39,41 @@ function toSocketConnectionError(error: unknown, socketPath: string) {
   }
 
   return new IpcClientError(
-    `Could not connect to IPC socket at ${socketPath}. ` +
-      "The server may not be running, or the socket path may be wrong.",
+    `Could not connect to IPC endpoint at ${socketPath}. ` +
+      "The server may not be running, or the endpoint may be wrong.",
     {
       cause: error,
     },
   )
+}
+
+/** Builds one HTTP request target for either a socket-backed or loopback IPC endpoint. */
+function getRequestOptions(
+  socketPath: string,
+  requestPath: string,
+  method: "GET" | "POST",
+  headers?: http.OutgoingHttpHeaders,
+) {
+  const networkOrigin = readNetworkOrigin(socketPath)
+  if (!networkOrigin) {
+    return {
+      socketPath,
+      path: requestPath,
+      method,
+      headers,
+    }
+  }
+
+  // The daemon still threads this value through the historical `socketPath` field because higher
+  // layers encode one "local daemon endpoint" there, even when Windows falls back to loopback HTTP.
+  const url = new URL(requestPath, networkOrigin)
+  return {
+    hostname: url.hostname,
+    port: url.port ? Number.parseInt(url.port, 10) : undefined,
+    path: `${url.pathname}${url.search}`,
+    method,
+    headers,
+  }
 }
 
 /** Creates the Node HTTP-over-socket transport for one daemon socket path. */
@@ -53,15 +82,10 @@ export function createNodeTransport(socketPath: string): IpcTransport {
     const wireData = JSON.stringify({ name, payload })
     return new Promise((resolve, reject) => {
       const req = http.request(
-        {
-          socketPath,
-          path: "/",
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(wireData),
-          },
-        },
+        getRequestOptions(socketPath, "/", "POST", {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(wireData),
+        }),
         (res: http.IncomingMessage) => {
           let body = ""
           res.setEncoding("utf8")
@@ -102,13 +126,13 @@ export function createNodeTransport(socketPath: string): IpcTransport {
       let errorBody = ""
 
       const req = http.request(
-        {
+        getRequestOptions(
           socketPath,
-          path: `/stream?name=${encodeURIComponent(name)}${
+          `/stream?name=${encodeURIComponent(name)}${
             filter === undefined ? "" : `&filter=${encodeURIComponent(JSON.stringify(filter))}`
           }`,
-          method: "GET",
-        },
+          "GET",
+        ),
         (res: http.IncomingMessage) => {
           response = res
 
@@ -166,6 +190,16 @@ export function createNodeTransport(socketPath: string): IpcTransport {
   }
 
   return { send, subscribe }
+}
+
+/** Parses one IPC target into a loopback URL when the daemon is using network transport. */
+function readNetworkOrigin(socketPath: string) {
+  try {
+    const url = new URL(socketPath)
+    return url.protocol === "http:" ? url : null
+  } catch {
+    return null
+  }
 }
 
 /** Creates the typed IPC client backed by the Node socket transport. */

@@ -1,6 +1,6 @@
 /** Desktop host helpers that stage, install, and launch the app-managed daemon runtime. */
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getDaemonSocketPath, getGoddardGlobalDir } from "@goddard-ai/paths/node"
+import { createDaemonIpcClient, getDefaultDaemonSocketPath } from "@goddard-ai/daemon-client/node"
+import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { Updater } from "electrobun/bun"
 import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
@@ -27,7 +27,7 @@ type PreparedDaemonRuntime = {
 const daemonInstallRootDir = join(getGoddardGlobalDir(), "desktop-runtime")
 const daemonInstallStatePath = join(daemonInstallRootDir, "installed-daemon.json")
 const daemonInstallVersionsDir = join(daemonInstallRootDir, "daemon-installs")
-const daemonSocketPath = getDaemonSocketPath()
+const daemonSocketPath = getDefaultDaemonSocketPath()
 const daemonUrl = createDaemonUrl(daemonSocketPath)
 
 let ensuredRuntime: Promise<{ daemonUrl: string }> | undefined

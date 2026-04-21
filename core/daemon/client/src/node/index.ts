@@ -3,7 +3,11 @@ import { createNodeClient } from "@goddard-ai/ipc/node"
 import { GODDARD_DAEMON_SOCKET_FILENAME } from "@goddard-ai/paths"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import {
+  DEFAULT_DAEMON_LOOPBACK_ORIGIN,
+  createDaemonUrl,
+  readSocketPathFromDaemonUrl,
+} from "@goddard-ai/schema/daemon-url"
 import * as path from "node:path"
 
 import {
@@ -11,8 +15,6 @@ import {
   type DaemonIpcClientFactory,
   type DaemonIpcClientFactoryInput,
 } from "../index.ts"
-
-const ipcPrefix = process.platform === "win32" ? "//./pipe/" : ""
 
 /** Environment variables consumed by daemon client convenience helpers. */
 export type DaemonClientEnv = Record<string, string | undefined>
@@ -76,14 +78,14 @@ function resolveDaemonUrl(env: DaemonClientEnv = process.env): string {
 }
 
 /** Returns the default daemon socket path for the local Node host. */
-function getDefaultDaemonSocketPath(): string {
-  const socketPath = path.posix.join(
-    toPosixPath(getGoddardGlobalDir()),
-    GODDARD_DAEMON_SOCKET_FILENAME,
-  )
-  return ipcPrefix.endsWith("/") && socketPath.startsWith("/")
-    ? ipcPrefix + socketPath.slice(1)
-    : ipcPrefix + socketPath
+export function getDefaultDaemonSocketPath(): string {
+  if (process.platform === "win32") {
+    // Bun's Windows `node:http` server still fails to boot reliably on named pipes,
+    // so the daemon uses a fixed loopback origin for local-only IPC instead.
+    return DEFAULT_DAEMON_LOOPBACK_ORIGIN
+  }
+
+  return path.posix.join(toPosixPath(getGoddardGlobalDir()), GODDARD_DAEMON_SOCKET_FILENAME)
 }
 
 /** Normalizes one host path into a posix-style socket path segment. */

@@ -1,5 +1,5 @@
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 
 import { getDefaultDaemonSocketPath } from "./ipc/socket.ts"
 
@@ -36,6 +36,7 @@ export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRu
   }
 }
 
+/** Prepends the daemon agent wrapper directory to PATH for child session launches. */
 export function prependAgentBinToPath(
   agentBinDir: string,
   env?: Record<string, string>,
@@ -44,6 +45,6 @@ export function prependAgentBinToPath(
 
   return {
     ...env,
-    PATH: existingPath ? `${agentBinDir}:${existingPath}` : agentBinDir,
+    PATH: existingPath ? `${agentBinDir}${delimiter}${existingPath}` : agentBinDir,
   }
 }
