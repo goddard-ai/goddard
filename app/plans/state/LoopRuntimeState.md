@@ -1,4 +1,5 @@
 # State Module: LoopRuntimeState
+
 - **Responsibility:** Own loop definition discovery, runtime status inspection, and lifecycle actions for daemon-managed loops.
 - **Data Shape:** Loop definition records keyed by project and loop name; active runtime status keyed the same way; filter fields; start-dialog draft; loading, submission, and error state; optional linked session ids.
 - **Mutations/Actions:** `loadLoops`; `refreshLoops`; `setLoopFilters`; `openStartLoopDialog`; `closeStartLoopDialog`; `setStartLoopDraft`; `startLoop`; `stopLoop`; `openLoopSession`.

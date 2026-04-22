@@ -7,7 +7,10 @@ Source: derived from `https://tsrx.dev/llms.txt` fetched on April 22, 2026.
 Declare components with `component`, not `function`. Keep the template directly in the component body and do not return JSX.
 
 ```tsrx
-export component Button({ label, onClick }: {
+export component Button({
+  label,
+  onClick,
+}: {
   label: string;
   onClick: () => void;
 }) {
@@ -30,7 +33,7 @@ Treat JSX as statements, not expressions. Put text inside expression containers.
 
 ```tsrx
 component Greeting() {
-  <h1>{'Hello World'}</h1>
+  <h1>{"Hello World"}</h1>
   <p>{`Count: ${count}`}</p>
 }
 ```
@@ -44,7 +47,7 @@ Do not write bare text:
 Write this instead:
 
 ```tsrx
-<div>{'Hello World'}</div>
+<div>{"Hello World"}</div>
 ```
 
 ## `<tsx>` for Expression Position
@@ -53,7 +56,11 @@ Wrap JSX in `<tsx>...</tsx>` when JSX must live in expression position, such as 
 
 ```tsrx
 component App() {
-  const title = <tsx><span class="title">{'Settings'}</span></tsx>;
+  const title = <tsx>
+    <span class="title">
+      {"Settings"}
+    </span>
+  </tsx>;
   <Card {title} />
 }
 ```
@@ -71,8 +78,12 @@ Do not assign or return bare JSX outside `<tsx>`.
 Use a single JS or TS expression inside each container. Adjacent containers concatenate.
 
 ```tsrx
-<p>{'Hello, '}{name}{'!'}</p>
-<p>{count > 0 ? 'Unread' : 'All caught up'}</p>
+<p>
+  {"Hello, "}
+  {name}
+  {"!"}
+</p>
+<p>{count > 0 ? "Unread" : "All caught up"}</p>
 ```
 
 Special forms:
@@ -132,7 +143,7 @@ Treat each nested element body as a lexical scope. Declare locals directly insid
 
 ```tsrx
 component App() {
-  const name = 'World';
+  const name = "World";
 
   <div>
     const greeting = `Hello, ${name}!`;
@@ -149,8 +160,8 @@ Nest JSX for standard composition:
 
 ```tsrx
 <Card>
-  <h2>{'Title'}</h2>
-  <p>{'Content goes here.'}</p>
+  <h2>{"Title"}</h2>
+  <p>{"Content goes here."}</p>
 </Card>
 ```
 

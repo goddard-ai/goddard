@@ -1,4 +1,4 @@
-import { useAppearance } from "~/app-state-context.tsx"
+import { useAppearance } from "~/app-state-context.tsx";
 import {
   SettingsChoiceBody,
   SettingsChoiceDescription,
@@ -15,8 +15,8 @@ import {
   SettingsSectionDescription,
   SettingsSectionHeader,
   SettingsSectionTitle,
-} from "~/settings/styled.tsx"
-import type { AppearanceMode } from "./theme.ts"
+} from "~/settings/styled.tsx";
+import type { AppearanceMode } from "./theme.ts";
 
 const themeModeOptions = [
   {
@@ -35,18 +35,20 @@ const themeModeOptions = [
     description: "Use the dark built-in palette.",
   },
 ] as const satisfies {
-  mode: AppearanceMode
-  label: string
-  description: string
-}[]
+  mode: AppearanceMode;
+  label: string;
+  description: string;
+}[];
 
 export function AppearanceSettingsSection() {
-  const appearance = useAppearance()
+  const appearance = useAppearance();
 
   return (
     <SettingsSection aria-labelledby="settings-appearance-heading">
       <SettingsSectionHeader>
-        <SettingsSectionTitle id="settings-appearance-heading">Appearance</SettingsSectionTitle>
+        <SettingsSectionTitle id="settings-appearance-heading">
+          Appearance
+        </SettingsSectionTitle>
         <SettingsSectionDescription>
           Choose how the workbench resolves theme and contrast.
         </SettingsSectionDescription>
@@ -67,17 +69,19 @@ export function AppearanceSettingsSection() {
                     name="appearance-mode"
                     type="radio"
                     value={option.mode}
-                    onChange={() => {
-                      appearance.setMode(option.mode)
+                    onInput={() => {
+                      appearance.setMode(option.mode);
                     }}
                   />
                   <SettingsChoiceBody>
                     <SettingsChoiceTitle>{option.label}</SettingsChoiceTitle>
-                    <SettingsChoiceDescription>{option.description}</SettingsChoiceDescription>
+                    <SettingsChoiceDescription>
+                      {option.description}
+                    </SettingsChoiceDescription>
                   </SettingsChoiceBody>
                 </SettingsChoiceLabel>
               </SettingsChoiceItem>
-            )
+            );
           })}
         </SettingsChoiceList>
       </SettingsFieldset>
@@ -97,12 +101,12 @@ export function AppearanceSettingsSection() {
           <SettingsChoiceInput
             checked={appearance.highContrast}
             type="checkbox"
-            onChange={(event) => {
-              appearance.setHighContrast(event.currentTarget.checked)
+            onInput={(event) => {
+              appearance.setHighContrast(event.currentTarget.checked);
             }}
           />
         </SettingsControlRowLabel>
       </SettingsFieldset>
     </SettingsSection>
-  )
+  );
 }

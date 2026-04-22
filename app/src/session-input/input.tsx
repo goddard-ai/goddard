@@ -1,105 +1,127 @@
-import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
-import { LexicalComposer } from "@lexical/react/LexicalComposer"
-import { ContentEditable } from "@lexical/react/LexicalContentEditable"
-import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary"
-import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin"
-import type { LexicalEditor } from "lexical"
-import { SendHorizontal } from "lucide-react"
-import { useListener } from "preact-sigma"
-import { useEffect, useRef, useState } from "preact/hooks"
+import type {
+  SessionComposerSuggestionsResponse,
+  SessionPromptRequest,
+} from "@goddard-ai/sdk";
+import { LexicalComposer } from "@lexical/react/LexicalComposer";
+import { ContentEditable } from "@lexical/react/LexicalContentEditable";
+import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
+import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
+import type { LexicalEditor } from "lexical";
+import { SendHorizontal } from "lucide-react";
+import { useListener } from "preact-sigma";
+import { useEffect, useRef, useState } from "preact/hooks";
 
-import { hasPromptContent } from "~/session-chat/composer-content.ts"
+import { hasPromptContent } from "~/session-chat/composer-content.ts";
 import {
   clearSessionInputEditor,
   insertSessionInputSuggestion,
   SessionInputPlugins,
   sessionInputInitialConfig,
   type SessionInputMenuState,
-} from "./input-lexical.tsx"
-import { SessionInputMenu } from "./input-menu.tsx"
+} from "./input-lexical.tsx";
+import { SessionInputMenu } from "./input-menu.tsx";
 
-export type SessionInputSuggestion = SessionComposerSuggestionsResponse["suggestions"][number]
-export type SessionInputPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
-export type SessionInputTrigger = "at" | "dollar" | "slash"
+export type SessionInputSuggestion =
+  SessionComposerSuggestionsResponse["suggestions"][number];
+export type SessionInputPromptBlocks = Exclude<
+  SessionPromptRequest["prompt"],
+  string
+>;
+export type SessionInputTrigger = "at" | "dollar" | "slash";
 export type SessionInputSuggestionLoader = (input: {
-  trigger: SessionInputTrigger
-  query: string
-}) => Promise<readonly SessionInputSuggestion[]>
+  trigger: SessionInputTrigger;
+  query: string;
+}) => Promise<readonly SessionInputSuggestion[]>;
 export type SessionInputClasses = {
-  form: string
-  editorFrame: string
-  contentEditable: string
-  placeholder: string
-  footer: string
-  helperText: string
-  submitButton: string
-}
+  form: string;
+  editorFrame: string;
+  contentEditable: string;
+  placeholder: string;
+  footer: string;
+  helperText: string;
+  submitButton: string;
+};
 
-type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
+type DismissedMenuState = Pick<
+  SessionInputMenuState,
+  "nodeKey" | "startOffset" | "trigger"
+>;
 
 export function SessionInput(props: {
-  autoFocus?: boolean
-  classes?: Partial<SessionInputClasses>
-  loadSuggestions: SessionInputSuggestionLoader
-  onEscape?: () => void
-  onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void
-  onPromptChange?: (prompt: SessionInputPromptBlocks) => void
-  placeholder?: string
-  helperText?: string
-  submitLabel?: string
+  autoFocus?: boolean;
+  classes?: Partial<SessionInputClasses>;
+  loadSuggestions: SessionInputSuggestionLoader;
+  onEscape?: () => void;
+  onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
+  onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
+  placeholder?: string;
+  helperText?: string;
+  submitLabel?: string;
 }) {
-  const formRef = useRef<HTMLFormElement | null>(null)
-  const menuRef = useRef<HTMLDivElement | null>(null)
-  const editorRef = useRef<LexicalEditor | null>(null)
-  const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
-  const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>([])
-  const [menu, setMenu] = useState<SessionInputMenuState | null>(null)
-  const [suggestions, setSuggestions] = useState<SessionInputSuggestion[]>([])
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const suggestionRequestIdRef = useRef(0)
-  const classes = props.classes ?? {}
-  const placeholder = props.placeholder ?? "Add the next instruction for this session."
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<LexicalEditor | null>(null);
+  const dismissedMenuRef = useRef<DismissedMenuState | null>(null);
+  const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>(
+    [],
+  );
+  const [menu, setMenu] = useState<SessionInputMenuState | null>(null);
+  const [suggestions, setSuggestions] = useState<SessionInputSuggestion[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const suggestionRequestIdRef = useRef(0);
+  const classes = props.classes ?? {};
+  const placeholder =
+    props.placeholder ?? "Add the next instruction for this session.";
   const helperText =
     props.helperText ??
-    "Enter sends, Shift+Enter inserts a newline, and @, $, or / open suggestions."
-  const submitLabel = props.submitLabel ?? "Send"
+    "Enter sends, Shift+Enter inserts a newline, and @, $, or / open suggestions.";
+  const submitLabel = props.submitLabel ?? "Send";
 
-  const canSubmit = hasPromptContent(promptBlocks) && menu === null && !isSubmitting
-  const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
-  const sessionInputPlaceholder = <div class={classes.placeholder}>{placeholder}</div>
+  const canSubmit =
+    hasPromptContent(promptBlocks) && menu === null && !isSubmitting;
+  const highlightedSuggestion =
+    suggestions[selectedIndex] ?? suggestions[0] ?? null;
+  const sessionInputPlaceholder = (
+    <div class={classes.placeholder}>{placeholder}</div>
+  );
 
   function clearMenuState() {
-    setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
+    setMenu((currentMenu) => (currentMenu === null ? currentMenu : null));
     setSuggestions((currentSuggestions) =>
       currentSuggestions.length === 0 ? currentSuggestions : [],
-    )
-    setSelectedIndex((currentIndex) => (currentIndex === 0 ? currentIndex : 0))
-    setIsLoadingSuggestions((currentIsLoading) => (currentIsLoading ? false : currentIsLoading))
+    );
+    setSelectedIndex((currentIndex) => (currentIndex === 0 ? currentIndex : 0));
+    setIsLoadingSuggestions((currentIsLoading) =>
+      currentIsLoading ? false : currentIsLoading,
+    );
   }
 
   function focusEditor() {
     queueMicrotask(() => {
-      editorRef.current?.focus()
-    })
+      editorRef.current?.focus();
+    });
   }
 
-  function hideMenu(options?: { dismissCurrentContext?: boolean; preserveFocus?: boolean }) {
+  function hideMenu(options?: {
+    dismissCurrentContext?: boolean;
+    preserveFocus?: boolean;
+  }) {
     if (options?.dismissCurrentContext && menu) {
       dismissedMenuRef.current = {
         trigger: menu.trigger,
         nodeKey: menu.nodeKey,
         startOffset: menu.startOffset,
-      }
+      };
     } else {
-      dismissedMenuRef.current = null
+      dismissedMenuRef.current = null;
     }
 
-    clearMenuState()
+    clearMenuState();
 
     if (options?.preserveFocus) {
-      focusEditor()
+      focusEditor();
     }
   }
 
@@ -108,7 +130,7 @@ export function SessionInput(props: {
       dismissedMenuRef.current?.trigger === menuState.trigger &&
       dismissedMenuRef.current?.nodeKey === menuState.nodeKey &&
       dismissedMenuRef.current?.startOffset === menuState.startOffset
-    )
+    );
   }
 
   function isSameMenuState(
@@ -116,11 +138,11 @@ export function SessionInput(props: {
     nextMenu: SessionInputMenuState | null,
   ) {
     if (currentMenu === nextMenu) {
-      return true
+      return true;
     }
 
     if (!currentMenu || !nextMenu) {
-      return false
+      return false;
     }
 
     return (
@@ -131,87 +153,91 @@ export function SessionInput(props: {
       currentMenu.endOffset === nextMenu.endOffset &&
       currentMenu.anchorLeft === nextMenu.anchorLeft &&
       currentMenu.anchorTop === nextMenu.anchorTop
-    )
+    );
   }
 
   async function submitPrompt() {
     if (!hasPromptContent(promptBlocks) || menu !== null || isSubmitting) {
-      return
+      return;
     }
 
-    setIsSubmitting(true)
+    setIsSubmitting(true);
 
     try {
-      await props.onSubmit(promptBlocks)
-      dismissedMenuRef.current = null
-      setPromptBlocks([])
-      props.onPromptChange?.([])
+      await props.onSubmit(promptBlocks);
+      dismissedMenuRef.current = null;
+      setPromptBlocks([]);
+      props.onPromptChange?.([]);
 
       if (editorRef.current) {
-        clearSessionInputEditor(editorRef.current)
-        focusEditor()
+        clearSessionInputEditor(editorRef.current);
+        focusEditor();
       }
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
   }
 
   function acceptSuggestion(suggestion: SessionInputSuggestion | null) {
     if (!menu || !suggestion || !editorRef.current) {
-      return
+      return;
     }
 
-    insertSessionInputSuggestion(editorRef.current, menu, suggestion)
-    dismissedMenuRef.current = null
-    clearMenuState()
-    focusEditor()
+    insertSessionInputSuggestion(editorRef.current, menu, suggestion);
+    dismissedMenuRef.current = null;
+    clearMenuState();
+    focusEditor();
   }
 
   function acceptHighlightedSuggestion() {
-    acceptSuggestion(highlightedSuggestion)
+    acceptSuggestion(highlightedSuggestion);
   }
 
   function highlightNextSuggestion() {
     setSelectedIndex((currentIndex) =>
       suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
-    )
+    );
   }
 
   function highlightPreviousSuggestion() {
     setSelectedIndex((currentIndex) =>
-      suggestions.length === 0 ? 0 : (currentIndex - 1 + suggestions.length) % suggestions.length,
-    )
+      suggestions.length === 0
+        ? 0
+        : (currentIndex - 1 + suggestions.length) % suggestions.length,
+    );
   }
 
   function highlightSuggestion(index: number) {
-    setSelectedIndex(index)
+    setSelectedIndex(index);
   }
 
   function updateMenu(nextMenu: SessionInputMenuState | null) {
     if (!nextMenu) {
-      dismissedMenuRef.current = null
-      clearMenuState()
-      return
+      dismissedMenuRef.current = null;
+      clearMenuState();
+      return;
     }
 
     if (isDismissedMenu(nextMenu)) {
-      clearMenuState()
-      return
+      clearMenuState();
+      return;
     }
 
-    setMenu((currentMenu) => (isSameMenuState(currentMenu, nextMenu) ? currentMenu : nextMenu))
+    setMenu((currentMenu) =>
+      isSameMenuState(currentMenu, nextMenu) ? currentMenu : nextMenu,
+    );
   }
 
   function updatePromptBlocks(nextPromptBlocks: SessionInputPromptBlocks) {
-    setPromptBlocks(nextPromptBlocks)
-    props.onPromptChange?.(nextPromptBlocks)
+    setPromptBlocks(nextPromptBlocks);
+    props.onPromptChange?.(nextPromptBlocks);
   }
 
   function registerEditor(editor: LexicalEditor) {
-    editorRef.current = editor
+    editorRef.current = editor;
 
     if (props.autoFocus) {
-      focusEditor()
+      focusEditor();
     }
   }
 
@@ -219,21 +245,21 @@ export function SessionInput(props: {
     hideMenu({
       dismissCurrentContext: true,
       preserveFocus: true,
-    })
+    });
   }
 
   function submitFromEditor() {
-    void submitPrompt()
+    void submitPrompt();
   }
 
   useEffect(() => {
     if (!menu) {
-      return
+      return;
     }
 
-    const requestId = suggestionRequestIdRef.current + 1
-    suggestionRequestIdRef.current = requestId
-    setIsLoadingSuggestions(true)
+    const requestId = suggestionRequestIdRef.current + 1;
+    suggestionRequestIdRef.current = requestId;
+    setIsLoadingSuggestions(true);
 
     void props
       .loadSuggestions({
@@ -242,71 +268,80 @@ export function SessionInput(props: {
       })
       .then((response) => {
         if (suggestionRequestIdRef.current !== requestId) {
-          return
+          return;
         }
 
-        setSuggestions([...response])
-        setSelectedIndex(0)
+        setSuggestions([...response]);
+        setSelectedIndex(0);
       })
       .catch((error) => {
         if (suggestionRequestIdRef.current !== requestId) {
-          return
+          return;
         }
 
-        console.error("Failed to load session input suggestions.", error)
-        setSuggestions([])
-        setSelectedIndex(0)
+        console.error("Failed to load session input suggestions.", error);
+        setSuggestions([]);
+        setSelectedIndex(0);
       })
       .finally(() => {
         if (suggestionRequestIdRef.current === requestId) {
-          setIsLoadingSuggestions(false)
+          setIsLoadingSuggestions(false);
         }
-      })
-  }, [menu?.nodeKey, menu?.query, menu?.startOffset, menu?.trigger, props.loadSuggestions])
+      });
+  }, [
+    menu?.nodeKey,
+    menu?.query,
+    menu?.startOffset,
+    menu?.trigger,
+    props.loadSuggestions,
+  ]);
 
   useEffect(() => {
     setSelectedIndex((currentIndex) => {
       if (suggestions.length === 0) {
-        return 0
+        return 0;
       }
 
-      return Math.min(currentIndex, suggestions.length - 1)
-    })
-  }, [suggestions])
+      return Math.min(currentIndex, suggestions.length - 1);
+    });
+  }, [suggestions]);
 
   useListener(document, "mousedown", (event) => {
     if (!menu) {
-      return
+      return;
     }
 
-    const target = event.target
+    const target = event.target;
 
     if (!(target instanceof Node)) {
-      return
+      return;
     }
 
-    if (menuRef.current?.contains(target) || formRef.current?.contains(target)) {
-      return
+    if (
+      menuRef.current?.contains(target) ||
+      formRef.current?.contains(target)
+    ) {
+      return;
     }
 
-    hideMenu()
-  })
+    hideMenu();
+  });
 
   useListener(window, "resize", () => {
     if (!menu) {
-      return
+      return;
     }
 
-    hideMenu()
-  })
+    hideMenu();
+  });
 
   return (
     <form
       ref={formRef}
       class={classes.form}
       onSubmit={(event) => {
-        event.preventDefault()
-        void submitPrompt()
+        event.preventDefault();
+        void submitPrompt();
       }}
     >
       <LexicalComposer initialConfig={sessionInputInitialConfig}>
@@ -349,11 +384,15 @@ export function SessionInput(props: {
 
       <div class={classes.footer}>
         <p class={classes.helperText}>{helperText}</p>
-        <button class={classes.submitButton} disabled={!canSubmit} type="submit">
+        <button
+          class={classes.submitButton}
+          disabled={!canSubmit}
+          type="submit"
+        >
           {submitLabel}
           <SendHorizontal size={15} strokeWidth={2.2} />
         </button>
       </div>
     </form>
-  )
+  );
 }

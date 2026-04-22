@@ -1,4 +1,5 @@
 # Component: SessionChatTranscript ASAP Design
+
 - **Goal:** Define the technical design for the `ASAP` transcript components so the first production-grade `SessionChatTranscript` can represent a normal ACP coding turn correctly without depending on future review or replay features.
 - **Scope:** Covers `SessionChatMessageList`, `TranscriptRowShell`, `PretextMarkdown`, `UserMessageRow`, `AgentMessageRow`, `ResourceLinkAttachment`, `ToolCallCard`, `ToolCallContentRenderer`, `ToolCallLocationList`, `PermissionRequestCard`, and `TurnStopState`.
 - **Out of scope:** `PlanUpdatePanel`, `AgentThoughtRow`, turn change summaries, replay boundaries, embedded media, and richer row actions. Those stay in `Soon` or `Later`.

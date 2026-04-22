@@ -1,9 +1,10 @@
-import type {
-  DaemonClientEnv,
-  DaemonIpcClient,
-  DaemonIpcClientFactory,
+import {
+  createDaemonIpcClient,
+  createDaemonIpcClientFromEnv,
+  type DaemonClientEnv,
+  type DaemonIpcClient,
+  type DaemonIpcClientFactory,
 } from "@goddard-ai/daemon-client/node"
-import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
 
 import { resolveIpcClient, type GoddardClient } from "../ipc-client.ts"
 

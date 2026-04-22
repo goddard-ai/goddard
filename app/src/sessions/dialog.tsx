@@ -1,52 +1,60 @@
-import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
-import { useModel } from "@preact/signals"
-import { X } from "lucide-react"
-import { useEffect } from "preact/hooks"
+import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog";
+import { useModel } from "@preact/signals";
+import { X } from "lucide-react";
+import { useEffect } from "preact/hooks";
 
-import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
-import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { commandContext } from "~/commands/command-context.ts"
-import { DialogPortal } from "~/lib/dialog-portal.tsx"
-import { appToaster } from "~/lib/good-toaster.tsx"
-import { createSession } from "./actions.ts"
-import styles from "./dialog.style.ts"
-import { SessionLaunchFormState } from "./launch-form-state.ts"
-import { SessionLaunchForm } from "./launch-form.tsx"
-import { getSessionDisplayTitle } from "./presentation.ts"
+import {
+  useProjectContext,
+  useProjectRegistry,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsx";
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts";
+import { commandContext } from "~/commands/command-context.ts";
+import { DialogPortal } from "~/lib/dialog-portal.tsx";
+import { appToaster } from "~/lib/good-toaster.tsx";
+import { createSession } from "./actions.ts";
+import styles from "./dialog.style.ts";
+import { SessionLaunchFormState } from "./launch-form-state.ts";
+import { SessionLaunchForm } from "./launch-form.tsx";
+import { getSessionDisplayTitle } from "./presentation.ts";
 
-export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) {
-  const projectContext = useProjectContext()
-  const projectRegistry = useProjectRegistry()
-  const workbenchTabSet = useWorkbenchTabSet()
-  const form = useModel(SessionLaunchFormState)
-  const activeProjectPath = projectContext.activeProjectPath
-  const isDialogOpen = props.dialog.open
-  const projects = projectRegistry.projectList
-  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0 && isDialogOpen
+export default function SessionLaunchDialog(props: {
+  dialog: UseDialogReturn;
+}) {
+  const projectContext = useProjectContext();
+  const projectRegistry = useProjectRegistry();
+  const workbenchTabSet = useWorkbenchTabSet();
+  const form = useModel(SessionLaunchFormState);
+  const activeProjectPath = projectContext.activeProjectPath;
+  const isDialogOpen = props.dialog.open;
+  const projects = projectRegistry.projectList;
+  const hasAdapterSelector =
+    (form.adapterCatalog.value?.adapters.length ?? 0) > 0 && isDialogOpen;
   const hasBranchSelector =
     form.draftLocation.value === "worktree" &&
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
-    isDialogOpen
-  const hasLocationSelector = form.launchPreview.value !== null && isDialogOpen
+    isDialogOpen;
+  const hasLocationSelector = form.launchPreview.value !== null && isDialogOpen;
   const hasModelSelector =
-    (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0 && isDialogOpen
-  const hasProjectSelector = projects.length > 0 && isDialogOpen
-  const hasThinkingLevel = form.thinkingOption.value !== null && isDialogOpen
-  const canSubmit = form.canSubmit.value && isDialogOpen
+    (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0 &&
+    isDialogOpen;
+  const hasProjectSelector = projects.length > 0 && isDialogOpen;
+  const hasThinkingLevel = form.thinkingOption.value !== null && isDialogOpen;
+  const canSubmit = form.canSubmit.value && isDialogOpen;
 
   async function launchSession() {
-    const sessionInput = form.sessionInput.value
+    const sessionInput = form.sessionInput.value;
 
     if (!sessionInput) {
-      return
+      return;
     }
 
     try {
-      const projectPath = form.draftProjectPath.value
-      const { session } = await createSession(sessionInput)
-      const sessionTitle = getSessionDisplayTitle(session)
+      const projectPath = form.draftProjectPath.value;
+      const { session } = await createSession(sessionInput);
+      const sessionTitle = getSessionDisplayTitle(session);
 
-      form.reset(projectPath)
+      form.reset(projectPath);
       workbenchTabSet.openOrFocusTab({
         id: `session:${session.id}`,
         kind: "sessionChat",
@@ -56,7 +64,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
           sessionId: session.id,
         },
         dirty: false,
-      })
+      });
       // Defer the toast until the submit control finishes clearing its editor after onSubmit.
       window.setTimeout(() => {
         appToaster.create({
@@ -64,95 +72,95 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
           duration: 2800,
           title: "Session launched",
           type: "success",
-        })
-      }, 0)
+        });
+      }, 0);
     } catch (error) {
-      console.error("Failed to create session.", error)
+      console.error("Failed to create session.", error);
     }
   }
 
   function openProjectSelector() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    form.setOpenPicker("project")
+    form.setOpenPicker("project");
   }
 
   function openAdapterSelector() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    form.setOpenPicker("adapter")
+    form.setOpenPicker("adapter");
   }
 
   function openLocationSelector() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    form.setOpenPicker("location")
+    form.setOpenPicker("location");
   }
 
   function openBranchSelector() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    form.setOpenPicker("branch")
+    form.setOpenPicker("branch");
   }
 
   function openModelSelector() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    form.setOpenPicker("model")
+    form.setOpenPicker("model");
   }
 
   function openThinkingLevelSelector() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    form.setOpenPicker("thinking")
+    form.setOpenPicker("thinking");
   }
 
   function submitSessionLaunch() {
     if (!isDialogOpen) {
-      return
+      return;
     }
 
-    void launchSession()
+    void launchSession();
   }
 
   useEffect(() => {
     if (isDialogOpen) {
-      form.reset(activeProjectPath)
+      form.reset(activeProjectPath);
     }
-  }, [activeProjectPath, form, isDialogOpen])
+  }, [activeProjectPath, form, isDialogOpen]);
 
   useEffect(() => {
-    commandContext.sessionInputActive.value = isDialogOpen
-    commandContext.sessionInputHasAdapterSelector.value = hasAdapterSelector
-    commandContext.sessionInputHasBranchSelector.value = hasBranchSelector
-    commandContext.sessionInputHasLocationSelector.value = hasLocationSelector
-    commandContext.sessionInputCanSubmit.value = canSubmit
-    commandContext.sessionInputHasModelSelector.value = hasModelSelector
-    commandContext.sessionInputHasProjectSelector.value = hasProjectSelector
-    commandContext.sessionInputHasThinkingLevel.value = hasThinkingLevel
+    commandContext.sessionInputActive.value = isDialogOpen;
+    commandContext.sessionInputHasAdapterSelector.value = hasAdapterSelector;
+    commandContext.sessionInputHasBranchSelector.value = hasBranchSelector;
+    commandContext.sessionInputHasLocationSelector.value = hasLocationSelector;
+    commandContext.sessionInputCanSubmit.value = canSubmit;
+    commandContext.sessionInputHasModelSelector.value = hasModelSelector;
+    commandContext.sessionInputHasProjectSelector.value = hasProjectSelector;
+    commandContext.sessionInputHasThinkingLevel.value = hasThinkingLevel;
 
     return () => {
-      commandContext.sessionInputActive.value = false
-      commandContext.sessionInputHasAdapterSelector.value = false
-      commandContext.sessionInputHasBranchSelector.value = false
-      commandContext.sessionInputHasLocationSelector.value = false
-      commandContext.sessionInputCanSubmit.value = false
-      commandContext.sessionInputHasModelSelector.value = false
-      commandContext.sessionInputHasProjectSelector.value = false
-      commandContext.sessionInputHasThinkingLevel.value = false
-    }
+      commandContext.sessionInputActive.value = false;
+      commandContext.sessionInputHasAdapterSelector.value = false;
+      commandContext.sessionInputHasBranchSelector.value = false;
+      commandContext.sessionInputHasLocationSelector.value = false;
+      commandContext.sessionInputCanSubmit.value = false;
+      commandContext.sessionInputHasModelSelector.value = false;
+      commandContext.sessionInputHasProjectSelector.value = false;
+      commandContext.sessionInputHasThinkingLevel.value = false;
+    };
   }, [
     canSubmit,
     hasAdapterSelector,
@@ -162,15 +170,27 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
     hasProjectSelector,
     hasThinkingLevel,
     isDialogOpen,
-  ])
+  ]);
 
-  useAppCommand(AppCommand.sessionInput.openProjectSelector, openProjectSelector)
-  useAppCommand(AppCommand.sessionInput.openAdapterSelector, openAdapterSelector)
-  useAppCommand(AppCommand.sessionInput.openLocationSelector, openLocationSelector)
-  useAppCommand(AppCommand.sessionInput.openBranchSelector, openBranchSelector)
-  useAppCommand(AppCommand.sessionInput.openModelSelector, openModelSelector)
-  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, openThinkingLevelSelector)
-  useAppCommand(AppCommand.sessionInput.submit, submitSessionLaunch)
+  useAppCommand(
+    AppCommand.sessionInput.openProjectSelector,
+    openProjectSelector,
+  );
+  useAppCommand(
+    AppCommand.sessionInput.openAdapterSelector,
+    openAdapterSelector,
+  );
+  useAppCommand(
+    AppCommand.sessionInput.openLocationSelector,
+    openLocationSelector,
+  );
+  useAppCommand(AppCommand.sessionInput.openBranchSelector, openBranchSelector);
+  useAppCommand(AppCommand.sessionInput.openModelSelector, openModelSelector);
+  useAppCommand(
+    AppCommand.sessionInput.openThinkingLevelSelector,
+    openThinkingLevelSelector,
+  );
+  useAppCommand(AppCommand.sessionInput.submit, submitSessionLaunch);
 
   return (
     <DialogPortal>
@@ -187,7 +207,7 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
             form={form}
             onEscape={() => {
               // Lexical binds Escape to blur by default, so close the dialog explicitly here.
-              props.dialog.setOpen(false)
+              props.dialog.setOpen(false);
             }}
             onSubmit={launchSession}
             projects={projects}
@@ -195,5 +215,5 @@ export default function SessionLaunchDialog(props: { dialog: UseDialogReturn }) 
         </Dialog.Content>
       </Dialog.Positioner>
     </DialogPortal>
-  )
+  );
 }

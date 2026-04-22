@@ -28,7 +28,9 @@
       }
 
       body {
-        font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+        font-family:
+          "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
+          serif;
         cursor: default;
         overflow: hidden;
       }
@@ -57,13 +59,25 @@
 
       .atmosphere--left {
         background:
-          radial-gradient(62% 54% at 16% 82%, rgba(45, 88, 128, 0.16), transparent 69%),
-          radial-gradient(44% 34% at 28% 64%, rgba(57, 78, 124, 0.07), transparent 76%);
+          radial-gradient(
+            62% 54% at 16% 82%,
+            rgba(45, 88, 128, 0.16),
+            transparent 69%
+          ),
+          radial-gradient(
+            44% 34% at 28% 64%,
+            rgba(57, 78, 124, 0.07),
+            transparent 76%
+          );
       }
 
       .atmosphere--right {
         background:
-          radial-gradient(58% 48% at 86% 16%, rgba(217, 119, 87, 0.18), transparent 70%),
+          radial-gradient(
+            58% 48% at 86% 16%,
+            rgba(217, 119, 87, 0.18),
+            transparent 70%
+          ),
           linear-gradient(
             135deg,
             rgba(217, 119, 87, 0.055) 0%,
@@ -188,7 +202,8 @@
       <div class="atmosphere atmosphere--left"></div>
       <div class="atmosphere atmosphere--right"></div>
       <p class="hint-pill">
-        Everything laid out in JS. Resize horizontally and vertically, then click the logos.
+        Everything laid out in JS. Resize horizontally and vertically, then
+        click the logos.
       </p>
       <div id="stage" class="stage"></div>
     </main>

@@ -1,12 +1,11 @@
-import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
-import { ActionConfig, type InlineSessionParams } from "@goddard-ai/schema/config"
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
+import { ActionConfig, type InlineSessionParams } from "@goddard-ai/schema/config"
+import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
-import type { RootConfigProvider } from "./config.ts"
-import { readActionConfig, readCurrentRootConfig } from "./config.ts"
+import { readActionConfig, readCurrentRootConfig, type RootConfigProvider } from "./config.ts"
 
 /** A resolved named action prompt and merged persisted config. */
 export type ResolvedAction = {

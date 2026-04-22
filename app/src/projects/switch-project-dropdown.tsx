@@ -1,63 +1,69 @@
-import { Search } from "lucide-react"
-import { useListener } from "preact-sigma"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { Search } from "lucide-react";
+import { useListener } from "preact-sigma";
+import { useEffect, useRef, useState } from "preact/hooks";
 
-import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
-import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { openProjectFromFilesystem, openProjectTab } from "./actions.ts"
-import { orderProjectsByRecentActivity } from "./project-context.ts"
-import type { ProjectRecord } from "./project-registry.ts"
-import { lookupProject } from "./project-registry.ts"
-import styles from "./switch-project-dropdown.style.ts"
+import {
+  useProjectContext,
+  useProjectRegistry,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsx";
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts";
+import { openProjectFromFilesystem, openProjectTab } from "./actions.ts";
+import { orderProjectsByRecentActivity } from "./project-context.ts";
+import type { ProjectRecord } from "./project-registry.ts";
+import { lookupProject } from "./project-registry.ts";
+import styles from "./switch-project-dropdown.style.ts";
 
 type SwitchProjectItem =
   | {
-      id: "open-folder"
-      kind: "open-folder"
+      id: "open-folder";
+      kind: "open-folder";
     }
   | {
-      id: string
-      kind: "project"
-      project: ProjectRecord
-    }
+      id: string;
+      kind: "project";
+      project: ProjectRecord;
+    };
 
 function projectMatchesSearch(project: ProjectRecord, search: string) {
-  const normalizedSearch = search.trim().toLowerCase()
+  const normalizedSearch = search.trim().toLowerCase();
 
   if (normalizedSearch.length === 0) {
-    return true
+    return true;
   }
 
   return (
     project.name.toLowerCase().includes(normalizedSearch) ||
     project.path.toLowerCase().includes(normalizedSearch)
-  )
+  );
 }
 
 /** Renders the header-anchored searchable project switcher dropdown. */
 export function SwitchProjectDropdown() {
-  const projectContext = useProjectContext()
-  const projectRegistry = useProjectRegistry()
-  const workbenchTabSet = useWorkbenchTabSet()
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const contentRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const projectContext = useProjectContext();
+  const projectRegistry = useProjectRegistry();
+  const workbenchTabSet = useWorkbenchTabSet();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  const [isOpen, setIsOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const projects = orderProjectsByRecentActivity(
     projectRegistry.projectList,
     projectContext.recentProjectPaths,
-  )
+  );
   const activeProject =
     projectContext.activeProjectPath === null
       ? null
-      : lookupProject(projectRegistry, projectContext.activeProjectPath)
+      : lookupProject(projectRegistry, projectContext.activeProjectPath);
 
-  const filteredProjects = projects.filter((project) => projectMatchesSearch(project, search))
+  const filteredProjects = projects.filter((project) =>
+    projectMatchesSearch(project, search),
+  );
   const items: SwitchProjectItem[] =
     search.trim().length === 0
       ? [
@@ -72,115 +78,118 @@ export function SwitchProjectDropdown() {
           id: project.path,
           kind: "project" as const,
           project,
-        }))
+        }));
   const highlightedItemIndex =
-    items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
-  const highlightedItem = items[highlightedItemIndex]
-  const highlightedItemId = highlightedItem?.id ?? null
+    items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1);
+  const highlightedItem = items[highlightedItemIndex];
+  const highlightedItemId = highlightedItem?.id ?? null;
 
   async function openFolderFromSwitcher() {
-    setIsOpen(false)
+    setIsOpen(false);
     await openProjectFromFilesystem({
       projectContext,
       projectRegistry,
       workbenchTabSet,
-    })
+    });
   }
 
   function moveHighlightedIndex(delta: -1 | 1) {
     setHighlightedIndex((currentIndex) => {
       if (items.length === 0) {
-        return 0
+        return 0;
       }
 
-      const currentHighlightedIndex = Math.min(currentIndex, items.length - 1)
+      const currentHighlightedIndex = Math.min(currentIndex, items.length - 1);
 
       return delta > 0
         ? Math.min(currentHighlightedIndex + 1, items.length - 1)
-        : Math.max(currentHighlightedIndex - 1, 0)
-    })
+        : Math.max(currentHighlightedIndex - 1, 0);
+    });
   }
 
   function activateItem(item: SwitchProjectItem | undefined) {
     if (!item) {
-      return
+      return;
     }
 
     if (item.kind === "open-folder") {
-      void openFolderFromSwitcher()
-      return
+      void openFolderFromSwitcher();
+      return;
     }
 
-    setIsOpen(false)
+    setIsOpen(false);
     openProjectTab({
       projectContext,
       projectPath: item.project.path,
       projectRegistry,
       workbenchTabSet,
-    })
+    });
   }
 
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
-    setIsOpen(true)
-  })
+    setIsOpen(true);
+  });
 
   useAppCommand(AppCommand.projects.openFolder, async () => {
-    await openFolderFromSwitcher()
-  })
+    await openFolderFromSwitcher();
+  });
 
   useEffect(() => {
     if (!isOpen) {
-      setSearch("")
-      setHighlightedIndex(0)
-      return
+      setSearch("");
+      setHighlightedIndex(0);
+      return;
     }
 
     queueMicrotask(() => {
-      const input = inputRef.current
-      input?.focus()
-      input?.setSelectionRange(input.value.length, input.value.length)
-    })
-  }, [isOpen])
+      const input = inputRef.current;
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+    });
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !highlightedItemId) {
-      return
+      return;
     }
 
     itemRefs.current[highlightedItemId]?.scrollIntoView({
       block: "nearest",
-    })
-  }, [highlightedItemId, isOpen])
+    });
+  }, [highlightedItemId, isOpen]);
 
   useListener(document, "mousedown", (event) => {
     if (!isOpen) {
-      return
+      return;
     }
 
-    const target = event.target
+    const target = event.target;
 
     if (!(target instanceof Node)) {
-      return
+      return;
     }
 
-    if (contentRef.current?.contains(target) || triggerRef.current?.contains(target)) {
-      return
+    if (
+      contentRef.current?.contains(target) ||
+      triggerRef.current?.contains(target)
+    ) {
+      return;
     }
 
-    setIsOpen(false)
-  })
+    setIsOpen(false);
+  });
 
   useListener(document, "keydown", (event) => {
     if (!isOpen || event.key !== "Escape") {
-      return
+      return;
     }
 
-    event.preventDefault()
-    setIsOpen(false)
+    event.preventDefault();
+    setIsOpen(false);
     queueMicrotask(() => {
-      triggerRef.current?.focus()
-    })
-  })
+      triggerRef.current?.focus();
+    });
+  });
 
   return (
     <>
@@ -192,16 +201,18 @@ export function SwitchProjectDropdown() {
         class={styles.trigger}
         type="button"
         onClick={() => {
-          setIsOpen(!isOpen)
+          setIsOpen(!isOpen);
         }}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" && !isOpen) {
-            event.preventDefault()
-            setIsOpen(true)
+            event.preventDefault();
+            setIsOpen(true);
           }
         }}
       >
-        <span class={styles.triggerLabel}>{activeProject?.name ?? "Open project"}</span>
+        <span class={styles.triggerLabel}>
+          {activeProject?.name ?? "Open project"}
+        </span>
       </button>
 
       {isOpen ? (
@@ -215,25 +226,25 @@ export function SwitchProjectDropdown() {
               placeholder="Search projects"
               value={search}
               onInput={(event) => {
-                setSearch(event.currentTarget.value)
-                setHighlightedIndex(0)
+                setSearch(event.currentTarget.value);
+                setHighlightedIndex(0);
               }}
               onKeyDown={(event) => {
                 if (event.key === "ArrowDown") {
-                  event.preventDefault()
-                  moveHighlightedIndex(1)
-                  return
+                  event.preventDefault();
+                  moveHighlightedIndex(1);
+                  return;
                 }
 
                 if (event.key === "ArrowUp") {
-                  event.preventDefault()
-                  moveHighlightedIndex(-1)
-                  return
+                  event.preventDefault();
+                  moveHighlightedIndex(-1);
+                  return;
                 }
 
                 if (event.key === "Enter") {
-                  event.preventDefault()
-                  activateItem(highlightedItem)
+                  event.preventDefault();
+                  activateItem(highlightedItem);
                 }
               }}
             />
@@ -242,23 +253,23 @@ export function SwitchProjectDropdown() {
           {items.length > 0 ? (
             <ul class={styles.list}>
               {items.map((item, index) => {
-                const isHighlighted = highlightedItemIndex === index
+                const isHighlighted = highlightedItemIndex === index;
 
                 if (item.kind === "open-folder") {
                   return (
                     <li key={item.id}>
                       <button
                         ref={(element) => {
-                          itemRefs.current[item.id] = element
+                          itemRefs.current[item.id] = element;
                         }}
                         class={styles.item}
                         data-highlighted={isHighlighted ? "true" : "false"}
                         type="button"
                         onMouseEnter={() => {
-                          setHighlightedIndex(index)
+                          setHighlightedIndex(index);
                         }}
                         onClick={() => {
-                          activateItem(item)
+                          activateItem(item);
                         }}
                       >
                         <span class={styles.itemBody}>
@@ -269,36 +280,43 @@ export function SwitchProjectDropdown() {
                         </span>
                       </button>
                     </li>
-                  )
+                  );
                 }
 
-                const isActiveProject = activeProject?.path === item.project.path
+                const isActiveProject =
+                  activeProject?.path === item.project.path;
 
                 return (
                   <li key={item.id}>
                     <button
                       ref={(element) => {
-                        itemRefs.current[item.id] = element
+                        itemRefs.current[item.id] = element;
                       }}
                       class={styles.item}
                       data-highlighted={isHighlighted ? "true" : "false"}
                       type="button"
                       onMouseEnter={() => {
-                        setHighlightedIndex(index)
+                        setHighlightedIndex(index);
                       }}
                       onClick={() => {
-                        activateItem(item)
+                        activateItem(item);
                       }}
                     >
                       <span class={styles.itemBody}>
-                        <span class={styles.itemTitleEllipsis}>{item.project.name}</span>
-                        <span class={styles.itemDetailEllipsis}>{item.project.path}</span>
+                        <span class={styles.itemTitleEllipsis}>
+                          {item.project.name}
+                        </span>
+                        <span class={styles.itemDetailEllipsis}>
+                          {item.project.path}
+                        </span>
                       </span>
 
-                      {isActiveProject ? <span class={styles.activeBadge}>Active</span> : null}
+                      {isActiveProject ? (
+                        <span class={styles.activeBadge}>Active</span>
+                      ) : null}
                     </button>
                   </li>
-                )
+                );
               })}
             </ul>
           ) : (
@@ -307,7 +325,7 @@ export function SwitchProjectDropdown() {
         </div>
       ) : null}
     </>
-  )
+  );
 }
 
-export default SwitchProjectDropdown
+export default SwitchProjectDropdown;

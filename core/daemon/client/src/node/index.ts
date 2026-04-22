@@ -1,10 +1,10 @@
 /** Node-specific daemon IPC client helpers built on the shared daemon client types. */
+import * as path from "node:path"
 import { createNodeClient } from "@goddard-ai/ipc/node"
 import { GODDARD_DAEMON_SOCKET_FILENAME } from "@goddard-ai/paths"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import * as path from "node:path"
 
 import {
   type DaemonIpcClient,
@@ -45,7 +45,10 @@ export function createDaemonIpcClientFromEnv<TClient = DaemonIpcClient>(options?
   client: TClient
 }
 export function createDaemonIpcClientFromEnv(
-  options: { env?: DaemonClientEnv; createClient?: DaemonIpcClientFactory } = {},
+  options: {
+    env?: DaemonClientEnv
+    createClient?: DaemonIpcClientFactory
+  } = {},
 ): {
   daemonUrl: string
   client: DaemonIpcClient

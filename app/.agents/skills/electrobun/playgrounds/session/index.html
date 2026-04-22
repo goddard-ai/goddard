@@ -10,7 +10,8 @@
         box-sizing: border-box;
       }
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         margin: 0;
         padding: 20px;
         background: #1a1a2e;
@@ -121,7 +122,9 @@
     <div class="header">
       <div>
         <h1>Session & Partition Playground</h1>
-        <p class="subtitle">Test webview partitions and session isolation with localStorage</p>
+        <p class="subtitle">
+          Test webview partitions and session isolation with localStorage
+        </p>
       </div>
       <button id="doneBtn" class="done-btn">Done</button>
     </div>
@@ -129,23 +132,30 @@
     <div class="section">
       <h2>How It Works</h2>
       <div class="info">
-        <p>Each webview below has a counter stored in <strong>localStorage</strong>.</p>
         <p>
-          Webviews with the <strong>same partition</strong> share localStorage and will show the
-          same counter value.
+          Each webview below has a counter stored in
+          <strong>localStorage</strong>.
         </p>
         <p>
-          Webviews with <strong>different partitions</strong> have isolated storage and independent
-          counters.
+          Webviews with the <strong>same partition</strong> share localStorage
+          and will show the same counter value.
+        </p>
+        <p>
+          Webviews with <strong>different partitions</strong> have isolated
+          storage and independent counters.
         </p>
         <p style="margin-top: 8px">
-          <strong>Try it:</strong> Click +/- in one webview and watch which others update!
+          <strong>Try it:</strong> Click +/- in one webview and watch which
+          others update!
         </p>
       </div>
     </div>
 
     <div class="section">
-      <h2><span class="match-indicator match-default"></span>Default Partition (Shared)</h2>
+      <h2>
+        <span class="match-indicator match-default"></span>Default Partition
+        (Shared)
+      </h2>
       <p style="font-size: 13px; color: #888; margin-bottom: 10px">
         Both use <code>partition=""</code> - counters should stay in sync
       </p>
@@ -172,13 +182,19 @@
     </div>
 
     <div class="section">
-      <h2><span class="match-indicator match-test1"></span>Persistent Partition: test1 (Shared)</h2>
+      <h2>
+        <span class="match-indicator match-test1"></span>Persistent Partition:
+        test1 (Shared)
+      </h2>
       <p style="font-size: 13px; color: #888; margin-bottom: 10px">
-        Both use <code>partition="persist:test1"</code> - counters should stay in sync
+        Both use <code>partition="persist:test1"</code> - counters should stay
+        in sync
       </p>
       <div class="webview-grid">
         <div class="webview-container">
-          <div class="webview-label">Webview C - <code>partition="persist:test1"</code></div>
+          <div class="webview-label">
+            Webview C - <code>partition="persist:test1"</code>
+          </div>
           <electrobun-webview
             id="wv-c"
             src="views://playgrounds/session/counter.html"
@@ -187,7 +203,9 @@
           ></electrobun-webview>
         </div>
         <div class="webview-container">
-          <div class="webview-label">Webview D - <code>partition="persist:test1"</code></div>
+          <div class="webview-label">
+            Webview D - <code>partition="persist:test1"</code>
+          </div>
           <electrobun-webview
             id="wv-d"
             src="views://playgrounds/session/counter.html"

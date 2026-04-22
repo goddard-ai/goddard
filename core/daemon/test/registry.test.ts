@@ -1,9 +1,9 @@
-import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { afterEach, expect, test } from "bun:test"
 
 import { createACPRegistryService } from "../src/session/registry.ts"
 

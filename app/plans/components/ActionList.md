@@ -1,4 +1,5 @@
 # Component: ActionList
+
 - **Minimum Viable Component:** Filtered list of available actions with create, edit, duplicate, and launch-entry affordances.
 - **Props Interface:** `actions: array of action summary records`; `selectedActionId?: string | null`; `onSelect: (id) => void`; `onOpenEditor: (id) => void`; `onLaunchWithAction: (id) => void`.
 - **Sub-components:** `ActionListRow`.

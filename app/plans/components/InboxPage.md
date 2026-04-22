@@ -1,4 +1,5 @@
 # Component: InboxPage
+
 - **Minimum Viable Component:** Gmail-like inbox view for coding agent updates with multi-select, hover actions, and bulk workflows.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `InboxToolbar`, `InboxList`.

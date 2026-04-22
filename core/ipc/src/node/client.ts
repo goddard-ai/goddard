@@ -146,7 +146,10 @@ export function createNodeTransport(socketPath: string): IpcTransport {
                 continue
               }
 
-              const message = JSON.parse(line) as { name?: unknown; payload?: unknown }
+              const message = JSON.parse(line) as {
+                name?: unknown
+                payload?: unknown
+              }
               if (message.name === name) {
                 onMessage(message.payload)
               }

@@ -1,8 +1,8 @@
 /** Turn-history helpers shared by daemon session lifecycle management. */
+import { randomUUID } from "node:crypto"
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/schema/daemon"
-import { randomUUID } from "node:crypto"
 
 /** Stable request id used to identify one persisted prompt turn. */
 export type SessionTurnPromptRequestId = string | number

@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test"
 
 import {
-  authDeviceStartRoute,
   authDeviceCompleteRoute,
+  authDeviceStartRoute,
   authSessionRoute,
+  githubWebhookRoute,
   prCreateRoute,
   prManagedRoute,
-  githubWebhookRoute,
   repoStreamRoute,
 } from "../src/backend/routes.ts"
 

@@ -1,11 +1,11 @@
-import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
-import { afterEach, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import { afterEach, expect, test } from "bun:test"
 
 import { createConfigManager } from "../src/config-manager.ts"
 import { readMergedRootConfig } from "../src/resolvers/config.ts"

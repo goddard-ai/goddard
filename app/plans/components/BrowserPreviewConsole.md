@@ -1,4 +1,5 @@
 # Component: BrowserPreviewConsole
+
 - **Minimum Viable Component:** Inspectable log pane for console messages captured from the preview iframe through the injected protocol shim.
 - **Props Interface:** `entries: array of { id, level, text, timestamp, sourceUrl?, line?, column? }`; `levelFilter: string | null`; `onLevelFilterChange: (level) => void`; `onClear: () => void`; `onSelectEntry?: (id) => void`.
 - **Sub-components:** None.

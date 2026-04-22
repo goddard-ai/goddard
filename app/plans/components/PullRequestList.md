@@ -1,4 +1,5 @@
 # Component: PullRequestList
+
 - **Minimum Viable Component:** Recency-ordered list of pull requests with click-through into detail tabs and a compact review summary.
 - **Props Interface:** `pullRequests: array of pull request summary records`; `selectedPullRequestRef?: { owner, repo, number } | null`; `onSelect: (ref) => void`; `onOpen: (ref) => void`.
 - **Sub-components:** `PullRequestListRow`.

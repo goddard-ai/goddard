@@ -1,4 +1,5 @@
 # Component: IdentityPage
+
 - **Minimum Viable Component:** Full-width account and auth status page that explains degraded local-only mode, shows the current authenticated identity when present, and exposes login and logout actions.
 - **Props Interface:** `class?: string`; `showProtectedActionsSummary?: boolean`.
 - **Sub-components:** `ProtectedActionGate`, `DeviceFlowDialog`.

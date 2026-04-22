@@ -193,11 +193,7 @@ interface WorktreeSyncSessionState {
 }
 
 class WorktreeSyncSessionHost {
-  constructor(input: {
-    sessionId: string
-    primaryDir: string
-    worktreeDir: string
-  })
+  constructor(input: { sessionId: string; primaryDir: string; worktreeDir: string })
 
   inspect(): Promise<WorktreeSyncSessionState | null>
   mount(): Promise<WorktreeSyncSessionState>

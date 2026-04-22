@@ -1,41 +1,48 @@
-import { Dialog, useDialog, type UseDialogReturn } from "@ark-ui/react/dialog"
-import { cx } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
-import { type Signal, useSignal } from "@preact/signals"
-import { ArrowUpRight, FolderSearch2, Plus, Trash2, X } from "lucide-react"
-import { useEffect } from "preact/hooks"
+import { Dialog, useDialog, type UseDialogReturn } from "@ark-ui/react/dialog";
+import { cx } from "@goddard-ai/styled-system/css";
+import { token } from "@goddard-ai/styled-system/tokens";
+import { type Signal, useSignal } from "@preact/signals";
+import { ArrowUpRight, FolderSearch2, Plus, Trash2, X } from "lucide-react";
+import { useEffect } from "preact/hooks";
 
-import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
-import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
-import { DialogPortal } from "~/lib/dialog-portal.tsx"
-import { openProjectTab } from "./actions.ts"
-import { deriveProjectName } from "./project-name.ts"
-import { lookupProject, type ProjectRecord } from "./project-registry.ts"
-import styles from "./projects-page.style.ts"
+import {
+  useProjectContext,
+  useProjectRegistry,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsx";
+import { browseForProject as browseForProjectPath } from "~/desktop-host.ts";
+import { DialogPortal } from "~/lib/dialog-portal.tsx";
+import { openProjectTab } from "./actions.ts";
+import { deriveProjectName } from "./project-name.ts";
+import { lookupProject, type ProjectRecord } from "./project-registry.ts";
+import styles from "./projects-page.style.ts";
 
 /** Renders the projects page plus its local add-project modal flow. */
 export function ProjectsPage() {
-  const projectContext = useProjectContext()
-  const projectRegistry = useProjectRegistry()
-  const workbenchTabSet = useWorkbenchTabSet()
-  const addProjectDialog = useDialog()
-  const selectedProjectPath = useSignal<string | null>(projectRegistry.projectList[0]?.path ?? null)
-  const projects = projectRegistry.projectList
+  const projectContext = useProjectContext();
+  const projectRegistry = useProjectRegistry();
+  const workbenchTabSet = useWorkbenchTabSet();
+  const addProjectDialog = useDialog();
+  const selectedProjectPath = useSignal<string | null>(
+    projectRegistry.projectList[0]?.path ?? null,
+  );
+  const projects = projectRegistry.projectList;
   const resolvedSelectedProjectPath =
-    selectedProjectPath.value && projectRegistry.projectsByPath[selectedProjectPath.value]
+    selectedProjectPath.value &&
+    projectRegistry.projectsByPath[selectedProjectPath.value]
       ? selectedProjectPath.value
-      : (projects[0]?.path ?? null)
+      : (projects[0]?.path ?? null);
   const selectedProject = resolvedSelectedProjectPath
     ? lookupProject(projectRegistry, resolvedSelectedProjectPath)
-    : null
+    : null;
 
   function selectProject(projectPath: string): void {
-    selectedProjectPath.value = projectPath
+    selectedProjectPath.value = projectPath;
   }
 
   function removeProject(projectPath: string): void {
-    projectContext.removeProject(projectPath)
-    projectRegistry.removeProject(projectPath)
+    projectContext.removeProject(projectPath);
+    projectRegistry.removeProject(projectPath);
   }
 
   function openProjectInTab(projectPath: string): void {
@@ -44,7 +51,7 @@ export function ProjectsPage() {
       projectPath,
       projectRegistry,
       workbenchTabSet,
-    })
+    });
   }
 
   return (
@@ -59,7 +66,10 @@ export function ProjectsPage() {
               </p>
             </div>
             <Dialog.Trigger asChild>
-              <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+              <button
+                class={cx(styles.buttonBase, styles.primaryButton)}
+                type="button"
+              >
                 <Plus size={16} strokeWidth={2.2} />
                 Add project
               </button>
@@ -71,11 +81,15 @@ export function ProjectsPage() {
               <div class={styles.emptyCopy}>
                 <h2 class={styles.title}>No projects yet</h2>
                 <p class={styles.body}>
-                  Add a local directory to establish the app&apos;s explicit working set.
+                  Add a local directory to establish the app&apos;s explicit
+                  working set.
                 </p>
                 <div>
                   <Dialog.Trigger asChild>
-                    <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+                    <button
+                      class={cx(styles.buttonBase, styles.primaryButton)}
+                      type="button"
+                    >
                       <Plus size={16} strokeWidth={2.2} />
                       Add project
                     </button>
@@ -116,21 +130,24 @@ export function ProjectsPage() {
           </div>
         </aside>
 
-        <AddProjectDialog dialog={addProjectDialog} selectedProjectPath={selectedProjectPath} />
+        <AddProjectDialog
+          dialog={addProjectDialog}
+          selectedProjectPath={selectedProjectPath}
+        />
       </div>
     </Dialog.RootProvider>
-  )
+  );
 }
 
-export default ProjectsPage
+export default ProjectsPage;
 
 /** Renders the machine-wide project list. */
 function ProjectList(props: {
-  projects: readonly ProjectRecord[]
-  selectedProjectPath: string | null
-  onSelect: (id: string) => void
-  onRemove: (id: string) => void
-  onOpenProjectTab: (id: string) => void
+  projects: readonly ProjectRecord[];
+  selectedProjectPath: string | null;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
+  onOpenProjectTab: (id: string) => void;
 }) {
   return (
     <ul class={styles.list}>
@@ -146,35 +163,41 @@ function ProjectList(props: {
         </li>
       ))}
     </ul>
-  )
+  );
 }
 
 /** Renders one project row with quick actions and identity metadata. */
 function ProjectListRow(props: {
-  project: ProjectRecord
-  isSelected: boolean
-  onSelect: (id: string) => void
-  onRemove: (id: string) => void
-  onOpenProjectTab: (id: string) => void
+  project: ProjectRecord;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
+  onOpenProjectTab: (id: string) => void;
 }) {
   return (
     <article
       class={styles.row}
       style={{
-        borderInlineStartColor: props.isSelected ? token.var("colors.accent") : "transparent",
-        backgroundColor: props.isSelected ? token.var("colors.surface") : "transparent",
+        borderInlineStartColor: props.isSelected
+          ? token.var("colors.accent")
+          : "transparent",
+        backgroundColor: props.isSelected
+          ? token.var("colors.surface")
+          : "transparent",
       }}
     >
       <button
         class={styles.rowButton}
         type="button"
         onClick={() => {
-          props.onSelect(props.project.path)
+          props.onSelect(props.project.path);
         }}
       >
         <div class={styles.rowHeader}>
           <h3 class={styles.rowTitle}>{props.project.name}</h3>
-          {props.isSelected ? <span class={styles.selectedBadge}>Selected</span> : null}
+          {props.isSelected ? (
+            <span class={styles.selectedBadge}>Selected</span>
+          ) : null}
         </div>
         <p class={styles.path}>{props.project.path}</p>
       </button>
@@ -184,8 +207,8 @@ function ProjectListRow(props: {
           class={cx(styles.buttonBase, styles.secondaryButton)}
           type="button"
           onClick={(event) => {
-            event.stopPropagation()
-            props.onOpenProjectTab(props.project.path)
+            event.stopPropagation();
+            props.onOpenProjectTab(props.project.path);
           }}
         >
           <ArrowUpRight size={15} strokeWidth={2.2} />
@@ -195,8 +218,8 @@ function ProjectListRow(props: {
           class={cx(styles.buttonBase, styles.dangerButton)}
           type="button"
           onClick={(event) => {
-            event.stopPropagation()
-            props.onRemove(props.project.path)
+            event.stopPropagation();
+            props.onRemove(props.project.path);
           }}
         >
           <Trash2 size={15} strokeWidth={2.1} />
@@ -204,7 +227,7 @@ function ProjectListRow(props: {
         </button>
       </div>
     </article>
-  )
+  );
 }
 
 /** Renders one small inspector card. */
@@ -214,84 +237,88 @@ function InfoCard(props: { label: string; value: string }) {
       <dt class={styles.quietLabel}>{props.label}</dt>
       <dd class={styles.infoValue}>{props.value}</dd>
     </dl>
-  )
+  );
 }
 
 /** Renders the modal flow used to add one project. */
 function AddProjectDialog(props: {
-  dialog: UseDialogReturn
-  selectedProjectPath: Signal<string | null>
+  dialog: UseDialogReturn;
+  selectedProjectPath: Signal<string | null>;
 }) {
-  const projectRegistry = useProjectRegistry()
+  const projectRegistry = useProjectRegistry();
 
-  const draftPath = useSignal("")
-  const draftName = useSignal("")
-  const lastSuggestedName = useSignal<string | null>(null)
+  const draftPath = useSignal("");
+  const draftName = useSignal("");
+  const lastSuggestedName = useSignal<string | null>(null);
 
-  const draftProjectPath = draftPath.value.trim()
-  const draftProjectName = draftName.value.trim()
-  const derivedProjectName = deriveProjectName(draftPath.value)
+  const draftProjectPath = draftPath.value.trim();
+  const draftProjectName = draftName.value.trim();
+  const derivedProjectName = deriveProjectName(draftPath.value);
   const canAddProject =
-    draftProjectPath.length > 0 && (draftProjectName.length > 0 || derivedProjectName.length > 0)
+    draftProjectPath.length > 0 &&
+    (draftProjectName.length > 0 || derivedProjectName.length > 0);
 
   function resetDraft(): void {
-    draftPath.value = ""
-    draftName.value = ""
-    lastSuggestedName.value = null
+    draftPath.value = "";
+    draftName.value = "";
+    lastSuggestedName.value = null;
   }
 
   function updateDraftPath(value: string): void {
-    draftPath.value = value
-    const suggestedName = deriveProjectName(value)
+    draftPath.value = value;
+    const suggestedName = deriveProjectName(value);
 
-    if (draftName.value.length === 0 || draftName.value === lastSuggestedName.value) {
-      draftName.value = suggestedName
+    if (
+      draftName.value.length === 0 ||
+      draftName.value === lastSuggestedName.value
+    ) {
+      draftName.value = suggestedName;
     }
 
-    lastSuggestedName.value = suggestedName
+    lastSuggestedName.value = suggestedName;
   }
 
   function updateDraftName(value: string): void {
-    draftName.value = value
+    draftName.value = value;
   }
 
   async function browseForProject(): Promise<void> {
-    const selectedPath = await browseForProjectPath()
+    const selectedPath = await browseForProjectPath();
 
     if (!selectedPath) {
-      return
+      return;
     }
 
-    updateDraftPath(selectedPath)
+    updateDraftPath(selectedPath);
   }
 
   function addProject(): void {
     if (draftProjectPath.length === 0) {
-      return
+      return;
     }
 
-    const projectName = draftProjectName || deriveProjectName(draftProjectPath)
+    const projectName = draftProjectName || deriveProjectName(draftProjectPath);
 
     if (projectName.length === 0) {
-      return
+      return;
     }
 
     projectRegistry.addProject({
       path: draftProjectPath,
       name: projectName,
-    })
-    props.selectedProjectPath.value = draftProjectPath
-    props.dialog.setOpen(false)
-    resetDraft()
+    });
+    props.selectedProjectPath.value = draftProjectPath;
+    props.dialog.setOpen(false);
+    resetDraft();
   }
 
   useEffect(() => {
     if (!props.dialog.open) {
-      return
+      return;
     }
 
-    resetDraft()
-  }, [props.dialog.open])
+    resetDraft();
+  }, [props.dialog.open]);
 
   return (
     <DialogPortal>
@@ -301,8 +328,8 @@ function AddProjectDialog(props: {
           <form
             class={styles.form}
             onSubmit={(event) => {
-              event.preventDefault()
-              addProject()
+              event.preventDefault();
+              addProject();
             }}
           >
             <header class={styles.dialogHeader}>
@@ -327,7 +354,7 @@ function AddProjectDialog(props: {
                 type="text"
                 value={draftPath.value}
                 onInput={(event) => {
-                  updateDraftPath(event.currentTarget.value)
+                  updateDraftPath(event.currentTarget.value);
                 }}
               />
             </label>
@@ -337,7 +364,7 @@ function AddProjectDialog(props: {
                 class={cx(styles.buttonBase, styles.secondaryButton)}
                 type="button"
                 onClick={() => {
-                  void browseForProject()
+                  void browseForProject();
                 }}
               >
                 <FolderSearch2 size={15} strokeWidth={2.1} />
@@ -353,14 +380,17 @@ function AddProjectDialog(props: {
                 type="text"
                 value={draftName.value}
                 onInput={(event) => {
-                  updateDraftName(event.currentTarget.value)
+                  updateDraftName(event.currentTarget.value);
                 }}
               />
             </label>
 
             <div class={styles.dialogActions}>
               <Dialog.CloseTrigger asChild>
-                <button class={cx(styles.buttonBase, styles.secondaryButton)} type="button">
+                <button
+                  class={cx(styles.buttonBase, styles.secondaryButton)}
+                  type="button"
+                >
                   Cancel
                 </button>
               </Dialog.CloseTrigger>
@@ -369,7 +399,7 @@ function AddProjectDialog(props: {
                 disabled={!canAddProject}
                 type="button"
                 onClick={() => {
-                  addProject()
+                  addProject();
                 }}
               >
                 <Plus size={15} strokeWidth={2.2} />
@@ -380,5 +410,5 @@ function AddProjectDialog(props: {
         </Dialog.Content>
       </Dialog.Positioner>
     </DialogPortal>
-  )
+  );
 }

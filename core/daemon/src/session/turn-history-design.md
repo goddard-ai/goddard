@@ -343,7 +343,7 @@ For agents that support ACP `loadSession`, a future resume flow may reconcile re
 3. If this is the latest page and a live `activeTurn` exists, daemon appends that in-memory turn to the response.
 4. Otherwise, if this is the latest page and a durable draft exists, daemon appends the draft to the response.
 5. During daemon restart reconciliation, any surviving draft may first be promoted into `sessionTurns`, in which case the latest page reads it from persisted turns instead of appending a draft.
-5. Daemon returns `turns`, `nextCursor`, and `hasMore`.
+6. Daemon returns `turns`, `nextCursor`, and `hasMore`.
 
 ## Alternatives And Tradeoffs
 

@@ -1,4 +1,5 @@
 # State Module: ActionCatalogState
+
 - **Responsibility:** Own the list of global and project-scoped actions, their filter state, applicability to the current tab, and the dropdown-ready view of that catalog.
 - **Data Shape:** Normalized action records keyed by action id; filter fields for scope, project, applicability, and query; current tab context; derived grouped lists for management pages and contextual dropdowns; load and refresh state.
 - **Mutations/Actions:** `loadActions`; `refreshActions`; `setActionFilters`; `setCurrentTabContext`; `selectAction`; `clearActionSelection`; `openManageActionsPage`.

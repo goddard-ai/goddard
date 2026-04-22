@@ -1,4 +1,4 @@
-import Electrobun, { Electroview } from "electrobun/view"
+import Electrobun, { Electroview } from "electrobun/view";
 
 const rpc = Electroview.defineRPC<any>({
   maxRequestTime: 120000,
@@ -9,37 +9,37 @@ const rpc = Electroview.defineRPC<any>({
         blurDetected,
         focusDetected,
       }: {
-        blurDetected: boolean
-        focusDetected: boolean
+        blurDetected: boolean;
+        focusDetected: boolean;
       }) => {
         if (blurDetected) {
-          document.getElementById("blur-indicator")?.classList.add("detected")
-          const blurStatus = document.getElementById("blur-status")
+          document.getElementById("blur-indicator")?.classList.add("detected");
+          const blurStatus = document.getElementById("blur-status");
           if (blurStatus) {
-            blurStatus.classList.add("detected")
-            blurStatus.textContent = "Blur: Detected!"
+            blurStatus.classList.add("detected");
+            blurStatus.textContent = "Blur: Detected!";
           }
         }
         if (focusDetected) {
-          document.getElementById("focus-indicator")?.classList.add("detected")
-          const focusStatus = document.getElementById("focus-status")
+          document.getElementById("focus-indicator")?.classList.add("detected");
+          const focusStatus = document.getElementById("focus-status");
           if (focusStatus) {
-            focusStatus.classList.add("detected")
-            focusStatus.textContent = "Focus: Detected!"
+            focusStatus.classList.add("detected");
+            focusStatus.textContent = "Focus: Detected!";
           }
         }
         if (blurDetected && focusDetected) {
-          document.getElementById("done-message")?.classList.add("show")
+          document.getElementById("done-message")?.classList.add("show");
         }
       },
     },
   },
-})
+});
 
-const electrobun = new Electrobun.Electroview({ rpc })
+const electrobun = new Electrobun.Electroview({ rpc });
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("closeBtn")?.addEventListener("click", () => {
-    ;(electrobun.rpc as any)?.request.closeWindow({})
-  })
-})
+    (electrobun.rpc as any)?.request.closeWindow({});
+  });
+});

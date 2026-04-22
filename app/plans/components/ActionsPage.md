@@ -1,4 +1,5 @@
 # Component: ActionsPage
+
 - **Minimum Viable Component:** Full-width management page for browsing, filtering, creating, and opening reusable actions.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `ActionFilterSidebar`, `ActionList`, `CreateActionDialog`.

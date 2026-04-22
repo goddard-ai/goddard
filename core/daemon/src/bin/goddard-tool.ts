@@ -1,15 +1,17 @@
 #!/usr/bin/env node
+import * as fs from "node:fs/promises"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
 import { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { command, option, run, string, subcommands } from "cmd-ts"
-import * as fs from "node:fs/promises"
 
 import { db } from "../persistence/store.ts"
 
 async function requireSessionId(): Promise<DaemonSession["id"]> {
   const { client } = createDaemonIpcClientFromEnv()
-  const result = await client.send("sessionResolveToken", { token: requireSessionToken() })
+  const result = await client.send("sessionResolveToken", {
+    token: requireSessionToken(),
+  })
   return DaemonSessionId.parse(result.id)
 }
 

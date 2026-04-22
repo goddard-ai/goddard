@@ -1,9 +1,9 @@
-import { afterEach, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { afterEach, expect, test } from "bun:test"
 
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
 import { WorktreeSyncSessionHost } from "../src/worktrees/sync.ts"
@@ -218,35 +218,37 @@ async function createRepoFixture(files: Record<string, string>) {
 }
 
 async function runGit(cwd: string, args: string[]) {
-  const result = await new Promise<{ status: number | null; stdout: string; stderr: string }>(
-    (resolve, reject) => {
-      const child = spawn("git", args, {
-        cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-      })
+  const result = await new Promise<{
+    status: number | null
+    stdout: string
+    stderr: string
+  }>((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
 
-      if (!child.stdout || !child.stderr) {
-        reject(new Error("Failed to capture git output"))
-        return
-      }
+    if (!child.stdout || !child.stderr) {
+      reject(new Error("Failed to capture git output"))
+      return
+    }
 
-      let stdout = ""
-      let stderr = ""
-      child.stdout.setEncoding("utf8")
-      child.stderr.setEncoding("utf8")
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk
-      })
-      child.stderr.on("data", (chunk: string) => {
-        stderr += chunk
-      })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk
+    })
 
-      child.on("error", reject)
-      child.on("close", (status) => {
-        resolve({ status, stdout, stderr })
-      })
-    },
-  )
+    child.on("error", reject)
+    child.on("close", (status) => {
+      resolve({ status, stdout, stderr })
+    })
+  })
 
   expect({
     status: result.status,

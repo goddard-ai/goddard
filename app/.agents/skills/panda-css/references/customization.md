@@ -15,15 +15,15 @@ To create a condition, you can use the conditions property in the config. Let's 
 pseudo condition that applies styles to an element when a parent container with the `group` role is hovered.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   conditions: {
     extend: {
-      groupHover: '[role=group]:where(:hover, [data-hover]) &'
-    }
-  }
-})
+      groupHover: "[role=group]:where(:hover, [data-hover]) &",
+    },
+  },
+});
 ```
 
 > ⚠️ The `&` character is mandatory, it is a placeholder for the current selector. It will be replaced with the actual
@@ -32,45 +32,45 @@ export default defineConfig({
 Then you can run the following command to generate the conditions JS code:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun panda codegen
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 Now, we can use the `groupHover` condition in our components.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
     <div role="group">
       <span
         className={css({
-          color: { base: 'blue.400', _groupHover: 'blue.600' }
+          color: { base: "blue.400", _groupHover: "blue.600" },
         })}
       />
     </div>
-  )
+  );
 }
 ```
 
@@ -80,43 +80,43 @@ You can extend the [default conditions](/docs/concepts/conditional-styles#refere
 property in the config.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   conditions: {
     extend: {
       // Extend the default `dark` condition
-      dark: '.dark &, [data-theme="dark"] &'
-    }
-  }
-})
+      dark: '.dark &, [data-theme="dark"] &',
+    },
+  },
+});
 ```
 
 Then you can run the following command to update the conditions JS code:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun panda codegen
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ## Using tokens
@@ -124,16 +124,16 @@ Then you can run the following command to update the conditions JS code:
 You can also use tokens in your conditions, and they will be resolved to their actual values:
 
 ```tsx
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   conditions: {
     extend: {
-      mq: '@media (min-width: token(sizes.4xl))',
-      size2: '&[data-size=token(spacing.2)]'
-    }
-  }
-})
+      mq: "@media (min-width: token(sizes.4xl))",
+      size2: "&[data-size=token(spacing.2)]",
+    },
+  },
+});
 ```
 
 ## Mixed conditions
@@ -141,25 +141,25 @@ export default defineConfig({
 You can also use mixed conditions (nested at-rules/selectors) under a single condition name:
 
 ```tsx
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   conditions: {
     extend: {
-      supportHover: ['@media (hover: hover) and (pointer: fine)', '&:hover']
-    }
-  }
-})
+      supportHover: ["@media (hover: hover) and (pointer: fine)", "&:hover"],
+    },
+  },
+});
 ```
 
 ```ts
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 css({
   _supportHover: {
-    color: 'red'
-  }
-})
+    color: "red",
+  },
+});
 ```
 
 will generate the following CSS:
@@ -183,7 +183,6 @@ If you want to use Panda with the bare minimum, without any of the defaults, you
 
 ---
 
-
 ## Config Functions
 
 Functions to expose types for your config.
@@ -200,12 +199,12 @@ To help defining config in a type-safe way, you can use the following helpers:
 Function for [config](/docs/references/config) definitions.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {},
-  include: ['src/**/*.{js,jsx,ts,tsx}']
-})
+  include: ["src/**/*.{js,jsx,ts,tsx}"],
+});
 ```
 
 ### `defineRecipe`
@@ -213,25 +212,25 @@ export default defineConfig({
 Function for [recipe](/docs/concepts/recipes#config-recipe) definitions.
 
 ```ts
-import { defineRecipe } from '@pandacss/dev'
+import { defineRecipe } from "@pandacss/dev";
 
 export const buttonRecipe = defineRecipe({
-  className: 'button',
-  description: 'The styles for the Button component',
+  className: "button",
+  description: "The styles for the Button component",
   base: {
-    display: 'flex'
+    display: "flex",
   },
   variants: {
     visual: {
-      funky: { bg: 'red.200', color: 'white' },
-      edgy: { border: '1px solid {colors.red.500}' }
-    }
+      funky: { bg: "red.200", color: "white" },
+      edgy: { border: "1px solid {colors.red.500}" },
+    },
   },
   defaultVariants: {
-    visual: 'funky',
-    size: 'sm'
-  }
-})
+    visual: "funky",
+    size: "sm",
+  },
+});
 ```
 
 ### `defineSlotRecipe`
@@ -239,33 +238,33 @@ export const buttonRecipe = defineRecipe({
 Function for [slot recipe](/docs/concepts/slot-recipes#config-slot-recipe) definitions.
 
 ```ts
-import { defineSlotRecipe } from '@pandacss/dev'
+import { defineSlotRecipe } from "@pandacss/dev";
 
 export const checkboxRecipe = defineSlotRecipe({
-  className: 'checkbox',
-  description: 'The styles for the Checkbox component',
-  slots: ['root', 'control', 'label'],
+  className: "checkbox",
+  description: "The styles for the Checkbox component",
+  slots: ["root", "control", "label"],
   base: {
-    root: { display: 'flex', alignItems: 'center', gap: '2' },
-    control: { borderWidth: '1px', borderRadius: 'sm' },
-    label: { marginStart: '2' }
+    root: { display: "flex", alignItems: "center", gap: "2" },
+    control: { borderWidth: "1px", borderRadius: "sm" },
+    label: { marginStart: "2" },
   },
   variants: {
     size: {
       sm: {
-        control: { width: '8', height: '8' },
-        label: { fontSize: 'sm' }
+        control: { width: "8", height: "8" },
+        label: { fontSize: "sm" },
       },
       md: {
-        control: { width: '10', height: '10' },
-        label: { fontSize: 'md' }
-      }
-    }
+        control: { width: "10", height: "10" },
+        label: { fontSize: "md" },
+      },
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 ```
 
 ### `defineParts`
@@ -278,38 +277,38 @@ It pairs well with [ZagJs](https://zagjs.com/) and [Ark-UI](https://ark-ui.com/)
 Let's refactor the previous example to use parts instead of slots:
 
 ```ts
-import { defineParts, definetRecipe } from '@pandacss/dev'
+import { defineParts, definetRecipe } from "@pandacss/dev";
 
 const parts = defineParts({
   root: { selector: '& [data-part="root"]' },
   control: { selector: '& [data-part="control"]' },
-  label: { selector: '& [data-part="label"]' }
-})
+  label: { selector: '& [data-part="label"]' },
+});
 
 export const checkboxRecipe = defineRecipe({
-  className: 'checkbox',
-  description: 'A checkbox style',
+  className: "checkbox",
+  description: "A checkbox style",
   base: parts({
-    root: { display: 'flex', alignItems: 'center', gap: '2' },
-    control: { borderWidth: '1px', borderRadius: 'sm' },
-    label: { marginStart: '2' }
+    root: { display: "flex", alignItems: "center", gap: "2" },
+    control: { borderWidth: "1px", borderRadius: "sm" },
+    label: { marginStart: "2" },
   }),
   variants: {
     size: {
       sm: parts({
-        control: { width: '8', height: '8' },
-        label: { fontSize: 'sm' }
+        control: { width: "8", height: "8" },
+        label: { fontSize: "sm" },
       }),
       md: parts({
-        control: { width: '10', height: '10' },
-        label: { fontSize: 'md' }
-      })
-    }
+        control: { width: "10", height: "10" },
+        label: { fontSize: "md" },
+      }),
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 ```
 
 ### `definePattern`
@@ -317,16 +316,16 @@ export const checkboxRecipe = defineRecipe({
 Function for [pattern](/docs/customization/patterns) definitions.
 
 ```ts
-import { definePattern } from '@pandacss/dev'
+import { definePattern } from "@pandacss/dev";
 
 const visuallyHidden = definePattern({
   transform(props) {
     return {
       srOnly: true,
-      ...props
-    }
-  }
-})
+      ...props,
+    };
+  },
+});
 ```
 
 ### `definePreset`
@@ -334,17 +333,17 @@ const visuallyHidden = definePattern({
 Function for [preset](/docs/customization/presets#creating-a-preset) definitions.
 
 ```ts
-import { definePreset } from '@pandacss/dev'
+import { definePreset } from "@pandacss/dev";
 
 export const pandaPreset = definePreset({
   theme: {
     extend: {
       tokens: {
-        colors: { primary: { value: 'blue.500' } }
-      }
-    }
-  }
-})
+        colors: { primary: { value: "blue.500" } },
+      },
+    },
+  },
+});
 ```
 
 ### `definePlugin`
@@ -352,18 +351,18 @@ export const pandaPreset = definePreset({
 Function for [plugin](/docs/references/config#plugins) definitions.
 
 ```ts
-import { definePlugin } from '@pandacss/dev'
+import { definePlugin } from "@pandacss/dev";
 
 export const plugin = definePlugin({
-  name: 'token-format',
+  name: "token-format",
   hooks: {
-    'tokens:created': ({ configure }) => {
+    "tokens:created": ({ configure }) => {
       configure({
-        formatTokenName: path => '$' + path.join('-')
-      })
-    }
-  }
-})
+        formatTokenName: (path) => "$" + path.join("-"),
+      });
+    },
+  },
+});
 ```
 
 ### `defineKeyframes`
@@ -371,14 +370,14 @@ export const plugin = definePlugin({
 Function for [keyframes](/docs/customization/theme#keyframes) definitions.
 
 ```ts
-import { defineKeyframes } from '@pandacss/dev'
+import { defineKeyframes } from "@pandacss/dev";
 
 export const keyframes = defineKeyframes({
   fadeIn: {
-    '0%': { opacity: '0' },
-    '100%': { opacity: '1' }
-  }
-})
+    "0%": { opacity: "0" },
+    "100%": { opacity: "1" },
+  },
+});
 ```
 
 ### `defineGlobalStyles`
@@ -386,14 +385,14 @@ export const keyframes = defineKeyframes({
 Function for [global styles](/docs/concepts/writing-styles#global-styles) definitions.
 
 ```ts
-import { defineGlobalStyles } from '@pandacss/dev'
+import { defineGlobalStyles } from "@pandacss/dev";
 
 const globalCss = defineGlobalStyles({
-  'html, body': {
-    color: 'gray.900',
-    lineHeight: '1.5'
-  }
-})
+  "html, body": {
+    color: "gray.900",
+    lineHeight: "1.5",
+  },
+});
 ```
 
 ### `defineUtility`
@@ -401,15 +400,15 @@ const globalCss = defineGlobalStyles({
 Function for [utility](/docs/customization/utilities) definitions.
 
 ```ts
-import { defineUtility } from '@pandacss/dev'
+import { defineUtility } from "@pandacss/dev";
 
 export const br = defineUtility({
-  className: 'rounded',
-  values: 'radii',
+  className: "rounded",
+  values: "radii",
   transform(value) {
-    return { borderRadius: value }
-  }
-})
+    return { borderRadius: value };
+  },
+});
 ```
 
 ### `defineTextStyles`
@@ -417,22 +416,22 @@ export const br = defineUtility({
 Function for [text styles](/docs/theming/text-styles) definitions.
 
 ```ts
-import { defineTextStyles } from '@pandacss/dev'
+import { defineTextStyles } from "@pandacss/dev";
 
 export const textStyles = defineTextStyles({
   body: {
-    description: 'The body text style - used in paragraphs',
+    description: "The body text style - used in paragraphs",
     value: {
-      fontFamily: 'Inter',
-      fontWeight: '500',
-      fontSize: '16px',
-      lineHeight: '24',
-      letterSpacing: '0',
-      textDecoration: 'None',
-      textTransform: 'None'
-    }
-  }
-})
+      fontFamily: "Inter",
+      fontWeight: "500",
+      fontSize: "16px",
+      lineHeight: "24",
+      letterSpacing: "0",
+      textDecoration: "None",
+      textTransform: "None",
+    },
+  },
+});
 ```
 
 ### `defineLayerStyles`
@@ -440,18 +439,18 @@ export const textStyles = defineTextStyles({
 Function for [layer styles](/docs/theming/layer-styles) definitions.
 
 ```ts
-import { defineLayerStyles } from '@pandacss/dev'
+import { defineLayerStyles } from "@pandacss/dev";
 
 const layerStyles = defineLayerStyles({
   container: {
-    description: 'container styles',
+    description: "container styles",
     value: {
-      background: 'gray.50',
-      border: '2px solid',
-      borderColor: 'gray.500'
-    }
-  }
-})
+      background: "gray.50",
+      border: "2px solid",
+      borderColor: "gray.500",
+    },
+  },
+});
 ```
 
 ### `defineStyles`
@@ -463,29 +462,29 @@ This comes in handy when you want to define reusable styles in the config.
 E.g. a set of styles to be used in multiple variants within a [recipe](/docs/concepts/recipes#config-recipe).
 
 ```ts {3, 14, 18} filename="recipes/button.ts"
-import { defineRecipe, defineStyles } from '@pandacss/dev'
+import { defineRecipe, defineStyles } from "@pandacss/dev";
 
 const buttonVisualStyles = defineStyles({
-  borderRadius: 'lg',
-  boxShadow: 'sm'
-})
+  borderRadius: "lg",
+  boxShadow: "sm",
+});
 
 export const buttonRecipe = defineRecipe({
   // ...
   variants: {
     visual: {
       funky: {
-        bg: 'red.200',
-        color: 'white',
-        ...buttonVisualStyles
+        bg: "red.200",
+        color: "white",
+        ...buttonVisualStyles,
       },
       edgy: {
-        border: '1px solid {colors.red.500}',
-        ...buttonVisualStyles
-      }
-    }
-  }
-})
+        border: "1px solid {colors.red.500}",
+        ...buttonVisualStyles,
+      },
+    },
+  },
+});
 ```
 
 ## Token Creators
@@ -495,57 +494,56 @@ To help defining tokens in a type-safe way, you can use the following helpers:
 ### `defineTokens`
 
 ```ts
-import { defineTokens } from '@pandacss/dev'
+import { defineTokens } from "@pandacss/dev";
 
 const theme = {
   tokens: defineTokens({
     colors: {
-      primary: { value: '#ff0000' }
-    }
-  })
-}
+      primary: { value: "#ff0000" },
+    },
+  }),
+};
 ```
 
 You can also use this function to define tokens in a separate file:
 
 ```ts filename="tokens/colors.ts"
-import { defineTokens } from '@pandacss/dev'
+import { defineTokens } from "@pandacss/dev";
 
 export const colors = defineTokens.colors({
-  primary: { value: '#ff0000' }
-})
+  primary: { value: "#ff0000" },
+});
 ```
 
 ### `defineSemanticTokens`
 
 ```ts
-import { defineSemanticTokens } from '@pandacss/dev'
+import { defineSemanticTokens } from "@pandacss/dev";
 
 const theme = {
   semanticTokens: defineSemanticTokens({
     colors: {
       primary: {
-        value: { _light: '{colors.blue.400}', _dark: '{colors.blue.200}' }
-      }
-    }
-  })
-}
+        value: { _light: "{colors.blue.400}", _dark: "{colors.blue.200}" },
+      },
+    },
+  }),
+};
 ```
 
 You can also use this function to define tokens in a separate file:
 
 ```ts filename="tokens/colors.semantic.ts"
-import { defineSemanticTokens } from '@pandacss/dev'
+import { defineSemanticTokens } from "@pandacss/dev";
 
 export const colors = defineSemanticTokens.colors({
   primary: {
-    value: { _light: '{colors.blue.400}', _dark: '{colors.blue.200}' }
-  }
-})
+    value: { _light: "{colors.blue.400}", _dark: "{colors.blue.200}" },
+  },
+});
 ```
 
 ---
-
 
 ## Deprecations
 
@@ -559,18 +557,18 @@ before removing them from the codebase.
 To deprecate a utility, set the `deprecated` property to `true` in the `utility` object.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   utilities: {
     ta: {
       deprecated: true,
       transform(value) {
-        return { textAlign: value }
-      }
-    }
-  }
-})
+        return { textAlign: value };
+      },
+    },
+  },
+});
 ```
 
 ## Deprecating a Token
@@ -578,17 +576,17 @@ export default defineConfig({
 To deprecate a token, set the `deprecated` property to `true` in the `token` object.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     tokens: {
       spacing: {
-        lg: { value: '8px', deprecated: true }
-      }
-    }
-  }
-})
+        lg: { value: "8px", deprecated: true },
+      },
+    },
+  },
+});
 ```
 
 ## Deprecating a Pattern
@@ -596,15 +594,15 @@ export default defineConfig({
 To deprecate a pattern, set the `deprecated` property to true in the `pattern` definition.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   patterns: {
     customStack: {
-      deprecated: true
-    }
-  }
-})
+      deprecated: true,
+    },
+  },
+});
 ```
 
 ## Deprecating a Recipe
@@ -612,17 +610,17 @@ export default defineConfig({
 To deprecate a recipe, set the `deprecated` property to true in the `recipe` definition.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     recipes: {
       btn: {
-        deprecated: true
-      }
-    }
-  }
-})
+        deprecated: true,
+      },
+    },
+  },
+});
 ```
 
 ## Custom Deprecation Messages
@@ -631,35 +629,34 @@ You can also provide a custom deprecation message by setting the `deprecated` pr
 message.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     tokens: {
       colors: {
-        primary: { value: 'blue.500', deprecated: 'use `blue.600` instead' }
-      }
-    }
-  }
-})
+        primary: { value: "blue.500", deprecated: "use `blue.600` instead" },
+      },
+    },
+  },
+});
 ```
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     recipes: {
       btn: {
-        deprecated: 'will be removed in v2.0'
-      }
-    }
-  }
-})
+        deprecated: "will be removed in v2.0",
+      },
+    },
+  },
+});
 ```
 
 ---
-
 
 ## Customizing Patterns
 
@@ -691,78 +688,78 @@ const config = {
   patterns: {
     extend: {
       scrollable: {
-        description: 'A container that allows for scrolling',
+        description: "A container that allows for scrolling",
         defaultValues: {
-          direction: 'vertical',
-          hideScrollbar: true
+          direction: "vertical",
+          hideScrollbar: true,
         },
         properties: {
           // The direction of the scroll
-          direction: { type: 'enum', value: ['horizontal', 'vertical'] },
+          direction: { type: "enum", value: ["horizontal", "vertical"] },
           // Whether to hide the scrollbar
-          hideScrollbar: { type: 'boolean' }
+          hideScrollbar: { type: "boolean" },
         },
         // disallow the `overflow` property (in TypeScript)
-        blocklist: ['overflow'],
+        blocklist: ["overflow"],
         transform(props) {
-          const { direction, hideScrollbar, ...rest } = props
+          const { direction, hideScrollbar, ...rest } = props;
           return {
-            overflow: 'auto',
-            height: direction === 'horizontal' ? '100%' : 'auto',
-            width: direction === 'vertical' ? '100%' : 'auto',
-            scrollbarWidth: hideScrollbar ? 'none' : 'auto',
-            WebkitOverflowScrolling: 'touch',
-            '&::-webkit-scrollbar': {
-              display: hideScrollbar ? 'none' : 'auto'
+            overflow: "auto",
+            height: direction === "horizontal" ? "100%" : "auto",
+            width: direction === "vertical" ? "100%" : "auto",
+            scrollbarWidth: hideScrollbar ? "none" : "auto",
+            WebkitOverflowScrolling: "touch",
+            "&::-webkit-scrollbar": {
+              display: hideScrollbar ? "none" : "auto",
             },
-            ...rest
-          }
-        }
-      }
-    }
-  }
-}
+            ...rest,
+          };
+        },
+      },
+    },
+  },
+};
 ```
 
 Then you can run the following command to generate the pattern JS code:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun panda codegen
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 Now you can import the pattern and use it in your application:
 
 ```js
-import { scrollable } from '../styled-system/patterns'
+import { scrollable } from "../styled-system/patterns";
 
 const App = () => {
   return (
-    <div className={scrollable({ direction: 'vertical', hideScrollbar: true })}>
+    <div className={scrollable({ direction: "vertical", hideScrollbar: true })}>
       <div>Scrollable content</div>
     </div>
-  )
-}
+  );
+};
 ```
 
 ## Customizing Built-in Patterns
@@ -771,7 +768,7 @@ You can extend the [default patterns](/docs/concepts/patterns#predefined-pattern
 property in the config.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   patterns: {
@@ -780,40 +777,40 @@ export default defineConfig({
       flex: {
         properties: {
           // only allow row and column
-          direction: { type: 'enum', value: ['row', 'column'] },
-          jsx: ['Flex', 'CustomFlex'] // 👈 match the `CustomFlex` component to this pattern
-        }
-      }
-    }
-  }
-})
+          direction: { type: "enum", value: ["row", "column"] },
+          jsx: ["Flex", "CustomFlex"], // 👈 match the `CustomFlex` component to this pattern
+        },
+      },
+    },
+  },
+});
 ```
 
 Then you can run the following command to update the pattern JS code:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn panda codegen
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun panda codegen
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ## Minimal setup
@@ -822,7 +819,6 @@ If you want to use Panda with the bare minimum, without any of the defaults, you
 [here](/docs/guides/minimal-setup)
 
 ---
-
 
 ## Presets
 
@@ -834,11 +830,11 @@ By default, any configuration you add in your own `panda.config.js` file is smar
 You can specify a preset in your `panda.config.js` file by using the `presets` option:
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
-  presets: ['@acmecorp/panda-preset']
-})
+  presets: ["@acmecorp/panda-preset"],
+});
 ```
 
 ## Creating a preset
@@ -850,34 +846,34 @@ Presets are also valid Panda configuration objects, taking a similar shape to th
 
 ```js
 // my-preset.js
-import { definePreset } from '@pandacss/dev'
+import { definePreset } from "@pandacss/dev";
 
 export default definePreset({
-  name: 'my-preset',
+  name: "my-preset",
   theme: {
     tokens: {
       colors: {
         rose: {
-          50: { value: '#fff1f2' },
+          50: { value: "#fff1f2" },
           // ...
-          800: { value: '#9f2233' }
-        }
-      }
-    }
-  }
-})
+          800: { value: "#9f2233" },
+        },
+      },
+    },
+  },
+});
 ```
 
 You can then use this preset in your `panda.config.ts` file:
 
 ```js
 // panda.config.ts
-import { defineConfig } from '@pandacss/dev'
-import myPreset from './my-preset'
+import { defineConfig } from "@pandacss/dev";
+import myPreset from "./my-preset";
 
 export default defineConfig({
-  presets: [myPreset]
-})
+  presets: [myPreset],
+});
 ```
 
 The available keys for a preset are:
@@ -898,18 +894,18 @@ this. In cases where they're asynchronous; panda allows promises, given that the
 ```js
 // my-preset.js
 export default async function myPreset() {
-  const roseColors = await getRoseColors()
+  const roseColors = await getRoseColors();
 
   return definePreset({
-    name: 'my-preset',
+    name: "my-preset",
     theme: {
       tokens: {
         colors: {
-          rose: roseColors
-        }
-      }
-    }
-  })
+          rose: roseColors,
+        },
+      },
+    },
+  });
 }
 ```
 
@@ -917,12 +913,12 @@ You can then use this preset in your `panda.config.ts` file:
 
 ```js
 // panda.config.ts
-import { defineConfig } from '@pandacss/dev'
-import myPreset from './my-preset'
+import { defineConfig } from "@pandacss/dev";
+import myPreset from "./my-preset";
 
 export default defineConfig({
-  presets: [myPreset()]
-})
+  presets: [myPreset()],
+});
 ```
 
 ## Which panda presets will be included ?
@@ -935,13 +931,13 @@ export default defineConfig({
   you'll have to include that preset by yourself like so:
 
 ```ts
-import pandaPreset from '@pandacss/preset-panda'
-import { defineConfig } from '@pandacss/dev'
+import pandaPreset from "@pandacss/preset-panda";
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
-  presets: [pandaPreset, myCustomPreset]
-})
+  presets: [pandaPreset, myCustomPreset],
+});
 ```
 
 ## Minimal setup
@@ -950,7 +946,6 @@ If you want to use Panda with the bare minimum, without any of the defaults, you
 [here](/docs/guides/minimal-setup)
 
 ---
-
 
 ## Theme
 
@@ -964,17 +959,17 @@ to match your design requirements.
 Use the `breakpoints` key in the `theme` section of your Panda config file to customize the default breakpoints.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       breakpoints: {
-        '3xl': '1800px'
-      }
-    }
-  }
-})
+        "3xl": "1800px",
+      },
+    },
+  },
+});
 ```
 
 Panda ships with the following breakpoints by default:
@@ -990,19 +985,19 @@ Use the `colors` key in the `token` section of your Panda config file to customi
 > We recommend using numeric ranges from `50` to `900`
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       tokens: {
         colors: {
-          brand: { value: '#EA8433' }
-        }
-      }
-    }
-  }
-})
+          brand: { value: "#EA8433" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Panda comes with a handful of colors picked from the amazing Tailwind color palette
@@ -1014,19 +1009,19 @@ Panda comes with a handful of colors picked from the amazing Tailwind color pale
 Use the `spacing` key in the theme section of your Panda config file to customize the default spacing values.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       tokens: {
         spacing: {
-          gutter: { value: '32px' }
-        }
-      }
-    }
-  }
-})
+          gutter: { value: "32px" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Panda ships with the following spacing tokens by default:
@@ -1052,19 +1047,19 @@ Panda ships with the following shadows by default:
 Use the `sizes` key in the theme section of your Panda config file to customize the default sizing values.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       tokens: {
         sizes: {
-          icon: { value: '24px' }
-        }
-      }
-    }
-  }
-})
+          icon: { value: "24px" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Panda ships with the following sizing tokens by default, in addition with the values from the default Panda
@@ -1077,19 +1072,19 @@ Panda ships with the following sizing tokens by default, in addition with the va
 Use the `fonts` key in the theme object to customize the default font families.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       tokens: {
         fonts: {
-          marketing: { value: 'Inter Variable' }
-        }
-      }
-    }
-  }
-})
+          marketing: { value: "Inter Variable" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Panda ships with the following font families tokens by default:
@@ -1101,19 +1096,19 @@ Panda ships with the following font families tokens by default:
 Use the `fontSizes` key in the theme object to customize the default font sizes.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       tokens: {
         fontSizes: {
-          big: { value: '80px' }
-        }
-      }
-    }
-  }
-})
+          big: { value: "80px" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Panda ships with the following font size tokens by default:
@@ -1125,24 +1120,24 @@ Panda ships with the following font size tokens by default:
 Use the `keyframes` key in the `theme` section of your Panda config file to customize the default keyframes.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       keyframes: {
         fadein: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' }
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
         },
         fadeout: {
-          '0%': { opacity: '1' },
-          '100%': { opacity: '0' }
-        }
-      }
-    }
-  }
-})
+          "0%": { opacity: "1" },
+          "100%": { opacity: "0" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Panda ships with the following keyframes by default:
@@ -1155,7 +1150,6 @@ If you want to use Panda with the bare minimum, without any of the defaults, you
 [here](/docs/guides/minimal-setup)
 
 ---
-
 
 ## Utilities
 
@@ -1179,67 +1173,67 @@ Here are the properties you need to define or customize a utility:
 Let's say we want to create new property `br` that applies a border radius to an element.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   utilities: {
     extend: {
       br: {
-        className: 'rounded', // css({ br: "sm" }) => rounded-sm
-        values: 'radii', // connect values to the radii tokens
+        className: "rounded", // css({ br: "sm" }) => rounded-sm
+        values: "radii", // connect values to the radii tokens
         transform(value) {
-          return { borderRadius: value }
-        }
-      }
-    }
-  }
-})
+          return { borderRadius: value };
+        },
+      },
+    },
+  },
+});
 ```
 
 Then you can run the following command to generate the pattern JS code:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-    <Tab>
-      ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
       pnpm panda codegen
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       npm panda codegen
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       yarn panda codegen
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       bun panda codegen
-      ```
-    </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+      `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 Now, we can use the `br` property in our components.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
-  return <div className={css({ br: 'sm' })} />
+  return <div className={css({ br: "sm" })} />;
 }
 ```
 
 or use in JSX style props
 
 ```jsx
-import { styled } from '../styled-system/jsx'
+import { styled } from "../styled-system/jsx";
 
 function App() {
-  return <styled.div br="sm" />
+  return <styled.div br="sm" />;
 }
 ```
 
@@ -1249,82 +1243,82 @@ Let's say we want to create a new property `borderX` that applies a limited set 
 automatically applies the border color.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   utilities: {
     extend: {
       borderX: {
-        values: ['1px', '2px', '4px'],
-        shorthand: 'bx', // `bx` or `borderX` can be used
+        values: ["1px", "2px", "4px"],
+        shorthand: "bx", // `bx` or `borderX` can be used
         transform(value, { token }) {
           return {
             borderInlineWidth: value,
-            borderColor: token('colors.red.200') // read the css variable for red.200
-          }
-        }
-      }
-    }
-  }
-})
+            borderColor: token("colors.red.200"), // read the css variable for red.200
+          };
+        },
+      },
+    },
+  },
+});
 ```
 
 Now, we can use the `borderX` or `bx` property in our components.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
-  return <div className={css({ borderX: '2px' })} />
+  return <div className={css({ borderX: "2px" })} />;
 }
 ```
 
 ### Using mapped values
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   utilities: {
     extend: {
       borderX: {
-        values: { small: '2px', medium: '5px' },
-        shorthand: 'bx',
+        values: { small: "2px", medium: "5px" },
+        shorthand: "bx",
         transform(value, { token }) {
           return {
             borderTopWidth: value,
-            borderTopColor: token('colors.gray.400')
-          }
-        }
-      }
-    }
-  }
-})
+            borderTopColor: token("colors.gray.400"),
+          };
+        },
+      },
+    },
+  },
+});
 ```
 
 ### Using boolean values
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   utilities: {
     extend: {
       truncate: {
-        className: 'truncate',
-        values: { type: 'boolean' },
+        className: "truncate",
+        values: { type: "boolean" },
         transform(value) {
-          if (!value) return {}
+          if (!value) return {};
           return {
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap'
-          }
-        }
-      }
-    }
-  }
-})
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          };
+        },
+      },
+    },
+  },
+});
 ```
 
 ## Minimal setup
@@ -1333,5 +1327,3 @@ If you want to use Panda with the bare minimum, without any of the defaults, you
 [here](/docs/guides/minimal-setup)
 
 ---
-
-

@@ -1,4 +1,5 @@
 # Component: TaskDetailView
+
 - **Minimum Viable Component:** Detail-tab view for one task record with status, ownership, description, and linked work context.
 - **Props Interface:** `taskId: string`.
 - **Sub-components:** `ContextActionDropdown`.

@@ -1,10 +1,10 @@
 /** Daemon-owned loader for custom worktree plugins declared in global config. */
-import type { WorktreePluginReference } from "@goddard-ai/schema/config"
-import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
-import hashSum from "hash-sum"
 import { access } from "node:fs/promises"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
+import type { WorktreePluginReference } from "@goddard-ai/schema/config"
+import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
+import hashSum from "hash-sum"
 
 import type { ConfigManager, RootConfigSnapshot } from "../config-manager.ts"
 import { createLogger } from "../logging.ts"

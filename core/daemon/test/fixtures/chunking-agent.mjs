@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import * as acp from "@agentclientprotocol/sdk"
 import { randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
+import * as acp from "@agentclientprotocol/sdk"
 
 class ChunkingFixtureAgent {
   constructor(connection) {

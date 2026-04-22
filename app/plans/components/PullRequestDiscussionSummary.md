@@ -1,4 +1,5 @@
 # Component: PullRequestDiscussionSummary
+
 - **Minimum Viable Component:** Collapsed discussion block that shows only the author description, a reveal-more control, the last reply from a non-author, and the last reply from the author.
 - **Props Interface:** `authorDescription: { body, updatedAt }`; `hiddenCommentCount: number`; `lastNonAuthorReply: { author, body, createdAt } | null`; `lastAuthorReply: { author, body, createdAt } | null`; `isExpanded: boolean`; `onRevealFullDiscussion: () => void`.
 - **Sub-components:** None.

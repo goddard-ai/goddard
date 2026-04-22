@@ -2,8 +2,8 @@ import {
   layoutWithLines,
   prepareWithSegments,
   type LayoutLine,
-  type PrepareOptions,
   type PreparedTextWithSegments,
+  type PrepareOptions,
 } from "@chenglou/pretext"
 
 import type {

@@ -1,4 +1,5 @@
 # Component: PullRequestListRow
+
 - **Minimum Viable Component:** One pull request row that shows repository, number, title, author, managed status, and updated time.
 - **Props Interface:** `pullRequest: { owner, repo, number, title, author, status, managed, updatedAt }`; `isSelected: boolean`; `onSelect: (ref) => void`; `onOpen: (ref) => void`.
 - **Sub-components:** None.

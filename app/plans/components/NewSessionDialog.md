@@ -1,4 +1,5 @@
 # Component: NewSessionDialog
+
 - **Minimum Viable Component:** Modal-only session launch flow for starting one new coding agent session with project, action, and initial prompt context.
 - **Props Interface:** `isOpen: boolean`; `defaultProjectPath?: string | null`; `defaultActionId?: string | null`; `currentTabContext?: { kind, projectPath?, entityRef? } | null`; `onClose: () => void`; `onSubmitted: (sessionId) => void`.
 - **Sub-components:** `SessionLaunchForm`, `ContextActionDropdown`.

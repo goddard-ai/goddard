@@ -1,118 +1,129 @@
 /** Shared custom dropdown used by the launch-session selectors. */
-import { Popover } from "@ark-ui/react/popover"
-import { css, cx } from "@goddard-ai/styled-system/css"
-import { token } from "@goddard-ai/styled-system/tokens"
-import { ChevronDown, LoaderCircle } from "lucide-react"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { Popover } from "@ark-ui/react/popover";
+import { css, cx } from "@goddard-ai/styled-system/css";
+import { token } from "@goddard-ai/styled-system/tokens";
+import { ChevronDown, LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "preact/hooks";
 
-import { GoodTooltip } from "~/lib/good-tooltip.tsx"
-import { MenuPortal } from "~/lib/menu-portal.tsx"
-import styles from "./select-menu.style.ts"
+import { GoodTooltip } from "~/lib/good-tooltip.tsx";
+import { MenuPortal } from "~/lib/menu-portal.tsx";
+import styles from "./select-menu.style.ts";
 
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
-  value: string
-  label: string
-  detail?: string | null
-  searchText?: string | null
-  disabled?: boolean
-}
+  value: string;
+  label: string;
+  detail?: string | null;
+  searchText?: string | null;
+  disabled?: boolean;
+};
 
 /** Props for one shared launch-session selector menu. */
 export type SessionInputSelectProps = {
-  label: string
-  placeholder: string
-  shortcut?: string | null
-  value: string | null
-  items: readonly SessionInputSelectItem[]
-  open: boolean
-  disabled?: boolean
-  filterable?: boolean
-  loading?: boolean
-  onOpenChange: (open: boolean) => void
-  onValueChange: (value: string) => void
-}
+  label: string;
+  placeholder: string;
+  shortcut?: string | null;
+  value: string | null;
+  items: readonly SessionInputSelectItem[];
+  open: boolean;
+  disabled?: boolean;
+  filterable?: boolean;
+  loading?: boolean;
+  onOpenChange: (open: boolean) => void;
+  onValueChange: (value: string) => void;
+};
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
 export function SessionInputSelect(props: SessionInputSelectProps) {
-  const menuRef = useRef<HTMLDivElement | null>(null)
-  const filterInputRef = useRef<HTMLInputElement | null>(null)
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const filterInputRef = useRef<HTMLInputElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  const [query, setQuery] = useState("")
-  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const isMenuOpen = props.open
-  const isFilterable = props.filterable ?? false
-  const selectedItem = props.items.find((item) => item.value === props.value) ?? null
-  const normalizedQuery = query.trim().toLowerCase()
+  const isMenuOpen = props.open;
+  const isFilterable = props.filterable ?? false;
+  const selectedItem =
+    props.items.find((item) => item.value === props.value) ?? null;
+  const normalizedQuery = query.trim().toLowerCase();
   const filteredItems =
     !isFilterable || normalizedQuery.length === 0
       ? props.items
       : props.items.filter((item) => {
           const searchableText = [item.label, item.detail, item.searchText]
-            .filter((value): value is string => typeof value === "string" && value.length > 0)
+            .filter(
+              (value): value is string =>
+                typeof value === "string" && value.length > 0,
+            )
             .join("\n")
-            .toLowerCase()
+            .toLowerCase();
 
-          return searchableText.includes(normalizedQuery)
-        })
-  const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
-  const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
-  const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
-  const triggerLabel = selectedItem?.label ?? props.placeholder
-  const ariaLabel = `${props.label}: ${triggerLabel}`
+          return searchableText.includes(normalizedQuery);
+        });
+  const filteredItemSignature = filteredItems
+    .map((item) => item.value)
+    .join("\n");
+  const highlightedItem =
+    filteredItems[selectedIndex] ?? filteredItems[0] ?? null;
+  const shortcutLabel = props.shortcut
+    ? `${props.shortcut} opens menu`
+    : "No shortcut assigned";
+  const triggerLabel = selectedItem?.label ?? props.placeholder;
+  const ariaLabel = `${props.label}: ${triggerLabel}`;
 
   useEffect(() => {
     if (!isMenuOpen) {
-      setQuery("")
-      setSelectedIndex(0)
-      return
+      setQuery("");
+      setSelectedIndex(0);
+      return;
     }
 
-    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-  }, [filteredItemSignature, isFilterable, isMenuOpen, props.value])
+    const currentIndex = filteredItems.findIndex(
+      (item) => item.value === props.value,
+    );
+    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
+  }, [filteredItemSignature, isFilterable, isMenuOpen, props.value]);
 
   useEffect(() => {
     if (!isMenuOpen || !highlightedItem) {
-      return
+      return;
     }
 
     itemRefs.current[highlightedItem.value]?.scrollIntoView({
       block: "nearest",
-    })
-  }, [highlightedItem?.value, isMenuOpen])
+    });
+  }, [highlightedItem?.value, isMenuOpen]);
 
   function moveHighlightedIndex(step: 1 | -1) {
     if (filteredItems.length === 0) {
-      setSelectedIndex(0)
-      return
+      setSelectedIndex(0);
+      return;
     }
 
     setSelectedIndex((currentIndex) => {
-      const nextIndex = currentIndex + step
+      const nextIndex = currentIndex + step;
 
       if (nextIndex < 0) {
-        return filteredItems.length - 1
+        return filteredItems.length - 1;
       }
 
       if (nextIndex >= filteredItems.length) {
-        return 0
+        return 0;
       }
 
-      return nextIndex
-    })
+      return nextIndex;
+    });
   }
 
   function commitSelection(item: SessionInputSelectItem | null) {
     if (!item || item.disabled) {
-      return
+      return;
     }
 
-    props.onValueChange(item.value)
-    props.onOpenChange(false)
+    props.onValueChange(item.value);
+    props.onOpenChange(false);
   }
 
   return (
@@ -121,7 +132,9 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
       closeOnInteractOutside={true}
       finalFocusEl={() => triggerRef.current}
       immediate={true}
-      initialFocusEl={() => (isFilterable ? filterInputRef.current : menuRef.current)}
+      initialFocusEl={() =>
+        isFilterable ? filterInputRef.current : menuRef.current
+      }
       lazyMount={true}
       modal={isFilterable}
       open={isMenuOpen}
@@ -135,7 +148,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
       }}
       unmountOnExit={true}
       onOpenChange={(details) => {
-        props.onOpenChange(details.open)
+        props.onOpenChange(details.open);
       }}
     >
       <div class={styles.field}>
@@ -160,22 +173,27 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                 type="button"
                 onKeyDown={(event) => {
                   if (props.disabled) {
-                    return
+                    return;
                   }
 
                   if (event.key === "ArrowDown") {
-                    event.preventDefault()
-                    props.onOpenChange(true)
-                    return
+                    event.preventDefault();
+                    props.onOpenChange(true);
+                    return;
                   }
 
                   if (event.key === "Escape" && isMenuOpen) {
-                    event.preventDefault()
-                    props.onOpenChange(false)
+                    event.preventDefault();
+                    props.onOpenChange(false);
                   }
                 }}
               >
-                <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
+                <span
+                  class={cx(
+                    styles.triggerLabel,
+                    !selectedItem && styles.triggerPlaceholder,
+                  )}
+                >
                   {triggerLabel}
                 </span>
                 <ChevronDown
@@ -183,7 +201,9 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                   size={16}
                   strokeWidth={2.2}
                   style={{
-                    color: isMenuOpen ? token.var("colors.text") : token.var("colors.muted"),
+                    color: isMenuOpen
+                      ? token.var("colors.text")
+                      : token.var("colors.muted"),
                     transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
                   }}
                 />
@@ -200,30 +220,30 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
               tabIndex={isFilterable ? undefined : -1}
               onKeyDown={(event) => {
                 if (isFilterable) {
-                  return
+                  return;
                 }
 
                 if (event.key === "ArrowDown") {
-                  event.preventDefault()
-                  moveHighlightedIndex(1)
-                  return
+                  event.preventDefault();
+                  moveHighlightedIndex(1);
+                  return;
                 }
 
                 if (event.key === "ArrowUp") {
-                  event.preventDefault()
-                  moveHighlightedIndex(-1)
-                  return
+                  event.preventDefault();
+                  moveHighlightedIndex(-1);
+                  return;
                 }
 
                 if (event.key === "Enter") {
-                  event.preventDefault()
-                  commitSelection(highlightedItem)
-                  return
+                  event.preventDefault();
+                  commitSelection(highlightedItem);
+                  return;
                 }
 
                 if (event.key === "Escape") {
-                  event.preventDefault()
-                  props.onOpenChange(false)
+                  event.preventDefault();
+                  props.onOpenChange(false);
                 }
               }}
             >
@@ -234,30 +254,30 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                   placeholder="Type to filter"
                   value={query}
                   onInput={(event) => {
-                    setQuery(event.currentTarget.value)
+                    setQuery(event.currentTarget.value);
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown") {
-                      event.preventDefault()
-                      moveHighlightedIndex(1)
-                      return
+                      event.preventDefault();
+                      moveHighlightedIndex(1);
+                      return;
                     }
 
                     if (event.key === "ArrowUp") {
-                      event.preventDefault()
-                      moveHighlightedIndex(-1)
-                      return
+                      event.preventDefault();
+                      moveHighlightedIndex(-1);
+                      return;
                     }
 
                     if (event.key === "Enter") {
-                      event.preventDefault()
-                      commitSelection(highlightedItem)
-                      return
+                      event.preventDefault();
+                      commitSelection(highlightedItem);
+                      return;
                     }
 
                     if (event.key === "Escape") {
-                      event.preventDefault()
-                      props.onOpenChange(false)
+                      event.preventDefault();
+                      props.onOpenChange(false);
                     }
                   }}
                 />
@@ -272,7 +292,10 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
                       gap: "8px",
                     })}
                   >
-                    <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+                    <LoaderCircle
+                      class={css({ animation: "spin 1s linear infinite" })}
+                      size={14}
+                    />
                     Loading options...
                   </span>
                 </div>
@@ -281,28 +304,31 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
               ) : (
                 <ul class={styles.menuList}>
                   {filteredItems.map((item, index) => {
-                    const isActive = index === selectedIndex
+                    const isActive = index === selectedIndex;
 
                     return (
                       <li key={item.value}>
                         <button
                           ref={(element) => {
-                            itemRefs.current[item.value] = element
+                            itemRefs.current[item.value] = element;
                           }}
-                          class={cx(styles.menuButton, isActive && styles.menuButtonActive)}
+                          class={cx(
+                            styles.menuButton,
+                            isActive && styles.menuButtonActive,
+                          )}
                           disabled={item.disabled}
                           type="button"
                           onMouseEnter={() => {
-                            setSelectedIndex(index)
+                            setSelectedIndex(index);
                           }}
                           onClick={() => {
-                            commitSelection(item)
+                            commitSelection(item);
                           }}
                         >
                           {item.label}
                         </button>
                       </li>
-                    )
+                    );
                   })}
                 </ul>
               )}
@@ -311,5 +337,5 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
         </MenuPortal>
       </div>
     </Popover.Root>
-  )
+  );
 }

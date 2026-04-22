@@ -1,4 +1,5 @@
 # Component: SessionListRow
+
 - **Minimum Viable Component:** One recency-sorted session row that shows repository identity, generated title, raw status with UI label mapping, updated time, initiative or blocker text, and quick actions.
 - **Props Interface:** `session: { id, repositoryHost, repositorySlug, title, rawStatus, displayStatusLabel, updatedAt, initiative, blockedReason }`; `isSelected: boolean`; `onToggleSelected: (id) => void`; `onOpenChat: (id) => void`; `onOpenDiff: (id) => void`; `onOpenPullRequest: (id) => void`.
 - **Sub-components:** None.

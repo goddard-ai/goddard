@@ -1,16 +1,16 @@
 /** Shared, pre-styled tooltip primitives for app UI chrome. */
-import { Portal } from "@ark-ui/react/portal"
-import { Tooltip } from "@ark-ui/react/tooltip"
+import { Portal } from "@ark-ui/react/portal";
+import { Tooltip } from "@ark-ui/react/tooltip";
 
-import styles from "./good-tooltip.style.ts"
+import styles from "./good-tooltip.style.ts";
 
 /** Attaches the shared app tooltip treatment to one trigger element. */
 export function GoodTooltip(props: {
-  ariaLabel?: string
-  children: preact.ComponentChildren
-  content: preact.ComponentChildren
-  side?: "top" | "right" | "bottom" | "left"
-  sideOffset?: number
+  ariaLabel?: string;
+  children: preact.ComponentChildren;
+  content: preact.ComponentChildren;
+  side?: "top" | "right" | "bottom" | "left";
+  sideOffset?: number;
 }) {
   return (
     <Tooltip.Root
@@ -31,5 +31,5 @@ export function GoodTooltip(props: {
         </Tooltip.Positioner>
       </Portal>
     </Tooltip.Root>
-  )
+  );
 }

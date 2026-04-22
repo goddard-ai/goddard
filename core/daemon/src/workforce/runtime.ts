@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import type { WorkforceDescription, WorkforceEventEnvelope } from "@goddard-ai/schema/daemon"
 import type {
   WorkforceAgentConfig,
@@ -8,7 +9,6 @@ import type {
   WorkforceRequestRecord,
   WorkforceStatus,
 } from "@goddard-ai/schema/workforce"
-import { join } from "node:path"
 import { concat, dedent } from "radashi"
 import { v7 as uuidv7 } from "uuid"
 
@@ -647,7 +647,10 @@ export class WorkforceRuntime {
   private async appendEvent(
     event: DistributiveOmit<WorkforceLedgerEvent, "id"> & { id?: string },
   ): Promise<void> {
-    const eventWithId = { ...event, id: event.id ?? uuidv7() } as WorkforceLedgerEvent
+    const eventWithId = {
+      ...event,
+      id: event.id ?? uuidv7(),
+    } as WorkforceLedgerEvent
     await appendWorkforceLedgerEvent(this.#rootDir, eventWithId)
     this.#events.push(eventWithId)
     applyWorkforceEvent(this.#projection.requests, eventWithId)

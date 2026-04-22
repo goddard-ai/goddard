@@ -1,8 +1,8 @@
 /** Daemon-owned ACP registry cache and fallback catalog service. */
-import { getAcpRegistryCacheDir } from "@goddard-ai/paths/node"
-import type { AdapterCatalogEntry } from "@goddard-ai/schema/daemon"
 import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getAcpRegistryCacheDir } from "@goddard-ai/paths/node"
+import type { AdapterCatalogEntry } from "@goddard-ai/schema/daemon"
 
 import { readAdapterCatalogFromRegistryDir } from "./registry-catalog.ts"
 import { ACPRegistryFallbackCatalog } from "./registry-fallback.ts"

@@ -1,9 +1,9 @@
 /** Git-backed sync-session host for one primary checkout and one linked session worktree. */
-import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import { randomUUID } from "node:crypto"
-import { mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 
 import { runCommand } from "./process.ts"
 
@@ -284,7 +284,9 @@ async function unmountLocked(metadata: WorktreeSyncMetadata) {
   }
 
   await deleteSessionRefs(metadata.primaryDir, metadata.sessionId)
-  await rm(resolveMetadataPath(metadata.commonDir, metadata.sessionId), { force: true })
+  await rm(resolveMetadataPath(metadata.commonDir, metadata.sessionId), {
+    force: true,
+  })
   return warnings
 }
 
@@ -433,7 +435,9 @@ async function removeScratchWorktree(primaryDir: string, scratchDir: string) {
 }
 
 async function resolveConflictedPaths(cwd: string) {
-  const unresolved = await runGit(cwd, ["ls-files", "-u"], { allowFailure: true })
+  const unresolved = await runGit(cwd, ["ls-files", "-u"], {
+    allowFailure: true,
+  })
   const paths = new Set<string>()
 
   for (const line of unresolved.stdout.split("\n")) {
@@ -529,7 +533,9 @@ async function applySnapshot(cwd: string, snapshotOid: string) {
 
 async function captureSnapshot(cwd: string, label: string) {
   const previousTop = await resolveRefOid(cwd, "refs/stash")
-  await runGit(cwd, ["stash", "push", "-u", "-m", label], { allowFailure: true })
+  await runGit(cwd, ["stash", "push", "-u", "-m", label], {
+    allowFailure: true,
+  })
   const nextTop = await resolveRefOid(cwd, "refs/stash")
   if (!nextTop || nextTop === previousTop) {
     return null
@@ -657,17 +663,23 @@ async function resolveHeadOid(cwd: string) {
 }
 
 async function resolveSymbolicRef(cwd: string) {
-  const result = await runGit(cwd, ["symbolic-ref", "-q", "HEAD"], { allowFailure: true })
+  const result = await runGit(cwd, ["symbolic-ref", "-q", "HEAD"], {
+    allowFailure: true,
+  })
   return result.stdout.trim() || null
 }
 
 async function resolveRefOid(cwd: string, refName: string) {
-  const result = await runGit(cwd, ["rev-parse", "--verify", "-q", refName], { allowFailure: true })
+  const result = await runGit(cwd, ["rev-parse", "--verify", "-q", refName], {
+    allowFailure: true,
+  })
   return result.stdout.trim() || null
 }
 
 async function resolveGitCommonDir(cwd: string) {
-  const result = await runGit(cwd, ["rev-parse", "--git-common-dir"], { allowFailure: true })
+  const result = await runGit(cwd, ["rev-parse", "--git-common-dir"], {
+    allowFailure: true,
+  })
   const value = result.stdout.trim()
   return value ? await normalizePath(resolve(cwd, value)) : null
 }
@@ -765,7 +777,9 @@ function sleep(ms: number) {
 }
 
 async function objectExists(cwd: string, objectRef: string) {
-  const result = await runGit(cwd, ["cat-file", "-e", objectRef], { allowFailure: true })
+  const result = await runGit(cwd, ["cat-file", "-e", objectRef], {
+    allowFailure: true,
+  })
   return result.status === 0
 }
 

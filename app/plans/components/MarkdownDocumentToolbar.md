@@ -1,4 +1,5 @@
 # Component: MarkdownDocumentToolbar
+
 - **Minimum Viable Component:** Toolbar for markdown document mode switching, save or revert actions, contextual actions, and document metadata display.
 - **Props Interface:** `document: { title, pathOrKey, updatedAt }`; `mode: "view" | "edit"`; `isDirty: boolean`; `isSaving: boolean`; `readOnly: boolean`; `currentTabContext?: { kind, projectPath?, entityRef? } | null`; `onModeChange: (mode) => void`; `onSave: () => void`; `onRevert: () => void`; `onActionSelect?: (actionId) => void`.
 - **Sub-components:** `ContextActionDropdown`.

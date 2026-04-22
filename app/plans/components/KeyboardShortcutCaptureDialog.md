@@ -1,4 +1,5 @@
 # Component: KeyboardShortcutCaptureDialog
+
 - **Minimum Viable Component:** Lightweight modal for recording one shortcut command’s replacement bindings and confirming or discarding that draft.
 - **Props Interface:** `commandId: string`; `label: string`; `whenClause?: string`; `currentExpressions: readonly string[]`; `isOpen: boolean`; `onSave: (expressions: readonly string[] | null) => void`; `onClose: () => void`.
 - **Sub-components:** None.

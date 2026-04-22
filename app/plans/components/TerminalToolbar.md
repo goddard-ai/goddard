@@ -1,4 +1,5 @@
 # Component: TerminalToolbar
+
 - **Minimum Viable Component:** Toolbar showing terminal title, cwd, connection state, contextual actions, and session-level controls such as restart and clear.
 - **Props Interface:** `terminal: { title, cwdLabel, connectionState, exitCode? }`; `currentTabContext?: { kind, projectPath?, entityRef? } | null`; `canRestart: boolean`; `onRestart: () => void`; `onClear: () => void`; `onClose: () => void`; `onActionSelect?: (actionId) => void`.
 - **Sub-components:** `ContextActionDropdown`.

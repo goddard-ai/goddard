@@ -1,18 +1,18 @@
-import type { DaemonSession } from "@goddard-ai/sdk"
+import type { DaemonSession } from "@goddard-ai/sdk";
 
-import { ListRow } from "./list-row.tsx"
-import styles from "./list.style.ts"
+import { ListRow } from "./list-row.tsx";
+import styles from "./list.style.ts";
 
 export function SessionsList(props: {
-  errorMessage?: string | null
-  listStatus?: "idle" | "loading" | "ready" | "error"
-  onOpenChanges: (sessionId: DaemonSession["id"]) => void
-  onOpenSession: (sessionId: DaemonSession["id"]) => void
-  searchQuery: string
-  sessions: readonly DaemonSession[]
+  errorMessage?: string | null;
+  listStatus?: "idle" | "loading" | "ready" | "error";
+  onOpenChanges: (sessionId: DaemonSession["id"]) => void;
+  onOpenSession: (sessionId: DaemonSession["id"]) => void;
+  searchQuery: string;
+  sessions: readonly DaemonSession[];
 }) {
   if (props.listStatus === "loading" && props.sessions.length === 0) {
-    return <div class={styles.loading}>Loading sessions...</div>
+    return <div class={styles.loading}>Loading sessions...</div>;
   }
 
   if (props.listStatus === "error" && props.sessions.length === 0) {
@@ -21,11 +21,12 @@ export function SessionsList(props: {
         <div class={styles.errorContent}>
           <h2 class={styles.title}>Couldn&apos;t load sessions</h2>
           <p class={styles.body}>
-            {props.errorMessage ?? "The daemon-backed session list request failed."}
+            {props.errorMessage ??
+              "The daemon-backed session list request failed."}
           </p>
         </div>
       </div>
-    )
+    );
   }
 
   if (props.sessions.length === 0) {
@@ -33,7 +34,9 @@ export function SessionsList(props: {
       <div class={styles.empty}>
         <div class={styles.emptyContent}>
           <h2 class={styles.title}>
-            {props.searchQuery.trim().length > 0 ? "No matching sessions" : "No sessions yet"}
+            {props.searchQuery.trim().length > 0
+              ? "No matching sessions"
+              : "No sessions yet"}
           </h2>
           <p class={styles.description}>
             {props.searchQuery.trim().length > 0
@@ -42,7 +45,7 @@ export function SessionsList(props: {
           </p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -51,15 +54,15 @@ export function SessionsList(props: {
         <li key={session.id}>
           <ListRow
             onOpen={() => {
-              props.onOpenSession(session.id)
+              props.onOpenSession(session.id);
             }}
             onOpenChanges={() => {
-              props.onOpenChanges(session.id)
+              props.onOpenChanges(session.id);
             }}
             session={session}
           />
         </li>
       ))}
     </ul>
-  )
+  );
 }

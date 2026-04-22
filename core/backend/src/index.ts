@@ -1,6 +1,6 @@
+import type { Socket } from "node:net"
 import { type RepoEvent } from "@goddard-ai/schema/backend"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
-import type { Socket } from "node:net"
 
 import { type BackendControlPlane } from "./api/control-plane.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"

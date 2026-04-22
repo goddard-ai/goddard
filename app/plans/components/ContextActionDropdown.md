@@ -1,4 +1,5 @@
 # Component: ContextActionDropdown
+
 - **Minimum Viable Component:** Filterable dropdown of global actions and context-applicable actions for the current tab or launch form.
 - **Props Interface:** `currentTabContext?: { kind, projectPath?, entityRef? } | null`; `mode: "global" | "contextual" | "combined"`; `selectedActionId?: string | null`; `placeholder?: string`; `onSelect: (actionId) => void`; `onOpenManageActions?: () => void`.
 - **Sub-components:** None.

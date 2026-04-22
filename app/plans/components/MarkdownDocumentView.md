@@ -1,4 +1,5 @@
 # Component: MarkdownDocumentView
+
 - **Minimum Viable Component:** Document surface for viewing and editing markdown content with project breadcrumbs, a mode-aware toolbar, and a `MarkdownEditorSurface` integration boundary.
 - **Props Interface:** `documentId: string`; `source: { kind, pathOrKey }`; `initialMode?: "view" | "edit"`; `readOnly?: boolean`.
 - **Sub-components:** `DocumentBreadcrumbs`, `MarkdownDocumentToolbar`, `MarkdownEditorSurface`.

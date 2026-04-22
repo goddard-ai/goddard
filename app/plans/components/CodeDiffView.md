@@ -1,4 +1,5 @@
 # Component: CodeDiffView
+
 - **Minimum Viable Component:** Reusable wrapper around `@pierre/diffs/react` that renders one normalized diff source in a review-friendly layout.
 - **Props Interface:** `diffSource: { id, label, kind, metadata }`; `files: array of diff file records`; `selectedFilePath?: string`; `presentationMode?: "unified" | "split"`; `onSelectFile?: (path) => void`.
 - **Sub-components:** None.

@@ -28,12 +28,12 @@ Use the `ark` factory when you need your own elements that still behave like Ark
 Share `ids` across composed components when multiple primitives need to refer to the same DOM identity.
 
 ```tsx
-import { Avatar } from '@ark-ui/react/avatar'
-import { Tooltip } from '@ark-ui/react/tooltip'
-import { useId } from 'react'
+import { Avatar } from "@ark-ui/react/avatar";
+import { Tooltip } from "@ark-ui/react/tooltip";
+import { useId } from "react";
 
 export const TooltipWithAvatar = () => {
-  const id = useId()
+  const id = useId();
 
   return (
     <Tooltip.Root ids={{ trigger: id }}>
@@ -47,8 +47,8 @@ export const TooltipWithAvatar = () => {
         <Tooltip.Content>Segun Adebayo is online</Tooltip.Content>
       </Tooltip.Positioner>
     </Tooltip.Root>
-  )
-}
+  );
+};
 ```
 
 ## Refs
@@ -56,11 +56,11 @@ export const TooltipWithAvatar = () => {
 Attach refs to the rendered part when parent code needs measurement, focus management, or imperative DOM access.
 
 ```tsx
-import { Slider } from '@ark-ui/react/slider'
-import { useRef } from 'react'
+import { Slider } from "@ark-ui/react/slider";
+import { useRef } from "react";
 
 export const MySlider = () => {
-  const rootRef = useRef<HTMLDivElement | null>(null)
-  return <Slider.Root ref={rootRef}>{/* ... */}</Slider.Root>
-}
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  return <Slider.Root ref={rootRef}>{/* ... */}</Slider.Root>;
+};
 ```

@@ -35,32 +35,32 @@ You will be asked a few questions, answer them as follows:
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Configure PostCSS
@@ -105,21 +105,21 @@ Make sure that all of the paths of your Angular components are included in the `
 `panda.config.ts` file.
 
 ```js {8,17} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx}"],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -135,28 +135,28 @@ Add this code to an `src/index.css` file and import it in the root component of 
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -165,23 +165,22 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 `src/app.component.ts` file.
 
 ```typescript filename="src/app.component.ts"
-import { Component } from '@angular/core'
-import { css } from '../styled-system/css'
+import { Component } from "@angular/core";
+import { css } from "../styled-system/css";
 
 @Component({
-  selector: 'app-root',
+  selector: "app-root",
   standalone: true,
-  template: ` <div [class]="redBg"></div> `
+  template: ` <div [class]="redBg"></div> `,
 })
 export class App {
-  redBg = css({ bg: 'red.400' })
+  redBg = css({ bg: "red.400" });
 }
 ```
 
 </Steps>
 
 ---
-
 
 ## Using Astro
 
@@ -198,32 +197,32 @@ This guide shows you how to set up Panda CSS in an Astro project using our dedic
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -252,15 +251,18 @@ Open your `package.json` file and update the `scripts` section as follows:
 Add your panda config to your `panda.config.js` file, or wherever panda is configured in your project.
 
 ```js {6}
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   preflight: true,
   // define the content to scan 👇🏻
-  include: ['./src/**/*.{ts,tsx,js,jsx,astro}', './pages/**/*.{ts,tsx,js,jsx,astro}'],
+  include: [
+    "./src/**/*.{ts,tsx,js,jsx,astro}",
+    "./pages/**/*.{ts,tsx,js,jsx,astro}",
+  ],
   exclude: [],
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -297,28 +299,28 @@ module.exports = {
 Run your build process with `npm run dev` or whatever command is configured in your package.json file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -348,7 +350,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 
 ---
 
-
 ## Panda CLI
 
 An alternative way to use Panda is by running the Panda CLI tool.
@@ -360,32 +361,32 @@ This guide shows you how to use Panda as an alternative approach by running the 
 ### Install Panda
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Configure the content
@@ -393,14 +394,14 @@ This guide shows you how to use Panda as an alternative approach by running the 
 Add the paths to all of your JavaScript or TypeScript code where you intend to use panda.
 
 ```js {5}
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   preflight: true,
-  include: ['./src/**/*.{ts,tsx,js,jsx}', './pages/**/*.{ts,tsx,js,jsx}'],
+  include: ["./src/**/*.{ts,tsx,js,jsx}", "./pages/**/*.{ts,tsx,js,jsx}"],
   exclude: [],
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Update package.json scripts
@@ -427,10 +428,10 @@ For each Panda run, it emits the generated CSS at the `styled-system/styles.css`
 component of your project.
 
 ```jsx {1}
-import './styled-system/styles.css'
+import "./styled-system/styles.css";
 
 export function App() {
-  return <div>Page</div>
+  return <div>Page</div>;
 }
 ```
 
@@ -439,11 +440,11 @@ export function App() {
 Run the CLI tool to scan your JavaScript and TypeScript files for style properties and call expressions.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
-    # Run it once
-    pnpm panda
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+
+````bash # Run it once
+pnpm panda
 
     # Run it in watch mode
     pnpm panda --watch
@@ -489,12 +490,12 @@ Use the generated style utilities in your code and panda will extract them to th
 build process.
 
 ```jsx
-import { css } from './styled-system/css'
+import { css } from "./styled-system/css";
 
 export function App() {
-  return <div className={css({ bg: 'red.400' })} />
+  return <div className={css({ bg: "red.400" })} />;
 }
-```
+````
 
 </Steps>
 
@@ -512,7 +513,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 
 ---
 
-
 ## Using Ember
 
 Easily use Panda with Ember with our dedicated integration.
@@ -529,28 +529,28 @@ To get started, we will need to create a new Ember project using the `embroider`
 `test-app` but you can name it whatever you want.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']} variant="code">
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dlx ember-cli@latest new test-app --embroider --no-welcome --typescript --pnpm
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx ember-cli@latest new test-app --embroider --no-welcome --typescript
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dlx ember-cli@latest new test-app --embroider --no-welcome --typescript --yarn
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bunx ember-cli@latest new test-app --embroider --no-welcome --typescript --skip-install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 Enter the newly created directory:
@@ -565,32 +565,32 @@ Install panda and its peer dependencies, as well as `postcss-loader`. Run the in
 `panda.config.ts` and `postcss.config.js` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev postcss postcss-loader
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev postcss postcss-loader
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev postcss postcss-loader
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev postcss postcss-loader
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Enable PostCSS support
@@ -598,32 +598,32 @@ Install panda and its peer dependencies, as well as `postcss-loader`. Run the in
 In your `ember-cli-build.js` file, configure PostCSS to process your CSS files.
 
 ```js {12-23} filename="ember-cli-build.js"
-'use strict'
+"use strict";
 
-const EmberApp = require('ember-cli/lib/broccoli/ember-app')
+const EmberApp = require("ember-cli/lib/broccoli/ember-app");
 
 module.exports = function (defaults) {
   const app = new EmberApp(defaults, {
     // Add options here
-  })
+  });
 
-  const { Webpack } = require('@embroider/webpack')
-  return require('@embroider/compat').compatBuild(app, Webpack, {
+  const { Webpack } = require("@embroider/webpack");
+  return require("@embroider/compat").compatBuild(app, Webpack, {
     packagerOptions: {
       webpackConfig: {
         module: {
           rules: [
             {
               test: /\.css$/i,
-              use: ['postcss-loader']
-            }
-          ]
-        }
-      }
-    }
+              use: ["postcss-loader"],
+            },
+          ],
+        },
+      },
+    },
     // other options...
-  })
-}
+  });
+};
 ```
 
 ### Configure the PostCSS plugin
@@ -633,11 +633,11 @@ Add the `.embroider` folder to the allow list so the Panda PostCSS plugin picks 
 ```js {4} filename="postcss.config.cjs"
 module.exports = {
   plugins: {
-    '@pandacss/dev/postcss': {
-      allow: [/node_modules\/.embroider/]
-    }
-  }
-}
+    "@pandacss/dev/postcss": {
+      allow: [/node_modules\/.embroider/],
+    },
+  },
+};
 ```
 
 ### Update package.json scripts
@@ -666,29 +666,29 @@ file. Set the `outdir` to the app folder so the code can be imported in your Emb
 accordingly to reflect your app name.
 
 ```js {8,19-22} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./app/**/*.{js,ts,gjs,gts}'],
+  include: ["./app/**/*.{js,ts,gjs,gts}"],
 
   // Files to exclude
   exclude: [],
 
   // Useful for theme customization
   theme: {
-    extend: {}
+    extend: {},
   },
 
   // The output directory for your css system
-  outdir: 'app/styled-system',
+  outdir: "app/styled-system",
 
   // Configure the import map to use your project name
-  importMap: 'test-app/styled-system'
-})
+  importMap: "test-app/styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -702,19 +702,19 @@ Add this code to an `app/index.css` file.
 Next, import the file in your `app/app.ts` file.
 
 ```ts {5} filename="app/app.ts"
-import Application from '@ember/application'
-import Resolver from 'ember-resolver'
-import loadInitializers from 'ember-load-initializers'
-import config from 'test-app/config/environment'
-import 'test-app/index.css'
+import Application from "@ember/application";
+import Resolver from "ember-resolver";
+import loadInitializers from "ember-load-initializers";
+import config from "test-app/config/environment";
+import "test-app/index.css";
 
 export default class App extends Application {
-  modulePrefix = config.modulePrefix
-  podModulePrefix = config.podModulePrefix
-  Resolver = Resolver
+  modulePrefix = config.modulePrefix;
+  podModulePrefix = config.podModulePrefix;
+  Resolver = Resolver;
 }
 
-loadInitializers(App, config.modulePrefix)
+loadInitializers(App, config.modulePrefix);
 ```
 
 ### Start your build process
@@ -722,28 +722,28 @@ loadInitializers(App, config.modulePrefix)
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm start
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run start
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn start
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun start
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -751,11 +751,11 @@ Run the following command to start your development server.
 Now you can start using Panda CSS in your project.
 
 ```ts filename="app/components/hello-panda.ts"
-import Component from '@glimmer/component'
-import { css } from 'test-app/styled-system/css'
+import Component from "@glimmer/component";
+import { css } from "test-app/styled-system/css";
 
 export default class HelloPanda extends Component {
-  style = css({ fontSize: '5xl', fontWeight: 'bold' })
+  style = css({ fontSize: "5xl", fontWeight: "bold" });
 }
 ```
 
@@ -764,9 +764,9 @@ export default class HelloPanda extends Component {
 ```
 
 ```hbs {5} filename="app/templates/application.hbs"
-{{page-title 'TestApp'}}
+{{page-title "TestApp"}}
 
-<h2 id='title'>Welcome to Ember</h2>
+<h2 id="title">Welcome to Ember</h2>
 
 <HelloPanda />
 
@@ -792,7 +792,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Gatsby
 
@@ -846,18 +845,18 @@ Include the plugin in your `gatsby-config.ts` file. Check out the
 [official documentation](https://www.gatsbyjs.com/plugins/gatsby-plugin-postcss/) for more information.
 
 ```ts {9} filename="gatsby-config.ts"
-import type { GatsbyConfig } from 'gatsby'
+import type { GatsbyConfig } from "gatsby";
 
 const config: GatsbyConfig = {
   siteMetadata: {
     title: `My Gatsby Site`,
-    siteUrl: `https://www.yourdomain.tld`
+    siteUrl: `https://www.yourdomain.tld`,
   },
   graphqlTypegen: true,
-  plugins: [`gatsby-plugin-postcss`]
-}
+  plugins: [`gatsby-plugin-postcss`],
+};
 
-export default config
+export default config;
 ```
 
 ### Update package.json scripts
@@ -893,15 +892,18 @@ file.
 > avoid infinite loop due to generated `src/gatsby-types.d.ts`.
 
 ```js {6} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   preflight: true,
   // Where to look for your css declarations
-  include: ['./src/pages/*.{js,jsx,ts,tsx}', './src/components/**/*.{js,jsx,ts,tsx}'],
+  include: [
+    "./src/pages/*.{js,jsx,ts,tsx}",
+    "./src/components/**/*.{js,jsx,ts,tsx}",
+  ],
   exclude: [],
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -917,7 +919,7 @@ Create `src/styles/index.css` file and add the following content:
 Create a `gatsby-browser.ts` file in the root of your project and add the following content:
 
 ```ts filename="gatsby-browser.ts"
-import './src/styles/index.css'
+import "./src/styles/index.css";
 ```
 
 ### Start your build process
@@ -934,17 +936,21 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 `src/pages/index.tsx` file.
 
 ```tsx {3,7} filename="src/pages/index.tsx"
-import * as React from 'react'
-import type { HeadFC, PageProps } from 'gatsby'
-import { css } from '../../styled-system/css'
+import * as React from "react";
+import type { HeadFC, PageProps } from "gatsby";
+import { css } from "../../styled-system/css";
 
 const IndexPage: React.FC<PageProps> = () => {
-  return <div className={css({ fontSize: '2xl', fontWeight: 'bold' })}>Hello 🐼!</div>
-}
+  return (
+    <div className={css({ fontSize: "2xl", fontWeight: "bold" })}>
+      Hello 🐼!
+    </div>
+  );
+};
 
-export default IndexPage
+export default IndexPage;
 
-export const Head: HeadFC = () => <title>Home Page</title>
+export const Head: HeadFC = () => <title>Home Page</title>;
 ```
 
 </Steps>
@@ -962,7 +968,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Next.js
 
@@ -989,30 +994,30 @@ CLI. We will name our project `test-app` but you can name it whatever you want.
 
 If you don't enter any parameter, the CLI will guide you through the process of creating a new Next.js app.
 
-  <Tabs items={['pnpm', 'npm', 'yarn', 'bun']} variant="code">
-    {/* <!-- prettier-ignore-start --> */}
-    <Tab>
-      ```bash
+<Tabs items={['pnpm', 'npm', 'yarn', 'bun']} variant="code">
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
       pnpm dlx create-next-app@latest --use-pnpm
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       npx create-next-app@latest --use-npm
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       yarn dlx create-next-app@latest --use-yarn
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       bunx create next-app@latest --use-bun
-      ```
-    </Tab>
-    {/* <!-- prettier-ignore-end --> */}
-  </Tabs>
+      `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
+</Tabs>
 
 You will be asked a few questions, answer them as follows:
 
@@ -1053,34 +1058,34 @@ cd test-app
 
 Install Panda CSS dependency using your favorite package manager.
 
-  <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-    <Tab>
-      ```bash
+<Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
       pnpm install -D @pandacss/dev
       pnpm panda init --postcss
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       npm install -D @pandacss/dev
       npx panda init --postcss
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       yarn add -D @pandacss/dev
       yarn panda init --postcss
-      ```
-    </Tab>
-    <Tab>
-      ```bash
+      `
+</Tab>
+<Tab>
+`bash
       bun add -D @pandacss/dev
       bun panda init --postcss
-      ```
-    </Tab>
-  {/* <!-- prettier-ignore-end --> */}
-  </Tabs>
+      `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
+</Tabs>
 
 `panda init --postcss` command will automatically create a `postcss.config.js` file at the root of your project with the
 following code:
@@ -1088,9 +1093,9 @@ following code:
 ```js {3}
 module.exports = {
   plugins: {
-    '@pandacss/dev/postcss': {}
-  }
-}
+    "@pandacss/dev/postcss": {},
+  },
+};
 ```
 
 For advanced configuration follow the Next.js PostCSS guide to set up a custom PostCSS configuration by referring to
@@ -1126,18 +1131,21 @@ file.
 <RouteSwitchContent value="app-dir">
 
 ```ts {7} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
   // Where to look for your css declarations
-  include: ['./src/components/**/*.{ts,tsx,js,jsx}', './src/app/**/*.{ts,tsx,js,jsx}'],
+  include: [
+    "./src/components/**/*.{ts,tsx,js,jsx}",
+    "./src/app/**/*.{ts,tsx,js,jsx}",
+  ],
   // Files to exclude
   exclude: [],
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 </RouteSwitchContent>
@@ -1145,18 +1153,21 @@ export default defineConfig({
 <RouteSwitchContent value="pages-dir">
 
 ```ts {7} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
   // Where to look for your css declarations
-  include: ['./src/components/**/*.{ts,tsx,js,jsx}', './src/pages/**/*.{ts,tsx,js,jsx}'],
+  include: [
+    "./src/components/**/*.{ts,tsx,js,jsx}",
+    "./src/pages/**/*.{ts,tsx,js,jsx}",
+  ],
   // Files to exclude
   exclude: [],
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 </RouteSwitchContent>
@@ -1195,36 +1206,38 @@ export default defineConfig({
 Make sure that you import the `globals.css` file in your `src/app/layout.tsx` file as follows:
 
 ```tsx {1} filename="./src/app/layout.tsx"
-import './globals.css'
-import type { Metadata } from 'next'
-import localFont from 'next/font/local'
+import "./globals.css";
+import type { Metadata } from "next";
+import localFont from "next/font/local";
 
 const geistSans = localFont({
-  src: './fonts/GeistVF.woff',
-  variable: '--font-geist-sans',
-  weight: '100 900'
-})
+  src: "./fonts/GeistVF.woff",
+  variable: "--font-geist-sans",
+  weight: "100 900",
+});
 const geistMono = localFont({
-  src: './fonts/GeistMonoVF.woff',
-  variable: '--font-geist-mono',
-  weight: '100 900'
-})
+  src: "./fonts/GeistMonoVF.woff",
+  variable: "--font-geist-mono",
+  weight: "100 900",
+});
 
 export const metadata: Metadata = {
-  title: 'Create Next App',
-  description: 'Generated by create next app'
-}
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
 
 export default function RootLayout({
-  children
+  children,
 }: Readonly<{
-  children: React.ReactNode
+  children: React.ReactNode;
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
+      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        {children}
+      </body>
     </html>
-  )
+  );
 }
 ```
 
@@ -1234,11 +1247,11 @@ export default function RootLayout({
 Make sure that you import the `globals.css` file in your `src/pages/_app.tsx` file as follows:
 
 ```tsx {1} filename="./src/pages/_app.tsx"
-import '../styles/globals.css'
-import type { AppProps } from 'next/app'
+import "../styles/globals.css";
+import type { AppProps } from "next/app";
 
 export default function App({ Component, pageProps }: AppProps) {
-  return <Component {...pageProps} />
+  return <Component {...pageProps} />;
 }
 ```
 
@@ -1254,10 +1267,14 @@ export default function App({ Component, pageProps }: AppProps) {
 </RouteSwitchContent>
 
 ```tsx
-import { css } from '../../styled-system/css'
+import { css } from "../../styled-system/css";
 
 export default function Home() {
-  return <div className={css({ fontSize: '2xl', fontWeight: 'bold' })}>Hello 🐼!</div>
+  return (
+    <div className={css({ fontSize: "2xl", fontWeight: "bold" })}>
+      Hello 🐼!
+    </div>
+  );
 }
 ```
 
@@ -1266,28 +1283,28 @@ export default function Home() {
 Run the following command to start the development server:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-{/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-{/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
@@ -1346,7 +1363,6 @@ yet", update your tsconfig to use es6 or higher:
 
 ---
 
-
 ## Using Nuxt
 
 Easily use Panda with Nuxt with the vue integration.
@@ -1362,54 +1378,54 @@ Learn how to set up Panda CSS in a Nuxt project using PostCSS.
 To get started, we will need to create a new Nuxt project using npx.
 
 <Tabs items={['npx', 'pnpm', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npx nuxi@latest init test-app
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     pnpm dlx nuxi@latest init test-app
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bunx nuxi@latest init test-app
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 Enter the newly created directory and install the dependencies.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     cd test-app
     pnpm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     npm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     yarn install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     bun install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -1417,32 +1433,32 @@ Enter the newly created directory and install the dependencies.
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -1473,21 +1489,25 @@ Make sure that all of the paths of your Vue components are included in the `incl
 file.
 
 ```js {8,17} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./app.vue', './components/**/*.{js,jsx,ts,tsx,vue}', './pages/**/*.{js,jsx,ts,tsx,vue}'],
+  include: [
+    "./app.vue",
+    "./components/**/*.{js,jsx,ts,tsx,vue}",
+    "./pages/**/*.{js,jsx,ts,tsx,vue}",
+  ],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -1503,22 +1523,22 @@ Add this code to an `assets/css/global.css` file.
 Add the following configuration to the `nuxt.config.ts` file
 
 ```js {1-2,5-17}  filename="nuxt.config.ts"
-import { createResolver } from '@nuxt/kit'
-const { resolve } = createResolver(import.meta.url)
+import { createResolver } from "@nuxt/kit";
+const { resolve } = createResolver(import.meta.url);
 
 export default defineNuxtConfig({
   alias: {
-    'styled-system': resolve('./styled-system')
+    "styled-system": resolve("./styled-system"),
   },
 
-  css: ['@/assets/css/global.css'],
+  css: ["@/assets/css/global.css"],
 
   postcss: {
     plugins: {
-      '@pandacss/dev/postcss': {}
-    }
-  }
-})
+      "@pandacss/dev/postcss": {},
+    },
+  },
+});
 ```
 
 With the above we've performed the following:
@@ -1532,28 +1552,28 @@ With the above we've performed the following:
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -1576,7 +1596,6 @@ import { css } from "styled-system/css";
 
 ---
 
-
 ## Using PostCSS
 
 Installing Panda as a PostCSS plugin is the recommended way to integrate it with your project.
@@ -1590,32 +1609,32 @@ project.
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev postcss
     pnpm panda init -p
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev postcss
     npx panda init -p
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev postcss
     yarn panda init -p
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev postcss
     bun panda init -p
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Add Panda to your PostCSS config
@@ -1625,9 +1644,9 @@ Add panda to your `postcss.config.cjs` file, or wherever PostCSS is configured i
 ```js
 module.exports = {
   plugins: {
-    '@pandacss/dev/postcss': {}
-  }
-}
+    "@pandacss/dev/postcss": {},
+  },
+};
 ```
 
 ### Configure the content
@@ -1635,14 +1654,14 @@ module.exports = {
 Add your panda config to your `panda.config.js` file, or wherever panda is configured in your project.
 
 ```js {5}
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   preflight: true,
-  include: ['./src/**/*.{ts,tsx,js,jsx}', './pages/**/*.{ts,tsx,js,jsx}'],
+  include: ["./src/**/*.{ts,tsx,js,jsx}", "./pages/**/*.{ts,tsx,js,jsx}"],
   exclude: [],
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Update package.json scripts
@@ -1676,16 +1695,17 @@ Add this code to an `index.css` file which is going to be the root css of your p
 Run your build process by feeding the [root css](#configure-the-entry-css-with-layers) to PostCSS in your preferred way.
 
 <Tabs items={['CLI', 'JS API']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     postcss -o output.css index.css
-    ```
-  </Tab>
-  <Tab>
-    ```js
-    const postcss = require("postcss");
-    const fs = require("fs");
+    `
+</Tab>
+<Tab>
+
+````js
+const postcss = require("postcss");
+const fs = require("fs");
 
     fs.readFile("index.css", (err, css) => {
       postcss()
@@ -1708,12 +1728,12 @@ Run your build process by feeding the [root css](#configure-the-entry-css-with-l
 Use the generated style utilities in your code and panda will extract them to the generated CSS file.
 
 ```jsx
-import { css } from './styled-system/css'
+import { css } from "./styled-system/css";
 
 export function App() {
-  return <div className={css({ bg: 'red.400' })} />
+  return <div className={css({ bg: "red.400" })} />;
 }
-```
+````
 
   </Steps>
 
@@ -1731,7 +1751,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 
 ---
 
-
 ## Using Preact
 
 Easily use Panda with Preact with our dedicated integration.
@@ -1747,20 +1766,20 @@ This guide shows you how to set up Panda CSS in a Preact project using PostCSS.
 To get started, we will need to create a new Preact project using `typescript` template.
 
 <Tabs items={['npm', 'yarn']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npx preact-cli create typescript test-app
     cd test-app
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx preact-cli create typescript test-app --yarn
     cd test-app
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -1768,20 +1787,20 @@ To get started, we will need to create a new Preact project using `typescript` t
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['npm', 'yarn']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -1813,15 +1832,15 @@ Make sure that all of the paths of your Preact components are included in the `i
 file.
 
 ```js {6} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   preflight: true,
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx}', './pages/**/*.{js,jsx,ts,tsx}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx}", "./pages/**/*.{js,jsx,ts,tsx}"],
   exclude: [],
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -1837,18 +1856,18 @@ Add this code to an `src/style/index.css` file imported in the root component of
 Run the following command to start your development server.
 
 <Tabs items={['npm', 'yarn']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -1857,14 +1876,18 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 `src/routes/home/index.tsx` file.
 
 ```tsx filename="src/routes/home/index.tsx"
-import { h } from 'preact'
-import { css } from '../../../styled-system/css'
+import { h } from "preact";
+import { css } from "../../../styled-system/css";
 
 const Home = () => {
-  return <div class={css({ fontSize: '2xl', fontWeight: 'bold', pt: '56px' })}>Hello 🐼!</div>
-}
+  return (
+    <div class={css({ fontSize: "2xl", fontWeight: "bold", pt: "56px" })}>
+      Hello 🐼!
+    </div>
+  );
+};
 
-export default Home
+export default Home;
 ```
 
 </Steps>
@@ -1882,7 +1905,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Qwik
 
@@ -1899,28 +1921,28 @@ Learn how to set up Panda CSS in a Qwik project using PostCSS.
 To get started, we will need to create a new Qwik project using `typescript` template.
 
 <Tabs items={['npm', 'pnpm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npm create qwik@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     pnpm create qwik@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn create qwik
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun create qwik@latest
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install and Configure Panda
@@ -1928,28 +1950,28 @@ To get started, we will need to create a new Qwik project using `typescript` tem
 Qwik provies an official script that installs panda and configures it for you.
 
 <Tabs items={['npm', 'pnpm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npm run qwik add pandacss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     pnpm qwik add pandacss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn qwik add pandacss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun qwik add pandacss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ## Start your build process
@@ -1957,28 +1979,28 @@ Qwik provies an official script that installs panda and configures it for you.
 Run the following command to start your development server.
 
 <Tabs items={['npm', 'pnpm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -1986,23 +2008,23 @@ Run the following command to start your development server.
 Now you can start using Panda CSS in your project.
 
 ```tsx filename="src/routes/layout.tsx"
-import { component$, Slot } from '@builder.io/qwik'
-import { routeLoader$ } from '@builder.io/qwik-city'
-import { css } from 'styled-system/css'
+import { component$, Slot } from "@builder.io/qwik";
+import { routeLoader$ } from "@builder.io/qwik-city";
+import { css } from "styled-system/css";
 
 export const useServerTimeLoader = routeLoader$(() => {
   return {
-    date: new Date().toISOString()
-  }
-})
+    date: new Date().toISOString(),
+  };
+});
 
 export default component$(() => {
   return (
-    <div class={css({ p: '10', bg: 'gray.900', h: 'dvh' })}>
+    <div class={css({ p: "10", bg: "gray.900", h: "dvh" })}>
       <Slot />
     </div>
-  )
-})
+  );
+});
 ```
 
 </Steps>
@@ -2020,7 +2042,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using React Router
 
@@ -2040,28 +2061,28 @@ To get started, we will need to create a new React Router project using the offi
 If you don't enter any parameter, the CLI will guide you through the process of creating a new React Router app.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dlx create-react-router@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx create-react-router@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dlx create-react-router@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bunx create-react-router@latest
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 You will be asked a few questions, answer these as follows:
@@ -2078,32 +2099,32 @@ You will be asked a few questions, answer these as follows:
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -2134,21 +2155,21 @@ Make sure that all of the paths of your React Router components are included in 
 `panda.config.ts` file.
 
 ```ts {5,8,11} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./app/**/{**,.client,.server}/**/*.{js,jsx,ts,tsx}'],
+  include: ["./app/**/{**,.client,.server}/**/*.{js,jsx,ts,tsx}"],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Replace TailwindCSS with PandaCSS
@@ -2156,20 +2177,20 @@ export default defineConfig({
 Update the `vite.config.ts` file to use PandaCSS instead of TailwindCSS.
 
 ```ts {3,10} filename="vite.config.ts"
-import { reactRouter } from '@react-router/dev/vite'
-import autoprefixer from 'autoprefixer'
-import pandacss from '@pandacss/dev/postcss'
-import { defineConfig } from 'vite'
-import tsconfigPaths from 'vite-tsconfig-paths'
+import { reactRouter } from "@react-router/dev/vite";
+import autoprefixer from "autoprefixer";
+import pandacss from "@pandacss/dev/postcss";
+import { defineConfig } from "vite";
+import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   css: {
     postcss: {
-      plugins: [pandacss, autoprefixer]
-    }
+      plugins: [pandacss, autoprefixer],
+    },
   },
-  plugins: [reactRouter(), tsconfigPaths()]
-})
+  plugins: [reactRouter(), tsconfigPaths()],
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -2188,15 +2209,22 @@ Please note the `?url` query parameter in the `import` statement. This is requir
 to the CSS file.
 
 ```tsx {4,8} filename="app/root.tsx"
-import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router'
+import {
+  isRouteErrorResponse,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+} from "react-router";
 
-import type { Route } from './+types/root'
-import stylesheet from './app.css?url'
+import type { Route } from "./+types/root";
+import stylesheet from "./app.css?url";
 
 export const links: LinksFunction = () => [
   // ...
-  { rel: 'stylesheet', href: stylesheet }
-]
+  { rel: "stylesheet", href: stylesheet },
+];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -2213,7 +2241,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Scripts />
       </body>
     </html>
-  )
+  );
 }
 ```
 
@@ -2222,28 +2250,28 @@ export function Layout({ children }: { children: React.ReactNode }) {
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -2252,19 +2280,24 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 `app/routes/home.tsx` file.
 
 ```tsx filename="app/routes/home.tsx"
-import type { Route } from './+types/home'
-import { css } from 'styled-system/css'
+import type { Route } from "./+types/home";
+import { css } from "styled-system/css";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: 'New React Router App' }, { name: 'description', content: 'Welcome to React Router!' }]
+  return [
+    { title: "New React Router App" },
+    { name: "description", content: "Welcome to React Router!" },
+  ];
 }
 
 export default function Home() {
   return (
     <div>
-      <h1 className={css({ fontSize: '2xl', fontWeight: 'bold' })}>Welcome to the home page</h1>
+      <h1 className={css({ fontSize: "2xl", fontWeight: "bold" })}>
+        Welcome to the home page
+      </h1>
     </div>
-  )
+  );
 }
 ```
 
@@ -2283,7 +2316,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Redwood
 
@@ -2392,14 +2424,14 @@ Make sure that all of the paths of your Redwood components are included in the `
 `panda.config.ts` file.
 
 ```js {5} filename="web/config/panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   preflight: true,
-  include: ['./src/**/*.{js,jsx,ts,tsx}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx}"],
   exclude: [],
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -2423,10 +2455,10 @@ yarn rw dev
 Now you can start using Panda CSS in your project.
 
 ```tsx filename="web/src/pages/HomePage/HomePage.tsx"
-import { css } from 'styled-system/css'
-import { stack } from 'styled-system/patterns'
-import { Link, routes } from '@redwoodjs/router'
-import { MetaTags } from '@redwoodjs/web'
+import { css } from "styled-system/css";
+import { stack } from "styled-system/patterns";
+import { Link, routes } from "@redwoodjs/router";
+import { MetaTags } from "@redwoodjs/web";
 
 const HomePage = () => {
   return (
@@ -2435,19 +2467,21 @@ const HomePage = () => {
 
       <div
         className={stack({
-          bg: { base: 'red.300', _hover: 'red.500' },
-          py: '12',
-          px: '8'
+          bg: { base: "red.300", _hover: "red.500" },
+          py: "12",
+          px: "8",
         })}
       >
-        <h1 className={css({ fontSize: '4xl', fontWeight: 'bold' })}>HomePage</h1>
+        <h1 className={css({ fontSize: "4xl", fontWeight: "bold" })}>
+          HomePage
+        </h1>
         <p>Hello World</p>
       </div>
     </>
-  )
-}
+  );
+};
 
-export default HomePage
+export default HomePage;
 ```
 
 </Steps>
@@ -2465,7 +2499,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Remix
 
@@ -2485,28 +2518,28 @@ To get started, we will need to create a new Remix project using the official
 If you don't enter any parameter, the CLI will guide you through the process of creating a new Remix app.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dlx create-remix@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx create-remix@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dlx create-remix@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bunx create-remix@latest
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 You will be asked a few questions, answer these as follows:
@@ -2523,32 +2556,32 @@ You will be asked a few questions, answer these as follows:
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -2579,21 +2612,24 @@ Make sure that all of the paths of your Remix components are included in the `in
 file.
 
 ```js {5, 11} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./app/routes/**/*.{ts,tsx,js,jsx}', './app/components/**/*.{ts,tsx,js,jsx}'],
+  include: [
+    "./app/routes/**/*.{ts,tsx,js,jsx}",
+    "./app/components/**/*.{ts,tsx,js,jsx}",
+  ],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -2610,12 +2646,19 @@ Please note the `?url` query parameter in the `import` statement. This is requir
 to the CSS file.
 
 ```tsx filename="app/root.tsx" {4,6}
-import type { LinksFunction } from '@remix-run/node'
-import { Links, LiveReload, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react'
+import type { LinksFunction } from "@remix-run/node";
+import {
+  Links,
+  LiveReload,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+} from "@remix-run/react";
 
-import styles from './index.css?url'
+import styles from "./index.css?url";
 
-export const links: LinksFunction = () => [{ rel: 'stylesheet', href: styles }]
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export default function App() {
   return (
@@ -2633,7 +2676,7 @@ export default function App() {
         <LiveReload />
       </body>
     </html>
-  )
+  );
 }
 ```
 
@@ -2642,28 +2685,28 @@ export default function App() {
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -2672,15 +2715,22 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 `app/routes/_index.tsx` file.
 
 ```tsx filename="app/routes/_index.tsx"
-import type { MetaFunction } from '@remix-run/node'
-import { css } from 'styled-system/css'
+import type { MetaFunction } from "@remix-run/node";
+import { css } from "styled-system/css";
 
 export const meta: MetaFunction = () => {
-  return [{ title: 'New Remix App' }, { name: 'description', content: 'Welcome to Remix!' }]
-}
+  return [
+    { title: "New Remix App" },
+    { name: "description", content: "Welcome to Remix!" },
+  ];
+};
 
 export default function Index() {
-  return <div className={css({ fontSize: '2xl', fontWeight: 'bold' })}>Hello 🐼!</div>
+  return (
+    <div className={css({ fontSize: "2xl", fontWeight: "bold" })}>
+      Hello 🐼!
+    </div>
+  );
 }
 ```
 
@@ -2704,12 +2754,11 @@ config file.
 ```js filename="remix.config.js"
 export default {
   // ...
-  watchPaths: ['panda.config.ts']
-}
+  watchPaths: ["panda.config.ts"],
+};
 ```
 
 ---
-
 
 ## Using Rsbuild
 
@@ -2726,36 +2775,36 @@ This guide shows you how to set up Panda CSS in a Rsbuild project using PostCSS.
 To get started, we will need to create a new Rsbuild project using `react-ts` template.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm create rsbuild@latest --dir test-app --template react-ts
     cd test-app
     pnpm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm create rsbuild@latest --dir test-app -- --template react-ts
     cd test-app
     npm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn create rsbuild@latest --dir test-app --template react-ts
     cd test-app
     yarn
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun create rsbuild@latest --dir test-app --template react-ts
     cd test-app
     bun install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -2763,32 +2812,32 @@ To get started, we will need to create a new Rsbuild project using `react-ts` te
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -2818,24 +2867,24 @@ Make sure that all of the paths of your React components are included in the `in
 file.
 
 ```js {8} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx}', './pages/**/*.{js,jsx,ts,tsx}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx}", "./pages/**/*.{js,jsx,ts,tsx}"],
 
   // Files to exclude
   exclude: [],
 
   // Generates JSX utilities with options of React, Preact, Qwik, Solid, Vue
-  jsxFramework: 'react',
+  jsxFramework: "react",
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -2851,28 +2900,28 @@ Add this code to an `src/App.css` file imported in the root component of your pr
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -2881,13 +2930,17 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 file.
 
 ```tsx filename="src/App.tsx"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
-  return <div className={css({ fontSize: '2xl', fontWeight: 'bold' })}>Hello 🐼!</div>
+  return (
+    <div className={css({ fontSize: "2xl", fontWeight: "bold" })}>
+      Hello 🐼!
+    </div>
+  );
 }
 
-export default App
+export default App;
 ```
 
 </Steps>
@@ -2906,7 +2959,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 
 ---
 
-
 ## Using SolidJS
 
 Easily use Panda with SolidJS with our dedicated integration.
@@ -2922,36 +2974,36 @@ This guide will show you how to set up Panda CSS in a Solid.js project using Pos
 To get started, we will need to create a new SolidJS project using `solidjs/templates/ts` template.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dlx degit solidjs/templates/ts test-app
     cd test-app
     pnpm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx degit solidjs/templates/ts test-app
     cd test-app
     npm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dlx degit solidjs/templates/ts test-app
     cd test-app
     yarn
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bunx degit solidjs/templates/ts test-app
     cd test-app
     bun install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -2959,32 +3011,32 @@ To get started, we will need to create a new SolidJS project using `solidjs/temp
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -3015,21 +3067,21 @@ Make sure that all of the paths of your SolidJS components are included in the `
 `panda.config.ts` file.
 
 ```ts {8,17} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx}', './pages/**/*.{js,jsx,ts,tsx}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx}", "./pages/**/*.{js,jsx,ts,tsx}"],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -3048,28 +3100,28 @@ Add this code to an `src/index.css` file imported in the root component of your 
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -3078,14 +3130,16 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 file.
 
 ```tsx filename="src/App.tsx"
-import type { Component } from 'solid-js'
-import { css } from '../styled-system/css'
+import type { Component } from "solid-js";
+import { css } from "../styled-system/css";
 
 const App: Component = () => {
-  return <div class={css({ fontSize: '2xl', fontWeight: 'bold' })}>Hello 🐼!</div>
-}
+  return (
+    <div class={css({ fontSize: "2xl", fontWeight: "bold" })}>Hello 🐼!</div>
+  );
+};
 
-export default App
+export default App;
 ```
 
 </Steps>
@@ -3103,7 +3157,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Storybook
 
@@ -3123,28 +3176,28 @@ Storybook needs to be installed into a project that is already set up with a fra
 project.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-{/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dlx storybook@latest init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx storybook@latest init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dlx storybook@latest init
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bunx storybook@latest init
-    ```
-  </Tab>
-{/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -3152,32 +3205,32 @@ project.
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 If you are using Storybook with the Vite builder, you will have to update your PostCSS config file to use the array
@@ -3216,18 +3269,22 @@ Make sure that all of the paths of your Storybook components are included in the
 `panda.config.ts` file.
 
 ```ts {7} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx}', './pages/**/*.{js,jsx,ts,tsx}', './stories/**/*.{js,jsx,ts,tsx}'],
+  include: [
+    "./src/**/*.{js,jsx,ts,tsx}",
+    "./pages/**/*.{js,jsx,ts,tsx}",
+    "./stories/**/*.{js,jsx,ts,tsx}",
+  ],
   // Files to exclude
   exclude: [],
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -3245,23 +3302,23 @@ Locate your `.storybook/preview.ts` file and import the CSS file.
 In this example CSS file is located in the `src` folder.
 
 ```ts {1} filename=".storybook/preview.ts"
-import '../src/index.css'
+import "../src/index.css";
 
-import type { Preview } from '@storybook/react'
+import type { Preview } from "@storybook/react";
 
 const preview: Preview = {
   parameters: {
-    actions: { argTypesRegex: '^on[A-Z].*' },
+    actions: { argTypesRegex: "^on[A-Z].*" },
     controls: {
       matchers: {
         color: /(background|color)$/i,
-        date: /Date$/
-      }
-    }
-  }
-}
+        date: /Date$/,
+      },
+    },
+  },
+};
 
-export default preview
+export default preview;
 ```
 
 ### Start the Storybook server
@@ -3269,28 +3326,28 @@ export default preview
 Run the following command to start your Storybook server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm storybook
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run storybook
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn storybook
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun storybook
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -3300,58 +3357,58 @@ Now you can start using Panda CSS in Storybook.
 Here is the example of a Button component and its corresponding Storybook story:
 
 ```tsx filename="src/stories/Button.tsx"
-import { ReactNode } from 'react'
-import { css } from '../../styled-system/css'
+import { ReactNode } from "react";
+import { css } from "../../styled-system/css";
 
 export interface IButtonProps {
-  children: ReactNode
+  children: ReactNode;
 }
 
 export const Button = ({ children }: IButtonProps) => {
   return (
     <button
       className={css({
-        bg: 'red.300',
-        fontFamily: 'Inter',
-        px: '4',
-        py: '3',
-        borderRadius: 'md',
-        _hover: { bg: 'red.400' }
+        bg: "red.300",
+        fontFamily: "Inter",
+        px: "4",
+        py: "3",
+        borderRadius: "md",
+        _hover: { bg: "red.400" },
       })}
     >
       {children}
     </button>
-  )
-}
+  );
+};
 ```
 
 ```tsx filename="src/stories/Button.stories.tsx"
-import type { Meta, StoryObj } from '@storybook/react'
-import { css } from '../../styled-system/css'
+import type { Meta, StoryObj } from "@storybook/react";
+import { css } from "../../styled-system/css";
 
-import { Button } from './Button'
+import { Button } from "./Button";
 
 const meta = {
-  title: 'Example/Button',
+  title: "Example/Button",
   component: Button,
-  tags: ['autodocs'],
+  tags: ["autodocs"],
   decorators: [
-    Story => (
+    (Story) => (
       <div className={css({ m: 10 })}>
         <Story />
       </div>
-    )
-  ]
-} satisfies Meta<typeof Button>
+    ),
+  ],
+} satisfies Meta<typeof Button>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
-    children: 'Hello 🐼!'
-  }
-}
+    children: "Hello 🐼!",
+  },
+};
 ```
 
 </Steps>
@@ -3367,23 +3424,23 @@ pnpm add -D @storybook/addon-themes
 Then, update your `.storybook/preview.ts` file to include the following:
 
 ```ts filename=".storybook/preview.ts"
-import { withThemeByClassName } from '@storybook/addon-themes'
-import type { Preview, ReactRenderer } from '@storybook/react'
+import { withThemeByClassName } from "@storybook/addon-themes";
+import type { Preview, ReactRenderer } from "@storybook/react";
 
 const preview: Preview = {
   // ...
   decorators: [
     withThemeByClassName<ReactRenderer>({
       themes: {
-        light: '',
-        dark: 'dark'
+        light: "",
+        dark: "dark",
       },
-      defaultTheme: 'light'
-    })
-  ]
-}
+      defaultTheme: "light",
+    }),
+  ],
+};
 
-export default preview
+export default preview;
 ```
 
 With that in place, you should see the light/dark switcher in Storybook's toolbar.
@@ -3397,8 +3454,8 @@ PostCSS config as follows:
 
 ```js filename="postcss.config.js"
 module.exports = {
-  plugins: [require('@pandacss/dev/postcss')]
-}
+  plugins: [require("@pandacss/dev/postcss")],
+};
 ```
 
 ### HMR not triggered
@@ -3408,12 +3465,12 @@ If you are having issues with HMR not being triggered after a `panda.config.ts` 
 by adding the following to your `panda.config.ts`:
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
-  dependencies: ['path/to/files/**.ts']
-})
+  dependencies: ["path/to/files/**.ts"],
+});
 ```
 
 ### Styles in `args` is not generated
@@ -3426,17 +3483,17 @@ If you are having issues with your `args` not generating the expected CSS, it's 
   [`.raw()` marker that helps Panda find style usage](https://panda-css.com/docs/guides/dynamic-styling#alternative)
 
 ```tsx filename="stories/Button.stories.tsx"
-import type { Meta, StoryObj } from '@storybook/react'
-import { button } from '../../styled-system/recipes'
+import type { Meta, StoryObj } from "@storybook/react";
+import { button } from "../../styled-system/recipes";
 
 export const Funky: Story = {
   // mark this as a button recipe usage
   args: button.raw({
-    visual: 'funky',
-    shape: 'circle',
-    size: 'sm'
-  })
-}
+    visual: "funky",
+    shape: "circle",
+    size: "sm",
+  }),
+};
 ```
 
 ### Some recipes styles are missing
@@ -3450,18 +3507,17 @@ because of:
   with [`staticCss`](/docs/guides/static)
 
 ```tsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   staticCss: {
-    recipes: '*'
-  }
-})
+    recipes: "*",
+  },
+});
 ```
 
 ---
-
 
 ## Using Svelte
 
@@ -3478,28 +3534,28 @@ This guide will show you how to set up Panda CSS in a Svelte project using PostC
 To get started, we will need to create a new Svelte project.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm create svelte@latest test-app
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm create svelte@latest test-app
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn create svelte@latest test-app
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun create svelte@latest test-app
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 You will be asked a few questions, answer them as follows:
@@ -3525,32 +3581,32 @@ You will be asked a few questions, answer them as follows:
 Enter the newly created directory and install the dependencies.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     cd test-app
     pnpm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     npm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     yarn
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     bun install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -3558,32 +3614,32 @@ Enter the newly created directory and install the dependencies.
 To install Panda and corresponding dependencies run the following commands:
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -3617,21 +3673,21 @@ Make sure that all of the paths of your Svelte components are included in the `i
 file.
 
 ```js {8} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,ts,svelte}'],
+  include: ["./src/**/*.{js,ts,svelte}"],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Update Svelte config
@@ -3639,8 +3695,8 @@ export default defineConfig({
 To configure Svelte preprocess to use PostCSS and add Panda alias update the `svelte.config.js` file as follows:
 
 ```js {15} filename="svelte.config.js"
-import adapter from '@sveltejs/adapter-auto'
-import { vitePreprocess } from '@sveltejs/vite-plugin-svelte'
+import adapter from "@sveltejs/adapter-auto";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -3653,12 +3709,12 @@ const config = {
     // See https://kit.svelte.dev/docs/adapters for more information about adapters.
     adapter: adapter(),
     alias: {
-      'styled-system': './styled-system/*'
-    }
-  }
-}
+      "styled-system": "./styled-system/*",
+    },
+  },
+};
 
-export default config
+export default config;
 ```
 
 ### Update Vite config
@@ -3667,43 +3723,43 @@ To be able to import `styled-system` files in your Svelte components you will ne
 as follows:
 
 ```js {6-10} filename="vite.config.js"
-import { sveltekit } from '@sveltejs/kit/vite'
-import { defineConfig } from 'vite'
+import { sveltekit } from "@sveltejs/kit/vite";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [sveltekit()],
   server: {
     fs: {
-      allow: ['styled-system']
-    }
-  }
-})
+      allow: ["styled-system"],
+    },
+  },
+});
 ```
 
 If you’re using Storybook for a SvelteKit project, you need to replicate the same Vite server config changes. In your
 .storybook folder, you likely have a `main.js` (or `vite.config.js` in older Storybook versions). Update it as follows:
 
 ```js filename="main.js"
-import { defineConfig, mergeConfig } from 'vite'
+import { defineConfig, mergeConfig } from "vite";
 
 /** @type { import('@storybook/sveltekit').StorybookConfig } */
 
 const config = {
   // other Storybook config...
-  viteFinal: async config => {
+  viteFinal: async (config) => {
     return mergeConfig(
       config,
       defineConfig({
         server: {
           fs: {
-            allow: ['styled-system']
-          }
-        }
-      })
-    )
-  }
-}
-export default config
+            allow: ["styled-system"],
+          },
+        },
+      }),
+    );
+  },
+};
+export default config;
 ```
 
 ### Configure the entry CSS with layers
@@ -3731,28 +3787,28 @@ Create the `src/routes/+layout.svelte` file and add the following content:
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -3781,27 +3837,26 @@ TypeScript config. However, in Svelte your main `tsconfig.json` file is extendin
 without overriding the defaults adjust your `svelte.config.js` to include following entry:
 
 ```js filename="svelte.config.js"
-import adapter from '@sveltejs/adapter-auto'
-import { vitePreprocess } from '@sveltejs/vite-plugin-svelte'
+import adapter from "@sveltejs/adapter-auto";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   // ...
   kit: {
     // ...
     typescript: {
-      config: config => {
-        config.include.push('../styled-system')
-        return config
-      }
-    }
-  }
-}
+      config: (config) => {
+        config.include.push("../styled-system");
+        return config;
+      },
+    },
+  },
+};
 
-export default config
+export default config;
 ```
 
 ---
-
 
 ## Using Vite
 
@@ -3818,36 +3873,36 @@ This guide will show you how to set up Panda CSS in a Vite project using PostCSS
 To get started, we will need to create a new Vite project using `react-ts` template.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm create vite test-app --template react-ts
     cd test-app
     pnpm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm create vite@latest test-app -- --template react-ts
     cd test-app
     npm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn create vite test-app --template react-ts
     cd test-app
     yarn
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun create vite test-app --template react-ts
     cd test-app
     bun install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -3855,32 +3910,32 @@ To get started, we will need to create a new Vite project using `react-ts` templ
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -3911,24 +3966,24 @@ Make sure that all of the paths of your React components are included in the `in
 file.
 
 ```js {8} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx}', './pages/**/*.{js,jsx,ts,tsx}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx}", "./pages/**/*.{js,jsx,ts,tsx}"],
 
   // Files to exclude
   exclude: [],
 
   // Generates JSX utilities with options of React, Preact, Qwik, Solid, Vue
-  jsxFramework: 'react',
+  jsxFramework: "react",
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -3947,28 +4002,28 @@ Add this code to an `src/index.css` file imported in the root component of your 
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -3977,13 +4032,17 @@ Now you can start using Panda CSS in your project. Here is the snippet of code t
 file.
 
 ```tsx filename="src/App.tsx"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
-  return <div className={css({ fontSize: '2xl', fontWeight: 'bold' })}>Hello 🐼!</div>
+  return (
+    <div className={css({ fontSize: "2xl", fontWeight: "bold" })}>
+      Hello 🐼!
+    </div>
+  );
 }
 
-export default App
+export default App;
 ```
 
 </Steps>
@@ -4001,7 +4060,6 @@ If you're not getting import autocomplete in your IDE, you may need to include t
 ```
 
 ---
-
 
 ## Using Vue
 
@@ -4021,28 +4079,28 @@ To get started, we will need to create a new Vue project using the official
 If you don't enter any parameter, the CLI will guide you through the process of creating a new Vue app.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm create vue@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm create vue@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn create vue@latest
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun create vue@latest
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 You will be asked a few questions, answer them as follows:
@@ -4064,32 +4122,32 @@ Vue.js - The Progressive JavaScript Framework
 Enter the newly created directory and install the dependencies.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     cd test-app
     pnpm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     npm install
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     yarn
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     cd test-app
     bun install
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Install Panda
@@ -4097,32 +4155,32 @@ Enter the newly created directory and install the dependencies.
 Install panda and create your `panda.config.ts` file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm install -D @pandacss/dev
     pnpm panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm install -D @pandacss/dev
     npx panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn add -D @pandacss/dev
     yarn panda init --postcss
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun add -D @pandacss/dev
     bun panda init --postcss
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Update package.json scripts
@@ -4153,21 +4211,21 @@ Make sure that all of the paths of your Vue components are included in the `incl
 file.
 
 ```js {8, 17} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // Whether to use css reset
   preflight: true,
 
   // Where to look for your css declarations
-  include: ['./src/**/*.{js,jsx,ts,tsx,vue}'],
+  include: ["./src/**/*.{js,jsx,ts,tsx,vue}"],
 
   // Files to exclude
   exclude: [],
 
   // The output directory for your css system
-  outdir: 'styled-system'
-})
+  outdir: "styled-system",
+});
 ```
 
 ### Configure the entry CSS with layers
@@ -4183,28 +4241,28 @@ Add this code to an `src/index.css` file and import it in the root component of 
 Run the following command to start your development server.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npm run dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn dev
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun dev
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 ### Start using Panda
@@ -4225,5 +4283,3 @@ import { css } from "../styled-system/css";
 </Steps>
 
 ---
-
-

@@ -1,20 +1,29 @@
-import { Suspense } from "preact/compat"
-import { useEffect } from "preact/hooks"
+import { Suspense } from "preact/compat";
+import { useEffect } from "preact/hooks";
 
-import { useShortcutRegistry } from "~/app-state-context.tsx"
-import { AppCommand } from "~/commands/app-command.ts"
-import type { ProjectRecord } from "~/projects/project-registry.ts"
-import { goddardSdk } from "~/sdk.ts"
-import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsx"
-import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsx"
-import selectorStyles from "./launch-form-selectors.style.ts"
+import { useShortcutRegistry } from "~/app-state-context.tsx";
+import { AppCommand } from "~/commands/app-command.ts";
+import type { ProjectRecord } from "~/projects/project-registry.ts";
+import { goddardSdk } from "~/sdk.ts";
+import {
+  SessionInput,
+  type SessionInputClasses,
+} from "~/session-input/input.tsx";
+import {
+  SessionInputSelect,
+  type SessionInputSelectItem,
+} from "~/session-input/select-menu.tsx";
+import selectorStyles from "./launch-form-selectors.style.ts";
 import {
   AgentHarnessSelector,
   SessionLaunchLoadingSelect,
   SessionLaunchPreviewSelectors,
-} from "./launch-form-selectors.tsx"
-import { filterSlashCommandSuggestions, type SessionLaunchFormState } from "./launch-form-state.ts"
-import styles from "./launch-form.style.ts"
+} from "./launch-form-selectors.tsx";
+import {
+  filterSlashCommandSuggestions,
+  type SessionLaunchFormState,
+} from "./launch-form-state.ts";
+import styles from "./launch-form.style.ts";
 
 const launchInputClasses = {
   form: styles.form,
@@ -24,59 +33,63 @@ const launchInputClasses = {
   footer: styles.footer,
   helperText: styles.helperText,
   submitButton: styles.submitButton,
-} satisfies SessionInputClasses
+} satisfies SessionInputClasses;
 
 function getShortcutLabel(binding: unknown) {
   if (typeof binding === "string") {
-    return binding
+    return binding;
   }
 
   if (binding && typeof binding === "object") {
     if ("combo" in binding && typeof binding.combo === "string") {
-      return binding.combo
+      return binding.combo;
     }
 
     if ("sequence" in binding && typeof binding.sequence === "string") {
-      return binding.sequence
+      return binding.sequence;
     }
   }
 
-  return null
+  return null;
 }
 
 export function SessionLaunchForm(props: {
-  form: SessionLaunchFormState
-  onEscape?: () => void
-  onSubmit: () => Promise<void> | void
-  projects: readonly ProjectRecord[]
+  form: SessionLaunchFormState;
+  onEscape?: () => void;
+  onSubmit: () => Promise<void> | void;
+  projects: readonly ProjectRecord[];
 }) {
-  const { form } = props
-  const shortcutRegistry = useShortcutRegistry()
-  const projectItems: SessionInputSelectItem[] = props.projects.map((project) => ({
-    value: project.path,
-    label: project.name,
-    detail: project.path,
-    searchText: project.path,
-  }))
-  const selectedAdapter = form.selectedAdapter.value
+  const { form } = props;
+  const shortcutRegistry = useShortcutRegistry();
+  const projectItems: SessionInputSelectItem[] = props.projects.map(
+    (project) => ({
+      value: project.path,
+      label: project.name,
+      detail: project.path,
+      searchText: project.path,
+    }),
+  );
+  const selectedAdapter = form.selectedAdapter.value;
   const projectShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openProjectSelector.id]?.[0],
-  )
+    shortcutRegistry.resolvedBindings[
+      AppCommand.sessionInput.openProjectSelector.id
+    ]?.[0],
+  );
 
   useEffect(() => {
     const nextProjectPath = props.projects.some(
       (project) => project.path === form.draftProjectPath.value,
     )
       ? form.draftProjectPath.value
-      : (props.projects[0]?.path ?? null)
+      : (props.projects[0]?.path ?? null);
 
     if (nextProjectPath === form.draftProjectPath.value) {
-      return
+      return;
     }
 
-    form.draftProjectPath.value = nextProjectPath
-    form.launchPreview.value = null
-  }, [form, props.projects])
+    form.draftProjectPath.value = nextProjectPath;
+    form.launchPreview.value = null;
+  }, [form, props.projects]);
 
   return (
     <div class={selectorStyles.section}>
@@ -91,12 +104,12 @@ export function SessionLaunchForm(props: {
           shortcut={projectShortcut}
           value={form.draftProjectPath.value}
           onOpenChange={(open) => {
-            form.setOpenPicker(open ? "project" : null)
+            form.setOpenPicker(open ? "project" : null);
           }}
           onValueChange={(value) => {
-            form.draftProjectPath.value = value
-            form.launchPreview.value = null
-            form.setOpenPicker(null)
+            form.draftProjectPath.value = value;
+            form.launchPreview.value = null;
+            form.setOpenPicker(null);
           }}
         />
         <Suspense fallback={<SessionLaunchLoadingSelect label="Adapter" />}>
@@ -119,7 +132,9 @@ export function SessionLaunchForm(props: {
             </span>
           </p>
           {selectedAdapter.description ? (
-            <p class={styles.adapterDescription}>{selectedAdapter.description}</p>
+            <p class={styles.adapterDescription}>
+              {selectedAdapter.description}
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -146,37 +161,37 @@ export function SessionLaunchForm(props: {
         classes={launchInputClasses}
         helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
         loadSuggestions={async (input) => {
-          const cwd = form.draftProjectPath.value
+          const cwd = form.draftProjectPath.value;
 
           if (!cwd) {
-            return []
+            return [];
           }
 
           if (input.trigger === "slash") {
             return filterSlashCommandSuggestions(
               form.launchPreview.value?.slashCommands ?? [],
               input.query,
-            )
+            );
           }
 
           const response = await goddardSdk.session.draftSuggestions({
             cwd,
             trigger: input.trigger,
             query: input.query,
-          })
+          });
 
-          return response.suggestions
+          return response.suggestions;
         }}
         onPromptChange={(prompt) => {
-          form.draftPromptBlocks.value = prompt
+          form.draftPromptBlocks.value = prompt;
         }}
         onEscape={props.onEscape}
         placeholder="Describe the first thing this session should do."
         submitLabel="Launch session"
         onSubmit={async () => {
-          await props.onSubmit()
+          await props.onSubmit();
         }}
       />
     </div>
-  )
+  );
 }

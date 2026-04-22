@@ -1,22 +1,25 @@
-import { cx } from "@goddard-ai/styled-system/css"
-import { useEffect, useRef } from "preact/hooks"
+import { cx } from "@goddard-ai/styled-system/css";
+import { useEffect, useRef } from "preact/hooks";
 
-import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model.ts"
-import styles from "./terminal-viewport.style.ts"
+import {
+  translateKeyboardEvent,
+  type TerminalViewportModel,
+} from "./terminal-viewport-model.ts";
+import styles from "./terminal-viewport.style.ts";
 
 export function TerminalViewport(props: {
-  terminal: TerminalViewportModel
-  class?: string
-  ariaLabel?: string
+  terminal: TerminalViewportModel;
+  class?: string;
+  ariaLabel?: string;
 }) {
-  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    props.terminal.attachViewport(viewportRef.current)
+    props.terminal.attachViewport(viewportRef.current);
     return () => {
-      props.terminal.attachViewport(null)
-    }
-  }, [props.terminal])
+      props.terminal.attachViewport(null);
+    };
+  }, [props.terminal]);
 
   return (
     <div class={cx(styles.frame, props.class)}>
@@ -24,31 +27,31 @@ export function TerminalViewport(props: {
         aria-label={props.ariaLabel ?? "Terminal viewport"}
         class={styles.viewport}
         onFocus={() => {
-          props.terminal.notifyFocus()
+          props.terminal.notifyFocus();
         }}
         onKeyDown={(event) => {
-          const input = translateKeyboardEvent(event)
+          const input = translateKeyboardEvent(event);
 
           if (!input) {
-            return
+            return;
           }
 
-          event.preventDefault()
-          props.terminal.forwardInput(input)
+          event.preventDefault();
+          props.terminal.forwardInput(input);
         }}
         onPaste={(event) => {
-          const pasted = event.clipboardData?.getData("text")
+          const pasted = event.clipboardData?.getData("text");
 
           if (!pasted) {
-            return
+            return;
           }
 
-          event.preventDefault()
-          props.terminal.forwardPaste(pasted)
+          event.preventDefault();
+          props.terminal.forwardPaste(pasted);
         }}
         onWheel={(event) => {
-          event.preventDefault()
-          props.terminal.scrollViewport(event.deltaY, event.deltaMode)
+          event.preventDefault();
+          props.terminal.scrollViewport(event.deltaY, event.deltaMode);
         }}
         ref={viewportRef}
         role="region"
@@ -75,5 +78,5 @@ export function TerminalViewport(props: {
         ))}
       </div>
     </div>
-  )
+  );
 }

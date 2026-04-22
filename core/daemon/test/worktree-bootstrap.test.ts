@@ -1,9 +1,9 @@
-import { afterEach, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { afterEach, expect, test } from "bun:test"
 
 import { prepareFreshWorktree } from "../src/worktrees/bootstrap.ts"
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"

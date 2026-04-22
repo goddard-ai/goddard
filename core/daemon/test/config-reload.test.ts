@@ -1,10 +1,10 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
-import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import { afterEach, expect, test } from "bun:test"
 
 import { createConfigManager } from "../src/config-manager.ts"
 import { resolveRuntimeConfig } from "../src/config.ts"

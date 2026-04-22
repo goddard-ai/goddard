@@ -1,4 +1,5 @@
 # Component: SessionChatView
+
 - **Minimum Viable Component:** Detail view for one coding agent session that composes the header, transcript, and composer around an `@assistant-ui/react` integration boundary.
 - **Props Interface:** `sessionId: string`; `tabId: string`; `initialFocus?: "transcript" | "composer"`.
 - **Sub-components:** `SessionChatHeader`, `SessionChatTranscript`, `SessionChatComposer`.

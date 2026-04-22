@@ -34,9 +34,7 @@ export component Counter() {
     }
   };
 
-  <button onClick={increment}>
-    {`Count: ${count}`}
-  </button>
+  <button onClick={increment}>{`Count: ${count}`}</button>
 }
 ```
 

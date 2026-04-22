@@ -1,4 +1,5 @@
 # Component: InboxToolbar
+
 - **Minimum Viable Component:** Toolbar for inbox search, filter controls, selection summary, and bulk actions.
 - **Props Interface:** `query: string`; `selectedCount: number`; `totalCount: number`; `activeFilter: string | null`; `onQueryChange: (value) => void`; `onFilterChange: (value) => void`; `onSnoozeSelected: () => void`; `onArchiveSelected: () => void`; `onDelegateSelected: () => void`; `onClearSelection: () => void`.
 - **Sub-components:** None.

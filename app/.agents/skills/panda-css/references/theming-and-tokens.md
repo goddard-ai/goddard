@@ -15,28 +15,28 @@ Animation styles are defined in the `animationStyles` property of the theme.
 Here's an example of an animation style:
 
 ```js filename="animation-styles.ts"
-import { defineAnimationStyles } from '@pandacss/dev'
+import { defineAnimationStyles } from "@pandacss/dev";
 
 export const animationStyles = defineAnimationStyles({
-  'slide-fade-in': {
+  "slide-fade-in": {
     value: {
-      transformOrigin: 'var(--transform-origin)',
-      animationDuration: 'fast',
-      '&[data-placement^=top]': {
-        animationName: 'slide-from-top, fade-in'
+      transformOrigin: "var(--transform-origin)",
+      animationDuration: "fast",
+      "&[data-placement^=top]": {
+        animationName: "slide-from-top, fade-in",
       },
-      '&[data-placement^=bottom]': {
-        animationName: 'slide-from-bottom, fade-in'
+      "&[data-placement^=bottom]": {
+        animationName: "slide-from-bottom, fade-in",
       },
-      '&[data-placement^=left]': {
-        animationName: 'slide-from-left, fade-in'
+      "&[data-placement^=left]": {
+        animationName: "slide-from-left, fade-in",
       },
-      '&[data-placement^=right]': {
-        animationName: 'slide-from-right, fade-in'
-      }
-    }
-  }
-})
+      "&[data-placement^=right]": {
+        animationName: "slide-from-right, fade-in",
+      },
+    },
+  },
+});
 ```
 
 > **Good to know:** The `value` property maps to style objects that will be applied to the element.
@@ -46,16 +46,16 @@ export const animationStyles = defineAnimationStyles({
 To use the animation styles, we need to update the `config` object in the `panda.config.ts` file.
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
-import { animationStyles } from './animation-styles'
+import { defineConfig } from "@pandacss/dev";
+import { animationStyles } from "./animation-styles";
 
 export default defineConfig({
   theme: {
     extend: {
-      animationStyles
-    }
-  }
-})
+      animationStyles,
+    },
+  },
+});
 ```
 
 This should automatically update the generated theme with the specified `animationStyles`. If this doesn't happen, you
@@ -66,14 +66,14 @@ can run the `panda codegen` command.
 Now we can use the `animationStyle` property in our components.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
-    <div className={css({ animationStyle: 'slide-fade-in' })}>
+    <div className={css({ animationStyle: "slide-fade-in" })}>
       This is an element with slide-fade-in animation style.
     </div>
-  )
+  );
 }
 ```
 
@@ -85,14 +85,14 @@ export const popoverSlotRecipe = defineSlotRecipe({
   base: {
     content: {
       _open: {
-        animationStyle: 'scale-fade-in'
+        animationStyle: "scale-fade-in",
       },
       _closed: {
-        animationStyle: 'scale-fade-out'
-      }
-    }
-  }
-})
+        animationStyle: "scale-fade-out",
+      },
+    },
+  },
+});
 ```
 
 ## Nesting animation styles
@@ -111,45 +111,45 @@ export default defineConfig({
         fade: {
           DEFAULT: {
             value: {
-              animationName: 'fade-in',
-              animationDuration: '300ms',
-              animationTimingFunction: 'ease-in-out'
-            }
+              animationName: "fade-in",
+              animationDuration: "300ms",
+              animationTimingFunction: "ease-in-out",
+            },
           },
           slow: {
             value: {
-              animationName: 'fade-in',
-              animationDuration: '600ms',
-              animationTimingFunction: 'ease-in-out'
-            }
+              animationName: "fade-in",
+              animationDuration: "600ms",
+              animationTimingFunction: "ease-in-out",
+            },
           },
           fast: {
             value: {
-              animationName: 'fade-in',
-              animationDuration: '150ms',
-              animationTimingFunction: 'ease-in-out'
-            }
-          }
-        }
-      }
-    }
-  }
-})
+              animationName: "fade-in",
+              animationDuration: "150ms",
+              animationTimingFunction: "ease-in-out",
+            },
+          },
+        },
+      },
+    },
+  },
+});
 ```
 
 Now you can use the default fade animation or specific speed variants:
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
     <div>
-      <div className={css({ animationStyle: 'fade' })}>Default fade speed</div>
-      <div className={css({ animationStyle: 'fade.slow' })}>Slow fade</div>
-      <div className={css({ animationStyle: 'fade.fast' })}>Fast fade</div>
+      <div className={css({ animationStyle: "fade" })}>Default fade speed</div>
+      <div className={css({ animationStyle: "fade.slow" })}>Slow fade</div>
+      <div className={css({ animationStyle: "fade.fast" })}>Fast fade</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -173,7 +173,6 @@ By following these guidelines, you can create a clear and maintainable animation
 
 ---
 
-
 ## Layer Styles
 
 Define reusable container styles properties.
@@ -193,18 +192,18 @@ Layer styles are defined in the `layerStyles` property of the theme.
 Here's an example of a layer style:
 
 ```js filename="layer-styles.ts"
-import { defineLayerStyles } from '@pandacss/dev'
+import { defineLayerStyles } from "@pandacss/dev";
 
 const layerStyles = defineLayerStyles({
   container: {
-    description: 'container styles',
+    description: "container styles",
     value: {
-      background: 'gray.50',
-      border: '2px solid',
-      borderColor: 'gray.500'
-    }
-  }
-})
+      background: "gray.50",
+      border: "2px solid",
+      borderColor: "gray.500",
+    },
+  },
+});
 ```
 
 > **Good to know:** The `value` property maps to style objects that will be applied to the element.
@@ -214,16 +213,16 @@ const layerStyles = defineLayerStyles({
 To use the layer styles, we need to update the `config` object in the `panda.config.ts` file.
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
-import { layerStyles } from './layer-styles'
+import { defineConfig } from "@pandacss/dev";
+import { layerStyles } from "./layer-styles";
 
 export default defineConfig({
   theme: {
     extend: {
-      layerStyles
-    }
-  }
-})
+      layerStyles,
+    },
+  },
+});
 ```
 
 This should automatically update the generated theme the specified `layerStyles`. If this doesn't happen, you can run
@@ -234,10 +233,14 @@ the `panda codegen` command.
 Now we can use `layerStyle` property in our components.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
-  return <div className={css({ layerStyle: 'container' })}>This is inside a container style</div>
+  return (
+    <div className={css({ layerStyle: "container" })}>
+      This is inside a container style
+    </div>
+  );
 }
 ```
 
@@ -257,55 +260,54 @@ export default defineConfig({
         card: {
           DEFAULT: {
             value: {
-              background: 'white',
-              border: '1px solid',
-              borderColor: 'gray.200',
-              borderRadius: 'md',
-              boxShadow: 'sm'
-            }
+              background: "white",
+              border: "1px solid",
+              borderColor: "gray.200",
+              borderRadius: "md",
+              boxShadow: "sm",
+            },
           },
           elevated: {
             value: {
-              background: 'white',
-              border: 'none',
-              borderRadius: 'lg',
-              boxShadow: 'lg'
-            }
+              background: "white",
+              border: "none",
+              borderRadius: "lg",
+              boxShadow: "lg",
+            },
           },
           outlined: {
             value: {
-              background: 'transparent',
-              border: '2px solid',
-              borderColor: 'gray.300',
-              borderRadius: 'md',
-              boxShadow: 'none'
-            }
-          }
-        }
-      }
-    }
-  }
-})
+              background: "transparent",
+              border: "2px solid",
+              borderColor: "gray.300",
+              borderRadius: "md",
+              boxShadow: "none",
+            },
+          },
+        },
+      },
+    },
+  },
+});
 ```
 
 Now you can use the default card style or specific variants:
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
     <div>
-      <div className={css({ layerStyle: 'card' })}>Default card style</div>
-      <div className={css({ layerStyle: 'card.elevated' })}>Elevated card</div>
-      <div className={css({ layerStyle: 'card.outlined' })}>Outlined card</div>
+      <div className={css({ layerStyle: "card" })}>Default card style</div>
+      <div className={css({ layerStyle: "card.elevated" })}>Elevated card</div>
+      <div className={css({ layerStyle: "card.outlined" })}>Outlined card</div>
     </div>
-  )
+  );
 }
 ```
 
 ---
-
 
 ## Spec
 
@@ -369,7 +371,10 @@ This file contains an array of raw design tokens grouped by category
           "cssVar": "var(--colors-purple-800)"
         }
       ],
-      "tokenFunctionExamples": ["token('colors.purple.800')", "token.var('colors.purple.800')"],
+      "tokenFunctionExamples": [
+        "token('colors.purple.800')",
+        "token.var('colors.purple.800')"
+      ],
       "functionExamples": ["css({ color: 'purple.800' })"],
       "jsxExamples": ["<Box color='purple.800' />"]
     }
@@ -391,30 +396,30 @@ Each token in the `values` array includes:
 Here's an example of how to document color tokens:
 
 ```tsx
-import { grid } from 'styled-system/patterns'
-import tokens from 'styled-system/specs/tokens.json'
+import { grid } from "styled-system/patterns";
+import tokens from "styled-system/specs/tokens.json";
 
 const Demo = () => {
-  const colors = tokens.data.find(token => token.type === 'colors')
+  const colors = tokens.data.find((token) => token.type === "colors");
   return (
-    <div className={grid({ padding: '40px', columns: 3, gap: '4' })}>
-      {colors?.values.map(color => (
+    <div className={grid({ padding: "40px", columns: 3, gap: "4" })}>
+      {colors?.values.map((color) => (
         <div key={color.name}>
           <p>{color.name}</p>
           <p>{color.value}</p>
           <div
             style={{
-              width: '100px',
-              height: '100px',
+              width: "100px",
+              height: "100px",
               background: color.value,
-              border: '1px solid lightgray'
+              border: "1px solid lightgray",
             }}
           />
         </div>
       ))}
     </div>
-  )
-}
+  );
+};
 ```
 
 Your color token documentation should look similar to this:
@@ -468,13 +473,13 @@ Each semantic token in the `values` array includes:
 Here's an example of how to document semantic color tokens with their conditional values:
 
 ```tsx
-import semanticTokens from 'styled-system/specs/semantic-tokens.json'
+import semanticTokens from "styled-system/specs/semantic-tokens.json";
 
 const Demo = () => {
-  const colors = semanticTokens.data.find(token => token.type === 'colors')
+  const colors = semanticTokens.data.find((token) => token.type === "colors");
   return (
     <div>
-      {colors?.values.map(token => (
+      {colors?.values.map((token) => (
         <div key={token.name}>
           <p>{token.name}</p>
           <p>{token.cssVar}</p>
@@ -489,8 +494,8 @@ const Demo = () => {
         </div>
       ))}
     </div>
-  )
-}
+  );
+};
 ```
 
 ### `recipes.json`
@@ -516,8 +521,16 @@ This file contains an array of recipe definitions for styling components with va
         "color": "main",
         "size": "md"
       },
-      "functionExamples": ["button({ shape: 'square' })", "button({ color: 'main' })", "button({ size: 'sm' })"],
-      "jsxExamples": ["<Button shape='square' />", "<Button color='main' />", "<Button size='sm' />"]
+      "functionExamples": [
+        "button({ shape: 'square' })",
+        "button({ color: 'main' })",
+        "button({ size: 'sm' })"
+      ],
+      "jsxExamples": [
+        "<Button shape='square' />",
+        "<Button color='main' />",
+        "<Button size='sm' />"
+      ]
     }
   ]
 }
@@ -537,11 +550,11 @@ Each recipe in the `data` array includes:
 Here's an example of how to document a button recipe within a table:
 
 ```tsx
-import recipes from 'styled-system/specs/recipes.json'
+import recipes from "styled-system/specs/recipes.json";
 
 const Demo = () => {
-  const buttonRecipe = recipes.data.find(recipe => recipe.name === 'button')
-  const defaultVariants = buttonRecipe?.defaultVariants || {}
+  const buttonRecipe = recipes.data.find((recipe) => recipe.name === "button");
+  const defaultVariants = buttonRecipe?.defaultVariants || {};
 
   return (
     <div>
@@ -556,22 +569,27 @@ const Demo = () => {
           </tr>
         </thead>
         <tbody>
-          {Object.entries(buttonRecipe?.variants || {}).map(([key, options]) => (
-            <tr key={key}>
-              <td>{key}</td>
-              <td>
-                {(options as string[]).map(option => (
-                  <span key={option}>{option}</span>
-                ))}
-              </td>
-              <td>{defaultVariants[key as keyof typeof defaultVariants] || 'none'}</td>
-            </tr>
-          ))}
+          {Object.entries(buttonRecipe?.variants || {}).map(
+            ([key, options]) => (
+              <tr key={key}>
+                <td>{key}</td>
+                <td>
+                  {(options as string[]).map((option) => (
+                    <span key={option}>{option}</span>
+                  ))}
+                </td>
+                <td>
+                  {defaultVariants[key as keyof typeof defaultVariants] ||
+                    "none"}
+                </td>
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
     </div>
-  )
-}
+  );
+};
 ```
 
 Your button recipe documentation should look similar to this:
@@ -616,20 +634,20 @@ Each text style in the `data` array includes:
 Here's an example of how to document text styles with a visual preview:
 
 ```tsx
-import textStyles from 'styled-system/specs/text-styles.json'
+import textStyles from "styled-system/specs/text-styles.json";
 
 const Demo = () => {
   return (
     <div>
-      {textStyles.data.map(style => (
+      {textStyles.data.map((style) => (
         <div key={style.name}>
           <span className={css({ textStyle: style.name })}>{style.name}</span>
           <p>The quick brown fox jumps over the lazy dog</p>
         </div>
       ))}
     </div>
-  )
-}
+  );
+};
 ```
 
 ### `layer-styles.json`
@@ -662,20 +680,20 @@ Each layer style in the `data` array includes:
 Here's an example of how to document layer styles with a visual preview:
 
 ```tsx
-import layerStyles from 'styled-system/specs/layer-styles.json'
+import layerStyles from "styled-system/specs/layer-styles.json";
 
 const Demo = () => {
   return (
     <div>
-      {layerStyles.data.map(style => (
+      {layerStyles.data.map((style) => (
         <div key={style.name}>
           <div className={css({ layerStyle: style.name })} />
           <span>{style.name}</span>
         </div>
       ))}
     </div>
-  )
-}
+  );
+};
 ```
 
 ### `animation-styles.json`
@@ -700,8 +718,14 @@ This file contains an array of keyframe definitions for CSS animations.
   "data": [
     {
       "name": "spin",
-      "functionExamples": ["css({ animationName: 'spin' })", "css({ animation: 'spin 1s ease-in-out infinite' })"],
-      "jsxExamples": ["<Box animationName='spin' />", "<Box animation='spin 1s ease-in-out infinite' />"]
+      "functionExamples": [
+        "css({ animationName: 'spin' })",
+        "css({ animation: 'spin 1s ease-in-out infinite' })"
+      ],
+      "jsxExamples": [
+        "<Box animationName='spin' />",
+        "<Box animation='spin 1s ease-in-out infinite' />"
+      ]
     }
   ]
 }
@@ -718,20 +742,22 @@ Each keyframe in the `data` array includes:
 Here's an example of how to document keyframes with animated previews:
 
 ```tsx
-import keyframes from 'styled-system/specs/keyframes.json'
+import keyframes from "styled-system/specs/keyframes.json";
 
 const Demo = () => {
   return (
     <div>
-      {keyframes.data.map(keyframe => (
+      {keyframes.data.map((keyframe) => (
         <div key={keyframe.name}>
-          <div style={{ animation: `${keyframe.name} 1s ease-in-out infinite` }} />
+          <div
+            style={{ animation: `${keyframe.name} 1s ease-in-out infinite` }}
+          />
           <span>{keyframe.name}</span>
         </div>
       ))}
     </div>
-  )
-}
+  );
+};
 ```
 
 ### `patterns.json`
@@ -753,8 +779,14 @@ This file contains an array of pattern definitions for layout utilities.
         { "name": "direction", "type": "SystemProperties['flexDirection']" },
         { "name": "wrap", "type": "SystemProperties['flexWrap']" }
       ],
-      "functionExamples": ["flex({ align: 'center' })", "flex({ justify: 'space-between' })"],
-      "jsxExamples": ["<Flex align='center' />", "<Flex justify='space-between' />"]
+      "functionExamples": [
+        "flex({ align: 'center' })",
+        "flex({ justify: 'space-between' })"
+      ],
+      "jsxExamples": [
+        "<Flex align='center' />",
+        "<Flex justify='space-between' />"
+      ]
     }
   ]
 }
@@ -776,18 +808,18 @@ Each pattern in the `data` array includes:
 Here's an example of how to document patterns with their properties:
 
 ```tsx
-import patterns from 'styled-system/specs/patterns.json'
+import patterns from "styled-system/specs/patterns.json";
 
 const Demo = () => {
   return (
     <div>
-      {patterns.data.map(pattern => (
+      {patterns.data.map((pattern) => (
         <div key={pattern.name}>
           <h3>{pattern.name}</h3>
           <span>
-            {'<'}
-            {pattern.jsx} {'/'}
-            {'>'}
+            {"<"}
+            {pattern.jsx} {"/"}
+            {">"}
           </span>
           {pattern.properties.length > 0 && (
             <table>
@@ -799,11 +831,11 @@ const Demo = () => {
                 </tr>
               </thead>
               <tbody>
-                {pattern.properties.map(prop => (
+                {pattern.properties.map((prop) => (
                   <tr key={prop.name}>
                     <td>{prop.name}</td>
                     <td>{prop.type}</td>
-                    <td>{prop.defaultValue || '—'}</td>
+                    <td>{prop.defaultValue || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -812,8 +844,8 @@ const Demo = () => {
         </div>
       ))}
     </div>
-  )
-}
+  );
+};
 ```
 
 ### `conditions.json`
@@ -833,7 +865,6 @@ these files. All configuration changes must be made in your `panda.config.ts` fi
 documentation and visualization purposes.
 
 ---
-
 
 ## Using Panda Studio
 
@@ -879,7 +910,6 @@ You can also deploy the studio as a standalone design system portal for your tea
 
 ---
 
-
 ## Text Styles
 
 Define reusable typography css properties.
@@ -899,22 +929,22 @@ Text styles are defined in the `textStyles` property of the theme.
 Here's an example of a text style:
 
 ```js filename="text-styles.ts"
-import { defineTextStyles } from '@pandacss/dev'
+import { defineTextStyles } from "@pandacss/dev";
 
 export const textStyles = defineTextStyles({
   body: {
-    description: 'The body text style - used in paragraphs',
+    description: "The body text style - used in paragraphs",
     value: {
-      fontFamily: 'Inter',
-      fontWeight: '500',
-      fontSize: '16px',
-      lineHeight: '24px',
-      letterSpacing: '0',
-      textDecoration: 'None',
-      textTransform: 'None'
-    }
-  }
-})
+      fontFamily: "Inter",
+      fontWeight: "500",
+      fontSize: "16px",
+      lineHeight: "24px",
+      letterSpacing: "0",
+      textDecoration: "None",
+      textTransform: "None",
+    },
+  },
+});
 ```
 
 > **Good to know:** The `value` property maps to style objects that will be applied to the text.
@@ -924,16 +954,16 @@ export const textStyles = defineTextStyles({
 To use the text styles, we need to update the `config` object in the `panda.config.ts` file.
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
-import { textStyles } from './text-styles'
+import { defineConfig } from "@pandacss/dev";
+import { textStyles } from "./text-styles";
 
 export default defineConfig({
   theme: {
     extend: {
-      textStyles
-    }
-  }
-})
+      textStyles,
+    },
+  },
+});
 ```
 
 This should automatically update the generated theme the specified `textStyles`. If this doesn't happen, you can run the
@@ -944,10 +974,14 @@ This should automatically update the generated theme the specified `textStyles`.
 Now we can use `textStyle` property in our components.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
-  return <p className={css({ textStyle: 'body' })}>This is a paragraph from Panda with the body text style.</p>
+  return (
+    <p className={css({ textStyle: "body" })}>
+      This is a paragraph from Panda with the body text style.
+    </p>
+  );
 }
 ```
 
@@ -967,48 +1001,48 @@ export default defineConfig({
         heading: {
           DEFAULT: {
             value: {
-              fontFamily: 'Inter',
-              fontWeight: 'bold',
-              fontSize: '1.5rem',
-              lineHeight: '1.2'
-            }
+              fontFamily: "Inter",
+              fontWeight: "bold",
+              fontSize: "1.5rem",
+              lineHeight: "1.2",
+            },
           },
           h1: {
             value: {
-              fontFamily: 'Inter',
-              fontWeight: 'bold',
-              fontSize: '2.5rem',
-              lineHeight: '1.1'
-            }
+              fontFamily: "Inter",
+              fontWeight: "bold",
+              fontSize: "2.5rem",
+              lineHeight: "1.1",
+            },
           },
           h2: {
             value: {
-              fontFamily: 'Inter',
-              fontWeight: 'bold',
-              fontSize: '2rem',
-              lineHeight: '1.15'
-            }
-          }
-        }
-      }
-    }
-  }
-})
+              fontFamily: "Inter",
+              fontWeight: "bold",
+              fontSize: "2rem",
+              lineHeight: "1.15",
+            },
+          },
+        },
+      },
+    },
+  },
+});
 ```
 
 Now you can use the default heading style or specific variants:
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
     <div>
-      <h1 className={css({ textStyle: 'heading.h1' })}>Main Title</h1>
-      <h2 className={css({ textStyle: 'heading.h2' })}>Subtitle</h2>
-      <h3 className={css({ textStyle: 'heading' })}>Uses DEFAULT variant</h3>
+      <h1 className={css({ textStyle: "heading.h1" })}>Main Title</h1>
+      <h2 className={css({ textStyle: "heading.h2" })}>Subtitle</h2>
+      <h3 className={css({ textStyle: "heading" })}>Uses DEFAULT variant</h3>
     </div>
-  )
+  );
 }
 ```
 
@@ -1031,7 +1065,6 @@ styles:
 
 ---
 
-
 ## Tokens
 
 Design tokens are the platform-agnostic way to manage design decisions in your application or website.
@@ -1051,7 +1084,7 @@ A design token consists of the following properties:
 Tokens are defined in the `panda.config` file under the `theme` key
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
@@ -1059,16 +1092,16 @@ export default defineConfig({
     extend: {
       tokens: {
         colors: {
-          primary: { value: '#0FEE0F' },
-          secondary: { value: '#EE0F0F' }
+          primary: { value: "#0FEE0F" },
+          secondary: { value: "#EE0F0F" },
         },
         fonts: {
-          body: { value: 'system-ui, sans-serif' }
-        }
-      }
-    }
-  }
-})
+          body: { value: "system-ui, sans-serif" },
+        },
+      },
+    },
+  },
+});
 ```
 
 > ⚠️ Token values need to be nested in an object with a `value` key. This is to allow for additional properties like
@@ -1077,39 +1110,39 @@ export default defineConfig({
 After defining tokens, you can use them in authoring components and styles.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
     <p
       className={css({
-        color: 'primary',
-        fontFamily: 'body'
+        color: "primary",
+        fontFamily: "body",
       })}
     >
       Hello World
     </p>
-  )
+  );
 }
 ```
 
 You can also add an optional description to your tokens. This will be used in the autogenerate token documentation.
 
 ```js {8}
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     tokens: {
       colors: {
         danger: {
-          value: '#EE0F0F',
-          description: 'Color for errors'
-        }
-      }
-    }
-  }
-})
+          value: "#EE0F0F",
+          description: "Color for errors",
+        },
+      },
+    },
+  },
+});
 ```
 
 ## Semantic Tokens
@@ -1125,24 +1158,24 @@ For example, assuming we've defined the following tokens:
 - `danger` and `success` are semantic tokens that reference the `red` and `green` tokens.
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     tokens: {
       colors: {
-        red: { value: '#EE0F0F' },
-        green: { value: '#0FEE0F' }
-      }
+        red: { value: "#EE0F0F" },
+        green: { value: "#0FEE0F" },
+      },
     },
     semanticTokens: {
       colors: {
-        danger: { value: '{colors.red}' },
-        success: { value: '{colors.green}' }
-      }
-    }
-  }
-})
+        danger: { value: "{colors.red}" },
+        success: { value: "{colors.green}" },
+      },
+    },
+  },
+});
 ```
 
 > ⚠️ Semantic Token values need to be nested in an object with a `value` key. This is to allow for additional properties
@@ -1154,7 +1187,7 @@ modes.
 For example, if you want a color to change automatically based on light or dark mode.
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
@@ -1162,15 +1195,15 @@ export default defineConfig({
     semanticTokens: {
       colors: {
         danger: {
-          value: { base: '{colors.red}', _dark: '{colors.darkred}' }
+          value: { base: "{colors.red}", _dark: "{colors.darkred}" },
         },
         success: {
-          value: { base: '{colors.green}', _dark: '{colors.darkgreen}' }
-        }
-      }
-    }
-  }
-})
+          value: { base: "{colors.green}", _dark: "{colors.darkgreen}" },
+        },
+      },
+    },
+  },
+});
 ```
 
 > NOTE 🚨: The conditions used in semantic tokens must be an at-rule or parent selector
@@ -1183,7 +1216,7 @@ Tokens can be nested to create a hierarchy of tokens. This is useful when you wa
 > Tip: You can use the `DEFAULT` key to define the default value of a nested token.
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
@@ -1191,33 +1224,33 @@ export default defineConfig({
     semanticTokens: {
       colors: {
         bg: {
-          DEFAULT: { value: '{colors.gray.100}' },
-          muted: { value: '{colors.gray.100}' }
-        }
-      }
-    }
-  }
-})
+          DEFAULT: { value: "{colors.gray.100}" },
+          muted: { value: "{colors.gray.100}" },
+        },
+      },
+    },
+  },
+});
 ```
 
 This allows the use of the `bg` token in the following ways:
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function App() {
   return (
     <div
       className={css({
         // 👇🏻 This will use the `DEFAULT` value
-        bg: 'bg',
+        bg: "bg",
         // 👇🏻 This will use the `muted` value
-        color: 'bg.muted'
+        color: "bg.muted",
       })}
     >
       Hello World
     </div>
-  )
+  );
 }
 ```
 
@@ -1234,10 +1267,10 @@ states. It is mostly defined as a string value or reference to other tokens.
 const theme = {
   tokens: {
     colors: {
-      red: { 100: { value: '#fff1f0' } }
-    }
-  }
-}
+      red: { 100: { value: "#fff1f0" } },
+    },
+  },
+};
 ```
 
 ### Gradients
@@ -1249,15 +1282,15 @@ composite value.
 type Gradient =
   | string
   | {
-      type: 'linear' | 'radial'
-      placement: string | number
+      type: "linear" | "radial";
+      placement: string | number;
       stops:
         | Array<{
-            color: string
-            position: number
+            color: string;
+            position: number;
           }>
-        | Array<string>
-    }
+        | Array<string>;
+    };
 ```
 
 ```jsx
@@ -1265,18 +1298,18 @@ const theme = {
   tokens: {
     gradients: {
       // string value
-      simple: { value: 'linear-gradient(to right, red, blue)' },
+      simple: { value: "linear-gradient(to right, red, blue)" },
       // composite value
       primary: {
         value: {
-          type: 'linear',
-          placement: 'to right',
-          stops: ['red', 'blue']
-        }
-      }
-    }
-  }
-}
+          type: "linear",
+          placement: "to right",
+          stops: ["red", "blue"],
+        },
+      },
+    },
+  },
+};
 ```
 
 ### Sizes
@@ -1287,10 +1320,10 @@ Size tokens represent the width and height of an element. Its value is defined a
 const theme = {
   tokens: {
     sizes: {
-      sm: { value: '12px' }
-    }
-  }
-}
+      sm: { value: "12px" },
+    },
+  },
+};
 ```
 
 > Size tokens are typically used in `width`, `height`, `min-width`, `max-width`, `min-height`, `max-height` properties.
@@ -1303,10 +1336,10 @@ Spacing tokens represent the margin and padding of an element. Its value is defi
 const theme = {
   tokens: {
     spacing: {
-      sm: { value: '12px' }
-    }
-  }
-}
+      sm: { value: "12px" },
+    },
+  },
+};
 ```
 
 > Spacing tokens are typically used in `margin`, `padding`, `gap`, and `{top|right|bottom|left}` properties.
@@ -1319,11 +1352,11 @@ Font tokens represent the font family of a text element. Its value is defined as
 const theme = {
   tokens: {
     fonts: {
-      body: { value: 'Inter, sans-serif' },
-      heading: { value: ['Roboto Mono', 'sans-serif'] }
-    }
-  }
-}
+      body: { value: "Inter, sans-serif" },
+      heading: { value: ["Roboto Mono", "sans-serif"] },
+    },
+  },
+};
 ```
 
 > Font tokens are typically used in `font-family` property.
@@ -1336,10 +1369,10 @@ Font size tokens represent the size of a text element. Its value is defined as a
 const theme = {
   tokens: {
     fontSizes: {
-      sm: { value: '12px' }
-    }
-  }
-}
+      sm: { value: "12px" },
+    },
+  },
+};
 ```
 
 > Font size tokens are typically used in `font-size` property.
@@ -1352,10 +1385,10 @@ Font weight tokens represent the weight of a text element. Its value is defined 
 const theme = {
   tokens: {
     fontWeights: {
-      bold: { value: '700' }
-    }
-  }
-}
+      bold: { value: "700" },
+    },
+  },
+};
 ```
 
 > Font weight tokens are typically used in `font-weight` property.
@@ -1368,10 +1401,10 @@ Letter spacing tokens represent the spacing between letters in a text element. I
 const theme = {
   tokens: {
     letterSpacings: {
-      wide: { value: '0.1em' }
-    }
-  }
-}
+      wide: { value: "0.1em" },
+    },
+  },
+};
 ```
 
 > Letter spacing tokens are typically used in `letter-spacing` property.
@@ -1384,10 +1417,10 @@ Line height tokens represent the height of a line of text. Its value is defined 
 const theme = {
   tokens: {
     lineHeights: {
-      normal: { value: '1.5' }
-    }
-  }
-}
+      normal: { value: "1.5" },
+    },
+  },
+};
 ```
 
 > Line height tokens are typically used in `line-height` property.
@@ -1400,10 +1433,10 @@ Radii tokens represent the radius of a border. Its value is defined as a string.
 const theme = {
   tokens: {
     radii: {
-      sm: { value: '4px' }
-    }
-  }
-}
+      sm: { value: "4px" },
+    },
+  },
+};
 ```
 
 > Radii tokens are typically used in `border-radius` property.
@@ -1417,14 +1450,14 @@ const theme = {
   tokens: {
     borders: {
       // string value
-      subtle: { value: '1px solid red' },
+      subtle: { value: "1px solid red" },
       // string value with reference to color token
-      danger: { value: '1px solid {colors.red.400}' },
+      danger: { value: "1px solid {colors.red.400}" },
       // composite value
-      accent: { value: { width: '1px', color: 'red', style: 'solid' } }
-    }
-  }
-}
+      accent: { value: { width: "1px", color: "red", style: "solid" } },
+    },
+  },
+};
 ```
 
 > Border tokens are typically used in `border`, `border-top`, `border-right`, `border-bottom`, `border-left`, `outline`
@@ -1438,12 +1471,12 @@ Border width tokens represent the width of a border. Its value is defined as a s
 const theme = {
   tokens: {
     borderWidths: {
-      thin: { value: '1px' },
-      thick: { value: '2px' },
-      medium: { value: '1.5px' }
-    }
-  }
-}
+      thin: { value: "1px" },
+      thick: { value: "2px" },
+      medium: { value: "1.5px" },
+    },
+  },
+};
 ```
 
 ### Shadows
@@ -1453,15 +1486,15 @@ or a composite value.
 
 ```ts
 type CompositeShadow = {
-  offsetX: number
-  offsetY: number
-  blur: number
-  spread: number
-  color: string
-  inset?: boolean
-}
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  spread: number;
+  color: string;
+  inset?: boolean;
+};
 
-type Shadow = string | CompositeShadow | string[] | CompositeShadow[]
+type Shadow = string | CompositeShadow | string[] | CompositeShadow[];
 ```
 
 ```jsx
@@ -1469,7 +1502,7 @@ const theme = {
   tokens: {
     shadows: {
       // string value
-      subtle: { value: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' },
+      subtle: { value: "0 1px 2px 0 rgba(0, 0, 0, 0.05)" },
       // composite value
       accent: {
         value: {
@@ -1477,16 +1510,19 @@ const theme = {
           offsetY: 4,
           blur: 4,
           spread: 0,
-          color: 'rgba(0, 0, 0, 0.1)'
-        }
+          color: "rgba(0, 0, 0, 0.1)",
+        },
       },
       // multiple string values
       realistic: {
-        value: ['0 1px 2px 0 rgba(0, 0, 0, 0.05)', '0 1px 4px 0 rgba(0, 0, 0, 0.1)']
-      }
-    }
-  }
-}
+        value: [
+          "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+          "0 1px 4px 0 rgba(0, 0, 0, 0.1)",
+        ],
+      },
+    },
+  },
+};
 ```
 
 > Shadow tokens are typically used in `box-shadow` property.
@@ -1501,12 +1537,12 @@ const theme = {
   tokens: {
     easings: {
       // string value
-      easeIn: { value: 'cubic-bezier(0.4, 0, 0.2, 1)' },
+      easeIn: { value: "cubic-bezier(0.4, 0, 0.2, 1)" },
       // array value
-      easeOut: { value: [0.4, 0, 0.2, 1] }
-    }
-  }
-}
+      easeOut: { value: [0.4, 0, 0.2, 1] },
+    },
+  },
+};
 ```
 
 > Ease tokens are typically used in `transition-timing-function` property.
@@ -1519,10 +1555,10 @@ Opacity tokens help you set the opacity of an element.
 const theme = {
   tokens: {
     opacity: {
-      50: { value: 0.5 }
-    }
-  }
-}
+      50: { value: 0.5 },
+    },
+  },
+};
 ```
 
 > Opacity tokens are typically used in `opacity` property.
@@ -1535,10 +1571,10 @@ This token type represents the depth of an element's position on the z-axis.
 const theme = {
   tokens: {
     zIndex: {
-      modal: { value: 1000 }
-    }
-  }
-}
+      modal: { value: 1000 },
+    },
+  },
+};
 ```
 
 > Z-index tokens are typically used in `z-index` property.
@@ -1548,8 +1584,8 @@ const theme = {
 Asset tokens represent a url or svg string. Its value is defined as a string or a composite value.
 
 ```ts
-type CompositeAsset = { type: 'url' | 'svg'; value: string }
-type Asset = string | CompositeAsset
+type CompositeAsset = { type: "url" | "svg"; value: string };
+type Asset = string | CompositeAsset;
 ```
 
 ```js
@@ -1557,14 +1593,14 @@ const theme = {
   tokens: {
     assets: {
       logo: {
-        value: { type: 'url', value: '/static/logo.png' }
+        value: { type: "url", value: "/static/logo.png" },
       },
       checkmark: {
-        value: { type: 'svg', value: '<svg>...</svg>' }
-      }
-    }
-  }
-}
+        value: { type: "svg", value: "<svg>...</svg>" },
+      },
+    },
+  },
+};
 ```
 
 > Asset tokens are typically used in `background-image` property.
@@ -1578,10 +1614,10 @@ value is defined as a string.
 const theme = {
   tokens: {
     durations: {
-      fast: { value: '100ms' }
-    }
-  }
-}
+      fast: { value: "100ms" },
+    },
+  },
+};
 ```
 
 > Duration tokens are typically used in `transition-duration` and `animation-duration` properties.
@@ -1595,11 +1631,11 @@ const theme = {
   tokens: {
     animations: {
       spin: {
-        value: 'spin 1s linear infinite'
-      }
-    }
-  }
-}
+        value: "spin 1s linear infinite",
+      },
+    },
+  },
+};
 ```
 
 > Animation tokens are typically used in `animation` property.
@@ -1612,11 +1648,11 @@ Aspect ratio tokens represent the aspect ratio of an element. Its value is defin
 const theme = {
   tokens: {
     aspectRatios: {
-      '1:1': { value: '1 / 1' },
-      '16:9': { value: '16 / 9' }
-    }
-  }
-}
+      "1:1": { value: "1 / 1" },
+      "16:9": { value: "16 / 9" },
+    },
+  },
+};
 ```
 
 ### Cursor
@@ -1629,13 +1665,13 @@ loading states. Their value is defined as a string.
 const theme = {
   tokens: {
     cursor: {
-      click: { value: 'pointer' },
-      disabled: { value: 'not-allowed' },
+      click: { value: "pointer" },
+      disabled: { value: "not-allowed" },
       // custom value
-      custom: { value: 'url(cursor.svg), auto' }
-    }
-  }
-}
+      custom: { value: "url(cursor.svg), auto" },
+    },
+  },
+};
 ```
 
 ## Token Helpers
@@ -1648,12 +1684,12 @@ To help defining tokens in a type-safe way, you can use the tokens
 The generated CSS variables will be scoped using the `cssVarRoot` selector defined in the config.
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
-  cssVarRoot: ':where(:root, :host)'
+  cssVarRoot: ":where(:root, :host)",
   // ...
-})
+});
 ```
 
 This will generate a CSS file similar to the following:
@@ -1670,7 +1706,6 @@ You can also define type-safe CSS variables using [globalVars](/docs/concepts/wr
 
 ---
 
-
 ## Using Tokens
 
 There are various ways to consume Panda tokens depending on your need at that point in time.
@@ -1682,16 +1717,16 @@ Learn the various ways to consume Panda tokens in your project.
 The recommended way to consume your tokens is in the `css` function or style props.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => (
   <div
     className={css({
-      color: 'green.400',
-      background: 'gray.200'
+      color: "green.400",
+      background: "gray.200",
     })}
   />
-)
+);
 ```
 
 ## Composite values
@@ -1704,10 +1739,11 @@ The `token()` function is useful when you need to provide a fallback value. The 
 you don't need a fallback value or prefer using a more concise syntax.
 
 <Tabs items={['token', 'reference syntax']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```js
-    import { css } from '../styled-system/css'
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+
+````js
+import { css } from '../styled-system/css'
 
     const className = css({ border: '1px solid token(colors.red.400)' })
     ```
@@ -1735,10 +1771,10 @@ you don't need a fallback value or prefer using a more concise syntax.
 You can also use it in media queries or any other CSS at-rule.
 
 <Tabs items={['token', 'reference syntax']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```js
-    import { css } from '../styled-system/css'
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+```js
+import { css } from '../styled-system/css'
 
     const className = css({
       '@media screen and (min-width: token(sizes.4xl))': {
@@ -1775,30 +1811,30 @@ your design tokens in the `style` attribute or when using CSS-in-JS libraries li
 ### Style Attribute
 
 ```tsx filename="src/App.tsx"
-import { token } from '../styled-system/tokens'
+import { token } from "../styled-system/tokens";
 
 function App() {
   return (
     <div
       style={{
-        background: token('colors.blue.200')
+        background: token("colors.blue.200"),
       }}
     />
-  )
+  );
 }
-```
+````
 
 Each of your design tokens will be available in the generated `/tokens` folder. It looks like this:
 
 ```js filename="styled-system/tokens.ts"
 const tokens = {
   // ...
-  'colors.blue.200': {
-    value: '#bfdbfe',
-    variable: 'var(--colors-blue-200)'
-  }
+  "colors.blue.200": {
+    value: "#bfdbfe",
+    variable: "var(--colors-blue-200)",
+  },
   // ...
-}
+};
 ```
 
 - The `token()` function returns the raw value of the token.
@@ -1813,23 +1849,21 @@ return `var(--colors-blue-200)`.
 ### Styled Components
 
 ```tsx
-import styled from 'styled-components'
+import styled from "styled-components";
 
 const Button = styled.button`
-  background: ${token('colors.blue.200')};
-`
+  background: ${token("colors.blue.200")};
+`;
 ```
 
 ### Emotion
 
 ```tsx
-import styled from '@emotion/styled'
+import styled from "@emotion/styled";
 
 const Button = styled.button`
-  background: ${token('colors.blue.200')};
-`
+  background: ${token("colors.blue.200")};
+`;
 ```
 
 ---
-
-

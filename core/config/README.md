@@ -16,11 +16,7 @@ Persisted config is JSON-only:
 Use these to validate JSON documents before loading them:
 
 ```ts
-import {
-  ActionConfig,
-  LoopConfig,
-  RootConfig,
-} from "@goddard-ai/schema/config"
+import { ActionConfig, LoopConfig, RootConfig } from "@goddard-ai/schema/config"
 
 const rootConfig = RootConfig.parse(rawRootConfig)
 const actionConfig = ActionConfig.parse(rawActionConfig)

@@ -1,4 +1,5 @@
 # Component: PullRequestsPage
+
 - **Minimum Viable Component:** Full-width pull request index page for triaging managed pull requests, filtering them, and opening detail tabs.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `PullRequestFilterSidebar`, `PullRequestList`, `CreatePullRequestDialog`.

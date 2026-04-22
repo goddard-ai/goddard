@@ -1,8 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { type ModelConfig, textModelConfigSchema } from "ai-sdk-json-schema"
+import { textModelConfigSchema, type ModelConfig } from "ai-sdk-json-schema"
 import { z } from "zod"
 
-import { type ACPAdapterName, ACPAdapterNames } from "./acp-adapters.ts"
+import { ACPAdapterNames, type ACPAdapterName } from "./acp-adapters.ts"
 import { AgentDistribution } from "./agent-distribution.ts"
 import { DaemonSessionMetadata } from "./daemon/store.ts"
 
@@ -330,15 +330,28 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   // Types inherited from ACP schema: https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json
   acpRegistry.add(McpServer)
 
-  z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...ACPAdapterNames] })
+  z.globalRegistry.add(AgentSetting, {
+    id: "AgentSetting",
+    examples: [...ACPAdapterNames],
+  })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(ActionConfig, { id: "ActionConfig" })
   z.globalRegistry.add(LoopConfig, { id: "LoopConfig" })
-  z.globalRegistry.add(WorktreePluginPathReference, { id: "WorktreePluginPathReference" })
-  z.globalRegistry.add(WorktreePluginPackageReference, { id: "WorktreePluginPackageReference" })
-  z.globalRegistry.add(WorktreePluginReference, { id: "WorktreePluginReference" })
-  z.globalRegistry.add(WorktreeBootstrapPackageManager, { id: "WorktreeBootstrapPackageManager" })
-  z.globalRegistry.add(WorktreeBootstrapConfig, { id: "WorktreeBootstrapConfig" })
+  z.globalRegistry.add(WorktreePluginPathReference, {
+    id: "WorktreePluginPathReference",
+  })
+  z.globalRegistry.add(WorktreePluginPackageReference, {
+    id: "WorktreePluginPackageReference",
+  })
+  z.globalRegistry.add(WorktreePluginReference, {
+    id: "WorktreePluginReference",
+  })
+  z.globalRegistry.add(WorktreeBootstrapPackageManager, {
+    id: "WorktreeBootstrapPackageManager",
+  })
+  z.globalRegistry.add(WorktreeBootstrapConfig, {
+    id: "WorktreeBootstrapConfig",
+  })
   z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
   z.globalRegistry.add(SessionTitlesConfig, { id: "SessionTitlesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })

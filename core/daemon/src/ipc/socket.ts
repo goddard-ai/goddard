@@ -1,7 +1,7 @@
-import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
-import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { mkdir, rm } from "node:fs/promises"
 import * as path from "node:path"
+import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
+import { createDaemonUrl, readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 
 import { ipcPath } from "../ipc-path.ts"
 

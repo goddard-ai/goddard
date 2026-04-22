@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
-
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 
 import pkg from "../package.json" with { type: "json" }

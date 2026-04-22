@@ -73,7 +73,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasMethod(
   value: unknown,
   method: "session/prompt" | "session/update",
-): value is Record<string, unknown> & { method: typeof method; params?: unknown } {
+): value is Record<string, unknown> & {
+  method: typeof method
+  params?: unknown
+} {
   return isRecord(value) && value.method === method
 }
 

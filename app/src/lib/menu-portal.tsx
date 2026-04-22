@@ -1,18 +1,20 @@
-import { Portal } from "@ark-ui/react/portal"
-import { useRef } from "preact/hooks"
+import { Portal } from "@ark-ui/react/portal";
+import { useRef } from "preact/hooks";
 
-export const menuPortalId = "menu-portal"
+export const menuPortalId = "menu-portal";
 const menuPortalElement =
-  typeof document === "undefined" ? null : document.getElementById(menuPortalId)
+  typeof document === "undefined"
+    ? null
+    : document.getElementById(menuPortalId);
 
 /** Renders menus into a shared host that layers above the dialog portal. */
 export function MenuPortal(props: { children?: preact.ComponentChildren }) {
-  const containerRef = useRef<HTMLElement | null>(menuPortalElement)
-  containerRef.current = menuPortalElement
+  const containerRef = useRef<HTMLElement | null>(menuPortalElement);
+  containerRef.current = menuPortalElement;
 
   if (!containerRef.current) {
-    return null
+    return null;
   }
 
-  return <Portal container={containerRef}>{props.children}</Portal>
+  return <Portal container={containerRef}>{props.children}</Portal>;
 }

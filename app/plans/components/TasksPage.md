@@ -1,4 +1,5 @@
 # Component: TasksPage
+
 - **Minimum Viable Component:** Full-width task prioritization page that uses a list layout, not a board, with a left-hanging filter sidebar and task detail tabs.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `TaskFilterSidebar`, `TaskList`.

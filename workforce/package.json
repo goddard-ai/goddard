@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsgo",
     "lint": "oxlint",
-    "fmt": "oxfmt",
+    "fmt": "prettier -w .",
     "typecheck": "tsgo -p tsconfig.json --noEmit",
     "test": "bun test --pass-with-no-tests --dots"
   },

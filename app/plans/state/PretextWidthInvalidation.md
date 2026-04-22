@@ -1,4 +1,5 @@
 # State Module: PretextWidthInvalidation
+
 - **Goal:** Keep paragraph-heavy transcript and markdown surfaces responsive when the window width changes, without forcing eager Pretext relayout for offscreen content.
 - **Why now:** `SessionChatTranscript` is moving to `react-virtuoso` for row virtualization, which leaves paragraph measurement and width invalidation as the shared problem to solve across transcript-like surfaces.
 - **Responsibility:** Own the shared width-invalidation epoch, paragraph measurement registry, and read-then-write batching used by `TabViewport`, `SessionChatTranscript`, and future `PretextMarkdown` surfaces.

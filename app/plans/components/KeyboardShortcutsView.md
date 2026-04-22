@@ -1,4 +1,5 @@
 # Component: KeyboardShortcutsView
+
 - **Minimum Viable Component:** Closable workbench-tab view for browsing every registered shortcut command, filtering the list, and opening a lightweight capture modal for rebinding.
 - **Props Interface:** `class?: string`.
 - **Sub-components:** `KeyboardShortcutCaptureDialog`.

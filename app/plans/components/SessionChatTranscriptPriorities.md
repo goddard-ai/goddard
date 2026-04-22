@@ -1,4 +1,5 @@
 # Component: SessionChatTranscript Priorities
+
 - **Goal:** Prioritize the transcript component work needed to turn `SessionChatTranscript` from a debug-only message list into a production-ready ACP session surface.
 - **Inputs:** `SessionChatTranscriptAcpRequirements`, `SessionTurnChangeSummary`, `PretextMarkdown`, and `CodeDiffView`.
 - **Ordering principle:**

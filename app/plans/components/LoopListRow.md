@@ -1,4 +1,5 @@
 # Component: LoopListRow
+
 - **Minimum Viable Component:** One loop row that shows project, loop name, runtime state, cycle metrics, and lifecycle actions.
 - **Props Interface:** `loop: { key, rootDirLabel, loopName, runtimeState, cycleCount, lastPromptAt, sessionId? }`; `isSelected: boolean`; `onSelect: (loopKey) => void`; `onStart: (loopKey) => void`; `onStop: (loopKey) => void`; `onOpenSession?: (sessionId) => void`.
 - **Sub-components:** None.

@@ -8,13 +8,13 @@ import { commandContext } from "~/commands/command-context.ts"
 import { desktopHost } from "~/desktop-host.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
-  createShortcutBinding,
   createDefaultShortcutKeymapFile,
+  createShortcutBinding,
   getShortcutBindingExpression,
   resolveShortcutBindings,
   shortcutKeymapProfiles,
-  type ShortcutBinding,
   type KeymapProfileId,
+  type ShortcutBinding,
   type ShortcutKeymapBindings,
   type ShortcutKeymapOverrides,
 } from "~/shared/shortcut-keymap.ts"
@@ -145,7 +145,9 @@ export const ShortcutRegistry = new SigmaType<ShortcutRegistryShape>("ShortcutRe
           this.resolvedBindings[commandId] ?? [],
           (binding) => binding as ShortcutBinding,
         ),
-        this.toPersistedBinding(commandId, expression, { when: normalizedWhenClause }),
+        this.toPersistedBinding(commandId, expression, {
+          when: normalizedWhenClause,
+        }),
       ])
     },
 

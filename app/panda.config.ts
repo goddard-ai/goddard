@@ -1,6 +1,6 @@
-import { defineConfig } from "@pandacss/dev"
+import { defineConfig } from "@pandacss/dev";
 
-import { globalCss } from "./src/panda-css/global.css.ts"
+import { globalCss } from "./src/panda-css/global.css.ts";
 
 export default defineConfig({
   preflight: true,
@@ -45,7 +45,9 @@ export default defineConfig({
           userBubble: {
             start: { value: "var(--theme-color-transcript-user-bubble-start)" },
             end: { value: "var(--theme-color-transcript-user-bubble-end)" },
-            border: { value: "var(--theme-color-transcript-user-bubble-border)" },
+            border: {
+              value: "var(--theme-color-transcript-user-bubble-border)",
+            },
           },
           userCode: {
             bg: { value: "var(--theme-color-transcript-user-code-bg)" },
@@ -55,4 +57,4 @@ export default defineConfig({
       },
     },
   },
-})
+});

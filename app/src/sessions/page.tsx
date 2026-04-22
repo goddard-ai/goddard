@@ -1,33 +1,38 @@
-import type { DaemonSession } from "@goddard-ai/sdk"
-import { useState } from "preact/hooks"
+import type { DaemonSession } from "@goddard-ai/sdk";
+import { useState } from "preact/hooks";
 
-import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsx"
-import { queryClient, useQuery } from "~/lib/query.ts"
-import { findNearestProjectPath } from "~/projects/project-context.ts"
-import { goddardSdk } from "~/sdk.ts"
-import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
-import { ListToolbar } from "./list-toolbar.tsx"
-import { SessionsList } from "./list.tsx"
-import styles from "./page.style.ts"
+import {
+  useProjectRegistry,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsx";
+import { queryClient, useQuery } from "~/lib/query.ts";
+import { findNearestProjectPath } from "~/projects/project-context.ts";
+import { goddardSdk } from "~/sdk.ts";
+import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts";
+import { ListToolbar } from "./list-toolbar.tsx";
+import { SessionsList } from "./list.tsx";
+import styles from "./page.style.ts";
 import {
   filterSessionsByTitle,
   getSessionDisplayTitle,
   getSessionRepositoryLabel,
-} from "./presentation.ts"
+} from "./presentation.ts";
 
 export default function SessionsPage() {
-  const projectRegistry = useProjectRegistry()
-  const workbenchTabSet = useWorkbenchTabSet()
-  const [searchQuery, setSearchQuery] = useState("")
+  const projectRegistry = useProjectRegistry();
+  const workbenchTabSet = useWorkbenchTabSet();
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const { sessions } = useQuery(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
-  const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+  const { sessions } = useQuery(goddardSdk.session.list, [
+    { limit: SESSION_LIST_LIMIT },
+  ]);
+  const visibleSessions = filterSessionsByTitle(sessions, searchQuery);
 
   function openSession(sessionId: DaemonSession["id"]) {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
+    const session = sessions.find((candidate) => candidate.id === sessionId);
 
     if (!session) {
-      return
+      return;
     }
 
     workbenchTabSet.openOrFocusTab({
@@ -35,21 +40,24 @@ export default function SessionsPage() {
       kind: "sessionChat",
       title: getSessionDisplayTitle(session),
       payload: {
-        projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
+        projectPath: findNearestProjectPath(
+          projectRegistry.projectList,
+          session.cwd,
+        ),
         sessionId: session.id,
       },
       dirty: false,
-    })
+    });
   }
 
   function openSessionChanges(sessionId: DaemonSession["id"]) {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
+    const session = sessions.find((candidate) => candidate.id === sessionId);
 
     if (!session) {
-      return
+      return;
     }
 
-    queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
+    queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }]);
     workbenchTabSet.openOrFocusTab({
       id: `session-changes:${session.id}`,
       kind: "sessionChanges",
@@ -60,7 +68,7 @@ export default function SessionsPage() {
         repositoryLabel: getSessionRepositoryLabel(session),
       },
       dirty: false,
-    })
+    });
   }
 
   return (
@@ -68,7 +76,7 @@ export default function SessionsPage() {
       <ListToolbar
         searchQuery={searchQuery}
         onSearchInput={(value) => {
-          setSearchQuery(value)
+          setSearchQuery(value);
         }}
       />
       <div class={styles.listBody}>
@@ -80,5 +88,5 @@ export default function SessionsPage() {
         />
       </div>
     </div>
-  )
+  );
 }

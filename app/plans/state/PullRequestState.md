@@ -1,4 +1,5 @@
 # State Module: PullRequestState
+
 - **Responsibility:** Manage pull request detail records, collapsed discussion summaries, and on-demand expansion of the full discussion.
 - **Data Shape:** One map keyed by stable pull request ref `{ owner, repo, number }`; summary metadata for title, author, branches, status, URL, and repository; discussion slices containing author description, hidden count, last non-author reply, last author reply, and optional full timeline; loading and error state.
 - **Mutations/Actions:** `loadPullRequest`; `refreshPullRequest`; `revealFullDiscussion`; `mergePullRequestEvent`; `setActiveDiscussionMode`; `openRelatedSession`.

@@ -1,4 +1,5 @@
 # State Module: InboxState
+
 - **Responsibility:** Own the Gmail-like inbox of coding agent updates, including normalization, selection, snoozing, archiving, and delegation workflows.
 - **Data Shape:** One normalized inbox item map keyed by inbox id; one ordered array grouped or sorted by most recently updated first; one selection set; one query string; one active filter; per-item linkage to session ids, pull request refs, diff refs, or project refs; loading, error, and optimistic action state.
 - **Mutations/Actions:** `loadInbox`; `mergeInboxEvent`; `setQuery`; `setFilter`; `toggleSelection`; `clearSelection`; `snoozeItems`; `archiveItems`; `delegateItems`; `openInboxItem`.

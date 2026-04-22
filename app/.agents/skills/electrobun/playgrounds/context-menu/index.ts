@@ -1,9 +1,9 @@
-import Electrobun, { Electroview } from "electrobun/view"
+import Electrobun, { Electroview } from "electrobun/view";
 
 interface MenuConfig {
-  id: string
-  title: string
-  menu: any[]
+  id: string;
+  title: string;
+  menu: any[];
 }
 
 const menuConfigs: MenuConfig[] = [
@@ -109,92 +109,98 @@ const menuConfigs: MenuConfig[] = [
       },
     ],
   },
-]
+];
 
 const rpc = Electroview.defineRPC<any>({
   maxRequestTime: 600000,
   handlers: {
     requests: {},
     messages: {
-      contextMenuClicked: (eventData: { action?: string; role?: string; data?: any }) => {
-        addLogEntry(eventData.action || eventData.role || "unknown", eventData.data)
+      contextMenuClicked: (eventData: {
+        action?: string;
+        role?: string;
+        data?: any;
+      }) => {
+        addLogEntry(
+          eventData.action || eventData.role || "unknown",
+          eventData.data,
+        );
       },
     },
   },
-})
+});
 
-const electrobun = new Electrobun.Electroview({ rpc })
+const electrobun = new Electrobun.Electroview({ rpc });
 
-let currentMenuId = "menu1"
+let currentMenuId = "menu1";
 
 function addLogEntry(action: string, data?: any) {
-  const log = document.getElementById("eventLog")
-  if (!log) return
+  const log = document.getElementById("eventLog");
+  if (!log) return;
 
-  const placeholder = log.querySelector(".log-placeholder")
-  if (placeholder) placeholder.remove()
+  const placeholder = log.querySelector(".log-placeholder");
+  if (placeholder) placeholder.remove();
 
-  const entry = document.createElement("div")
-  entry.className = "log-entry"
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
 
-  const now = new Date()
-  const timestamp = now.toLocaleTimeString()
+  const now = new Date();
+  const timestamp = now.toLocaleTimeString();
 
-  let html = `<span class="timestamp">${timestamp}</span> Clicked: <span class="action">${action}</span>`
+  let html = `<span class="timestamp">${timestamp}</span> Clicked: <span class="action">${action}</span>`;
 
   if (data) {
-    html += `<span class="data">Data: ${JSON.stringify(data)}</span>`
+    html += `<span class="data">Data: ${JSON.stringify(data)}</span>`;
   }
 
-  entry.innerHTML = html
-  log.insertBefore(entry, log.firstChild)
+  entry.innerHTML = html;
+  log.insertBefore(entry, log.firstChild);
 }
 
 function showContextMenu(menuId: string) {
-  const config = menuConfigs.find((c) => c.id === menuId)
-  if (!config) return
-
-  ;(electrobun.rpc as any)?.request.showContextMenu({ menu: config.menu })
-  addLogEntry(`Showing: ${config.title}`)
+  const config = menuConfigs.find((c) => c.id === menuId);
+  if (!config) return;
+  (electrobun.rpc as any)?.request.showContextMenu({ menu: config.menu });
+  addLogEntry(`Showing: ${config.title}`);
 }
 
 function setActiveButton(menuId: string) {
   document.querySelectorAll(".menu-btn").forEach((btn) => {
-    btn.classList.remove("active")
-  })
-  document.getElementById(menuId)?.classList.add("active")
+    btn.classList.remove("active");
+  });
+  document.getElementById(menuId)?.classList.add("active");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   // Done button
   document.getElementById("doneBtn")?.addEventListener("click", () => {
-    ;(electrobun.rpc as any)?.request.closeWindow({})
-  })
+    (electrobun.rpc as any)?.request.closeWindow({});
+  });
 
   // Clear log button
   document.getElementById("clearLog")?.addEventListener("click", () => {
-    const log = document.getElementById("eventLog")
+    const log = document.getElementById("eventLog");
     if (log) {
       log.innerHTML =
-        '<div class="log-placeholder">Context menu click events will appear here...</div>'
+        '<div class="log-placeholder">Context menu click events will appear here...</div>';
     }
-  })
+  });
 
   // Menu buttons - click to show that menu
   menuConfigs.forEach((config) => {
     document.getElementById(config.id)?.addEventListener("click", () => {
-      currentMenuId = config.id
-      setActiveButton(config.id)
-      showContextMenu(config.id)
-    })
-  })
+      currentMenuId = config.id;
+      setActiveButton(config.id);
+      showContextMenu(config.id);
+    });
+  });
 
   // Right-click in test area shows current menu
   document.getElementById("testArea")?.addEventListener("contextmenu", (e) => {
-    e.preventDefault()
-    showContextMenu(currentMenuId)
-  })
+    e.preventDefault();
+    showContextMenu(currentMenuId);
+  });
 
   // Set initial active state
-  setActiveButton(currentMenuId)
-})
+  setActiveButton(currentMenuId);
+});

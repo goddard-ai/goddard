@@ -1,11 +1,11 @@
 /** Desktop host helpers that stage, install, and launch the app-managed daemon runtime. */
+import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getDaemonSocketPath, getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { Updater } from "electrobun/bun"
-import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
 
 import {
   daemonServiceName,
@@ -147,7 +147,10 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
     const stagedInstallDir = join(stagingRoot, "runtime")
 
     try {
-      await cp(embeddedDaemonRootDir, stagedInstallDir, { recursive: true, force: true })
+      await cp(embeddedDaemonRootDir, stagedInstallDir, {
+        recursive: true,
+        force: true,
+      })
       await rename(stagedInstallDir, installDir)
     } catch (error) {
       await rm(stagingRoot, { recursive: true, force: true }).catch(() => {})

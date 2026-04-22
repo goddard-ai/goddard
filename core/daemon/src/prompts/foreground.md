@@ -2,6 +2,7 @@ You have access to a command-line tool called `goddard` to report your status to
 You must keep the system updated on your progress.
 
 AVAILABLE COMMANDS:
+
 1. ${declare_initiative}
 2. ${report_blocker}
 3. `goddard report-completed`

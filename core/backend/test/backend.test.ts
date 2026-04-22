@@ -24,11 +24,15 @@ test("control plane creates PR authored by authenticated user", () => {
 })
 
 test("http api supports login and pr creation", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
     const session = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
       githubUsername: "alec",
@@ -53,11 +57,15 @@ test("http api supports login and pr creation", async () => {
 })
 
 test("managed PR endpoint returns true only for PRs created by the authenticated user", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
     const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
       githubUsername: "alec",
@@ -65,7 +73,13 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
 
     await postJson(
       `${baseUrl}/pr/create`,
-      { owner: "goddard-ai", repo: "test-repo", title: "Add CLI", head: "feat/cli", base: "main" },
+      {
+        owner: "goddard-ai",
+        repo: "test-repo",
+        title: "Add CLI",
+        head: "feat/cli",
+        base: "main",
+      },
       alecSession.token,
     )
 
@@ -74,7 +88,9 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
     expect(managedResponse.status).toBe(200)
-    const managedPayload = (await managedResponse.json()) as { managed: boolean }
+    const managedPayload = (await managedResponse.json()) as {
+      managed: boolean
+    }
     expect(managedPayload.managed).toBe(true)
 
     const unmanagedResponse = await fetch(
@@ -82,10 +98,14 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
     expect(unmanagedResponse.status).toBe(200)
-    const unmanagedPayload = (await unmanagedResponse.json()) as { managed: boolean }
+    const unmanagedPayload = (await unmanagedResponse.json()) as {
+      managed: boolean
+    }
     expect(unmanagedPayload.managed).toBe(false)
 
-    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
+    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "bob",
+    })
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: bobFlow.deviceCode,
       githubUsername: "bob",
@@ -96,7 +116,9 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
       { headers: { authorization: `Bearer ${bobSession.token}` } },
     )
     expect(foreignResponse.status).toBe(200)
-    const foreignPayload = (await foreignResponse.json()) as { managed: boolean }
+    const foreignPayload = (await foreignResponse.json()) as {
+      managed: boolean
+    }
     expect(foreignPayload.managed).toBe(false)
   } finally {
     await server.close()
@@ -124,7 +146,9 @@ test("expired auth sessions are rejected", () => {
 })
 
 test("invalid JSON body returns 400", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
@@ -145,11 +169,15 @@ test("invalid JSON body returns 400", async () => {
 })
 
 test("sse stream receives webhook events for a managed PR", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
     const session = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
       githubUsername: "alec",
@@ -186,7 +214,9 @@ test("sse stream receives webhook events for a managed PR", async () => {
       body: "looks good",
     })
 
-    const parsed = (await eventPromise) as { event: { type: string; reactionAdded: string } }
+    const parsed = (await eventPromise) as {
+      event: { type: string; reactionAdded: string }
+    }
     expect(parsed.event.type).toBe("comment")
     expect(parsed.event.reactionAdded).toBe("eyes")
   } finally {
@@ -195,16 +225,22 @@ test("sse stream receives webhook events for a managed PR", async () => {
 })
 
 test("unified stream only emits events for managed PRs owned by the authenticated user", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const alecFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const alecFlow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
     const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: alecFlow.deviceCode,
       githubUsername: "alec",
     })
-    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "bob" })
+    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "bob",
+    })
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: bobFlow.deviceCode,
       githubUsername: "bob",
@@ -255,7 +291,9 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       body: "looks good",
     })
 
-    const alecEvent = (await readFirstSseEvent(alecStream)) as { event: { prNumber: number } }
+    const alecEvent = (await readFirstSseEvent(alecStream)) as {
+      event: { prNumber: number }
+    }
     expect(alecEvent.event.prNumber).toBe(1)
     await assertNoSseEvent(bobStream, 100)
   } finally {
@@ -264,11 +302,15 @@ test("unified stream only emits events for managed PRs owned by the authenticate
 })
 
 test("unified stream ignores webhook events for unmanaged PRs", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), { port: 0 })
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, { githubUsername: "alec" })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
     const session = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
       githubUsername: "alec",

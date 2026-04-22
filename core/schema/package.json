@@ -18,9 +18,9 @@
   "scripts": {
     "prepare": "bun run scripts/generate-acp-adapters.js",
     "build": "tsdown --unused && bun run generate-schemas",
-    "generate-schemas": "bun run scripts/generate-json-schemas.ts && oxfmt json/",
+    "generate-schemas": "bun run scripts/generate-json-schemas.ts && prettier -w json/",
     "lint": "oxlint",
-    "fmt": "oxfmt",
+    "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
     "test": "bun test --dots"
   },

@@ -3,8 +3,8 @@ import {
   type SessionInputClasses,
   type SessionInputPromptBlocks,
   type SessionInputSuggestionLoader,
-} from "~/session-input/input.tsx"
-import styles from "./composer.style.ts"
+} from "~/session-input/input.tsx";
+import styles from "./composer.style.ts";
 
 const composerClasses = {
   form: styles.form,
@@ -14,15 +14,15 @@ const composerClasses = {
   footer: styles.footer,
   helperText: styles.helperText,
   submitButton: styles.submitButton,
-} satisfies SessionInputClasses
+} satisfies SessionInputClasses;
 
 export function Composer(props: {
-  loadSuggestions: SessionInputSuggestionLoader
-  onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void
-  onPromptChange?: (prompt: SessionInputPromptBlocks) => void
-  placeholder?: string
-  helperText?: string
-  submitLabel?: string
+  loadSuggestions: SessionInputSuggestionLoader;
+  onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
+  onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
+  placeholder?: string;
+  helperText?: string;
+  submitLabel?: string;
 }) {
   return (
     <SessionInput
@@ -34,5 +34,5 @@ export function Composer(props: {
       submitLabel={props.submitLabel}
       onSubmit={props.onSubmit}
     />
-  )
+  );
 }

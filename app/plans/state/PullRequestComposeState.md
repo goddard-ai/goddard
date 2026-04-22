@@ -1,4 +1,5 @@
 # State Module: PullRequestComposeState
+
 - **Responsibility:** Manage creation and reply drafts for managed pull requests.
 - **Data Shape:** One create-dialog draft; reply drafts keyed by pull request ref; validation errors; submission status; transient success and error state; protected-action requirements for create or reply workflows.
 - **Mutations/Actions:** `openCreatePullRequestDialog`; `closeCreatePullRequestDialog`; `setCreatePullRequestDraft`; `submitPullRequest`; `setReplyDraft`; `submitReply`; `clearComposeError`.

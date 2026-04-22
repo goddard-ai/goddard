@@ -1,4 +1,5 @@
 # Component: RecentItemsList
+
 - **Minimum Viable Component:** Compact list of recent pages and tabs shown inside the global search dialog before the user types or when the query is empty.
 - **Props Interface:** `items: array of { id, domain, title, subtitle?, icon }`; `onOpen: (id) => void`.
 - **Sub-components:** None.

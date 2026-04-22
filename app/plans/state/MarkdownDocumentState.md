@@ -1,4 +1,5 @@
 # State Module: MarkdownDocumentState
+
 - **Responsibility:** Own markdown document loading, editing, dirty tracking, and save or revert flows independently of the `MarkdownEditorSurface` component tree.
 - **Data Shape:** One map keyed by document id containing source metadata, raw markdown content, editor-projected content, current mode, read-only flag, dirty baseline, save status, validation errors, and last-saved timestamp.
 - **Mutations/Actions:** `loadDocument`; `setMode`; `editDocument`; `saveDocument`; `revertDocument`; `markExternalUpdate`; `clearDocumentError`.

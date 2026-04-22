@@ -1,7 +1,18 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["import", "typescript", "unicorn", "oxc"],
+  "jsPlugins": [
+    {
+      "name": "tsrx",
+      "specifier": "@tsrx/eslint-plugin"
+    }
+  ],
   "rules": {
+    "tsrx/prefer-oninput": "warn",
+    "tsrx/no-return-in-component": "error",
+    "tsrx/control-flow-jsx": "error",
+    "tsrx/no-lazy-destructuring-in-modules": "error",
+    "tsrx/valid-for-of-key": "error",
     "import/no-duplicates": "error",
     "no-unused-vars": [
       "error",

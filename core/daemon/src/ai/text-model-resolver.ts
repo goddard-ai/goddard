@@ -1,21 +1,21 @@
 /** Daemon-owned text-model loading that prefers bundled provider packages and can install others on demand. */
+import { mkdir, stat, writeFile } from "node:fs/promises"
+import { join, resolve } from "node:path"
 import { getGoddardCacheDir } from "@goddard-ai/paths/node"
 import type { LanguageModel } from "ai"
 import {
   buildModelLoadPlan,
   executeModelLoadPlan,
   MissingProviderPackageError,
+  resolveModel,
+  resolveModelModules,
   type BuildModelLoadPlanOptions,
   type ModelConfig,
   type ModelDescriptor,
-  type ResolveModelModulesOptions,
   type ResolvedModelLoadPlan,
+  type ResolveModelModulesOptions,
   type UnresolvedModelLoadPlan,
-  resolveModel,
-  resolveModelModules,
 } from "ai-sdk-json-schema"
-import { mkdir, stat, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
 
 import { runCommand } from "../worktrees/process.ts"
 
@@ -82,7 +82,10 @@ const daemonProviderRootManifest = {
 const daemonPackageManagers = [
   { command: "bun", args: ["add", "--exact"] },
   { command: "pnpm", args: ["add", "--save-exact"] },
-  { command: "npm", args: ["install", "--save-exact", "--no-audit", "--no-fund"] },
+  {
+    command: "npm",
+    args: ["install", "--save-exact", "--no-audit", "--no-fund"],
+  },
 ] as const
 const defaultDaemonTextModelModuleLoaders = {
   "@ai-sdk/anthropic": () => import("@ai-sdk/anthropic"),

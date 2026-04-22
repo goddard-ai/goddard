@@ -1,4 +1,5 @@
 # State Module: GlobalSearchState
+
 - **Responsibility:** Own the global discovery index, recent items, current query, and ranked search results across app domains.
 - **Data Shape:** Dialog open state; current query; active domain filter; ranked result list; highlighted result id; recent item list; indexing status; last refresh metadata.
 - **Mutations/Actions:** `openSearchDialog`; `closeSearchDialog`; `setSearchQuery`; `setSearchDomainFilter`; `rebuildSearchIndex`; `highlightResult`; `openSearchResult`; `recordRecentItem`.

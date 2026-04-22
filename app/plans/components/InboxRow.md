@@ -1,4 +1,5 @@
 # Component: InboxRow
+
 - **Minimum Viable Component:** One inbox notification row showing project name, notification title, relative updated time, and hover-only action buttons.
 - **Props Interface:** `item: { id, projectName, title, updatedAt, state, linkedSessionId?, linkedPullRequestRef?, linkedDiffRef? }`; `isSelected: boolean`; `onToggleSelected: (id) => void`; `onOpen: (id) => void`; `onSnooze: (id) => void`; `onArchive: (id) => void`; `onDelegate: (id) => void`.
 - **Sub-components:** None.

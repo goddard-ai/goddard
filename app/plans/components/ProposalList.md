@@ -1,4 +1,5 @@
 # Component: ProposalList
+
 - **Minimum Viable Component:** Prioritized list of roadmap proposals with click-through into proposal detail tabs.
 - **Props Interface:** `proposals: array of proposal summary records`; `selectedProposalId?: string | null`; `onSelect: (id) => void`; `onOpen: (id) => void`.
 - **Sub-components:** `ProposalListRow`.

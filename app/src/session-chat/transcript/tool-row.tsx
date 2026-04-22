@@ -2,8 +2,8 @@ import type {
   SessionTranscriptToolCall,
   SessionTranscriptToolContent,
   SessionTranscriptToolStatus,
-} from "~/sessions/models.ts"
-import { buildToolDiffPreview } from "./layout.ts"
+} from "~/sessions/models.ts";
+import { buildToolDiffPreview } from "./layout.ts";
 import {
   rowClass,
   rowColumnClass,
@@ -19,41 +19,45 @@ import {
   toolSummaryClass,
   toolSummaryTextClass,
   toolToggleHintClass,
-} from "./styles.ts"
+} from "./styles.ts";
 
 function formatToolKindLabel(toolKind: SessionTranscriptToolCall["toolKind"]) {
   return toolKind === "switch_mode"
     ? "Switch mode"
-    : `${toolKind.slice(0, 1).toUpperCase()}${toolKind.slice(1)}`
+    : `${toolKind.slice(0, 1).toUpperCase()}${toolKind.slice(1)}`;
 }
 
 function formatToolStatusLabel(status: SessionTranscriptToolStatus) {
   return status === "in_progress"
     ? "Running"
-    : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
+    : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`;
 }
 
-function buildToolGroupSummaryParts(toolCalls: readonly SessionTranscriptToolCall[]) {
-  const visibleTitles = toolCalls.slice(0, 3).map((toolCall) => toolCall.title)
-  const moreCount = Math.max(0, toolCalls.length - visibleTitles.length)
+function buildToolGroupSummaryParts(
+  toolCalls: readonly SessionTranscriptToolCall[],
+) {
+  const visibleTitles = toolCalls.slice(0, 3).map((toolCall) => toolCall.title);
+  const moreCount = Math.max(0, toolCalls.length - visibleTitles.length);
 
   return [
     toolCalls.length === 1 ? "Tool call" : `${toolCalls.length} tool calls`,
     visibleTitles.join(", "),
     moreCount > 0 ? `+${moreCount} more` : null,
-  ].filter((part): part is string => Boolean(part))
+  ].filter((part): part is string => Boolean(part));
 }
 
-function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[]) {
+function buildToolStatusSummary(
+  toolCalls: readonly SessionTranscriptToolCall[],
+) {
   const counts = {
     pending: 0,
     in_progress: 0,
     completed: 0,
     failed: 0,
-  } satisfies Record<SessionTranscriptToolStatus, number>
+  } satisfies Record<SessionTranscriptToolStatus, number>;
 
   for (const toolCall of toolCalls) {
-    counts[toolCall.status] += 1
+    counts[toolCall.status] += 1;
   }
 
   return Object.entries(counts)
@@ -62,15 +66,15 @@ function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[])
       ([status, count]) =>
         `${count} ${formatToolStatusLabel(status as SessionTranscriptToolStatus).toLowerCase()}`,
     )
-    .join(", ")
+    .join(", ");
 }
 
 function renderMetaParts(parts: readonly string[], keyPrefix: string) {
   return parts.flatMap((part, index) => {
-    const partNode = <span key={`${keyPrefix}:part:${index}`}>{part}</span>
+    const partNode = <span key={`${keyPrefix}:part:${index}`}>{part}</span>;
 
     if (index === 0) {
-      return [partNode]
+      return [partNode];
     }
 
     return [
@@ -80,8 +84,8 @@ function renderMetaParts(parts: readonly string[], keyPrefix: string) {
         class={toolInlineSeparatorClass}
       />,
       partNode,
-    ]
-  })
+    ];
+  });
 }
 
 function renderToolContent(content: SessionTranscriptToolContent, key: string) {
@@ -90,28 +94,32 @@ function renderToolContent(content: SessionTranscriptToolContent, key: string) {
       <div key={key} class={toolDetailTextClass}>
         {content.text?.trim() || "Structured tool output."}
       </div>
-    )
+    );
   }
 
   if (content.type === "diff") {
     return (
       <div key={key} class={toolDetailListClass}>
-        {content.path ? <div class={toolDetailMonoClass}>{content.path}</div> : null}
+        {content.path ? (
+          <div class={toolDetailMonoClass}>{content.path}</div>
+        ) : null}
         <div class={toolDetailMonoClass}>{buildToolDiffPreview(content)}</div>
       </div>
-    )
+    );
   }
 
   return (
     <div key={key} class={toolDetailMonoClass}>
       Terminal session {content.terminalId}
     </div>
-  )
+  );
 }
 
-function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) {
+function renderToolLocations(
+  locations: SessionTranscriptToolCall["locations"],
+) {
   if (locations.length === 0) {
-    return null
+    return null;
   }
 
   return (
@@ -126,17 +134,19 @@ function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) 
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 /** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
 export function ToolTranscriptRow(props: {
-  groupId: string
-  toolCalls: readonly SessionTranscriptToolCall[]
+  groupId: string;
+  toolCalls: readonly SessionTranscriptToolCall[];
 }) {
-  const summaryParts = buildToolGroupSummaryParts(props.toolCalls)
-  const statusSummary = buildToolStatusSummary(props.toolCalls)
-  const summaryMetaParts = statusSummary ? [...summaryParts, statusSummary] : summaryParts
+  const summaryParts = buildToolGroupSummaryParts(props.toolCalls);
+  const statusSummary = buildToolStatusSummary(props.toolCalls);
+  const summaryMetaParts = statusSummary
+    ? [...summaryParts, statusSummary]
+    : summaryParts;
 
   return (
     <article class={rowClass}>
@@ -146,14 +156,20 @@ export function ToolTranscriptRow(props: {
             <summary class={toolSummaryClass}>
               <span class={toolSummaryTextClass}>
                 <span class={toolInlineMetaClass}>
-                  {renderMetaParts(summaryMetaParts, `${props.groupId}:summary`)}
+                  {renderMetaParts(
+                    summaryMetaParts,
+                    `${props.groupId}:summary`,
+                  )}
                 </span>
               </span>
               <span class={toolToggleHintClass}>Details</span>
             </summary>
             <ol class={toolDetailListClass}>
               {props.toolCalls.map((toolCall) => (
-                <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
+                <li
+                  key={`${props.groupId}:${toolCall.id}`}
+                  class={toolDetailItemClass}
+                >
                   <article>
                     <div class={toolDetailHeadingClass}>
                       <span class={toolInlineMetaClass}>
@@ -168,10 +184,14 @@ export function ToolTranscriptRow(props: {
                       </span>
                     </div>
                     {toolCall.content.map((content, index) =>
-                      renderToolContent(content, `${toolCall.id}:content:${index}`),
+                      renderToolContent(
+                        content,
+                        `${toolCall.id}:content:${index}`,
+                      ),
                     )}
                     {renderToolLocations(toolCall.locations)}
-                    {toolCall.content.length === 0 && toolCall.locations.length === 0 ? (
+                    {toolCall.content.length === 0 &&
+                    toolCall.locations.length === 0 ? (
                       <div class={toolDetailTextClass}>
                         No tool output was attached to this call.
                       </div>
@@ -184,5 +204,5 @@ export function ToolTranscriptRow(props: {
         </div>
       </div>
     </article>
-  )
+  );
 }

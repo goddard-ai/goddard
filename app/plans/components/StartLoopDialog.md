@@ -1,4 +1,5 @@
 # Component: StartLoopDialog
+
 - **Minimum Viable Component:** Modal flow for starting one daemon-managed loop with project context and optional runtime overrides.
 - **Props Interface:** `isOpen: boolean`; `draft: { projectPath, loopName, cycleDelay, maxOpsPerMinute, maxCyclesBeforePause }`; `projects: array of managed project summaries`; `availableLoops: array of { id, name, projectPath? }`; `validation: { canSubmit, fieldErrors }`; `isSubmitting: boolean`; `onDraftChange: (patch) => void`; `onSubmit: () => void`; `onClose: () => void`.
 - **Sub-components:** None.

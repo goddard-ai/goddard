@@ -1,4 +1,5 @@
 # Component: BrowserPreviewView
+
 - **Minimum Viable Component:** Detail view for an iframe-driven browser preview with navigation chrome and an observable console pane.
 - **Props Interface:** `previewId: string`; `initialUrl?: string`; `showConsoleByDefault?: boolean`.
 - **Sub-components:** `BrowserPreviewToolbar`, `BrowserPreviewFrame`, `BrowserPreviewConsole`.

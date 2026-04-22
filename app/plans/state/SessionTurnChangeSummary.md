@@ -1,4 +1,5 @@
 # State Module: SessionTurnChangeSummary
+
 - **Goal:** Show a reliable per-turn summary of changed files and diff output at the end of each ACP prompt turn, even though ACP does not define a standardized end-of-turn change summary.
 - **ACP gap:** ACP gives the client `tool_call`, `tool_call_update`, tool-call `diff` content, tool-call `locations`, and the final `stopReason`, but it does **not** define a single “here are the changed files for this turn” payload or a canonical git patch emitted at turn completion.
 - **Why now:** `SessionChatTranscript` will need an end-of-turn artifact summary if the app wants to feel like a serious coding workspace instead of a chat log. Relying on ad hoc message parsing later will make the transcript model brittle.

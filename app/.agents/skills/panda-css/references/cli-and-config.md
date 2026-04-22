@@ -159,29 +159,29 @@ The main `styles.css` file contains the `@layer` declarations and imports all th
 /* styled-system/styles.css */
 @layer reset, base, tokens, recipes, utilities;
 
-@import './styles/reset.css';
-@import './styles/global.css';
-@import './styles/tokens.css';
-@import './styles/recipes.css';
-@import './styles/utilities.css';
+@import "./styles/reset.css";
+@import "./styles/global.css";
+@import "./styles/tokens.css";
+@import "./styles/recipes.css";
+@import "./styles/utilities.css";
 ```
 
 You can then choose how to import these files:
 
 ```css
 /* Option 1: Import everything (default) */
-@import './styled-system/styles.css';
+@import "./styled-system/styles.css";
 
 /* Option 2: Import specific layers only */
-@import './styled-system/styles/tokens.css';
-@import './styled-system/styles/utilities.css';
+@import "./styled-system/styles/tokens.css";
+@import "./styled-system/styles/utilities.css";
 
 /* Option 3: Import specific recipes */
-@import './styled-system/styles/recipes/button.css';
-@import './styled-system/styles/recipes/card.css';
+@import "./styled-system/styles/recipes/button.css";
+@import "./styled-system/styles/recipes/card.css";
 
 /* Option 4: Import a specific theme (when using multiple themes) */
-@import './styled-system/styles/themes/oceanic.css';
+@import "./styled-system/styles/themes/oceanic.css";
 ```
 
 | Flag                   | Description                                                                            | Related                                                       |
@@ -405,7 +405,6 @@ See the [MCP Server guide](/docs/ai/mcp-server) for detailed usage and available
 
 ---
 
-
 ## Configuring Panda
 
 Customize how Panda works via the `panda.config.ts` file in your project.
@@ -413,11 +412,11 @@ Customize how Panda works via the `panda.config.ts` file in your project.
 Customize how Panda works via the `panda.config.ts` file in your project.
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // your configuration options here...
-})
+});
 ```
 
 ## Output css options
@@ -548,11 +547,11 @@ Ex: when using a prefix of `panda-`
 ```
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => {
-  return <div className={css({ color: 'blue.500' })} />
-}
+  return <div className={css({ color: "blue.500" })} />;
+};
 ```
 
 would result in:
@@ -580,11 +579,11 @@ Ex: when customizing the utilities layer
 ```
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => {
-  return <div className={css({ color: 'blue.500' })} />
-}
+  return <div className={css({ color: "blue.500" })} />;
+};
 ```
 
 would result in:
@@ -616,11 +615,11 @@ The separator for the generated css classes.
 Using a `=` with:
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => {
-  return <div className={css({ color: 'blue.500' })} />
-}
+  return <div className={css({ color: "blue.500" })} />;
+};
 ```
 
 would result in:
@@ -665,11 +664,11 @@ Hash the class names and css variables:
 This
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => {
-  return <div className={css({ color: 'blue.500' })} />
-}
+  return <div className={css({ color: "blue.500" })} />;
+};
 ```
 
 would result in something that looks like:
@@ -946,9 +945,9 @@ Ex object-literal:
 
 ```tsx
 const styles = css({
-  backgroundColor: 'gainsboro',
-  padding: '10px 15px'
-})
+  backgroundColor: "gainsboro",
+  padding: "10px 15px",
+});
 ```
 
 Ex template-literal:
@@ -957,7 +956,7 @@ Ex template-literal:
 const Container = styled.div`
   background-color: gainsboro;
   padding: 10px 15px;
-`
+`;
 ```
 
 ### lightningcss
@@ -1022,18 +1021,18 @@ Ex `true`:
 
 ```tsx
 const styles = css({
-  bgColor: 'gainsboro',
-  p: '10px 15px'
-})
+  bgColor: "gainsboro",
+  p: "10px 15px",
+});
 ```
 
 Ex false:
 
 ```tsx
 const styles = css({
-  backgroundColor: 'gainsboro',
-  padding: '10px 15px'
-})
+  backgroundColor: "gainsboro",
+  padding: "10px 15px",
+});
 ```
 
 ### cssVarRoot
@@ -1357,13 +1356,13 @@ Ex with 'all':
 Ex with 'minimal':
 
 ```jsx
-<styled.button css={{ marginTop: '40px' }}>Click me</styled.button>
+<styled.button css={{ marginTop: "40px" }}>Click me</styled.button>
 ```
 
 Ex with 'none':
 
 ```jsx
-<button className={css({ marginTop: '40px' })}>Click me</button>
+<button className={css({ marginTop: "40px" })}>Click me</button>
 ```
 
 ## Documentation options
@@ -1437,27 +1436,26 @@ They will be called in sequence in the order they are defined in the `plugins` a
 last.
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   plugins: [
     {
-      name: 'token-format',
+      name: "token-format",
       hooks: {
-        'tokens:created': ({ configure }) => {
+        "tokens:created": ({ configure }) => {
           configure({
-            formatTokenName: path => '$' + path.join('-')
-          })
-        }
-      }
-    }
-  ]
-})
+            formatTokenName: (path) => "$" + path.join("-"),
+          });
+        },
+      },
+    },
+  ],
+});
 ```
 
 ---
-
 
 ---
 

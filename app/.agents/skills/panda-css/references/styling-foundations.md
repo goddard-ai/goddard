@@ -127,14 +127,13 @@ Here is an example of a `postcss.config.js` file that uses these polyfills:
 
 ```js
 module.exports = {
-  plugins: ['@pandacss/dev/postcss', '@csstools/postcss-cascade-layers']
-}
+  plugins: ["@pandacss/dev/postcss", "@csstools/postcss-cascade-layers"],
+};
 ```
 
 Since CSS `@layer`s have a lower priority than other CSS rules, this postcss plugin is also useful in cases where your styles are being overridden by some other stylesheets that you're not in total control of, since it will remove the `@layer` rules and still emulate their specificity.
 
 ---
-
 
 ## Color opacity modifier
 
@@ -151,9 +150,9 @@ You can use it like this:
 
 ```ts
 css({
-  bg: 'red.300/40',
-  color: 'white'
-})
+  bg: "red.300/40",
+  color: "white",
+});
 ```
 
 This will generate:
@@ -161,7 +160,11 @@ This will generate:
 ```css
 @layer utilities {
   .bg_red\.300\/40 {
-    --mix-background: color-mix(in srgb, var(--colors-red-300) 40%, transparent);
+    --mix-background: color-mix(
+      in srgb,
+      var(--colors-red-300) 40%,
+      transparent
+    );
     background: var(--mix-background, var(--colors-red-300));
   }
 
@@ -185,21 +188,21 @@ use it on your own utilities:
 export default defineConfig({
   utilities: {
     background: {
-      shorthand: 'bg',
-      className: 'bg',
-      values: 'colors',
+      shorthand: "bg",
+      className: "bg",
+      values: "colors",
       transform(value, args) {
-        const mix = args.utils.colorMix(value)
+        const mix = args.utils.colorMix(value);
         // This can happen if the value format is invalid (e.g. `bg: red.300/invalid` or `bg: red.300//10`)
-        if (mix.invalid) return { background: value }
+        if (mix.invalid) return { background: value };
 
         return {
-          background: mix.value
-        }
-      }
-    }
-  }
-})
+          background: mix.value,
+        };
+      },
+    },
+  },
+});
 ```
 
 ---
@@ -208,18 +211,18 @@ Here's a cool snippet (that we use internally !) that makes it easier to create 
 property:
 
 ```ts
-import type { PropertyTransform } from '@pandacss/types'
+import type { PropertyTransform } from "@pandacss/types";
 export const createColorMixTransform =
   (prop: string): PropertyTransform =>
   (value, args) => {
-    const mix = args.utils.colorMix(value)
-    if (mix.invalid) return { [prop]: value }
-    const cssVar = '--mix-' + prop
+    const mix = args.utils.colorMix(value);
+    if (mix.invalid) return { [prop]: value };
+    const cssVar = "--mix-" + prop;
     return {
       [cssVar]: mix.value,
-      [prop]: `var(${cssVar}, ${mix.color})`
-    }
-  }
+      [prop]: `var(${cssVar}, ${mix.color})`,
+    };
+  };
 ```
 
 then the same utility transform as above can be written like this:
@@ -238,7 +241,6 @@ export default defineConfig({
 
 ---
 
-
 ## Conditional Styles
 
 Learn how to use conditional and responsive styles in Panda.
@@ -252,8 +254,8 @@ say you want to change the background color of a button when it's hovered. You c
 ```jsx
 <button
   className={css({
-    bg: 'red.500',
-    _hover: { bg: 'red.700' }
+    bg: "red.500",
+    _hover: { bg: "red.700" },
   })}
 >
   Hover me
@@ -291,7 +293,7 @@ Let's say you want to change the background color of a button when it's focused 
 ```jsx
 <button
   className={css({
-    bg: { base: 'red.500', _hover: { _focus: 'red.700' } }
+    bg: { base: "red.500", _hover: { _focus: "red.700" } },
   })}
 >
   Hover me
@@ -313,45 +315,45 @@ What if you need a one-off selector that is not defined in your config's conditi
 generate classes for arbitrary selectors:
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => {
   return (
     <div
       className={css({
-        '&[data-state=closed]': { color: 'red.300' },
-        '& > *': { margin: '2' }
+        "&[data-state=closed]": { color: "red.300" },
+        "& > *": { margin: "2" },
       })}
     />
-  )
-}
+  );
+};
 ```
 
 This also works with the supported at-rules (`@media`, `@layer`, `@container`, `@supports`, and `@page`):
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const App = () => {
   return (
-    <div className={css({ display: 'flex', containerType: 'size' })}>
+    <div className={css({ display: "flex", containerType: "size" })}>
       <div
         className={css({
-          '@media (min-width: 768px)': {
-            color: 'red.300'
+          "@media (min-width: 768px)": {
+            color: "red.300",
           },
-          '@container (min-width: 10px)': {
-            color: 'green.300'
+          "@container (min-width: 10px)": {
+            color: "green.300",
           },
-          '@supports (display: flex)': {
-            fontSize: '3xl',
-            color: 'blue.300'
-          }
+          "@supports (display: flex)": {
+            fontSize: "3xl",
+            color: "blue.300",
+          },
         })}
       />
     </div>
-  )
-}
+  );
+};
 ```
 
 ## Pseudo Classes
@@ -363,9 +365,9 @@ You can style the hover, active, focus, and disabled states of an element using 
 ```jsx
 <button
   className={css({
-    bg: 'red.500',
-    _hover: { bg: 'red.700' },
-    _active: { bg: 'red.900' }
+    bg: "red.500",
+    _hover: { bg: "red.700" },
+    _active: { bg: "red.900" },
   })}
 >
   Hover me
@@ -378,8 +380,8 @@ You can style the first, last, odd, and even elements of a group using their `_`
 
 ```jsx
 <ul>
-  {items.map(item => (
-    <li key={item} className={css({ _first: { color: 'red.500' } })}>
+  {items.map((item) => (
+    <li key={item} className={css({ _first: { color: "red.500" } })}>
       {item}
     </li>
   ))}
@@ -391,12 +393,12 @@ You can also style even and odd elements using the `_even` and `_odd` modifier:
 ```jsx
 <table>
   <tbody>
-    {items.map(item => (
+    {items.map((item) => (
       <tr
         key={item}
         className={css({
-          _even: { bg: 'gray.100' },
-          _odd: { bg: 'white' }
+          _even: { bg: "gray.100" },
+          _odd: { bg: "white" },
         })}
       >
         <td>{item}</td>
@@ -415,7 +417,7 @@ You can style the `::before` and `::after` pseudo elements of an element using t
 ```jsx
 <div
   className={css({
-    _before: { content: '"👋"' }
+    _before: { content: '"👋"' },
   })}
 >
   Hello
@@ -457,7 +459,7 @@ Style the placeholder text of any input or textarea using the `_placeholder` mod
 <input
   placeholder="Enter your name"
   className={css({
-    _placeholder: { color: 'gray.500' }
+    _placeholder: { color: "gray.500" },
   })}
 />
 ```
@@ -470,7 +472,7 @@ Style the file input button using the `_file` modifier:
 <input
   type="file"
   className={css({
-    _file: { bg: 'gray.500', px: '4', py: '2', marginEnd: '3' }
+    _file: { bg: "gray.500", px: "4", py: "2", marginEnd: "3" },
   })}
 />
 ```
@@ -484,8 +486,8 @@ Use the `_motionReduce` and `_motionSafe` modifiers to style an element based on
 ```jsx
 <div
   className={css({
-    _motionReduce: { transition: 'none' },
-    _motionSafe: { transition: 'all 0.3s' }
+    _motionReduce: { transition: "none" },
+    _motionSafe: { transition: "all 0.3s" },
   })}
 >
   Hello
@@ -502,8 +504,8 @@ Use the `_osLight` and `_osDark` modifiers to style an element based on the user
 ```jsx
 <div
   className={css({
-    bg: 'white',
-    _osDark: { bg: 'black' }
+    bg: "white",
+    _osDark: { bg: "black" },
   })}
 >
   Hello
@@ -515,8 +517,8 @@ Let's say your app is dark by default, but you want to allow users to switch to 
 ```jsx
 <div
   className={css({
-    bg: 'black',
-    _osLight: { bg: 'white' }
+    bg: "black",
+    _osLight: { bg: "white" },
   })}
 >
   Hello
@@ -533,8 +535,8 @@ Use the `_highContrast` and `_lessContrast` modifiers to style an element based 
 ```jsx
 <div
   className={css({
-    bg: 'white',
-    _highContrast: { bg: 'black' }
+    bg: "white",
+    _highContrast: { bg: "black" },
   })}
 >
   Hello
@@ -550,8 +552,8 @@ Use the `_portrait` and `_landscape` modifiers to style an element based on the 
 ```jsx
 <div
   className={css({
-    pb: '4',
-    _portrait: { pb: '8' }
+    pb: "4",
+    _portrait: { pb: "8" },
   })}
 >
   Hello
@@ -565,7 +567,7 @@ parent element, and use any of the `_group*` modifiers on the child element.
 
 ```jsx
 <div className="group">
-  <p className={css({ _groupHover: { bg: 'red.500' } })}>Hover me</p>
+  <p className={css({ _groupHover: { bg: "red.500" } })}>Hover me</p>
 </div>
 ```
 
@@ -580,7 +582,7 @@ sibling element, and use any of the `_peer*` modifiers on the target element.
 ```jsx
 <div>
   <p className="peer">Hover me</p>
-  <p className={css({ _peerHover: { bg: 'red.500' } })}>I'll change by bg</p>
+  <p className={css({ _peerHover: { bg: "red.500" } })}>I'll change by bg</p>
 </div>
 ```
 
@@ -597,8 +599,8 @@ You can style an element based on the direction of the text using the `_ltr` and
 <div dir="ltr">
   <div
     className={css({
-      _ltr: { ml: '3' },
-      _rtl: { mr: '3' }
+      _ltr: { ml: "3" },
+      _rtl: { mr: "3" },
     })}
   >
     Hello
@@ -620,7 +622,7 @@ You can style an element based on its `data-{state}` attribute using the corresp
 <div
   data-loading
   className={css({
-    _loading: { bg: 'gray.500' }
+    _loading: { bg: "gray.500" },
   })}
 >
   Hello
@@ -634,7 +636,7 @@ This also works for common states like `data-active`, `data-disabled`, `data-foc
 <div
   data-active
   className={css({
-    _active: { bg: 'gray.500' }
+    _active: { bg: "gray.500" },
   })}
 >
   Hello
@@ -653,8 +655,8 @@ You can style an element based on its `data-orientation` attribute using the `_h
 <div
   data-orientation="horizontal"
   className={css({
-    _horizontal: { bg: 'red.500' },
-    _vertical: { bg: 'blue.500' }
+    _horizontal: { bg: "red.500" },
+    _vertical: { bg: "blue.500" },
   })}
 >
   Hello
@@ -669,7 +671,7 @@ You can style an element based on its `aria-{state}=true` attribute using the co
 <div
   aria-expanded="true"
   className={css({
-    _expanded: { bg: 'gray.500' }
+    _expanded: { bg: "gray.500" },
   })}
 >
   Hello
@@ -688,34 +690,34 @@ export default defineConfig({
   // ...
   theme: {
     extend: {
-      containerNames: ['sidebar', 'content'],
+      containerNames: ["sidebar", "content"],
       containerSizes: {
-        xs: '40em',
-        sm: '60em',
-        md: '80em'
-      }
-    }
-  }
-})
+        xs: "40em",
+        sm: "60em",
+        md: "80em",
+      },
+    },
+  },
+});
 ```
 
 The default container sizes in the `@pandacss/preset-panda` preset are shown below:
 
 ```ts
 export const containerSizes = {
-  xs: '320px',
-  sm: '384px',
-  md: '448px',
-  lg: '512px',
-  xl: '576px',
-  '2xl': '672px',
-  '3xl': '768px',
-  '4xl': '896px',
-  '5xl': '1024px',
-  '6xl': '1152px',
-  '7xl': '1280px',
-  '8xl': '1440px'
-}
+  xs: "320px",
+  sm: "384px",
+  md: "448px",
+  lg: "512px",
+  xl: "576px",
+  "2xl": "672px",
+  "3xl": "768px",
+  "4xl": "896px",
+  "5xl": "1024px",
+  "6xl": "1152px",
+  "7xl": "1280px",
+  "8xl": "1440px",
+};
 ```
 
 Then use them in your styles by referencing using `@<container-name>/<container-size>` syntax:
@@ -775,7 +777,7 @@ function Demo() {
 Here's a list of all the condition shortcuts you can use in Panda:
 
 | Condition name         | Selector                                                                                         |
-| ---------------------- | -------------------------------------------------------------------------------------------------|
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
 | \_hover                | `&:is(:hover, [data-hover])`                                                                     |
 | \_focus                | `&:is(:focus, [data-focus])`                                                                     |
 | \_focusWithin          | `&:focus-within`                                                                                 |
@@ -891,7 +893,6 @@ customizing conditions [here](/docs/customization/conditions).
 
 ---
 
-
 ## The extend keyword
 
 What is and how to to use the extend keyword
@@ -918,34 +919,34 @@ The `extend` keyword allows you to extend the following parts of Panda:
 After running the `panda init` command you should see something similar to this:
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
 
   // Useful for theme customization
   theme: {
-    extend: {} // 👈 it's already there! perfect, now you just need to add your customizations in this object
-  }
+    extend: {}, // 👈 it's already there! perfect, now you just need to add your customizations in this object
+  },
 
   // ...
-})
+});
 ```
 
 Let's say you want to add a new color to the default theme. You can do it like this:
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     extend: {
       colors: {
-        primary: { value: '#ff0000' }
-      }
-    }
-  }
-})
+        primary: { value: "#ff0000" },
+      },
+    },
+  },
+});
 ```
 
 This will add a new color to the default theme, without erasing the other ones.
@@ -953,21 +954,21 @@ This will add a new color to the default theme, without erasing the other ones.
 Now, let's say we want to create new property `br` that applies a border radius to an element.
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   utilities: {
     extend: {
       br: {
-        className: 'rounded', // css({ br: "sm" }) => rounded-sm
-        values: 'radii', // connect values to the radii tokens
+        className: "rounded", // css({ br: "sm" }) => rounded-sm
+        values: "radii", // connect values to the radii tokens
         transform(value) {
-          return { borderRadius: value }
-        }
-      }
-    }
-  }
-})
+          return { borderRadius: value };
+        },
+      },
+    },
+  },
+});
 ```
 
 What if this utility was coming from a preset (`@acme/my-preset`) ? You can extend any specific part, as it will be
@@ -1016,24 +1017,24 @@ Let's say you want to remove the `stack` pattern from the `@pandacss/preset-base
 You can pick only the parts that you need with and spread the rest, like this:
 
 ```ts
-import pandaBasePreset from '@pandacss/preset-base'
+import pandaBasePreset from "@pandacss/preset-base";
 
 // omitting stack here
-const { stack, ...pandaBasePresetPatterns } = pandaBasePreset.patterns
+const { stack, ...pandaBasePresetPatterns } = pandaBasePreset.patterns;
 
 export default defineConfig({
-  presets: ['@pandacss/preset-panda'], // 👈 we still want the tokens, breakpoints and textStyles from this preset
+  presets: ["@pandacss/preset-panda"], // 👈 we still want the tokens, breakpoints and textStyles from this preset
 
   // ⚠️ we need to eject to prevent the `@pandacss/preset-base` from being resolved
   // https://panda-css.com/docs/customization/presets#which-panda-presets-will-be-included-
   eject: true,
   patterns: {
     extend: {
-      ...pandaBasePresetPatterns
+      ...pandaBasePresetPatterns,
       // your customizations here
-    }
-  }
-})
+    },
+  },
+});
 ```
 
 ## Minimal setup
@@ -1049,7 +1050,6 @@ You might have forgotten to include the `extend` keyword in your config. Without
 replace the base one, instead of merging with it.
 
 ---
-
 
 ## Global Styles
 
@@ -1069,21 +1069,21 @@ Panda groups global styles into reset and base layers so you can control default
 Enable or scope the reset styles.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
-  preflight: true
-})
+  preflight: true,
+});
 ```
 
 Scope and level:
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
-  preflight: { scope: '.extension', level: 'element' }
-})
+  preflight: { scope: ".extension", level: "element" },
+});
 ```
 
 ## Exposed global CSS variables
@@ -1102,21 +1102,21 @@ These variables are used by the reset and defaults. Set them in `globalCss`:
 Use `globalCss` to define additional global styles and set variables.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   globalCss: {
     html: {
-      '--global-font-body': 'Inter, sans-serif',
-      '--global-font-mono': 'Mononoki Nerd Font, monospace',
-      '--global-color-border': 'colors.gray.400',
-      '--global-color-placeholder': 'rgba(0,0,0,0.5)',
-      '--global-color-selection': 'rgba(0,115,255,0.3)',
-      '--global-color-focus-ring': 'colors.blue.400'
-    }
-  }
-})
+      "--global-font-body": "Inter, sans-serif",
+      "--global-font-mono": "Mononoki Nerd Font, monospace",
+      "--global-color-border": "colors.gray.400",
+      "--global-color-placeholder": "rgba(0,0,0,0.5)",
+      "--global-color-selection": "rgba(0,115,255,0.3)",
+      "--global-color-focus-ring": "colors.blue.400",
+    },
+  },
+});
 ```
 
 ### Theming patterns
@@ -1143,17 +1143,17 @@ You can set variables on `:root`, a `.dark` class, or via media queries.
 Define additional global CSS variables or `@property` entries.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   globalVars: {
-    '--button-color': {
-      syntax: '<color>',
+    "--button-color": {
+      syntax: "<color>",
       inherits: false,
-      initialValue: 'blue'
-    }
-  }
-})
+      initialValue: "blue",
+    },
+  },
+});
 ```
 
 > Keys from `globalVars` are suggestable in style objects and generated near your tokens at `cssVarRoot`.
@@ -1168,7 +1168,6 @@ export default defineConfig({
   framework plugins), preserve `@layer` order so globals are not overridden.
 
 ---
-
 
 ## Panda Integration Hooks
 
@@ -1203,18 +1202,18 @@ Here are some examples of what you can do with hooks:
 This is especially useful when migrating from other css-in-js libraries, [like Stitches.](/docs/migration/stitches)
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   hooks: {
-    'tokens:created': ({ configure }) => {
+    "tokens:created": ({ configure }) => {
       configure({
-        formatTokenName: path => '$' + path.join('-')
-      })
-    }
-  }
-})
+        formatTokenName: (path) => "$" + path.join("-"),
+      });
+    },
+  },
+});
 ```
 
 ### Customizing the hash function
@@ -1227,18 +1226,18 @@ export default defineConfig({
   // ...
   hash: true,
   hooks: {
-    'utility:created': ({ configure }) => {
+    "utility:created": ({ configure }) => {
       configure({
         toHash: (paths, toHash) => {
-          const stringConds = paths.join(':')
-          const splitConds = stringConds.split('_')
-          const hashConds = splitConds.map(toHash)
-          return hashConds.join('_')
-        }
-      })
-    }
-  }
-})
+          const stringConds = paths.join(":");
+          const splitConds = stringConds.split("_");
+          const hashConds = splitConds.map(toHash);
+          return hashConds.join("_");
+        },
+      });
+    },
+  },
+});
 ```
 
 ### Modifying the config
@@ -1247,16 +1246,16 @@ Here's an example of how to leveraging the provided `utils` functions in the `co
 `stack` pattern from the resolved config.
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   hooks: {
-    'config:resolved': ({ config, utils }) => {
-      return utils.omit(config, ['patterns.stack'])
-    }
-  }
-})
+    "config:resolved": ({ config, utils }) => {
+      return utils.omit(config, ["patterns.stack"]);
+    },
+  },
+});
 ```
 
 ### Modifying presets
@@ -1265,19 +1264,22 @@ You can use the `preset:resolved` hook to modify presets after they are resolved
 filtering out parts of a preset.
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   hooks: {
-    'preset:resolved': ({ utils, preset, name }) => {
-      if (name === '@pandacss/preset-panda') {
-        return utils.omit(preset, ['theme.tokens.colors', 'theme.semanticTokens.colors'])
+    "preset:resolved": ({ utils, preset, name }) => {
+      if (name === "@pandacss/preset-panda") {
+        return utils.omit(preset, [
+          "theme.tokens.colors",
+          "theme.semanticTokens.colors",
+        ]);
       }
-      return preset
-    }
-  }
-})
+      return preset;
+    },
+  },
+});
 ```
 
 ### Configuring JSX extraction
@@ -1298,16 +1300,17 @@ Let's see a Radix UI example where the `Select.Content` component has a `positio
 export default defineConfig({
   // ...
   hooks: {
-    'parser:before': ({ configure }) => {
+    "parser:before": ({ configure }) => {
       configure({
         // ignore the Select.Content entirely
-        matchTag: tag => tag !== 'Select.Content',
+        matchTag: (tag) => tag !== "Select.Content",
         // ...or specifically ignore the `position` property
-        matchTagProp: (tag, prop) => tag === 'Select.Content' && prop !== 'position'
-      })
-    }
-  }
-})
+        matchTagProp: (tag, prop) =>
+          tag === "Select.Content" && prop !== "position",
+      });
+    },
+  },
+});
 ```
 
 ### Remove unused variables from final css
@@ -1315,20 +1318,20 @@ export default defineConfig({
 Here's an example of how to transform the generated css in the `cssgen:done` hook.
 
 ```ts file="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
-import { removeUnusedCssVars } from './remove-unused-css-vars'
-import { removeUnusedKeyframes } from './remove-unused-keyframes'
+import { defineConfig } from "@pandacss/dev";
+import { removeUnusedCssVars } from "./remove-unused-css-vars";
+import { removeUnusedKeyframes } from "./remove-unused-keyframes";
 
 export default defineConfig({
   // ...
   hooks: {
-    'cssgen:done': ({ artifact, content }) => {
-      if (artifact === 'styles.css') {
-        return removeUnusedCssVars(removeUnusedKeyframes(content))
+    "cssgen:done": ({ artifact, content }) => {
+      if (artifact === "styles.css") {
+        return removeUnusedCssVars(removeUnusedKeyframes(content));
       }
-    }
-  }
-})
+    },
+  },
+});
 ```
 
 Get the snippets for the removal logic from our Github Sandbox in the
@@ -1350,23 +1353,23 @@ with a `hooks` object with the same structure as the `hooks` object in the confi
 > defined in the `plugins` array, with the user's config called last.
 
 ```ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   plugins: [
     {
-      name: 'token-format',
+      name: "token-format",
       hooks: {
-        'tokens:created': ({ configure }) => {
+        "tokens:created": ({ configure }) => {
           configure({
-            formatTokenName: path => '$' + path.join('-')
-          })
-        }
-      }
-    }
-  ]
-})
+            formatTokenName: (path) => "$" + path.join("-"),
+          });
+        },
+      },
+    },
+  ],
+});
 ```
 
 ## Reference
@@ -1377,58 +1380,63 @@ export interface PandaHooks {
    * Called when the config is resolved, after all the presets are loaded and merged.
    * This is the first hook called, you can use it to tweak the config before the context is created.
    */
-  'config:resolved': (args: ConfigResolvedHookArgs) => MaybeAsyncReturn<void | ConfigResolvedHookArgs['config']>
+  "config:resolved": (
+    args: ConfigResolvedHookArgs,
+  ) => MaybeAsyncReturn<void | ConfigResolvedHookArgs["config"]>;
   /**
    * Called when a preset is resolved, allowing you to modify it before it's merged into the config.
    */
-  'preset:resolved': (args: PresetResolvedHookArgs) => MaybeAsyncReturn<void | PresetResolvedHookArgs['preset']>
+  "preset:resolved": (
+    args: PresetResolvedHookArgs,
+  ) => MaybeAsyncReturn<void | PresetResolvedHookArgs["preset"]>;
   /**
    * Called when the token engine has been created
    */
-  'tokens:created': (args: TokenCreatedHookArgs) => MaybeAsyncReturn
+  "tokens:created": (args: TokenCreatedHookArgs) => MaybeAsyncReturn;
   /**
    * Called when the classname engine has been created
    */
-  'utility:created': (args: UtilityCreatedHookArgs) => MaybeAsyncReturn
+  "utility:created": (args: UtilityCreatedHookArgs) => MaybeAsyncReturn;
   /**
    * Called when the Panda context has been created and the API is ready to be used.
    */
-  'context:created': (args: ContextCreatedHookArgs) => void
+  "context:created": (args: ContextCreatedHookArgs) => void;
   /**
    * Called when the config file or one of its dependencies (imports) has changed.
    */
-  'config:change': (args: ConfigChangeHookArgs) => MaybeAsyncReturn
+  "config:change": (args: ConfigChangeHookArgs) => MaybeAsyncReturn;
   /**
    * Called after reading the file content but before parsing it.
    * You can use this hook to transform the file content to a tsx-friendly syntax so that Panda's parser can parse it.
    * You can also use this hook to parse the file's content on your side using a custom parser, in this case you don't have to return anything.
    */
-  'parser:before': (args: ParserResultBeforeHookArgs) => string | void
+  "parser:before": (args: ParserResultBeforeHookArgs) => string | void;
   /**
    * Called after the file styles are extracted and processed into the resulting ParserResult object.
    * You can also use this hook to add your own extraction results from your custom parser to the ParserResult object.
    */
-  'parser:after': (args: ParserResultAfterHookArgs) => void
+  "parser:after": (args: ParserResultAfterHookArgs) => void;
   /**
    * Called right before writing the codegen files to disk.
    * You can use this hook to tweak the codegen files before they are written to disk.
    */
-  'codegen:prepare': (args: CodegenPrepareHookArgs) => MaybeAsyncReturn<Artifact[]>
+  "codegen:prepare": (
+    args: CodegenPrepareHookArgs,
+  ) => MaybeAsyncReturn<Artifact[]>;
   /**
    * Called after the codegen is completed
    */
-  'codegen:done': (args: CodegenDoneHookArgs) => MaybeAsyncReturn
+  "codegen:done": (args: CodegenDoneHookArgs) => MaybeAsyncReturn;
   /**
    * Called right before adding the design-system CSS (global, static, preflight, tokens, keyframes) to the final CSS
    * Called right before writing/injecting the final CSS (styles.css) that contains the design-system CSS and the parser CSS
    * You can use it to tweak the CSS content before it's written to disk or injected through the postcss plugin.
    */
-  'cssgen:done': (args: CssgenDoneHookArgs) => string | void
+  "cssgen:done": (args: CssgenDoneHookArgs) => string | void;
 }
 ```
 
 ---
-
 
 ## JSX Style Context
 
@@ -1446,35 +1454,35 @@ headless UI libraries like Ark UI, and Radix UI.
 ```tsx
 // components/ui/card.tsx
 
-import { sva } from 'styled-system/css'
-import { createStyleContext } from 'styled-system/jsx'
+import { sva } from "styled-system/css";
+import { createStyleContext } from "styled-system/jsx";
 
 const card = sva({
-  slots: ['root', 'label'],
+  slots: ["root", "label"],
   base: {
     root: {},
-    label: {}
+    label: {},
   },
   variants: {
     size: {
       sm: { root: {} },
-      md: { root: {} }
-    }
+      md: { root: {} },
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 
-const { withProvider, withContext } = createStyleContext(card)
+const { withProvider, withContext } = createStyleContext(card);
 
-const Root = withProvider('div', 'root')
-const Label = withContext('label', 'label')
+const Root = withProvider("div", "root");
+const Label = withContext("label", "label");
 
 export const Card = {
   Root,
-  Label
-}
+  Label,
+};
 ```
 
 Then you can use the `Root` and `Label` components to create a card.
@@ -1482,14 +1490,14 @@ Then you can use the `Root` and `Label` components to create a card.
 ```tsx
 // app/page.tsx
 
-import { Card } from './components/ui/card'
+import { Card } from "./components/ui/card";
 
 export default function App() {
   return (
     <Card.Root>
       <Card.Label>Hello</Card.Label>
     </Card.Root>
-  )
+  );
 }
 ```
 
@@ -1503,18 +1511,18 @@ The `createStyleContext` function can also be used with slot recipes defined in 
 ```tsx
 // components/ui/card.tsx
 
-import { card } from '../styled-system/recipes'
-import { createStyleContext } from 'styled-system/jsx'
+import { card } from "../styled-system/recipes";
+import { createStyleContext } from "styled-system/jsx";
 
-const { withProvider, withContext } = createStyleContext(card)
+const { withProvider, withContext } = createStyleContext(card);
 
-const Root = withProvider('div', 'root')
-const Label = withContext('label', 'label')
+const Root = withProvider("div", "root");
+const Label = withContext("label", "label");
 
 export const Card = {
   Root,
-  Label
-}
+  Label,
+};
 ```
 
 Then you can use the `Root` and `Label` components to create a card.
@@ -1522,14 +1530,14 @@ Then you can use the `Root` and `Label` components to create a card.
 ```tsx
 // app/page.tsx
 
-import { Card } from './components/ui/card'
+import { Card } from "./components/ui/card";
 
 export default function App() {
   return (
     <Card.Root>
       <Card.Label>Hello</Card.Label>
     </Card.Root>
-  )
+  );
 }
 ```
 
@@ -1543,11 +1551,11 @@ Creates the root component that provides the style context. Use this when the ro
 underlying DOM element**.
 
 ```tsx
-import { Dialog } from '@ark-ui/react'
+import { Dialog } from "@ark-ui/react";
 
 //...
 
-const DialogRoot = withRootProvider(Dialog.Root)
+const DialogRoot = withRootProvider(Dialog.Root);
 ```
 
 ### withProvider
@@ -1558,11 +1566,11 @@ Creates a component that both provides context and applies the root slot styles.
 > **Note:** It requires the root `slot` parameter to be passed.
 
 ```tsx
-import { Avatar } from '@ark-ui/react'
+import { Avatar } from "@ark-ui/react";
 
 //...
 
-const AvatarRoot = withProvider(Avatar.Root, 'root')
+const AvatarRoot = withProvider(Avatar.Root, "root");
 ```
 
 ### withContext
@@ -1571,12 +1579,12 @@ Creates a component that consumes the style context and applies slot styles. It 
 but gets them from context.
 
 ```tsx
-import { Avatar } from '@ark-ui/react'
+import { Avatar } from "@ark-ui/react";
 
 //...
 
-const AvatarImage = withContext(Avatar.Image, 'image')
-const AvatarFallback = withContext(Avatar.Fallback, 'fallback')
+const AvatarImage = withContext(Avatar.Image, "image");
+const AvatarFallback = withContext(Avatar.Fallback, "fallback");
 ```
 
 ### unstyled prop
@@ -1612,20 +1620,20 @@ matches the name of the recipe.
 
 ```tsx
 // recipe name is "card"
-import { card } from '../styled-system/recipes'
+import { card } from "../styled-system/recipes";
 
-const { withRootProvider, withContext } = createStyleContext(card)
+const { withRootProvider, withContext } = createStyleContext(card);
 
-const Root = withRootProvider('div')
-const Header = withContext('header', 'header')
-const Body = withContext('body', 'body')
+const Root = withRootProvider("div");
+const Header = withContext("header", "header");
+const Body = withContext("body", "body");
 
 // The final component name must be "Card"
 export const Card = {
   Root,
   Header,
-  Body
-}
+  Body,
+};
 ```
 
 ### Default Props
@@ -1633,17 +1641,16 @@ export const Card = {
 Use `defaultProps` option to provide default props to the component.
 
 ```tsx
-const { withContext } = createStyleContext(card)
+const { withContext } = createStyleContext(card);
 
-export const CardHeader = withContext('header', 'header', {
+export const CardHeader = withContext("header", "header", {
   defaultProps: {
-    role: 'banner'
-  }
-})
+    role: "banner",
+  },
+});
 ```
 
 ---
-
 
 ## Merging Styles
 
@@ -1654,18 +1661,18 @@ Learn how to merge multiple styles without conflicts.
 You can merge multiple style objects together using the `css` function.
 
 ```js
-import { css } from 'styled-system/css'
+import { css } from "styled-system/css";
 
 const style1 = {
-  bg: 'red',
-  color: 'white'
-}
+  bg: "red",
+  color: "white",
+};
 
 const style2 = {
-  bg: 'blue'
-}
+  bg: "blue",
+};
 
-const className = css(style1, style2) // => 'bg_blue text_white'
+const className = css(style1, style2); // => 'bg_blue text_white'
 ```
 
 In some cases though, the style object might not be colocated in the same file as the component. In this case, you can
@@ -1676,22 +1683,22 @@ use the `css.raw` function to preserve the original style object.
 
 ```js
 // style.js
-import { css } from 'styled-system/css'
+import { css } from "styled-system/css";
 
 export const style1 = css.raw({
-  bg: 'red',
-  color: 'white'
-})
+  bg: "red",
+  color: "white",
+});
 
 // component.js
-import { css } from 'styled-system/css'
-import { style1 } from './style.js'
+import { css } from "styled-system/css";
+import { style1 } from "./style.js";
 
 const style2 = css.raw({
-  bg: 'blue'
-})
+  bg: "blue",
+});
 
-const className = css(style1, style2) // => 'bg_blue text_white'
+const className = css(style1, style2); // => 'bg_blue text_white'
 ```
 
 ## Spreading `css.raw` objects
@@ -1704,29 +1711,29 @@ nested selectors, conditions, and complex compositions:
 ### Child selectors
 
 ```js
-import { css } from 'styled-system/css'
+import { css } from "styled-system/css";
 
-const baseStyles = css.raw({ margin: 0, padding: 0 })
+const baseStyles = css.raw({ margin: 0, padding: 0 });
 
 const component = css({
-  '& p': { ...baseStyles, fontSize: '1rem' },
-  '& h1': { ...baseStyles, fontSize: '2rem' }
-})
+  "& p": { ...baseStyles, fontSize: "1rem" },
+  "& h1": { ...baseStyles, fontSize: "2rem" },
+});
 ```
 
 ### Nested conditions
 
 ```js
-import { css } from 'styled-system/css'
+import { css } from "styled-system/css";
 
-const interactive = css.raw({ cursor: 'pointer', transition: 'all 0.2s' })
+const interactive = css.raw({ cursor: "pointer", transition: "all 0.2s" });
 
 const card = css({
   _hover: {
     ...interactive,
-    _dark: { ...interactive, color: 'white' }
-  }
-})
+    _dark: { ...interactive, color: "white" },
+  },
+});
 ```
 
 ## Merging `cva` + `css` styles
@@ -1734,31 +1741,31 @@ const card = css({
 The same technique can be used to merge an atomic `cva` recipe and a style object.
 
 ```js
-import { css, cx, cva } from 'styled-system/css'
+import { css, cx, cva } from "styled-system/css";
 
 const overrideStyles = css.raw({
-  bg: 'red',
-  color: 'white'
-})
+  bg: "red",
+  color: "white",
+});
 
 const buttonStyles = cva({
   base: {
-    bg: 'blue',
-    border: '1px solid black'
+    bg: "blue",
+    border: "1px solid black",
   },
   variants: {
     size: {
-      small: { fontSize: '12px' }
-    }
-  }
-})
+      small: { fontSize: "12px" },
+    },
+  },
+});
 
 const className = css(
   // returns the resolved style object
-  buttonStyles.raw({ size: 'small' }),
+  buttonStyles.raw({ size: "small" }),
   // add the override styles
-  overrideStyles
-)
+  overrideStyles,
+);
 
 // => 'bg_red border_1px_solid_black color_white font-size_12px'
 ```
@@ -1812,15 +1819,15 @@ overridden with any atomic styles. Use the `cx` function to achieve that.
 > The `utilties` layer has more precedence than the `recipe` layer.
 
 ```js
-import { css, cx } from 'styled-system/css'
-import { button } from 'styled-system/recipes'
+import { css, cx } from "styled-system/css";
+import { button } from "styled-system/recipes";
 
 const className = cx(
   // returns the resolved class name: `button button--size-small`
-  button({ size: 'small' }),
+  button({ size: "small" }),
   // add the override styles
-  css({ bg: 'red' }) // => 'bg_red'
-)
+  css({ bg: "red" }), // => 'bg_red'
+);
 
 // => 'button button--size-small bg_red'
 ```
@@ -1833,9 +1840,9 @@ Using these techniques, you can apply them to a component by exposing a `css` pr
 
 ```jsx
 const cardStyles = css.raw({
-  bg: 'red',
-  color: 'white'
-})
+  bg: "red",
+  color: "white",
+});
 
 function Card({ title, description, css: cssProp }) {
   return (
@@ -1844,12 +1851,18 @@ function Card({ title, description, css: cssProp }) {
       <h1>{title}</h1>
       <p>{description}</p>
     </div>
-  )
+  );
 }
 
 // usage
 function Demo() {
-  return <Card title="Hello World" description="This is a card component" css={{ bg: 'blue' }} />
+  return (
+    <Card
+      title="Hello World"
+      description="This is a card component"
+      css={{ bg: "blue" }}
+    />
+  );
 }
 ```
 
@@ -1858,9 +1871,9 @@ the style object.
 
 ```jsx
 const cardStyles = css.raw({
-  bg: 'red',
-  color: 'white'
-})
+  bg: "red",
+  color: "white",
+});
 
 function Card({ title, description, style }) {
   return (
@@ -1869,7 +1882,7 @@ function Card({ title, description, style }) {
       <h1>{title}</h1>
       <p>{description}</p>
     </div>
-  )
+  );
 }
 
 // usage
@@ -1879,12 +1892,10 @@ function Demo() {
       title="Hello World"
       description="This is a card component"
       // use `css.raw(...)` to ensure Panda extracts the style object
-      style={css.raw({ bg: 'blue' })}
+      style={css.raw({ bg: "blue" })}
     />
-  )
+  );
 }
 ```
 
 ---
-
-

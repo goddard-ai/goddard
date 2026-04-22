@@ -1,17 +1,17 @@
-import Electrobun, { Electroview } from "electrobun/view"
+import Electrobun, { Electroview } from "electrobun/view";
 
-const bunny = document.getElementById("bunny") as HTMLDivElement
+const bunny = document.getElementById("bunny") as HTMLDivElement;
 
-const MAX_ROTATION = 25
-const SPRING = 0.08
-const DAMPING = 0.85
+const MAX_ROTATION = 25;
+const SPRING = 0.08;
+const DAMPING = 0.85;
 
-let targetRotateX = 0
-let targetRotateY = 0
-let currentRotateX = 0
-let currentRotateY = 0
-let velocityX = 0
-let velocityY = 0
+let targetRotateX = 0;
+let targetRotateY = 0;
+let currentRotateX = 0;
+let currentRotateY = 0;
+let velocityX = 0;
+let velocityY = 0;
 
 const rpc = Electroview.defineRPC<any>({
   maxRequestTime: 5000,
@@ -19,37 +19,37 @@ const rpc = Electroview.defineRPC<any>({
     requests: {},
     messages: {
       cursorMove: ({ screenX, screenY, winX, winY, winW, winH }) => {
-        const centerX = winX + winW / 2
-        const centerY = winY + winH / 2
+        const centerX = winX + winW / 2;
+        const centerY = winY + winH / 2;
 
-        const normalizedX = (screenX - centerX) / (winW / 2)
-        const normalizedY = (screenY - centerY) / (winH / 2)
+        const normalizedX = (screenX - centerX) / (winW / 2);
+        const normalizedY = (screenY - centerY) / (winH / 2);
 
-        const clampedX = Math.max(-1, Math.min(1, normalizedX))
-        const clampedY = Math.max(-1, Math.min(1, normalizedY))
+        const clampedX = Math.max(-1, Math.min(1, normalizedX));
+        const clampedY = Math.max(-1, Math.min(1, normalizedY));
 
-        targetRotateX = -clampedY * MAX_ROTATION
-        targetRotateY = clampedX * MAX_ROTATION
+        targetRotateX = -clampedY * MAX_ROTATION;
+        targetRotateY = clampedX * MAX_ROTATION;
       },
     },
   },
-})
+});
 
-new Electrobun.Electroview({ rpc })
+new Electrobun.Electroview({ rpc });
 
 function animate() {
-  const forceX = (targetRotateX - currentRotateX) * SPRING
-  const forceY = (targetRotateY - currentRotateY) * SPRING
+  const forceX = (targetRotateX - currentRotateX) * SPRING;
+  const forceY = (targetRotateY - currentRotateY) * SPRING;
 
-  velocityX = (velocityX + forceX) * DAMPING
-  velocityY = (velocityY + forceY) * DAMPING
+  velocityX = (velocityX + forceX) * DAMPING;
+  velocityY = (velocityY + forceY) * DAMPING;
 
-  currentRotateX += velocityX
-  currentRotateY += velocityY
+  currentRotateX += velocityX;
+  currentRotateY += velocityY;
 
-  bunny.style.transform = `rotateX(${currentRotateX}deg) rotateY(${currentRotateY}deg)`
+  bunny.style.transform = `rotateX(${currentRotateX}deg) rotateY(${currentRotateY}deg)`;
 
-  requestAnimationFrame(animate)
+  requestAnimationFrame(animate);
 }
 
-animate()
+animate();

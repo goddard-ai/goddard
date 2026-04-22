@@ -2,8 +2,8 @@ import type { RepoEvent } from "@goddard-ai/schema/backend"
 
 import {
   createBackendClient,
-  type BackendClient,
   isBackendUnauthenticatedError,
+  type BackendClient,
 } from "./backend.ts"
 import { createConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"

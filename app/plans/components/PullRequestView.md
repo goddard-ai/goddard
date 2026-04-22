@@ -1,4 +1,5 @@
 # Component: PullRequestView
+
 - **Minimum Viable Component:** GitHub-like pull request detail view that emphasizes the author description, a collapsed discussion summary, a reply flow, and the code diff at the bottom.
 - **Props Interface:** `pullRequestRef: { owner, repo, number }`; `sourceSessionId?: string`; `initialDiscussionMode?: "collapsed" | "expanded"`.
 - **Sub-components:** `PullRequestHeader`, `PullRequestDiscussionSummary`, `PullRequestReplyComposer`, `CodeDiffView`.

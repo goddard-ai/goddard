@@ -3,4 +3,4 @@ The human reviewer also pushed the following commits to your branch. These have 
 
 ${commits}
 
-*Tip: You can use `git show <commit-hash>` to see exactly what they changed.*
+_Tip: You can use `git show <commit-hash>` to see exactly what they changed._

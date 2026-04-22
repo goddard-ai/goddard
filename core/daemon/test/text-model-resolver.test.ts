@@ -1,10 +1,10 @@
-import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { afterEach, expect, test } from "bun:test"
 
-import { MissingProviderPackageError, loadDaemonTextModel } from "../src/ai/text-model-resolver.ts"
+import { loadDaemonTextModel, MissingProviderPackageError } from "../src/ai/text-model-resolver.ts"
 
 const cleanupPaths: string[] = []
 

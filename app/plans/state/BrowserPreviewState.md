@@ -1,4 +1,5 @@
 # State Module: BrowserPreviewState
+
 - **Responsibility:** Manage iframe-driven preview sessions, including URL entry, committed navigation history, loading state, and observable console logs from the custom protocol shim.
 - **Data Shape:** One map keyed by preview id containing display URL text, committed URL, back and forward history stacks or index state, loading status, page metadata, navigation errors, console entries, console filters, and cached pane-layout preferences.
 - **Mutations/Actions:** `createPreview`; `setDisplayUrl`; `navigate`; `commitNavigation`; `goBack`; `goForward`; `refresh`; `stopNavigation`; `appendConsoleEntry`; `clearConsole`; `closePreview`.

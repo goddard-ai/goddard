@@ -1,4 +1,5 @@
 # Component: TextModelSelector
+
 - **Minimum Viable Component:** Reusable fieldset for editing one shared `Text Model Config` by choosing a provider first and a provider-scoped model second.
 - **Props Interface:** `value: { provider?: string | null; model?: string | null }`; `providers: array of provider summaries { id, label }`; `popularProviderIds: string[]`; `models: array of selected-provider model summaries { id, label, lastUpdated }`; `validation?: { provider?: string | null; model?: string | null }`; `disabled?: boolean`; `readOnly?: boolean`; `onChange: (patch) => void`.
 - **Sub-components:** None required for the MVP; searchable select popovers may stay internal.

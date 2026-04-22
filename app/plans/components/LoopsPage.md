@@ -1,4 +1,5 @@
 # Component: LoopsPage
+
 - **Minimum Viable Component:** Full-width operator page for inspecting configured loops, filtering them by project, and starting or stopping loop runtimes.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `LoopFilterSidebar`, `LoopList`, `StartLoopDialog`.

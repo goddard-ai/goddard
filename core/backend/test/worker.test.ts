@@ -33,7 +33,9 @@ test("user stream durable object fans out published events to subscribers", asyn
   )
 
   expect(publishResponse.status).toBe(204)
-  const payload = (await eventPromise) as { event: { type: string; prNumber: number } }
+  const payload = (await eventPromise) as {
+    event: { type: string; prNumber: number }
+  }
   expect(payload.event.type).toBe("comment")
   expect(payload.event.prNumber).toBe(1)
 

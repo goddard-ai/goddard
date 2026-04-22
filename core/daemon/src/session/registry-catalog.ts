@@ -1,12 +1,14 @@
 /** Shared ACP registry catalog parsing helpers used by both runtime and code generation. */
-import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import { AgentDistribution as AgentDistributionSchema } from "@goddard-ai/schema/agent-distribution"
+import { access, readdir, readFile } from "node:fs/promises"
+import { join } from "node:path"
+import {
+  AgentDistribution as AgentDistributionSchema,
+  type AgentDistribution,
+} from "@goddard-ai/schema/agent-distribution"
 import {
   AdapterCatalogEntry,
   type AdapterCatalogEntry as AdapterCatalogEntryType,
 } from "@goddard-ai/schema/daemon"
-import { access, readFile, readdir } from "node:fs/promises"
-import { join } from "node:path"
 import { z } from "zod"
 
 const UpstreamRegistryAgent = AgentDistributionSchema.extend({
@@ -19,7 +21,9 @@ type UpstreamRegistryAgent = z.infer<typeof UpstreamRegistryAgent>
 /** Sorts adapter catalog entries into a stable user-facing order. */
 export function sortAdapterCatalogEntries(entries: AdapterCatalogEntryType[]) {
   return [...entries].sort((left, right) => {
-    const nameCompare = left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+    const nameCompare = left.name.localeCompare(right.name, undefined, {
+      sensitivity: "base",
+    })
     return nameCompare !== 0 ? nameCompare : left.id.localeCompare(right.id)
   })
 }

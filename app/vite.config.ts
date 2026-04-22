@@ -1,7 +1,7 @@
-import preact from "@preact/preset-vite"
-import { defineConfig } from "vite"
+import preact from "@preact/preset-vite";
+import { defineConfig } from "vite";
 
-import svgIcons from "./plugins/svg-icon-build-plugin.ts"
+import svgIcons from "./plugins/svg-icon-build-plugin.ts";
 
 /** Vite config for the desktop webview source rooted at src/main. */
 export default defineConfig({
@@ -22,4 +22,4 @@ export default defineConfig({
     conditions: ["bun"],
     tsconfigPaths: true,
   },
-})
+});

@@ -1,6 +1,6 @@
-import { getShortcutKeymapPath } from "@goddard-ai/paths/node"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
+import { getShortcutKeymapPath } from "@goddard-ai/paths/node"
 import { z } from "zod"
 
 import { UserShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"

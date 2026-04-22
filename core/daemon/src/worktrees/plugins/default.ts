@@ -1,10 +1,10 @@
 /** Default worktree plugin that creates linked git worktrees under daemon control. */
-import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
+import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
 import { runCommand } from "../process.ts"
 

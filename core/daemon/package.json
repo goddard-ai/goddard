@@ -31,7 +31,7 @@
     "generate-acp-registry-fallback": "bun scripts/generate-acp-registry-fallback.ts",
     "build:standalone": "bun run ./scripts/build-standalone.ts",
     "lint": "oxlint",
-    "fmt": "oxfmt",
+    "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
     "test": "bun test --dots"
   },

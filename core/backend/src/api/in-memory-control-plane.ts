@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto"
 import type {
   AuthSession,
   CreatePrInput,
@@ -8,22 +9,25 @@ import type {
   PullRequestRecord,
   RepoEvent,
 } from "@goddard-ai/schema/backend"
-import { randomBytes } from "node:crypto"
 
 import type { Env } from "../env.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"
 import {
-  type BackendControlPlane,
-  HttpError,
   assertRepo,
+  HttpError,
   postPrCommentViaApp,
+  type BackendControlPlane,
 } from "./control-plane.ts"
 
 /** Stored auth session with an in-memory expiration timestamp. */
 export type SessionRecord = AuthSession & { expiresAt: number }
 
 /** Stored device-code session awaiting completion. */
-export type DeviceSessionRecord = { githubUsername: string; createdAt: number; expiresAt: number }
+export type DeviceSessionRecord = {
+  githubUsername: string
+  createdAt: number
+  expiresAt: number
+}
 
 /** Minimal sink interface used by local SSE fanout. */
 export type StreamSink = {

@@ -98,21 +98,26 @@
       <div class="top-sentinel">TOP SENTINEL MUST STAY BELOW TITLEBAR</div>
       <div class="header">
         <h1>FullSize WebView Frame Repro</h1>
-        <p>Resize window height. The green bar below should stay fully visible at the bottom.</p>
+        <p>
+          Resize window height. The green bar below should stay fully visible at
+          the bottom.
+        </p>
       </div>
       <div class="center">
-        <div class="card">This uses a strict <code>100vh</code> viewport layout.</div>
         <div class="card">
-          If the fullSize webview height incorrectly includes titlebar area, bottom content can be
-          clipped.
+          This uses a strict <code>100vh</code> viewport layout.
         </div>
         <div class="card">
-          Expected: blue top sentinel remains below titlebar and green bottom sentinel remains fully
-          visible.
+          If the fullSize webview height incorrectly includes titlebar area,
+          bottom content can be clipped.
         </div>
         <div class="card">
-          Failure signal: content shifts upward into titlebar and/or bottom sentinel disappears
-          while resizing.
+          Expected: blue top sentinel remains below titlebar and green bottom
+          sentinel remains fully visible.
+        </div>
+        <div class="card">
+          Failure signal: content shifts upward into titlebar and/or bottom
+          sentinel disappears while resizing.
         </div>
       </div>
       <div class="sentinel">BOTTOM SENTINEL MUST BE FULLY VISIBLE</div>

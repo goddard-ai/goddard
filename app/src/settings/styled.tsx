@@ -1,4 +1,4 @@
-import { styled } from "@goddard-ai/styled-system/jsx"
+import { styled } from "@goddard-ai/styled-system/jsx";
 
 export const SettingsSection = styled("section", {
   base: {
@@ -6,14 +6,14 @@ export const SettingsSection = styled("section", {
     gap: "20px",
     maxWidth: "720px",
   },
-})
+});
 
 export const SettingsSectionHeader = styled("div", {
   base: {
     display: "grid",
     gap: "4px",
   },
-})
+});
 
 export const SettingsSectionTitle = styled("h2", {
   base: {
@@ -23,7 +23,7 @@ export const SettingsSectionTitle = styled("h2", {
     fontWeight: "680",
     lineHeight: "1.4",
   },
-})
+});
 
 export const SettingsSectionDescription = styled("p", {
   base: {
@@ -32,7 +32,7 @@ export const SettingsSectionDescription = styled("p", {
     fontSize: "0.88rem",
     lineHeight: "1.6",
   },
-})
+});
 
 export const SettingsFieldset = styled("fieldset", {
   base: {
@@ -43,7 +43,7 @@ export const SettingsFieldset = styled("fieldset", {
     padding: "0",
     border: "0",
   },
-})
+});
 
 export const SettingsLegend = styled("legend", {
   base: {
@@ -53,7 +53,7 @@ export const SettingsLegend = styled("legend", {
     fontWeight: "620",
     lineHeight: "1.4",
   },
-})
+});
 
 export const SettingsHelperText = styled("p", {
   base: {
@@ -62,7 +62,7 @@ export const SettingsHelperText = styled("p", {
     fontSize: "0.84rem",
     lineHeight: "1.55",
   },
-})
+});
 
 export const SettingsChoiceList = styled("ul", {
   base: {
@@ -72,14 +72,14 @@ export const SettingsChoiceList = styled("ul", {
     borderTop: "1px solid",
     borderColor: "border",
   },
-})
+});
 
 export const SettingsChoiceItem = styled("li", {
   base: {
     borderBottom: "1px solid",
     borderColor: "border",
   },
-})
+});
 
 export const SettingsChoiceLabel = styled("label", {
   base: {
@@ -90,7 +90,7 @@ export const SettingsChoiceLabel = styled("label", {
     paddingBlock: "12px",
     cursor: "pointer",
   },
-})
+});
 
 export const SettingsChoiceInput = styled("input", {
   base: {
@@ -99,7 +99,7 @@ export const SettingsChoiceInput = styled("input", {
     margin: "0",
     marginTop: "2px",
   },
-})
+});
 
 export const SettingsChoiceBody = styled("span", {
   base: {
@@ -107,7 +107,7 @@ export const SettingsChoiceBody = styled("span", {
     gap: "2px",
     minWidth: "0",
   },
-})
+});
 
 export const SettingsChoiceTitle = styled("span", {
   base: {
@@ -116,7 +116,7 @@ export const SettingsChoiceTitle = styled("span", {
     fontWeight: "620",
     lineHeight: "1.45",
   },
-})
+});
 
 export const SettingsChoiceDescription = styled("span", {
   base: {
@@ -124,7 +124,7 @@ export const SettingsChoiceDescription = styled("span", {
     fontSize: "0.84rem",
     lineHeight: "1.55",
   },
-})
+});
 
 export const SettingsControlRowLabel = styled("label", {
   base: {
@@ -138,4 +138,4 @@ export const SettingsControlRowLabel = styled("label", {
     borderColor: "border",
     cursor: "pointer",
   },
-})
+});

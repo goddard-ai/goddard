@@ -22,14 +22,14 @@ function. It can be useful with its JSX form and is the equivalent of a `styled.
 style props available in JSX.
 
 ```tsx
-import { Box } from '../styled-system/jsx'
+import { Box } from "../styled-system/jsx";
 
 function App() {
   return (
     <Box color="blue.300">
       <div>Cool !</div>
     </Box>
-  )
+  );
 }
 ```
 
@@ -48,7 +48,7 @@ By default, the container sets the following properties:
 <Tab>
 
 ```tsx
-import { container } from '../styled-system/patterns'
+import { container } from "../styled-system/patterns";
 
 function App() {
   return (
@@ -57,7 +57,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -65,7 +65,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Container } from '../styled-system/jsx'
+import { Container } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -74,7 +74,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </Container>
-  )
+  );
 }
 ```
 
@@ -96,16 +96,16 @@ The `stack` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { stack } from '../styled-system/patterns'
+import { stack } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={stack({ gap: '6', padding: '4' })}>
+    <div className={stack({ gap: "6", padding: "4" })}>
       <div>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -113,7 +113,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Stack } from '../styled-system/jsx'
+import { Stack } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -122,7 +122,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </Stack>
-  )
+  );
 }
 ```
 
@@ -138,16 +138,16 @@ centers the elements vertically.
 <Tab>
 
 ```tsx
-import { hstack } from '../styled-system/patterns'
+import { hstack } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={hstack({ gap: '6' })}>
+    <div className={hstack({ gap: "6" })}>
       <div>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -155,7 +155,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { HStack } from '../styled-system/jsx'
+import { HStack } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -164,7 +164,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </HStack>
-  )
+  );
 }
 ```
 
@@ -180,16 +180,16 @@ the elements horizontally.
 <Tab>
 
 ```tsx
-import { vstack } from '../styled-system/patterns'
+import { vstack } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={vstack({ gap: '6' })}>
+    <div className={vstack({ gap: "6" })}>
       <div>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -197,7 +197,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { VStack } from '../styled-system/jsx'
+import { VStack } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -206,7 +206,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </VStack>
-  )
+  );
 }
 ```
 
@@ -229,16 +229,16 @@ The `wrap` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { wrap } from '../styled-system/patterns'
+import { wrap } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={wrap({ gap: '6' })}>
+    <div className={wrap({ gap: "6" })}>
       <div>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -246,7 +246,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Wrap } from '../styled-system/jsx'
+import { Wrap } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -255,7 +255,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </Wrap>
-  )
+  );
 }
 ```
 
@@ -277,14 +277,18 @@ The `aspectRatio` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { aspectRatio } from '../styled-system/patterns'
+import { aspectRatio } from "../styled-system/patterns";
 
 function App() {
   return (
     <div className={aspectRatio({ ratio: 16 / 9 })}>
-      <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m1" title="Google map" frameBorder="0" />
+      <iframe
+        src="https://www.google.com/maps/embed?pb=!1m18!1m1"
+        title="Google map"
+        frameBorder="0"
+      />
     </div>
-  )
+  );
 }
 ```
 
@@ -292,14 +296,18 @@ function App() {
   <Tab>
 
 ```tsx
-import { AspectRatio } from '../styled-system/jsx'
+import { AspectRatio } from "../styled-system/jsx";
 
 function App() {
   return (
     <AspectRatio ratio={16 / 9}>
-      <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m1" title="Google map" frameBorder="0" />
+      <iframe
+        src="https://www.google.com/maps/embed?pb=!1m18!1m1"
+        title="Google map"
+        frameBorder="0"
+      />
     </AspectRatio>
-  )
+  );
 }
 ```
 
@@ -324,16 +332,16 @@ The `flex` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { flex } from '../styled-system/patterns'
+import { flex } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={flex({ direction: 'row', align: 'center' })}>
+    <div className={flex({ direction: "row", align: "center" })}>
       <div>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -341,7 +349,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Flex } from '../styled-system/jsx'
+import { Flex } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -350,7 +358,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </Flex>
-  )
+  );
 }
 ```
 
@@ -369,14 +377,14 @@ The `center` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { center } from '../styled-system/patterns'
+import { center } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={center({ bg: 'red.200' })}>
+    <div className={center({ bg: "red.200" })}>
       <Icon />
     </div>
-  )
+  );
 }
 ```
 
@@ -384,7 +392,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Center } from '../styled-system/jsx'
+import { Center } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -393,7 +401,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </Center>
-  )
+  );
 }
 ```
 
@@ -410,18 +418,18 @@ The link overlay pattern is used to expand a link's clickable area to its neares
 <Tab>
 
 ```tsx
-import { css } from '../styled-system/css'
-import { linkOverlay } from '../styled-system/patterns'
+import { css } from "../styled-system/css";
+import { linkOverlay } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={css({ pos: 'relative' })}>
+    <div className={css({ pos: "relative" })}>
       <img src="https://via.placeholder.com/150" alt="placeholder" />
       <a href="#" className={linkOverlay()}>
         View more
       </a>
     </div>
-  )
+  );
 }
 ```
 
@@ -430,7 +438,7 @@ function App() {
 <Tab>
 
 ```tsx
-import { Box, LinkOverlay } from '../styled-system/jsx'
+import { Box, LinkOverlay } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -438,7 +446,7 @@ function App() {
       <img src="https://via.placeholder.com/150" alt="placeholder" />
       <LinkOverlay href="#">View more</LinkOverlay>
     </Box>
-  )
+  );
 }
 ```
 
@@ -463,15 +471,15 @@ The `float` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { css } from '../styled-system/css'
-import { float } from '../styled-system/patterns'
+import { css } from "../styled-system/css";
+import { float } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={css({ position: 'relative' })}>
-      <div className={float({ placement: 'top-start' })}>3</div>
+    <div className={css({ position: "relative" })}>
+      <div className={float({ placement: "top-start" })}>3</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -479,15 +487,15 @@ function App() {
   <Tab>
 
 ```tsx
-import { css } from '../styled-system/css'
-import { Float } from '../styled-system/jsx'
+import { css } from "../styled-system/css";
+import { Float } from "../styled-system/jsx";
 
 function App() {
   return (
-    <div className={css({ position: 'relative' })}>
+    <div className={css({ position: "relative" })}>
       <Float placement="top-start">3</Float>
     </div>
-  )
+  );
 }
 ```
 
@@ -510,16 +518,16 @@ The `grid` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { grid } from '../styled-system/patterns'
+import { grid } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={grid({ columns: 3, gap: '6' })}>
+    <div className={grid({ columns: 3, gap: "6" })}>
       <div>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -527,7 +535,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Grid } from '../styled-system/jsx'
+import { Grid } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -536,7 +544,7 @@ function App() {
       <div>Second</div>
       <div>Third</div>
     </Grid>
-  )
+  );
 }
 ```
 
@@ -560,16 +568,16 @@ The `gridItem` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { grid, gridItem } from '../styled-system/patterns'
+import { grid, gridItem } from "../styled-system/patterns";
 
 function App() {
   return (
-    <div className={grid({ columns: 3, gap: '6' })}>
+    <div className={grid({ columns: 3, gap: "6" })}>
       <div className={gridItem({ colSpan: 2 })}>First</div>
       <div>Second</div>
       <div>Third</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -577,7 +585,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Grid, GridItem } from '../styled-system/jsx'
+import { Grid, GridItem } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -586,7 +594,7 @@ function App() {
       <GridItem>Second</GridItem>
       <GridItem>Third</GridItem>
     </Grid>
-  )
+  );
 }
 ```
 
@@ -607,16 +615,16 @@ The `divider` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { divider, stack } from '../styled-system/patterns'
+import { divider, stack } from "../styled-system/patterns";
 
 function App() {
   return (
     <div className={stack()}>
       <button>First</button>
-      <div className={divider({ orientation: 'horizontal' })} />
+      <div className={divider({ orientation: "horizontal" })} />
       <button>Second</button>
     </div>
-  )
+  );
 }
 ```
 
@@ -624,7 +632,7 @@ function App() {
   <Tab>
 
 ```tsx
-import { Divider, Stack } from '../styled-system/jsx'
+import { Divider, Stack } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -633,7 +641,7 @@ function App() {
       <Divider orientation="horizontal" />
       <button>Second</button>
     </Stack>
-  )
+  );
 }
 ```
 
@@ -652,10 +660,10 @@ The `circle` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { circle } from '../styled-system/patterns'
+import { circle } from "../styled-system/patterns";
 
 function App() {
-  return <div className={circle({ size: '12', bg: 'red.300' })} />
+  return <div className={circle({ size: "12", bg: "red.300" })} />;
 }
 ```
 
@@ -663,10 +671,10 @@ function App() {
   <Tab>
 
 ```tsx
-import { Circle } from '../styled-system/jsx'
+import { Circle } from "../styled-system/jsx";
 
 function App() {
-  return <Circle size="12" bg="red.300" />
+  return <Circle size="12" bg="red.300" />;
 }
 ```
 
@@ -685,10 +693,10 @@ The `square` function accepts the following properties:
 <Tab>
 
 ```tsx
-import { square } from '../styled-system/patterns'
+import { square } from "../styled-system/patterns";
 
 function App() {
-  return <div className={square({ size: '12', bg: 'red.300' })} />
+  return <div className={square({ size: "12", bg: "red.300" })} />;
 }
 ```
 
@@ -696,10 +704,10 @@ function App() {
   <Tab>
 
 ```tsx
-import { Square } from '../styled-system/jsx'
+import { Square } from "../styled-system/jsx";
 
 function App() {
-  return <Square size="12" bg="red.300" />
+  return <Square size="12" bg="red.300" />;
 }
 ```
 
@@ -711,7 +719,7 @@ function App() {
 The Visually Hidden pattern is used to hide an element visually, but keep it accessible to screen readers.
 
 ```tsx
-import { visuallyHidden } from '../styled-system/patterns'
+import { visuallyHidden } from "../styled-system/patterns";
 
 export function Checkbox() {
   return (
@@ -721,7 +729,7 @@ export function Checkbox() {
       </input>
       <span>Checkbox</span>
     </label>
-  )
+  );
 }
 ```
 
@@ -735,18 +743,18 @@ The `bleed` function accepts the following properties:
 - `block`: The amount of padding to negate on the vertical axis. Should match the parent's padding.
 
 <Tabs items={['Function', 'JSX']}>
-  <Tab>
+<Tab>
 
 ```tsx
-import { css } from '../styled-system/css'
-import { bleed } from '../styled-system/patterns'
+import { css } from "../styled-system/css";
+import { bleed } from "../styled-system/patterns";
 
 export function Page() {
   return (
-    <div className={css({ px: '6' })}>
-      <div className={bleed({ inline: '6' })}>Welcome</div>
+    <div className={css({ px: "6" })}>
+      <div className={bleed({ inline: "6" })}>Welcome</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -806,33 +814,33 @@ You can also named container queries:
 export default defineConfig({
   // ...
   theme: {
-    containerNames: ['sidebar', 'content'],
+    containerNames: ["sidebar", "content"],
     containerSizes: {
-      xs: '40em',
-      sm: '60em',
-      md: '80em'
-    }
-  }
-})
+      xs: "40em",
+      sm: "60em",
+      md: "80em",
+    },
+  },
+});
 ```
 
 ```tsx
 // 2 - Automatically generate container query pattern
 
-import { cq } from 'styled-system/patterns'
+import { cq } from "styled-system/patterns";
 
 function Demo() {
   return (
-    <nav className={cq({ name: 'sidebar' })}>
+    <nav className={cq({ name: "sidebar" })}>
       <div
         className={css({
           // When the sidebar container reaches the `sm` size
           // change font size to `md`
-          fontSize: { base: 'lg', '@sidebar/sm': 'md' }
+          fontSize: { base: "lg", "@sidebar/sm": "md" },
         })}
       />
     </nav>
-  )
+  );
 }
 ```
 
@@ -850,7 +858,7 @@ rendered (with the `jsxElement` config property).
 Learn more about pattern customization [here](/docs/customization/patterns).
 
 ```tsx
-import { VStack, Center } from '../styled-system/jsx'
+import { VStack, Center } from "../styled-system/jsx";
 
 function App() {
   return (
@@ -860,7 +868,7 @@ function App() {
       <div>Third</div>
       <Center>4</Center>
     </VStack>
-  )
+  );
 }
 ```
 
@@ -872,13 +880,13 @@ existing components to create new components.
 To track the usage of the patterns in these cases, you'll need to add the `jsx` hint for the pattern config
 
 ```js {12} filename="button.pattern.ts"
-import { definePattern } from '@pandacss/dev'
+import { definePattern } from "@pandacss/dev";
 
 const scrollable = definePattern({
   // ...
   // Add the jsx hint to track the usage of the pattern in JSX, you can also use a regex to match multiple components
-  jsx: ['Scrollable', 'PageScrollable']
-})
+  jsx: ["Scrollable", "PageScrollable"],
+});
 ```
 
 Then you can create a new component that uses the `PageScrollable` component and Panda will track the usage of the
@@ -886,17 +894,16 @@ Then you can create a new component that uses the `PageScrollable` component and
 
 ```tsx
 const PageScrollable = (props: ButtonProps) => {
-  const { children, size } = props
+  const { children, size } = props;
   return (
     <Scrollable {...props} size={size}>
       {children}
     </Scrollable>
-  )
-}
+  );
+};
 ```
 
 ---
-
 
 ## Recipes
 
@@ -929,23 +936,23 @@ They are defined using the `cva` function which was inspired by [Class Variance 
 ### Defining the recipe
 
 ```jsx
-import { cva } from '../styled-system/css'
+import { cva } from "../styled-system/css";
 
 const button = cva({
   base: {
-    display: 'flex'
+    display: "flex",
   },
   variants: {
     visual: {
-      solid: { bg: 'red.200', color: 'white' },
-      outline: { borderWidth: '1px', borderColor: 'red.200' }
+      solid: { bg: "red.200", color: "white" },
+      outline: { borderWidth: "1px", borderColor: "red.200" },
     },
     size: {
-      sm: { padding: '4', fontSize: '12px' },
-      lg: { padding: '8', fontSize: '24px' }
-    }
-  }
-})
+      sm: { padding: "4", fontSize: "12px" },
+      lg: { padding: "8", fontSize: "24px" },
+    },
+  },
+});
 ```
 
 ### Using the recipe
@@ -954,11 +961,15 @@ The returned value from the `cva` function is a function that can be used to app
 example of how to use the `button` recipe:
 
 ```jsx
-import { button } from './button'
+import { button } from "./button";
 
 const Button = () => {
-  return <button className={button({ visual: 'solid', size: 'lg' })}>Click Me</button>
-}
+  return (
+    <button className={button({ visual: "solid", size: "lg" })}>
+      Click Me
+    </button>
+  );
+};
 ```
 
 When a recipe is created, Panda will extract and generate CSS for every variant and compoundVariant `css` ahead of time,
@@ -991,27 +1002,27 @@ The `defaultVariants` property is used to set the default variant values for the
 apply a variant by default. Here's an example of how to use `defaultVariants`:
 
 ```jsx
-import { cva } from '../styled-system/css'
+import { cva } from "../styled-system/css";
 
 const button = cva({
   base: {
-    display: 'flex'
+    display: "flex",
   },
   variants: {
     visual: {
-      solid: { bg: 'red.200', color: 'white' },
-      outline: { borderWidth: '1px', borderColor: 'red.200' }
+      solid: { bg: "red.200", color: "white" },
+      outline: { borderWidth: "1px", borderColor: "red.200" },
     },
     size: {
-      sm: { padding: '4', fontSize: '12px' },
-      lg: { padding: '8', fontSize: '24px' }
-    }
+      sm: { padding: "4", fontSize: "12px" },
+      lg: { padding: "8", fontSize: "24px" },
+    },
   },
   defaultVariants: {
-    visual: 'solid',
-    size: 'lg'
-  }
-})
+    visual: "solid",
+    size: "lg",
+  },
+});
 ```
 
 ### Compound Variants
@@ -1023,91 +1034,95 @@ array represents a set of conditions that must be met in order for the correspon
 Here's an example of how to use `compoundVariants` in Panda:
 
 ```js
-import { cva } from '../styled-system/css'
+import { cva } from "../styled-system/css";
 
 const button = cva({
   base: {
-    padding: '8px 16px',
-    borderRadius: '4px',
-    fontSize: '16px',
-    fontWeight: 'bold'
+    padding: "8px 16px",
+    borderRadius: "4px",
+    fontSize: "16px",
+    fontWeight: "bold",
   },
 
   variants: {
     size: {
       small: {
-        fontSize: '14px',
-        padding: '4px 8px'
+        fontSize: "14px",
+        padding: "4px 8px",
       },
       medium: {
-        fontSize: '16px',
-        padding: '8px 16px'
+        fontSize: "16px",
+        padding: "8px 16px",
       },
       large: {
-        fontSize: '18px',
-        padding: '12px 24px'
-      }
+        fontSize: "18px",
+        padding: "12px 24px",
+      },
     },
     color: {
       primary: {
-        backgroundColor: 'blue',
-        color: 'white'
+        backgroundColor: "blue",
+        color: "white",
       },
       secondary: {
-        backgroundColor: 'gray',
-        color: 'black'
-      }
+        backgroundColor: "gray",
+        color: "black",
+      },
     },
     disabled: {
       true: {
         opacity: 0.5,
-        cursor: 'not-allowed'
-      }
-    }
+        cursor: "not-allowed",
+      },
+    },
   },
 
   // compound variants
   compoundVariants: [
     // apply when both small size and primary color are selected
     {
-      size: 'small',
-      color: 'primary',
+      size: "small",
+      color: "primary",
       css: {
-        border: '2px solid blue'
-      }
+        border: "2px solid blue",
+      },
     },
     // apply when both large size and secondary color are selected and the button is disabled
     {
-      size: 'large',
-      color: 'secondary',
+      size: "large",
+      color: "secondary",
       disabled: true,
       css: {
-        backgroundColor: 'lightgray',
-        color: 'darkgray',
-        border: 'none'
-      }
+        backgroundColor: "lightgray",
+        color: "darkgray",
+        border: "none",
+      },
     },
     // apply when both small or medium size, and secondary color variants are applied
     {
-      size: ['small', 'medium'],
-      color: 'secondary',
+      size: ["small", "medium"],
+      color: "secondary",
       css: {
-        fontWeight: 'extrabold'
-      }
-    }
-  ]
-})
+        fontWeight: "extrabold",
+      },
+    },
+  ],
+});
 ```
 
 Here's an example usage of the `button` recipe:
 
 ```jsx
-import { button } from './button'
+import { button } from "./button";
 
 const Button = () => {
   // will apply size: small, color: primary, css: { border: '2px solid blue' }
-  return <button className={button({ size: 'small', color: 'primary' })}>Click Me</button>
-}
+  return (
+    <button className={button({ size: "small", color: "primary" })}>
+      Click Me
+    </button>
+  );
+};
 ```
 
 Overall, using compound variants allows you to create more complex sets of styles that can be applied to your components
@@ -1123,29 +1138,29 @@ Panda provides a `RecipeVariantProps` type utility that can be used to infer the
 This is useful when you want to use the recipe in JSX and want to get type safety for the variants.
 
 ```tsx
-import { styled } from '../styled-system/jsx'
-import { cva, type RecipeVariantProps } from '../styled-system/css'
+import { styled } from "../styled-system/jsx";
+import { cva, type RecipeVariantProps } from "../styled-system/css";
 
 const buttonStyle = cva({
   base: {
-    color: 'red',
-    textAlign: 'center'
+    color: "red",
+    textAlign: "center",
   },
   variants: {
     size: {
       small: {
-        fontSize: '1rem'
+        fontSize: "1rem",
       },
       large: {
-        fontSize: '2rem'
-      }
-    }
-  }
-})
+        fontSize: "2rem",
+      },
+    },
+  },
+});
 
-export type ButtonVariants = RecipeVariantProps<typeof buttonStyle> // { size?: 'small' | 'large' }
+export type ButtonVariants = RecipeVariantProps<typeof buttonStyle>; // { size?: 'small' | 'large' }
 
-export const Button = styled('button', buttonStyle)
+export const Button = styled("button", buttonStyle);
 ```
 
 ### Usage in JSX
@@ -1159,27 +1174,27 @@ The `styled` function takes the element type as its first argument, and the reci
 > entrypoint.
 
 ```js
-import { cva } from '../styled-system/css'
-import { styled } from '../styled-system/jsx'
+import { cva } from "../styled-system/css";
+import { styled } from "../styled-system/jsx";
 
 const buttonStyle = cva({
   base: {
-    color: 'red',
-    textAlign: 'center'
+    color: "red",
+    textAlign: "center",
   },
   variants: {
     size: {
       small: {
-        fontSize: '1rem'
+        fontSize: "1rem",
       },
       large: {
-        fontSize: '2rem'
-      }
-    }
-  }
-})
+        fontSize: "2rem",
+      },
+    },
+  },
+});
 
-const Button = styled('button', buttonStyle)
+const Button = styled("button", buttonStyle);
 ```
 
 Then you can use the component in JSX
@@ -1206,34 +1221,34 @@ The config recipe takes the following additional properties:
 To define a config recipe, import the `defineRecipe` helper function
 
 ```jsx filename="button.recipe.ts"
-import { defineRecipe } from '@pandacss/dev'
+import { defineRecipe } from "@pandacss/dev";
 
 export const buttonRecipe = defineRecipe({
-  className: 'button',
-  description: 'The styles for the Button component',
+  className: "button",
+  description: "The styles for the Button component",
   base: {
-    display: 'flex'
+    display: "flex",
   },
   variants: {
     visual: {
-      funky: { bg: 'red.200', color: 'white' },
-      edgy: { border: '1px solid {colors.red.500}' }
+      funky: { bg: "red.200", color: "white" },
+      edgy: { border: "1px solid {colors.red.500}" },
     },
     size: {
-      sm: { padding: '4', fontSize: '12px' },
-      lg: { padding: '8', fontSize: '40px' }
+      sm: { padding: "4", fontSize: "12px" },
+      lg: { padding: "8", fontSize: "40px" },
     },
     shape: {
-      square: { borderRadius: '0' },
-      circle: { borderRadius: 'full' }
-    }
+      square: { borderRadius: "0" },
+      circle: { borderRadius: "full" },
+    },
   },
   defaultVariants: {
-    visual: 'funky',
-    size: 'sm',
-    shape: 'circle'
-  }
-})
+    visual: "funky",
+    size: "sm",
+    shape: "circle",
+  },
+});
 ```
 
 ### Adding recipe to config
@@ -1241,20 +1256,20 @@ export const buttonRecipe = defineRecipe({
 To add the recipe to the config, you’d need to add it to the `theme.recipes` object.
 
 ```jsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
-import { buttonRecipe } from './button.recipe'
+import { defineConfig } from "@pandacss/dev";
+import { buttonRecipe } from "./button.recipe";
 
 export default defineConfig({
   //...
-  jsxFramework: 'react',
+  jsxFramework: "react",
   theme: {
     extend: {
       recipes: {
-        button: buttonRecipe
-      }
-    }
-  }
-})
+        button: buttonRecipe,
+      },
+    },
+  },
+});
 ```
 
 ### Generate JS code
@@ -1270,15 +1285,15 @@ To use the recipe, you can import the recipe from the `<outdir>/recipes` entrypo
 tracks the usage of the recipe and only generates CSS of the variants used in your application.
 
 ```js
-import { button } from '../styled-system/recipes'
+import { button } from "../styled-system/recipes";
 
 function App() {
   return (
     <div>
       <button className={button()}>Click me</button>
-      <button className={button({ shape: 'circle' })}>Click me</button>
+      <button className={button({ shape: "circle" })}>Click me</button>
     </div>
-  )
+  );
 }
 ```
 
@@ -1315,14 +1330,16 @@ conditions.
 Here's how to tweak the size variant of the button recipe based on breakpoints.
 
 ```jsx
-import { button } from '../styled-system/recipes'
+import { button } from "../styled-system/recipes";
 
 function App() {
   return (
     <div>
-      <button className={button({ size: { base: 'sm', md: 'lg' } })}>Click me</button>
+      <button className={button({ size: { base: "sm", md: "lg" } })}>
+        Click me
+      </button>
     </div>
-  )
+  );
 }
 ```
 
@@ -1337,12 +1354,12 @@ entrypoint.
 For the button recipe, we can import the `ButtonVariants` type like so:
 
 ```ts
-import React from 'react'
-import type { ButtonVariants } from '../styled-system/recipes'
+import React from "react";
+import type { ButtonVariants } from "../styled-system/recipes";
 
 type ButtonProps = ButtonVariants & {
-  children: React.ReactNode
-}
+  children: React.ReactNode;
+};
 ```
 
 ### Usage in JSX
@@ -1354,29 +1371,29 @@ For example, if your recipe is called `button` and you create a `Button` compone
 track the usage of the variant properties.
 
 ```tsx
-import React from 'react'
-import { button, type ButtonVariants } from '../styled-system/recipes'
+import React from "react";
+import { button, type ButtonVariants } from "../styled-system/recipes";
 
 type ButtonProps = ButtonVariants & {
-  children: React.ReactNode
-}
+  children: React.ReactNode;
+};
 
 const Button = (props: ButtonProps) => {
-  const { children, size } = props
+  const { children, size } = props;
   return (
     <button {...props} className={button({ size })}>
       {children}
     </button>
-  )
-}
+  );
+};
 
 const App = () => {
   return (
     <div>
       <Button size="lg">Click me</Button>
     </div>
-  )
-}
+  );
+};
 ```
 
 ### Advanced JSX Tracking
@@ -1387,19 +1404,19 @@ existing components (like Button) to create new components.
 To track the usage of the recipes in these cases, you'll need to add the `jsx` hint for the recipe config
 
 ```js {12} filename="button.recipe.ts"
-import { defineRecipe } from '@pandacss/dev'
+import { defineRecipe } from "@pandacss/dev";
 
 const button = defineRecipe({
   base: {
-    color: 'red',
-    fontSize: '1.5rem'
+    color: "red",
+    fontSize: "1.5rem",
   },
   variants: {
     // ...
   },
   // Add the jsx hint to track the usage of the recipe in JSX, you can use regex to match multiple components
-  jsx: ['Button', 'PageButton']
-})
+  jsx: ["Button", "PageButton"],
+});
 ```
 
 Then you can create a new component that uses the `Button` component and Panda will track the usage of the `button`
@@ -1407,13 +1424,13 @@ recipe as well.
 
 ```tsx
 const PageButton = (props: ButtonProps) => {
-  const { children, size } = props
+  const { children, size } = props;
   return (
     <Button {...props} size={size}>
       {children}
     </Button>
-  )
-}
+  );
+};
 ```
 
 #### Extending a preset recipe
@@ -1421,29 +1438,29 @@ const PageButton = (props: ButtonProps) => {
 If you're using a recipe from a preset, you can still extend it in your config.
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  jsxFramework: 'react',
+  jsxFramework: "react",
   theme: {
     extend: {
       recipes: {
         button: {
-          className: 'something-else', // 👈 override the className
+          className: "something-else", // 👈 override the className
           base: {
-            color: 'red', // 👈 replace some part of the recipe
-            fontSize: '1.5rem' // or add new styles
+            color: "red", // 👈 replace some part of the recipe
+            fontSize: "1.5rem", // or add new styles
           },
           variants: {
             // ... // 👈 add or extend new variants
           },
-          jsx: ['Button', 'PageButton'] // 👈 extend the jsx tracking hint
-        }
-      }
-    }
-  }
-})
+          jsx: ["Button", "PageButton"], // 👈 extend the jsx tracking hint
+        },
+      },
+    },
+  },
+});
 ```
 
 Learn more about the [extend](/docs/concepts/extend.md) keyword.
@@ -1459,32 +1476,32 @@ recipe.
   variant props and the rest of the props
 
 ```js
-import { cva } from '../styled-system/css'
+import { cva } from "../styled-system/css";
 
 const buttonRecipe = cva({
   base: {
-    color: 'red',
-    fontSize: '1.5rem'
+    color: "red",
+    fontSize: "1.5rem",
   },
   variants: {
     size: {
       sm: {
-        fontSize: '1rem'
+        fontSize: "1rem",
       },
       md: {
-        fontSize: '2rem'
-      }
-    }
-  }
-})
+        fontSize: "2rem",
+      },
+    },
+  },
+});
 
-buttonRecipe.variantKeys
+buttonRecipe.variantKeys;
 // => ['size']
 
-buttonRecipe.variantMap
+buttonRecipe.variantMap;
 // => { size: ['sm', 'md'] }
 
-buttonRecipe.splitVariantProps({ size: 'sm', onClick() {} })
+buttonRecipe.splitVariantProps({ size: "sm", onClick() {} });
 // => [{ size: 'sm'}, { onClick() {} }]
 ```
 
@@ -1493,24 +1510,24 @@ These methods and properties are useful when creating custom components or writi
 Here's a Storybook example.
 
 ```tsx filename="button.stories.tsx"
-import { Button, buttonRecipe } from './components/button'
+import { Button, buttonRecipe } from "./components/button";
 
 export default {
-  title: 'Button',
+  title: "Button",
   component: Button,
   argTypes: {
     size: {
       control: {
-        type: 'select',
-        options: buttonRecipe.variantMap.size
-      }
-    }
-  }
-}
+        type: "select",
+        options: buttonRecipe.variantMap.size,
+      },
+    },
+  },
+};
 
 export const Demo = {
-  render: args => <Button {...args}>Click me</Button>
-}
+  render: (args) => <Button {...args}>Click me</Button>,
+};
 ```
 
 ## Best Practices
@@ -1537,8 +1554,8 @@ export const Demo = {
       <button {...props} className={button({ size: buttonSize })}>
         {children}
       </button>
-    )
-  }
+    );
+  };
   ```
 
   **When you use the recipe in a custom component that is not named as per the recipe name, Panda won't be able to track
@@ -1552,8 +1569,8 @@ export const Demo = {
       <button {...props} className={button({ size })}>
         {children}
       </button>
-    )
-  }
+    );
+  };
   ```
 
 - When using `compoundVariants` in the recipe, you're not able to use responsive values in the variants.
@@ -1561,37 +1578,37 @@ export const Demo = {
 ```tsx
 const button = defineRecipe({
   base: {
-    color: 'red',
-    fontSize: '1.5rem'
+    color: "red",
+    fontSize: "1.5rem",
   },
   variants: {
     size: {
       sm: {
-        fontSize: '1rem'
+        fontSize: "1rem",
       },
       md: {
-        fontSize: '2rem'
-      }
-    }
+        fontSize: "2rem",
+      },
+    },
   },
   // this  will disable responsive values for the variants
   compoundVariants: [
     {
-      size: 'sm',
-      visual: 'funky',
+      size: "sm",
+      visual: "funky",
       css: {
-        color: 'blue'
-      }
+        color: "blue",
+      },
     },
     {
-      size: 'md',
-      visual: 'funky',
+      size: "md",
+      visual: "funky",
       css: {
-        color: 'green'
-      }
-    }
-  ]
-})
+        color: "green",
+      },
+    },
+  ],
+});
 ```
 
 ## Static CSS
@@ -1629,7 +1646,6 @@ with only the styles used. Choose according to your component needs.
 
 ---
 
-
 ## Responsive Design
 
 How to write mobile responsive designs in your CSS in Panda
@@ -1645,8 +1661,8 @@ Let's say you want to change the font weight of a text on large screens, you can
 ```jsx
 <span
   className={css({
-    fontWeight: 'medium',
-    lg: { fontWeight: 'bold' }
+    fontWeight: "medium",
+    lg: { fontWeight: "bold" },
   })}
 >
   Text
@@ -1660,12 +1676,12 @@ Panda provides five breakpoints by default:
 
 ```ts
 const breakpoints = {
-  sm: '640px',
-  md: '768px',
-  lg: '1024px',
-  xl: '1280px',
-  '2xl': '1536px'
-}
+  sm: "640px",
+  md: "768px",
+  lg: "1024px",
+  xl: "1280px",
+  "2xl": "1536px",
+};
 ```
 
 ## Overview
@@ -1694,7 +1710,7 @@ array. Using our previous code as an example:
 ```jsx
 <span
   className={css({
-    fontWeight: ['medium', undefined, undefined, 'bold']
+    fontWeight: ["medium", undefined, undefined, "bold"],
   })}
 >
   Text
@@ -1717,7 +1733,7 @@ Let's say we want to apply styles between the `md` and `xl` breakpoints, we use 
 ```jsx
 <span
   className={css({
-    fontWeight: { mdToXl: 'bold' }
+    fontWeight: { mdToXl: "bold" },
   })}
 >
   Text
@@ -1736,7 +1752,7 @@ Let's say we want to apply styles only in the `lg` breakpoint, we use the `lgOnl
 ```jsx
 <span
   className={css({
-    fontWeight: { lgOnly: 'bold' }
+    fontWeight: { lgOnly: "bold" },
   })}
 >
   Text
@@ -1756,22 +1772,22 @@ config.
 > do not mix them.
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   theme: {
     extend: {
       breakpoints: {
-        sm: '640px',
-        md: '768px',
-        lg: '1024px',
-        xl: '1280px',
-        '2xl': '1536px'
-      }
-    }
-  }
-})
+        sm: "640px",
+        md: "768px",
+        lg: "1024px",
+        xl: "1280px",
+        "2xl": "1536px",
+      },
+    },
+  },
+});
 ```
 
 ### Hiding elements by breakpoint
@@ -1780,7 +1796,6 @@ If you need to limit the visibility of an element to any breakpoint, Panda provi
 [display utilities](/docs/utilities/display) to help you achieve this.
 
 ---
-
 
 ## Slot Recipes
 
@@ -1812,31 +1827,31 @@ but returns a slot recipe instead.
 ### Defining the Recipe
 
 ```jsx filename="checkbox.recipe.ts"
-import { sva } from '../styled-system/css'
+import { sva } from "../styled-system/css";
 
 const checkbox = sva({
-  slots: ['root', 'control', 'label'],
+  slots: ["root", "control", "label"],
   base: {
-    root: { display: 'flex', alignItems: 'center', gap: '2' },
-    control: { borderWidth: '1px', borderRadius: 'sm' },
-    label: { marginStart: '2' }
+    root: { display: "flex", alignItems: "center", gap: "2" },
+    control: { borderWidth: "1px", borderRadius: "sm" },
+    label: { marginStart: "2" },
   },
   variants: {
     size: {
       sm: {
-        control: { width: '8', height: '8' },
-        label: { fontSize: 'sm' }
+        control: { width: "8", height: "8" },
+        label: { fontSize: "sm" },
       },
       md: {
-        control: { width: '10', height: '10' },
-        label: { fontSize: 'md' }
-      }
-    }
+        control: { width: "10", height: "10" },
+        label: { fontSize: "md" },
+      },
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 ```
 
 ### Using the recipe
@@ -1845,19 +1860,19 @@ The returned value from `sva` is a function that can be used to apply the recipe
 example of how to use the `checkbox` recipe:
 
 ```jsx filename="Checkbox.tsx"
-import { css } from '../styled-system/css'
-import { checkbox } from './checkbox.recipe'
+import { css } from "../styled-system/css";
+import { checkbox } from "./checkbox.recipe";
 
 const Checkbox = () => {
-  const classes = checkbox({ size: 'sm' })
+  const classes = checkbox({ size: "sm" });
   return (
     <label className={classes.root}>
       <input type="checkbox" className={css({ srOnly: true })} />
       <div className={classes.control} />
       <span className={classes.label}>Checkbox Label</span>
     </label>
-  )
-}
+  );
+};
 ```
 
 When a slot recipe is created, Panda will pre-generate the css of all the possible combinations of variants and compound
@@ -1948,23 +1963,23 @@ Let's say you want to apply a different border color to the button text directly
 would do it:
 
 ```tsx
-import { sva } from '../styled-system/css'
+import { sva } from "../styled-system/css";
 
 const button = sva({
-  className: 'btn',
-  slots: ['root', 'text'],
+  className: "btn",
+  slots: ["root", "text"],
   base: {
     root: {
-      bg: 'blue.500',
+      bg: "blue.500",
       _hover: {
         // v--- 🎯 this will target the `text` slot
-        '& .btn__text': {
-          color: 'white'
-        }
-      }
-    }
-  }
-})
+        "& .btn__text": {
+          color: "white",
+        },
+      },
+    },
+  },
+});
 ```
 
 > Note: This doesn't work when you have the `hash: true` option in your panda config. We recommend using `data-x`
@@ -2031,39 +2046,41 @@ Let's say you want to design a Checkbox component that can be used like this:
 First, create a shared context for ths styles
 
 ```jsx filename="style-context.tsx"
-'use client'
-import { createContext, forwardRef, useContext } from 'react'
+"use client";
+import { createContext, forwardRef, useContext } from "react";
 
-export const createStyleContext = recipe => {
-  const StyleContext = createContext(null)
+export const createStyleContext = (recipe) => {
+  const StyleContext = createContext(null);
 
   const withProvider = (Component, part) => {
     const Comp = forwardRef((props, ref) => {
-      const [variantProps, rest] = recipe.splitVariantProps(props)
-      const styles = recipe(variantProps)
+      const [variantProps, rest] = recipe.splitVariantProps(props);
+      const styles = recipe(variantProps);
       return (
         <StyleContext.Provider value={styles}>
-          <Component ref={ref} className={styles?.[part ?? '']} {...rest} />
+          <Component ref={ref} className={styles?.[part ?? ""]} {...rest} />
         </StyleContext.Provider>
-      )
-    })
-    Comp.displayName = Component.displayName || Component.name
-    return Comp
-  }
+      );
+    });
+    Comp.displayName = Component.displayName || Component.name;
+    return Comp;
+  };
 
   const withContext = (Component, part) => {
-    if (!part) return Component
+    if (!part) return Component;
 
     const Comp = forwardRef((props, ref) => {
-      const styles = useContext(StyleContext)
-      return <Component ref={ref} className={styles?.[part ?? '']} {...props} />
-    })
-    Comp.displayName = Component.displayName || Component.name
-    return Comp
-  }
+      const styles = useContext(StyleContext);
+      return (
+        <Component ref={ref} className={styles?.[part ?? ""]} {...props} />
+      );
+    });
+    Comp.displayName = Component.displayName || Component.name;
+    return Comp;
+  };
 
-  return { withProvider, withContext }
-}
+  return { withProvider, withContext };
+};
 ```
 
 > Note: For the TypeScript version of this file, refer to
@@ -2073,19 +2090,19 @@ export const createStyleContext = recipe => {
 Then, use the context to create compound components connected to the recipe
 
 ```jsx filename="Checkbox.tsx"
-import { createStyleContext } from './style-context'
-import { checkbox } from './checkbox.recipe'
+import { createStyleContext } from "./style-context";
+import { checkbox } from "./checkbox.recipe";
 
-const { withProvider, withContext } = createStyleContext(checkbox)
+const { withProvider, withContext } = createStyleContext(checkbox);
 
 //                                  👇🏻 points to the root slot
-const Root = withProvider('label', 'root')
+const Root = withProvider("label", "root");
 //                                    👇🏻 points to the control slot
-const Control = withContext('div', 'control')
+const Control = withContext("div", "control");
 //                                  👇🏻 points to the label slot
-const Label = withContext('span', 'label')
+const Label = withContext("span", "label");
 
-const Checkbox = { Root, Control, Label }
+const Checkbox = { Root, Control, Label };
 ```
 
 ## Config Slot Recipe
@@ -2104,33 +2121,33 @@ The config slot recipe takes the following additional properties:
 To define a config slot recipe, import the `defineSlotRecipe` function
 
 ```jsx filename="checkbox.recipe.ts"
-import { defineSlotRecipe } from '@pandacss/dev'
+import { defineSlotRecipe } from "@pandacss/dev";
 
 export const checkboxRecipe = defineSlotRecipe({
-  className: 'checkbox',
-  description: 'The styles for the Checkbox component',
-  slots: ['root', 'control', 'label'],
+  className: "checkbox",
+  description: "The styles for the Checkbox component",
+  slots: ["root", "control", "label"],
   base: {
-    root: { display: 'flex', alignItems: 'center', gap: '2' },
-    control: { borderWidth: '1px', borderRadius: 'sm' },
-    label: { marginStart: '2' }
+    root: { display: "flex", alignItems: "center", gap: "2" },
+    control: { borderWidth: "1px", borderRadius: "sm" },
+    label: { marginStart: "2" },
   },
   variants: {
     size: {
       sm: {
-        control: { width: '8', height: '8' },
-        label: { fontSize: 'sm' }
+        control: { width: "8", height: "8" },
+        label: { fontSize: "sm" },
       },
       md: {
-        control: { width: '10', height: '10' },
-        label: { fontSize: 'md' }
-      }
-    }
+        control: { width: "10", height: "10" },
+        label: { fontSize: "md" },
+      },
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 ```
 
 ### Adding recipe to config
@@ -2138,20 +2155,20 @@ export const checkboxRecipe = defineSlotRecipe({
 To add the recipe to the config, you’d need to add it to the `slotRecipes` property of the `theme`
 
 ```jsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
-import { checkboxRecipe } from './checkbox.recipe'
+import { defineConfig } from "@pandacss/dev";
+import { checkboxRecipe } from "./checkbox.recipe";
 
 export default defineConfig({
   //...
-  jsxFramework: 'react',
+  jsxFramework: "react",
   theme: {
     extend: {
       slotRecipes: {
-        checkbox: checkboxRecipe
-      }
-    }
-  }
-})
+        checkbox: checkboxRecipe,
+      },
+    },
+  },
+});
 ```
 
 ### Generate JS code
@@ -2167,19 +2184,19 @@ To use the recipe, you can import the recipe from the `<outdir>/recipes` entrypo
 tracks the usage of the recipe and only generates CSS of the variants used in your application.
 
 ```js
-import { css } from '../styled-system/css'
-import { checkbox } from '../styled-system/recipes'
+import { css } from "../styled-system/css";
+import { checkbox } from "../styled-system/recipes";
 
 const Checkbox = () => {
-  const classes = checkbox({ size: 'sm' })
+  const classes = checkbox({ size: "sm" });
   return (
     <label className={classes.root}>
       <input type="checkbox" className={css({ srOnly: true })} />
       <div className={classes.control} />
       <span className={classes.label}>Checkbox Label</span>
     </label>
-  )
-}
+  );
+};
 ```
 
 The generated css is registered under the `recipe` [cascade layer](/docs/concepts/cascade-layers.mdx) with the class
@@ -2232,14 +2249,14 @@ entrypoint.
 For the checkbox recipe, we can import the `CheckboxVariants` type like so:
 
 ```ts
-import React from 'react'
-import type { CheckboxVariants } from '../styled-system/recipes'
+import React from "react";
+import type { CheckboxVariants } from "../styled-system/recipes";
 
 type CheckboxProps = CheckboxVariants & {
-  children: React.ReactNode
-  value?: string
-  onChange?: (value: string) => void
-}
+  children: React.ReactNode;
+  value?: string;
+  onChange?: (value: string) => void;
+};
 ```
 
 ### `defineParts`
@@ -2252,40 +2269,38 @@ It pairs well with [ZagJs](https://zagjs.com/) and [Ark-UI](https://ark-ui.com/)
 Let's refactor the previous example to use parts instead of slots:
 
 ```ts
-import { defineParts, definetRecipe } from '@pandacss/dev'
+import { defineParts, definetRecipe } from "@pandacss/dev";
 
 const parts = defineParts({
   root: { selector: '& [data-part="root"]' },
   control: { selector: '& [data-part="control"]' },
-  label: { selector: '& [data-part="label"]' }
-})
+  label: { selector: '& [data-part="label"]' },
+});
 
 export const checkboxRecipe = defineRecipe({
-  className: 'checkbox',
-  description: 'A checkbox style',
+  className: "checkbox",
+  description: "A checkbox style",
   base: parts({
-    root: { display: 'flex', alignItems: 'center', gap: '2' },
-    control: { borderWidth: '1px', borderRadius: 'sm' },
-    label: { marginStart: '2' }
+    root: { display: "flex", alignItems: "center", gap: "2" },
+    control: { borderWidth: "1px", borderRadius: "sm" },
+    label: { marginStart: "2" },
   }),
   variants: {
     size: {
       sm: parts({
-        control: { width: '8', height: '8' },
-        label: { fontSize: 'sm' }
+        control: { width: "8", height: "8" },
+        label: { fontSize: "sm" },
       }),
       md: parts({
-        control: { width: '10', height: '10' },
-        label: { fontSize: 'md' }
-      })
-    }
+        control: { width: "10", height: "10" },
+        label: { fontSize: "md" },
+      }),
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 ```
 
 ---
-
-

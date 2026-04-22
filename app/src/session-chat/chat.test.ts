@@ -1,7 +1,7 @@
-import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
-import { expect, test } from "bun:test"
+import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk";
+import { expect, test } from "bun:test";
 
-import { buildTranscriptMessages } from "./chat.ts"
+import { buildTranscriptMessages } from "./chat.ts";
 
 function createSession(lastAgentMessage: string | null) {
   return {
@@ -31,7 +31,7 @@ function createSession(lastAgentMessage: string | null) {
     lastAgentMessage,
     models: null,
     availableCommands: [],
-  } satisfies DaemonSession
+  } satisfies DaemonSession;
 }
 
 function createTurns(
@@ -50,11 +50,11 @@ function createTurns(
       messages,
       ...overrides,
     },
-  ]
+  ];
 }
 
 test("buildTranscriptMessages appends the latest daemon summary when turns have no assistant update yet", () => {
-  const session = createSession("Ready to review the diff.")
+  const session = createSession("Ready to review the diff.");
   const turns = createTurns([
     {
       jsonrpc: "2.0",
@@ -65,7 +65,7 @@ test("buildTranscriptMessages appends the latest daemon summary when turns have 
         prompt: [{ type: "text", text: "Review the current diff." }],
       },
     },
-  ])
+  ]);
 
   expect(buildTranscriptMessages(session, turns).at(-1)).toEqual({
     kind: "message",
@@ -75,11 +75,11 @@ test("buildTranscriptMessages appends the latest daemon summary when turns have 
     timestampLabel: "Latest",
     streaming: true,
     content: [{ type: "text", text: "Ready to review the diff." }],
-  })
-})
+  });
+});
 
 test("buildTranscriptMessages accumulates agent_message_chunk updates into one assistant row", () => {
-  const session = createSession(null)
+  const session = createSession(null);
   const turns = createTurns([
     {
       jsonrpc: "2.0",
@@ -118,7 +118,7 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
         },
       },
     },
-  ])
+  ]);
 
   expect(buildTranscriptMessages(session, turns)).toEqual([
     {
@@ -146,11 +146,11 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
       content: [{ type: "text", text: "# Summary\n\n- Uses Comark" }],
       streaming: false,
     },
-  ])
-})
+  ]);
+});
 
 test("buildTranscriptMessages merges tool_call updates into one stable tool row", () => {
-  const session = createSession(null)
+  const session = createSession(null);
   const turns = createTurns([
     {
       jsonrpc: "2.0",
@@ -158,7 +158,9 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
       method: "session/prompt",
       params: {
         sessionId: session.acpSessionId,
-        prompt: [{ type: "text", text: "Inspect the transcript implementation." }],
+        prompt: [
+          { type: "text", text: "Inspect the transcript implementation." },
+        ],
       },
     },
     {
@@ -172,7 +174,9 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
           title: "Read transcript.tsx",
           kind: "read",
           status: "in_progress",
-          locations: [{ path: "/repo-a/app/src/session-chat/transcript.tsx", line: 12 }],
+          locations: [
+            { path: "/repo-a/app/src/session-chat/transcript.tsx", line: 12 },
+          ],
         },
       },
     },
@@ -188,13 +192,18 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
           content: [
             {
               type: "content",
-              content: [{ type: "text", text: "Loaded transcript layout and measured row logic." }],
+              content: [
+                {
+                  type: "text",
+                  text: "Loaded transcript layout and measured row logic.",
+                },
+              ],
             },
           ],
         },
       },
     },
-  ])
+  ]);
 
   expect(buildTranscriptMessages(session, turns)).toEqual([
     {
@@ -211,7 +220,9 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
       role: "user",
       authorName: "You",
       timestampLabel: "Prompt",
-      content: [{ type: "text", text: "Inspect the transcript implementation." }],
+      content: [
+        { type: "text", text: "Inspect the transcript implementation." },
+      ],
     },
     {
       kind: "toolCall",
@@ -235,11 +246,11 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
         },
       ],
     },
-  ])
-})
+  ]);
+});
 
 test("buildTranscriptMessages ignores routed session/update payloads without rendering transcript text", () => {
-  const session = createSession(null)
+  const session = createSession(null);
   const turns = createTurns([
     {
       jsonrpc: "2.0",
@@ -257,7 +268,7 @@ test("buildTranscriptMessages ignores routed session/update payloads without ren
         },
       },
     },
-  ])
+  ]);
 
   expect(buildTranscriptMessages(session, turns)).toEqual([
     {
@@ -268,11 +279,11 @@ test("buildTranscriptMessages ignores routed session/update payloads without ren
       timestampLabel: "active",
       content: [{ type: "text", text: "Working directory: /repo-a" }],
     },
-  ])
-})
+  ]);
+});
 
 test("buildTranscriptMessages logs an error instead of flattening unsupported session/update payloads", () => {
-  const session = createSession(null)
+  const session = createSession(null);
   const turns = createTurns([
     {
       jsonrpc: "2.0",
@@ -288,13 +299,13 @@ test("buildTranscriptMessages logs an error instead of flattening unsupported se
         },
       },
     },
-  ])
+  ]);
 
-  const errors: unknown[][] = []
-  const originalConsoleError = console.error
+  const errors: unknown[][] = [];
+  const originalConsoleError = console.error;
   console.error = (...args) => {
-    errors.push(args)
-  }
+    errors.push(args);
+  };
 
   try {
     expect(buildTranscriptMessages(session, turns)).toEqual([
@@ -306,16 +317,16 @@ test("buildTranscriptMessages logs an error instead of flattening unsupported se
         timestampLabel: "active",
         content: [{ type: "text", text: "Working directory: /repo-a" }],
       },
-    ])
+    ]);
   } finally {
-    console.error = originalConsoleError
+    console.error = originalConsoleError;
   }
 
-  expect(errors).toHaveLength(1)
-  expect(errors[0]?.[0]).toBe("Unsupported session-chat transcript message.")
+  expect(errors).toHaveLength(1);
+  expect(errors[0]?.[0]).toBe("Unsupported session-chat transcript message.");
   expect(errors[0]?.[1]).toEqual(
     expect.objectContaining({
       reason: "Unsupported transcript session/update payload: mystery_update",
     }),
-  )
-})
+  );
+});

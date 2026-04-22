@@ -1,32 +1,32 @@
 /** Renders the app-wide command palette. */
-import { Dialog, UseDialogReturn } from "@ark-ui/react/dialog"
-import { token } from "@goddard-ai/styled-system/tokens"
-import { Command } from "ark-cmdk"
-import { Search } from "lucide-react"
-import { useEffect, useState } from "preact/hooks"
+import { Dialog, UseDialogReturn } from "@ark-ui/react/dialog";
+import { token } from "@goddard-ai/styled-system/tokens";
+import { Command } from "ark-cmdk";
+import { Search } from "lucide-react";
+import { useEffect, useState } from "preact/hooks";
 
-import { useShortcutRegistry } from "./app-state-context.tsx"
-import styles from "./command-palette.style.ts"
-import { AppCommand, appCommandList } from "./commands/app-command.ts"
-import { isCommandAvailable } from "./commands/command-context.ts"
-import { DialogPortal } from "./lib/dialog-portal.tsx"
+import { useShortcutRegistry } from "./app-state-context.tsx";
+import styles from "./command-palette.style.ts";
+import { AppCommand, appCommandList } from "./commands/app-command.ts";
+import { isCommandAvailable } from "./commands/command-context.ts";
+import { DialogPortal } from "./lib/dialog-portal.tsx";
 
 export default function CommandPalette(props: { dialog: UseDialogReturn }) {
-  const { open } = props.dialog
-  const shortcutRegistry = useShortcutRegistry()
+  const { open } = props.dialog;
+  const shortcutRegistry = useShortcutRegistry();
 
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState("");
   useEffect(() => {
     if (!open && search.length > 0) {
-      setSearch("")
+      setSearch("");
     }
-  }, [open, search])
+  }, [open, search]);
 
   const visibleCommands = appCommandList.filter(
     (command) =>
       command.id !== "navigation.openCommandPalette" &&
       isCommandAvailable(shortcutRegistry.runtime, command),
-  )
+  );
 
   return (
     <DialogPortal>
@@ -43,26 +43,31 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
             label="Command menu"
             onSearchChange={setSearch}
             onSelect={(command) => {
-              props.dialog.setOpen(false)
-              command()
+              props.dialog.setOpen(false);
+              command();
             }}
             search={search}
           >
             <div class={styles.searchRow}>
               <Search aria-hidden={true} class={styles.searchIcon} size={16} />
-              <Command.Input autoFocus={true} class={styles.input} placeholder="Type a command" />
+              <Command.Input
+                autoFocus={true}
+                class={styles.input}
+                placeholder="Type a command"
+              />
             </div>
             <Command.List<AppCommand>
               class={styles.list}
               empty={<div class={styles.empty}>No matching commands.</div>}
             >
               {(item, state) => {
-                const Icon = item.icon
-                const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
+                const Icon = item.icon;
+                const shortcutBinding =
+                  shortcutRegistry.resolvedBindings[item.id]?.[0];
                 const shortcut =
                   typeof shortcutBinding === "string"
                     ? shortcutBinding
-                    : (shortcutBinding?.combo ?? shortcutBinding?.sequence)
+                    : (shortcutBinding?.combo ?? shortcutBinding?.sequence);
 
                 return (
                   <div
@@ -87,14 +92,16 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
                       />
                     ) : null}
                     <span class={styles.itemLabel}>{item.label}</span>
-                    {shortcut ? <span class={styles.shortcut}>{shortcut}</span> : null}
+                    {shortcut ? (
+                      <span class={styles.shortcut}>{shortcut}</span>
+                    ) : null}
                   </div>
-                )
+                );
               }}
             </Command.List>
           </Command.Root>
         </Dialog.Content>
       </Dialog.Positioner>
     </DialogPortal>
-  )
+  );
 }

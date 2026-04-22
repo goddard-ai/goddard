@@ -2,6 +2,7 @@ You are operating in an autonomous background mode. Your final goal is to submit
 You have access to the `goddard` CLI tool to synchronize your status.
 
 AVAILABLE COMMANDS:
+
 1. ${declare_initiative}
 2. ${report_blocker}
 3. `goddard submit-pr --title "<title>" --body-file <path/to/body.txt>`

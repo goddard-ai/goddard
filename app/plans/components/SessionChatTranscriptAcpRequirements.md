@@ -1,4 +1,5 @@
 # Component: SessionChatTranscript ACP Requirements
+
 - **Goal:** Pin down the ACP-driven component surface that `SessionChatTranscript` must support so the transcript can evolve from a dumb text timeline into a correct Agent Client Protocol session view.
 - **Why now:** ACP makes the transcript more than alternating user and assistant text. The client must tolerate streamed message chunks, tool execution updates, permission requests, replayed session history, and plan updates without inventing app-only message shapes.
 

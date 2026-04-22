@@ -1,11 +1,11 @@
 /** Daemon-owned preparation helpers for fresh linked session worktrees. */
+import { constants as fsConstants } from "node:fs"
+import { cp, mkdir, readFile, stat } from "node:fs/promises"
+import * as path from "node:path"
 import type {
   WorktreeBootstrapConfig,
   WorktreeBootstrapPackageManager,
 } from "@goddard-ai/schema/config"
-import { constants as fsConstants } from "node:fs"
-import { cp, mkdir, readFile, stat } from "node:fs/promises"
-import * as path from "node:path"
 
 import { runCommand } from "./process.ts"
 

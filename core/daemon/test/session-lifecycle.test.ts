@@ -1,10 +1,3 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import {
-  getAcpRegistryCacheDir,
-  getGlobalConfigPath,
-  getLocalConfigPath,
-} from "@goddard-ai/paths/node"
-import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
@@ -13,6 +6,13 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import {
+  getAcpRegistryCacheDir,
+  getGlobalConfigPath,
+  getLocalConfigPath,
+} from "@goddard-ai/paths/node"
+import { afterAll, afterEach, expect, test } from "bun:test"
 
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
@@ -172,7 +172,9 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
   await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
 
   const session = await client.send("sessionGet", { id: created.session.id })
-  const history = await client.send("sessionHistory", { id: created.session.id })
+  const history = await client.send("sessionHistory", {
+    id: created.session.id,
+  })
   const promptStarts: string[] = []
   const promptStops: string[] = []
   const unsubscribe = await client.subscribe(
@@ -205,7 +207,9 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
     activeDaemonSession: false,
   })
 
-  const reconnected = await client.send("sessionConnect", { id: created.session.id })
+  const reconnected = await client.send("sessionConnect", {
+    id: created.session.id,
+  })
   await client.send("sessionSend", {
     id: created.session.id,
     message: buildPromptMessage(
@@ -241,8 +245,12 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
 
   const daemonB = await startServer({ useExistingHome: true })
   const clientB = createDaemonIpcClient({ daemonUrl: daemonB.daemonUrl })
-  const reloadedSession = await clientB.send("sessionGet", { id: created.session.id })
-  const history = await clientB.send("sessionHistory", { id: created.session.id })
+  const reloadedSession = await clientB.send("sessionGet", {
+    id: created.session.id,
+  })
+  const history = await clientB.send("sessionHistory", {
+    id: created.session.id,
+  })
 
   expect(reloadedSession.session.connectionMode).toBe("live")
   expect(reloadedSession.session.activeDaemonSession).toBe(false)
@@ -252,7 +260,9 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
     activeDaemonSession: false,
   })
 
-  const connected = await clientB.send("sessionConnect", { id: created.session.id })
+  const connected = await clientB.send("sessionConnect", {
+    id: created.session.id,
+  })
   expect(connected.session.connectionMode).toBe("live")
   expect(connected.session.activeDaemonSession).toBe(true)
 
@@ -629,7 +639,9 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   expect(history.connection.mode).toBe("history")
   expect(history.turns).toHaveLength(1)
 
-  const diagnostics = await client.send("sessionDiagnostics", { id: sessionId })
+  const diagnostics = await client.send("sessionDiagnostics", {
+    id: sessionId,
+  })
   expect(
     diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
@@ -803,7 +815,9 @@ test("daemon auto-shuts down idle loadable sessions with no connected clients", 
     "session_idle_shutdown_timer_expired",
   )
 
-  const reconnected = await client.send("sessionConnect", { id: created.session.id })
+  const reconnected = await client.send("sessionConnect", {
+    id: created.session.id,
+  })
   expect(reconnected.session.activeDaemonSession).toBe(true)
 
   await client.send("sessionShutdown", { id: created.session.id })

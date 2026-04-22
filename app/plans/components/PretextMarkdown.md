@@ -1,4 +1,5 @@
 # Component: PretextMarkdown
+
 - **Goal:** Render long markdown documents inside detail tabs with Pretext-owned paragraph layout so the app can virtualize prose-heavy surfaces by default without per-paragraph DOM measurement.
 - **Why now:** `SessionChatTranscript` is already establishing a shared Pretext viewport context and virtualized paragraph pipeline. A separate markdown surface should reuse that same viewport ownership instead of inventing a second measurement path for spec and document tabs.
 - **Minimum Viable Component:** A markdown document renderer that tokenizes markdown into block records, routes every paragraph-like block through Pretext, virtualizes the visible block window, and renders non-paragraph chrome such as headings, lists, quotes, code fences, and rules around the measured paragraph output.

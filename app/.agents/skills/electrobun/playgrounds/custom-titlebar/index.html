@@ -19,7 +19,8 @@
       }
 
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
         color: #fff;
       }
@@ -210,9 +211,21 @@
     <div class="titlebar electrobun-webkit-app-region-drag">
       <!-- Window controls - excluded from drag -->
       <div class="window-controls electrobun-webkit-app-region-no-drag">
-        <button id="closeBtn" class="window-btn close-btn" title="Close"></button>
-        <button id="minimizeBtn" class="window-btn minimize-btn" title="Minimize"></button>
-        <button id="maximizeBtn" class="window-btn maximize-btn" title="Maximize"></button>
+        <button
+          id="closeBtn"
+          class="window-btn close-btn"
+          title="Close"
+        ></button>
+        <button
+          id="minimizeBtn"
+          class="window-btn minimize-btn"
+          title="Minimize"
+        ></button>
+        <button
+          id="maximizeBtn"
+          class="window-btn maximize-btn"
+          title="Maximize"
+        ></button>
       </div>
       <span class="title">Custom Titlebar Demo</span>
       <div style="width: 60px"></div>
@@ -223,35 +236,54 @@
       <div class="info-card">
         <h3>Custom Titlebar Implementation</h3>
         <p>
-          This window uses <code>titleBarStyle: "hidden"</code> to hide both the native titlebar and
-          window controls. The custom titlebar above is a regular HTML element with the
-          <code>.electrobun-webkit-app-region-drag</code> class to make it draggable.
+          This window uses <code>titleBarStyle: "hidden"</code> to hide both the
+          native titlebar and window controls. The custom titlebar above is a
+          regular HTML element with the
+          <code>.electrobun-webkit-app-region-drag</code> class to make it
+          draggable.
         </p>
       </div>
 
       <div class="info-card">
         <h3>Window Controls</h3>
         <p>
-          The close, minimize, and maximize buttons are custom HTML elements styled like macOS
-          window controls. They use <code>.electrobun-webkit-app-region-no-drag</code> to remain
-          clickable within the draggable region.
+          The close, minimize, and maximize buttons are custom HTML elements
+          styled like macOS window controls. They use
+          <code>.electrobun-webkit-app-region-no-drag</code> to remain clickable
+          within the draggable region.
         </p>
       </div>
 
       <div class="info-card">
         <h3>Test Checklist</h3>
         <ul class="checklist">
-          <li><span class="check-icon"></span> Drag the window by the titlebar area</li>
-          <li><span class="check-icon"></span> Click the red button to close</li>
-          <li><span class="check-icon"></span> Click the yellow button to minimize</li>
-          <li><span class="check-icon"></span> Click the green button to maximize/restore</li>
-          <li><span class="check-icon"></span> Text input below should work normally</li>
+          <li>
+            <span class="check-icon"></span> Drag the window by the titlebar
+            area
+          </li>
+          <li>
+            <span class="check-icon"></span> Click the red button to close
+          </li>
+          <li>
+            <span class="check-icon"></span> Click the yellow button to minimize
+          </li>
+          <li>
+            <span class="check-icon"></span> Click the green button to
+            maximize/restore
+          </li>
+          <li>
+            <span class="check-icon"></span> Text input below should work
+            normally
+          </li>
         </ul>
       </div>
 
       <div class="test-area">
         <h4>Interactive Area (not draggable)</h4>
-        <input type="text" placeholder="Type here to verify text input works..." />
+        <input
+          type="text"
+          placeholder="Type here to verify text input works..."
+        />
       </div>
 
       <button id="doneBtn" class="done-btn">Done - Close Window</button>

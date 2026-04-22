@@ -1,4 +1,5 @@
 # Component: TerminalView
+
 - **Minimum Viable Component:** Detail view for one PTY-backed terminal session that composes session controls and an `xterm.js` viewport.
 - **Props Interface:** `terminalSessionId: string`; `initialCwdLabel?: string`; `initialTitle?: string`.
 - **Sub-components:** `TerminalToolbar`, `TerminalViewport`.

@@ -1,4 +1,5 @@
 # Component: CreateActionDialog
+
 - **Minimum Viable Component:** Modal that captures the initial metadata required to create a new action before opening its editor tab.
 - **Props Interface:** `isOpen: boolean`; `draft: { name, scope, projectPath }`; `projects: array of managed project summaries`; `validation: { canSubmit, fieldErrors }`; `isSubmitting: boolean`; `onDraftChange: (patch) => void`; `onSubmit: () => void`; `onClose: () => void`.
 - **Sub-components:** None.

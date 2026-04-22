@@ -1,4 +1,5 @@
 # State Module: TerminalSessionState
+
 - **Responsibility:** Own PTY-backed terminal session lifecycle, byte transport, resize coordination, and restoration across cached tab mounts.
 - **Data Shape:** One map keyed by terminal session id containing PTY handle metadata, title, cwd, connection state, rows, columns, scrollback bytes or decoded chunks, pending input queue, exit metadata, and cached viewport preferences.
 - **Mutations/Actions:** `createTerminal`; `attachViewport`; `detachViewport`; `writeInput`; `resizeTerminal`; `clearScrollback`; `restartTerminal`; `closeTerminal`; `appendOutputChunk`; `markTerminalExited`.

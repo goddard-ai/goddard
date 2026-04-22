@@ -1,4 +1,5 @@
 # Component: SpecsPage
+
 - **Minimum Viable Component:** Full-width specification discovery page with a left-hanging project or path tree and a file list that opens markdown document tabs.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `SpecTreeSidebar`, `SpecFileList`.

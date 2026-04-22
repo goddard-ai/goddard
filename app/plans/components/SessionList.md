@@ -1,4 +1,5 @@
 # Component: SessionList
+
 - **Minimum Viable Component:** Virtualizable list container for session rows with multi-select behavior and stable recency ordering.
 - **Props Interface:** `sessions: array of session summary records`; `selectedIds: set-like collection of session ids`; `onToggleSelected: (id) => void`; `onOpenChat: (id) => void`; `onOpenDiff: (id) => void`; `onOpenPullRequest: (id) => void`.
 - **Sub-components:** `SessionListRow`.

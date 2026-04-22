@@ -1,4 +1,5 @@
 # State Module: SessionChatState
+
 - **Responsibility:** Manage one or many live or history-backed chat conversations for daemon-managed coding sessions, isolated from the `@assistant-ui/react` view layer.
 - **Data Shape:** One map keyed by session id containing summary metadata, connection mode, reconnectability, normalized message history, pending draft text, send status, unread markers, streaming markers, and related diff or pull request references.
 - **Mutations/Actions:** `connectSession`; `loadSessionHistory`; `appendIncomingMessage`; `updateDraft`; `sendPrompt`; `cancelPrompt`; `reconnectSession`; `markTranscriptViewed`; `disposeSessionConnection`.

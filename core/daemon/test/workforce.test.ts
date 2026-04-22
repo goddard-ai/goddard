@@ -1,10 +1,10 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
-import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
+import { afterEach, expect, test } from "bun:test"
 
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
@@ -54,7 +54,11 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
           githubUsername: "alec",
           githubUserId: 42,
         }),
-        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        whoami: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
         logout: async () => {},
       },
       pr: {
@@ -119,7 +123,11 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
           githubUsername: "alec",
           githubUserId: 42,
         }),
-        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        whoami: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
         logout: async () => {},
       },
       pr: {

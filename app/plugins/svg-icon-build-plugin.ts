@@ -1,9 +1,9 @@
-import svgSpritemap from "@spiriit/vite-plugin-svg-spritemap"
-import chokidar, { type FSWatcher } from "chokidar"
 import { Dirent } from "node:fs"
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import path, { dirname, extname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
+import svgSpritemap from "@spiriit/vite-plugin-svg-spritemap"
+import chokidar, { type FSWatcher } from "chokidar"
 import type { Plugin, ViteDevServer } from "vite"
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url))
@@ -135,7 +135,10 @@ async function listSvgFilePaths(directoryPath: string) {
   let directoryEntries: Dirent[]
 
   try {
-    directoryEntries = await readdir(directoryPath, { recursive: true, withFileTypes: true })
+    directoryEntries = await readdir(directoryPath, {
+      recursive: true,
+      withFileTypes: true,
+    })
   } catch {
     return []
   }

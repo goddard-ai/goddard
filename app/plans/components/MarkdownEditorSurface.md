@@ -1,4 +1,5 @@
 # Component: MarkdownEditorSurface
+
 - **Goal:** Provide a Lexical-backed markdown surface that treats markdown as the source of truth, behaves as a WYSIWYG editor first, and can render the same content in `readOnly` mode without introducing a second markdown renderer.
 - **Why now:** The old rich-document editor direction is being retired. The app now needs one markdown-first surface with identical parsing and rendering rules in both editable and read-only modes.
 - **Minimum Viable Component:** Controlled Lexical wrapper that accepts raw markdown, hydrates a constrained rich-text document, emits normalized markdown on edits, and disables editing behavior when `readOnly` is true.

@@ -1,8 +1,8 @@
-import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
 import { execFile } from "node:child_process"
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
+import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
 
 import { buildWorkforcePaths } from "./paths.ts"
 
@@ -65,7 +65,9 @@ function assertAgentConfig(value: unknown, index: number): asserts value is Work
 /** Reads a package name from one manifest or falls back to the directory name. */
 async function resolvePackageName(manifestPath: string, packageDir: string): Promise<string> {
   try {
-    const parsed = JSON.parse(await readFile(manifestPath, "utf-8")) as { name?: string }
+    const parsed = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+      name?: string
+    }
     if (typeof parsed.name === "string" && parsed.name.trim()) {
       return parsed.name
     }

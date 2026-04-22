@@ -19,7 +19,10 @@ export function toPublicSession(session: SessionRecord): AuthSession {
   }
 }
 
-export function createSseSession(onClose: () => void): { response: Response; sink: StreamSink } {
+export function createSseSession(onClose: () => void): {
+  response: Response
+  sink: StreamSink
+} {
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null
   let isClosed = false

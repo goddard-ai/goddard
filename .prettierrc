@@ -1,0 +1,3 @@
+{
+  "plugins": ["@tsrx/prettier-plugin"]
+}

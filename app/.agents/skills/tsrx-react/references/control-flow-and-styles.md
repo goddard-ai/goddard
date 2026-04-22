@@ -9,12 +9,12 @@ Use normal JavaScript conditionals inside templates.
 ```tsrx
 component StatusBadge({ status }: { status: string }) {
   <div>
-    if (status === 'active') {
-      <span class="badge active">{'Online'}</span>
-    } else if (status === 'idle') {
-      <span class="badge idle">{'Away'}</span>
+    if (status === "active") {
+      <span class="badge active">{"Online"}</span>
+    } else if (status === "idle") {
+      <span class="badge idle">{"Away"}</span>
     } else {
-      <span class="badge">{'Offline'}</span>
+      <span class="badge">{"Offline"}</span>
     }
   </div>
 }
@@ -42,14 +42,14 @@ Use standard `switch` statements for multi-branch rendering. `break` terminates 
 
 ```tsrx
 switch (status) {
-  case 'loading':
-    <p>{'Loading...'}</p>
+  case "loading":
+    <p>{"Loading..."}</p>
     break;
-  case 'success':
-    <p class="success">{'Done!'}</p>
+  case "success":
+    <p class="success">{"Done!"}</p>
     break;
   default:
-    <p>{'Unknown status.'}</p>
+    <p>{"Unknown status."}</p>
 }
 ```
 
@@ -58,15 +58,15 @@ switch (status) {
 Use `try { ... } catch (e) { ... }` for error fallback UI. Add `pending { ... }` to model async loading boundaries.
 
 ```tsrx
-const UserProfile = lazy(() => import('./UserProfile.tsrx'));
+const UserProfile = lazy(() => import("./UserProfile.tsrx"));
 
 export component App() {
   try {
     <UserProfile id={1} />
   } pending {
-    <p>{'Loading...'}</p>
+    <p>{"Loading..."}</p>
   } catch (e) {
-    <p>{'Something went wrong.'}</p>
+    <p>{"Something went wrong."}</p>
   }
 }
 ```
@@ -80,7 +80,7 @@ Use a bare `return;` for guard clauses after rendering fallback content. Do not 
 ```tsrx
 component Dashboard({ user }: { user: User | null }) {
   if (!user) {
-    <p>{'Please sign in.'}</p>
+    <p>{"Please sign in."}</p>
     return;
   }
 
@@ -97,7 +97,7 @@ Use a component-local `<style>` block to scope selectors to the component with a
 ```tsrx
 component Card() {
   <div class="card">
-    <h2>{'Scoped title'}</h2>
+    <h2>{"Scoped title"}</h2>
   </div>
 
   <style>
@@ -133,16 +133,21 @@ Use `#style.className` to pass a scoped class name to a child component.
 
 ```tsrx
 component Badge({ className }: { className?: string }) {
-  <span class={`badge ${className ?? ''}`}>{'New'}</span>
+  <span class={`badge ${className ?? ""}`}>{"New"}</span>
   <style>
-    .badge { padding: 0.25rem 0.5rem; }
+    .badge {
+      padding: 0.25rem 0.5rem;
+    }
   </style>
 }
 
 component App() {
   <Badge className={#style.highlight} />
   <style>
-    .highlight { background: #e8f5e9; color: #2e7d32; }
+    .highlight {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
   </style>
 }
 ```

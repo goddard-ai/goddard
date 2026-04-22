@@ -1,13 +1,12 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import { afterAll, afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import { afterAll, afterEach, expect, test } from "bun:test"
 
-import type { DaemonServer } from "../src/ipc.ts"
-import { startDaemonServer } from "../src/ipc.ts"
+import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import type { BackendPrClient } from "../src/ipc/types.ts"
 import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
@@ -138,7 +137,11 @@ test("daemon submit request enforces trusted repo context and records created PR
           githubUsername: "alec",
           githubUserId: 42,
         }),
-        whoami: async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 }),
+        whoami: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
         logout: async () => {},
       },
       pr: {
@@ -401,7 +404,11 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
           })),
         whoami:
           options.sdk?.auth?.whoami ??
-          (async () => ({ token: "tok_1", githubUsername: "alec", githubUserId: 42 })),
+          (async () => ({
+            token: "tok_1",
+            githubUsername: "alec",
+            githubUserId: 42,
+          })),
         logout: options.sdk?.auth?.logout ?? (async () => {}),
       },
       pr: {

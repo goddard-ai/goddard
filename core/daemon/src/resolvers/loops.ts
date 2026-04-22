@@ -1,11 +1,10 @@
+import { existsSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { mergeLoopConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
 import { ResolvedLoopConfig, type LoopConfig } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest, StartLoopRequest } from "@goddard-ai/schema/daemon"
-import { existsSync } from "node:fs"
-import { join, resolve } from "node:path"
 
-import type { RootConfigProvider } from "./config.ts"
-import { readCurrentRootConfig, readLoopConfig } from "./config.ts"
+import { readCurrentRootConfig, readLoopConfig, type RootConfigProvider } from "./config.ts"
 
 type RequiredObject<T> = Required<Exclude<T, undefined>>
 

@@ -1,4 +1,5 @@
 # Component: LoopList
+
 - **Minimum Viable Component:** List of known loop definitions and active runtimes with controls for start, stop, and open-related-session.
 - **Props Interface:** `loops: array of loop summary records`; `selectedLoopKey?: string | null`; `onSelect: (loopKey) => void`; `onStart: (loopKey) => void`; `onStop: (loopKey) => void`; `onOpenSession?: (sessionId) => void`.
 - **Sub-components:** `LoopListRow`.

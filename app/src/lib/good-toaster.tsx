@@ -1,14 +1,14 @@
-import { Portal } from "@ark-ui/react/portal"
-import { Toast, Toaster, createToaster } from "@ark-ui/react/toast"
-import { X } from "lucide-react"
+import { Portal } from "@ark-ui/react/portal";
+import { Toast, Toaster, createToaster } from "@ark-ui/react/toast";
+import { X } from "lucide-react";
 
-import styles from "./good-toaster.style.ts"
+import styles from "./good-toaster.style.ts";
 
 export const appToaster = createToaster({
   gap: 12,
   max: 4,
   placement: "bottom-end",
-})
+});
 
 export function GoodToaster() {
   return (
@@ -32,5 +32,5 @@ export function GoodToaster() {
         )}
       </Toaster>
     </Portal>
-  )
+  );
 }

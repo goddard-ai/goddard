@@ -1,4 +1,5 @@
 # Component: ProposalDetailView
+
 - **Minimum Viable Component:** Detail-tab view for one roadmap proposal with status, ownership, narrative, and linked work context.
 - **Props Interface:** `proposalId: string`.
 - **Sub-components:** `ContextActionDropdown`.

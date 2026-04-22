@@ -25,9 +25,9 @@ npm install @ark-ui/react
 Choose the import style that matches the repo and keep it consistent inside the touched area:
 
 ```tsx
-import { Dialog } from '@ark-ui/react'
-import { Slider } from '@ark-ui/react/slider'
-import { createListCollection } from '@ark-ui/react/collection'
+import { Dialog } from "@ark-ui/react";
+import { Slider } from "@ark-ui/react/slider";
+import { createListCollection } from "@ark-ui/react/collection";
 ```
 
 ## First Component Checklist

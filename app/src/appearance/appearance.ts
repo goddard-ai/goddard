@@ -2,9 +2,9 @@ import { SigmaType } from "preact-sigma"
 
 import {
   applyAppearanceSnapshot,
+  writeAppearancePreferences,
   type AppearanceMode,
   type AppearanceSnapshot,
-  writeAppearancePreferences,
 } from "./theme.ts"
 
 type AppearanceShape = {

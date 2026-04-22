@@ -1,10 +1,10 @@
-import Electrobun, { Electroview } from "electrobun/view"
+import Electrobun, { Electroview } from "electrobun/view";
 
 interface MenuConfig {
-  id: string
-  title: string
-  description: string[]
-  menu: any[]
+  id: string;
+  title: string;
+  description: string[];
+  menu: any[];
 }
 
 const menuConfigs: MenuConfig[] = [
@@ -140,7 +140,11 @@ const menuConfigs: MenuConfig[] = [
         submenu: [
           { label: "About", role: "about" },
           { type: "separator" },
-          { label: "Preferences...", action: "prefs", accelerator: "CommandOrControl+," },
+          {
+            label: "Preferences...",
+            action: "prefs",
+            accelerator: "CommandOrControl+,",
+          },
           { type: "separator" },
           { label: "Quit", role: "quit", accelerator: "CommandOrControl+Q" },
         ],
@@ -148,18 +152,42 @@ const menuConfigs: MenuConfig[] = [
       {
         label: "File",
         submenu: [
-          { label: "New", action: "file-new", accelerator: "CommandOrControl+N" },
-          { label: "Open", action: "file-open", accelerator: "CommandOrControl+O" },
-          { label: "Save", action: "file-save", accelerator: "CommandOrControl+S" },
-          { label: "Save As...", action: "file-save-as", accelerator: "CommandOrControl+Shift+S" },
+          {
+            label: "New",
+            action: "file-new",
+            accelerator: "CommandOrControl+N",
+          },
+          {
+            label: "Open",
+            action: "file-open",
+            accelerator: "CommandOrControl+O",
+          },
+          {
+            label: "Save",
+            action: "file-save",
+            accelerator: "CommandOrControl+S",
+          },
+          {
+            label: "Save As...",
+            action: "file-save-as",
+            accelerator: "CommandOrControl+Shift+S",
+          },
           { type: "separator" },
-          { label: "Close Window", action: "file-close", accelerator: "CommandOrControl+W" },
+          {
+            label: "Close Window",
+            action: "file-close",
+            accelerator: "CommandOrControl+W",
+          },
         ],
       },
       {
         label: "View",
         submenu: [
-          { label: "Reload", action: "view-reload", accelerator: "CommandOrControl+R" },
+          {
+            label: "Reload",
+            action: "view-reload",
+            accelerator: "CommandOrControl+R",
+          },
           {
             label: "Force Reload",
             action: "view-force-reload",
@@ -181,23 +209,63 @@ const menuConfigs: MenuConfig[] = [
       {
         label: "Navigate",
         submenu: [
-          { label: "Go Left", action: "nav-left", accelerator: "CommandOrControl+Shift+[" },
-          { label: "Go Right", action: "nav-right", accelerator: "CommandOrControl+Shift+]" },
+          {
+            label: "Go Left",
+            action: "nav-left",
+            accelerator: "CommandOrControl+Shift+[",
+          },
+          {
+            label: "Go Right",
+            action: "nav-right",
+            accelerator: "CommandOrControl+Shift+]",
+          },
           { type: "separator" },
-          { label: "Search", action: "nav-search", accelerator: "CommandOrControl+/" },
-          { label: "Quick Actions", action: "nav-quick", accelerator: "CommandOrControl+K" },
-          { label: "Open Console", action: "nav-console", accelerator: "CommandOrControl+;" },
+          {
+            label: "Search",
+            action: "nav-search",
+            accelerator: "CommandOrControl+/",
+          },
+          {
+            label: "Quick Actions",
+            action: "nav-quick",
+            accelerator: "CommandOrControl+K",
+          },
+          {
+            label: "Open Console",
+            action: "nav-console",
+            accelerator: "CommandOrControl+;",
+          },
         ],
       },
       {
         label: "Tabs",
         submenu: [
-          { label: "Tab 1", action: "tab-1", accelerator: "CommandOrControl+1" },
-          { label: "Tab 2", action: "tab-2", accelerator: "CommandOrControl+2" },
-          { label: "Tab 3", action: "tab-3", accelerator: "CommandOrControl+3" },
+          {
+            label: "Tab 1",
+            action: "tab-1",
+            accelerator: "CommandOrControl+1",
+          },
+          {
+            label: "Tab 2",
+            action: "tab-2",
+            accelerator: "CommandOrControl+2",
+          },
+          {
+            label: "Tab 3",
+            action: "tab-3",
+            accelerator: "CommandOrControl+3",
+          },
           { type: "separator" },
-          { label: "Next Tab", action: "tab-next", accelerator: "CommandOrControl+Shift+]" },
-          { label: "Previous Tab", action: "tab-prev", accelerator: "CommandOrControl+Shift+[" },
+          {
+            label: "Next Tab",
+            action: "tab-next",
+            accelerator: "CommandOrControl+Shift+]",
+          },
+          {
+            label: "Previous Tab",
+            action: "tab-prev",
+            accelerator: "CommandOrControl+Shift+[",
+          },
         ],
       },
     ],
@@ -285,7 +353,7 @@ const menuConfigs: MenuConfig[] = [
       },
     ],
   },
-]
+];
 
 const rpc = Electroview.defineRPC<any>({
   maxRequestTime: 600000,
@@ -293,83 +361,88 @@ const rpc = Electroview.defineRPC<any>({
     requests: {},
     messages: {
       menuClicked: (data: { action?: string; role?: string }) => {
-        addLogEntry(data.action || data.role || "unknown")
+        addLogEntry(data.action || data.role || "unknown");
       },
     },
   },
-})
+});
 
-const electrobun = new Electrobun.Electroview({ rpc })
+const electrobun = new Electrobun.Electroview({ rpc });
 
 // @ts-expect-error - reserved for tracking active config
-let currentConfig = "config1"
+let currentConfig = "config1";
 
 function addLogEntry(action: string) {
-  const log = document.getElementById("eventLog")
-  if (!log) return
+  const log = document.getElementById("eventLog");
+  if (!log) return;
 
-  const placeholder = log.querySelector(".log-placeholder")
-  if (placeholder) placeholder.remove()
+  const placeholder = log.querySelector(".log-placeholder");
+  if (placeholder) placeholder.remove();
 
-  const entry = document.createElement("div")
-  entry.className = "log-entry"
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
 
-  const now = new Date()
-  const timestamp = now.toLocaleTimeString()
+  const now = new Date();
+  const timestamp = now.toLocaleTimeString();
 
-  entry.innerHTML = `<span class="timestamp">${timestamp}</span> Menu clicked: <span class="action">${action}</span>`
+  entry.innerHTML = `<span class="timestamp">${timestamp}</span> Menu clicked: <span class="action">${action}</span>`;
 
-  log.insertBefore(entry, log.firstChild)
+  log.insertBefore(entry, log.firstChild);
 }
 
 function updateConfigDetails(configId: string) {
-  const config = menuConfigs.find((c) => c.id === configId)
-  if (!config) return
+  const config = menuConfigs.find((c) => c.id === configId);
+  if (!config) return;
 
-  const details = document.getElementById("configDetails")
-  if (!details) return
+  const details = document.getElementById("configDetails");
+  if (!details) return;
 
   details.innerHTML = `
     <p><strong>${config.title}</strong></p>
     <ul>
       ${config.description.map((d) => `<li>${d}</li>`).join("")}
     </ul>
-  `
+  `;
 }
 
 function setActiveButton(configId: string) {
   document.querySelectorAll(".config-btn").forEach((btn) => {
-    btn.classList.remove("active")
-  })
-  document.getElementById(configId)?.classList.add("active")
+    btn.classList.remove("active");
+  });
+  document.getElementById(configId)?.classList.add("active");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   // Done button
   document.getElementById("doneBtn")?.addEventListener("click", () => {
-    ;(electrobun.rpc as any)?.request.closeWindow({})
-  })
+    (electrobun.rpc as any)?.request.closeWindow({});
+  });
 
   // Clear log button
   document.getElementById("clearLog")?.addEventListener("click", () => {
-    const log = document.getElementById("eventLog")
+    const log = document.getElementById("eventLog");
     if (log) {
-      log.innerHTML = '<div class="log-placeholder">Menu click events will appear here...</div>'
+      log.innerHTML =
+        '<div class="log-placeholder">Menu click events will appear here...</div>';
     }
-  })
+  });
 
   // Config buttons
   menuConfigs.forEach((config) => {
     document.getElementById(config.id)?.addEventListener("click", () => {
-      currentConfig = config.id
-      setActiveButton(config.id)
-      updateConfigDetails(config.id)
-      ;(electrobun.rpc as any)?.request.setApplicationMenu({ menu: config.menu })
-      addLogEntry(`Applied config: ${config.title}`)
-    })
-  })
+      currentConfig = config.id;
+      setActiveButton(config.id);
+      updateConfigDetails(config.id);
+      (electrobun.rpc as any)?.request.setApplicationMenu({
+        menu: config.menu,
+      });
+      addLogEntry(`Applied config: ${config.title}`);
+    });
+  });
 
   // Apply initial config
-  const initialConfig = menuConfigs[0]!
-  ;(electrobun.rpc as any)?.request.setApplicationMenu({ menu: initialConfig.menu })
-})
+  const initialConfig = menuConfigs[0]!;
+  (electrobun.rpc as any)?.request.setApplicationMenu({
+    menu: initialConfig.menu,
+  });
+});

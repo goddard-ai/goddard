@@ -1,4 +1,5 @@
 # Component: ProtectedActionGate
+
 - **Minimum Viable Component:** Reusable wrapper that blocks protected actions until the user is authenticated, then resumes the requested action automatically.
 - **Props Interface:** `isAuthenticated: boolean`; `actionLabel: string`; `onAllowed: () => void`; `onRequireAuth: () => void`; `children: preact component tree`.
 - **Sub-components:** None.

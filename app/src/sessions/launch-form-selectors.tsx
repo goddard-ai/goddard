@@ -1,29 +1,35 @@
-import { useEffect } from "preact/hooks"
+import { useEffect } from "preact/hooks";
 
-import { useShortcutRegistry } from "~/app-state-context.tsx"
-import { AppCommand } from "~/commands/app-command.ts"
-import { useQuery } from "~/lib/query.ts"
-import { goddardSdk } from "~/sdk.ts"
-import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsx"
-import styles from "./launch-form-selectors.style.ts"
-import { flattenConfigOptionValues, type SessionLaunchFormState } from "./launch-form-state.ts"
+import { useShortcutRegistry } from "~/app-state-context.tsx";
+import { AppCommand } from "~/commands/app-command.ts";
+import { useQuery } from "~/lib/query.ts";
+import { goddardSdk } from "~/sdk.ts";
+import {
+  SessionInputSelect,
+  type SessionInputSelectItem,
+} from "~/session-input/select-menu.tsx";
+import styles from "./launch-form-selectors.style.ts";
+import {
+  flattenConfigOptionValues,
+  type SessionLaunchFormState,
+} from "./launch-form-state.ts";
 
 function getShortcutLabel(binding: unknown) {
   if (typeof binding === "string") {
-    return binding
+    return binding;
   }
 
   if (binding && typeof binding === "object") {
     if ("combo" in binding && typeof binding.combo === "string") {
-      return binding.combo
+      return binding.combo;
     }
 
     if ("sequence" in binding && typeof binding.sequence === "string") {
-      return binding.sequence
+      return binding.sequence;
     }
   }
 
-  return null
+  return null;
 }
 
 export function SessionLaunchLoadingSelect(props: { label: string }) {
@@ -40,28 +46,32 @@ export function SessionLaunchLoadingSelect(props: { label: string }) {
       onOpenChange={() => {}}
       onValueChange={() => {}}
     />
-  )
+  );
 }
 
 export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
-  const { form } = props
-  const shortcutRegistry = useShortcutRegistry()
+  const { form } = props;
+  const shortcutRegistry = useShortcutRegistry();
   const adapterCatalog = useQuery(goddardSdk.adapter.list, [
     { cwd: form.draftProjectPath.value ?? undefined },
-  ])
-  const items: SessionInputSelectItem[] = adapterCatalog.adapters.map((adapter) => ({
-    value: adapter.id,
-    label: adapter.name,
-    detail: `${adapter.version}${adapter.unofficial ? " · Unofficial" : ""}`,
-    searchText: `${adapter.id}\n${adapter.description ?? ""}`,
-  }))
+  ]);
+  const items: SessionInputSelectItem[] = adapterCatalog.adapters.map(
+    (adapter) => ({
+      value: adapter.id,
+      label: adapter.name,
+      detail: `${adapter.version}${adapter.unofficial ? " · Unofficial" : ""}`,
+      searchText: `${adapter.id}\n${adapter.description ?? ""}`,
+    }),
+  );
   const adapterShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openAdapterSelector.id]?.[0],
-  )
+    shortcutRegistry.resolvedBindings[
+      AppCommand.sessionInput.openAdapterSelector.id
+    ]?.[0],
+  );
 
   useEffect(() => {
-    form.adapterCatalog.value = adapterCatalog
-  }, [adapterCatalog, form])
+    form.adapterCatalog.value = adapterCatalog;
+  }, [adapterCatalog, form]);
 
   return (
     <SessionInputSelect
@@ -74,20 +84,22 @@ export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
       shortcut={adapterShortcut}
       value={form.draftAdapterId.value}
       onOpenChange={(open) => {
-        form.setOpenPicker(open ? "adapter" : null)
+        form.setOpenPicker(open ? "adapter" : null);
       }}
       onValueChange={(value) => {
-        form.draftAdapterId.value = value
-        form.launchPreview.value = null
-        form.setOpenPicker(null)
+        form.draftAdapterId.value = value;
+        form.launchPreview.value = null;
+        form.setOpenPicker(null);
       }}
     />
-  )
+  );
 }
 
-export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormState }) {
-  const { form } = props
-  const shortcutRegistry = useShortcutRegistry()
+export function SessionLaunchPreviewSelectors(props: {
+  form: SessionLaunchFormState;
+}) {
+  const { form } = props;
+  const shortcutRegistry = useShortcutRegistry();
   const preview = useQuery(
     form.draftProjectPath.value && form.draftAdapterId.value
       ? goddardSdk.session.launchPreview
@@ -100,11 +112,11 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           },
         ]
       : null,
-  )
+  );
 
   useEffect(() => {
-    form.launchPreview.value = preview
-  }, [form, preview])
+    form.launchPreview.value = preview;
+  }, [form, preview]);
 
   const locationItems: SessionInputSelectItem[] = [
     {
@@ -119,21 +131,23 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           } satisfies SessionInputSelectItem,
         ]
       : []),
-  ]
+  ];
   const branchItems: SessionInputSelectItem[] =
     preview?.branches.map((branch) => ({
       value: branch.name,
       label: branch.name,
       detail: branch.current ? "Current branch" : null,
-    })) ?? []
-  const previewModels = form.launchModelConfig.value.models
+    })) ?? [];
+  const previewModels = form.launchModelConfig.value.models;
   const modelItems: SessionInputSelectItem[] =
     previewModels?.availableModels.map((model) => ({
       value: model.modelId,
       label: model.name,
       detail: model.description ?? model.modelId,
-      searchText: [model.name, model.description, model.modelId].filter(Boolean).join("\n"),
-    })) ?? []
+      searchText: [model.name, model.description, model.modelId]
+        .filter(Boolean)
+        .join("\n"),
+    })) ?? [];
   const thinkingItems: SessionInputSelectItem[] =
     form.thinkingOption.value?.type === "boolean"
       ? [
@@ -147,24 +161,34 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           },
         ]
       : form.thinkingOption.value?.type === "select"
-        ? flattenConfigOptionValues(form.thinkingOption.value).map((option) => ({
-            value: option.value,
-            label: option.name,
-            detail: option.description ?? null,
-          }))
-        : []
+        ? flattenConfigOptionValues(form.thinkingOption.value).map(
+            (option) => ({
+              value: option.value,
+              label: option.name,
+              detail: option.description ?? null,
+            }),
+          )
+        : [];
   const locationShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openLocationSelector.id]?.[0],
-  )
+    shortcutRegistry.resolvedBindings[
+      AppCommand.sessionInput.openLocationSelector.id
+    ]?.[0],
+  );
   const branchShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
-  )
+    shortcutRegistry.resolvedBindings[
+      AppCommand.sessionInput.openBranchSelector.id
+    ]?.[0],
+  );
   const modelShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
-  )
+    shortcutRegistry.resolvedBindings[
+      AppCommand.sessionInput.openModelSelector.id
+    ]?.[0],
+  );
   const thinkingShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
-  )
+    shortcutRegistry.resolvedBindings[
+      AppCommand.sessionInput.openThinkingLevelSelector.id
+    ]?.[0],
+  );
 
   return (
     <>
@@ -179,14 +203,16 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           shortcut={locationShortcut}
           value={form.draftLocation.value}
           onOpenChange={(open) => {
-            form.setOpenPicker(open ? "location" : null)
+            form.setOpenPicker(open ? "location" : null);
           }}
           onValueChange={(value) => {
-            form.draftLocation.value = value as "local" | "worktree"
+            form.draftLocation.value = value as "local" | "worktree";
           }}
         />
         <SessionInputSelect
-          disabled={form.draftLocation.value !== "worktree" || branchItems.length === 0}
+          disabled={
+            form.draftLocation.value !== "worktree" || branchItems.length === 0
+          }
           filterable={true}
           items={branchItems}
           label="Git branch"
@@ -195,10 +221,10 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           shortcut={branchShortcut}
           value={form.draftBaseBranchName.value}
           onOpenChange={(open) => {
-            form.setOpenPicker(open ? "branch" : null)
+            form.setOpenPicker(open ? "branch" : null);
           }}
           onValueChange={(value) => {
-            form.draftBaseBranchName.value = value
+            form.draftBaseBranchName.value = value;
           }}
         />
       </div>
@@ -213,10 +239,10 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
           shortcut={modelShortcut}
           value={form.draftModelId.value}
           onOpenChange={(open) => {
-            form.setOpenPicker(open ? "model" : null)
+            form.setOpenPicker(open ? "model" : null);
           }}
           onValueChange={(value) => {
-            form.draftModelId.value = value
+            form.draftModelId.value = value;
           }}
         />
         <SessionInputSelect
@@ -233,14 +259,16 @@ export function SessionLaunchPreviewSelectors(props: { form: SessionLaunchFormSt
               : (form.draftThinkingValue.value ?? null)
           }
           onOpenChange={(open) => {
-            form.setOpenPicker(open ? "thinking" : null)
+            form.setOpenPicker(open ? "thinking" : null);
           }}
           onValueChange={(value) => {
             form.draftThinkingValue.value =
-              form.thinkingOption.value?.type === "boolean" ? value === "true" : value
+              form.thinkingOption.value?.type === "boolean"
+                ? value === "true"
+                : value;
           }}
         />
       </div>
     </>
-  )
+  );
 }

@@ -21,7 +21,8 @@
       }
 
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         display: flex;
         flex-direction: column;
         gap: 16px;
@@ -99,7 +100,11 @@
 
       /* Notification-style card */
       .notification-card {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(139, 92, 246, 0.95));
+        background: linear-gradient(
+          135deg,
+          rgba(99, 102, 241, 0.95),
+          rgba(139, 92, 246, 0.95)
+        );
         border-radius: 12px;
         padding: 16px 20px;
         display: flex;
@@ -215,9 +220,10 @@
     <div class="floating-card electrobun-webkit-app-region-drag">
       <h2>&#x1F50D; Transparent Window Demo</h2>
       <p>
-        This demonstrates a transparent window where you can create custom-shaped UI elements that
-        float over other content. The window background is transparent, and individual elements
-        create the visual appearance.
+        This demonstrates a transparent window where you can create
+        custom-shaped UI elements that float over other content. The window
+        background is transparent, and individual elements create the visual
+        appearance.
       </p>
       <p style="margin-top: 12px">
         Configuration: <code>styleMask.Borderless: true</code> and HTML/CSS with
@@ -238,12 +244,18 @@
     <div class="info-panel electrobun-webkit-app-region-drag">
       <h3>How It Works</h3>
       <p>
-        The window uses a borderless style mask with transparent background. Each UI element is
-        styled individually. Drag any card to move the window. Click the red button to close.
+        The window uses a borderless style mask with transparent background.
+        Each UI element is styled individually. Drag any card to move the
+        window. Click the red button to close.
       </p>
     </div>
 
     <!-- Close button -->
-    <button id="closeBtn" class="close-btn electrobun-webkit-app-region-no-drag">&#x2715;</button>
+    <button
+      id="closeBtn"
+      class="close-btn electrobun-webkit-app-region-no-drag"
+    >
+      &#x2715;
+    </button>
   </body>
 </html>

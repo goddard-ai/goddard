@@ -1,5 +1,5 @@
 import { Terminal, type ITheme } from "@xterm/headless"
-import { type SigmaRef, SigmaType } from "preact-sigma"
+import { SigmaType, type SigmaRef } from "preact-sigma"
 
 const VIEWPORT_PADDING_PX = 18
 const DEFAULT_MINIMUM_COLS = 40

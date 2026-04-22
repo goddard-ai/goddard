@@ -1,7 +1,7 @@
 #!/usr/bin/env node
+import * as fs from "node:fs/promises"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
 import { command, option, optional, run, string, subcommands } from "cmd-ts"
-import * as fs from "node:fs/promises"
 
 async function readOptionalFile(path: string | undefined): Promise<string | undefined> {
   if (!path) {

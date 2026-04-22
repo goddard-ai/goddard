@@ -1,6 +1,6 @@
-import { css } from "@goddard-ai/styled-system/css"
+import { css } from "@goddard-ai/styled-system/css";
 
-import { AppearanceSettingsSection } from "~/appearance/appearance-settings-section.tsx"
+import { AppearanceSettingsSection } from "~/appearance/appearance-settings-section.tsx";
 
 export function SettingsPage() {
   return (
@@ -15,7 +15,7 @@ export function SettingsPage() {
     >
       <AppearanceSettingsSection />
     </main>
-  )
+  );
 }
 
-export default SettingsPage
+export default SettingsPage;

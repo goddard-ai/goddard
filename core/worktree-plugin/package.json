@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsdown --unused",
     "lint": "oxlint",
-    "fmt": "oxfmt",
+    "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit"
   }
 }

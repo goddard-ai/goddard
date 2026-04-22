@@ -1,4 +1,5 @@
 # State Module: SessionLaunchState
+
 - **Responsibility:** Coordinate cross-surface requests to open one shared session-launch dialog with project, action, or tab-context defaults. Do not own the dialog’s editable form draft.
 - **Data Shape:** Dialog open state; launch source metadata; `defaultProjectPath`; `defaultActionId`; `currentTabContext`; one reset token or equivalent so reopening with new defaults can replace the local dialog draft cleanly.
 - **Mutations/Actions:** `openLaunchDialog`; `closeLaunchDialog`; `setLaunchDefaults`; `clearLaunchDefaults`.

@@ -1,93 +1,95 @@
-import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
-import { X } from "lucide-react"
-import type { RecordingSession } from "powerkeys"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog";
+import { X } from "lucide-react";
+import type { RecordingSession } from "powerkeys";
+import { useEffect, useRef, useState } from "preact/hooks";
 
-import { useShortcutRegistry } from "~/app-state-context.tsx"
-import { DialogPortal } from "~/lib/dialog-portal.tsx"
-import styles from "./capture-dialog.style.ts"
+import { useShortcutRegistry } from "~/app-state-context.tsx";
+import { DialogPortal } from "~/lib/dialog-portal.tsx";
+import styles from "./capture-dialog.style.ts";
 
 export function KeyboardShortcutCaptureDialog(props: {
-  dialog: UseDialogReturn
-  label: string
-  mode: "add" | "change"
-  currentExpression: string | null
-  whenClause: string | null
-  onRemove?: () => Promise<void> | void
-  onSave: (expression: string) => Promise<void> | void
+  dialog: UseDialogReturn;
+  label: string;
+  mode: "add" | "change";
+  currentExpression: string | null;
+  whenClause: string | null;
+  onRemove?: () => Promise<void> | void;
+  onSave: (expression: string) => Promise<void> | void;
 }) {
-  const shortcutRegistry = useShortcutRegistry()
-  const sessionRef = useRef<RecordingSession | null>(null)
-  const [draftExpression, setDraftExpression] = useState(props.currentExpression ?? "")
-  const [isRecording, setIsRecording] = useState(false)
+  const shortcutRegistry = useShortcutRegistry();
+  const sessionRef = useRef<RecordingSession | null>(null);
+  const [draftExpression, setDraftExpression] = useState(
+    props.currentExpression ?? "",
+  );
+  const [isRecording, setIsRecording] = useState(false);
 
   useEffect(() => {
     if (!props.dialog.open) {
-      setDraftExpression(props.currentExpression ?? "")
-      setIsRecording(false)
-      return
+      setDraftExpression(props.currentExpression ?? "");
+      setIsRecording(false);
+      return;
     }
 
-    let isDisposed = false
-    setDraftExpression(props.currentExpression ?? "")
+    let isDisposed = false;
+    setDraftExpression(props.currentExpression ?? "");
 
     function beginCapture() {
       if (isDisposed) {
-        return
+        return;
       }
 
       try {
-        setIsRecording(true)
+        setIsRecording(true);
 
         const session = shortcutRegistry.runtime.record({
           suppressHandlers: true,
           consumeEvents: true,
           onUpdate: (recording) => {
             if (!isDisposed) {
-              setDraftExpression(recording.expression)
+              setDraftExpression(recording.expression);
             }
           },
-        })
+        });
 
-        sessionRef.current = session
+        sessionRef.current = session;
 
         void session.finished.then(
           (recording) => {
             if (sessionRef.current === session) {
-              sessionRef.current = null
+              sessionRef.current = null;
             }
             if (isDisposed) {
-              return
+              return;
             }
 
-            setDraftExpression(recording.expression)
-            beginCapture()
+            setDraftExpression(recording.expression);
+            beginCapture();
           },
           () => {
             if (sessionRef.current === session) {
-              sessionRef.current = null
+              sessionRef.current = null;
             }
             if (!isDisposed) {
-              setIsRecording(false)
+              setIsRecording(false);
             }
           },
-        )
+        );
       } catch (error) {
-        setIsRecording(false)
-        console.error("Failed to begin shortcut capture.", error)
+        setIsRecording(false);
+        console.error("Failed to begin shortcut capture.", error);
       }
     }
 
-    beginCapture()
+    beginCapture();
 
     return () => {
-      isDisposed = true
-      setIsRecording(false)
-      const session = sessionRef.current
-      sessionRef.current = null
-      session?.cancel()
-    }
-  }, [props.currentExpression, props.dialog.open, shortcutRegistry.runtime])
+      isDisposed = true;
+      setIsRecording(false);
+      const session = sessionRef.current;
+      sessionRef.current = null;
+      session?.cancel();
+    };
+  }, [props.currentExpression, props.dialog.open, shortcutRegistry.runtime]);
 
   return (
     <DialogPortal>
@@ -125,15 +127,21 @@ export function KeyboardShortcutCaptureDialog(props: {
 
           <section class={styles.captureSection}>
             <div class={styles.captureHeading}>
-              <span class={styles.captureLabel}>Press the shortcut you want to use</span>
-              {isRecording ? <span class={styles.captureStatus}>Listening…</span> : null}
+              <span class={styles.captureLabel}>
+                Press the shortcut you want to use
+              </span>
+              {isRecording ? (
+                <span class={styles.captureStatus}>Listening…</span>
+              ) : null}
             </div>
 
             <div class={styles.captureValue}>
               {draftExpression ? (
                 draftExpression
               ) : (
-                <span class={styles.capturePlaceholder}>Type a key combination or sequence</span>
+                <span class={styles.capturePlaceholder}>
+                  Type a key combination or sequence
+                </span>
               )}
             </div>
           </section>
@@ -150,7 +158,7 @@ export function KeyboardShortcutCaptureDialog(props: {
                 class={`${styles.actionButton} ${styles.actionButtonDanger}`}
                 type="button"
                 onClick={() => {
-                  void props.onRemove?.()
+                  void props.onRemove?.();
                 }}
               >
                 Remove shortcut
@@ -162,7 +170,7 @@ export function KeyboardShortcutCaptureDialog(props: {
               disabled={draftExpression.trim().length === 0}
               type="button"
               onClick={() => {
-                void props.onSave(draftExpression.trim())
+                void props.onSave(draftExpression.trim());
               }}
             >
               Save shortcut
@@ -171,7 +179,7 @@ export function KeyboardShortcutCaptureDialog(props: {
         </Dialog.Content>
       </Dialog.Positioner>
     </DialogPortal>
-  )
+  );
 }
 
-export default KeyboardShortcutCaptureDialog
+export default KeyboardShortcutCaptureDialog;

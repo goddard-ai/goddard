@@ -2,8 +2,8 @@ import { expect, test } from "bun:test"
 
 import {
   createDefaultShortcutKeymapFile,
-  UserShortcutKeymapFile,
   resolveShortcutBindings,
+  UserShortcutKeymapFile,
 } from "./shortcut-keymap.ts"
 
 const newSession = "navigation.openNewSessionDialog" as const

@@ -1,3 +1,5 @@
+import { existsSync, watch, type FSWatcher } from "node:fs"
+import { basename, dirname, resolve } from "node:path"
 import {
   getGlobalConfigPath,
   getGoddardGlobalDir,
@@ -5,8 +7,6 @@ import {
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
 import type { UserConfig } from "@goddard-ai/schema/config"
-import { existsSync, watch, type FSWatcher } from "node:fs"
-import { basename, dirname, resolve } from "node:path"
 
 import { createLogger } from "./logging.ts"
 import { readMergedRootConfig } from "./resolvers/config.ts"

@@ -1,8 +1,8 @@
-import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { UserConfig } from "@goddard-ai/schema/config"
 import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
 import { delimiter, join } from "node:path"
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import type { UserConfig } from "@goddard-ai/schema/config"
 
 /** Resolves the user's preferred default agent by inspecting configuration and system state. */
 export async function resolveDefaultAgent(

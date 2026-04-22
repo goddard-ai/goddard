@@ -1,4 +1,5 @@
 # State Module: RealtimeActivityState
+
 - **Responsibility:** Own the single authenticated realtime activity subscription and fan normalized events out to inbox, sessions, and pull request state without making each feature open its own stream.
 - **Data Shape:** Subscription status, auth readiness, reconnect backoff metadata, last event timestamp or id, transient event buffer, and lightweight counters or diagnostics for consumers.
 - **Mutations/Actions:** `connectActivityStream`; `disconnectActivityStream`; `handleIncomingEvent`; `acknowledgeEvent`; `markStreamError`; `retryStreamConnection`.

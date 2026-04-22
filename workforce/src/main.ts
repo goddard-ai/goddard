@@ -1,9 +1,9 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
 import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
 
 const execFileAsync = promisify(execFile)
 

@@ -15,7 +15,10 @@ import { toValidationClientError } from "../validation.ts"
 const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
 
 /** Returns the safe client-facing status code and message for one IPC server failure. */
-function getErrorResponse(error: unknown): { statusCode: number; message: string } {
+function getErrorResponse(error: unknown): {
+  statusCode: number
+  message: string
+} {
   return error instanceof IpcClientError
     ? { statusCode: 400, message: error.message }
     : { statusCode: 500, message: INTERNAL_SERVER_ERROR_MESSAGE }

@@ -1,37 +1,43 @@
-import type { SessionPromptRequest } from "@goddard-ai/sdk"
-import { expect, test } from "bun:test"
+import type { SessionPromptRequest } from "@goddard-ai/sdk";
+import { expect, test } from "bun:test";
 import {
   $createParagraphNode,
   $createTextNode,
   $getRoot,
   createEditor,
   type EditorState,
-} from "lexical"
+} from "lexical";
 
-import { $createComposerChipNode, ComposerChipNode } from "./composer-chip-node.tsx"
+import {
+  $createComposerChipNode,
+  ComposerChipNode,
+} from "./composer-chip-node.tsx";
 import {
   hasPromptContent,
   promptBlocksToTranscriptContent,
   serializeComposerEditorState,
-} from "./composer-content.ts"
+} from "./composer-content.ts";
 
-type ComposerPromptBlock = Exclude<SessionPromptRequest["prompt"], string>[number]
+type ComposerPromptBlock = Exclude<
+  SessionPromptRequest["prompt"],
+  string
+>[number];
 
 function buildEditorState(build: () => void): EditorState {
   const editor = createEditor({
     nodes: [ComposerChipNode],
     onError(error) {
-      throw error
+      throw error;
     },
-  })
+  });
 
-  editor.update(build, { discrete: true })
-  return editor.getEditorState()
+  editor.update(build, { discrete: true });
+  return editor.getEditorState();
 }
 
 test("serializeComposerEditorState preserves text order, slash chips, and resource links", () => {
   const editorState = buildEditorState(() => {
-    const paragraph = $createParagraphNode()
+    const paragraph = $createParagraphNode();
     paragraph.append(
       $createTextNode("Review "),
       $createComposerChipNode({
@@ -57,9 +63,9 @@ test("serializeComposerEditorState preserves text order, slash chips, and resour
         detail: "./.agents/skills/preact-sigma/SKILL.md",
         source: "local",
       }),
-    )
-    $getRoot().append(paragraph)
-  })
+    );
+    $getRoot().append(paragraph);
+  });
 
   expect(serializeComposerEditorState(editorState)).toEqual([
     {
@@ -84,8 +90,8 @@ test("serializeComposerEditorState preserves text order, slash chips, and resour
       title: "preact-sigma skill",
       description: "./.agents/skills/preact-sigma/SKILL.md",
     },
-  ] satisfies ComposerPromptBlock[])
-})
+  ] satisfies ComposerPromptBlock[]);
+});
 
 test("promptBlocksToTranscriptContent preserves resource links instead of flattening them", () => {
   expect(
@@ -114,11 +120,11 @@ test("promptBlocksToTranscriptContent preserves resource links instead of flatte
       title: "index.ts",
       description: "./src/index.ts",
     },
-  ])
-})
+  ]);
+});
 
 test("hasPromptContent requires non-whitespace text or at least one resource link", () => {
-  expect(hasPromptContent([{ type: "text", text: "   " }])).toBe(false)
+  expect(hasPromptContent([{ type: "text", text: "   " }])).toBe(false);
   expect(
     hasPromptContent([
       {
@@ -127,5 +133,5 @@ test("hasPromptContent requires non-whitespace text or at least one resource lin
         uri: "file:///repo/src/index.ts",
       },
     ] satisfies ComposerPromptBlock[]),
-  ).toBe(true)
-})
+  ).toBe(true);
+});

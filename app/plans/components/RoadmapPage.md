@@ -1,4 +1,5 @@
 # Component: RoadmapPage
+
 - **Minimum Viable Component:** Full-width roadmap page that shows proposal records in a prioritized list layout with filtering and detail-tab drill-down.
 - **Props Interface:** `class?: string`; `embedded?: boolean`.
 - **Sub-components:** `ProposalFilterSidebar`, `ProposalList`.

@@ -12,7 +12,9 @@ Use this reference when a Virtuoso view renders incorrectly, remounts rows, or l
 ```tsx
 <Virtuoso
   totalCount={100}
-  itemContent={(index) => <p style={{ margin: 0, padding: '8px 0' }}>Item {index}</p>}
+  itemContent={(index) => (
+    <p style={{ margin: 0, padding: "8px 0" }}>Item {index}</p>
+  )}
 />
 ```
 

@@ -5,21 +5,24 @@ Use `useListSelection` when you need Ark-style single or multiple selection beha
 ## Core Shape
 
 ```tsx
-import { createListCollection, useListSelection } from '@ark-ui/react/collection'
+import {
+  createListCollection,
+  useListSelection,
+} from "@ark-ui/react/collection";
 
 const collection = createListCollection({
   items: [
-    { label: 'Apple', value: 'apple' },
-    { label: 'Banana', value: 'banana' },
-    { label: 'Cherry', value: 'cherry' },
+    { label: "Apple", value: "apple" },
+    { label: "Banana", value: "banana" },
+    { label: "Cherry", value: "cherry" },
   ],
-})
+});
 
 const selection = useListSelection({
   collection,
-  selectionMode: 'single',
+  selectionMode: "single",
   deselectable: true,
-})
+});
 ```
 
 ## When to Use It

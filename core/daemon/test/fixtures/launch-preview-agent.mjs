@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import * as acp from "@agentclientprotocol/sdk"
 import { randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
+import * as acp from "@agentclientprotocol/sdk"
 
 class LaunchPreviewFixtureAgent {
   constructor(connection) {
@@ -71,8 +71,16 @@ class LaunchPreviewFixtureAgent {
           currentValue: session.thinkingLevel,
           options: [
             { value: "low", name: "Low", description: "Keep reasoning light." },
-            { value: "medium", name: "Medium", description: "Balanced reasoning." },
-            { value: "high", name: "High", description: "Use the deepest reasoning." },
+            {
+              value: "medium",
+              name: "Medium",
+              description: "Balanced reasoning.",
+            },
+            {
+              value: "high",
+              name: "High",
+              description: "Use the deepest reasoning.",
+            },
           ],
         },
       ],
@@ -117,8 +125,16 @@ class LaunchPreviewFixtureAgent {
           currentValue: session.thinkingLevel,
           options: [
             { value: "low", name: "Low", description: "Keep reasoning light." },
-            { value: "medium", name: "Medium", description: "Balanced reasoning." },
-            { value: "high", name: "High", description: "Use the deepest reasoning." },
+            {
+              value: "medium",
+              name: "Medium",
+              description: "Balanced reasoning.",
+            },
+            {
+              value: "high",
+              name: "High",
+              description: "Use the deepest reasoning.",
+            },
           ],
         },
       ],

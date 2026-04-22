@@ -1,4 +1,5 @@
 # Component: BrowserPreviewFrame
+
 - **Minimum Viable Component:** Sandboxed iframe host that renders the preview URL and forwards console-shim `postMessage` traffic back into preview state.
 - **Props Interface:** `src: string`; `title?: string`; `loadingState: "idle" | "loading" | "ready" | "error"`; `onLoadStart?: () => void`; `onLoadCommit?: (url) => void`; `onLoadError?: (message) => void`; `onPostMessage: (payload) => void`.
 - **Sub-components:** None.

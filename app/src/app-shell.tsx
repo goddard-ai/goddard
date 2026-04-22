@@ -1,51 +1,52 @@
-import { useListener } from "preact-sigma"
-import { useEffect } from "preact/hooks"
+import { useListener } from "preact-sigma";
+import { useEffect } from "preact/hooks";
 
-import { AppCommand, resolveAppCommand } from "~/commands/app-command.ts"
-import { commandContext } from "~/commands/command-context.ts"
-import { GoodToaster } from "~/lib/good-toaster.tsx"
-import { findNearestProjectPath } from "~/projects/project-context.ts"
-import { globalEventHub } from "~/shared/global-event-hub.ts"
-import { AppShellChrome } from "./app-shell/chrome.tsx"
+import { AppCommand, resolveAppCommand } from "~/commands/app-command.ts";
+import { commandContext } from "~/commands/command-context.ts";
+import { GoodToaster } from "~/lib/good-toaster.tsx";
+import { findNearestProjectPath } from "~/projects/project-context.ts";
+import { globalEventHub } from "~/shared/global-event-hub.ts";
+import { AppShellChrome } from "./app-shell/chrome.tsx";
 import {
   useNavigation,
   useProjectContext,
   useProjectRegistry,
   useWorkbenchTabSet,
-} from "./app-state-context.tsx"
-import { CommandDialog } from "./commands/command-dialog.tsx"
-import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
+} from "./app-state-context.tsx";
+import { CommandDialog } from "./commands/command-dialog.tsx";
+import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts";
 
 export function AppShell() {
-  const navigation = useNavigation()
-  const projectContext = useProjectContext()
-  const projectRegistry = useProjectRegistry()
-  const workbenchTabSet = useWorkbenchTabSet()
-  const projects = projectRegistry.projectList
-  const activeTabKind = workbenchTabSet.activeTab?.kind ?? WORKBENCH_PRIMARY_TAB.kind
+  const navigation = useNavigation();
+  const projectContext = useProjectContext();
+  const projectRegistry = useProjectRegistry();
+  const workbenchTabSet = useWorkbenchTabSet();
+  const projects = projectRegistry.projectList;
+  const activeTabKind =
+    workbenchTabSet.activeTab?.kind ?? WORKBENCH_PRIMARY_TAB.kind;
 
   useEffect(() => {
-    commandContext.activeTabKind.value = activeTabKind
+    commandContext.activeTabKind.value = activeTabKind;
     commandContext.hasClosableActiveTab.value =
-      workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id
-    commandContext.selectedNavId.value = navigation.selectedNavId
-  }, [activeTabKind, navigation.selectedNavId, workbenchTabSet.activeTabId])
+      workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id;
+    commandContext.selectedNavId.value = navigation.selectedNavId;
+  }, [activeTabKind, navigation.selectedNavId, workbenchTabSet.activeTabId]);
 
   useEffect(() => {
-    projectContext.syncProjects(projects.map((project) => project.path))
-  }, [projectContext, projects])
+    projectContext.syncProjects(projects.map((project) => project.path));
+  }, [projectContext, projects]);
 
   useEffect(() => {
     if (workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id) {
-      projectContext.applyFocusedTabProject(WORKBENCH_PRIMARY_TAB.id, null)
-      return
+      projectContext.applyFocusedTabProject(WORKBENCH_PRIMARY_TAB.id, null);
+      return;
     }
 
-    const activeTab = workbenchTabSet.activeTab
+    const activeTab = workbenchTabSet.activeTab;
 
     if (!activeTab) {
-      projectContext.applyFocusedTabProject(WORKBENCH_PRIMARY_TAB.id, null)
-      return
+      projectContext.applyFocusedTabProject(WORKBENCH_PRIMARY_TAB.id, null);
+      return;
     }
 
     switch (activeTab.kind) {
@@ -54,27 +55,34 @@ export function AppShell() {
           activeTab.id,
           findNearestProjectPath(
             projects,
-            (activeTab.payload as { projectPath?: string | null }).projectPath ?? null,
+            (activeTab.payload as { projectPath?: string | null })
+              .projectPath ?? null,
           ),
-        )
-        return
+        );
+        return;
       case "sessionChat":
         projectContext.applyFocusedTabProject(
           activeTab.id,
           findNearestProjectPath(
             projects,
-            (activeTab.payload as { projectPath?: string | null }).projectPath ?? null,
+            (activeTab.payload as { projectPath?: string | null })
+              .projectPath ?? null,
           ),
-        )
-        return
+        );
+        return;
       default:
-        projectContext.applyFocusedTabProject(activeTab.id, null)
+        projectContext.applyFocusedTabProject(activeTab.id, null);
     }
-  }, [projectContext, projects, workbenchTabSet.activeTab, workbenchTabSet.activeTabId])
+  }, [
+    projectContext,
+    projects,
+    workbenchTabSet.activeTab,
+    workbenchTabSet.activeTabId,
+  ]);
 
   useListener(globalEventHub, "appMenu", ({ command }) => {
-    resolveAppCommand(command)?.()
-  })
+    resolveAppCommand(command)?.();
+  });
 
   useListener(globalEventHub, "debugMenu", ({ surface }) => {
     switch (surface) {
@@ -85,8 +93,8 @@ export function AppShell() {
           title: "Transcript Debug",
           payload: {},
           dirty: false,
-        })
-        return
+        });
+        return;
       case "Terminal":
         workbenchTabSet.openOrFocusTab({
           id: "debug:terminal",
@@ -94,10 +102,10 @@ export function AppShell() {
           title: "Terminal Debug",
           payload: {},
           dirty: false,
-        })
-        return
+        });
+        return;
     }
-  })
+  });
 
   return (
     <>
@@ -112,5 +120,5 @@ export function AppShell() {
       />
       <GoodToaster />
     </>
-  )
+  );
 }

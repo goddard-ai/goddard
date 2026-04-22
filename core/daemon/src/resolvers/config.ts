@@ -1,3 +1,5 @@
+import { constants as fsConstants } from "node:fs"
+import { access, readFile, writeFile } from "node:fs/promises"
 import { mergeRootConfigLayers } from "@goddard-ai/config"
 import {
   getGlobalConfigPath,
@@ -6,8 +8,6 @@ import {
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
 import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
-import { constants as fsConstants } from "node:fs"
-import { access, readFile, writeFile } from "node:fs/promises"
 import { z } from "zod"
 
 /** Paths and merged root config for one daemon-side config resolution request. */
@@ -56,7 +56,9 @@ export async function readJsonConfig<T>(
   try {
     parsed = JSON.parse(await readFile(path, "utf-8"))
   } catch (error) {
-    throw new Error(`${label} at ${path} must be valid JSON.`, { cause: error })
+    throw new Error(`${label} at ${path} must be valid JSON.`, {
+      cause: error,
+    })
   }
 
   if (typeof parsed === "object" && parsed !== null && !("$schema" in parsed)) {

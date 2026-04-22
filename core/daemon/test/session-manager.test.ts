@@ -1,10 +1,10 @@
-import * as acp from "@agentclientprotocol/sdk"
-import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
-import { afterEach, expect, test, vi } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createGzip } from "node:zlib"
+import * as acp from "@agentclientprotocol/sdk"
+import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
+import { afterEach, expect, test, vi } from "bun:test"
 import * as tarFs from "tar-fs"
 
 import { resetDb } from "../src/persistence/store.ts"
@@ -105,7 +105,10 @@ test("installBinaryTargetPayload restores executability for zip payload commands
   cleanupDirs.push(installDir)
 
   const fetchMock = vi.fn(
-    async () => new Response(Buffer.from(testZipArchiveBase64, "base64"), { status: 200 }),
+    async () =>
+      new Response(Buffer.from(testZipArchiveBase64, "base64"), {
+        status: 200,
+      }),
   )
   globalThis.fetch = fetchMock as unknown as typeof fetch
 

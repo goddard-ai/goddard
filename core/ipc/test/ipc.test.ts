@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, test, vi } from "bun:test"
 import { AsyncLocalStorage } from "node:async_hooks"
 import { once } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { request } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { afterEach, describe, expect, test, vi } from "bun:test"
 import { z } from "zod"
 
 import { $type, IpcClientError, type IpcSchema } from "../src/index.ts"
@@ -127,8 +127,12 @@ describe("core/ipc", () => {
     const { client } = await createFixture()
 
     await expect(client.send("ping")).resolves.toEqual({ ok: true })
-    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({ echoed: "hello" })
-    await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
+    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({
+      echoed: "hello",
+    })
+    await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({
+      sum: 5,
+    })
   })
 
   test("rejects invalid request payloads before they cross the process boundary", async () => {
@@ -214,7 +218,13 @@ describe("core/ipc", () => {
         received.push({ name, payload, traceId: readTraceId() })
       },
       onResponseSent: ({ name, payload, response, durationMs }) => {
-        responded.push({ name, payload, response, durationMs, traceId: readTraceId() })
+        responded.push({
+          name,
+          payload,
+          response,
+          durationMs,
+          traceId: readTraceId(),
+        })
       },
     })
 
@@ -264,11 +274,12 @@ describe("core/ipc", () => {
     let resolveAlert:
       | ((payload: { message: string; level: "info" | "warn" | "error" }) => void)
       | null = null
-    const alertPromise = new Promise<{ message: string; level: "info" | "warn" | "error" }>(
-      (resolve) => {
-        resolveAlert = resolve
-      },
-    )
+    const alertPromise = new Promise<{
+      message: string
+      level: "info" | "warn" | "error"
+    }>((resolve) => {
+      resolveAlert = resolve
+    })
     const unsubscribe = await client.subscribe("systemAlert", (payload) => {
       resolveAlert?.(payload)
     })
@@ -279,7 +290,10 @@ describe("core/ipc", () => {
     await new Promise((resolve) => setTimeout(resolve, 25))
     publish("systemAlert", { message: "Heads up", level: "warn" })
 
-    await expect(alertPromise).resolves.toEqual({ message: "Heads up", level: "warn" })
+    await expect(alertPromise).resolves.toEqual({
+      message: "Heads up",
+      level: "warn",
+    })
   })
 
   test("applies stream filters on the server side", async () => {
@@ -300,7 +314,10 @@ describe("core/ipc", () => {
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     expect(onMessage).toHaveBeenCalledTimes(1)
-    expect(onMessage).toHaveBeenCalledWith({ userId: "user-1", message: "deliver me" })
+    expect(onMessage).toHaveBeenCalledWith({
+      userId: "user-1",
+      message: "deliver me",
+    })
   })
 
   test("rejects stream filters when the server-side validator fails", async () => {

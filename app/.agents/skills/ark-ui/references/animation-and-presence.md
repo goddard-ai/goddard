@@ -7,11 +7,11 @@ Use this reference when motion and mount timing are the real problem, not the pa
 Ark parts expose stateful `data-*` attributes, so prefer animating on `[data-state]` before introducing extra state.
 
 ```css
-[data-scope='tooltip'][data-part='content'][data-state='open'] {
+[data-scope="tooltip"][data-part="content"][data-state="open"] {
   animation: fadeIn 300ms ease-out;
 }
 
-[data-scope='tooltip'][data-part='content'][data-state='closed'] {
+[data-scope="tooltip"][data-part="content"][data-state="closed"] {
   animation: fadeOut 300ms ease-in;
 }
 ```
@@ -23,9 +23,9 @@ Use this pattern for popups, disclosure content, and any part that already expos
 Use `Presence` for arbitrary React elements that need enter and exit animation independent of a larger Ark component.
 
 ```tsx
-import { Presence } from '@ark-ui/react/presence'
+import { Presence } from "@ark-ui/react/presence";
 
-<Presence present={present}>Content</Presence>
+<Presence present={present}>Content</Presence>;
 ```
 
 Keep these rules:

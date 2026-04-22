@@ -1,3 +1,5 @@
+import { mkdirSync, rmSync } from "node:fs"
+import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import {
   DaemonPullRequest,
@@ -9,8 +11,6 @@ import {
   DaemonWorktree,
 } from "@goddard-ai/schema/daemon/store"
 import { kind, kindstore, UnrecoverableStoreOpenError, type DatabaseOptions } from "kindstore"
-import { mkdirSync, rmSync } from "node:fs"
-import { dirname } from "node:path"
 import { z } from "zod"
 
 type StoreConnectionOptions = {
@@ -54,7 +54,9 @@ const schema = {
       sequence: "desc",
     }),
 
-  sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", { type: "text" }),
+  sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", {
+    type: "text",
+  }),
 
   worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
 

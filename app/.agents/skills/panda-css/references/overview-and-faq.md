@@ -44,12 +44,15 @@ Here is an example of a `postcss.config.js` file that uses these polyfills:
 
 ```js
 module.exports = {
-  plugins: ['@pandacss/dev/postcss', 'autoprefixer', '@csstools/postcss-cascade-layers']
-}
+  plugins: [
+    "@pandacss/dev/postcss",
+    "autoprefixer",
+    "@csstools/postcss-cascade-layers",
+  ],
+};
 ```
 
 ---
-
 
 ## Frequently Asked Questions
 
@@ -61,12 +64,12 @@ When you combine shorthand and longhand properties, Panda will resolve the style
 property will take precedence over the longhand property.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const styles = css({
-  paddingTop: '20px',
-  padding: '10px'
-})
+  paddingTop: "20px",
+  padding: "10px",
+});
 ```
 
 The styles generated at build time will look like this:
@@ -94,18 +97,18 @@ This is a known limitation of Panda due to our static extraction approach.
 We recommend moving the imported `backgroundImage` to the `style` attribute.
 
 ```jsx
-import myImageBackground from './my-image.png'
+import myImageBackground from "./my-image.png";
 
 const Demo = () => {
   return (
     <p
-      className={css({ bg: 'red.300', backgroundRepeat: 'repeat' })}
+      className={css({ bg: "red.300", backgroundRepeat: "repeat" })}
       style={{ backgroundImage: `url("${myImageBackground}")` }}
     >
       Hello World
     </p>
-  )
-}
+  );
+};
 ```
 
 ---
@@ -131,10 +134,10 @@ In your Jest configuration, add the `ts-jest` transformer:
 export default {
   // ...
   transform: {
-    '^.+\\.tsx?$': 'ts-jest',
-    '^.+\\.(ts|tsx|js|jsx)?$': 'ts-jest'
-  }
-}
+    "^.+\\.tsx?$": "ts-jest",
+    "^.+\\.(ts|tsx|js|jsx)?$": "ts-jest",
+  },
+};
 ```
 
 In your Panda config, set the `outExtension` to `js`:
@@ -142,8 +145,8 @@ In your Panda config, set the `outExtension` to `js`:
 ```ts
 export default defineConfig({
   // ...
-  outExtension: 'js'
-})
+  outExtension: "js",
+});
 ```
 
 ---
@@ -173,8 +176,8 @@ your `tsconfig.json` file.
 // panda.config.js
 
 module.exports = {
-  importMap: '@my-path'
-}
+  importMap: "@my-path",
+};
 ```
 
 This will ensure that the paths are resolved correctly, and HMR works as expected.
@@ -188,12 +191,12 @@ If you are having issues with HMR not being triggered after a `panda.config.ts` 
 by adding the following to your `panda.config.ts`:
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
-  dependencies: ['path/to/files/**.ts']
-})
+  dependencies: ["path/to/files/**.ts"],
+});
 ```
 
 ---
@@ -229,7 +232,7 @@ You can get a [`config recipe`](/docs/concepts/recipes#config-recipe) properties
 say you have a `config recipe` named `button`, you can import its type like this:
 
 ```ts
-import { button, type ButtonVariantProps } from '../styled-system/recipes'
+import { button, type ButtonVariantProps } from "../styled-system/recipes";
 ```
 
 ---
@@ -238,9 +241,9 @@ You can get an [`atomic recipe`](/docs/concepts/recipes#atomic-recipe) propertie
 Let's say you have a `atomic recipe` named `button`, you can get its type like this:
 
 ```ts
-import { cva, type RecipeVariantProps } from '../styled-system/css'
+import { cva, type RecipeVariantProps } from "../styled-system/css";
 
-export type ButtonVariantProps = RecipeVariantProps<typeof buttonStyle>
+export type ButtonVariantProps = RecipeVariantProps<typeof buttonStyle>;
 ```
 
 ---
@@ -251,17 +254,21 @@ You can split recipe props by using `xxx.splitVariantProps`. Let's say you have 
 its props like this:
 
 ```tsx Button.tsx {8}
-import { css, cx } from '../styled-system/css'
-import { ButtonVariantProps, button } from '../styled-system/recipes'
+import { css, cx } from "../styled-system/css";
+import { ButtonVariantProps, button } from "../styled-system/recipes";
 
 interface ButtonProps extends ButtonVariantProps {
-  children: React.ReactNode
+  children: React.ReactNode;
 }
 
 export function Button(props: ButtonProps) {
-  const { children, ...rest } = props
-  const [buttonProps, cssProps] = button.splitVariantProps(rest)
-  return <button className={cx(button(buttonProps), css(cssProps))}>{children}</button>
+  const { children, ...rest } = props;
+  const [buttonProps, cssProps] = button.splitVariantProps(rest);
+  return (
+    <button className={cx(button(buttonProps), css(cssProps))}>
+      {children}
+    </button>
+  );
 }
 ```
 
@@ -276,16 +283,16 @@ You can reference a token value or it's associated css variable using the
 theme tokens at runtime.
 
 ```tsx
-import { token } from '../styled-system/tokens'
+import { token } from "../styled-system/tokens";
 
 function App() {
   return (
     <div
       style={{
-        background: token('colors.blue.200')
+        background: token("colors.blue.200"),
       }}
     />
-  )
+  );
 }
 ```
 
@@ -337,7 +344,7 @@ replace the base one, instead of merging with it.
 ## Why is my base condition not working in this example?
 
 ```ts
-css({ color: { _base: 'red.600', _dark: 'white' } })
+css({ color: { _base: "red.600", _dark: "white" } });
 ```
 
 You used `_base` instead of `base`, there is no underscore `_`.
@@ -421,20 +428,20 @@ shown below:
 
 ```javascript
 css({
-  containerType: 'size',
-  '@media (min-width: 10px)': {
-    fontSize: 'xl',
-    color: 'blue.300'
+  containerType: "size",
+  "@media (min-width: 10px)": {
+    fontSize: "xl",
+    color: "blue.300",
   },
-  '@container (min-width: 10px)': {
-    fontSize: '2xl',
-    color: 'green.300'
+  "@container (min-width: 10px)": {
+    fontSize: "2xl",
+    color: "green.300",
   },
-  '@supports (display: flex)': {
-    fontSize: '3xl',
-    color: 'red.300'
-  }
-})
+  "@supports (display: flex)": {
+    fontSize: "3xl",
+    color: "red.300",
+  },
+});
 ```
 
 ---
@@ -448,9 +455,9 @@ to prevent other libraries from overriding your styles.
 First of all you cast the css from the other library(s) to a css layer:
 
 ```css
-@import url('bootstrap.css') layer(bootstrap);
+@import url("bootstrap.css") layer(bootstrap);
 
-@import url('ionic.css') layer(ionic);
+@import url("ionic.css") layer(ionic);
 ```
 
 Then update the default layer list to deprioritize the styles from the other library(s):
@@ -462,7 +469,6 @@ Then update the default layer list to deprioritize the styles from the other lib
 ```
 
 ---
-
 
 ## Get started with Panda
 
@@ -547,7 +553,6 @@ The development of Panda was only possible due to the inspiration and ideas from
 
 ---
 
-
 ## Why Panda
 
 From the endless list of CSS-in-JS libraries, why should you choose Panda?
@@ -601,27 +606,31 @@ styling primitives to create, organize, and manage CSS styles in a type-safe and
 If you're building a JavaScript application with a framework that supports PostCSS, Panda is a great choice for you.
 
 ```jsx
-import { css } from '../styled-system/css'
-import { circle, stack } from '../styled-system/patterns'
+import { css } from "../styled-system/css";
+import { circle, stack } from "../styled-system/patterns";
 
 function App() {
   return (
     <div
       className={stack({
-        direction: 'row',
-        p: '4',
-        rounded: 'md',
-        shadow: 'lg',
-        bg: 'white'
+        direction: "row",
+        p: "4",
+        rounded: "md",
+        shadow: "lg",
+        bg: "white",
       })}
     >
-      <div className={circle({ size: '5rem', overflow: 'hidden' })}>
+      <div className={circle({ size: "5rem", overflow: "hidden" })}>
         <img src="https://via.placeholder.com/150" alt="avatar" />
       </div>
-      <div className={css({ mt: '4', fontSize: 'xl', fontWeight: 'semibold' })}>John Doe</div>
-      <div className={css({ mt: '2', fontSize: 'sm', color: 'gray.600' })}>john@doe.com</div>
+      <div className={css({ mt: "4", fontSize: "xl", fontWeight: "semibold" })}>
+        John Doe
+      </div>
+      <div className={css({ mt: "2", fontSize: "sm", color: "gray.600" })}>
+        john@doe.com
+      </div>
     </div>
-  )
+  );
 }
 ```
 
@@ -638,20 +647,20 @@ export default defineConfig({
   theme: {
     tokens: {
       colors: {
-        gray50: { value: '#F9FAFB' },
-        gray100: { value: '#F3F4F6' }
-      }
+        gray50: { value: "#F9FAFB" },
+        gray100: { value: "#F3F4F6" },
+      },
     },
     semanticTokens: {
       colors: {
-        primary: { value: '{colors.gray50}' },
+        primary: { value: "{colors.gray50}" },
         success: {
-          value: { _light: '{colors.green500}', _dark: '{colors.green200}' }
-        }
-      }
-    }
-  }
-})
+          value: { _light: "{colors.green500}", _dark: "{colors.green200}" },
+        },
+      },
+    },
+  },
+});
 ```
 
 Running the `panda codegen` will generate
@@ -664,7 +673,7 @@ Running the `panda codegen` will generate
   --colors-success: var(--colors-green500);
 }
 
-[data-theme='dark'] {
+[data-theme="dark"] {
   --colors-primary: var(--colors-gray50);
   --colors-success: var(--colors-green200);
 }
@@ -673,7 +682,7 @@ Running the `panda codegen` will generate
 Then you have a set of css variables that you can use in your project.
 
 ```css
-@import '../styled-system/tokens/index.css';
+@import "../styled-system/tokens/index.css";
 
 .card {
   background-color: var(--colors-gray50);
@@ -692,5 +701,3 @@ In these scenarios, we recommend that you use vanilla CSS (which is getting awes
 CSS libraries.
 
 ---
-
-

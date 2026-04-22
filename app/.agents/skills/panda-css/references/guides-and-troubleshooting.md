@@ -36,17 +36,17 @@ them in your projects.
 **Library code**
 
 ```tsx filename="src/index.ts"
-import { definePreset } from '@pandacss/dev'
+import { definePreset } from "@pandacss/dev";
 
 export const acmePreset = definePreset({
   theme: {
     extend: {
       tokens: {
-        colors: { primary: { value: 'blue.500' } }
-      }
-    }
-  }
-})
+        colors: { primary: { value: "blue.500" } },
+      },
+    },
+  },
+});
 ```
 
 Build the preset code
@@ -58,13 +58,13 @@ pnpm tsup src/index.ts
 **App code**
 
 ```tsx filename="panda.config.ts"
-import { acmePreset } from '@acme-org/panda-preset'
-import { defineConfig } from '@pandacss/dev'
+import { acmePreset } from "@acme-org/panda-preset";
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  presets: ['@pandacss/dev/presets', acmePreset]
-})
+  presets: ["@pandacss/dev/presets", acmePreset],
+});
 ```
 
 > Adding a preset will remove the default theme from Panda. To add it back, you need to include the
@@ -78,14 +78,14 @@ app code.
 **Library code**
 
 ```tsx filename="src/index.tsx"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 export function Button({ children }) {
   return (
-    <button type="button" className={css({ bg: 'red.300', px: '2', py: '3' })}>
+    <button type="button" className={css({ bg: "red.300", px: "2", py: "3" })}>
       {children}
     </button>
-  )
+  );
 }
 ```
 
@@ -104,11 +104,11 @@ Finally, don't forget to include the [cascade layers](/docs/concepts/cascade-lay
 **App code**
 
 ```tsx filename="src/App.tsx"
-import { Button } from '@acme-org/design-system'
-import './main.css'
+import { Button } from "@acme-org/design-system";
+import "./main.css";
 
 export function App() {
-  return <Button>Click me</Button>
+  return <Button>Click me</Button>;
 }
 ```
 
@@ -116,7 +116,7 @@ export function App() {
 
 ```css filename="src/main.css"
 @layer reset, base, tokens, recipes, utilities;
-@import url('@acme-org/design-system/dist/styles.css');
+@import url("@acme-org/design-system/dist/styles.css");
 
 /* Your own styles here */
 ```
@@ -127,12 +127,12 @@ This approach comes with a few downsides:
 - You might need add the [prefix](/docs/references/config#prefix) option to avoid className conflicts
 
   ```tsx filename="panda.config.ts"
-  import { defineConfig } from '@pandacss/dev'
+  import { defineConfig } from "@pandacss/dev";
 
   export default defineConfig({
     //...
-    prefix: 'acme'
-  })
+    prefix: "acme",
+  });
   ```
 
 - You might have duplicate CSS classes when using multiple atomic css libraries
@@ -216,14 +216,14 @@ This should look similar to this:
 Going forward, you'll now import the functions from the `@acme-org/styled-system` monorepo package.
 
 ```tsx
-import { css } from '@acme-org/styled-system/css'
+import { css } from "@acme-org/styled-system/css";
 
 export function Button({ children }) {
   return (
-    <button type="button" className={css({ bg: 'red.300', px: '2', py: '3' })}>
+    <button type="button" className={css({ bg: "red.300", px: "2", py: "3" })}>
       {children}
     </button>
-  )
+  );
 }
 ```
 
@@ -239,13 +239,13 @@ Configure the `importMap` in your `panda.config.ts` to match the `name` field of
 inform Panda which imports belong to the `styled-system`.
 
 ```tsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  importMap: '@acme-org/styled-system',
-  outdir: 'styled-system'
-})
+  importMap: "@acme-org/styled-system",
+  outdir: "styled-system",
+});
 ```
 
 Mark the `@acme-org/styled-system` as an external package in your library build tool. This ensures that the generated JS
@@ -260,14 +260,14 @@ tsup src/index.tsx --external @acme-org/styled-system
 Include the `src` directory from the library code in the panda config.
 
 ```tsx {6} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  include: ['../@acme-org/design-system/src/**/*.tsx', './src/**/*.{ts,tsx}'],
-  importMap: '@acme-org/styled-system',
-  outdir: 'styled-system'
-})
+  include: ["../@acme-org/design-system/src/**/*.tsx", "./src/**/*.{ts,tsx}"],
+  importMap: "@acme-org/styled-system",
+  outdir: "styled-system",
+});
 ```
 
 ### Ship the build info file
@@ -298,33 +298,36 @@ Configure the `importMap` in your `panda.config.ts` to match the `name` field of
 inform Panda which imports belong to the `styled-system`.
 
 ```tsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  importMap: '@acme-org/styled-system',
-  outdir: 'styled-system'
-})
+  importMap: "@acme-org/styled-system",
+  outdir: "styled-system",
+});
 ```
 
 Will allow imports like:
 
 ```tsx
-import { css } from '@acme-org/styled-system/css'
-import { button } from '@acme-org/styled-system/recipes'
+import { css } from "@acme-org/styled-system/css";
+import { button } from "@acme-org/styled-system/recipes";
 ```
 
 Next, you need to include the build info file from the library code in the panda config.
 
 ```tsx {6} filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  include: ['./node_modules/@acme-org/design-system/dist/panda.buildinfo.json', './src/**/*.{ts,tsx}'],
-  importMap: '@acme-org/styled-system',
-  outdir: 'styled-system'
-})
+  include: [
+    "./node_modules/@acme-org/design-system/dist/panda.buildinfo.json",
+    "./src/**/*.{ts,tsx}",
+  ],
+  importMap: "@acme-org/styled-system",
+  outdir: "styled-system",
+});
 ```
 
 ## FAQ
@@ -335,23 +338,26 @@ By de-coupling the component library from the `styled-system`, your users can sh
 library and their app code.
 
 ```tsx filename="component-lib/src/button.tsx"
-import { css } from '@acme-org/styled-system/css'
+import { css } from "@acme-org/styled-system/css";
 
 export function Button({ children, css: cssProp }) {
   return (
-    <button type="button" className={css({ bg: 'red.300', px: '2', py: '3' }, cssProp)}>
+    <button
+      type="button"
+      className={css({ bg: "red.300", px: "2", py: "3" }, cssProp)}
+    >
       {children}
     </button>
-  )
+  );
 }
 ```
 
 ```tsx filename="app/src/App.tsx"
-import { Button } from '@acme-org/design-system'
-import { css } from '@acme-org/styled-system/css'
+import { Button } from "@acme-org/design-system";
+import { css } from "@acme-org/styled-system/css";
 
 export function App() {
-  return <Button css={{ color: 'white' }}>Click me</Button>
+  return <Button css={{ color: "white" }}>Click me</Button>;
 }
 ```
 
@@ -371,25 +377,25 @@ Set the `importMap` in your `panda.config.ts` to that same package name. This wi
 the `styled-system`.
 
 ```tsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   //...
-  importMap: '@acme-org/styled-system'
-})
+  importMap: "@acme-org/styled-system",
+});
 ```
 
 Then you can import the functions from the `@acme-org/styled-system` monorepo package.
 
 ```tsx
-import { css } from '@acme-org/styled-system/css'
+import { css } from "@acme-org/styled-system/css";
 
 export function Button({ children }) {
   return (
-    <button type="button" className={css({ bg: 'red.300', px: '2', py: '3' })}>
+    <button type="button" className={css({ bg: "red.300", px: "2", py: "3" })}>
       {children}
     </button>
-  )
+  );
 }
 ```
 
@@ -424,7 +430,6 @@ export default defineConfig({
 
 ---
 
-
 ## Debugging
 
 How can I debug my styles or profile the extraction process?
@@ -438,44 +443,44 @@ By default it will scan and output debug files for the entire project depending 
 from your config file.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-    ```bash
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+`bash
     pnpm panda debug
     # You can also debug a specific file or folder
     # using the optional glob argument
     pnpm panda debug src/components/Button.tsx
     pnpm panda debug "./src/components/**"
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     npx panda debug
     # # You can also debug a specific file or folder
     # using the optional glob argument
     npx panda debug src/components/Button.tsx
     npx panda debug "./src/components/**"
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     yarn panda debug
     # # You can also debug a specific file or folder
     # using the optional glob argument
     yarn panda debug src/components/Button.tsx
     yarn panda debug "./src/components/**"
-    ```
-  </Tab>
-  <Tab>
-    ```bash
+    `
+</Tab>
+<Tab>
+`bash
     bun panda debug
     # # You can also debug a specific file or folder
     # using the optional glob argument
     bun panda debug src/components/Button.tsx
     bun panda debug "./src/components/**"
-    ```
-  </Tab>
-  {/* <!-- prettier-ignore-end --> */}
+    `
+</Tab>
+{/_ <!-- prettier-ignore-end --> _/}
 </Tabs>
 
 This would generate a `debug` folder in your `config.outdir` folder with the following structure:
@@ -620,8 +625,8 @@ import { css } from "#styled-system/css"
 // panda.config.js
 
 export default defineConfig({
-  importMap: '~/styled-system'
-})
+  importMap: "~/styled-system",
+});
 ```
 
 This will ensure that the paths are resolved correctly, and HMR works as expected.
@@ -668,8 +673,8 @@ your `tsconfig.json` file.
 // panda.config.js
 
 module.exports = {
-  importMap: '@my-path'
-}
+  importMap: "@my-path",
+};
 ```
 
 This will ensure that the paths are resolved correctly, and HMR works as expected.
@@ -700,7 +705,6 @@ that:
 
 ---
 
-
 ## Dynamic styling
 
 How to manage dynamic styling in Panda
@@ -719,21 +723,21 @@ Using a value that is not statically analyzable at build-time will not work in P
 the style values.
 
 ```tsx filename="App.tsx"
-import { useState } from 'react'
-import { css } from '../styled-system/css'
+import { useState } from "react";
+import { css } from "../styled-system/css";
 
 const App = () => {
-  const [color, setColor] = useState('red.300')
+  const [color, setColor] = useState("red.300");
 
   return (
     <div
       className={css({
         // ❌ Avoid: Panda can't determine the value of color at build-time
-        color
+        color,
       })}
     />
-  )
-}
+  );
+};
 ```
 
 The example above will not work because Panda can't determine the value of `color` at build-time. Here are some ways to
@@ -745,7 +749,7 @@ Panda supports a [`staticCss`](/docs/guides/static) option in the config you can
 of time.
 
 ```tsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   staticCss: {
@@ -753,24 +757,24 @@ export default defineConfig({
       {
         properties: {
           // ✅ Good: Pre-generate the styles for the color
-          color: ['red.300']
-        }
-      }
-    ]
-  }
-})
+          color: ["red.300"],
+        },
+      },
+    ],
+  },
+});
 ```
 
 ```tsx filename="Button.tsx"
-import { useState } from 'react'
-import { styled } from '../styled-system/jsx'
+import { useState } from "react";
+import { styled } from "../styled-system/jsx";
 
 export const Button = () => {
-  const [color, setColor] = useState('red.300')
+  const [color, setColor] = useState("red.300");
 
   // ✅ Good: This will work because `red.300` is pre-generated using `staticCss` config
-  return <styled.button color={color} />
-}
+  return <styled.button color={color} />;
+};
 ```
 
 ### Using `token()`
@@ -779,33 +783,33 @@ The `token()` function is generated by Panda and contains an object of all token
 token's raw value at runtime.
 
 ```tsx filename="App.tsx"
-import { useState } from 'react'
-import { css } from '../styled-system/css'
-import { token } from '../styled-system/tokens'
+import { useState } from "react";
+import { css } from "../styled-system/css";
+import { token } from "../styled-system/tokens";
 
-const Component = props => {
+const Component = (props) => {
   return (
     <div
       className={css({
         // ✅ Good: Store the value in a CSS custom property
-        color: 'var(--color)'
+        color: "var(--color)",
       })}
       style={{
         // ✅ Good: Handle the runtime value in the style attribute
-        '--color': token(`colors.${props.color}`)
+        "--color": token(`colors.${props.color}`),
       }}
     >
       Dynamic color with runtime value
     </div>
-  )
-}
+  );
+};
 
 // App.tsx
 const App = () => {
-  const [runtimeColor, setRuntimeColor] = useState('pink.300')
+  const [runtimeColor, setRuntimeColor] = useState("pink.300");
 
-  return <Component color={runtimeColor} />
-}
+  return <Component color={runtimeColor} />;
+};
 ```
 
 ### Using `token.var()`
@@ -814,27 +818,27 @@ You could also directly use the `token.var()` function to get a reference to the
 given token:
 
 ```tsx filename="App.tsx"
-import { useState } from 'react'
-import { token } from '../styled-system/tokens'
+import { useState } from "react";
+import { token } from "../styled-system/tokens";
 
-const Component = props => {
+const Component = (props) => {
   return (
     <div
       style={{
         // ✅ Good: Dynamically generate CSS custom property from the token
-        color: token.var(`colors.${props.color}`)
+        color: token.var(`colors.${props.color}`),
       }}
     >
       Dynamic color with runtime value
     </div>
-  )
-}
+  );
+};
 
 const App = () => {
-  const [runtimeColor, setRuntimeColor] = useState('yellow.300')
+  const [runtimeColor, setRuntimeColor] = useState("yellow.300");
 
-  return <Component color={runtimeColor} />
-}
+  return <Component color={runtimeColor} />;
+};
 ```
 
 ## JSX Style Props
@@ -844,11 +848,11 @@ Panda supports forwarding JSX style properties to any element in your codebase.
 For example, let's say we create a Card component that accepts a `color` prop:
 
 ```tsx filename="Card.tsx"
-import { styled } from '../styled-system/jsx'
+import { styled } from "../styled-system/jsx";
 
-const Card = props => {
-  return <styled.div px="4" py="3" {...props} />
-}
+const Card = (props) => {
+  return <styled.div px="4" py="3" {...props} />;
+};
 ```
 
 Then you add more style props to the Card component in a different file:
@@ -859,26 +863,26 @@ const App = () => {
     <Card color="blue.300">
       <p>Some content</p>
     </Card>
-  )
-}
+  );
+};
 ```
 
 As long as all prop-value pairs are statically extractable, Panda will automatically generate the CSS, so avoid using
 runtime values:
 
 ```tsx filename="App.tsx"
-import { useState } from 'react'
+import { useState } from "react";
 
 const App = () => {
-  const [color, setColor] = useState('blue.300')
+  const [color, setColor] = useState("blue.300");
 
   // ❌ Avoid: Panda can't determine the value of color at build-time
   return (
     <Card color={color}>
       <p>Some content</p>
     </Card>
-  )
-}
+  );
+};
 ```
 
 ## Property Renaming
@@ -886,21 +890,21 @@ const App = () => {
 Due to the static nature of Panda, you can't rename properties at runtime.
 
 ```tsx filename="App.tsx"
-import { Circle, CircleProps } from '../styled-system/jsx'
+import { Circle, CircleProps } from "../styled-system/jsx";
 
 type Props = {
-  circleSize?: CircleProps['size']
-}
+  circleSize?: CircleProps["size"];
+};
 
 const CustomCircle = (props: Props) => {
-  const { circleSize = '3' } = props
+  const { circleSize = "3" } = props;
   return (
     <Circle
       // ❌ Avoid: Panda can't determine the value of circleSize at build-time
       size={circleSize}
     />
-  )
-}
+  );
+};
 ```
 
 In this case, you need to use the `size` prop.
@@ -914,18 +918,18 @@ It can be useful, for example, in Storybook args or custom react props.
 
 ```tsx filename="App.tsx"
 // mark the object as valid css for the extractor
-<Button rootProps={css.raw({ bg: 'red.400' })} />
+<Button rootProps={css.raw({ bg: "red.400" })} />
 ```
 
 ```tsx
 export const Funky: Story = {
   // mark this as a button recipe usage
   args: button.raw({
-    visual: 'funky',
-    shape: 'circle',
-    size: 'sm'
-  })
-}
+    visual: "funky",
+    shape: "circle",
+    size: "sm",
+  }),
+};
 ```
 
 ### Enhanced `css.raw` spreading
@@ -935,21 +939,21 @@ export const Funky: Story = {
 You can also spread `css.raw` objects within nested selectors and conditions for better style composition:
 
 ```tsx filename="App.tsx"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
-const baseStyles = css.raw({ margin: 0, padding: 0 })
-const interactive = css.raw({ cursor: 'pointer', transition: 'all 0.2s' })
+const baseStyles = css.raw({ margin: 0, padding: 0 });
+const interactive = css.raw({ cursor: "pointer", transition: "all 0.2s" });
 
 const component = css({
   // Spreading in child selectors
-  '& p': { ...baseStyles, fontSize: '1rem' },
+  "& p": { ...baseStyles, fontSize: "1rem" },
 
   // Spreading in nested conditions
   _hover: {
     ...interactive,
-    _dark: { ...interactive, color: 'white' }
-  }
-})
+    _dark: { ...interactive, color: "white" },
+  },
+});
 ```
 
 ## Static expressions
@@ -961,15 +965,15 @@ Panda supports static expressions in your styles, as long as they are statically
 You can compose different style objects together using the `css.raw()` function.
 
 ```tsx filename="App.tsx"
-import { css } from 'styled-system/css'
+import { css } from "styled-system/css";
 
 const paragraphSpacingStyle = css.raw({
-  '& p': { marginBlockEnd: '1em' }
-})
+  "& p": { marginBlockEnd: "1em" },
+});
 
 export const proseCss = css.raw({
-  '& h1': paragraphSpacingStyle
-})
+  "& h1": paragraphSpacingStyle,
+});
 ```
 
 This will result in the following CSS:
@@ -992,24 +996,27 @@ You can only use functions that are defined in the ECMAScript spec such as `Math
 the evaluation of basic expressions like this:
 
 ```ts
-import { cva } from '.panda/css'
+import { cva } from ".panda/css";
 
 const getVariants = () => {
   const spacingTokens = Object.entries({
-    sm: 'token(spacing.1)',
-    md: 'token(spacing.2)'
-  })
+    sm: "token(spacing.1)",
+    md: "token(spacing.2)",
+  });
 
   // Generate variants programmatically
-  const variants = spacingTokens.map(([variant, token]) => [variant, { paddingX: token }])
-  return Object.fromEntries(variants)
-}
+  const variants = spacingTokens.map(([variant, token]) => [
+    variant,
+    { paddingX: token },
+  ]);
+  return Object.fromEntries(variants);
+};
 
 const baseStyle = cva({
   variants: {
-    variant: getVariants()
-  }
-})
+    variant: getVariants(),
+  },
+});
 ```
 
 This will generate the following variants object:
@@ -1044,24 +1051,24 @@ When encountering a runtime condition, Panda will first try to resolve it static
 the generating the corresponding CSS for each possible branches.
 
 ```tsx
-import { useState } from 'react'
-import { css } from '../styled-system/css'
-import { Stack } from '../styled-system/jsx'
+import { useState } from "react";
+import { css } from "../styled-system/css";
+import { Stack } from "../styled-system/jsx";
 
 const App = () => {
-  const [isHovered, setIsHovered] = useState(false)
+  const [isHovered, setIsHovered] = useState(false);
 
   return (
     <Stack
-      color={isHovered ? { _hover: 'red.100' } : 'red.200'}
+      color={isHovered ? { _hover: "red.100" } : "red.200"}
       _hover={{
-        color: { base: 'red.300', md: isHovered ? 'red.400' : undefined }
+        color: { base: "red.300", md: isHovered ? "red.400" : undefined },
       }}
     >
-      <div className={css({ color: isHovered ? 'red.500' : 'red.600' })} />
+      <div className={css({ color: isHovered ? "red.500" : "red.600" })} />
     </Stack>
-  )
-}
+  );
+};
 ```
 
 Since none of the conditions above are statically extractable, Panda will generate css for all possible code path,
@@ -1112,11 +1119,11 @@ Here's a short list of things to avoid:
 > If you don't know what value a variable holds with a quick glance, Panda won't be able to either.
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 // ✅ Good: All values are statically extractable
-const mainColor = 'red.300'
-const sizes = { sm: '12px', md: '16px', '2xl': '42px' }
+const mainColor = "red.300";
+const sizes = { sm: "12px", md: "16px", "2xl": "42px" };
 
 const App = () => {
   return (
@@ -1124,11 +1131,11 @@ const App = () => {
       className={css({
         color: mainColor,
         fontSize: sizes.md,
-        width: sizes['2xl']
+        width: sizes["2xl"],
       })}
     />
-  )
-}
+  );
+};
 ```
 
 ### Runtime reference on known objects
@@ -1136,48 +1143,54 @@ const App = () => {
 Using a more complex but still common example :
 
 ```tsx
-import { useState } from 'react'
-import { css } from '../styled-system/css'
+import { useState } from "react";
+import { css } from "../styled-system/css";
 
 const colorByType = {
-  primary: 'red.300',
-  secondary: 'blue.300',
-  tertiary: 'green.300'
-}
+  primary: "red.300",
+  secondary: "blue.300",
+  tertiary: "green.300",
+};
 
 const Section = () => {
-  const [type, setType] = useState('primary')
+  const [type, setType] = useState("primary");
 
   // ❌ Avoid: since only "gray.100" is statically extractable here
   // This will not work as expected, the color CSS won't be generated
-  return <section className={css({ color: colorByType[type] ?? 'gray.100' })}>❌ Will not be extracted</section>
-}
+  return (
+    <section className={css({ color: colorByType[type] ?? "gray.100" })}>
+      ❌ Will not be extracted
+    </section>
+  );
+};
 ```
 
 Even though `colorByType` is statically analyzable, Panda does not _yet_ support this kind of automatic extraction
 fallback. This is the perfect opportunity to use the [recipes](/docs/concepts/recipes).
 
 ```tsx
-import { useState } from 'react'
-import { cva } from '../styled-system/cva'
+import { useState } from "react";
+import { cva } from "../styled-system/cva";
 
 const sectionRecipe = cva({
-  base: { color: 'gray.100' },
+  base: { color: "gray.100" },
   variants: {
     type: {
-      primary: { color: 'red.300' },
-      secondary: { color: 'blue.300' },
-      tertiary: { color: 'green.300' }
-    }
-  }
-})
+      primary: { color: "red.300" },
+      secondary: { color: "blue.300" },
+      tertiary: { color: "green.300" },
+    },
+  },
+});
 
 const Section = () => {
-  const [type, setType] = useState('primary')
+  const [type, setType] = useState("primary");
 
   // ✅ Good: This will work as expected
-  return <section className={sectionRecipe({ type })}>✅ With a recipe</section>
-}
+  return (
+    <section className={sectionRecipe({ type })}>✅ With a recipe</section>
+  );
+};
 ```
 
 Not only did you get the same end result, but you also got a more readable and maintainable code !
@@ -1248,7 +1261,6 @@ const CustomCircle = (props) => {
 
 ---
 
-
 ## Custom Font
 
 How to use custom fonts in your project.
@@ -1266,21 +1278,21 @@ conveniently use all Google Fonts and any local font with performance and privac
 Here's an example of how to load a local "Mona Sans" font and a Google Font "Fira Code" in your Next.js project.
 
 ```js filename="styles/font.ts"
-import { Fira_Code } from 'next/font/google'
-import localFont from 'next/font/local'
+import { Fira_Code } from "next/font/google";
+import localFont from "next/font/local";
 
 export const MonaSans = localFont({
-  src: '../fonts/Mona-Sans.woff2',
-  display: 'swap',
-  variable: '--font-mona-sans'
-})
+  src: "../fonts/Mona-Sans.woff2",
+  display: "swap",
+  variable: "--font-mona-sans",
+});
 
 export const FiraCode = Fira_Code({
-  weight: ['400', '500', '700'],
-  display: 'swap',
-  subsets: ['latin'],
-  variable: '--font-fira-code'
-})
+  weight: ["400", "500", "700"],
+  display: "swap",
+  subsets: ["latin"],
+  variable: "--font-fira-code",
+});
 ```
 
 > Ideally, you should load the font in the layout file.
@@ -1291,15 +1303,15 @@ Router.
 #### App Router
 
 ```jsx filename="app/layout.tsx"
-import { FiraCode, MonaSans } from '../styles/font'
+import { FiraCode, MonaSans } from "../styles/font";
 
 export default function Layout(props) {
-  const { children } = props
+  const { children } = props;
   return (
     <html className={`${MonaSans.variable} ${FiraCode.variable}`}>
       <body>{children}</body>
     </html>
-  )
+  );
 }
 ```
 
@@ -1309,7 +1321,7 @@ export default function Layout(props) {
 #### Pages Router
 
 ```jsx filename="pages/_app.tsx"
-import { FiraCode, MonaSans } from '../styles/font'
+import { FiraCode, MonaSans } from "../styles/font";
 
 export default function App({ Component, pageProps }) {
   return (
@@ -1324,7 +1336,7 @@ export default function App({ Component, pageProps }) {
       </style>
       <Component {...pageProps} />
     </>
-  )
+  );
 }
 ```
 
@@ -1341,14 +1353,14 @@ pnpm add @fontsource-variable/fira-code
 Next, import the font into your project:
 
 ```jsx
-import '@fontsource-variable/fira-code'
+import "@fontsource-variable/fira-code";
 ```
 
 Lastly, create a variable to use it as a token in the panda config
 
 ```css filename="styles/font.css"
 :root {
-  --font-fira-code: 'Fira Code Variable', monospace;
+  --font-fira-code: "Fira Code Variable", monospace;
 }
 ```
 
@@ -1358,8 +1370,8 @@ You can leverage the native font-face CSS property to load custom fonts in your 
 
 ```css
 @font-face {
-  font-family: 'Mona Sans';
-  src: url('../fonts/Mona-Sans.woff2') format('woff2');
+  font-family: "Mona Sans";
+  src: url("../fonts/Mona-Sans.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1370,7 +1382,7 @@ Then alias the font names to css variables.
 
 ```css
 :root {
-  --font-mona-sans: 'Mona Sans', sans-serif;
+  --font-mona-sans: "Mona Sans", sans-serif;
 }
 ```
 
@@ -1384,11 +1396,11 @@ export default defineConfig({
     Fira: {
       src: 'url(/fonts/fira.woff2) format("woff2")',
       fontWeight: 400,
-      fontStyle: 'normal',
-      fontDisplay: 'swap'
-    }
-  }
-})
+      fontStyle: "normal",
+      fontDisplay: "swap",
+    },
+  },
+});
 ```
 
 You can also define multiple font sources for the same weight.
@@ -1397,13 +1409,16 @@ You can also define multiple font sources for the same weight.
 export default defineConfig({
   globalFontface: {
     Fira: {
-      src: ['url(/fonts/fira.woff2) format("woff2")', 'url(/fonts/fira.woff) format("woff")'],
+      src: [
+        'url(/fonts/fira.woff2) format("woff2")',
+        'url(/fonts/fira.woff) format("woff")',
+      ],
       fontWeight: 400,
-      fontStyle: 'normal',
-      fontDisplay: 'swap'
-    }
-  }
-})
+      fontStyle: "normal",
+      fontDisplay: "swap",
+    },
+  },
+});
 ```
 
 You can also define multiple font weights.
@@ -1415,25 +1430,25 @@ export default defineConfig({
       {
         src: 'url(/fonts/fira.woff2) format("woff2")',
         fontWeight: 400,
-        fontStyle: 'normal',
-        fontDisplay: 'swap'
+        fontStyle: "normal",
+        fontDisplay: "swap",
       },
       {
         src: 'url(/fonts/fira-bold.woff2) format("woff2")',
         fontWeight: 700,
-        fontStyle: 'normal',
-        fontDisplay: 'swap'
-      }
-    ]
-  }
-})
+        fontStyle: "normal",
+        fontDisplay: "swap",
+      },
+    ],
+  },
+});
 ```
 
 Then expose the font names to css variables.
 
 ```css
 :root {
-  --font-fira-code: 'Fira Code Variable', monospace;
+  --font-fira-code: "Fira Code Variable", monospace;
 }
 ```
 
@@ -1442,9 +1457,9 @@ You can also use [globalVars](/docs/concepts/writing-styles#global-vars) in your
 ```js
 export default defineConfig({
   globalVars: {
-    '--font-fira-code': 'Fira Code Variable, monospace'
-  }
-})
+    "--font-fira-code": "Fira Code Variable, monospace",
+  },
+});
 ```
 
 ## Update Panda Config
@@ -1455,32 +1470,31 @@ export default defineConfig({
     extend: {
       tokens: {
         fonts: {
-          fira: { value: 'var(--font-fira-code), Menlo, monospace' },
-          mona: { value: 'var(--font-mona-sans), sans-serif' }
-        }
-      }
-    }
-  }
-})
+          fira: { value: "var(--font-fira-code), Menlo, monospace" },
+          mona: { value: "var(--font-mona-sans), sans-serif" },
+        },
+      },
+    },
+  },
+});
 ```
 
 ## Use the custom fonts
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function Page() {
   return (
     <div>
-      <h1 className={css({ fontFamily: 'mona' })}>Mona Sans</h1>
-      <code className={css({ fontFamily: 'fira' })}>Fira Code</code>
+      <h1 className={css({ fontFamily: "mona" })}>Mona Sans</h1>
+      <code className={css({ fontFamily: "fira" })}>Fira Code</code>
     </div>
-  )
+  );
 }
 ```
 
 ---
-
 
 ## Minimal Setup
 
@@ -1496,8 +1510,8 @@ To remove the default design tokens injected by Panda, set the `presets` key to 
 ```js
 export default defineConfig({
   // ...
-  presets: []
-})
+  presets: [],
+});
 ```
 
 This allows you to define your own tokens, without having to use the `extend` key in the theme.
@@ -1508,11 +1522,11 @@ export default defineConfig({
   theme: {
     tokens: {
       colors: {
-        primary: { value: '#ff0000' }
-      }
-    }
-  }
-})
+        primary: { value: "#ff0000" },
+      },
+    },
+  },
+});
 ```
 
 ## Removing default utilities
@@ -1528,17 +1542,17 @@ export default defineConfig({
   eject: true,
   utilities: {
     color: {
-      values: 'colors'
-    }
+      values: "colors",
+    },
   },
   theme: {
     tokens: {
       colors: {
-        primary: { value: '#ff0000' }
-      }
-    }
-  }
-})
+        primary: { value: "#ff0000" },
+      },
+    },
+  },
+});
 ```
 
 This makes `<p className={css({ color: 'primary' })}> Text </p>` work as expected.
@@ -1555,8 +1569,8 @@ You can use these presets by installing them via npm and adding them to your `pr
 ```js
 export default defineConfig({
   // ...
-  presets: ['@pandacss/preset-base']
-})
+  presets: ["@pandacss/preset-base"],
+});
 ```
 
 - `@pandacss/preset-panda` as an opinionated set of tokens if you don't want to define your own colors/spacing/fonts
@@ -1565,15 +1579,14 @@ export default defineConfig({
 ```js
 export default defineConfig({
   // ...
-  presets: ['@pandacss/preset-panda']
-})
+  presets: ["@pandacss/preset-panda"],
+});
 ```
 
 > Note: You don't need to install `@pandacss/preset-base` or `@pandacss/preset-panda`. Panda will automatically resolve
 > them for you.
 
 ---
-
 
 ## Multi-Theme Tokens
 
@@ -1593,12 +1606,12 @@ We'll start by defining the following conditions for these theme and color modes
 // panda.config.ts
 const config = {
   conditions: {
-    light: '[data-color-mode=light] &',
-    dark: '[data-color-mode=dark] &',
-    pinkTheme: '[data-theme=pink] &',
-    blueTheme: '[data-theme=blue] &'
-  }
-}
+    light: "[data-color-mode=light] &",
+    dark: "[data-color-mode=dark] &",
+    pinkTheme: "[data-theme=pink] &",
+    blueTheme: "[data-theme=blue] &",
+  },
+};
 ```
 
 > Conditions are a way to provide preset css selectors or media queries for use in your Panda project
@@ -1613,13 +1626,13 @@ const theme = {
     colors: {
       text: {
         value: {
-          _pinkTheme: '{colors.pink.500}',
-          _blueTheme: '{colors.blue.500}'
-        }
-      }
-    }
-  }
-}
+          _pinkTheme: "{colors.pink.500}",
+          _blueTheme: "{colors.blue.500}",
+        },
+      },
+    },
+  },
+};
 ```
 
 Next, we'll modify `colors.text` to support light and dark color modes for each theme.
@@ -1632,13 +1645,13 @@ const theme = {
     colors: {
       text: {
         value: {
-          _pinkTheme: { base: '{colors.pink.500}', _dark: '{colors.pink.300}' },
-          _blueTheme: { base: '{colors.blue.500}', _dark: '{colors.blue.300}' }
-        }
-      }
-    }
-  }
-}
+          _pinkTheme: { base: "{colors.pink.500}", _dark: "{colors.pink.300}" },
+          _blueTheme: { base: "{colors.blue.500}", _dark: "{colors.blue.300}" },
+        },
+      },
+    },
+  },
+};
 ```
 
 Now, you can use the `text` token in your styles, and it will automatically change based on the theme and the color
@@ -1670,7 +1683,7 @@ This allows you to apply a `theme` on multiple tokens at once, using data attrib
 
 ```ts
 // panda.config.ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
@@ -1679,61 +1692,61 @@ export default defineConfig({
     extend: {
       tokens: {
         colors: {
-          text: { value: 'green' }
-        }
+          text: { value: "green" },
+        },
       },
       semanticTokens: {
         colors: {
           body: {
             value: {
-              base: '{colors.green.600}',
-              _osDark: '{colors.green.400}'
-            }
-          }
-        }
-      }
-    }
+              base: "{colors.green.600}",
+              _osDark: "{colors.green.400}",
+            },
+          },
+        },
+      },
+    },
   },
   // alternative theme variants
   themes: {
     primary: {
       tokens: {
         colors: {
-          text: { value: 'red' }
-        }
+          text: { value: "red" },
+        },
       },
       semanticTokens: {
         colors: {
-          muted: { value: '{colors.red.200}' },
+          muted: { value: "{colors.red.200}" },
           body: {
             value: {
-              base: '{colors.red.600}',
-              _osDark: '{colors.red.400}'
-            }
-          }
-        }
-      }
+              base: "{colors.red.600}",
+              _osDark: "{colors.red.400}",
+            },
+          },
+        },
+      },
     },
     secondary: {
       tokens: {
         colors: {
-          text: { value: 'blue' }
-        }
+          text: { value: "blue" },
+        },
       },
       semanticTokens: {
         colors: {
-          muted: { value: '{colors.blue.200}' },
+          muted: { value: "{colors.blue.200}" },
           body: {
             value: {
-              base: '{colors.blue.600}',
-              _osDark: '{colors.blue.400}'
-            }
-          }
-        }
-      }
-    }
-  }
-})
+              base: "{colors.blue.600}",
+              _osDark: "{colors.blue.400}",
+            },
+          },
+        },
+      },
+    },
+  },
+});
 ```
 
 ### Pregenerating themes
@@ -1743,14 +1756,14 @@ By default, no additional theme variant is generated, you need to specify the sp
 
 ```ts
 // panda.config.ts
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   staticCss: {
-    themes: ['primary', 'secondary']
-  }
-})
+    themes: ["primary", "secondary"],
+  },
+});
 ```
 
 This will generate the following CSS:
@@ -1762,7 +1775,7 @@ This will generate the following CSS:
     --colors-body: var(--colors-blue-600);
   }
 
-  [data-panda-theme='primary'] {
+  [data-panda-theme="primary"] {
     --colors-text: red;
     --colors-muted: var(--colors-red-200);
     --colors-body: var(--colors-red-600);
@@ -1773,7 +1786,7 @@ This will generate the following CSS:
       --colors-body: var(--colors-blue-400);
     }
 
-    [data-panda-theme='primary'] {
+    [data-panda-theme="primary"] {
       --colors-body: var(--colors-red-400);
     }
   }
@@ -1801,9 +1814,9 @@ Each theme has a corresponding JSON file with a similar structure:
 #### Dynamically import a theme using its name
 
 ```ts
-import { getTheme } from '../styled-system/themes'
+import { getTheme } from "../styled-system/themes";
 
-const theme = await getTheme('red')
+const theme = await getTheme("red");
 //    ^? {
 //     name: "red";
 //     id: string;
@@ -1814,28 +1827,28 @@ const theme = await getTheme('red')
 #### Inject the theme styles into the DOM:
 
 ```ts
-import { injectTheme } from '../styled-system/themes'
+import { injectTheme } from "../styled-system/themes";
 
-const theme = await getTheme('red')
-injectTheme(document.documentElement, theme) // this returns the injected style element
+const theme = await getTheme("red");
+injectTheme(document.documentElement, theme); // this returns the injected style element
 ```
 
 #### SSR example with NextJS:
 
 ```tsx
 // app/layout.tsx
-import { cookies } from 'next/headers'
-import './globals.css'
-import { ThemeName, getTheme } from '../../styled-system/themes'
+import { cookies } from "next/headers";
+import "./globals.css";
+import { ThemeName, getTheme } from "../../styled-system/themes";
 
 export default async function RootLayout({
-  children
+  children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
-  const store = cookies()
-  const themeName = store.get('theme')?.value as ThemeName
-  const theme = themeName && (await getTheme(themeName))
+  const store = cookies();
+  const themeName = store.get("theme")?.value as ThemeName;
+  const theme = themeName && (await getTheme(themeName));
 
   return (
     <html lang="en" data-panda-theme={themeName ? themeName : undefined}>
@@ -1850,39 +1863,39 @@ export default async function RootLayout({
       )}
       <body>{children}</body>
     </html>
-  )
+  );
 }
 ```
 
 ```tsx
 // app/page.tsx
-'use client'
-import { getTheme, injectTheme } from '../../styled-system/themes'
+"use client";
+import { getTheme, injectTheme } from "../../styled-system/themes";
 
 export default function Home() {
   return (
     <>
       <button
         onClick={async () => {
-          const current = document.documentElement.dataset.pandaTheme
-          const next = current === 'primary' ? 'secondary' : 'primary'
-          const theme = await getTheme(next)
-          setCookie('theme', next, 7)
-          injectTheme(document.documentElement, theme)
+          const current = document.documentElement.dataset.pandaTheme;
+          const next = current === "primary" ? "secondary" : "primary";
+          const theme = await getTheme(next);
+          setCookie("theme", next, 7);
+          injectTheme(document.documentElement, theme);
         }}
       >
         swap theme
       </button>
     </>
-  )
+  );
 }
 
 // Set a Cookie
 function setCookie(cName: string, cValue: any, expDays: number) {
-  let date = new Date()
-  date.setTime(date.getTime() + expDays * 24 * 60 * 60 * 1000)
-  const expires = 'expires=' + date.toUTCString()
-  document.cookie = cName + '=' + cValue + '; ' + expires + '; path=/'
+  let date = new Date();
+  date.setTime(date.getTime() + expDays * 24 * 60 * 60 * 1000);
+  const expires = "expires=" + date.toUTCString();
+  document.cookie = cName + "=" + cValue + "; " + expires + "; path=/";
 }
 ```
 
@@ -1891,15 +1904,15 @@ function setCookie(cName: string, cValue: any, expDays: number) {
 Finally, you can create a theme contract to ensure that all themes have the same structure:
 
 ```ts
-import { defineThemeContract } from '@pandacss/dev'
+import { defineThemeContract } from "@pandacss/dev";
 
 const defineTheme = defineThemeContract({
   tokens: {
     colors: {
-      red: { value: '' } // theme implementations must have a red color
-    }
-  }
-})
+      red: { value: "" }, // theme implementations must have a red color
+    },
+  },
+});
 
 defineTheme({
   tokens: {
@@ -1908,13 +1921,12 @@ defineTheme({
       //
       // ✅ fixed with
       // red: { value: 'red' },
-    }
-  }
-})
+    },
+  },
+});
 ```
 
 ---
-
 
 ## Static CSS Generator
 
@@ -1934,9 +1946,9 @@ export default {
     // the css properties you want to generate
     css: [],
     // the recipes you want to generate
-    recipes: {}
-  }
-}
+    recipes: {},
+  },
+};
 ```
 
 The `static` property supports two properties:
@@ -1963,21 +1975,21 @@ export default {
     css: [
       {
         properties: {
-          margin: ['*'],
-          padding: ['*', '50px', '80px']
+          margin: ["*"],
+          padding: ["*", "50px", "80px"],
         },
-        responsive: true
+        responsive: true,
       },
       {
         properties: {
-          color: ['*'],
-          backgroundColor: ['green.200', 'red.400']
+          color: ["*"],
+          backgroundColor: ["green.200", "red.400"],
         },
-        conditions: ['light', 'dark']
-      }
-    ]
-  }
-}
+        conditions: ["light", "dark"],
+      },
+    ],
+  },
+};
 ```
 
 ## Generating Recipes
@@ -1990,64 +2002,64 @@ export default {
     recipes: {
       button: [
         {
-          size: ['sm', 'md'],
-          responsive: true
+          size: ["sm", "md"],
+          responsive: true,
         },
-        { variant: ['*'] }
+        { variant: ["*"] },
       ],
       // shorthand for all variants
-      tooltip: ['*']
-    }
-  }
-}
+      tooltip: ["*"],
+    },
+  },
+};
 ```
 
 You can also directly specify a recipe's `staticCss` rules from inside a recipe config, e.g.:
 
 ```js
-import { defineRecipe } from '@pandacss/dev'
+import { defineRecipe } from "@pandacss/dev";
 
 const card = defineRecipe({
-  className: 'card',
-  base: { color: 'white' },
+  className: "card",
+  base: { color: "white" },
   variants: {
     size: {
-      small: { fontSize: '14px' },
-      large: { fontSize: '18px' }
-    }
+      small: { fontSize: "14px" },
+      large: { fontSize: "18px" },
+    },
   },
-  staticCss: [{ size: ['*'] }]
-})
+  staticCss: [{ size: ["*"] }],
+});
 ```
 
 would be the equivalent of defining it inside the main config:
 
 ```js
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   staticCss: {
     recipes: {
       card: {
-        size: ['*']
-      }
-    }
-  }
-})
+        size: ["*"],
+      },
+    },
+  },
+});
 ```
 
 Or you could even generate the CSS for every config `recipe` / `slotRecipes` (and each of their variants):
 
 ```tsx filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   staticCss: {
-    recipes: '*'
-  }
-})
+    recipes: "*",
+  },
+});
 ```
 
 This is mostly useful for testing purposes with [`Storybook`](/docs/installation/storybook).
@@ -2067,20 +2079,20 @@ export default {
   staticCss: {
     css: [
       {
-        conditions: ['hover', 'focus', 'active', 'disabled'],
+        conditions: ["hover", "focus", "active", "disabled"],
         properties: {
           // This expands to ALL tokens - very expensive!
-          color: ['*'],
-          backgroundColor: ['*'],
-          borderColor: ['*'],
-          width: ['*'],
-          height: ['*']
+          color: ["*"],
+          backgroundColor: ["*"],
+          borderColor: ["*"],
+          width: ["*"],
+          height: ["*"],
           // ... 20+ more properties with wildcards
-        }
-      }
-    ]
-  }
-}
+        },
+      },
+    ],
+  },
+};
 ```
 
 **✅ Better: Only generate what you need**
@@ -2090,17 +2102,17 @@ export default {
   staticCss: {
     css: [
       {
-        conditions: ['_hover', '_focus'],
+        conditions: ["_hover", "_focus"],
         properties: {
           // Only the colors you actually use
-          color: ['red.500', 'blue.500', 'gray.600'],
-          backgroundColor: ['white', 'gray.50', 'blue.50'],
-          borderColor: ['gray.200', 'blue.500']
-        }
-      }
-    ]
-  }
-}
+          color: ["red.500", "blue.500", "gray.600"],
+          backgroundColor: ["white", "gray.50", "blue.50"],
+          borderColor: ["gray.200", "blue.500"],
+        },
+      },
+    ],
+  },
+};
 ```
 
 ### When to Use Wildcards
@@ -2126,15 +2138,15 @@ export default {
         // This generates classes for ALL breakpoints (sm, md, lg, xl, 2xl)
         responsive: true,
         properties: {
-          color: ['red.500', 'blue.500'],
-          backgroundColor: ['white', 'gray.50'],
-          fontWeight: ['400', '500', '600'],
-          borderRadius: ['sm', 'md', 'lg']
-        }
-      }
-    ]
-  }
-}
+          color: ["red.500", "blue.500"],
+          backgroundColor: ["white", "gray.50"],
+          fontWeight: ["400", "500", "600"],
+          borderRadius: ["sm", "md", "lg"],
+        },
+      },
+    ],
+  },
+};
 ```
 
 **✅ Better: Responsive only for layout properties**
@@ -2147,21 +2159,21 @@ export default {
         // Responsive for layout properties that change across breakpoints
         responsive: true,
         properties: {
-          display: ['none', 'block', 'flex'],
-          flexDirection: ['row', 'column'],
-          width: ['full', '1/2', '1/3']
-        }
+          display: ["none", "block", "flex"],
+          flexDirection: ["row", "column"],
+          width: ["full", "1/2", "1/3"],
+        },
       },
       {
         // No responsive needed for colors/typography that stay the same
         properties: {
-          color: ['red.500', 'blue.500'],
-          fontWeight: ['400', '500', '600']
-        }
-      }
-    ]
-  }
-}
+          color: ["red.500", "blue.500"],
+          fontWeight: ["400", "500", "600"],
+        },
+      },
+    ],
+  },
+};
 ```
 
 Properties that commonly need `responsive: true`:
@@ -2183,5 +2195,3 @@ For an even smaller css output size, you can utilize [PurgeCSS](https://purgecss
 CSS. This tool will analyze your template and match selectors against your CSS.
 
 ---
-
-

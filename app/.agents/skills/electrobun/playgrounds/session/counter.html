@@ -64,34 +64,40 @@
     <button class="reset" id="resetBtn">Reset</button>
     <div class="info">localStorage counter</div>
     <script>
-      const KEY = "partition-test-counter"
+      const KEY = "partition-test-counter";
 
       function getCount() {
-        return parseInt(localStorage.getItem(KEY) || "0", 10)
+        return parseInt(localStorage.getItem(KEY) || "0", 10);
       }
 
       function setCount(val) {
-        localStorage.setItem(KEY, String(val))
-        updateDisplay()
+        localStorage.setItem(KEY, String(val));
+        updateDisplay();
       }
 
       function updateDisplay() {
-        document.getElementById("count").textContent = getCount()
+        document.getElementById("count").textContent = getCount();
       }
 
-      document.getElementById("incBtn").addEventListener("click", () => setCount(getCount() + 1))
-      document.getElementById("decBtn").addEventListener("click", () => setCount(getCount() - 1))
-      document.getElementById("resetBtn").addEventListener("click", () => setCount(0))
+      document
+        .getElementById("incBtn")
+        .addEventListener("click", () => setCount(getCount() + 1));
+      document
+        .getElementById("decBtn")
+        .addEventListener("click", () => setCount(getCount() - 1));
+      document
+        .getElementById("resetBtn")
+        .addEventListener("click", () => setCount(0));
 
       // Listen for storage events from other tabs/webviews with same partition
       window.addEventListener("storage", (e) => {
-        if (e.key === KEY) updateDisplay()
-      })
+        if (e.key === KEY) updateDisplay();
+      });
 
       // Poll for changes (storage event doesn't fire in same browsing context)
-      setInterval(updateDisplay, 500)
+      setInterval(updateDisplay, 500);
 
-      updateDisplay()
+      updateDisplay();
     </script>
   </body>
 </html>

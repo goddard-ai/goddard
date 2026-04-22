@@ -1,4 +1,5 @@
 # Component: ActionEditorView
+
 - **Minimum Viable Component:** Detail-tab editor for one action definition, including metadata, prompt content, scope, and save workflow.
 - **Props Interface:** `actionId: string`; `mode?: "edit" | "create"`; `sourceContext?: { projectPath?: string | null }`.
 - **Sub-components:** `ContextActionDropdown`.

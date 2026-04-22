@@ -2,7 +2,7 @@ import { textModelConfigJsonSchema } from "ai-sdk-json-schema"
 import { toJSONSchema, z } from "zod"
 import type { ToJSONSchemaParams } from "zod/v4/core"
 
-import { ActionConfig, LoopConfig, UserConfig, registerConfigSchemas } from "./config.ts"
+import { ActionConfig, LoopConfig, registerConfigSchemas, UserConfig } from "./config.ts"
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)

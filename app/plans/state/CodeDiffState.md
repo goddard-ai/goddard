@@ -1,4 +1,5 @@
 # State Module: CodeDiffState
+
 - **Responsibility:** Normalize and cache diff data so the same diff viewer can serve standalone diff tabs and pull request diff sections.
 - **Data Shape:** One map keyed by diff source id containing file-level diff records, presentation metadata, selected file path, load status, error state, and optional scroll or viewport restoration snapshots.
 - **Mutations/Actions:** `loadDiff`; `refreshDiff`; `setSelectedFile`; `setPresentationMode`; `restoreViewport`; `evictUnusedDiff`.

@@ -1,4 +1,5 @@
 # State Module: ProjectContentState
+
 - **Responsibility:** Own project-scoped specification and page discovery, including tree navigation, file metadata, and document-opening intents.
 - **Data Shape:** Managed project content roots; directory tree nodes keyed by project and path; spec and page file metadata keyed by document id; selected tree node; visible file list; loading and error state.
 - **Mutations/Actions:** `loadProjectContentRoots`; `loadTreeNodeChildren`; `selectContentNode`; `refreshProjectContent`; `openDocument`; `clearContentError`.

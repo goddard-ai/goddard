@@ -1,4 +1,5 @@
 # Component: CreatePullRequestDialog
+
 - **Minimum Viable Component:** Modal flow for submitting one new managed pull request from project context and current session or diff context.
 - **Props Interface:** `isOpen: boolean`; `draft: { projectPath, title, body, headBranch, baseBranch, sourceSessionId? }`; `projects: array of project summaries`; `validation: { canSubmit, fieldErrors }`; `isSubmitting: boolean`; `onDraftChange: (patch) => void`; `onSubmit: () => void`; `onClose: () => void`.
 - **Sub-components:** None.

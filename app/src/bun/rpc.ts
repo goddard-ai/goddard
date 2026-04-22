@@ -16,7 +16,9 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
       runtimeInfo: async () => ({ runtime: "electrobun" }),
       browseForProject: async () => ({ path: await browseForProject() }),
       readShortcutKeymap: async () => await readShortcutKeymap(),
-      writeShortcutKeymap: async ({ keymap }) => ({ keymap: await writeShortcutKeymap(keymap) }),
+      writeShortcutKeymap: async ({ keymap }) => ({
+        keymap: await writeShortcutKeymap(keymap),
+      }),
       daemonSend: async (input) => await daemonSend(input),
       maximizeWindow: async () => {
         getMainWindow()?.maximize()

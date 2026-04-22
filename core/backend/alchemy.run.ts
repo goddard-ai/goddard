@@ -1,5 +1,5 @@
 import alchemy from "alchemy"
-import { Worker, DurableObjectNamespace } from "alchemy/cloudflare"
+import { DurableObjectNamespace, Worker } from "alchemy/cloudflare"
 
 const app = await alchemy("goddard-backend")
 

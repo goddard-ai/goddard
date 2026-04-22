@@ -32,7 +32,11 @@ test("daemon backend client creates PRs and checks managed status through rouzer
 
     expect(pr.number).toBe(1)
     await expect(
-      client.pr.isManaged({ owner: "goddard-ai", repo: "sdk", prNumber: pr.number }),
+      client.pr.isManaged({
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: pr.number,
+      }),
     ).resolves.toBe(true)
   } finally {
     await server.close()

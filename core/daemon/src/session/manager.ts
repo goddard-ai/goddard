@@ -1,3 +1,11 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto"
+import { constants as fsConstants, watch, type Dirent, type FSWatcher } from "node:fs"
+import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { basename, dirname, join, relative, resolve } from "node:path"
+import { Readable, Writable } from "node:stream"
+import { ReadableStream } from "node:stream/web"
+import { pathToFileURL } from "node:url"
 import * as acp from "@agentclientprotocol/sdk"
 import treeKill, { type ProcessLike } from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
@@ -43,14 +51,6 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type { KindInput, KindOutput } from "kindstore"
-import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { constants as fsConstants, watch, type Dirent, type FSWatcher } from "node:fs"
-import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { basename, dirname, join, relative, resolve } from "node:path"
-import { Readable, Writable } from "node:stream"
-import { ReadableStream } from "node:stream/web"
-import { pathToFileURL } from "node:url"
 import { omit } from "radashi"
 
 import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
@@ -90,19 +90,19 @@ import { readSessionChanges } from "./changes.ts"
 import type { ACPRegistryService } from "./registry.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
-  type ActiveTurnBuffer,
   appendSessionHistoryMessage,
   createInitializedHistoryTurn,
   getAvailableCommandsFromMessage,
   getLatestAvailableCommands,
   isTurnTerminalMessage,
-  type SessionTurnPromptRequestId,
   shouldFlushTurnDraftImmediately,
   toCompletedTurnInput,
   toSessionHistoryTurnFromActiveTurn,
   toSessionHistoryTurnFromDraft,
   toSessionHistoryTurnFromRecord,
   toTurnDraftInput,
+  type ActiveTurnBuffer,
+  type SessionTurnPromptRequestId,
 } from "./turn-history.ts"
 import {
   resolveGitRepoRoot,

@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "bun:test"
 import { join } from "node:path"
+import { afterEach, expect, test } from "bun:test"
 
 import { getDatabasePath } from "../src/node/index.ts"
 

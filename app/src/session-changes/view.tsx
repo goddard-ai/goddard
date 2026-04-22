@@ -1,23 +1,29 @@
-import type { DaemonSession } from "@goddard-ai/sdk"
+import type { DaemonSession } from "@goddard-ai/sdk";
 
-import { useQuery } from "~/lib/query.ts"
-import { goddardSdk } from "~/sdk.ts"
-import styles from "./view.style.ts"
+import { useQuery } from "~/lib/query.ts";
+import { goddardSdk } from "~/sdk.ts";
+import styles from "./view.style.ts";
 
 export default function SessionChangesView(props: {
-  repositoryLabel: string
-  sessionId: DaemonSession["id"]
-  sessionTitle: string
+  repositoryLabel: string;
+  sessionId: DaemonSession["id"];
+  sessionTitle: string;
 }) {
-  const changes = useQuery(goddardSdk.session.changes, [{ id: props.sessionId }])
+  const changes = useQuery(goddardSdk.session.changes, [
+    { id: props.sessionId },
+  ]);
 
   return (
     <section class={styles.root}>
       <header class={styles.header}>
         <p class={styles.repository}>{props.repositoryLabel}</p>
         <h1 class={styles.title}>{props.sessionTitle}</h1>
-        <p class={styles.description}>Current git diff for this session workspace.</p>
-        {changes.workspaceRoot ? <p class={styles.workspaceRoot}>{changes.workspaceRoot}</p> : null}
+        <p class={styles.description}>
+          Current git diff for this session workspace.
+        </p>
+        {changes.workspaceRoot ? (
+          <p class={styles.workspaceRoot}>{changes.workspaceRoot}</p>
+        ) : null}
       </header>
 
       {changes.workspaceRoot === null ? (
@@ -36,9 +42,11 @@ export default function SessionChangesView(props: {
       ) : (
         <div class={styles.empty}>
           <h2 class={styles.emptyTitle}>No changes</h2>
-          <p class={styles.description}>This session workspace is currently clean.</p>
+          <p class={styles.description}>
+            This session workspace is currently clean.
+          </p>
         </div>
       )}
     </section>
-  )
+  );
 }

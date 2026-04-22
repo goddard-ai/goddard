@@ -1,12 +1,12 @@
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getGlobalConfigPath } from "@goddard-ai/paths/node"
-import { afterEach, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { getGlobalConfigPath } from "@goddard-ai/paths/node"
+import { afterEach, expect, test } from "bun:test"
 
 import { runDaemon } from "../src/daemon.ts"
 import {

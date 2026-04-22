@@ -1,4 +1,5 @@
 # Component: SessionChatTranscript
+
 - **Minimum Viable Component:** Scrollable conversation timeline that adapts `@assistant-ui/react` primitives to the session history model and live streaming updates.
 - **Props Interface:** `messages: array of normalized chat messages`; `isStreaming: boolean`; `hasOlderMessages: boolean`; `onLoadOlder: () => void`; `onRetryRender?: (messageId) => void`.
 - **Sub-components:** None.

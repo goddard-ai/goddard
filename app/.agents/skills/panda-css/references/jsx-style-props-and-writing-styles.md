@@ -14,30 +14,30 @@ Panda will extract the style props through static analysis and generate the CSS 
 > If you use Chakra UI, Styled System, or Theme UI, you'll feel right at home right away 😊
 
 ```jsx
-import { css } from '../styled-system/css'
-import { styled } from '../styled-system/jsx'
+import { css } from "../styled-system/css";
+import { styled } from "../styled-system/jsx";
 
 // The className approach
 const Button = ({ children }) => (
   <button
     className={css({
-      bg: 'blue.500',
-      color: 'white',
-      py: '2',
-      px: '4',
-      rounded: 'md'
+      bg: "blue.500",
+      color: "white",
+      py: "2",
+      px: "4",
+      rounded: "md",
     })}
   >
     {children}
   </button>
-)
+);
 
 // The style props approach
 const Button = ({ children }) => (
   <styled.button bg="blue.500" color="white" py="2" px="4" rounded="md">
     {children}
   </styled.button>
-)
+);
 ```
 
 ## Configure JSX
@@ -54,12 +54,12 @@ JSX is a JavaScript syntax extension that allows you to write HTML-like code dir
 supported by most popular frameworks. Panda supports JSX style props in React, Preact, Vue 3, Qwik and Solid.js.
 
 ```js filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
-  jsxFramework: 'react'
-})
+  jsxFramework: "react",
+});
 ```
 
 ### Generate JSX runtime
@@ -67,11 +67,13 @@ export default defineConfig({
 Next, you need to run `panda codegen` to generate the JSX runtime for your framework.
 
 <Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
-  {/* <!-- prettier-ignore-start --> */}
-  <Tab>
-  ```bash
-  pnpm panda codegen --clean
-  ```
+{/_ <!-- prettier-ignore-start --> _/}
+<Tab>
+
+```bash
+pnpm panda codegen --clean
+```
+
   </Tab>
   <Tab>
   ```bash
@@ -101,13 +103,13 @@ Style props are just CSS properties that you can pass to your components as prop
 `styled.<element>` syntax to create supercharged JSX elements that support style props.
 
 ```jsx
-import { styled } from '../styled-system/jsx'
+import { styled } from "../styled-system/jsx";
 
 const Button = ({ children }) => (
   <styled.button bg="blue.500" color="white" py="2" px="4" rounded="md">
     {children}
   </styled.button>
-)
+);
 ```
 
 ### Property Renaming
@@ -115,21 +117,21 @@ const Button = ({ children }) => (
 <Callout type="warning">Due to the static nature of Panda, you can't rename properties at runtime.</Callout>
 
 ```tsx filename="App.tsx"
-import { Circle, CircleProps } from '../styled-system/jsx'
+import { Circle, CircleProps } from "../styled-system/jsx";
 
 type Props = {
-  circleSize?: CircleProps['size']
-}
+  circleSize?: CircleProps["size"];
+};
 
 const CustomCircle = (props: Props) => {
-  const { circleSize = '3' } = props
+  const { circleSize = "3" } = props;
   return (
     <Circle
       // ❌ Avoid: Panda can't know that you're mapping `circleSize` to `size`
       size={circleSize}
     />
-  )
-}
+  );
+};
 
 // ...
 
@@ -137,8 +139,8 @@ const App = () => {
   return (
     // In this case, you should keep the `size` naming
     <CustomCircle circleSize="4" />
-  )
-}
+  );
+};
 ```
 
 The same principles apply to all style props, recipe variants, and pattern props.
@@ -154,12 +156,14 @@ You can use recipe variants as JSX props to quickly change the styles of your co
 [you're tracking those components in your recipe config](/docs/concepts/recipes#advanced-jsx-tracking).
 
 ```tsx
-import { styled } from '../styled-system/jsx'
-import { button, type ButtonVariantProps } from '../styled-system/recipes'
+import { styled } from "../styled-system/jsx";
+import { button, type ButtonVariantProps } from "../styled-system/recipes";
 
-const Button = (props: ButtonVariantProps) => <button className={button(props)}>Button</button>
+const Button = (props: ButtonVariantProps) => (
+  <button className={button(props)}>Button</button>
+);
 
-const App = () => <Button variant="secondary">Button</Button>
+const App = () => <Button variant="secondary">Button</Button>;
 ```
 
 ## Factory Function
@@ -168,16 +172,16 @@ You can also use the `styled` function to create a styled component from any com
 "a", "button").
 
 ```jsx
-import { styled } from '../styled-system/jsx'
-import { Button } from 'component-library'
+import { styled } from "../styled-system/jsx";
+import { Button } from "component-library";
 
-const StyledButton = styled(Button)
+const StyledButton = styled(Button);
 
 const App = () => (
   <StyledButton bg="blue.500" color="white" py="2" px="4" rounded="md">
     Button
   </StyledButton>
-)
+);
 ```
 
 > You can configure the `styled` function name using the [`config.jsxFactory`](/docs/references/config#jsxfactory)
@@ -189,33 +193,33 @@ You can define a recipe for your component using the `styled` function. This is 
 component that has a specific set of style props.
 
 ```jsx
-import { styled } from '../styled-system/jsx'
+import { styled } from "../styled-system/jsx";
 
-const Button = styled('button', {
+const Button = styled("button", {
   base: {
-    py: '2',
-    px: '4',
-    rounded: 'md'
+    py: "2",
+    px: "4",
+    rounded: "md",
   },
   variants: {
     variant: {
       primary: {
-        bg: 'blue.500',
-        color: 'white'
+        bg: "blue.500",
+        color: "white",
       },
       secondary: {
-        bg: 'gray.500',
-        color: 'white'
-      }
-    }
-  }
-})
+        bg: "gray.500",
+        color: "white",
+      },
+    },
+  },
+});
 
 const App = () => (
   <Button variant="secondary" mt="10px">
     Button
   </Button>
-)
+);
 ```
 
 ### Factory Options
@@ -224,9 +228,9 @@ There's a few options you can pass to the `styled` function to customize the beh
 
 ```ts
 interface FactoryOptions<TProps extends Dict> {
-  dataAttr?: boolean
-  defaultProps?: TProps
-  shouldForwardProp?(prop: string, variantKeys: string[]): boolean
+  dataAttr?: boolean;
+  defaultProps?: TProps;
+  shouldForwardProp?(prop: string, variantKeys: string[]): boolean;
 }
 ```
 
@@ -236,12 +240,12 @@ Setting `dataAttr` to true will add a `data-recipe="{recipeName}"` attribute to 
 is useful for testing and debugging.
 
 ```jsx
-import { styled } from '../styled-system/jsx'
-import { button } from '../styled-system/recipes'
+import { styled } from "../styled-system/jsx";
+import { button } from "../styled-system/recipes";
 
-const Button = styled('button', button, { dataAttr: true })
+const Button = styled("button", button, { dataAttr: true });
 
-const App = () => <Button variant="secondary">Button</Button>
+const App = () => <Button variant="secondary">Button</Button>;
 // => <button data-recipe="button" class="btn btn--variant_purple">Button</button>
 ```
 
@@ -251,17 +255,17 @@ allows you to skip writing wrapper components just to set a few props. It also a
 variants or base styles of a recipe.
 
 ```jsx
-import { styled } from '../styled-system/jsx'
-import { button } from '../styled-system/recipes'
+import { styled } from "../styled-system/jsx";
+import { button } from "../styled-system/recipes";
 
-const Button = styled('button', button, {
+const Button = styled("button", button, {
   defaultProps: {
-    variant: 'secondary',
-    px: '10px'
-  }
-})
+    variant: "secondary",
+    px: "10px",
+  },
+});
 
-const App = () => <Button>Button</Button>
+const App = () => <Button>Button</Button>;
 // => <button class="btn btn--variant_secondary px_10px">Button</button>
 ```
 
@@ -273,18 +277,19 @@ style props are forwarded.
 For example, you could use it to integrate with [Framer Motion](https://www.framer.com/motion/).
 
 ```jsx
-import { styled } from '../styled-system/jsx'
-import { button } from '../styled-system/recipes'
-import { motion, isValidMotionProp } from 'framer-motion'
+import { styled } from "../styled-system/jsx";
+import { button } from "../styled-system/recipes";
+import { motion, isValidMotionProp } from "framer-motion";
 
 const StyledMotion = styled(
   motion.div,
   {},
   {
     shouldForwardProp: (prop, variantKeys) =>
-      isValidMotionProp(prop) || (!variantKeys.includes(prop) && !isCssProperty(prop))
-  }
-)
+      isValidMotionProp(prop) ||
+      (!variantKeys.includes(prop) && !isCssProperty(prop)),
+  },
+);
 ```
 
 ### Unstyled prop
@@ -293,10 +298,10 @@ All styled components accept an `unstyled` prop that allows you to disable the r
 want to use a component's structure but apply completely custom styling.
 
 ```jsx
-import { styled } from '../styled-system/jsx'
-import { button } from '../styled-system/recipes'
+import { styled } from "../styled-system/jsx";
+import { button } from "../styled-system/recipes";
 
-const Button = styled('button', button)
+const Button = styled("button", button);
 
 const App = () => (
   <>
@@ -308,7 +313,7 @@ const App = () => (
       Unstyled Button
     </Button>
   </>
-)
+);
 ```
 
 ### Reducing the allowed style props
@@ -335,7 +340,7 @@ All the patterns provided by Panda are available as JSX components.
 > Learn more about the [patterns](/docs/customization/patterns) we provide.
 
 ```jsx
-import { Stack, Circle } from '../styled-system/jsx'
+import { Stack, Circle } from "../styled-system/jsx";
 
 const App = () => (
   <Stack gap="4" align="flex-start">
@@ -344,7 +349,7 @@ const App = () => (
       4
     </Circle>
   </Stack>
-)
+);
 ```
 
 ## Making your own styled components
@@ -355,21 +360,25 @@ other component props.
 > For this to work correctly, set the `jsxFramework` to the framework you're using in your panda config.
 
 ```tsx
-import { splitCssProps } from '../styled-system/jsx'
-import type { HTMLStyledProps } from '../styled-system/types'
+import { splitCssProps } from "../styled-system/jsx";
+import type { HTMLStyledProps } from "../styled-system/types";
 
-export function Component(props: HTMLStyledProps<'div'>) {
-  const [cssProps, restProps] = splitCssProps(props)
-  const { css: cssProp, ...styleProps } = cssProps
+export function Component(props: HTMLStyledProps<"div">) {
+  const [cssProps, restProps] = splitCssProps(props);
+  const { css: cssProp, ...styleProps } = cssProps;
 
-  const className = css({ display: 'flex', height: '20', width: '20' }, styleProps, cssProp)
+  const className = css(
+    { display: "flex", height: "20", width: "20" },
+    styleProps,
+    cssProp,
+  );
 
-  return <div {...restProps} className={className} />
+  return <div {...restProps} className={className} />;
 }
 
 // Usage
 function App() {
-  return <Component w="2">Click me</Component>
+  return <Component w="2">Click me</Component>;
 }
 ```
 
@@ -416,20 +425,20 @@ const Button = (props: ButtonProps) => {
 Use the `StyledVariantProps` type to extract the variants from a styled component.
 
 ```tsx {2}
-import { styled } from '../styled-system/jsx'
-import type { StyledVariantProps } from '../styled-system/jsx'
+import { styled } from "../styled-system/jsx";
+import type { StyledVariantProps } from "../styled-system/jsx";
 
-const Button = styled('button', {
-  base: { color: 'black' },
+const Button = styled("button", {
+  base: { color: "black" },
   variants: {
     state: {
-      error: { color: 'red' },
-      success: { color: 'green' }
-    }
-  }
-})
+      error: { color: "red" },
+      success: { color: "green" },
+    },
+  },
+});
 
-type ButtonVariantProps = StyledVariantProps<typeof Button>
+type ButtonVariantProps = StyledVariantProps<typeof Button>;
 //   ^ { state?: 'error' | 'success' | undefined }
 ```
 
@@ -438,12 +447,11 @@ type ButtonVariantProps = StyledVariantProps<typeof Button>
 Every pattern provided by Panda has a corresponding type that you can use to get type safety in your components.
 
 ```tsx {2}
-import { Stack } from '../styled-system/jsx'
-import type { StackProps } from '../styled-system/jsx'
+import { Stack } from "../styled-system/jsx";
+import type { StackProps } from "../styled-system/jsx";
 ```
 
 ---
-
 
 ## Styled System
 
@@ -460,7 +468,7 @@ as output path to generate the `styled-system` in.
 This is the core of what the `styled-system` does:
 
 ```ts
-css({ color: 'blue.300' }) // => "text_blue_300"
+css({ color: "blue.300" }); // => "text_blue_300"
 ```
 
 Since Panda doesn't rely on any bundler's (`vite`, `webpack`, etc) plugin, there is no code transformation happening to
@@ -518,7 +526,6 @@ don't have to ship the runtime to your users.
 
 ---
 
-
 ## Template Literals
 
 Panda allows you to write styles using template literals.
@@ -539,9 +546,9 @@ To use template literals, you need to set the `syntax` option in your `panda.con
 // panda.config.ts
 export default defineConfig({
   // ...
-  syntax: 'template-literal', // required
-  jsxFramework: 'react' // required for JSX utilities, e.g. `styled`
-})
+  syntax: "template-literal", // required
+  jsxFramework: "react", // required for JSX utilities, e.g. `styled`
+});
 ```
 
 Then run the codegen command to generate the functions:
@@ -556,15 +563,15 @@ This the basic way of writing template styles. It converts the template literal 
 you can pass to the `className` prop of an element.
 
 ```js
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const className = css`
   font-size: 16px;
   font-weight: bold;
-`
+`;
 
 function Heading() {
-  return <h1 className={className}>This is a title</h1>
+  return <h1 className={className}>This is a title</h1>;
 }
 
 // => <h1 className='font-size_16px font-weight_bold'></h1>
@@ -588,17 +595,17 @@ The `styled` tag allows you to create a component with encapsulated styles. It's
 `emotion` library.
 
 ```js
-import { styled } from '../styled-system/jsx'
+import { styled } from "../styled-system/jsx";
 
 // Create a styled component
 const Heading = styled.h1`
   font-size: 16px;
   font-weight: bold;
-`
+`;
 
 function Demo() {
   // Use the styled component
-  return <Heading>This is a title</Heading>
+  return <Heading>This is a title</Heading>;
 }
 
 // => <h1 class='font-size_16px font-weight_bold'>This is a title</h1>
@@ -627,7 +634,7 @@ const Button = styled.button`
   &:hover {
     color: blue;
   }
-`
+`;
 ```
 
 Using css nesting syntax, pseudo-elements, pseudo-selectors and combinators are also supported:
@@ -637,7 +644,7 @@ const Demo = styled.div`
   color: black;
 
   &::after {
-    content: '🐼';
+    content: "🐼";
   }
 
   & + & {
@@ -651,7 +658,7 @@ const Demo = styled.div`
   .parent & {
     color: red;
   }
-`
+`;
 ```
 
 Nested media and container queries are also supported:
@@ -667,7 +674,7 @@ const Demo = styled.div`
   @container (min-width: 200px) {
     color: red;
   }
-`
+`;
 ```
 
 ## Hashing class names
@@ -682,8 +689,8 @@ To achieve this, set the `hash` option in your `panda.config.ts` file to `true`:
 
 export default defineConfig({
   // ...
-  hash: true // optional
-})
+  hash: true, // optional
+});
 ```
 
 > Run the `codegen` command to regenerate the functions with hashing enabled.
@@ -718,12 +725,12 @@ Use the `token()` function or `{}` syntax in your template literals to reference
 will automatically generate the corresponding CSS variables.
 
 ```js
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const className = css`
   font-size: {fontSizes.md};
   font-weight: token(fontWeights.bold, 700);
-`
+`;
 ```
 
 ## Caveats
@@ -740,7 +747,6 @@ there are some caveats to be aware of:
 
 ---
 
-
 ## Virtual Color
 
 Panda allows you to create a virtual color or color placeholder in your project.
@@ -748,15 +754,15 @@ Panda allows you to create a virtual color or color placeholder in your project.
 The `colorPalette` property is how you create virtual colors.
 
 ```js
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const className = css({
-  colorPalette: 'blue',
-  bg: 'colorPalette.100',
+  colorPalette: "blue",
+  bg: "colorPalette.100",
   _hover: {
-    bg: 'colorPalette.200'
-  }
-})
+    bg: "colorPalette.200",
+  },
+});
 ```
 
 This will translate to the `blue.100` background color and `blue.200` background color on hover.
@@ -768,22 +774,22 @@ Virtual colors are useful when creating easily customizable components.
 You can also use virtual colors with recipes.
 
 ```js
-import { css, cva, cx } from '../styled-system/css'
+import { css, cva, cx } from "../styled-system/css";
 
 const button = cva({
   base: {
-    padding: 4
+    padding: 4,
     // you can also specify a default colorPalette in the `base` recipe key
     // colorPalette: 'blue',
     // ^^^^^^^^^^^^^^^^^^^^
   },
   variants: {
     variant: {
-      primary: { color: 'colorPalette.500' }
-    }
+      primary: { color: "colorPalette.500" },
+    },
   },
-  defaultVariants: { variant: 'primary' }
-})
+  defaultVariants: { variant: "primary" },
+});
 ```
 
 ## Using with different color modes
@@ -791,37 +797,49 @@ const button = cva({
 You can also use virtual colors with different conditions, such as color modes.
 
 ```js
-import { css, cva, cx } from '../styled-system/css'
+import { css, cva, cx } from "../styled-system/css";
 
 const someButton = cva({
   base: { padding: 4 },
   variants: {
     variant: {
       primary: {
-        bg: { base: 'colorPalette.500', _dark: 'colorPalette.200' },
-        color: { base: 'white', _dark: 'gray.900' }
-      }
-    }
+        bg: { base: "colorPalette.500", _dark: "colorPalette.200" },
+        color: { base: "white", _dark: "gray.900" },
+      },
+    },
   },
-  defaultVariants: { variant: 'primary' }
-})
+  defaultVariants: { variant: "primary" },
+});
 
 export const App = () => {
   return (
     <>
       <div className="light">
-        <button className={cx(css({ colorPalette: 'blue' }), someButton())}>Click me</button>
-        <button className={cx(css({ colorPalette: 'green' }), someButton())}>Click me</button>
-        <button className={cx(css({ colorPalette: 'red' }), someButton())}>Click me</button>
+        <button className={cx(css({ colorPalette: "blue" }), someButton())}>
+          Click me
+        </button>
+        <button className={cx(css({ colorPalette: "green" }), someButton())}>
+          Click me
+        </button>
+        <button className={cx(css({ colorPalette: "red" }), someButton())}>
+          Click me
+        </button>
       </div>
       <div className="dark">
-        <button className={cx(css({ colorPalette: 'blue' }), someButton())}>Click me</button>
-        <button className={cx(css({ colorPalette: 'green' }), someButton())}>Click me</button>
-        <button className={cx(css({ colorPalette: 'red' }), someButton())}>Click me</button>
+        <button className={cx(css({ colorPalette: "blue" }), someButton())}>
+          Click me
+        </button>
+        <button className={cx(css({ colorPalette: "green" }), someButton())}>
+          Click me
+        </button>
+        <button className={cx(css({ colorPalette: "red" }), someButton())}>
+          Click me
+        </button>
       </div>
     </>
-  )
-}
+  );
+};
 ```
 
 ## Semantic Virtual Colors
@@ -836,69 +854,69 @@ const theme = {
       colors: {
         button: {
           dark: {
-            value: 'navy'
+            value: "navy",
           },
           light: {
             DEFAULT: {
-              value: 'skyblue'
+              value: "skyblue",
             },
             accent: {
               DEFAULT: {
-                value: 'cyan'
+                value: "cyan",
               },
               secondary: {
-                value: 'blue'
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
+                value: "blue",
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
 ```
 
 You can now use the root `button` color palette and its values directly:
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 export const App = () => {
   return (
     <button
       className={css({
-        colorPalette: 'button',
-        color: 'colorPalette.light',
-        backgroundColor: 'colorPalette.dark',
+        colorPalette: "button",
+        color: "colorPalette.light",
+        backgroundColor: "colorPalette.dark",
         _hover: {
-          color: 'colorPalette.light.accent',
-          background: 'colorPalette.light.accent.secondary'
-        }
+          color: "colorPalette.light.accent",
+          background: "colorPalette.light.accent.secondary",
+        },
       })}
     >
       Root color palette
     </button>
-  )
-}
+  );
+};
 ```
 
 Or you can use any deeply nested property (e.g. `button.light.accent`) as a root color palette:
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 export const App = () => {
   return (
     <button
       className={css({
-        colorPalette: 'button.light.accent',
-        color: 'colorPalette.secondary'
+        colorPalette: "button.light.accent",
+        color: "colorPalette.secondary",
       })}
     >
       Nested color palette leaf
     </button>
-  )
-}
+  );
+};
 ```
 
 > **Note**: Nested tokens require glob patterns in the `colorPalette` config (e.g., `'button.*'`) to generate proper CSS
@@ -917,38 +935,41 @@ export default defineConfig({
   staticCss: {
     css: [
       {
-        properties: { colorPalette: ['red', 'blue'] }
-      }
-    ]
-  }
-})
+        properties: { colorPalette: ["red", "blue"] },
+      },
+    ],
+  },
+});
 ```
 
 Then in your code, you can design components that use the `colorPalette` property:
 
 ```tsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 function ButtonShowcase() {
-  const [colorPalette, setColorPalette] = useState('red')
+  const [colorPalette, setColorPalette] = useState("red");
   return (
     <div>
-      <select value={colorPalette} onChange={e => setColorPalette(e.currentTarget.value)}>
+      <select
+        value={colorPalette}
+        onChange={(e) => setColorPalette(e.currentTarget.value)}
+      >
         <option value="red">Red</option>
         <option value="blue">Blue</option>
       </select>
 
       <button
         className={css({
-          bg: 'colorPalette.50',
-          color: 'colorPalette.500',
-          colorPalette
+          bg: "colorPalette.50",
+          color: "colorPalette.500",
+          colorPalette,
         })}
       >
         Click me
       </button>
     </div>
-  )
+  );
 }
 ```
 
@@ -964,15 +985,15 @@ theme.
 To completely disable color palette generation, set `enabled` to `false`:
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     colorPalette: {
-      enabled: false
-    }
-  }
-})
+      enabled: false,
+    },
+  },
+});
 ```
 
 ### Include Specific Colors
@@ -980,15 +1001,15 @@ export default defineConfig({
 To generate color palettes for only specific colors, use the `include` option:
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     colorPalette: {
-      include: ['gray', 'blue', 'red']
-    }
-  }
-})
+      include: ["gray", "blue", "red"],
+    },
+  },
+});
 ```
 
 This will only generate color palettes for `gray`, `blue`, and `red` colors, even if you have other colors defined in
@@ -998,7 +1019,7 @@ your theme.
 
 ```ts filename="panda.config.ts"
 colorPalette: {
-  include: ['gray.*', 'blue.*'] // Includes all nested tokens
+  include: ["gray.*", "blue.*"]; // Includes all nested tokens
 }
 ```
 
@@ -1007,15 +1028,15 @@ colorPalette: {
 To exclude certain colors from color palette generation, use the `exclude` option:
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     colorPalette: {
-      exclude: ['yellow', 'orange']
-    }
-  }
-})
+      exclude: ["yellow", "orange"],
+    },
+  },
+});
 ```
 
 This will generate color palettes for all colors except `yellow` and `orange`.
@@ -1025,17 +1046,17 @@ This will generate color palettes for all colors except `yellow` and `orange`.
 You can combine the `enabled`, `include`, and `exclude` options as needed:
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   theme: {
     colorPalette: {
       enabled: true,
-      include: ['gray', 'blue', 'red', 'green'],
-      exclude: ['red'] // This will override the include for 'red'
-    }
-  }
-})
+      include: ["gray", "blue", "red", "green"],
+      exclude: ["red"], // This will override the include for 'red'
+    },
+  },
+});
 ```
 
 In this example, color palettes will be generated for `gray`, `blue`, and `green`, but not for `red` (since it's
@@ -1072,7 +1093,6 @@ className={css({
 ```
 
 ---
-
 
 ## Writing Styles
 
@@ -1141,23 +1161,23 @@ Properties like `borderRadius`, `backgroundColor`, and `padding` can be swapped 
 `bg`, and `p`.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 // BEFORE - Good
 const styles = css({
-  backgroundColor: 'gainsboro',
-  borderRadius: '9999px',
-  fontSize: '13px',
-  padding: '10px 15px'
-})
+  backgroundColor: "gainsboro",
+  borderRadius: "9999px",
+  fontSize: "13px",
+  padding: "10px 15px",
+});
 
 // AFTER - Better
 const styles = css({
-  bg: 'gainsboro',
-  rounded: '9999px',
-  fontSize: '13px',
-  p: '10px 15px'
-})
+  bg: "gainsboro",
+  rounded: "9999px",
+  fontSize: "13px",
+  p: "10px 15px",
+});
 ```
 
 > Shorthands are documented alongside their respective properties in the [utilities](/docs/utilities/background)
@@ -1170,10 +1190,10 @@ properties are connected to either the native CSS properties or their respective
 `theme` object.
 
 ```ts
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 //                       ⤵ you'll get autocomplete for colors
-const styles = css({ bg: '|' })
+const styles = css({ bg: "|" });
 ```
 
 > You can also enable the `strictTokens: true` setting in the Panda configuration. This allows only token values and
@@ -1191,24 +1211,24 @@ With `config.strictTokens` enabled, you can only use token values in your styles
 CSS values.
 
 ```ts filename="panda.config.ts"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
-css({ bg: 'red' }) // ❌ Error: "red" is not a valid token value
-css({ fontSize: '123px' }) // ❌ Error: "123px" is not a valid token value
+css({ bg: "red" }); // ❌ Error: "red" is not a valid token value
+css({ fontSize: "123px" }); // ❌ Error: "123px" is not a valid token value
 
-css({ bg: 'red.400' }) // ✅ Valid
-css({ fontSize: '[123px]' }) // ✅ Valid, since `[123px]` is using the escape-hatch syntax
-css({ content: 'abc' }) // ✅ Valid, since `content` isn't bound to a config token
+css({ bg: "red.400" }); // ✅ Valid
+css({ fontSize: "[123px]" }); // ✅ Valid, since `[123px]` is using the escape-hatch syntax
+css({ content: "abc" }); // ✅ Valid, since `content` isn't bound to a config token
 ```
 
 For one-off styles, you can always use the escape-hatch syntax `[xxx]` to use custom or raw CSS values without
 TypeScript errors.
 
 ```ts filename="panda.config.ts"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
-css({ bg: '[red]' }) // ✅ Valid, since `[red]` is using the escape-hatch syntax
-css({ fontSize: '[123px]' }) // ✅ Valid, since `[123px]` is using the escape-hatch syntax
+css({ bg: "[red]" }); // ✅ Valid, since `[red]` is using the escape-hatch syntax
+css({ fontSize: "[123px]" }); // ✅ Valid, since `[123px]` is using the escape-hatch syntax
 ```
 
 #### strictPropertyValues
@@ -1217,94 +1237,94 @@ With `config.strictPropertyValues` enabled, you can only use valid CSS values fo
 list of values in your styles. This prevents the use of custom or raw CSS values.
 
 ```ts filename="panda.config.ts"
-css({ display: 'flex' }) // ✅ Valid
-css({ display: 'block' }) // ✅ Valid
+css({ display: "flex" }); // ✅ Valid
+css({ display: "block" }); // ✅ Valid
 
-css({ display: 'abc' }) // ❌ will throw since 'abc' is not part of predefined values of 'display'
-css({ pos: 'absolute123' }) // ❌ will throw since 'absolute123' is not part of predefined values of 'position'
-css({ display: '[var(--btn-display)]' }) // ✅ Valid, since `[var(--btn-display)]` is using the escape-hatch syntax
+css({ display: "abc" }); // ❌ will throw since 'abc' is not part of predefined values of 'display'
+css({ pos: "absolute123" }); // ❌ will throw since 'absolute123' is not part of predefined values of 'position'
+css({ display: "[var(--btn-display)]" }); // ✅ Valid, since `[var(--btn-display)]` is using the escape-hatch syntax
 
-css({ content: '""' }) // ✅ Valid, since `content` does not have a predefined list of values
-css({ flex: '0 1' }) // ✅ Valid, since `flex` does not have a predefined list of values
+css({ content: '""' }); // ✅ Valid, since `content` does not have a predefined list of values
+css({ flex: "0 1" }); // ✅ Valid, since `flex` does not have a predefined list of values
 ```
 
 The `config.strictPropertyValues` option will only be applied to this exhaustive list of properties:
 
 ```ts
 type StrictableProps =
-  | 'alignContent'
-  | 'alignItems'
-  | 'alignSelf'
-  | 'all'
-  | 'animationComposition'
-  | 'animationDirection'
-  | 'animationFillMode'
-  | 'appearance'
-  | 'backfaceVisibility'
-  | 'backgroundAttachment'
-  | 'backgroundClip'
-  | 'borderCollapse'
-  | 'border'
-  | 'borderBlock'
-  | 'borderBlockEnd'
-  | 'borderBlockStart'
-  | 'borderBottom'
-  | 'borderInline'
-  | 'borderInlineEnd'
-  | 'borderInlineStart'
-  | 'borderLeft'
-  | 'borderRight'
-  | 'borderTop'
-  | 'borderBlockEndStyle'
-  | 'borderBlockStartStyle'
-  | 'borderBlockStyle'
-  | 'borderBottomStyle'
-  | 'borderInlineEndStyle'
-  | 'borderInlineStartStyle'
-  | 'borderInlineStyle'
-  | 'borderLeftStyle'
-  | 'borderRightStyle'
-  | 'borderTopStyle'
-  | 'boxDecorationBreak'
-  | 'boxSizing'
-  | 'breakAfter'
-  | 'breakBefore'
-  | 'breakInside'
-  | 'captionSide'
-  | 'clear'
-  | 'columnFill'
-  | 'columnRuleStyle'
-  | 'contentVisibility'
-  | 'direction'
-  | 'display'
-  | 'emptyCells'
-  | 'flexDirection'
-  | 'flexWrap'
-  | 'float'
-  | 'fontKerning'
-  | 'forcedColorAdjust'
-  | 'isolation'
-  | 'lineBreak'
-  | 'mixBlendMode'
-  | 'objectFit'
-  | 'outlineStyle'
-  | 'overflow'
-  | 'overflowX'
-  | 'overflowY'
-  | 'overflowBlock'
-  | 'overflowInline'
-  | 'overflowWrap'
-  | 'pointerEvents'
-  | 'position'
-  | 'resize'
-  | 'scrollBehavior'
-  | 'touchAction'
-  | 'transformBox'
-  | 'transformStyle'
-  | 'userSelect'
-  | 'visibility'
-  | 'wordBreak'
-  | 'writingMode'
+  | "alignContent"
+  | "alignItems"
+  | "alignSelf"
+  | "all"
+  | "animationComposition"
+  | "animationDirection"
+  | "animationFillMode"
+  | "appearance"
+  | "backfaceVisibility"
+  | "backgroundAttachment"
+  | "backgroundClip"
+  | "borderCollapse"
+  | "border"
+  | "borderBlock"
+  | "borderBlockEnd"
+  | "borderBlockStart"
+  | "borderBottom"
+  | "borderInline"
+  | "borderInlineEnd"
+  | "borderInlineStart"
+  | "borderLeft"
+  | "borderRight"
+  | "borderTop"
+  | "borderBlockEndStyle"
+  | "borderBlockStartStyle"
+  | "borderBlockStyle"
+  | "borderBottomStyle"
+  | "borderInlineEndStyle"
+  | "borderInlineStartStyle"
+  | "borderInlineStyle"
+  | "borderLeftStyle"
+  | "borderRightStyle"
+  | "borderTopStyle"
+  | "boxDecorationBreak"
+  | "boxSizing"
+  | "breakAfter"
+  | "breakBefore"
+  | "breakInside"
+  | "captionSide"
+  | "clear"
+  | "columnFill"
+  | "columnRuleStyle"
+  | "contentVisibility"
+  | "direction"
+  | "display"
+  | "emptyCells"
+  | "flexDirection"
+  | "flexWrap"
+  | "float"
+  | "fontKerning"
+  | "forcedColorAdjust"
+  | "isolation"
+  | "lineBreak"
+  | "mixBlendMode"
+  | "objectFit"
+  | "outlineStyle"
+  | "overflow"
+  | "overflowX"
+  | "overflowY"
+  | "overflowBlock"
+  | "overflowInline"
+  | "overflowWrap"
+  | "pointerEvents"
+  | "position"
+  | "resize"
+  | "scrollBehavior"
+  | "touchAction"
+  | "transformBox"
+  | "transformStyle"
+  | "userSelect"
+  | "visibility"
+  | "wordBreak"
+  | "writingMode";
 ```
 
 ## Nested Styles
@@ -1321,10 +1341,10 @@ Panda supports the native css nesting syntax. You can use the `&` selector to cr
 ```jsx
 <div
   className={css({
-    bg: 'red.400',
-    '&:hover': {
-      bg: 'orange.400'
-    }
+    bg: "red.400",
+    "&:hover": {
+      bg: "orange.400",
+    },
   })}
 />
 ```
@@ -1334,10 +1354,10 @@ You can also target children and siblings using the `&` syntax.
 ```jsx
 <div
   className={css({
-    bg: 'red.400',
-    '& span': {
-      color: 'pink.400'
-    }
+    bg: "red.400",
+    "& span": {
+      color: "pink.400",
+    },
   })}
 />
 ```
@@ -1355,10 +1375,10 @@ For example, to create a hover style, you can use the `_hover` pseudo prop.
 ```jsx
 <div
   className={css({
-    bg: 'red.400',
+    bg: "red.400",
     _hover: {
-      bg: 'orange.400'
-    }
+      bg: "orange.400",
+    },
   })}
 />
 ```
@@ -1375,19 +1395,19 @@ Global styles are inserted at the top of the stylesheet and are scoped to the `@
 > For resets, global variables, theming patterns, and more examples, see [Global styles](/docs/concepts/global-styles).
 
 ```js filename="panda.config.ts"
-import { defineConfig, defineGlobalStyles } from '@pandacss/dev'
+import { defineConfig, defineGlobalStyles } from "@pandacss/dev";
 
 const globalCss = defineGlobalStyles({
-  'html, body': {
-    color: 'gray.900',
-    lineHeight: '1.5'
-  }
-})
+  "html, body": {
+    color: "gray.900",
+    lineHeight: "1.5",
+  },
+});
 
 export default defineConfig({
   // ...
-  globalCss
-})
+  globalCss,
+});
 ```
 
 The styles generated at build time will look like this:
@@ -1410,9 +1430,9 @@ Passing multiple styles to the `css` function will deeply merge the styles, allo
 predictable way.
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
-const result = css({ mx: '3', paddingTop: '4' }, { mx: '10', pt: '6' })
+const result = css({ mx: "3", paddingTop: "4" }, { mx: "10", pt: "6" });
 //    ^? result = "mx_10 pt_6"
 ```
 
@@ -1420,25 +1440,28 @@ To design a component that supports style overrides, you can provide the `css` p
 merged correctly.
 
 ```tsx filename="src/components/Button.tsx"
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 export const Button = ({ css: cssProp = {}, children }) => {
-  const className = css({ display: 'flex', alignItems: 'center', color: 'black' }, cssProp)
-  return <button className={className}>{children}</button>
-}
+  const className = css(
+    { display: "flex", alignItems: "center", color: "black" },
+    cssProp,
+  );
+  return <button className={className}>{children}</button>;
+};
 ```
 
 Then you can use the `Button` component like this:
 
 ```tsx filename="src/app/page.tsx"
-import { Button } from './Button'
+import { Button } from "./Button";
 
 export default function Page() {
   return (
-    <Button css={{ color: 'pink', _hover: { color: 'red' } }}>
+    <Button css={{ color: "pink", _hover: { color: "red" } }}>
       will result in `class="d_flex items_center text_pink hover:text_red"`
     </Button>
-  )
+  );
 }
 ```
 
@@ -1450,85 +1473,85 @@ objects to be merged as expected in any situation.
 **Pattern Example:**
 
 ```tsx filename="src/components/Button.tsx"
-import { hstack } from '../styled-system/patterns'
-import { css } from '../styled-system/css'
+import { hstack } from "../styled-system/patterns";
+import { css } from "../styled-system/css";
 
 export const Button = ({ css: cssProp = {}, children }) => {
   // using the flex pattern
   const hstackProps = hstack.raw({
-    border: '1px solid',
-    _hover: { color: 'blue.400' }
-  })
+    border: "1px solid",
+    _hover: { color: "blue.400" },
+  });
 
   // merging the styles
-  const className = css(hstackProps, cssProp)
+  const className = css(hstackProps, cssProp);
 
-  return <button className={className}>{children}</button>
-}
+  return <button className={className}>{children}</button>;
+};
 ```
 
 **CVA Example:**
 
 ```tsx filename="src/components/Button.tsx"
-import { css, cva } from '../styled-system/css'
+import { css, cva } from "../styled-system/css";
 
 const buttonRecipe = cva({
-  base: { display: 'flex', fontSize: 'lg' },
+  base: { display: "flex", fontSize: "lg" },
   variants: {
     variant: {
-      primary: { color: 'white', backgroundColor: 'blue.500' }
-    }
-  }
-})
+      primary: { color: "white", backgroundColor: "blue.500" },
+    },
+  },
+});
 
 export const Button = ({ css: cssProp = {}, children }) => {
   const className = css(
     // using the button recipe
-    buttonRecipe.raw({ variant: 'primary' }),
+    buttonRecipe.raw({ variant: "primary" }),
 
     // adding style overrides (internal)
-    { _hover: { color: 'blue.400' } },
+    { _hover: { color: "blue.400" } },
 
     // adding style overrides (external)
-    cssProp
-  )
+    cssProp,
+  );
 
-  return <button className={className}>{children}</button>
-}
+  return <button className={className}>{children}</button>;
+};
 ```
 
 **SVA Example:**
 
 ```tsx filename="src/components/Button.tsx"
-import { css, sva } from '../styled-system/css'
+import { css, sva } from "../styled-system/css";
 
 const checkbox = sva({
-  slots: ['root', 'control', 'label'],
+  slots: ["root", "control", "label"],
   base: {
-    root: { display: 'flex', alignItems: 'center', gap: '2' },
-    control: { borderWidth: '1px', borderRadius: 'sm' },
-    label: { marginStart: '2' }
+    root: { display: "flex", alignItems: "center", gap: "2" },
+    control: { borderWidth: "1px", borderRadius: "sm" },
+    label: { marginStart: "2" },
   },
   variants: {
     size: {
       sm: {
-        control: { width: '8', height: '8' },
-        label: { fontSize: 'sm' }
+        control: { width: "8", height: "8" },
+        label: { fontSize: "sm" },
       },
       md: {
-        control: { width: '10', height: '10' },
-        label: { fontSize: 'md' }
-      }
-    }
+        control: { width: "10", height: "10" },
+        label: { fontSize: "md" },
+      },
+    },
   },
   defaultVariants: {
-    size: 'sm'
-  }
-})
+    size: "sm",
+  },
+});
 
 export const Checkbox = ({ rootProps, controlProps, labelProps }) => {
   // using the checkbox recipe
-  const slotStyles = checkbox.raw({ size: 'md' })
+  const slotStyles = checkbox.raw({ size: "md" });
 
   return (
     <label className={css(slotStyles.root, rootProps)}>
@@ -1536,8 +1559,8 @@ export const Checkbox = ({ rootProps, controlProps, labelProps }) => {
       <div className={css(slotStyles.control, controlProps)} />
       <span className={css(slotStyles.label, labelProps)}>Checkbox Label</span>
     </label>
-  )
-}
+  );
+};
 
 // Usage
 
@@ -1545,11 +1568,11 @@ const App = () => {
   return (
     <Checkbox
       rootProps={css.raw({ gap: 4 })}
-      controlProps={css.raw({ borderColor: 'yellow.400' })}
-      labelProps={css.raw({ fontSize: 'lg' })}
+      controlProps={css.raw({ borderColor: "yellow.400" })}
+      labelProps={css.raw({ fontSize: "lg" })}
     />
-  )
-}
+  );
+};
 ```
 
 ### Classname concatenation
@@ -1557,19 +1580,19 @@ const App = () => {
 Panda provides a simple `cx` function to join classnames. It accepts a list of classnames and returns a string.
 
 ```jsx
-import { css, cx } from '../styled-system/css'
+import { css, cx } from "../styled-system/css";
 
 const styles = css({
-  borderWidth: '1px',
-  borderRadius: '8px',
-  paddingX: '12px',
-  paddingY: '24px'
-})
+  borderWidth: "1px",
+  borderRadius: "8px",
+  paddingX: "12px",
+  paddingY: "24px",
+});
 
 const Card = ({ className, ...props }) => {
-  const rootClassName = cx('group', styles, className)
-  return <div className={rootClassName} {...props} />
-}
+  const rootClassName = cx("group", styles, className);
+  return <div className={rootClassName} {...props} />;
+};
 ```
 
 ### Hashing
@@ -1579,12 +1602,12 @@ long, and a bit annoying. If you prefer to have terser classnames, use the `hash
 variable name hashing.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
-  hash: true
-})
+  hash: true,
+});
 ```
 
 > You might need to generate a new code artifact by running `panda codegen --clean`
@@ -1592,15 +1615,15 @@ export default defineConfig({
 When you write a style like this:
 
 ```jsx
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const styles = css({
-  display: 'flex',
-  flexDirection: 'row',
+  display: "flex",
+  flexDirection: "row",
   _hover: {
-    bg: 'red.50'
-  }
-})
+    bg: "red.50",
+  },
+});
 ```
 
 The hash generated css will look like:
@@ -1627,16 +1650,16 @@ Applying important styles works just like CSS
 
 ```js
 css({
-  color: 'red !important'
-})
+  color: "red !important",
+});
 ```
 
 You can also apply important using just the exclamation syntax `!`
 
 ```js
 css({
-  color: 'red!'
-})
+  color: "red!",
+});
 ```
 
 ## TypeScript
@@ -1644,12 +1667,12 @@ css({
 Use the `SystemStyleObject` type if you want to type your styles.
 
 ```ts {2}
-import { css } from '../styled-system/css'
-import type { SystemStyleObject } from '../styled-system/types'
+import { css } from "../styled-system/css";
+import type { SystemStyleObject } from "../styled-system/types";
 
 const styles: SystemStyleObject = {
-  color: 'red'
-}
+  color: "red",
+};
 ```
 
 ## Property conflicts
@@ -1694,37 +1717,35 @@ This can be especially useful when using a 3rd party library that provides custo
 that exposes a `--popper-reference-width`.
 
 ```ts filename="panda.config.ts"
-import { defineConfig } from '@pandacss/dev'
+import { defineConfig } from "@pandacss/dev";
 
 export default defineConfig({
   // ...
   globalVars: {
-    '--popper-reference-width': '4px',
+    "--popper-reference-width": "4px",
     // you can also generate a CSS @property
-    '--button-color': {
-      syntax: '<color>',
+    "--button-color": {
+      syntax: "<color>",
       inherits: false,
-      initialValue: 'blue'
-    }
-  }
-})
+      initialValue: "blue",
+    },
+  },
+});
 ```
 
 > Note: Keys defined in `globalVars` will be available as a value for _every_ utilities, as they're not bound to token
 > categories.
 
 ```ts
-import { css } from '../styled-system/css'
+import { css } from "../styled-system/css";
 
 const className = css({
-  '--button-color': 'colors.red.300',
+  "--button-color": "colors.red.300",
   // ^^^^^^^^^^^^  will be suggested
 
-  backgroundColor: 'var(--button-color)'
+  backgroundColor: "var(--button-color)",
   //                ^^^^^^^^^^^^^^^^^^  will be suggested
-})
+});
 ```
 
 ---
-
-

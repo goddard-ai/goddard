@@ -1,4 +1,5 @@
 # Component: DeviceFlowDialog
+
 - **Minimum Viable Component:** Modal dialog for GitHub device-flow authentication that shows the verification URL, user code, status, and completion progress.
 - **Props Interface:** `isOpen: boolean`; `deviceFlow: { verificationUri, userCode, expiresAt, pollIntervalSeconds } | null`; `status: "idle" | "starting" | "waiting" | "authorized" | "error"`; `errorMessage?: string | null`; `onClose: () => void`; `onRetry: () => void`.
 - **Sub-components:** None.
