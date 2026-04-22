@@ -1,34 +1,28 @@
 {
-  "rust-analyzer.linkedProjects": ["app/src-tauri/Cargo.toml", "core/tauri-plugin-ipc/Cargo.toml"],
-  "editor.formatOnSave": true,
-  "editor.defaultFormatter": "oxc.oxc-vscode",
   "typescript.tsdk": "./node_modules/typescript/lib",
-  "oxc.enable.oxfmt": true,
+  "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.oxc": "explicit"
   },
   "typescript.preferences.importModuleSpecifierEnding": "js",
   "rewrap.wrappingColumn": 90,
   "[javascript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[javascriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[typescriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[rust]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[json]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[jsonc]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "files.readonlyInclude": {
     "core/schema/src/acp-adapters.ts": true
