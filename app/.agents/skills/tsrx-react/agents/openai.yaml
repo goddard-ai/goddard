@@ -1,0 +1,4 @@
+interface:
+  display_name: "TSRX React"
+  short_description: "Build and debug React TSRX components"
+  default_prompt: "Use $tsrx-react to build, refactor, or debug React .tsrx components."

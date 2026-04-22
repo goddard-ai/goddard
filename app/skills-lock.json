@@ -40,6 +40,11 @@
       "source": "/Users/alec/dev/skills/packages",
       "sourceType": "local",
       "computedHash": "0ad8839072da56a0ce9e13544c328a5d51059cf03da4e7a337d624c404b6d901"
+    },
+    "tsrx-react": {
+      "source": "/Users/alec/dev/skills/packages/tsrx-react",
+      "sourceType": "local",
+      "computedHash": "3e521397999b4aa8ff645a45542cb1a978ebcb85d3132ab5217924a971ea902e"
     }
   }
 }
