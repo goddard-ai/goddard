@@ -3,19 +3,29 @@
   "singleQuote": false,
   "trailingComma": "all",
   "printWidth": 100,
-  "plugins": ["@tsrx/prettier-plugin", "@ianvs/prettier-plugin-sort-imports"],
+  "plugins": [
+    "@prettier/plugin-oxc",
+    "@tsrx/prettier-plugin",
+    "@ianvs/prettier-plugin-sort-imports"
+  ],
+  "overrides": [
+    {
+      "files": ["*.ts", "*.tsx"],
+      "options": { "parser": "oxc-ts" }
+    },
+    {
+      "files": ["*.js", "*.jsx", "*.mjs", "*.cjs"],
+      "options": { "parser": "oxc" }
+    }
+  ],
   "importOrder": [
     "<BUILTIN_MODULES>",
-    "^(?!.*(?:\\.style\\.ts|\\.styles\\.ts|\\.(?:css|scss|sass|less|pcss|styl))(?:\\?.*)?$)(?:@[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+|[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9._-]+)*)$",
+    "<THIRD_PARTY_MODULES>",
     "",
-    "^(?!.*(?:\\.style\\.ts|\\.styles\\.ts|\\.(?:css|scss|sass|less|pcss|styl))(?:\\?.*)?$)(?:~/|@/).+$",
-    "^(?!.*(?:\\.style\\.ts|\\.styles\\.ts|\\.(?:css|scss|sass|less|pcss|styl))(?:\\?.*)?$)#.+$",
-    "^(?!.*(?:\\.style\\.ts|\\.styles\\.ts|\\.(?:css|scss|sass|less|pcss|styl))(?:\\?.*)?$)\\.\\.(?:/.*)?$",
-    "^(?!.*(?:\\.style\\.ts|\\.styles\\.ts|\\.(?:css|scss|sass|less|pcss|styl))(?:\\?.*)?$)\\.(?:/.*)?$",
-    "(?:\\.style\\.ts|\\.styles\\.ts|\\.(?:css|scss|sass|less|pcss|styl))(?:\\?.*)?$",
-    "<THIRD_PARTY_MODULES>"
+    "^(?!.*(?:\\.style\\.ts|\\.css)(?:\\?.*)?$)~/.+$",
+    "^(?!.*(?:\\.style\\.ts|\\.css)(?:\\?.*)?$)\\.\\.(?:/.*)?$",
+    "^(?!.*(?:\\.style\\.ts|\\.css)(?:\\?.*)?$)\\.(?:/.*)?$",
+    "(?:\\.style\\.ts|\\.css)(?:\\?.*)?$"
   ],
-  "importOrderParserPlugins": ["typescript", "jsx"],
-  "importOrderTypeScriptVersion": "5.9.3",
-  "importOrderCaseSensitive": false
+  "importOrderTypeScriptVersion": "5.9.3"
 }

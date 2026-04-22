@@ -1,4 +1,5 @@
 *.md
-**/.agents/**
+**/.agents/
+**/dist/
 app/src/support/svg-icon-data.ts
 core/schema/src/acp-adapters.ts
