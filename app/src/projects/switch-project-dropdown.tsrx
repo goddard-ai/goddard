@@ -36,13 +36,8 @@ export component SwitchProjectDropdown() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   let triggerElement: HTMLButtonElement | null = null
-  let contentElement: HTMLDivElement | null = null
-  let inputElement: HTMLInputElement | null = null
-  let itemElements: Record<string, HTMLButtonElement | null> = {}
 
   const [isOpen, setIsOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
 
   const projects = orderProjectsByRecentActivity(
     projectRegistry.projectList,
@@ -52,31 +47,6 @@ export component SwitchProjectDropdown() {
     projectContext.activeProjectPath === null
       ? null
       : lookupProject(projectRegistry, projectContext.activeProjectPath)
-
-  const filteredProjects = projects.filter((project) => projectMatchesSearch(project, search))
-  const items: SwitchProjectItem[] =
-    search.trim().length === 0
-      ? [
-          { id: "open-folder", kind: "open-folder" },
-          ...filteredProjects.map(
-            (project) => ({
-              id: project.path,
-              kind: "project" as const,
-              project,
-            }),
-          ),
-        ]
-      : filteredProjects.map(
-          (project) => ({
-            id: project.path,
-            kind: "project" as const,
-            project,
-          }),
-        )
-  const highlightedItemIndex =
-    items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
-  const highlightedItem = items[highlightedItemIndex]
-  const highlightedItemId = highlightedItem?.id ?? null
 
   async function openFolderFromSwitcher() {
     setIsOpen(false)
@@ -89,103 +59,12 @@ export component SwitchProjectDropdown() {
     )
   }
 
-  function moveHighlightedIndex(delta: -1 | 1) {
-    setHighlightedIndex((currentIndex) => {
-      if (items.length === 0) {
-        return 0
-      }
-
-      const currentHighlightedIndex = Math.min(currentIndex, items.length - 1)
-
-      return delta > 0
-        ? Math.min(currentHighlightedIndex + 1, items.length - 1)
-        : Math.max(currentHighlightedIndex - 1, 0)
-    })
-  }
-
-  function activateItem(item: SwitchProjectItem | undefined) {
-    if (!item) {
-      return
-    }
-
-    if (item.kind === "open-folder") {
-      void openFolderFromSwitcher()
-      return
-    }
-
-    setIsOpen(false)
-    openProjectTab(
-      {
-        projectContext,
-        projectPath: item.project.path,
-        projectRegistry,
-        workbenchTabSet,
-      },
-    )
-  }
-
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
     setIsOpen(true)
   })
 
   useAppCommand(AppCommand.projects.openFolder, async () => {
     await openFolderFromSwitcher()
-  })
-
-  useEffect(() => {
-    if (!isOpen) {
-      setSearch("")
-      setHighlightedIndex(0)
-      return
-    }
-
-    queueMicrotask(() => {
-      const input = inputElement
-      input?.focus()
-      input?.setSelectionRange(input.value.length, input.value.length)
-    })
-  }, [isOpen])
-
-  useEffect(() => {
-    if (!isOpen || !highlightedItemId) {
-      return
-    }
-
-    itemElements[highlightedItemId]?.scrollIntoView(
-      {
-        block: "nearest",
-      },
-    )
-  }, [highlightedItemId, isOpen])
-
-  useListener(document, "mousedown", (event) => {
-    if (!isOpen) {
-      return
-    }
-
-    const target = event.target
-
-    if (!(target instanceof Node)) {
-      return
-    }
-
-    if (contentElement?.contains(target) || triggerElement?.contains(target)) {
-      return
-    }
-
-    setIsOpen(false)
-  })
-
-  useListener(document, "keydown", (event) => {
-    if (!isOpen || event.key !== "Escape") {
-      return
-    }
-
-    event.preventDefault()
-    setIsOpen(false)
-    queueMicrotask(() => {
-      triggerElement?.focus()
-    })
   })
 
   <button
@@ -210,84 +89,219 @@ export component SwitchProjectDropdown() {
     </span>
   </button>
   if (isOpen) {
-    <div {ref contentElement} class={styles.content}>
-      <label class={styles.searchField}>
-        <span class={styles.srOnly}>{"Search projects"}</span>
-        <Search aria-hidden={true} size={16} strokeWidth={2.1} />
-        <input
-          {ref inputElement}
-          class={styles.searchInput}
-          placeholder="Search projects"
-          value={search}
-          onInput={(event) => {
-            setSearch(event.currentTarget.value)
-            setHighlightedIndex(0)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault()
-              moveHighlightedIndex(1)
-              return
-            }
-
-            if (event.key === "ArrowUp") {
-              event.preventDefault()
-              moveHighlightedIndex(-1)
-              return
-            }
-
-            if (event.key === "Enter") {
-              event.preventDefault()
-              activateItem(highlightedItem)
-            }
-          }}
-        />
-      </label>
-      if (items.length > 0) {
-        <ul class={styles.list}>
-          for (const item of items; index index) {
-            <li key={item.id}>
-              <button
-                {ref (element) => {
-                  itemElements[item.id] = element
-                }}
-                class={styles.item}
-                data-highlighted={highlightedItemIndex === index ? "true" : "false"}
-                type="button"
-                onMouseEnter={() => {
-                  setHighlightedIndex(index)
-                }}
-                onClick={() => {
-                  activateItem(item)
-                }}
-              >
-                <span class={styles.itemBody}>
-                  if (item.kind === "open-folder") {
-                    <span class={styles.itemTitle}>{"Open folder…"}</span>
-                    <span class={styles.itemDetail}>
-                      {"Add a local project from your filesystem."}
-                    </span>
-                  } else {
-                    <span class={styles.itemTitleEllipsis}>
-                      {item.project.name}
-                    </span>
-                    <span class={styles.itemDetailEllipsis}>
-                      {item.project.path}
-                    </span>
-                  }
-                </span>
-                if (item.kind === "project" && activeProject?.path === item.project.path) {
-                  <span class={styles.activeBadge}>{"Active"}</span>
-                }
-              </button>
-            </li>
-          }
-        </ul>
-      } else {
-        <p class={styles.empty}>{"No matching projects."}</p>
-      }
-    </div>
+    <SwitchProjectDropdownContent
+      activeProjectPath={activeProject?.path ?? null}
+      onClose={() => {
+        setIsOpen(false)
+      }}
+      onOpenFolder={openFolderFromSwitcher}
+      onOpenProject={(projectPath) => {
+        setIsOpen(false)
+        openProjectTab(
+          {
+            projectContext,
+            projectPath,
+            projectRegistry,
+            workbenchTabSet,
+          },
+        )
+      }}
+      {projects}
+      {triggerElement}
+    />
   }
+}
+
+component SwitchProjectDropdownContent(props: {
+  activeProjectPath: string | null;
+  onClose: () => void;
+  onOpenFolder: () => Promise<void> | void;
+  onOpenProject: (projectPath: string) => void;
+  projects: readonly ProjectRecord[];
+  triggerElement: HTMLButtonElement | null;
+}) {
+  let contentElement: HTMLDivElement | null = null
+  let inputElement: HTMLInputElement | null = null
+  let itemElements: Record<string, HTMLButtonElement | null> = {}
+
+  const [search, setSearch] = useState("")
+  const [highlightedIndex, setHighlightedIndex] = useState(0)
+
+  const filteredProjects = props.projects.filter((project) => projectMatchesSearch(project, search))
+  const items: SwitchProjectItem[] =
+    search.trim().length === 0
+      ? [
+          { id: "open-folder", kind: "open-folder" },
+          ...filteredProjects.map(
+            (project) => ({
+              id: project.path,
+              kind: "project" as const,
+              project,
+            }),
+          ),
+        ]
+      : filteredProjects.map(
+          (project) => ({
+            id: project.path,
+            kind: "project" as const,
+            project,
+          }),
+        )
+  const highlightedItemIndex =
+    items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
+  const highlightedItem = items[highlightedItemIndex]
+  const highlightedItemId = highlightedItem?.id ?? null
+
+  function moveHighlightedIndex(delta: -1 | 1) {
+    setHighlightedIndex((currentIndex) => {
+      if (items.length === 0) {
+        return 0
+      }
+
+      const currentHighlightedIndex = Math.min(currentIndex, items.length - 1)
+
+      return delta > 0
+        ? Math.min(currentHighlightedIndex + 1, items.length - 1)
+        : Math.max(currentHighlightedIndex - 1, 0)
+    })
+  }
+
+  function activateItem(item: SwitchProjectItem | undefined) {
+    if (!item) {
+      return
+    }
+
+    if (item.kind === "open-folder") {
+      void props.onOpenFolder()
+      return
+    }
+
+    props.onOpenProject(item.project.path)
+  }
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const input = inputElement
+      input?.focus()
+      input?.setSelectionRange(input.value.length, input.value.length)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!highlightedItemId) {
+      return
+    }
+
+    itemElements[highlightedItemId]?.scrollIntoView(
+      {
+        block: "nearest",
+      },
+    )
+  }, [highlightedItemId])
+
+  useListener(document, "mousedown", (event) => {
+    const target = event.target
+
+    if (!(target instanceof Node)) {
+      return
+    }
+
+    if (contentElement?.contains(target) || props.triggerElement?.contains(target)) {
+      return
+    }
+
+    props.onClose()
+  })
+
+  useListener(document, "keydown", (event) => {
+    if (event.key !== "Escape") {
+      return
+    }
+
+    event.preventDefault()
+    props.onClose()
+    queueMicrotask(() => {
+      props.triggerElement?.focus()
+    })
+  })
+
+  <div {ref contentElement} class={styles.content}>
+    <label class={styles.searchField}>
+      <span class={styles.srOnly}>{"Search projects"}</span>
+      <Search aria-hidden={true} size={16} strokeWidth={2.1} />
+      <input
+        {ref inputElement}
+        class={styles.searchInput}
+        placeholder="Search projects"
+        value={search}
+        onInput={(event) => {
+          setSearch(event.currentTarget.value)
+          setHighlightedIndex(0)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault()
+            moveHighlightedIndex(1)
+            return
+          }
+
+          if (event.key === "ArrowUp") {
+            event.preventDefault()
+            moveHighlightedIndex(-1)
+            return
+          }
+
+          if (event.key === "Enter") {
+            event.preventDefault()
+            activateItem(highlightedItem)
+          }
+        }}
+      />
+    </label>
+    if (items.length > 0) {
+      <ul class={styles.list}>
+        for (const item of items; index index) {
+          <li key={item.id}>
+            <button
+              {ref (element) => {
+                itemElements[item.id] = element
+              }}
+              class={styles.item}
+              data-highlighted={highlightedItemIndex === index ? "true" : "false"}
+              type="button"
+              onMouseEnter={() => {
+                setHighlightedIndex(index)
+              }}
+              onClick={() => {
+                activateItem(item)
+              }}
+            >
+              <span class={styles.itemBody}>
+                if (item.kind === "open-folder") {
+                  <span class={styles.itemTitle}>{"Open folder…"}</span>
+                  <span class={styles.itemDetail}>
+                    {"Add a local project from your filesystem."}
+                  </span>
+                } else {
+                  <span class={styles.itemTitleEllipsis}>
+                    {item.project.name}
+                  </span>
+                  <span class={styles.itemDetailEllipsis}>
+                    {item.project.path}
+                  </span>
+                }
+              </span>
+              if (item.kind === "project" && props.activeProjectPath === item.project.path) {
+                <span class={styles.activeBadge}>{"Active"}</span>
+              }
+            </button>
+          </li>
+        }
+      </ul>
+    } else {
+      <p class={styles.empty}>{"No matching projects."}</p>
+    }
+  </div>
 }
 
 export default SwitchProjectDropdown

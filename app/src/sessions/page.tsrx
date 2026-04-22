@@ -23,51 +23,6 @@ component SessionsPage() {
   const { sessions } = useQuery(goddardSdk.session.list, [
     { limit: SESSION_LIST_LIMIT },
   ])
-  const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
-
-  function openSession(sessionId: DaemonSession["id"]) {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
-
-    if (!session) {
-      return
-    }
-
-    workbenchTabSet.openOrFocusTab(
-      {
-        id: `session:${session.id}`,
-        kind: "sessionChat",
-        title: getSessionDisplayTitle(session),
-        payload: {
-          projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
-          sessionId: session.id,
-        },
-        dirty: false,
-      },
-    )
-  }
-
-  function openSessionChanges(sessionId: DaemonSession["id"]) {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
-
-    if (!session) {
-      return
-    }
-
-    queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
-    workbenchTabSet.openOrFocusTab(
-      {
-        id: `session-changes:${session.id}`,
-        kind: "sessionChanges",
-        title: `Changes · ${getSessionDisplayTitle(session)}`,
-        payload: {
-          sessionId: session.id,
-          sessionTitle: getSessionDisplayTitle(session),
-          repositoryLabel: getSessionRepositoryLabel(session),
-        },
-        dirty: false,
-      },
-    )
-  }
 
   <div class={styles.root}>
     <ListToolbar
@@ -77,6 +32,52 @@ component SessionsPage() {
       }}
     />
     <div class={styles.listBody}>
+      const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+
+      function openSession(sessionId: DaemonSession["id"]) {
+        const session = sessions.find((candidate) => candidate.id === sessionId)
+
+        if (!session) {
+          return
+        }
+
+        workbenchTabSet.openOrFocusTab(
+          {
+            id: `session:${session.id}`,
+            kind: "sessionChat",
+            title: getSessionDisplayTitle(session),
+            payload: {
+              projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
+              sessionId: session.id,
+            },
+            dirty: false,
+          },
+        )
+      }
+
+      function openSessionChanges(sessionId: DaemonSession["id"]) {
+        const session = sessions.find((candidate) => candidate.id === sessionId)
+
+        if (!session) {
+          return
+        }
+
+        queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
+        workbenchTabSet.openOrFocusTab(
+          {
+            id: `session-changes:${session.id}`,
+            kind: "sessionChanges",
+            title: `Changes · ${getSessionDisplayTitle(session)}`,
+            payload: {
+              sessionId: session.id,
+              sessionTitle: getSessionDisplayTitle(session),
+              repositoryLabel: getSessionRepositoryLabel(session),
+            },
+            dirty: false,
+          },
+        )
+      }
+
       <SessionsList
         onOpenChanges={openSessionChanges}
         onOpenSession={openSession}
