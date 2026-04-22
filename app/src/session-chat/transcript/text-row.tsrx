@@ -54,17 +54,17 @@ function renderContentBlock(props: {
   message: SessionTranscriptTextMessage;
 }) {
   if (props.block.type === "resource_link") {
-    return <tsx:react>
+    return <tsx>
       <div key={`${props.message.id}:block:${props.blockIndex}`} class={attachmentCardClass}>
         <div class={attachmentHeadingClass}>
           <span class={attachmentIconClass} aria-hidden="true">
             {isSkillResourceLink(props.block)
-              ? <tsx:react>
+              ? <tsx>
                   <BookOpen size={14} strokeWidth={2.2} />
-                </tsx:react>
-              : <tsx:react>
+                </tsx>
+              : <tsx>
                   <Link2 size={14} strokeWidth={2.2} />
-                </tsx:react>}
+                </tsx>}
           </span>
           <span>
             {props.block.name}
@@ -74,16 +74,16 @@ function renderContentBlock(props: {
           {getResourceLinkDetail(props.block)}
         </div>
       </div>
-    </tsx:react>
+    </tsx>
   }
 
   const markdownRole =
     props.message.role === "user" ? "user" : "assistant"
 
-  return <tsx:react>
+  return <tsx>
     <MarkdownMessage key={`${props.message.id}:block:${props.blockIndex}`} markdown={props.block.text} role={markdownRole} streaming={props.message.streaming &&
       props.blockIndex === props.lastTextBlockIndex} />
-  </tsx:react>
+  </tsx>
 }
 
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */

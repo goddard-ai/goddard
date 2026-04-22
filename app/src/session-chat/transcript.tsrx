@@ -115,13 +115,13 @@ export component Transcript(props: TranscriptProps) {
       getItemKey={(message) => message.id}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
-      loadingFallback={<tsx:react>
-        <div class={loadingStateClass}>Preparing transcript layout...</div>
-      </tsx:react>}
+      loadingFallback={<tsx>
+        <div class={loadingStateClass}>
+          {"Preparing transcript layout..."}
+        </div>
+      </tsx>}
       overscanPx={VIRTUAL_OVERSCAN_PX}
-      renderRow={(row) => <tsx:react>
-        <TranscriptRow row={row} />
-      </tsx:react>}
+      renderRow={(row) => <tsx><TranscriptRow row={row} /></tsx>}
       scrollCacheKey={props.scrollCacheKey}
     />
   </div>

@@ -63,18 +63,18 @@ export component TerminalViewport(props: {
       tabIndex={0}
     >
       {props.terminal.viewRows.map(
-        (row) => <tsx:react>
+        (row) => <tsx>
           <div class={styles.row} key={row.key}>
             {row.segments.length === 0 ? " " : null}
             {row.segments.map(
-              (segment) => <tsx:react>
+              (segment) => <tsx>
                 <span key={segment.key} style={segment.style}>
                   {segment.text}
                 </span>
-              </tsx:react>,
+              </tsx>,
             )}
           </div>
-        </tsx:react>,
+        </tsx>,
       )}
     </div>
   </div>

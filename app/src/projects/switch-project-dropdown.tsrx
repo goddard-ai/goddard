@@ -210,10 +210,12 @@ export component SwitchProjectDropdown() {
     </span>
   </button>
   {isOpen
-    ? <tsx:react>
+    ? <tsx>
         <div ref={contentRef} class={styles.content}>
           <label class={styles.searchField}>
-            <span class={styles.srOnly}>Search projects</span>
+            <span class={styles.srOnly}>
+              {"Search projects"}
+            </span>
             <Search aria-hidden={true} size={16} strokeWidth={2.1} />
             <input ref={inputRef} class={styles.searchInput} placeholder="Search projects" value={search} onInput={(
               event,
@@ -240,13 +242,13 @@ export component SwitchProjectDropdown() {
             }} />
           </label>
           {items.length > 0
-            ? <tsx:react>
+            ? <tsx>
                 <ul class={styles.list}>
                   {items.map((item, index) => {
                     const isHighlighted = highlightedItemIndex === index
 
                     if (item.kind === "open-folder") {
-                      return <tsx:react>
+                      return <tsx>
                         <li key={item.id}>
                           <button ref={(element) => {
                             itemRefs.current[item.id] = element
@@ -258,17 +260,21 @@ export component SwitchProjectDropdown() {
                             activateItem(item)
                           }}>
                             <span class={styles.itemBody}>
-                              <span class={styles.itemTitle}>Open folder…</span>
-                              <span class={styles.itemDetail}>Add a local project from your filesystem.</span>
+                              <span class={styles.itemTitle}>
+                                {"Open folder…"}
+                              </span>
+                              <span class={styles.itemDetail}>
+                                {"Add a local project from your filesystem."}
+                              </span>
                             </span>
                           </button>
                         </li>
-                      </tsx:react>
+                      </tsx>
                     }
 
                     const isActiveProject = activeProject?.path === item.project.path
 
-                    return <tsx:react>
+                    return <tsx>
                       <li key={item.id}>
                         <button ref={(element) => {
                           itemRefs.current[item.id] = element
@@ -288,21 +294,25 @@ export component SwitchProjectDropdown() {
                             </span>
                           </span>
                           {isActiveProject
-                            ? <tsx:react>
-                                <span class={styles.activeBadge}>Active</span>
-                              </tsx:react>
+                            ? <tsx>
+                                <span class={styles.activeBadge}>
+                                  {"Active"}
+                                </span>
+                              </tsx>
                             : null}
                         </button>
                       </li>
-                    </tsx:react>
+                    </tsx>
                   })}
                 </ul>
-              </tsx:react>
-            : <tsx:react>
-                <p class={styles.empty}>No matching projects.</p>
-              </tsx:react>}
+              </tsx>
+            : <tsx>
+                <p class={styles.empty}>
+                  {"No matching projects."}
+                </p>
+              </tsx>}
         </div>
-      </tsx:react>
+      </tsx>
     : null}
 }
 

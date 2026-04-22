@@ -270,21 +270,21 @@ component KeyboardShortcutsView(props: { class?: string }) {
       </button>
     </label>
     {shortcutRegistry.loadError
-      ? <tsx:react>
+      ? <tsx>
           <div class={styles.warning}>
             The saved keymap could not be loaded, so the built-in profile is
           active.
             <br />
             {shortcutRegistry.loadError}
           </div>
-        </tsx:react>
+        </tsx>
       : null}
     {shortcutRegistry.writeError
-      ? <tsx:react>
+      ? <tsx>
           <div class={styles.error}>
             {shortcutRegistry.writeError}
           </div>
-        </tsx:react>
+        </tsx>
       : null}
     <div class={styles.tableFrame}>
       <table class={styles.table}>
@@ -314,7 +314,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
         <tbody>
           {visibleRows.length > 0
             ? (visibleRows.map(
-                (row) => <tsx:react>
+                (row) => <tsx>
                   <tr key={row.rowKey} class={styles.row}>
                     <td class={`${styles.cell} ${styles.commandCell}`}>
                       {row.label}
@@ -346,7 +346,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                     whenClause: row.whenClause,
                                   },
                                 )
-                              }}>Add shortcut</Menu.Item>
+                              }}>
+                                {"Add shortcut"}
+                              </Menu.Item>
                               <Menu.Item class={styles.menuItem} disabled={row.bindingIndex ===
                                 null} value={`${row.rowKey}:change`} onSelect={() => {
                                 if (row.bindingIndex === null) {
@@ -354,7 +356,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                 }
 
                                 openCaptureDialog(row)
-                              }}>Change shortcut</Menu.Item>
+                              }}>
+                                {"Change shortcut"}
+                              </Menu.Item>
                               <Menu.Item class={cx(
                                 styles.menuItem,
                                 styles.menuItemDanger,
@@ -369,7 +373,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                   row.commandId,
                                   row.bindingIndex,
                                 )
-                              }}>Remove shortcut</Menu.Item>
+                              }}>
+                                {"Remove shortcut"}
+                              </Menu.Item>
                               <Menu.Item class={styles.menuItem} disabled={!row.shortcut} value={`${row.rowKey}:show-matches`} onSelect={() => {
                                 if (!row.shortcut) {
                                   return
@@ -379,7 +385,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                 setIsRecordingSearchEnabled(false)
                                 setSearchText(formatShortcutSearch(row.shortcut))
                                 searchInputRef.current?.focus()
-                              }}>Show commands with same shortcut</Menu.Item>
+                              }}>
+                                {"Show commands with same shortcut"}
+                              </Menu.Item>
                             </Menu.Content>
                           </Menu.Positioner>
                         </MenuPortal>
@@ -387,7 +395,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                     </td>
                     <td class={styles.cell}>
                       {editingWhenRowKey === row.rowKey && row.bindingIndex !== null
-                        ? <tsx:react>
+                        ? <tsx>
                             <input autoFocus={true} class={styles.whenInput} defaultValue={row.whenClause ??
                               ""} onBlur={(event) => {
                               setEditingWhenRowKey(null)
@@ -411,9 +419,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                 setEditingWhenRowKey(null)
                               }
                             }} />
-                          </tsx:react>
+                          </tsx>
                         : row.bindingIndex !== null
-                          ? <tsx:react>
+                          ? <tsx>
                               <button class={cx(
                                 styles.cellButton,
                                 styles.whenButton,
@@ -423,29 +431,31 @@ component KeyboardShortcutsView(props: { class?: string }) {
                               }}>
                                 {row.whenClause ?? "Add when clause"}
                               </button>
-                            </tsx:react>
-                          : <tsx:react>
+                            </tsx>
+                          : <tsx>
                               <span class={styles.cellButtonMuted}>
                                 {row.whenClause ?? "–"}
                               </span>
-                            </tsx:react>}
+                            </tsx>}
                     </td>
                   </tr>
-                </tsx:react>,
+                </tsx>,
               ))
-            : <tsx:react>
+            : <tsx>
                 <tr>
                   <td class={styles.cell} colSpan={3}>
-                    <div class={styles.empty}>No matching shortcuts.</div>
+                    <div class={styles.empty}>
+                      {"No matching shortcuts."}
+                    </div>
                   </td>
                 </tr>
-              </tsx:react>}
+              </tsx>}
         </tbody>
       </table>
     </div>
     <Dialog.RootProvider value={captureDialog} lazyMount unmountOnExit>
       {captureState
-        ? <tsx:react>
+        ? <tsx>
             <KeyboardShortcutCaptureDialog currentExpression={captureState.currentExpression} dialog={captureDialog} label={captureState.label} mode={captureState.mode} whenClause={captureState.whenClause} onRemove={captureState.bindingIndex ===
             null
               ? undefined
@@ -491,7 +501,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                 setCaptureState(null)
               }
             }} />
-          </tsx:react>
+          </tsx>
         : null}
     </Dialog.RootProvider>
   </section>

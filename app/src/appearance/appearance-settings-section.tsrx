@@ -58,7 +58,7 @@ export component AppearanceSettingsSection() {
       </SettingsHelperText>
       <SettingsChoiceList>
         {themeModeOptions.map((option) => {
-          return <tsx:react>
+          return <tsx>
             <SettingsChoiceItem key={option.mode}>
               <SettingsChoiceLabel>
                 <SettingsChoiceInput checked={appearance.mode ===
@@ -75,7 +75,7 @@ export component AppearanceSettingsSection() {
                 </SettingsChoiceBody>
               </SettingsChoiceLabel>
             </SettingsChoiceItem>
-          </tsx:react>
+          </tsx>
         })}
       </SettingsChoiceList>
     </SettingsFieldset>

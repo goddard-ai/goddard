@@ -66,26 +66,29 @@ export component ProjectsPage() {
           </Dialog.Trigger>
         </header>
         {projects.length === 0
-          ? <tsx:react>
+          ? <tsx>
               <div class={styles.empty}>
                 <div class={styles.emptyCopy}>
-                  <h2 class={styles.title}>No projects yet</h2>
-                  <p class={styles.body}>Add a local directory to establish the app's explicit
-                  working set.</p>
+                  <h2 class={styles.title}>
+                    {"No projects yet"}
+                  </h2>
+                  <p class={styles.body}>
+                    {"Add a local directory to establish the app's explicit working set."}
+                  </p>
                   <div>
                     <Dialog.Trigger asChild>
                       <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
                         <Plus size={16} strokeWidth={2.2} />
-                        Add project
+                        {"Add project"}
                       </button>
                     </Dialog.Trigger>
                   </div>
                 </div>
               </div>
-            </tsx:react>
-          : <tsx:react>
+            </tsx>
+          : <tsx>
               <ProjectList onOpenProjectTab={openProjectInTab} onRemove={removeProject} onSelect={selectProject} projects={projects} selectedProjectPath={resolvedSelectedProjectPath} />
-            </tsx:react>}
+            </tsx>}
       </section>
       <aside class={styles.panel}>
         <div class={styles.asideBody}>
@@ -98,7 +101,7 @@ export component ProjectsPage() {
             </p>
           </div>
           {selectedProject
-            ? <tsx:react>
+            ? <tsx>
                 <h3 class={styles.selectedTitle}>
                   {selectedProject.name}
                 </h3>
@@ -106,7 +109,7 @@ export component ProjectsPage() {
                   <InfoCard label="Path" value={selectedProject.path} />
                   <InfoCard label="Display name" value={selectedProject.name} />
                 </div>
-              </tsx:react>
+              </tsx>
             : null}
         </div>
       </aside>
@@ -127,12 +130,12 @@ component ProjectList(props: {
 }) {
   <ul class={styles.list}>
     {props.projects.map(
-      (project) => <tsx:react>
+      (project) => <tsx>
         <li key={project.path}>
           <ProjectListRow isSelected={props.selectedProjectPath ===
             project.path} onOpenProjectTab={props.onOpenProjectTab} onRemove={props.onRemove} onSelect={props.onSelect} project={project} />
         </li>
-      </tsx:react>,
+      </tsx>,
     )}
   </ul>
 }
@@ -163,11 +166,7 @@ component ProjectListRow(props: {
         <h3 class={styles.rowTitle}>
           {props.project.name}
         </h3>
-        {props.isSelected
-          ? <tsx:react>
-              <span class={styles.selectedBadge}>Selected</span>
-            </tsx:react>
-          : null}
+        {props.isSelected ? <tsx><span class={styles.selectedBadge}>Selected</span></tsx> : null}
       </div>
       <p class={styles.path}>
         {props.project.path}

@@ -52,9 +52,11 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
           </div>
           <Command.List
             class={styles.list}
-            empty={<tsx:react>
-              <div class={styles.empty}>No matching commands.</div>
-            </tsx:react>}
+            empty={<tsx>
+              <div class={styles.empty}>
+                {"No matching commands."}
+              </div>
+            </tsx>}
           >
             {(item, state) => {
               const Icon = item.icon
@@ -64,31 +66,31 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                   ? shortcutBinding
                   : shortcutBinding?.combo ?? shortcutBinding?.sequence
 
-              return <tsx:react>
+              return <tsx>
                 <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
                   gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
                 }}>
                   {Icon
-                    ? <tsx:react>
+                    ? <tsx>
                         <Icon aria-hidden={true} size={16} strokeWidth={2} style={{
                           color: state.active
                             ? token.var("colors.text")
                             : token.var("colors.muted"),
                         }} />
-                      </tsx:react>
+                      </tsx>
                     : null}
                   <span class={styles.itemLabel}>
                     {item.label}
                   </span>
                   {shortcut
-                    ? <tsx:react>
+                    ? <tsx>
                         <span class={styles.shortcut}>
                           {shortcut}
                         </span>
-                      </tsx:react>
+                      </tsx>
                     : null}
                 </div>
-              </tsx:react>
+              </tsx>
             }}
           </Command.List>
         </Command.Root>

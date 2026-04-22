@@ -110,41 +110,49 @@ export component KeyboardShortcutCaptureDialog(props: {
         </Dialog.CloseTrigger>
         <dl class={styles.metaList}>
           {props.currentExpression
-            ? <tsx:react>
+            ? <tsx>
                 <div class={styles.metaRow}>
-                  <dt class={styles.metaTerm}>Current shortcut</dt>
+                  <dt class={styles.metaTerm}>
+                    {"Current shortcut"}
+                  </dt>
                   <dd class={styles.metaDetail}>
                     {props.currentExpression}
                   </dd>
                 </div>
-              </tsx:react>
+              </tsx>
             : null}
           {props.whenClause
-            ? <tsx:react>
+            ? <tsx>
                 <div class={styles.metaRow}>
-                  <dt class={styles.metaTerm}>When</dt>
+                  <dt class={styles.metaTerm}>
+                    {"When"}
+                  </dt>
                   <dd class={styles.metaDetail}>
                     {props.whenClause}
                   </dd>
                 </div>
-              </tsx:react>
+              </tsx>
             : null}
         </dl>
         <section class={styles.captureSection}>
           <div class={styles.captureHeading}>
             <span class={styles.captureLabel}>{"Press the shortcut you want to use"}</span>
             {isRecording
-              ? <tsx:react>
-                  <span class={styles.captureStatus}>Listening…</span>
-                </tsx:react>
+              ? <tsx>
+                  <span class={styles.captureStatus}>
+                    {"Listening…"}
+                  </span>
+                </tsx>
               : null}
           </div>
           <div class={styles.captureValue}>
             {draftExpression
-              ? (draftExpression)
-              : <tsx:react>
-                  <span class={styles.capturePlaceholder}>Type a key combination or sequence</span>
-                </tsx:react>}
+              ? <tsx>{draftExpression}</tsx>
+              : <tsx>
+                  <span class={styles.capturePlaceholder}>
+                    {"Type a key combination or sequence"}
+                  </span>
+                </tsx>}
           </div>
         </section>
         <div class={styles.actionRow}>
@@ -152,11 +160,13 @@ export component KeyboardShortcutCaptureDialog(props: {
             <button class={styles.actionButton} type="button">{"Cancel"}</button>
           </Dialog.CloseTrigger>
           {props.onRemove
-            ? <tsx:react>
+            ? <tsx>
                 <button class={`${styles.actionButton} ${styles.actionButtonDanger}`} type="button" onClick={() => {
                   void props.onRemove?.()
-                }}>Remove shortcut</button>
-              </tsx:react>
+                }}>
+                  {"Remove shortcut"}
+                </button>
+              </tsx>
             : null}
           <button
             class={`${styles.actionButton} ${styles.actionButtonPrimary}`}

@@ -46,7 +46,7 @@ export component SessionsList(props: {
 
   <ul class={styles.list}>
     {props.sessions.map(
-      (session) => <tsx:react>
+      (session) => <tsx>
         <li key={session.id}>
           <ListRow onOpen={() => {
             props.onOpenSession(session.id)
@@ -54,7 +54,7 @@ export component SessionsList(props: {
             props.onOpenChanges(session.id)
           }} session={session} />
         </li>
-      </tsx:react>,
+      </tsx>,
     )}
   </ul>
 }

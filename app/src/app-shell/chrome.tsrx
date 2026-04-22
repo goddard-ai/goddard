@@ -223,17 +223,13 @@ export component AppShellChrome() {
         <div class={styles.actionGroup}>
           <ActionButton
             ariaLabel="Propose task"
-            icon={<tsx:react>
-              <InlineSvgIcon icon="what-next" size="17px 12px" />
-            </tsx:react>}
+            icon={<tsx><InlineSvgIcon icon="what-next" size="17px 12px" /></tsx>}
             onAction={AppCommand.navigation.openProposeTaskDialog}
           />
           <span class={styles.actionDivider} />
           <ActionButton
             ariaLabel="New session"
-            icon={<tsx:react>
-              <InlineSvgIcon icon="new-session" size="16px 16px" />
-            </tsx:react>}
+            icon={<tsx><InlineSvgIcon icon="new-session" size="16px 16px" /></tsx>}
             onAction={AppCommand.navigation.openNewSessionDialog}
           />
         </div>
@@ -279,7 +275,7 @@ export component AppShellChrome() {
             title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
           />
           {workbenchTabSet.tabList.map(
-            (tab) => <tsx:react>
+            (tab) => <tsx>
               <TabButton key={tab.id} activeTabId={workbenchTabSet.activeTabId} dirty={tab.dirty} icon={getWorkbenchTabIcon(
                 tab.kind,
               )} id={tab.id} onClose={(id) => {
@@ -297,7 +293,7 @@ export component AppShellChrome() {
               }} refCallback={(element) => {
                 tabStrip.tabRefs.current[tab.id] = element
               }} title={tab.title} />
-            </tsx:react>,
+            </tsx>,
           )}
           <span
             aria-hidden="true"
@@ -337,12 +333,12 @@ component AppShellSidebarSection(props: {
   selectedNavigationId: NavigationItemId;
 }) {
   {props.items.map(
-    (item) => <tsx:react>
+    (item) => <tsx>
       <SidebarItem key={item.id} icon={item.icon} isSelected={item.id ===
         props.selectedNavigationId} label={item.label} onSelect={(options) => {
         props.onNavigationSelect(item.id, options)
       }} />
-    </tsx:react>,
+    </tsx>,
   )}
 }
 
@@ -482,16 +478,16 @@ component TabButton(props: {
     </button>
     {isHome
       ? null
-      : <tsx:react>
+      : <tsx>
           <div class={styles.tabTail} onClick={() => {
             props.onSelect(props.id)
           }}>
             {props.dirty
-              ? <tsx:react>
+              ? <tsx>
                   <span aria-hidden="true" class={styles.tabDirty} style={{
                     opacity: showCloseButton ? "0" : "1",
                   }} />
-                </tsx:react>
+                </tsx>
               : null}
             <button aria-label={`Close ${props.title}`} class={styles.tabClose} style={{
               opacity: showCloseButton ? "1" : "0",
@@ -503,7 +499,7 @@ component TabButton(props: {
               <InlineSvgIcon icon="close-tab" size="9px" />
             </button>
           </div>
-        </tsx:react>}
+        </tsx>}
   </div>
 }
 

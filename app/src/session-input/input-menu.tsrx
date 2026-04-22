@@ -95,7 +95,7 @@ export component SessionInputMenu(props: {
       </div>
       <div class={inputMenuListClass}>
         {props.isLoadingSuggestions
-          ? <tsx:react>
+          ? <tsx>
               <div class={inputMenuEmptyClass}>
                 <span class={css(
                   {
@@ -105,16 +105,18 @@ export component SessionInputMenu(props: {
                   },
                 )}>
                   <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-                  Loading suggestions...
+                  {"Loading suggestions..."}
                 </span>
               </div>
-            </tsx:react>
+            </tsx>
           : props.suggestions.length === 0
-            ? <tsx:react>
-                <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
-              </tsx:react>
+            ? <tsx>
+                <div class={inputMenuEmptyClass}>
+                  {"No matches for this trigger yet."}
+                </div>
+              </tsx>
             : (props.suggestions.map(
-                (suggestion, index) => <tsx:react>
+                (suggestion, index) => <tsx>
                   <button key={suggestionKey(suggestion)} class={cx(
                     inputMenuButtonClass,
                     index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
@@ -137,7 +139,7 @@ export component SessionInputMenu(props: {
                       </span>
                     </span>
                   </button>
-                </tsx:react>,
+                </tsx>,
               ))}
       </div>
     </div>

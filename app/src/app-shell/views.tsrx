@@ -15,22 +15,18 @@ export component AppShellWorkbenchContent() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
 
-  <Suspense
-    fallback={<tsx:react>
-      <div />
-    </tsx:react>}
-  >
+  <Suspense fallback={<tsx><div /></tsx>}>
     {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id
-      ? <tsx:react>
+      ? <tsx>
           <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
             <MainWorkbenchView />
           </WorkbenchScrollPanel>
-        </tsx:react>
-      : <tsx:react>
+        </tsx>
+      : <tsx>
           <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
             <WorkbenchTabPanel />
           </WorkbenchScrollPanel>
-        </tsx:react>}
+        </tsx>}
   </Suspense>
 }
 

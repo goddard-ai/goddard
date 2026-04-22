@@ -100,16 +100,12 @@ export component SessionLaunchForm(props: {
           form.setOpenPicker(null)
         }}
       />
-      <Suspense
-        fallback={<tsx:react>
-          <SessionLaunchLoadingSelect label="Adapter" />
-        </tsx:react>}
-      >
+      <Suspense fallback={<tsx><SessionLaunchLoadingSelect label="Adapter" /></tsx>}>
         <AgentHarnessSelector {form} />
       </Suspense>
     </div>
     {selectedAdapter
-      ? <tsx:react>
+      ? <tsx>
           <div class={selectorStyles.adapterCard}>
             <p class={styles.adapterMeta}>
               <span class={styles.mutedMeta}>
@@ -126,17 +122,17 @@ export component SessionLaunchForm(props: {
               </span>
             </p>
             {selectedAdapter.description
-              ? <tsx:react>
+              ? <tsx>
                   <p class={styles.adapterDescription}>
                     {selectedAdapter.description}
                   </p>
-                </tsx:react>
+                </tsx>
               : null}
           </div>
-        </tsx:react>
+        </tsx>
       : null}
     <Suspense
-      fallback={<tsx:react>
+      fallback={<tsx>
         <div class={selectorStyles.section}>
           <div class={selectorStyles.grid}>
             <SessionLaunchLoadingSelect label="Launch location" />
@@ -147,7 +143,7 @@ export component SessionLaunchForm(props: {
             <SessionLaunchLoadingSelect label="Thinking level" />
           </div>
         </div>
-      </tsx:react>}
+      </tsx>}
     >
       <SessionLaunchPreviewSelectors {form} />
     </Suspense>

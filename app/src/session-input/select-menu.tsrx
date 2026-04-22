@@ -145,7 +145,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
     <div class={styles.field}>
       <GoodTooltip
         ariaLabel={props.label}
-        content={<tsx:react>
+        content={<tsx>
           <span class={styles.tooltipContent}>
             <span>
               {props.label}
@@ -154,7 +154,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               {shortcutLabel}
             </span>
           </span>
-        </tsx:react>}
+        </tsx>}
       >
         <span class={styles.tooltipTrigger}>
           <Popover.Trigger asChild>
@@ -235,7 +235,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             }}
           >
             {isFilterable
-              ? <tsx:react>
+              ? <tsx>
                   <input ref={filterInputRef} class={styles.menuFilter} placeholder="Type to filter" value={query} onInput={(
                     event,
                   ) => {
@@ -264,10 +264,10 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                       props.onOpenChange(false)
                     }
                   }} />
-                </tsx:react>
+                </tsx>
               : null}
             {props.loading
-              ? <tsx:react>
+              ? <tsx>
                   <div class={styles.menuEmpty}>
                     <span class={css(
                       {
@@ -279,20 +279,22 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                       <LoaderCircle class={css(
                         { animation: "spin 1s linear infinite" },
                       )} size={14} />
-                      Loading options...
+                      {"Loading options..."}
                     </span>
                   </div>
-                </tsx:react>
+                </tsx>
               : filteredItems.length === 0
-                ? <tsx:react>
-                    <div class={styles.menuEmpty}>No matching options.</div>
-                  </tsx:react>
-                : <tsx:react>
+                ? <tsx>
+                    <div class={styles.menuEmpty}>
+                      {"No matching options."}
+                    </div>
+                  </tsx>
+                : <tsx>
                     <ul class={styles.menuList}>
                       {filteredItems.map((item, index) => {
                         const isActive = index === selectedIndex
 
-                        return <tsx:react>
+                        return <tsx>
                           <li key={item.value}>
                             <button ref={(element) => {
                               itemRefs.current[item.value] = element
@@ -307,10 +309,10 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                               {item.label}
                             </button>
                           </li>
-                        </tsx:react>
+                        </tsx>
                       })}
                     </ul>
-                  </tsx:react>}
+                  </tsx>}
           </Popover.Content>
         </Popover.Positioner>
       </MenuPortal>

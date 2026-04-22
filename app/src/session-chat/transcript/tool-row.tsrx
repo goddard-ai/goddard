@@ -65,20 +65,20 @@ function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[])
 
 function renderMetaParts(parts: readonly string[], keyPrefix: string) {
   return parts.flatMap((part, index) => {
-    const partNode = <tsx:react>
+    const partNode = <tsx>
       <span key={`${keyPrefix}:part:${index}`}>
         {part}
       </span>
-    </tsx:react>
+    </tsx>
 
     if (index === 0) {
       return [partNode]
     }
 
     return [
-      <tsx:react>
+      <tsx>
         <span key={`${keyPrefix}:separator:${index}`} aria-hidden="true" class={toolInlineSeparatorClass} />
-      </tsx:react>,
+      </tsx>,
       partNode,
     ]
   })
@@ -86,36 +86,36 @@ function renderMetaParts(parts: readonly string[], keyPrefix: string) {
 
 function renderToolContent(content: SessionTranscriptToolContent, key: string) {
   if (content.type === "content") {
-    return <tsx:react>
+    return <tsx>
       <div key={key} class={toolDetailTextClass}>
         {content.text?.trim() || "Structured tool output."}
       </div>
-    </tsx:react>
+    </tsx>
   }
 
   if (content.type === "diff") {
-    return <tsx:react>
+    return <tsx>
       <div key={key} class={toolDetailListClass}>
         {content.path
-          ? <tsx:react>
+          ? <tsx>
               <div class={toolDetailMonoClass}>
                 {content.path}
               </div>
-            </tsx:react>
+            </tsx>
           : null}
         <div class={toolDetailMonoClass}>
           {buildToolDiffPreview(content)}
         </div>
       </div>
-    </tsx:react>
+    </tsx>
   }
 
-  return <tsx:react>
+  return <tsx>
     <div key={key} class={toolDetailMonoClass}>
-      Terminal session
+      {"Terminal session "}
       {content.terminalId}
     </div>
-  </tsx:react>
+  </tsx>
 }
 
 function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) {
@@ -123,20 +123,20 @@ function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) 
     return null
   }
 
-  return <tsx:react>
+  return <tsx>
     <div class={toolDetailListClass}>
       {locations.map(
-        (location, index) => <tsx:react>
+        (location, index) => <tsx>
           <div key={`${location.path}:${
             location.line ?? "none"
           }:${index}`} class={toolDetailMonoClass}>
             {location.path}
             {location.line != null ? `:${location.line}` : ""}
           </div>
-        </tsx:react>,
+        </tsx>,
       )}
     </div>
-  </tsx:react>
+  </tsx>
 }
 
 /** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
@@ -158,13 +158,11 @@ export component ToolTranscriptRow(props: {
                 {renderMetaParts(summaryMetaParts, `${props.groupId}:summary`)}
               </span>
             </span>
-            <span class={toolToggleHintClass}>
-              Details
-            </span>
+            <span class={toolToggleHintClass}>{"Details"}</span>
           </summary>
           <ol class={toolDetailListClass}>
             {props.toolCalls.map(
-              (toolCall) => <tsx:react>
+              (toolCall) => <tsx>
                 <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
                   <article>
                     <div class={toolDetailHeadingClass}>
@@ -187,13 +185,15 @@ export component ToolTranscriptRow(props: {
                     )}
                     {renderToolLocations(toolCall.locations)}
                     {toolCall.content.length === 0 && toolCall.locations.length === 0
-                      ? <tsx:react>
-                          <div class={toolDetailTextClass}>No tool output was attached to this call.</div>
-                        </tsx:react>
+                      ? <tsx>
+                          <div class={toolDetailTextClass}>
+                            {"No tool output was attached to this call."}
+                          </div>
+                        </tsx>
                       : null}
                   </article>
                 </li>
-              </tsx:react>,
+              </tsx>,
             )}
           </ol>
         </details>

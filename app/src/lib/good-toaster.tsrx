@@ -15,7 +15,7 @@ export const appToaster = createToaster(
 export component GoodToaster() {
   <Portal>
     <Toaster toaster={appToaster} class={styles.group}>
-      {(toast) => <tsx:react>
+      {(toast) => <tsx>
         <Toast.Root key={toast.id} class={styles.root}>
           <span aria-hidden="true" class={styles.accent} />
           <div class={styles.body}>
@@ -23,18 +23,18 @@ export component GoodToaster() {
               {toast.title}
             </Toast.Title>
             {toast.description
-              ? <tsx:react>
+              ? <tsx>
                   <Toast.Description class={styles.description}>
                     {toast.description}
                   </Toast.Description>
-                </tsx:react>
+                </tsx>
               : null}
           </div>
           <Toast.CloseTrigger class={styles.closeButton}>
             <X size={15} strokeWidth={2.2} />
           </Toast.CloseTrigger>
         </Toast.Root>
-      </tsx:react>}
+      </tsx>}
     </Toaster>
   </Portal>
 }
