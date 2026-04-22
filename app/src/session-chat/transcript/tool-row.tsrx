@@ -173,9 +173,11 @@ export component ToolTranscriptRow(props: {
                       )}
                     </span>
                   </div>
+
                   for (const content of toolCall.content; index index) {
                     {renderToolContent(content, `${toolCall.id}:content:${index}`)}
                   }
+
                   {renderToolLocations(toolCall.locations)}
                   {toolCall.content.length === 0 && toolCall.locations.length === 0
                     ? <tsx>

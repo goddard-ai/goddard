@@ -274,6 +274,7 @@ export component AppShellChrome() {
             }}
             title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
           />
+
           for (const tab of workbenchTabSet.tabList) {
             <TabButton
               activeTabId={workbenchTabSet.activeTabId}
@@ -304,6 +305,7 @@ export component AppShellChrome() {
               title={tab.title}
             />
           }
+
           <span
             aria-hidden="true"
             class={styles.indicator}
