@@ -65,30 +65,32 @@ export component ProjectsPage() {
             </button>
           </Dialog.Trigger>
         </header>
-        {projects.length === 0
-          ? <tsx>
-              <div class={styles.empty}>
-                <div class={styles.emptyCopy}>
-                  <h2 class={styles.title}>
-                    {"No projects yet"}
-                  </h2>
-                  <p class={styles.body}>
-                    {"Add a local directory to establish the app's explicit working set."}
-                  </p>
-                  <div>
-                    <Dialog.Trigger asChild>
-                      <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
-                        <Plus size={16} strokeWidth={2.2} />
-                        {"Add project"}
-                      </button>
-                    </Dialog.Trigger>
-                  </div>
-                </div>
+        if (projects.length === 0) {
+          <div class={styles.empty}>
+            <div class={styles.emptyCopy}>
+              <h2 class={styles.title}>{"No projects yet"}</h2>
+              <p class={styles.body}>
+                {"Add a local directory to establish the app's explicit working set."}
+              </p>
+              <div>
+                <Dialog.Trigger asChild>
+                  <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+                    <Plus size={16} strokeWidth={2.2} />
+                    {"Add project"}
+                  </button>
+                </Dialog.Trigger>
               </div>
-            </tsx>
-          : <tsx>
-              <ProjectList onOpenProjectTab={openProjectInTab} onRemove={removeProject} onSelect={selectProject} projects={projects} selectedProjectPath={resolvedSelectedProjectPath} />
-            </tsx>}
+            </div>
+          </div>
+        } else {
+          <ProjectList
+            onOpenProjectTab={openProjectInTab}
+            onRemove={removeProject}
+            onSelect={selectProject}
+            {projects}
+            selectedProjectPath={resolvedSelectedProjectPath}
+          />
+        }
       </section>
       <aside class={styles.panel}>
         <div class={styles.asideBody}>
@@ -100,17 +102,15 @@ export component ProjectsPage() {
                 : "Select a project to inspect its configured path and display name."}
             </p>
           </div>
-          {selectedProject
-            ? <tsx>
-                <h3 class={styles.selectedTitle}>
-                  {selectedProject.name}
-                </h3>
-                <div class={styles.cardList}>
-                  <InfoCard label="Path" value={selectedProject.path} />
-                  <InfoCard label="Display name" value={selectedProject.name} />
-                </div>
-              </tsx>
-            : null}
+          if (selectedProject) {
+            <h3 class={styles.selectedTitle}>
+              {selectedProject.name}
+            </h3>
+            <div class={styles.cardList}>
+              <InfoCard label="Path" value={selectedProject.path} />
+              <InfoCard label="Display name" value={selectedProject.name} />
+            </div>
+          }
         </div>
       </aside>
       <AddProjectDialog dialog={addProjectDialog} {selectedProjectPath} />
@@ -169,7 +169,9 @@ component ProjectListRow(props: {
         <h3 class={styles.rowTitle}>
           {props.project.name}
         </h3>
-        {props.isSelected ? <tsx><span class={styles.selectedBadge}>Selected</span></tsx> : null}
+        if (props.isSelected) {
+          <span class={styles.selectedBadge}>{"Selected"}</span>
+        }
       </div>
       <p class={styles.path}>
         {props.project.path}

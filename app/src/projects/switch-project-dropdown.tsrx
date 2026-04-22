@@ -209,90 +209,85 @@ export component SwitchProjectDropdown() {
       {activeProject?.name ?? "Open project"}
     </span>
   </button>
-  {isOpen
-    ? <tsx>
-        <div ref={contentRef} class={styles.content}>
-          <label class={styles.searchField}>
-            <span class={styles.srOnly}>
-              {"Search projects"}
-            </span>
-            <Search aria-hidden={true} size={16} strokeWidth={2.1} />
-            <input ref={inputRef} class={styles.searchInput} placeholder="Search projects" value={search} onInput={(
-              event,
-            ) => {
-              setSearch(event.currentTarget.value)
-              setHighlightedIndex(0)
-            }} onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                moveHighlightedIndex(1)
-                return
-              }
+  if (isOpen) {
+    <div ref={contentRef} class={styles.content}>
+      <label class={styles.searchField}>
+        <span class={styles.srOnly}>{"Search projects"}</span>
+        <Search aria-hidden={true} size={16} strokeWidth={2.1} />
+        <input
+          ref={inputRef}
+          class={styles.searchInput}
+          placeholder="Search projects"
+          value={search}
+          onInput={(event) => {
+            setSearch(event.currentTarget.value)
+            setHighlightedIndex(0)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault()
+              moveHighlightedIndex(1)
+              return
+            }
 
-              if (event.key === "ArrowUp") {
-                event.preventDefault()
-                moveHighlightedIndex(-1)
-                return
-              }
+            if (event.key === "ArrowUp") {
+              event.preventDefault()
+              moveHighlightedIndex(-1)
+              return
+            }
 
-              if (event.key === "Enter") {
-                event.preventDefault()
-                activateItem(highlightedItem)
-              }
-            }} />
-          </label>
-          {items.length > 0
-            ? <tsx>
-                <ul class={styles.list}>
-                  for (const item of items; index index)
-                  {<li key={item.id}>
-                    <button ref={(element) => {
-                      itemRefs.current[item.id] = element
-                    }} class={styles.item} data-highlighted={highlightedItemIndex === index
-                      ? "true"
-                      : "false"} type="button" onMouseEnter={() => {
-                      setHighlightedIndex(index)
-                    }} onClick={() => {
-                      activateItem(item)
-                    }}>
-                      <span class={styles.itemBody}>
-                        {item.kind === "open-folder"
-                          ? <tsx>
-                              <span class={styles.itemTitle}>
-                                {"Open folder…"}
-                              </span>
-                              <span class={styles.itemDetail}>
-                                {"Add a local project from your filesystem."}
-                              </span>
-                            </tsx>
-                          : <tsx>
-                              <span class={styles.itemTitleEllipsis}>
-                                {item.project.name}
-                              </span>
-                              <span class={styles.itemDetailEllipsis}>
-                                {item.project.path}
-                              </span>
-                            </tsx>}
-                      </span>
-                      {item.kind === "project" && activeProject?.path === item.project.path
-                        ? <tsx>
-                            <span class={styles.activeBadge}>
-                              {"Active"}
-                            </span>
-                          </tsx>
-                        : null}
-                    </button>
-                  </li>}
-                </ul>
-              </tsx>
-            : <tsx>
-                <p class={styles.empty}>
-                  {"No matching projects."}
-                </p>
-              </tsx>}
-        </div>
-      </tsx>
-    : null}
+            if (event.key === "Enter") {
+              event.preventDefault()
+              activateItem(highlightedItem)
+            }
+          }}
+        />
+      </label>
+      if (items.length > 0) {
+        <ul class={styles.list}>
+          for (const item of items; index index) {
+            <li key={item.id}>
+              <button
+                ref={(element) => {
+                  itemRefs.current[item.id] = element
+                }}
+                class={styles.item}
+                data-highlighted={highlightedItemIndex === index ? "true" : "false"}
+                type="button"
+                onMouseEnter={() => {
+                  setHighlightedIndex(index)
+                }}
+                onClick={() => {
+                  activateItem(item)
+                }}
+              >
+                <span class={styles.itemBody}>
+                  if (item.kind === "open-folder") {
+                    <span class={styles.itemTitle}>{"Open folder…"}</span>
+                    <span class={styles.itemDetail}>
+                      {"Add a local project from your filesystem."}
+                    </span>
+                  } else {
+                    <span class={styles.itemTitleEllipsis}>
+                      {item.project.name}
+                    </span>
+                    <span class={styles.itemDetailEllipsis}>
+                      {item.project.path}
+                    </span>
+                  }
+                </span>
+                if (item.kind === "project" && activeProject?.path === item.project.path) {
+                  <span class={styles.activeBadge}>{"Active"}</span>
+                }
+              </button>
+            </li>
+          }
+        </ul>
+      } else {
+        <p class={styles.empty}>{"No matching projects."}</p>
+      }
+    </div>
+  }
 }
 
 export default SwitchProjectDropdown

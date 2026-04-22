@@ -104,33 +104,29 @@ export component SessionLaunchForm(props: {
         <AgentHarnessSelector {form} />
       </Suspense>
     </div>
-    {selectedAdapter
-      ? <tsx>
-          <div class={selectorStyles.adapterCard}>
-            <p class={styles.adapterMeta}>
-              <span class={styles.mutedMeta}>
-                Adapter
-                {" · "}
-              </span>
-              <span>
-                {selectedAdapter.name}
-              </span>
-              <span class={styles.mutedMeta}>
-                {" · "}
-                {selectedAdapter.id}
-                {selectedAdapter.unofficial ? " · Unofficial" : ""}
-              </span>
-            </p>
-            {selectedAdapter.description
-              ? <tsx>
-                  <p class={styles.adapterDescription}>
-                    {selectedAdapter.description}
-                  </p>
-                </tsx>
-              : null}
-          </div>
-        </tsx>
-      : null}
+    if (selectedAdapter) {
+      <div class={selectorStyles.adapterCard}>
+        <p class={styles.adapterMeta}>
+          <span class={styles.mutedMeta}>
+            Adapter
+            {" · "}
+          </span>
+          <span>
+            {selectedAdapter.name}
+          </span>
+          <span class={styles.mutedMeta}>
+            {" · "}
+            {selectedAdapter.id}
+            {selectedAdapter.unofficial ? " · Unofficial" : ""}
+          </span>
+        </p>
+        if (selectedAdapter.description) {
+          <p class={styles.adapterDescription}>
+            {selectedAdapter.description}
+          </p>
+        }
+      </div>
+    }
     <Suspense
       fallback={<tsx>
         <div class={selectorStyles.section}>

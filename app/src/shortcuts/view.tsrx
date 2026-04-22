@@ -269,23 +269,18 @@ component KeyboardShortcutsView(props: { class?: string }) {
         <Command size={15} strokeWidth={2.2} />
       </button>
     </label>
-    {shortcutRegistry.loadError
-      ? <tsx>
-          <div class={styles.warning}>
-            The saved keymap could not be loaded, so the built-in profile is
-          active.
-            <br />
-            {shortcutRegistry.loadError}
-          </div>
-        </tsx>
-      : null}
-    {shortcutRegistry.writeError
-      ? <tsx>
-          <div class={styles.error}>
-            {shortcutRegistry.writeError}
-          </div>
-        </tsx>
-      : null}
+    if (shortcutRegistry.loadError) {
+      <div class={styles.warning}>
+        {"The saved keymap could not be loaded, so the built-in profile is active."}
+        <br />
+        {shortcutRegistry.loadError}
+      </div>
+    }
+    if (shortcutRegistry.writeError) {
+      <div class={styles.error}>
+        {shortcutRegistry.writeError}
+      </div>
+    }
     <div class={styles.tableFrame}>
       <table class={styles.table}>
         <thead>
@@ -416,49 +411,54 @@ component KeyboardShortcutsView(props: { class?: string }) {
                   </Menu.Root>
                 </td>
                 <td class={styles.cell}>
-                  {editingWhenRowKey === row.rowKey && row.bindingIndex !== null
-                    ? <tsx>
-                        <input autoFocus={true} class={styles.whenInput} defaultValue={row.whenClause ??
-                          ""} onBlur={(event) => {
-                          setEditingWhenRowKey(null)
-                          if (row.bindingIndex === null) {
-                            return
-                          }
-                          void shortcutRegistry.updateCommandBindingWhen(
-                            row.commandId,
-                            row.bindingIndex,
-                            event.currentTarget.value,
-                          )
-                        }} onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault()
-                            event.currentTarget.blur()
-                            return
-                          }
+                  if (editingWhenRowKey === row.rowKey && row.bindingIndex !== null) {
+                    <input
+                      autoFocus={true}
+                      class={styles.whenInput}
+                      defaultValue={row.whenClause ?? ""}
+                      onBlur={(event) => {
+                        setEditingWhenRowKey(null)
+                        if (row.bindingIndex === null) {
+                          return
+                        }
+                        void shortcutRegistry.updateCommandBindingWhen(
+                          row.commandId,
+                          row.bindingIndex,
+                          event.currentTarget.value,
+                        )
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                          return
+                        }
 
-                          if (event.key === "Escape") {
-                            event.preventDefault()
-                            setEditingWhenRowKey(null)
-                          }
-                        }} />
-                      </tsx>
-                    : row.bindingIndex !== null
-                      ? <tsx>
-                          <button class={cx(
-                            styles.cellButton,
-                            styles.whenButton,
-                            !row.whenClause && styles.cellButtonMuted,
-                          )} type="button" onClick={() => {
-                            setEditingWhenRowKey(row.rowKey)
-                          }}>
-                            {row.whenClause ?? "Add when clause"}
-                          </button>
-                        </tsx>
-                      : <tsx>
-                          <span class={styles.cellButtonMuted}>
-                            {row.whenClause ?? "–"}
-                          </span>
-                        </tsx>}
+                        if (event.key === "Escape") {
+                          event.preventDefault()
+                          setEditingWhenRowKey(null)
+                        }
+                      }}
+                    />
+                  } else if (row.bindingIndex !== null) {
+                    <button
+                      class={cx(
+                        styles.cellButton,
+                        styles.whenButton,
+                        !row.whenClause && styles.cellButtonMuted,
+                      )}
+                      type="button"
+                      onClick={() => {
+                        setEditingWhenRowKey(row.rowKey)
+                      }}
+                    >
+                      {row.whenClause ?? "Add when clause"}
+                    </button>
+                  } else {
+                    <span class={styles.cellButtonMuted}>
+                      {row.whenClause ?? "–"}
+                    </span>
+                  }
                 </td>
               </tr>
             }
@@ -473,55 +473,60 @@ component KeyboardShortcutsView(props: { class?: string }) {
       </table>
     </div>
     <Dialog.RootProvider value={captureDialog} lazyMount unmountOnExit>
-      {captureState
-        ? <tsx>
-            <KeyboardShortcutCaptureDialog currentExpression={captureState.currentExpression} dialog={captureDialog} label={captureState.label} mode={captureState.mode} whenClause={captureState.whenClause} onRemove={captureState.bindingIndex ===
-            null
-              ? undefined
-              : async () => {
-                  if (captureState.bindingIndex === null) {
-                    return
-                  }
+      if (captureState) {
+        <KeyboardShortcutCaptureDialog
+          currentExpression={captureState.currentExpression}
+          dialog={captureDialog}
+          label={captureState.label}
+          mode={captureState.mode}
+          whenClause={captureState.whenClause}
+          onRemove={captureState.bindingIndex === null
+            ? undefined
+            : async () => {
+                if (captureState.bindingIndex === null) {
+                  return
+                }
 
-                  if (
-                    await shortcutRegistry.removeCommandBinding(
-                      captureState.commandId,
-                      captureState.bindingIndex,
-                    )
-                  ) {
-                    setCaptureState(null)
-                  }
-                }} onSave={async (expression) => {
-              if (captureState.mode === "add") {
                 if (
-                  await shortcutRegistry.addCommandBinding(
+                  await shortcutRegistry.removeCommandBinding(
                     captureState.commandId,
-                    expression,
-                    captureState.whenClause,
+                    captureState.bindingIndex,
                   )
                 ) {
                   setCaptureState(null)
                 }
-
-                return
-              }
-
-              if (captureState.bindingIndex === null) {
-                return
-              }
-
+              }}
+          onSave={async (expression) => {
+            if (captureState.mode === "add") {
               if (
-                await shortcutRegistry.replaceCommandBinding(
+                await shortcutRegistry.addCommandBinding(
                   captureState.commandId,
-                  captureState.bindingIndex,
                   expression,
+                  captureState.whenClause,
                 )
               ) {
                 setCaptureState(null)
               }
-            }} />
-          </tsx>
-        : null}
+
+              return
+            }
+
+            if (captureState.bindingIndex === null) {
+              return
+            }
+
+            if (
+              await shortcutRegistry.replaceCommandBinding(
+                captureState.commandId,
+                captureState.bindingIndex,
+                expression,
+              )
+            ) {
+              setCaptureState(null)
+            }
+          }}
+        />
+      }
     </Dialog.RootProvider>
   </section>
 }

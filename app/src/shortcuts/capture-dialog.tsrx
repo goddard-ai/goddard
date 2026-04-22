@@ -109,65 +109,53 @@ export component KeyboardShortcutCaptureDialog(props: {
           </button>
         </Dialog.CloseTrigger>
         <dl class={styles.metaList}>
-          {props.currentExpression
-            ? <tsx>
-                <div class={styles.metaRow}>
-                  <dt class={styles.metaTerm}>
-                    {"Current shortcut"}
-                  </dt>
-                  <dd class={styles.metaDetail}>
-                    {props.currentExpression}
-                  </dd>
-                </div>
-              </tsx>
-            : null}
-          {props.whenClause
-            ? <tsx>
-                <div class={styles.metaRow}>
-                  <dt class={styles.metaTerm}>
-                    {"When"}
-                  </dt>
-                  <dd class={styles.metaDetail}>
-                    {props.whenClause}
-                  </dd>
-                </div>
-              </tsx>
-            : null}
+          if (props.currentExpression) {
+            <div class={styles.metaRow}>
+              <dt class={styles.metaTerm}>{"Current shortcut"}</dt>
+              <dd class={styles.metaDetail}>
+                {props.currentExpression}
+              </dd>
+            </div>
+          }
+          if (props.whenClause) {
+            <div class={styles.metaRow}>
+              <dt class={styles.metaTerm}>{"When"}</dt>
+              <dd class={styles.metaDetail}>
+                {props.whenClause}
+              </dd>
+            </div>
+          }
         </dl>
         <section class={styles.captureSection}>
           <div class={styles.captureHeading}>
             <span class={styles.captureLabel}>{"Press the shortcut you want to use"}</span>
-            {isRecording
-              ? <tsx>
-                  <span class={styles.captureStatus}>
-                    {"Listening…"}
-                  </span>
-                </tsx>
-              : null}
+            if (isRecording) {
+              <span class={styles.captureStatus}>{"Listening…"}</span>
+            }
           </div>
           <div class={styles.captureValue}>
-            {draftExpression
-              ? <tsx>{draftExpression}</tsx>
-              : <tsx>
-                  <span class={styles.capturePlaceholder}>
-                    {"Type a key combination or sequence"}
-                  </span>
-                </tsx>}
+            if (draftExpression) {
+              {draftExpression}
+            } else {
+              <span class={styles.capturePlaceholder}>{"Type a key combination or sequence"}</span>
+            }
           </div>
         </section>
         <div class={styles.actionRow}>
           <Dialog.CloseTrigger asChild>
             <button class={styles.actionButton} type="button">{"Cancel"}</button>
           </Dialog.CloseTrigger>
-          {props.onRemove
-            ? <tsx>
-                <button class={`${styles.actionButton} ${styles.actionButtonDanger}`} type="button" onClick={() => {
-                  void props.onRemove?.()
-                }}>
-                  {"Remove shortcut"}
-                </button>
-              </tsx>
-            : null}
+          if (props.onRemove) {
+            <button
+              class={`${styles.actionButton} ${styles.actionButtonDanger}`}
+              type="button"
+              onClick={() => {
+                void props.onRemove?.()
+              }}
+            >
+              {"Remove shortcut"}
+            </button>
+          }
           <button
             class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
             disabled={draftExpression.trim().length === 0}

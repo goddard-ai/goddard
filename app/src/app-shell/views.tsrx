@@ -16,17 +16,15 @@ export component AppShellWorkbenchContent() {
   const workbenchTabSet = useWorkbenchTabSet()
 
   <Suspense fallback={<tsx><div /></tsx>}>
-    {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id
-      ? <tsx>
-          <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
-            <MainWorkbenchView />
-          </WorkbenchScrollPanel>
-        </tsx>
-      : <tsx>
-          <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
-            <WorkbenchTabPanel />
-          </WorkbenchScrollPanel>
-        </tsx>}
+    if (workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id) {
+      <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
+        <MainWorkbenchView />
+      </WorkbenchScrollPanel>
+    } else {
+      <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
+        <WorkbenchTabPanel />
+      </WorkbenchScrollPanel>
+    }
   </Suspense>
 }
 

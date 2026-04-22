@@ -58,13 +58,10 @@ function renderContentBlock(props: {
       <div key={`${props.message.id}:block:${props.blockIndex}`} class={attachmentCardClass}>
         <div class={attachmentHeadingClass}>
           <span class={attachmentIconClass} aria-hidden="true">
-            {isSkillResourceLink(props.block)
-              ? <tsx>
-                  <BookOpen size={14} strokeWidth={2.2} />
-                </tsx>
-              : <tsx>
-                  <Link2 size={14} strokeWidth={2.2} />
-                </tsx>}
+            if (isSkillResourceLink(props.block))
+            {<BookOpen size={14} strokeWidth={2.2} />}
+            else
+            {<Link2 size={14} strokeWidth={2.2} />}
           </span>
           <span>
             {props.block.name}

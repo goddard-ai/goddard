@@ -234,80 +234,85 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               }
             }}
           >
-            {isFilterable
-              ? <tsx>
-                  <input ref={filterInputRef} class={styles.menuFilter} placeholder="Type to filter" value={query} onInput={(
-                    event,
-                  ) => {
-                    setQuery(event.currentTarget.value)
-                  }} onKeyDown={(event) => {
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault()
-                      moveHighlightedIndex(1)
-                      return
-                    }
+            if (isFilterable) {
+              <input
+                ref={filterInputRef}
+                class={styles.menuFilter}
+                placeholder="Type to filter"
+                value={query}
+                onInput={(event) => {
+                  setQuery(event.currentTarget.value)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault()
+                    moveHighlightedIndex(1)
+                    return
+                  }
 
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault()
-                      moveHighlightedIndex(-1)
-                      return
-                    }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault()
+                    moveHighlightedIndex(-1)
+                    return
+                  }
 
-                    if (event.key === "Enter") {
-                      event.preventDefault()
-                      commitSelection(highlightedItem)
-                      return
-                    }
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    commitSelection(highlightedItem)
+                    return
+                  }
 
-                    if (event.key === "Escape") {
-                      event.preventDefault()
-                      props.onOpenChange(false)
-                    }
-                  }} />
-                </tsx>
-              : null}
-            {props.loading
-              ? <tsx>
-                  <div class={styles.menuEmpty}>
-                    <span class={css(
-                      {
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      },
-                    )}>
-                      <LoaderCircle class={css(
-                        { animation: "spin 1s linear infinite" },
-                      )} size={14} />
-                      {"Loading options..."}
-                    </span>
-                  </div>
-                </tsx>
-              : filteredItems.length === 0
-                ? <tsx>
-                    <div class={styles.menuEmpty}>
-                      {"No matching options."}
-                    </div>
-                  </tsx>
-                : <tsx>
-                    <ul class={styles.menuList}>
-                      for (const item of filteredItems; index index)
-                      {<li key={item.value}>
-                        <button ref={(element) => {
-                          itemRefs.current[item.value] = element
-                        }} class={cx(
-                          styles.menuButton,
-                          index === selectedIndex && styles.menuButtonActive,
-                        )} disabled={item.disabled} type="button" onMouseEnter={() => {
-                          setSelectedIndex(index)
-                        }} onClick={() => {
-                          commitSelection(item)
-                        }}>
-                          {item.label}
-                        </button>
-                      </li>}
-                    </ul>
-                  </tsx>}
+                  if (event.key === "Escape") {
+                    event.preventDefault()
+                    props.onOpenChange(false)
+                  }
+                }}
+              />
+            }
+            if (props.loading) {
+              <div class={styles.menuEmpty}>
+                <span
+                  class={css(
+                    {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    },
+                  )}
+                >
+                  <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+                  {"Loading options..."}
+                </span>
+              </div>
+            } else if (filteredItems.length === 0) {
+              <div class={styles.menuEmpty}>{"No matching options."}</div>
+            } else {
+              <ul class={styles.menuList}>
+                for (const item of filteredItems; index index) {
+                  <li key={item.value}>
+                    <button
+                      ref={(element) => {
+                        itemRefs.current[item.value] = element
+                      }}
+                      class={cx(
+                        styles.menuButton,
+                        index === selectedIndex && styles.menuButtonActive,
+                      )}
+                      disabled={item.disabled}
+                      type="button"
+                      onMouseEnter={() => {
+                        setSelectedIndex(index)
+                      }}
+                      onClick={() => {
+                        commitSelection(item)
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
           </Popover.Content>
         </Popover.Positioner>
       </MenuPortal>

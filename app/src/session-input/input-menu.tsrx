@@ -94,55 +94,56 @@ export component SessionInputMenu(props: {
         {getMenuHeading(props.menu.trigger)}
       </div>
       <div class={inputMenuListClass}>
-        {props.isLoadingSuggestions
-          ? <tsx>
-              <div class={inputMenuEmptyClass}>
-                <span class={css(
-                  {
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  },
-                )}>
-                  <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-                  {"Loading suggestions..."}
+        if (props.isLoadingSuggestions) {
+          <div class={inputMenuEmptyClass}>
+            <span
+              class={css(
+                {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                },
+              )}
+            >
+              <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+              {"Loading suggestions..."}
+            </span>
+          </div>
+        } else if (props.suggestions.length === 0) {
+          <div class={inputMenuEmptyClass}>{"No matches for this trigger yet."}</div>
+        } else {
+          for (const suggestion of props.suggestions; index index) {
+            <button
+              class={cx(
+                inputMenuButtonClass,
+                index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
+              )}
+              key={suggestionKey(suggestion)}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault()
+              }}
+              onMouseEnter={() => {
+                props.onHighlight(index)
+              }}
+              onClick={() => {
+                props.onAcceptSuggestion(suggestion)
+              }}
+            >
+              <span class={inputMenuIconClass} aria-hidden="true">
+                <SuggestionIcon {suggestion} />
+              </span>
+              <span class={inputMenuBodyClass}>
+                <span class={inputMenuLabelClass}>
+                  {getSuggestionLabel(suggestion)}
                 </span>
-              </div>
-            </tsx>
-          : props.suggestions.length === 0
-            ? <tsx>
-                <div class={inputMenuEmptyClass}>
-                  {"No matches for this trigger yet."}
-                </div>
-              </tsx>
-            : <tsx>
-                for (
-                  const suggestion of props.suggestions;
-                  index index
-                )
-                {<button class={cx(
-                  inputMenuButtonClass,
-                  index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
-                )} key={suggestionKey(suggestion)} type="button" onMouseDown={(event) => {
-                  event.preventDefault()
-                }} onMouseEnter={() => {
-                  props.onHighlight(index)
-                }} onClick={() => {
-                  props.onAcceptSuggestion(suggestion)
-                }}>
-                  <span class={inputMenuIconClass} aria-hidden="true">
-                    <SuggestionIcon suggestion={suggestion} />
-                  </span>
-                  <span class={inputMenuBodyClass}>
-                    <span class={inputMenuLabelClass}>
-                      {getSuggestionLabel(suggestion)}
-                    </span>
-                    <span class={inputMenuDetailClass}>
-                      {getSuggestionDetail(suggestion)}
-                    </span>
-                  </span>
-                </button>}
-              </tsx>}
+                <span class={inputMenuDetailClass}>
+                  {getSuggestionDetail(suggestion)}
+                </span>
+              </span>
+            </button>
+          }
+        }
       </div>
     </div>
   </MenuPortal>

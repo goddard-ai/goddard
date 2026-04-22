@@ -70,25 +70,17 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                 <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
                   gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
                 }}>
-                  {Icon
-                    ? <tsx>
-                        <Icon aria-hidden={true} size={16} strokeWidth={2} style={{
-                          color: state.active
-                            ? token.var("colors.text")
-                            : token.var("colors.muted"),
-                        }} />
-                      </tsx>
-                    : null}
+                  if (Icon)
+                  {<Icon aria-hidden={true} size={16} strokeWidth={2} style={{
+                    color: state.active ? token.var("colors.text") : token.var("colors.muted"),
+                  }} />}
                   <span class={styles.itemLabel}>
                     {item.label}
                   </span>
-                  {shortcut
-                    ? <tsx>
-                        <span class={styles.shortcut}>
-                          {shortcut}
-                        </span>
-                      </tsx>
-                    : null}
+                  if (shortcut)
+                  {<span class={styles.shortcut}>
+                    {shortcut}
+                  </span>}
                 </div>
               </tsx>
             }}

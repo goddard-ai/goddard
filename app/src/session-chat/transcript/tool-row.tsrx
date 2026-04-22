@@ -96,13 +96,10 @@ function renderToolContent(content: SessionTranscriptToolContent, key: string) {
   if (content.type === "diff") {
     return <tsx>
       <div key={key} class={toolDetailListClass}>
-        {content.path
-          ? <tsx>
-              <div class={toolDetailMonoClass}>
-                {content.path}
-              </div>
-            </tsx>
-          : null}
+        if (content.path)
+        {<div class={toolDetailMonoClass}>
+          {content.path}
+        </div>}
         <div class={toolDetailMonoClass}>
           {buildToolDiffPreview(content)}
         </div>
@@ -179,13 +176,11 @@ export component ToolTranscriptRow(props: {
                   }
 
                   {renderToolLocations(toolCall.locations)}
-                  {toolCall.content.length === 0 && toolCall.locations.length === 0
-                    ? <tsx>
-                        <div class={toolDetailTextClass}>
-                          {"No tool output was attached to this call."}
-                        </div>
-                      </tsx>
-                    : null}
+                  if (toolCall.content.length === 0 && toolCall.locations.length === 0) {
+                    <div class={toolDetailTextClass}>
+                      {"No tool output was attached to this call."}
+                    </div>
+                  }
                 </article>
               </li>
             }

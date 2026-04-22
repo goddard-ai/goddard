@@ -490,30 +490,39 @@ component TabButton(props: {
         {props.title}
       </span>
     </button>
-    {isHome
-      ? null
-      : <tsx>
-          <div class={styles.tabTail} onClick={() => {
-            props.onSelect(props.id)
-          }}>
-            {props.dirty
-              ? <tsx>
-                  <span aria-hidden="true" class={styles.tabDirty} style={{
-                    opacity: showCloseButton ? "0" : "1",
-                  }} />
-                </tsx>
-              : null}
-            <button aria-label={`Close ${props.title}`} class={styles.tabClose} style={{
-              opacity: showCloseButton ? "1" : "0",
-              pointerEvents: showCloseButton ? "auto" : "none",
-            }} type="button" onClick={(event) => {
-              event.stopPropagation()
-              props.onClose?.(props.id)
-            }}>
-              <InlineSvgIcon icon="close-tab" size="9px" />
-            </button>
-          </div>
-        </tsx>}
+    if (!isHome) {
+      <div
+        class={styles.tabTail}
+        onClick={() => {
+          props.onSelect(props.id)
+        }}
+      >
+        if (props.dirty) {
+          <span
+            aria-hidden="true"
+            class={styles.tabDirty}
+            style={{
+              opacity: showCloseButton ? "0" : "1",
+            }}
+          />
+        }
+        <button
+          aria-label={`Close ${props.title}`}
+          class={styles.tabClose}
+          style={{
+            opacity: showCloseButton ? "1" : "0",
+            pointerEvents: showCloseButton ? "auto" : "none",
+          }}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            props.onClose?.(props.id)
+          }}
+        >
+          <InlineSvgIcon icon="close-tab" size="9px" />
+        </button>
+      </div>
+    }
   </div>
 }
 
