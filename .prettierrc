@@ -1,3 +1,23 @@
 {
-  "plugins": ["@tsrx/prettier-plugin"]
+  "semi": false,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "plugins": ["@tsrx/prettier-plugin", "@trivago/prettier-plugin-sort-imports"],
+  "importOrder": [
+    "<BUILTIN_MODULES>",
+    "^(?:@[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+|[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9._-]+)*)$",
+    "<SEPARATOR>",
+    "^(?!.*\\.(?:css|scss|sass|less|pcss|styl)(?:\\?.*)?$)(?:~/|@/).+$",
+    "^(?!.*\\.(?:css|scss|sass|less|pcss|styl)(?:\\?.*)?$)#.+$",
+    "^(?!.*\\.(?:css|scss|sass|less|pcss|styl)(?:\\?.*)?$)\\.\\.(?:/.*)?$",
+    "^(?!.*\\.(?:css|scss|sass|less|pcss|styl)(?:\\?.*)?$)\\.(?:/.*)?$",
+    "\\.(?:css|scss|sass|less|pcss|styl)(?:\\?.*)?$",
+    "<THIRD_PARTY_MODULES>"
+  ],
+  "importOrderSeparation": true,
+  "importOrderSortSpecifiers": true,
+  "importOrderSideEffects": false,
+  "importOrderCaseInsensitive": false,
+  "importOrderParserPlugins": ["typescript", "jsx"]
 }
