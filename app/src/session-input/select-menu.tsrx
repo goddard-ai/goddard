@@ -120,21 +120,32 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
     props.onOpenChange(false)
   }
 
-  <tsx:react>
-    <Popover.Root autoFocus={true} closeOnInteractOutside={true} finalFocusEl={() => triggerRef.current} immediate={true} initialFocusEl={() => isFilterable
-      ? filterInputRef.current
-      : menuRef.current} lazyMount={true} modal={isFilterable} open={isMenuOpen} positioning={{
+  <Popover.Root
+    autoFocus={true}
+    closeOnInteractOutside={true}
+    finalFocusEl={() => triggerRef.current}
+    immediate={true}
+    initialFocusEl={() => isFilterable ? filterInputRef.current : menuRef.current}
+    lazyMount={true}
+    modal={isFilterable}
+    open={isMenuOpen}
+    positioning={{
       fitViewport: true,
       getAnchorElement: () => triggerRef.current,
       gutter: 8,
       placement: "bottom-start",
       sameWidth: true,
       strategy: "fixed",
-    }} unmountOnExit={true} onOpenChange={(details) => {
+    }}
+    unmountOnExit={true}
+    onOpenChange={(details) => {
       props.onOpenChange(details.open)
-    }}>
-      <div class={styles.field}>
-        <GoodTooltip ariaLabel={props.label} content={<tsx:react>
+    }}
+  >
+    <div class={styles.field}>
+      <GoodTooltip
+        ariaLabel={props.label}
+        content={<tsx:react>
           <span class={styles.tooltipContent}>
             <span>
               {props.label}
@@ -143,12 +154,19 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               {shortcutLabel}
             </span>
           </span>
-        </tsx:react>}>
-          <span class={styles.tooltipTrigger}>
-            <Popover.Trigger asChild>
-              <button ref={triggerRef} aria-expanded={isMenuOpen} aria-haspopup="menu" aria-label={ariaLabel} class={styles.trigger} disabled={props.disabled} type="button" onKeyDown={(
-                event,
-              ) => {
+        </tsx:react>}
+      >
+        <span class={styles.tooltipTrigger}>
+          <Popover.Trigger asChild>
+            <button
+              ref={triggerRef}
+              aria-expanded={isMenuOpen}
+              aria-haspopup="menu"
+              aria-label={ariaLabel}
+              class={styles.trigger}
+              disabled={props.disabled}
+              type="button"
+              onKeyDown={(event) => {
                 if (props.disabled) {
                   return
                 }
@@ -163,23 +181,31 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                   event.preventDefault()
                   props.onOpenChange(false)
                 }
-              }}>
-                <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
-                  {triggerLabel}
-                </span>
-                <ChevronDown class={styles.chevron} size={16} strokeWidth={2.2} style={{
+              }}
+            >
+              <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
+                {triggerLabel}
+              </span>
+              <ChevronDown
+                class={styles.chevron}
+                size={16}
+                strokeWidth={2.2}
+                style={{
                   color: isMenuOpen ? token.var("colors.text") : token.var("colors.muted"),
                   transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
-                }} />
-              </button>
-            </Popover.Trigger>
-          </span>
-        </GoodTooltip>
-        <MenuPortal>
-          <Popover.Positioner>
-            <Popover.Content ref={menuRef} class={styles.menu} tabIndex={isFilterable
-              ? undefined
-              : -1} onKeyDown={(event) => {
+                }}
+              />
+            </button>
+          </Popover.Trigger>
+        </span>
+      </GoodTooltip>
+      <MenuPortal>
+        <Popover.Positioner>
+          <Popover.Content
+            ref={menuRef}
+            class={styles.menu}
+            tabIndex={isFilterable ? undefined : -1}
+            onKeyDown={(event) => {
               if (isFilterable) {
                 return
               }
@@ -206,88 +232,88 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                 event.preventDefault()
                 props.onOpenChange(false)
               }
-            }}>
-              {isFilterable
+            }}
+          >
+            {isFilterable
+              ? <tsx:react>
+                  <input ref={filterInputRef} class={styles.menuFilter} placeholder="Type to filter" value={query} onInput={(
+                    event,
+                  ) => {
+                    setQuery(event.currentTarget.value)
+                  }} onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault()
+                      moveHighlightedIndex(1)
+                      return
+                    }
+
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault()
+                      moveHighlightedIndex(-1)
+                      return
+                    }
+
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      commitSelection(highlightedItem)
+                      return
+                    }
+
+                    if (event.key === "Escape") {
+                      event.preventDefault()
+                      props.onOpenChange(false)
+                    }
+                  }} />
+                </tsx:react>
+              : null}
+            {props.loading
+              ? <tsx:react>
+                  <div class={styles.menuEmpty}>
+                    <span class={css(
+                      {
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      },
+                    )}>
+                      <LoaderCircle class={css(
+                        { animation: "spin 1s linear infinite" },
+                      )} size={14} />
+                      Loading options...
+                    </span>
+                  </div>
+                </tsx:react>
+              : filteredItems.length === 0
                 ? <tsx:react>
-                    <input ref={filterInputRef} class={styles.menuFilter} placeholder="Type to filter" value={query} onInput={(
-                      event,
-                    ) => {
-                      setQuery(event.currentTarget.value)
-                    }} onKeyDown={(event) => {
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault()
-                        moveHighlightedIndex(1)
-                        return
-                      }
-
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault()
-                        moveHighlightedIndex(-1)
-                        return
-                      }
-
-                      if (event.key === "Enter") {
-                        event.preventDefault()
-                        commitSelection(highlightedItem)
-                        return
-                      }
-
-                      if (event.key === "Escape") {
-                        event.preventDefault()
-                        props.onOpenChange(false)
-                      }
-                    }} />
+                    <div class={styles.menuEmpty}>No matching options.</div>
                   </tsx:react>
-                : null}
-              {props.loading
-                ? <tsx:react>
-                    <div class={styles.menuEmpty}>
-                      <span class={css(
-                        {
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        },
-                      )}>
-                        <LoaderCircle class={css(
-                          { animation: "spin 1s linear infinite" },
-                        )} size={14} />
-                        Loading options...
-                      </span>
-                    </div>
-                  </tsx:react>
-                : filteredItems.length === 0
-                  ? <tsx:react>
-                      <div class={styles.menuEmpty}>No matching options.</div>
-                    </tsx:react>
-                  : <tsx:react>
-                      <ul class={styles.menuList}>
-                        {filteredItems.map((item, index) => {
-                          const isActive = index === selectedIndex
+                : <tsx:react>
+                    <ul class={styles.menuList}>
+                      {filteredItems.map((item, index) => {
+                        const isActive = index === selectedIndex
 
-                          return <tsx:react>
-                            <li key={item.value}>
-                              <button ref={(element) => {
-                                itemRefs.current[item.value] = element
-                              }} class={cx(
-                                styles.menuButton,
-                                isActive && styles.menuButtonActive,
-                              )} disabled={item.disabled} type="button" onMouseEnter={() => {
-                                setSelectedIndex(index)
-                              }} onClick={() => {
-                                commitSelection(item)
-                              }}>
-                                {item.label}
-                              </button>
-                            </li>
-                          </tsx:react>
-                        })}
-                      </ul>
-                    </tsx:react>}
-            </Popover.Content>
-          </Popover.Positioner>
-        </MenuPortal>
-      </div>
-    </Popover.Root>
-  </tsx:react>
+                        return <tsx:react>
+                          <li key={item.value}>
+                            <button ref={(element) => {
+                              itemRefs.current[item.value] = element
+                            }} class={cx(
+                              styles.menuButton,
+                              isActive && styles.menuButtonActive,
+                            )} disabled={item.disabled} type="button" onMouseEnter={() => {
+                              setSelectedIndex(index)
+                            }} onClick={() => {
+                              commitSelection(item)
+                            }}>
+                              {item.label}
+                            </button>
+                          </li>
+                        </tsx:react>
+                      })}
+                    </ul>
+                  </tsx:react>}
+          </Popover.Content>
+        </Popover.Positioner>
+      </MenuPortal>
+    </div>
+  </Popover.Root>
 }

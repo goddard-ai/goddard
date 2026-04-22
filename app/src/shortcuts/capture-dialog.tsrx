@@ -91,83 +91,87 @@ export component KeyboardShortcutCaptureDialog(props: {
     }
   }, [props.currentExpression, props.dialog.open, shortcutRegistry.runtime])
 
-  <tsx:react>
-    <DialogPortal>
-      <Dialog.Backdrop class={styles.backdrop} />
-      <Dialog.Positioner class={styles.positioner}>
-        <Dialog.Content class={styles.content}>
-          <Dialog.Title class={styles.title}>
-            <span class={styles.titleLabel}>
-              {props.mode === "add" ? "Add shortcut" : "Change shortcut"}
-            </span>
-            <span class={styles.titleText}>
-              {props.label}
-            </span>
-          </Dialog.Title>
-          <Dialog.CloseTrigger asChild>
-            <button class={styles.closeButton} type="button">
-              <X size={16} strokeWidth={2.2} />
-            </button>
-          </Dialog.CloseTrigger>
-          <dl class={styles.metaList}>
-            {props.currentExpression
+  <DialogPortal>
+    <Dialog.Backdrop class={styles.backdrop} />
+    <Dialog.Positioner class={styles.positioner}>
+      <Dialog.Content class={styles.content}>
+        <Dialog.Title class={styles.title}>
+          <span class={styles.titleLabel}>
+            {props.mode === "add" ? "Add shortcut" : "Change shortcut"}
+          </span>
+          <span class={styles.titleText}>
+            {props.label}
+          </span>
+        </Dialog.Title>
+        <Dialog.CloseTrigger asChild>
+          <button class={styles.closeButton} type="button">
+            <X size={16} strokeWidth={2.2} />
+          </button>
+        </Dialog.CloseTrigger>
+        <dl class={styles.metaList}>
+          {props.currentExpression
+            ? <tsx:react>
+                <div class={styles.metaRow}>
+                  <dt class={styles.metaTerm}>Current shortcut</dt>
+                  <dd class={styles.metaDetail}>
+                    {props.currentExpression}
+                  </dd>
+                </div>
+              </tsx:react>
+            : null}
+          {props.whenClause
+            ? <tsx:react>
+                <div class={styles.metaRow}>
+                  <dt class={styles.metaTerm}>When</dt>
+                  <dd class={styles.metaDetail}>
+                    {props.whenClause}
+                  </dd>
+                </div>
+              </tsx:react>
+            : null}
+        </dl>
+        <section class={styles.captureSection}>
+          <div class={styles.captureHeading}>
+            <span class={styles.captureLabel}>{"Press the shortcut you want to use"}</span>
+            {isRecording
               ? <tsx:react>
-                  <div class={styles.metaRow}>
-                    <dt class={styles.metaTerm}>Current shortcut</dt>
-                    <dd class={styles.metaDetail}>
-                      {props.currentExpression}
-                    </dd>
-                  </div>
+                  <span class={styles.captureStatus}>Listening…</span>
                 </tsx:react>
               : null}
-            {props.whenClause
-              ? <tsx:react>
-                  <div class={styles.metaRow}>
-                    <dt class={styles.metaTerm}>When</dt>
-                    <dd class={styles.metaDetail}>
-                      {props.whenClause}
-                    </dd>
-                  </div>
-                </tsx:react>
-              : null}
-          </dl>
-          <section class={styles.captureSection}>
-            <div class={styles.captureHeading}>
-              <span class={styles.captureLabel}>Press the shortcut you want to use</span>
-              {isRecording
-                ? <tsx:react>
-                    <span class={styles.captureStatus}>Listening…</span>
-                  </tsx:react>
-                : null}
-            </div>
-            <div class={styles.captureValue}>
-              {draftExpression
-                ? (draftExpression)
-                : <tsx:react>
-                    <span class={styles.capturePlaceholder}>Type a key combination or sequence</span>
-                  </tsx:react>}
-            </div>
-          </section>
-          <div class={styles.actionRow}>
-            <Dialog.CloseTrigger asChild>
-              <button class={styles.actionButton} type="button">Cancel</button>
-            </Dialog.CloseTrigger>
-            {props.onRemove
-              ? <tsx:react>
-                  <button class={`${styles.actionButton} ${styles.actionButtonDanger}`} type="button" onClick={() => {
-                    void props.onRemove?.()
-                  }}>Remove shortcut</button>
-                </tsx:react>
-              : null}
-            <button class={`${styles.actionButton} ${styles.actionButtonPrimary}`} disabled={draftExpression.trim().length ===
-              0} type="button" onClick={() => {
-              void props.onSave(draftExpression.trim())
-            }}>Save shortcut</button>
           </div>
-        </Dialog.Content>
-      </Dialog.Positioner>
-    </DialogPortal>
-  </tsx:react>
+          <div class={styles.captureValue}>
+            {draftExpression
+              ? (draftExpression)
+              : <tsx:react>
+                  <span class={styles.capturePlaceholder}>Type a key combination or sequence</span>
+                </tsx:react>}
+          </div>
+        </section>
+        <div class={styles.actionRow}>
+          <Dialog.CloseTrigger asChild>
+            <button class={styles.actionButton} type="button">{"Cancel"}</button>
+          </Dialog.CloseTrigger>
+          {props.onRemove
+            ? <tsx:react>
+                <button class={`${styles.actionButton} ${styles.actionButtonDanger}`} type="button" onClick={() => {
+                  void props.onRemove?.()
+                }}>Remove shortcut</button>
+              </tsx:react>
+            : null}
+          <button
+            class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+            disabled={draftExpression.trim().length === 0}
+            type="button"
+            onClick={() => {
+              void props.onSave(draftExpression.trim())
+            }}
+          >
+            {"Save shortcut"}
+          </button>
+        </div>
+      </Dialog.Content>
+    </Dialog.Positioner>
+  </DialogPortal>
 }
 
 export default KeyboardShortcutCaptureDialog

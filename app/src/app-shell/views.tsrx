@@ -15,23 +15,23 @@ export component AppShellWorkbenchContent() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
 
-  <tsx:react>
-    <Suspense fallback={<tsx:react>
+  <Suspense
+    fallback={<tsx:react>
       <div />
-    </tsx:react>}>
-      {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id
-        ? <tsx:react>
-            <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
-              <MainWorkbenchView />
-            </WorkbenchScrollPanel>
-          </tsx:react>
-        : <tsx:react>
-            <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
-              <WorkbenchTabPanel />
-            </WorkbenchScrollPanel>
-          </tsx:react>}
-    </Suspense>
-  </tsx:react>
+    </tsx:react>}
+  >
+    {workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id
+      ? <tsx:react>
+          <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
+            <MainWorkbenchView />
+          </WorkbenchScrollPanel>
+        </tsx:react>
+      : <tsx:react>
+          <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
+            <WorkbenchTabPanel />
+          </WorkbenchScrollPanel>
+        </tsx:react>}
+  </Suspense>
 }
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
@@ -54,31 +54,35 @@ component WorkbenchScrollPanel(props: {
     setScrollTop(restoredScrollTop)
   }, [props.scrollKey])
 
-  <tsx:react>
-    <TabViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
-      <div ref={scrollerRef} class={css(
+  <TabViewportProvider {scrollTop} viewportRef={scrollerRef}>
+    <div
+      ref={scrollerRef}
+      class={css(
         {
           minHeight: "0",
           height: "100%",
           overflowY: "auto",
           overscrollBehavior: "contain",
         },
-      )} onScroll={(event) => {
+      )}
+      onScroll={(event) => {
         const nextScrollTop = event.currentTarget.scrollTop
         panelScrollCache.set(props.scrollKey, nextScrollTop)
         setScrollTop(nextScrollTop)
-      }}>
-        <div class={css(
+      }}
+    >
+      <div
+        class={css(
           {
             height: "100%",
             minHeight: "100%",
           },
-        )}>
-          {props.children}
-        </div>
+        )}
+      >
+        {props.children}
       </div>
-    </TabViewportProvider>
-  </tsx:react>
+    </div>
+  </TabViewportProvider>
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
@@ -86,9 +90,7 @@ component MainWorkbenchView() {
   const navigation = useNavigation()
   const ActiveNavigationComponent = getWorkbenchTabComponent(navigation.selectedNavId)
 
-  <tsx:react>
-    <ActiveNavigationComponent />
-  </tsx:react>
+  <ActiveNavigationComponent />
 }
 
 /** Renders the active closable workbench tab panel. */
@@ -97,16 +99,12 @@ component WorkbenchTabPanel() {
   const activeTab = workbenchTabSet.activeTab
 
   if (!activeTab) {
-    <tsx:react>
-      <div />
-    </tsx:react>
+    <div />
     return
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
   const activeTabPayload = activeTab.payload as Record<string, unknown>
 
-  <tsx:react>
-    <ActiveTabComponent />
-  </tsx:react>
+  <ActiveTabComponent />
 }

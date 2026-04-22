@@ -101,17 +101,17 @@ export component TabViewportProvider(props: TabViewportProviderProps) {
     }
   }, [props.viewportRef])
 
-  <tsx:react>
-    <tabViewportContext.Provider value={{
+  <tabViewportContext.Provider
+    value={{
       viewportRef: props.viewportRef,
       width: viewport.width,
       height: viewport.height,
       scrollTop: props.scrollTop,
       fontsReady,
-    }}>
-      {props.children}
-    </tabViewportContext.Provider>
-  </tsx:react>
+    }}
+  >
+    {props.children}
+  </tabViewportContext.Provider>
 }
 
 /** Returns the shared viewport metrics for the nearest tab viewport provider. */

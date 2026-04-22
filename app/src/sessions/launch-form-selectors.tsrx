@@ -27,9 +27,18 @@ function getShortcutLabel(binding: unknown) {
 }
 
 export component SessionLaunchLoadingSelect(props: { label: string }) {
-  <tsx:react>
-    <SessionInputSelect disabled={true} filterable={false} items={[]} label={props.label} loading={true} open={false} placeholder="Loading options..." value={null} onOpenChange={() => {}} onValueChange={() => {}} />
-  </tsx:react>
+  <SessionInputSelect
+    disabled={true}
+    filterable={false}
+    items={[]}
+    label={props.label}
+    loading={true}
+    open={false}
+    placeholder="Loading options..."
+    value={null}
+    onOpenChange={() => {}}
+    onValueChange={() => {}}
+  />
 }
 
 export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
@@ -54,18 +63,24 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
     form.adapterCatalog.value = adapterCatalog
   }, [adapterCatalog, form])
 
-  <tsx:react>
-    <SessionInputSelect disabled={!form.draftProjectPath.value} filterable={true} items={items} label="Adapter" open={form.openPicker.value ===
-      "adapter"} placeholder="Select an adapter" shortcut={adapterShortcut} value={form.draftAdapterId.value} onOpenChange={(
-      open,
-    ) => {
+  <SessionInputSelect
+    disabled={!form.draftProjectPath.value}
+    filterable={true}
+    {items}
+    label="Adapter"
+    open={form.openPicker.value === "adapter"}
+    placeholder="Select an adapter"
+    shortcut={adapterShortcut}
+    value={form.draftAdapterId.value}
+    onOpenChange={(open) => {
       form.setOpenPicker(open ? "adapter" : null)
-    }} onValueChange={(value) => {
+    }}
+    onValueChange={(value) => {
       form.draftAdapterId.value = value
       form.launchPreview.value = null
       form.setOpenPicker(null)
-    }} />
-  </tsx:react>
+    }}
+  />
 }
 
 export component SessionLaunchPreviewSelectors(props: {
@@ -159,51 +174,76 @@ export component SessionLaunchPreviewSelectors(props: {
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
   )
 
-  <tsx:react>
-    <>
-      <div class={styles.grid}>
-        <SessionInputSelect disabled={!form.draftProjectPath.value} filterable={false} items={locationItems} label="Launch location" open={form.openPicker.value ===
-          "location"} placeholder="Choose where to launch" shortcut={locationShortcut} value={form.draftLocation.value} onOpenChange={(
-          open,
-        ) => {
-          form.setOpenPicker(open ? "location" : null)
-        }} onValueChange={(value) => {
-          form.draftLocation.value = value as "local" | "worktree"
-        }} />
-        <SessionInputSelect disabled={form.draftLocation.value !== "worktree" ||
-          branchItems.length ===
-            0} filterable={true} items={branchItems} label="Git branch" open={form.openPicker.value ===
-          "branch"} placeholder="Choose a branch" shortcut={branchShortcut} value={form.draftBaseBranchName.value} onOpenChange={(
-          open,
-        ) => {
-          form.setOpenPicker(open ? "branch" : null)
-        }} onValueChange={(value) => {
-          form.draftBaseBranchName.value = value
-        }} />
-      </div>
-      <div class={styles.grid}>
-        <SessionInputSelect disabled={modelItems.length ===
-          0} filterable={true} items={modelItems} label="Model" open={form.openPicker.value ===
-          "model"} placeholder="Use the adapter default model" shortcut={modelShortcut} value={form.draftModelId.value} onOpenChange={(
-          open,
-        ) => {
-          form.setOpenPicker(open ? "model" : null)
-        }} onValueChange={(value) => {
-          form.draftModelId.value = value
-        }} />
-        <SessionInputSelect disabled={thinkingItems.length ===
-          0} filterable={false} items={thinkingItems} label="Thinking level" open={form.openPicker.value ===
-          "thinking"} placeholder="Use the adapter default" shortcut={thinkingShortcut} value={typeof form.draftThinkingValue.value ===
-        "boolean"
-          ? String(form.draftThinkingValue.value)
-          : form.draftThinkingValue.value ?? null} onOpenChange={(open) => {
-          form.setOpenPicker(open ? "thinking" : null)
-        }} onValueChange={(value) => {
-          form.draftThinkingValue.value = form.thinkingOption.value?.type === "boolean"
-            ? value === "true"
-            : value
-        }} />
-      </div>
-    </>
-  </tsx:react>
+  <div class={styles.grid}>
+    <SessionInputSelect
+      disabled={!form.draftProjectPath.value}
+      filterable={false}
+      items={locationItems}
+      label="Launch location"
+      open={form.openPicker.value === "location"}
+      placeholder="Choose where to launch"
+      shortcut={locationShortcut}
+      value={form.draftLocation.value}
+      onOpenChange={(open) => {
+        form.setOpenPicker(open ? "location" : null)
+      }}
+      onValueChange={(value) => {
+        form.draftLocation.value = value as "local" | "worktree"
+      }}
+    />
+    <SessionInputSelect
+      disabled={form.draftLocation.value !== "worktree" || branchItems.length === 0}
+      filterable={true}
+      items={branchItems}
+      label="Git branch"
+      open={form.openPicker.value === "branch"}
+      placeholder="Choose a branch"
+      shortcut={branchShortcut}
+      value={form.draftBaseBranchName.value}
+      onOpenChange={(open) => {
+        form.setOpenPicker(open ? "branch" : null)
+      }}
+      onValueChange={(value) => {
+        form.draftBaseBranchName.value = value
+      }}
+    />
+  </div>
+  <div class={styles.grid}>
+    <SessionInputSelect
+      disabled={modelItems.length === 0}
+      filterable={true}
+      items={modelItems}
+      label="Model"
+      open={form.openPicker.value === "model"}
+      placeholder="Use the adapter default model"
+      shortcut={modelShortcut}
+      value={form.draftModelId.value}
+      onOpenChange={(open) => {
+        form.setOpenPicker(open ? "model" : null)
+      }}
+      onValueChange={(value) => {
+        form.draftModelId.value = value
+      }}
+    />
+    <SessionInputSelect
+      disabled={thinkingItems.length === 0}
+      filterable={false}
+      items={thinkingItems}
+      label="Thinking level"
+      open={form.openPicker.value === "thinking"}
+      placeholder="Use the adapter default"
+      shortcut={thinkingShortcut}
+      value={typeof form.draftThinkingValue.value === "boolean"
+        ? String(form.draftThinkingValue.value)
+        : form.draftThinkingValue.value ?? null}
+      onOpenChange={(open) => {
+        form.setOpenPicker(open ? "thinking" : null)
+      }}
+      onValueChange={(value) => {
+        form.draftThinkingValue.value = form.thinkingOption.value?.type === "boolean"
+          ? value === "true"
+          : value
+      }}
+    />
+  </div>
 }

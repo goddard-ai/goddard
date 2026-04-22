@@ -103,32 +103,35 @@ export component TextTranscriptRow(props: {
     return
   }
 
-  <tsx:react>
-    <article class={rowClass}>
-      <div class={rowInnerClass} style={alignmentStyle}>
-        <div class={rowColumnClass} style={{
+  <article class={rowClass}>
+    <div class={rowInnerClass} style={alignmentStyle}>
+      <div
+        class={rowColumnClass}
+        style={{
           width: isUserMessage
             ? `${getBubbleMaxWidth(props.row.viewportWidth, message)}px`
             : "100%",
-        }}>
-          <div class={isUserMessage
+        }}
+      >
+        <div
+          class={isUserMessage
             ? cx(bubbleFrameClass, userBubbleClass)
-            : cx(assistantMessageClass, assistantBubbleClass)}>
-            <div class={transcriptContentClass}>
-              {message.content.map(
-                (block, blockIndex) => renderContentBlock(
-                  {
-                    block,
-                    blockIndex,
-                    lastTextBlockIndex,
-                    message,
-                  },
-                ),
-              )}
-            </div>
+            : cx(assistantMessageClass, assistantBubbleClass)}
+        >
+          <div class={transcriptContentClass}>
+            {message.content.map(
+              (block, blockIndex) => renderContentBlock(
+                {
+                  block,
+                  blockIndex,
+                  lastTextBlockIndex,
+                  message,
+                },
+              ),
+            )}
           </div>
         </div>
       </div>
-    </article>
-  </tsx:react>
+    </div>
+  </article>
 }

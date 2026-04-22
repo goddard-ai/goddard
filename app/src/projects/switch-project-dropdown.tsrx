@@ -188,119 +188,122 @@ export component SwitchProjectDropdown() {
     })
   })
 
-  <tsx:react>
-    <>
-      <button ref={triggerRef} aria-expanded={isOpen
-        ? "true"
-        : "false"} aria-haspopup="dialog" aria-label="Switch project" class={styles.trigger} type="button" onClick={() => {
-        setIsOpen(!isOpen)
-      }} onKeyDown={(event) => {
-        if (event.key === "ArrowDown" && !isOpen) {
-          event.preventDefault()
-          setIsOpen(true)
-        }
-      }}>
-        <span class={styles.triggerLabel}>
-          {activeProject?.name ?? "Open project"}
-        </span>
-      </button>
-      {isOpen
-        ? <tsx:react>
-            <div ref={contentRef} class={styles.content}>
-              <label class={styles.searchField}>
-                <span class={styles.srOnly}>Search projects</span>
-                <Search aria-hidden={true} size={16} strokeWidth={2.1} />
-                <input ref={inputRef} class={styles.searchInput} placeholder="Search projects" value={search} onInput={(
-                  event,
-                ) => {
-                  setSearch(event.currentTarget.value)
-                  setHighlightedIndex(0)
-                }} onKeyDown={(event) => {
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault()
-                    moveHighlightedIndex(1)
-                    return
-                  }
+  <button
+    ref={triggerRef}
+    aria-expanded={isOpen ? "true" : "false"}
+    aria-haspopup="dialog"
+    aria-label="Switch project"
+    class={styles.trigger}
+    type="button"
+    onClick={() => {
+      setIsOpen(!isOpen)
+    }}
+    onKeyDown={(event) => {
+      if (event.key === "ArrowDown" && !isOpen) {
+        event.preventDefault()
+        setIsOpen(true)
+      }
+    }}
+  >
+    <span class={styles.triggerLabel}>
+      {activeProject?.name ?? "Open project"}
+    </span>
+  </button>
+  {isOpen
+    ? <tsx:react>
+        <div ref={contentRef} class={styles.content}>
+          <label class={styles.searchField}>
+            <span class={styles.srOnly}>Search projects</span>
+            <Search aria-hidden={true} size={16} strokeWidth={2.1} />
+            <input ref={inputRef} class={styles.searchInput} placeholder="Search projects" value={search} onInput={(
+              event,
+            ) => {
+              setSearch(event.currentTarget.value)
+              setHighlightedIndex(0)
+            }} onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault()
+                moveHighlightedIndex(1)
+                return
+              }
 
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault()
-                    moveHighlightedIndex(-1)
-                    return
-                  }
+              if (event.key === "ArrowUp") {
+                event.preventDefault()
+                moveHighlightedIndex(-1)
+                return
+              }
 
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    activateItem(highlightedItem)
-                  }
-                }} />
-              </label>
-              {items.length > 0
-                ? <tsx:react>
-                    <ul class={styles.list}>
-                      {items.map((item, index) => {
-                        const isHighlighted = highlightedItemIndex === index
+              if (event.key === "Enter") {
+                event.preventDefault()
+                activateItem(highlightedItem)
+              }
+            }} />
+          </label>
+          {items.length > 0
+            ? <tsx:react>
+                <ul class={styles.list}>
+                  {items.map((item, index) => {
+                    const isHighlighted = highlightedItemIndex === index
 
-                        if (item.kind === "open-folder") {
-                          return <tsx:react>
-                            <li key={item.id}>
-                              <button ref={(element) => {
-                                itemRefs.current[item.id] = element
-                              }} class={styles.item} data-highlighted={isHighlighted
-                                ? "true"
-                                : "false"} type="button" onMouseEnter={() => {
-                                setHighlightedIndex(index)
-                              }} onClick={() => {
-                                activateItem(item)
-                              }}>
-                                <span class={styles.itemBody}>
-                                  <span class={styles.itemTitle}>Open folder…</span>
-                                  <span class={styles.itemDetail}>Add a local project from your filesystem.</span>
-                                </span>
-                              </button>
-                            </li>
-                          </tsx:react>
-                        }
+                    if (item.kind === "open-folder") {
+                      return <tsx:react>
+                        <li key={item.id}>
+                          <button ref={(element) => {
+                            itemRefs.current[item.id] = element
+                          }} class={styles.item} data-highlighted={isHighlighted
+                            ? "true"
+                            : "false"} type="button" onMouseEnter={() => {
+                            setHighlightedIndex(index)
+                          }} onClick={() => {
+                            activateItem(item)
+                          }}>
+                            <span class={styles.itemBody}>
+                              <span class={styles.itemTitle}>Open folder…</span>
+                              <span class={styles.itemDetail}>Add a local project from your filesystem.</span>
+                            </span>
+                          </button>
+                        </li>
+                      </tsx:react>
+                    }
 
-                        const isActiveProject = activeProject?.path === item.project.path
+                    const isActiveProject = activeProject?.path === item.project.path
 
-                        return <tsx:react>
-                          <li key={item.id}>
-                            <button ref={(element) => {
-                              itemRefs.current[item.id] = element
-                            }} class={styles.item} data-highlighted={isHighlighted
-                              ? "true"
-                              : "false"} type="button" onMouseEnter={() => {
-                              setHighlightedIndex(index)
-                            }} onClick={() => {
-                              activateItem(item)
-                            }}>
-                              <span class={styles.itemBody}>
-                                <span class={styles.itemTitleEllipsis}>
-                                  {item.project.name}
-                                </span>
-                                <span class={styles.itemDetailEllipsis}>
-                                  {item.project.path}
-                                </span>
-                              </span>
-                              {isActiveProject
-                                ? <tsx:react>
-                                    <span class={styles.activeBadge}>Active</span>
-                                  </tsx:react>
-                                : null}
-                            </button>
-                          </li>
-                        </tsx:react>
-                      })}
-                    </ul>
-                  </tsx:react>
-                : <tsx:react>
-                    <p class={styles.empty}>No matching projects.</p>
-                  </tsx:react>}
-            </div>
-          </tsx:react>
-        : null}
-    </>
-  </tsx:react>
+                    return <tsx:react>
+                      <li key={item.id}>
+                        <button ref={(element) => {
+                          itemRefs.current[item.id] = element
+                        }} class={styles.item} data-highlighted={isHighlighted
+                          ? "true"
+                          : "false"} type="button" onMouseEnter={() => {
+                          setHighlightedIndex(index)
+                        }} onClick={() => {
+                          activateItem(item)
+                        }}>
+                          <span class={styles.itemBody}>
+                            <span class={styles.itemTitleEllipsis}>
+                              {item.project.name}
+                            </span>
+                            <span class={styles.itemDetailEllipsis}>
+                              {item.project.path}
+                            </span>
+                          </span>
+                          {isActiveProject
+                            ? <tsx:react>
+                                <span class={styles.activeBadge}>Active</span>
+                              </tsx:react>
+                            : null}
+                        </button>
+                      </li>
+                    </tsx:react>
+                  })}
+                </ul>
+              </tsx:react>
+            : <tsx:react>
+                <p class={styles.empty}>No matching projects.</p>
+              </tsx:react>}
+        </div>
+      </tsx:react>
+    : null}
 }
 
 export default SwitchProjectDropdown

@@ -80,54 +80,63 @@ export component SessionLaunchForm(props: {
     form.launchPreview.value = null
   }, [form, props.projects])
 
-  <tsx:react>
-    <div class={selectorStyles.section}>
-      <div class={selectorStyles.grid}>
-        <SessionInputSelect disabled={props.projects.length ===
-          0} filterable={true} items={projectItems} label="Project" open={form.openPicker.value ===
-          "project"} placeholder="Select a project" shortcut={projectShortcut} value={form.draftProjectPath.value} onOpenChange={(
-          open,
-        ) => {
+  <div class={selectorStyles.section}>
+    <div class={selectorStyles.grid}>
+      <SessionInputSelect
+        disabled={props.projects.length === 0}
+        filterable={true}
+        items={projectItems}
+        label="Project"
+        open={form.openPicker.value === "project"}
+        placeholder="Select a project"
+        shortcut={projectShortcut}
+        value={form.draftProjectPath.value}
+        onOpenChange={(open) => {
           form.setOpenPicker(open ? "project" : null)
-        }} onValueChange={(value) => {
+        }}
+        onValueChange={(value) => {
           form.draftProjectPath.value = value
           form.launchPreview.value = null
           form.setOpenPicker(null)
-        }} />
-        <Suspense fallback={<tsx:react>
+        }}
+      />
+      <Suspense
+        fallback={<tsx:react>
           <SessionLaunchLoadingSelect label="Adapter" />
-        </tsx:react>}>
-          <AgentHarnessSelector form={form} />
-        </Suspense>
-      </div>
-      {selectedAdapter
-        ? <tsx:react>
-            <div class={selectorStyles.adapterCard}>
-              <p class={styles.adapterMeta}>
-                <span class={styles.mutedMeta}>
-                  Adapter
-                  {" · "}
-                </span>
-                <span>
-                  {selectedAdapter.name}
-                </span>
-                <span class={styles.mutedMeta}>
-                  {" · "}
-                  {selectedAdapter.id}
-                  {selectedAdapter.unofficial ? " · Unofficial" : ""}
-                </span>
-              </p>
-              {selectedAdapter.description
-                ? <tsx:react>
-                    <p class={styles.adapterDescription}>
-                      {selectedAdapter.description}
-                    </p>
-                  </tsx:react>
-                : null}
-            </div>
-          </tsx:react>
-        : null}
-      <Suspense fallback={<tsx:react>
+        </tsx:react>}
+      >
+        <AgentHarnessSelector {form} />
+      </Suspense>
+    </div>
+    {selectedAdapter
+      ? <tsx:react>
+          <div class={selectorStyles.adapterCard}>
+            <p class={styles.adapterMeta}>
+              <span class={styles.mutedMeta}>
+                Adapter
+                {" · "}
+              </span>
+              <span>
+                {selectedAdapter.name}
+              </span>
+              <span class={styles.mutedMeta}>
+                {" · "}
+                {selectedAdapter.id}
+                {selectedAdapter.unofficial ? " · Unofficial" : ""}
+              </span>
+            </p>
+            {selectedAdapter.description
+              ? <tsx:react>
+                  <p class={styles.adapterDescription}>
+                    {selectedAdapter.description}
+                  </p>
+                </tsx:react>
+              : null}
+          </div>
+        </tsx:react>
+      : null}
+    <Suspense
+      fallback={<tsx:react>
         <div class={selectorStyles.section}>
           <div class={selectorStyles.grid}>
             <SessionLaunchLoadingSelect label="Launch location" />
@@ -138,12 +147,15 @@ export component SessionLaunchForm(props: {
             <SessionLaunchLoadingSelect label="Thinking level" />
           </div>
         </div>
-      </tsx:react>}>
-        <SessionLaunchPreviewSelectors form={form} />
-      </Suspense>
-      <SessionInput autoFocus={true} classes={launchInputClasses} helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions." loadSuggestions={async (
-        input,
-      ) => {
+      </tsx:react>}
+    >
+      <SessionLaunchPreviewSelectors {form} />
+    </Suspense>
+    <SessionInput
+      autoFocus={true}
+      classes={launchInputClasses}
+      helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
+      loadSuggestions={async (input) => {
         const cwd = form.draftProjectPath.value
 
         if (!cwd) {
@@ -166,11 +178,16 @@ export component SessionLaunchForm(props: {
         )
 
         return response.suggestions
-      }} onPromptChange={(prompt) => {
+      }}
+      onPromptChange={(prompt) => {
         form.draftPromptBlocks.value = prompt
-      }} onEscape={props.onEscape} placeholder="Describe the first thing this session should do." submitLabel="Launch session" onSubmit={async () => {
+      }}
+      onEscape={props.onEscape}
+      placeholder="Describe the first thing this session should do."
+      submitLabel="Launch session"
+      onSubmit={async () => {
         await props.onSubmit()
-      }} />
-    </div>
-  </tsx:react>
+      }}
+    />
+  </div>
 }

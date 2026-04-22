@@ -18,12 +18,14 @@ export component TerminalViewport(props: {
     }
   }, [props.terminal])
 
-  <tsx:react>
-    <div class={cx(styles.frame, props.class)}>
-      <div aria-label={props.ariaLabel ??
-        "Terminal viewport"} class={styles.viewport} onFocus={() => {
+  <div class={cx(styles.frame, props.class)}>
+    <div
+      aria-label={props.ariaLabel ?? "Terminal viewport"}
+      class={styles.viewport}
+      onFocus={() => {
         props.terminal.notifyFocus()
-      }} onKeyDown={(event) => {
+      }}
+      onKeyDown={(event) => {
         const input = translateKeyboardEvent(event)
 
         if (!input) {
@@ -32,7 +34,8 @@ export component TerminalViewport(props: {
 
         event.preventDefault()
         props.terminal.forwardInput(input)
-      }} onPaste={(event) => {
+      }}
+      onPaste={(event) => {
         const pasted = event.clipboardData?.getData("text")
 
         if (!pasted) {
@@ -41,10 +44,14 @@ export component TerminalViewport(props: {
 
         event.preventDefault()
         props.terminal.forwardPaste(pasted)
-      }} onWheel={(event) => {
+      }}
+      onWheel={(event) => {
         event.preventDefault()
         props.terminal.scrollViewport(event.deltaY, event.deltaMode)
-      }} ref={viewportRef} role="region" style={{
+      }}
+      ref={viewportRef}
+      role="region"
+      style={{
         backgroundColor: props.terminal.theme.background,
         color: props.terminal.theme.foreground,
         fontFamily: props.terminal.fontFamily,
@@ -52,22 +59,23 @@ export component TerminalViewport(props: {
         fontVariantLigatures: "none",
         letterSpacing: props.terminal.letterSpacing,
         lineHeight: props.terminal.lineHeight,
-      }} tabIndex={0}>
-        {props.terminal.viewRows.map(
-          (row) => <tsx:react>
-            <div class={styles.row} key={row.key}>
-              {row.segments.length === 0 ? " " : null}
-              {row.segments.map(
-                (segment) => <tsx:react>
-                  <span key={segment.key} style={segment.style}>
-                    {segment.text}
-                  </span>
-                </tsx:react>,
-              )}
-            </div>
-          </tsx:react>,
-        )}
-      </div>
+      }}
+      tabIndex={0}
+    >
+      {props.terminal.viewRows.map(
+        (row) => <tsx:react>
+          <div class={styles.row} key={row.key}>
+            {row.segments.length === 0 ? " " : null}
+            {row.segments.map(
+              (segment) => <tsx:react>
+                <span key={segment.key} style={segment.style}>
+                  {segment.text}
+                </span>
+              </tsx:react>,
+            )}
+          </div>
+        </tsx:react>,
+      )}
     </div>
-  </tsx:react>
+  </div>
 }

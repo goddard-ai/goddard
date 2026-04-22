@@ -112,12 +112,14 @@ export component AppShell() {
     }
   })
 
-  <tsx:react>
-    <>
-      <CommandDialog command={AppCommand.navigation.openCommandPalette} content={() => import("~/command-palette.tsrx")} />
-      <AppShellChrome />
-      <CommandDialog command={AppCommand.navigation.openNewSessionDialog} content={() => import("~/sessions/dialog.tsrx")} />
-      <GoodToaster />
-    </>
-  </tsx:react>
+  <CommandDialog
+    command={AppCommand.navigation.openCommandPalette}
+    content={() => import("~/command-palette.tsrx")}
+  />
+  <AppShellChrome />
+  <CommandDialog
+    command={AppCommand.navigation.openNewSessionDialog}
+    content={() => import("~/sessions/dialog.tsrx")}
+  />
+  <GoodToaster />
 }

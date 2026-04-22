@@ -76,17 +76,16 @@ export component MarkdownMessage(props: {
   }, [props.markdown, props.streaming])
 
   if (!tree) {
-    <tsx:react>
-      <div class={cx(renderClass, styles.fallback)}>
-        {props.markdown}
-      </div>
-    </tsx:react>
+    <div class={cx(renderClass, styles.fallback)}>
+      {props.markdown}
+    </div>
     return
   }
 
-  <tsx:react>
-    <ComarkRenderer caret={props.streaming
-      ? { class: styles.caret }
-      : false} className={renderClass} streaming={props.streaming} tree={tree} />
-  </tsx:react>
+  <ComarkRenderer
+    caret={props.streaming ? { class: styles.caret } : false}
+    className={renderClass}
+    streaming={props.streaming}
+    {tree}
+  />
 }

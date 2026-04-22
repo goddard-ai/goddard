@@ -92,15 +92,11 @@ function estimateToolGroupRowHeight(
 /** Renders one transcript row using the row-specific presentation path. */
 component TranscriptRow(props: { row: MessageListRow<RenderTranscriptItem> }) {
   if (props.row.item.kind === "toolGroup") {
-    <tsx:react>
-      <ToolTranscriptRow groupId={props.row.item.id} toolCalls={props.row.item.toolCalls} />
-    </tsx:react>
+    <ToolTranscriptRow groupId={props.row.item.id} toolCalls={props.row.item.toolCalls} />
     return
   }
 
-  <tsx:react>
-    <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
-  </tsx:react>
+  <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
 }
 
 /** Renders one chat transcript inside the shared message-list virtualizer. */
@@ -110,21 +106,23 @@ export component Transcript(props: TranscriptProps) {
     props.messages,
   ])
 
-  <tsx:react>
-    <div class={cx(transcriptViewportClass, props.class)}>
-      <MessageList defaultRowHeight={DEFAULT_ROW_HEIGHT} estimateRowHeight={(
-        message,
-        _index,
-        viewportWidth,
-      ) => message.kind === "toolGroup"
+  <div class={cx(transcriptViewportClass, props.class)}>
+    <MessageList
+      defaultRowHeight={DEFAULT_ROW_HEIGHT}
+      estimateRowHeight={(message, _index, viewportWidth) => message.kind === "toolGroup"
         ? estimateToolGroupRowHeight(message.toolCalls, viewportWidth)
-        : estimateTranscriptRowHeight(message, viewportWidth)} getItemKey={(
-        message,
-      ) => message.id} initialScrollPosition={effectiveInitialScroll} items={renderItems} loadingFallback={<tsx:react>
+        : estimateTranscriptRowHeight(message, viewportWidth)}
+      getItemKey={(message) => message.id}
+      initialScrollPosition={effectiveInitialScroll}
+      items={renderItems}
+      loadingFallback={<tsx:react>
         <div class={loadingStateClass}>Preparing transcript layout...</div>
-      </tsx:react>} overscanPx={VIRTUAL_OVERSCAN_PX} renderRow={(row) => <tsx:react>
+      </tsx:react>}
+      overscanPx={VIRTUAL_OVERSCAN_PX}
+      renderRow={(row) => <tsx:react>
         <TranscriptRow row={row} />
-      </tsx:react>} scrollCacheKey={props.scrollCacheKey} />
-    </div>
-  </tsx:react>
+      </tsx:react>}
+      scrollCacheKey={props.scrollCacheKey}
+    />
+  </div>
 }

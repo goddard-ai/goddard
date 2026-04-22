@@ -13,30 +13,28 @@ export const appToaster = createToaster(
 )
 
 export component GoodToaster() {
-  <tsx:react>
-    <Portal>
-      <Toaster toaster={appToaster} class={styles.group}>
-        {(toast) => <tsx:react>
-          <Toast.Root key={toast.id} class={styles.root}>
-            <span aria-hidden="true" class={styles.accent} />
-            <div class={styles.body}>
-              <Toast.Title class={styles.title}>
-                {toast.title}
-              </Toast.Title>
-              {toast.description
-                ? <tsx:react>
-                    <Toast.Description class={styles.description}>
-                      {toast.description}
-                    </Toast.Description>
-                  </tsx:react>
-                : null}
-            </div>
-            <Toast.CloseTrigger class={styles.closeButton}>
-              <X size={15} strokeWidth={2.2} />
-            </Toast.CloseTrigger>
-          </Toast.Root>
-        </tsx:react>}
-      </Toaster>
-    </Portal>
-  </tsx:react>
+  <Portal>
+    <Toaster toaster={appToaster} class={styles.group}>
+      {(toast) => <tsx:react>
+        <Toast.Root key={toast.id} class={styles.root}>
+          <span aria-hidden="true" class={styles.accent} />
+          <div class={styles.body}>
+            <Toast.Title class={styles.title}>
+              {toast.title}
+            </Toast.Title>
+            {toast.description
+              ? <tsx:react>
+                  <Toast.Description class={styles.description}>
+                    {toast.description}
+                  </Toast.Description>
+                </tsx:react>
+              : null}
+          </div>
+          <Toast.CloseTrigger class={styles.closeButton}>
+            <X size={15} strokeWidth={2.2} />
+          </Toast.CloseTrigger>
+        </Toast.Root>
+      </tsx:react>}
+    </Toaster>
+  </Portal>
 }

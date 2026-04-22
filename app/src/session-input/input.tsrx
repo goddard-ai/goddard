@@ -310,29 +310,54 @@ export component SessionInput(props: {
     hideMenu()
   })
 
-  <tsx:react>
-    <form ref={formRef} class={classes.form} onSubmit={(event) => {
+  <form
+    ref={formRef}
+    class={classes.form}
+    onSubmit={(event) => {
       event.preventDefault()
       void submitPrompt()
-    }}>
-      <LexicalComposer initialConfig={sessionInputInitialConfig}>
-        <div class={classes.editorFrame}>
-          <PlainTextPlugin ErrorBoundary={LexicalErrorBoundary} contentEditable={<tsx:react>
+    }}
+  >
+    <LexicalComposer initialConfig={sessionInputInitialConfig}>
+      <div class={classes.editorFrame}>
+        <PlainTextPlugin
+          ErrorBoundary={LexicalErrorBoundary}
+          contentEditable={<tsx:react>
             <ContentEditable aria-placeholder={placeholder} class={classes.contentEditable} placeholder={sessionInputPlaceholder} />
-          </tsx:react>} placeholder={sessionInputPlaceholder} />
-          <SessionInputPlugins menu={menu} onAcceptMenu={acceptHighlightedSuggestion} onDismissMenu={dismissMenuFromEditor} onEditorReady={registerEditor} onHighlightNext={highlightNextSuggestion} onHighlightPrevious={highlightPreviousSuggestion} onMenuChange={updateMenu} onPromptBlocksChange={updatePromptBlocks} onEscape={props.onEscape} onSubmit={submitFromEditor} />
-        </div>
-      </LexicalComposer>
-      <SessionInputMenu isLoadingSuggestions={isLoadingSuggestions} menu={menu} menuRef={menuRef} selectedIndex={selectedIndex} suggestions={suggestions} onAcceptSuggestion={acceptSuggestion} onHighlight={highlightSuggestion} />
-      <div class={classes.footer}>
-        <p class={classes.helperText}>
-          {helperText}
-        </p>
-        <button class={classes.submitButton} disabled={!canSubmit} type="submit">
-          {submitLabel}
-          <SendHorizontal size={15} strokeWidth={2.2} />
-        </button>
+          </tsx:react>}
+          placeholder={sessionInputPlaceholder}
+        />
+        <SessionInputPlugins
+          {menu}
+          onAcceptMenu={acceptHighlightedSuggestion}
+          onDismissMenu={dismissMenuFromEditor}
+          onEditorReady={registerEditor}
+          onHighlightNext={highlightNextSuggestion}
+          onHighlightPrevious={highlightPreviousSuggestion}
+          onMenuChange={updateMenu}
+          onPromptBlocksChange={updatePromptBlocks}
+          onEscape={props.onEscape}
+          onSubmit={submitFromEditor}
+        />
       </div>
-    </form>
-  </tsx:react>
+    </LexicalComposer>
+    <SessionInputMenu
+      {isLoadingSuggestions}
+      {menu}
+      {menuRef}
+      {selectedIndex}
+      {suggestions}
+      onAcceptSuggestion={acceptSuggestion}
+      onHighlight={highlightSuggestion}
+    />
+    <div class={classes.footer}>
+      <p class={classes.helperText}>
+        {helperText}
+      </p>
+      <button class={classes.submitButton} disabled={!canSubmit} type="submit">
+        {submitLabel}
+        <SendHorizontal size={15} strokeWidth={2.2} />
+      </button>
+    </div>
+  </form>
 }

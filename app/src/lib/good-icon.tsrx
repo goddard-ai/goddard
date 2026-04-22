@@ -25,20 +25,20 @@ export component GoodIcon(props: SvgIconSource & preact.JSX.IntrinsicElements["s
 
   if (props.data !== undefined) {
     const parsedSvg = getParsedInlineSvg(props.data)
-    <tsx:react>
-      <svg dangerouslySetInnerHTML={{
+    <svg
+      dangerouslySetInnerHTML={{
         __html: parsedSvg.innerMarkup,
-      }} preserveAspectRatio={svgProps.preserveAspectRatio ?? parsedSvg.preserveAspectRatio ??
-        undefined} viewBox={svgProps.viewBox ?? parsedSvg.viewBox ?? undefined} />
-    </tsx:react>
+      }}
+      preserveAspectRatio={svgProps.preserveAspectRatio ?? parsedSvg.preserveAspectRatio ??
+        undefined}
+      viewBox={svgProps.viewBox ?? parsedSvg.viewBox ?? undefined}
+    />
     return
   }
 
-  <tsx:react>
-    <svg>
-      <use href={`/__spritemap#${svgIconSymbolIds[props.name]}`} />
-    </svg>
-  </tsx:react>
+  <svg>
+    <use href={`/__spritemap#${svgIconSymbolIds[props.name]}`} />
+  </svg>
 }
 
 /** Removes SvgIcon-only props before forwarding the rest to the `<svg>` element. */

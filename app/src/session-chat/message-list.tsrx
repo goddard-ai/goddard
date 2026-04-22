@@ -86,29 +86,36 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   }, [props.estimateRowHeight, props.items, viewport.width])
 
   if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
-    <tsx:react>
-      {props.loadingFallback ?? <div class={styles.loading}>Preparing paragraph layout...</div>}
-    </tsx:react>
+    {props.loadingFallback ??
+      <tsx:react>
+        <div class={styles.loading}>
+          {"Preparing paragraph layout..."}
+        </div>
+      </tsx:react>}
     return
   }
 
-  <tsx:react>
-    <Virtuoso ref={virtuosoRef} alignToBottom={effectiveInitialScroll ===
-      "bottom"} computeItemKey={(index, item) => props.getItemKey?.(item, index) ??
-      index} customScrollParent={viewport.viewportRef.current} data={props.items} defaultItemHeight={props.defaultRowHeight} heightEstimates={heightEstimates} itemContent={(
-      index,
-      item,
-    ) => props.renderRow(
+  <Virtuoso
+    ref={virtuosoRef}
+    alignToBottom={effectiveInitialScroll === "bottom"}
+    computeItemKey={(index, item) => props.getItemKey?.(item, index) ?? index}
+    customScrollParent={viewport.viewportRef.current}
+    data={props.items}
+    defaultItemHeight={props.defaultRowHeight}
+    {heightEstimates}
+    itemContent={(index, item) => props.renderRow(
       {
         item,
         index,
         viewportWidth: viewport.width,
       },
-    )} overscan={{
+    )}
+    overscan={{
       main: overscanPx,
       reverse: overscanPx,
-    }} style={{
+    }}
+    style={{
       minHeight: "100%",
-    }} />
-  </tsx:react>
+    }}
+  />
 }

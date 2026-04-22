@@ -214,30 +214,23 @@ export component TerminalDebugView(_props: TerminalDebugViewProps) {
     setTerminalSize(nextSize)
   })
 
-  <tsx:react>
-    <div class={styles.page}>
-      <section class={styles.header}>
-        <div class={styles.eyebrow}>Debug Surface</div>
-        <h1 class={styles.title}>Terminal</h1>
-        <p class={styles.body}>This view exercises the real terminal viewport and headless xterm
-          model with a local fixture shell. It is intentionally disconnected
-          from Bun-side PTY ownership so input echo, ANSI styling, and resize
-          behavior can be tuned in isolation first.</p>
-        <div class={styles.metaRow}>
-          <div class={styles.metaChip}>
-            {`${terminalSize.cols} x ${terminalSize.rows}`}
-          </div>
-          <div class={styles.metaChip}>
-            {`last command: ${lastCommand ?? "none"}`}
-          </div>
-          <div class={styles.metaChip}>mode: fixture shell</div>
-        </div>
-      </section>
-      <section class={styles.canvas}>
-        <TerminalViewport ariaLabel="Terminal debug viewport" terminal={terminal} />
-      </section>
-    </div>
-  </tsx:react>
+  <div class={styles.page}>
+    <section class={styles.header}>
+      <div class={styles.eyebrow}>{"Debug Surface"}</div>
+      <h1 class={styles.title}>{"Terminal"}</h1>
+      <p class={styles.body}>
+        {"This view exercises the real terminal viewport and headless xterm model with a local fixture shell. It is intentionally disconnected from Bun-side PTY ownership so input echo, ANSI styling, and resize behavior can be tuned in isolation first."}
+      </p>
+      <div class={styles.metaRow}>
+        <div class={styles.metaChip}>{`${terminalSize.cols} x ${terminalSize.rows}`}</div>
+        <div class={styles.metaChip}>{`last command: ${lastCommand ?? "none"}`}</div>
+        <div class={styles.metaChip}>{"mode: fixture shell"}</div>
+      </div>
+    </section>
+    <section class={styles.canvas}>
+      <TerminalViewport ariaLabel="Terminal debug viewport" {terminal} />
+    </section>
+  </div>
 }
 
 export default TerminalDebugView

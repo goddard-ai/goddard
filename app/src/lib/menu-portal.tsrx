@@ -14,9 +14,7 @@ export component MenuPortal(props: { children?: preact.ComponentChildren }) {
     return
   }
 
-  <tsx:react>
-    <Portal container={containerRef}>
-      {props.children}
-    </Portal>
-  </tsx:react>
+  <Portal container={containerRef}>
+    {props.children}
+  </Portal>
 }

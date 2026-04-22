@@ -194,11 +194,10 @@ export component AppShellChrome() {
     )
   })
 
-  <tsx:react>
-    <div class={styles.root}>
-      <header class={cx(styles.header, "electrobun-webkit-app-region-drag")} onDblClick={(
-        event,
-      ) => {
+  <div class={styles.root}>
+    <header
+      class={cx(styles.header, "electrobun-webkit-app-region-drag")}
+      onDblClick={(event) => {
         if (
           (event.target as HTMLElement | null)?.closest(".electrobun-webkit-app-region-no-drag")
         ) {
@@ -206,95 +205,123 @@ export component AppShellChrome() {
         }
 
         void maximizeWindow()
-      }}>
-        <div class={cx(styles.switcher, "electrobun-webkit-app-region-no-drag")}>
-          <div class={css(
+      }}
+    >
+      <div class={cx(styles.switcher, "electrobun-webkit-app-region-no-drag")}>
+        <div
+          class={css(
             {
               position: "relative",
               width: "100%",
             },
-          )}>
-            <SwitchProjectDropdown />
-          </div>
+          )}
+        >
+          <SwitchProjectDropdown />
         </div>
-        <div class={cx(styles.actions, "electrobun-webkit-app-region-no-drag")}>
-          <div class={styles.actionGroup}>
-            <ActionButton ariaLabel="Propose task" icon={<tsx:react>
+      </div>
+      <div class={cx(styles.actions, "electrobun-webkit-app-region-no-drag")}>
+        <div class={styles.actionGroup}>
+          <ActionButton
+            ariaLabel="Propose task"
+            icon={<tsx:react>
               <InlineSvgIcon icon="what-next" size="17px 12px" />
-            </tsx:react>} onAction={AppCommand.navigation.openProposeTaskDialog} />
-            <span class={styles.actionDivider} />
-            <ActionButton ariaLabel="New session" icon={<tsx:react>
+            </tsx:react>}
+            onAction={AppCommand.navigation.openProposeTaskDialog}
+          />
+          <span class={styles.actionDivider} />
+          <ActionButton
+            ariaLabel="New session"
+            icon={<tsx:react>
               <InlineSvgIcon icon="new-session" size="16px 16px" />
-            </tsx:react>} onAction={AppCommand.navigation.openNewSessionDialog} />
-          </div>
-          <button aria-label="Settings" class={cx(
-            styles.actionButton,
-            styles.settingsButton,
-          )} type="button" onClick={() => {
-            AppCommand.navigation.openSettings()
-          }}>
-            <InlineSvgIcon icon="settings" size="15px" />
-          </button>
+            </tsx:react>}
+            onAction={AppCommand.navigation.openNewSessionDialog}
+          />
         </div>
-      </header>
-      <nav aria-label="Primary" class={styles.nav}>
-        <AppShellSidebarSection items={navigationItems.filter(
-          (item) => item.group === "primary",
-        )} onNavigationSelect={selectNavigationSurface} selectedNavigationId={navigation.selectedNavId} />
-        <div aria-hidden="true" class={styles.navDivider} />
-        <AppShellSidebarSection items={navigationItems.filter(
-          (item) => item.group === "secondary",
-        )} onNavigationSelect={selectNavigationSurface} selectedNavigationId={navigation.selectedNavId} />
-      </nav>
-      <div class={styles.main}>
-        <div ref={tabStrip.tabStripRef} class={styles.tabStrip}>
-          <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
-            <TabButton activeTabId={workbenchTabSet.activeTabId} icon={getWorkbenchTabIcon(
-              "main",
-            )} id={WORKBENCH_PRIMARY_TAB.id} isHome={true} onSelect={(id) => {
+        <button
+          aria-label="Settings"
+          class={cx(styles.actionButton, styles.settingsButton)}
+          type="button"
+          onClick={() => {
+            AppCommand.navigation.openSettings()
+          }}
+        >
+          <InlineSvgIcon icon="settings" size="15px" />
+        </button>
+      </div>
+    </header>
+    <nav aria-label="Primary" class={styles.nav}>
+      <AppShellSidebarSection
+        items={navigationItems.filter((item) => item.group === "primary")}
+        onNavigationSelect={selectNavigationSurface}
+        selectedNavigationId={navigation.selectedNavId}
+      />
+      <div aria-hidden="true" class={styles.navDivider} />
+      <AppShellSidebarSection
+        items={navigationItems.filter((item) => item.group === "secondary")}
+        onNavigationSelect={selectNavigationSurface}
+        selectedNavigationId={navigation.selectedNavId}
+      />
+    </nav>
+    <div class={styles.main}>
+      <div ref={tabStrip.tabStripRef} class={styles.tabStrip}>
+        <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
+          <TabButton
+            activeTabId={workbenchTabSet.activeTabId}
+            icon={getWorkbenchTabIcon("main")}
+            id={WORKBENCH_PRIMARY_TAB.id}
+            isHome={true}
+            onSelect={(id) => {
               workbenchTabSet.activateTab(id)
-            }} refCallback={(element) => {
+            }}
+            refCallback={(element) => {
               tabStrip.tabRefs.current[WORKBENCH_PRIMARY_TAB.id] = element
-            }} title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title} />
-            {workbenchTabSet.tabList.map(
-              (tab) => <tsx:react>
-                <TabButton key={tab.id} activeTabId={workbenchTabSet.activeTabId} dirty={tab.dirty} icon={getWorkbenchTabIcon(
-                  tab.kind,
-                )} id={tab.id} onClose={(id) => {
-                  workbenchTabSet.closeTab(id)
-                }} onDragEnd={() => {
-                  tabStrip.dragSourceTabId.current = null
-                }} onDragEnter={(id) => {
-                  if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
-                    workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
-                  }
-                }} onDragStart={(id) => {
-                  tabStrip.dragSourceTabId.current = id
-                }} onSelect={(id) => {
-                  workbenchTabSet.activateTab(id)
-                }} refCallback={(element) => {
-                  tabStrip.tabRefs.current[tab.id] = element
-                }} title={tab.title} />
-              </tsx:react>,
-            )}
-            <span aria-hidden="true" class={styles.indicator} style={{
+            }}
+            title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
+          />
+          {workbenchTabSet.tabList.map(
+            (tab) => <tsx:react>
+              <TabButton key={tab.id} activeTabId={workbenchTabSet.activeTabId} dirty={tab.dirty} icon={getWorkbenchTabIcon(
+                tab.kind,
+              )} id={tab.id} onClose={(id) => {
+                workbenchTabSet.closeTab(id)
+              }} onDragEnd={() => {
+                tabStrip.dragSourceTabId.current = null
+              }} onDragEnter={(id) => {
+                if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
+                  workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
+                }
+              }} onDragStart={(id) => {
+                tabStrip.dragSourceTabId.current = id
+              }} onSelect={(id) => {
+                workbenchTabSet.activateTab(id)
+              }} refCallback={(element) => {
+                tabStrip.tabRefs.current[tab.id] = element
+              }} title={tab.title} />
+            </tsx:react>,
+          )}
+          <span
+            aria-hidden="true"
+            class={styles.indicator}
+            style={{
               opacity: tabStrip.indicator.opacity,
               transform: `translateX(${tabStrip.indicator.left}px)`,
               width: `${tabStrip.indicator.width}px`,
-            }} />
-          </div>
+            }}
+          />
         </div>
-        <div class={css(
+      </div>
+      <div
+        class={css(
           {
             minHeight: "0",
             overflow: "hidden",
           },
-        )}>
-          <AppShellWorkbenchContent />
-        </div>
+        )}
+      >
+        <AppShellWorkbenchContent />
       </div>
     </div>
-  </tsx:react>
+  </div>
 }
 
 /** Renders one grouped section of the left navigation rail. */
@@ -309,18 +336,14 @@ component AppShellSidebarSection(props: {
   }) => void;
   selectedNavigationId: NavigationItemId;
 }) {
-  <tsx:react>
-    <>
-      {props.items.map(
-        (item) => <tsx:react>
-          <SidebarItem key={item.id} icon={item.icon} isSelected={item.id ===
-            props.selectedNavigationId} label={item.label} onSelect={(options) => {
-            props.onNavigationSelect(item.id, options)
-          }} />
-        </tsx:react>,
-      )}
-    </>
-  </tsx:react>
+  {props.items.map(
+    (item) => <tsx:react>
+      <SidebarItem key={item.id} icon={item.icon} isSelected={item.id ===
+        props.selectedNavigationId} label={item.label} onSelect={(options) => {
+        props.onNavigationSelect(item.id, options)
+      }} />
+    </tsx:react>,
+  )}
 }
 
 component ActionButton(props: {
@@ -328,16 +351,16 @@ component ActionButton(props: {
   icon: preact.JSX.Element;
   onAction: () => void;
 }) {
-  <tsx:react>
-    <button aria-label={props.ariaLabel} class={cx(
-      styles.actionButton,
-      styles.actionItem,
-    )} type="button" onClick={() => {
+  <button
+    aria-label={props.ariaLabel}
+    class={cx(styles.actionButton, styles.actionItem)}
+    type="button"
+    onClick={() => {
       props.onAction()
-    }}>
-      {props.icon}
-    </button>
-  </tsx:react>
+    }}
+  >
+    {props.icon}
+  </button>
 }
 
 component SidebarItem(props: {
@@ -346,17 +369,20 @@ component SidebarItem(props: {
   label: string;
   onSelect: (options?: { openInTab?: boolean }) => void;
 }) {
-  <tsx:react>
-    <button aria-current={props.isSelected
-      ? "page"
-      : undefined} aria-label={props.label} class={styles.sidebarItem} style={{
+  <button
+    aria-current={props.isSelected ? "page" : undefined}
+    aria-label={props.label}
+    class={styles.sidebarItem}
+    style={{
       color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
-    }} type="button" onClick={(event) => {
+    }}
+    type="button"
+    onClick={(event) => {
       props.onSelect({ openInTab: event.metaKey })
-    }}>
-      <InlineSvgIcon icon={props.icon} size="22px 21px" />
-    </button>
-  </tsx:react>
+    }}
+  >
+    <InlineSvgIcon icon={props.icon} size="22px 21px" />
+  </button>
 }
 
 component TabButton(props: {
@@ -398,71 +424,91 @@ component TabButton(props: {
           ? `color-mix(in srgb, ${textColor} 52%, transparent)`
           : `color-mix(in srgb, ${textColor} 34%, transparent)`
 
-  <tsx:react>
-    <div ref={props.refCallback} class={styles.tab} draggable={!isHome} role="presentation" onDragEnd={() => {
+  <div
+    ref={props.refCallback}
+    class={styles.tab}
+    draggable={!isHome}
+    role="presentation"
+    onDragEnd={() => {
       props.onDragEnd?.()
-    }} onDragEnter={() => {
+    }}
+    onDragEnter={() => {
       props.onDragEnter?.(props.id)
-    }} onDragOver={(event) => {
+    }}
+    onDragOver={(event) => {
       if (!isHome) {
         event.preventDefault()
       }
-    }} onDragStart={() => {
+    }}
+    onDragStart={() => {
       props.onDragStart?.(props.id)
-    }} onMouseEnter={() => {
+    }}
+    onMouseEnter={() => {
       setIsHovered(true)
-    }} onMouseLeave={() => {
+    }}
+    onMouseLeave={() => {
       setIsHovered(false)
-    }}>
-      <button aria-selected={isActive} class={styles.tabButton} style={{
+    }}
+  >
+    <button
+      aria-selected={isActive}
+      class={styles.tabButton}
+      style={{
         paddingLeft: "8px",
         paddingRight: isHome ? "14px" : "8px",
-      }} role="tab" type="button" onClick={() => {
+      }}
+      role="tab"
+      type="button"
+      onClick={() => {
         props.onSelect(props.id)
-      }}>
-        <span class={styles.tabIcon} style={{
+      }}
+    >
+      <span
+        class={styles.tabIcon}
+        style={{
           color: iconColor,
-        }}>
-          <InlineSvgIcon icon={props.icon} size="14px" />
-        </span>
-        <span class={styles.tabLabel} style={{
+        }}
+      >
+        <InlineSvgIcon icon={props.icon} size="14px" />
+      </span>
+      <span
+        class={styles.tabLabel}
+        style={{
           color: labelColor,
-        }}>
-          {props.title}
-        </span>
-      </button>
-      {isHome
-        ? null
-        : <tsx:react>
-            <div class={styles.tabTail} onClick={() => {
-              props.onSelect(props.id)
+        }}
+      >
+        {props.title}
+      </span>
+    </button>
+    {isHome
+      ? null
+      : <tsx:react>
+          <div class={styles.tabTail} onClick={() => {
+            props.onSelect(props.id)
+          }}>
+            {props.dirty
+              ? <tsx:react>
+                  <span aria-hidden="true" class={styles.tabDirty} style={{
+                    opacity: showCloseButton ? "0" : "1",
+                  }} />
+                </tsx:react>
+              : null}
+            <button aria-label={`Close ${props.title}`} class={styles.tabClose} style={{
+              opacity: showCloseButton ? "1" : "0",
+              pointerEvents: showCloseButton ? "auto" : "none",
+            }} type="button" onClick={(event) => {
+              event.stopPropagation()
+              props.onClose?.(props.id)
             }}>
-              {props.dirty
-                ? <tsx:react>
-                    <span aria-hidden="true" class={styles.tabDirty} style={{
-                      opacity: showCloseButton ? "0" : "1",
-                    }} />
-                  </tsx:react>
-                : null}
-              <button aria-label={`Close ${props.title}`} class={styles.tabClose} style={{
-                opacity: showCloseButton ? "1" : "0",
-                pointerEvents: showCloseButton ? "auto" : "none",
-              }} type="button" onClick={(event) => {
-                event.stopPropagation()
-                props.onClose?.(props.id)
-              }}>
-                <InlineSvgIcon icon="close-tab" size="9px" />
-              </button>
-            </div>
-          </tsx:react>}
-    </div>
-  </tsx:react>
+              <InlineSvgIcon icon="close-tab" size="9px" />
+            </button>
+          </div>
+        </tsx:react>}
+  </div>
 }
 
 component InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
   const [width, height = width] = props.size.split(" ")
 
-  <tsx:react>
-    <GoodIcon class={styles.icon} name={props.icon} height={height} width={width} />
-  </tsx:react>
+  <GoodIcon class={styles.icon} name={props.icon} {height} {width} />
 }

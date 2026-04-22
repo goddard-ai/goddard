@@ -51,11 +51,9 @@ export component CommandDialog(props: CommandDialogProps) {
     dialog.setOpen(true)
   })
 
-  <tsx:react>
-    <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
-      <Suspense fallback={null}>
-        <Content dialog={dialog} />
-      </Suspense>
-    </Dialog.RootProvider>
-  </tsx:react>
+  <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
+    <Suspense fallback={null}>
+      <Content {dialog} />
+    </Suspense>
+  </Dialog.RootProvider>
 }

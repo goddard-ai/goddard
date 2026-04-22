@@ -51,29 +51,21 @@ function suggestionKey(suggestion: SessionInputSuggestion) {
 
 component SuggestionIcon(props: { suggestion: SessionInputSuggestion }) {
   if (props.suggestion.type === "folder") {
-    <tsx:react>
-      <Folder size={14} strokeWidth={2.2} />
-    </tsx:react>
+    <Folder size={14} strokeWidth={2.2} />
     return
   }
 
   if (props.suggestion.type === "file") {
-    <tsx:react>
-      <File size={14} strokeWidth={2.2} />
-    </tsx:react>
+    <File size={14} strokeWidth={2.2} />
     return
   }
 
   if (props.suggestion.type === "skill") {
-    <tsx:react>
-      <BookOpen size={14} strokeWidth={2.2} />
-    </tsx:react>
+    <BookOpen size={14} strokeWidth={2.2} />
     return
   }
 
-  <tsx:react>
-    <Command size={14} strokeWidth={2.2} />
-  </tsx:react>
+  <Command size={14} strokeWidth={2.2} />
 }
 
 export component SessionInputMenu(props: {
@@ -89,63 +81,65 @@ export component SessionInputMenu(props: {
     return
   }
 
-  <tsx:react>
-    <MenuPortal>
-      <div ref={props.menuRef} class={inputMenuClass} style={{
+  <MenuPortal>
+    <div
+      ref={props.menuRef}
+      class={inputMenuClass}
+      style={{
         left: `${props.menu.anchorLeft}px`,
         top: `${props.menu.anchorTop}px`,
-      }}>
-        <div class={inputMenuHeaderClass}>
-          {getMenuHeading(props.menu.trigger)}
-        </div>
-        <div class={inputMenuListClass}>
-          {props.isLoadingSuggestions
-            ? <tsx:react>
-                <div class={inputMenuEmptyClass}>
-                  <span class={css(
-                    {
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    },
-                  )}>
-                    <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-                    Loading suggestions...
-                  </span>
-                </div>
-              </tsx:react>
-            : props.suggestions.length === 0
-              ? <tsx:react>
-                  <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
-                </tsx:react>
-              : (props.suggestions.map(
-                  (suggestion, index) => <tsx:react>
-                    <button key={suggestionKey(suggestion)} class={cx(
-                      inputMenuButtonClass,
-                      index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
-                    )} type="button" onMouseDown={(event) => {
-                      event.preventDefault()
-                    }} onMouseEnter={() => {
-                      props.onHighlight(index)
-                    }} onClick={() => {
-                      props.onAcceptSuggestion(suggestion)
-                    }}>
-                      <span class={inputMenuIconClass} aria-hidden="true">
-                        <SuggestionIcon suggestion={suggestion} />
-                      </span>
-                      <span class={inputMenuBodyClass}>
-                        <span class={inputMenuLabelClass}>
-                          {getSuggestionLabel(suggestion)}
-                        </span>
-                        <span class={inputMenuDetailClass}>
-                          {getSuggestionDetail(suggestion)}
-                        </span>
-                      </span>
-                    </button>
-                  </tsx:react>,
-                ))}
-        </div>
+      }}
+    >
+      <div class={inputMenuHeaderClass}>
+        {getMenuHeading(props.menu.trigger)}
       </div>
-    </MenuPortal>
-  </tsx:react>
+      <div class={inputMenuListClass}>
+        {props.isLoadingSuggestions
+          ? <tsx:react>
+              <div class={inputMenuEmptyClass}>
+                <span class={css(
+                  {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  },
+                )}>
+                  <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+                  Loading suggestions...
+                </span>
+              </div>
+            </tsx:react>
+          : props.suggestions.length === 0
+            ? <tsx:react>
+                <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
+              </tsx:react>
+            : (props.suggestions.map(
+                (suggestion, index) => <tsx:react>
+                  <button key={suggestionKey(suggestion)} class={cx(
+                    inputMenuButtonClass,
+                    index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
+                  )} type="button" onMouseDown={(event) => {
+                    event.preventDefault()
+                  }} onMouseEnter={() => {
+                    props.onHighlight(index)
+                  }} onClick={() => {
+                    props.onAcceptSuggestion(suggestion)
+                  }}>
+                    <span class={inputMenuIconClass} aria-hidden="true">
+                      <SuggestionIcon suggestion={suggestion} />
+                    </span>
+                    <span class={inputMenuBodyClass}>
+                      <span class={inputMenuLabelClass}>
+                        {getSuggestionLabel(suggestion)}
+                      </span>
+                      <span class={inputMenuDetailClass}>
+                        {getSuggestionDetail(suggestion)}
+                      </span>
+                    </span>
+                  </button>
+                </tsx:react>,
+              ))}
+      </div>
+    </div>
+  </MenuPortal>
 }

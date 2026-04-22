@@ -178,24 +178,27 @@ component SessionLaunchDialog(props: {
   useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, openThinkingLevelSelector)
   useAppCommand(AppCommand.sessionInput.submit, submitSessionLaunch)
 
-  <tsx:react>
-    <DialogPortal>
-      <Dialog.Backdrop class={styles.backdrop} />
-      <Dialog.Positioner class={styles.positioner}>
-        <Dialog.Content class={styles.content}>
-          <Dialog.Title class={styles.title}>Launch session</Dialog.Title>
-          <Dialog.CloseTrigger asChild>
-            <button class={styles.closeButton} type="button">
-              <X size={16} strokeWidth={2.2} />
-            </button>
-          </Dialog.CloseTrigger>
-          <SessionLaunchForm form={form} onEscape={() => {
+  <DialogPortal>
+    <Dialog.Backdrop class={styles.backdrop} />
+    <Dialog.Positioner class={styles.positioner}>
+      <Dialog.Content class={styles.content}>
+        <Dialog.Title class={styles.title}>{"Launch session"}</Dialog.Title>
+        <Dialog.CloseTrigger asChild>
+          <button class={styles.closeButton} type="button">
+            <X size={16} strokeWidth={2.2} />
+          </button>
+        </Dialog.CloseTrigger>
+        <SessionLaunchForm
+          {form}
+          onEscape={() => {
             props.dialog.setOpen(false)
-          }} onSubmit={launchSession} projects={projects} />
-        </Dialog.Content>
-      </Dialog.Positioner>
-    </DialogPortal>
-  </tsx:react>
+          }}
+          onSubmit={launchSession}
+          {projects}
+        />
+      </Dialog.Content>
+    </Dialog.Positioner>
+  </DialogPortal>
 }
 
 export default SessionLaunchDialog

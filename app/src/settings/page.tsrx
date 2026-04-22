@@ -3,8 +3,8 @@ import { css } from "@goddard-ai/styled-system/css"
 import { AppearanceSettingsSection } from "~/appearance/appearance-settings-section.tsrx"
 
 export component SettingsPage() {
-  <tsx:react>
-    <main class={css(
+  <main
+    class={css(
       {
         display: "grid",
         alignContent: "start",
@@ -12,10 +12,10 @@ export component SettingsPage() {
         minHeight: "100%",
         padding: "28px",
       },
-    )}>
-      <AppearanceSettingsSection />
-    </main>
-  </tsx:react>
+    )}
+  >
+    <AppearanceSettingsSection />
+  </main>
 }
 
 export default SettingsPage

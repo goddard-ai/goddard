@@ -31,11 +31,16 @@ export component SessionChatView(props: { sessionId: string }) {
     }
   }, [projectContext, resolvedProjectPath, workbenchTabSet.activeTabId])
 
-  <tsx:react>
-    <main class={styles.root}>
-      <Transcript class={styles.transcript} initialScrollPosition="bottom" messages={messages} scrollCacheKey={`detail:session:${session.id}:transcript`} />
-      <footer class={styles.composerDock}>
-        <Composer loadSuggestions={async (input) => {
+  <main class={styles.root}>
+    <Transcript
+      class={styles.transcript}
+      initialScrollPosition="bottom"
+      {messages}
+      scrollCacheKey={`detail:session:${session.id}:transcript`}
+    />
+    <footer class={styles.composerDock}>
+      <Composer
+        loadSuggestions={async (input) => {
           const response = await goddardSdk.session.composerSuggestions(
             {
               id: session.id,
@@ -45,7 +50,8 @@ export component SessionChatView(props: { sessionId: string }) {
           )
 
           return response.suggestions
-        }} onSubmit={async (prompt) => {
+        }}
+        onSubmit={async (prompt) => {
           try {
             await submitSessionPrompt(
               {
@@ -57,10 +63,10 @@ export component SessionChatView(props: { sessionId: string }) {
           } catch (error) {
             console.error("Failed to submit session prompt.", error)
           }
-        }} />
-      </footer>
-    </main>
-  </tsx:react>
+        }}
+      />
+    </footer>
+  </main>
 }
 
 export default SessionChatView

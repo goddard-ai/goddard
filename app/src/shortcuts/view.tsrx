@@ -225,30 +225,37 @@ component KeyboardShortcutsView(props: { class?: string }) {
       row.whenClause?.toLowerCase().includes(normalizedSearch)
   })
 
-  <tsx:react>
-    <section class={cx(styles.page, props.class)}>
-      <label class={styles.searchField}>
-        <span class={styles.srOnly}>Search shortcuts</span>
-        <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
-        <input ref={searchInputRef} class={styles.searchInput} placeholder={isRecordingSearchEnabled
+  <section class={cx(styles.page, props.class)}>
+    <label class={styles.searchField}>
+      <span class={styles.srOnly}>{"Search shortcuts"}</span>
+      <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
+      <input
+        ref={searchInputRef}
+        class={styles.searchInput}
+        placeholder={isRecordingSearchEnabled
           ? "Type a key binding"
-          : "Search commands, shortcuts, or when clauses"} readOnly={isRecordingSearchEnabled} value={searchText} onInput={(
-          event,
-        ) => {
+          : "Search commands, shortcuts, or when clauses"}
+        readOnly={isRecordingSearchEnabled}
+        value={searchText}
+        onInput={(event) => {
           setSearchText(event.currentTarget.value)
-        }} onKeyDown={(event) => {
+        }}
+        onKeyDown={(event) => {
           if (event.key === "Escape" && isRecordingSearchEnabled) {
             event.preventDefault()
             stopSearchRecording()
             setIsRecordingSearchEnabled(false)
           }
-        }} />
-        <button aria-label={isRecordingSearchEnabled
+        }}
+      />
+      <button
+        aria-label={isRecordingSearchEnabled
           ? "Stop recording key binding search"
-          : "Record key binding search"} aria-pressed={isRecordingSearchEnabled} class={cx(
-          styles.recordButton,
-          isRecordingSearchEnabled && styles.recordButtonActive,
-        )} type="button" onClick={() => {
+          : "Record key binding search"}
+        aria-pressed={isRecordingSearchEnabled}
+        class={cx(styles.recordButton, isRecordingSearchEnabled && styles.recordButtonActive)}
+        type="button"
+        onClick={() => {
           if (isRecordingSearchEnabled) {
             stopSearchRecording()
             setIsRecordingSearchEnabled(false)
@@ -257,225 +264,237 @@ component KeyboardShortcutsView(props: { class?: string }) {
 
           searchInputRef.current?.focus()
           setIsRecordingSearchEnabled(true)
-        }}>
-          <Command size={15} strokeWidth={2.2} />
-        </button>
-      </label>
-      {shortcutRegistry.loadError
-        ? <tsx:react>
-            <div class={styles.warning}>
-              The saved keymap could not be loaded, so the built-in profile is
+        }}
+      >
+        <Command size={15} strokeWidth={2.2} />
+      </button>
+    </label>
+    {shortcutRegistry.loadError
+      ? <tsx:react>
+          <div class={styles.warning}>
+            The saved keymap could not be loaded, so the built-in profile is
           active.
-              <br />
-              {shortcutRegistry.loadError}
-            </div>
-          </tsx:react>
-        : null}
-      {shortcutRegistry.writeError
-        ? <tsx:react>
-            <div class={styles.error}>
-              {shortcutRegistry.writeError}
-            </div>
-          </tsx:react>
-        : null}
-      <div class={styles.tableFrame}>
-        <table class={styles.table}>
-          <thead>
-            <tr>
-              <th class={styles.headerCell} scope="col" style={{
+            <br />
+            {shortcutRegistry.loadError}
+          </div>
+        </tsx:react>
+      : null}
+    {shortcutRegistry.writeError
+      ? <tsx:react>
+          <div class={styles.error}>
+            {shortcutRegistry.writeError}
+          </div>
+        </tsx:react>
+      : null}
+    <div class={styles.tableFrame}>
+      <table class={styles.table}>
+        <thead>
+          <tr>
+            <th
+              class={styles.headerCell}
+              scope="col"
+              style={{
                 width: "44%",
-              }}>Command</th>
-              <th class={styles.headerCell} scope="col" style={{
+              }}
+            >
+              {"Command"}
+            </th>
+            <th
+              class={styles.headerCell}
+              scope="col"
+              style={{
                 width: "23%",
-              }}>Shortcut</th>
-              <th class={styles.headerCell} scope="col">When</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.length > 0
-              ? (visibleRows.map(
-                  (row) => <tsx:react>
-                    <tr key={row.rowKey} class={styles.row}>
-                      <td class={`${styles.cell} ${styles.commandCell}`}>
-                        {row.label}
-                      </td>
-                      <td class={styles.cell}>
-                        <Menu.Root aria-label={`${row.label} shortcut actions`} lazyMount={true} positioning={{
-                          fitViewport: true,
-                          placement: "bottom-start",
-                        }} unmountOnExit={true}>
-                          <Menu.ContextTrigger class={cx(
-                            styles.cellButton,
-                            styles.shortcutButton,
-                            !row.shortcut && styles.cellButtonMuted,
-                          )} type="button" onClick={() => {
-                            openCaptureDialog(row)
-                          }}>
-                            {row.shortcut ?? "Add shortcut"}
-                          </Menu.ContextTrigger>
-                          <MenuPortal>
-                            <Menu.Positioner>
-                              <Menu.Content class={styles.menuContent}>
-                                <Menu.Item class={styles.menuItem} value={`${row.rowKey}:add`} onSelect={() => {
-                                  openCaptureDialog(
-                                    {
-                                      commandId: row.commandId,
-                                      label: row.label,
-                                      bindingIndex: null,
-                                      shortcut: null,
-                                      whenClause: row.whenClause,
-                                    },
-                                  )
-                                }}>Add shortcut</Menu.Item>
-                                <Menu.Item class={styles.menuItem} disabled={row.bindingIndex ===
-                                  null} value={`${row.rowKey}:change`} onSelect={() => {
-                                  if (row.bindingIndex === null) {
-                                    return
-                                  }
-
-                                  openCaptureDialog(row)
-                                }}>Change shortcut</Menu.Item>
-                                <Menu.Item class={cx(
-                                  styles.menuItem,
-                                  styles.menuItemDanger,
-                                )} disabled={row.bindingIndex ===
-                                  null} value={`${row.rowKey}:remove`} onSelect={() => {
-                                  if (row.bindingIndex === null) {
-                                    return
-                                  }
-
-                                  setEditingWhenRowKey(null)
-                                  void shortcutRegistry.removeCommandBinding(
-                                    row.commandId,
-                                    row.bindingIndex,
-                                  )
-                                }}>Remove shortcut</Menu.Item>
-                                <Menu.Item class={styles.menuItem} disabled={!row.shortcut} value={`${row.rowKey}:show-matches`} onSelect={() => {
-                                  if (!row.shortcut) {
-                                    return
-                                  }
-
-                                  stopSearchRecording()
-                                  setIsRecordingSearchEnabled(false)
-                                  setSearchText(formatShortcutSearch(row.shortcut))
-                                  searchInputRef.current?.focus()
-                                }}>Show commands with same shortcut</Menu.Item>
-                              </Menu.Content>
-                            </Menu.Positioner>
-                          </MenuPortal>
-                        </Menu.Root>
-                      </td>
-                      <td class={styles.cell}>
-                        {editingWhenRowKey === row.rowKey && row.bindingIndex !== null
-                          ? <tsx:react>
-                              <input autoFocus={true} class={styles.whenInput} defaultValue={row.whenClause ??
-                                ""} onBlur={(event) => {
-                                setEditingWhenRowKey(null)
+              }}
+            >
+              {"Shortcut"}
+            </th>
+            <th class={styles.headerCell} scope="col">{"When"}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visibleRows.length > 0
+            ? (visibleRows.map(
+                (row) => <tsx:react>
+                  <tr key={row.rowKey} class={styles.row}>
+                    <td class={`${styles.cell} ${styles.commandCell}`}>
+                      {row.label}
+                    </td>
+                    <td class={styles.cell}>
+                      <Menu.Root aria-label={`${row.label} shortcut actions`} lazyMount={true} positioning={{
+                        fitViewport: true,
+                        placement: "bottom-start",
+                      }} unmountOnExit={true}>
+                        <Menu.ContextTrigger class={cx(
+                          styles.cellButton,
+                          styles.shortcutButton,
+                          !row.shortcut && styles.cellButtonMuted,
+                        )} type="button" onClick={() => {
+                          openCaptureDialog(row)
+                        }}>
+                          {row.shortcut ?? "Add shortcut"}
+                        </Menu.ContextTrigger>
+                        <MenuPortal>
+                          <Menu.Positioner>
+                            <Menu.Content class={styles.menuContent}>
+                              <Menu.Item class={styles.menuItem} value={`${row.rowKey}:add`} onSelect={() => {
+                                openCaptureDialog(
+                                  {
+                                    commandId: row.commandId,
+                                    label: row.label,
+                                    bindingIndex: null,
+                                    shortcut: null,
+                                    whenClause: row.whenClause,
+                                  },
+                                )
+                              }}>Add shortcut</Menu.Item>
+                              <Menu.Item class={styles.menuItem} disabled={row.bindingIndex ===
+                                null} value={`${row.rowKey}:change`} onSelect={() => {
                                 if (row.bindingIndex === null) {
                                   return
                                 }
-                                void shortcutRegistry.updateCommandBindingWhen(
-                                  row.commandId,
-                                  row.bindingIndex,
-                                  event.currentTarget.value,
-                                )
-                              }} onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault()
-                                  event.currentTarget.blur()
+
+                                openCaptureDialog(row)
+                              }}>Change shortcut</Menu.Item>
+                              <Menu.Item class={cx(
+                                styles.menuItem,
+                                styles.menuItemDanger,
+                              )} disabled={row.bindingIndex ===
+                                null} value={`${row.rowKey}:remove`} onSelect={() => {
+                                if (row.bindingIndex === null) {
                                   return
                                 }
 
-                                if (event.key === "Escape") {
-                                  event.preventDefault()
-                                  setEditingWhenRowKey(null)
+                                setEditingWhenRowKey(null)
+                                void shortcutRegistry.removeCommandBinding(
+                                  row.commandId,
+                                  row.bindingIndex,
+                                )
+                              }}>Remove shortcut</Menu.Item>
+                              <Menu.Item class={styles.menuItem} disabled={!row.shortcut} value={`${row.rowKey}:show-matches`} onSelect={() => {
+                                if (!row.shortcut) {
+                                  return
                                 }
-                              }} />
+
+                                stopSearchRecording()
+                                setIsRecordingSearchEnabled(false)
+                                setSearchText(formatShortcutSearch(row.shortcut))
+                                searchInputRef.current?.focus()
+                              }}>Show commands with same shortcut</Menu.Item>
+                            </Menu.Content>
+                          </Menu.Positioner>
+                        </MenuPortal>
+                      </Menu.Root>
+                    </td>
+                    <td class={styles.cell}>
+                      {editingWhenRowKey === row.rowKey && row.bindingIndex !== null
+                        ? <tsx:react>
+                            <input autoFocus={true} class={styles.whenInput} defaultValue={row.whenClause ??
+                              ""} onBlur={(event) => {
+                              setEditingWhenRowKey(null)
+                              if (row.bindingIndex === null) {
+                                return
+                              }
+                              void shortcutRegistry.updateCommandBindingWhen(
+                                row.commandId,
+                                row.bindingIndex,
+                                event.currentTarget.value,
+                              )
+                            }} onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault()
+                                event.currentTarget.blur()
+                                return
+                              }
+
+                              if (event.key === "Escape") {
+                                event.preventDefault()
+                                setEditingWhenRowKey(null)
+                              }
+                            }} />
+                          </tsx:react>
+                        : row.bindingIndex !== null
+                          ? <tsx:react>
+                              <button class={cx(
+                                styles.cellButton,
+                                styles.whenButton,
+                                !row.whenClause && styles.cellButtonMuted,
+                              )} type="button" onClick={() => {
+                                setEditingWhenRowKey(row.rowKey)
+                              }}>
+                                {row.whenClause ?? "Add when clause"}
+                              </button>
                             </tsx:react>
-                          : row.bindingIndex !== null
-                            ? <tsx:react>
-                                <button class={cx(
-                                  styles.cellButton,
-                                  styles.whenButton,
-                                  !row.whenClause && styles.cellButtonMuted,
-                                )} type="button" onClick={() => {
-                                  setEditingWhenRowKey(row.rowKey)
-                                }}>
-                                  {row.whenClause ?? "Add when clause"}
-                                </button>
-                              </tsx:react>
-                            : <tsx:react>
-                                <span class={styles.cellButtonMuted}>
-                                  {row.whenClause ?? "–"}
-                                </span>
-                              </tsx:react>}
-                      </td>
-                    </tr>
-                  </tsx:react>,
-                ))
-              : <tsx:react>
-                  <tr>
-                    <td class={styles.cell} colSpan={3}>
-                      <div class={styles.empty}>No matching shortcuts.</div>
+                          : <tsx:react>
+                              <span class={styles.cellButtonMuted}>
+                                {row.whenClause ?? "–"}
+                              </span>
+                            </tsx:react>}
                     </td>
                   </tr>
-                </tsx:react>}
-          </tbody>
-        </table>
-      </div>
-      <Dialog.RootProvider value={captureDialog} lazyMount unmountOnExit>
-        {captureState
-          ? <tsx:react>
-              <KeyboardShortcutCaptureDialog currentExpression={captureState.currentExpression} dialog={captureDialog} label={captureState.label} mode={captureState.mode} whenClause={captureState.whenClause} onRemove={captureState.bindingIndex ===
-              null
-                ? undefined
-                : async () => {
-                    if (captureState.bindingIndex === null) {
-                      return
-                    }
+                </tsx:react>,
+              ))
+            : <tsx:react>
+                <tr>
+                  <td class={styles.cell} colSpan={3}>
+                    <div class={styles.empty}>No matching shortcuts.</div>
+                  </td>
+                </tr>
+              </tsx:react>}
+        </tbody>
+      </table>
+    </div>
+    <Dialog.RootProvider value={captureDialog} lazyMount unmountOnExit>
+      {captureState
+        ? <tsx:react>
+            <KeyboardShortcutCaptureDialog currentExpression={captureState.currentExpression} dialog={captureDialog} label={captureState.label} mode={captureState.mode} whenClause={captureState.whenClause} onRemove={captureState.bindingIndex ===
+            null
+              ? undefined
+              : async () => {
+                  if (captureState.bindingIndex === null) {
+                    return
+                  }
 
-                    if (
-                      await shortcutRegistry.removeCommandBinding(
-                        captureState.commandId,
-                        captureState.bindingIndex,
-                      )
-                    ) {
-                      setCaptureState(null)
-                    }
-                  }} onSave={async (expression) => {
-                if (captureState.mode === "add") {
                   if (
-                    await shortcutRegistry.addCommandBinding(
+                    await shortcutRegistry.removeCommandBinding(
                       captureState.commandId,
-                      expression,
-                      captureState.whenClause,
+                      captureState.bindingIndex,
                     )
                   ) {
                     setCaptureState(null)
                   }
-
-                  return
-                }
-
-                if (captureState.bindingIndex === null) {
-                  return
-                }
-
+                }} onSave={async (expression) => {
+              if (captureState.mode === "add") {
                 if (
-                  await shortcutRegistry.replaceCommandBinding(
+                  await shortcutRegistry.addCommandBinding(
                     captureState.commandId,
-                    captureState.bindingIndex,
                     expression,
+                    captureState.whenClause,
                   )
                 ) {
                   setCaptureState(null)
                 }
-              }} />
-            </tsx:react>
-          : null}
-      </Dialog.RootProvider>
-    </section>
-  </tsx:react>
+
+                return
+              }
+
+              if (captureState.bindingIndex === null) {
+                return
+              }
+
+              if (
+                await shortcutRegistry.replaceCommandBinding(
+                  captureState.commandId,
+                  captureState.bindingIndex,
+                  expression,
+                )
+              ) {
+                setCaptureState(null)
+              }
+            }} />
+          </tsx:react>
+        : null}
+    </Dialog.RootProvider>
+  </section>
 }
 
 export default KeyboardShortcutsView

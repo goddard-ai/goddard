@@ -13,49 +13,47 @@ component SessionChangesView(props: {
     { id: props.sessionId },
   ])
 
-  <tsx:react>
-    <section class={styles.root}>
-      <header class={styles.header}>
-        <p class={styles.repository}>
-          {props.repositoryLabel}
-        </p>
-        <h1 class={styles.title}>
-          {props.sessionTitle}
-        </h1>
-        <p class={styles.description}>Current git diff for this session workspace.</p>
-        {changes.workspaceRoot
-          ? <tsx:react>
-              <p class={styles.workspaceRoot}>
-                {changes.workspaceRoot}
-              </p>
-            </tsx:react>
-          : null}
-      </header>
-      {changes.workspaceRoot === null
+  <section class={styles.root}>
+    <header class={styles.header}>
+      <p class={styles.repository}>
+        {props.repositoryLabel}
+      </p>
+      <h1 class={styles.title}>
+        {props.sessionTitle}
+      </h1>
+      <p class={styles.description}>{"Current git diff for this session workspace."}</p>
+      {changes.workspaceRoot
         ? <tsx:react>
-            <div class={styles.empty}>
-              <h2 class={styles.emptyTitle}>Git diff unavailable</h2>
-              <p class={styles.description}>This session is not currently attached to a git workspace.</p>
+            <p class={styles.workspaceRoot}>
+              {changes.workspaceRoot}
+            </p>
+          </tsx:react>
+        : null}
+    </header>
+    {changes.workspaceRoot === null
+      ? <tsx:react>
+          <div class={styles.empty}>
+            <h2 class={styles.emptyTitle}>Git diff unavailable</h2>
+            <p class={styles.description}>This session is not currently attached to a git workspace.</p>
+          </div>
+        </tsx:react>
+      : changes.hasChanges
+        ? <tsx:react>
+            <div class={styles.panel}>
+              <div class={styles.diffViewport}>
+                <pre class={styles.diff}>
+                  {changes.diff}
+                </pre>
+              </div>
             </div>
           </tsx:react>
-        : changes.hasChanges
-          ? <tsx:react>
-              <div class={styles.panel}>
-                <div class={styles.diffViewport}>
-                  <pre class={styles.diff}>
-                    {changes.diff}
-                  </pre>
-                </div>
-              </div>
-            </tsx:react>
-          : <tsx:react>
-              <div class={styles.empty}>
-                <h2 class={styles.emptyTitle}>No changes</h2>
-                <p class={styles.description}>This session workspace is currently clean.</p>
-              </div>
-            </tsx:react>}
-    </section>
-  </tsx:react>
+        : <tsx:react>
+            <div class={styles.empty}>
+              <h2 class={styles.emptyTitle}>No changes</h2>
+              <p class={styles.description}>This session workspace is currently clean.</p>
+            </div>
+          </tsx:react>}
+  </section>
 }
 
 export default SessionChangesView

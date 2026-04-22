@@ -370,12 +370,11 @@ export component SessionInputPlugins(props: {
     }
   }, [editor, props])
 
-  <tsx:react>
-    <>
-      <HistoryPlugin />
-      <OnChangePlugin ignoreSelectionChange={true} onInput={(editorState) => {
-        props.onPromptBlocksChange(serializeComposerEditorState(editorState))
-      }} />
-    </>
-  </tsx:react>
+  <HistoryPlugin />
+  <OnChangePlugin
+    ignoreSelectionChange={true}
+    onInput={(editorState) => {
+      props.onPromptBlocksChange(serializeComposerEditorState(editorState))
+    }}
+  />
 }

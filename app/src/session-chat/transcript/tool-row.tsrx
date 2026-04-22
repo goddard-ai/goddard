@@ -148,56 +148,56 @@ export component ToolTranscriptRow(props: {
   const statusSummary = buildToolStatusSummary(props.toolCalls)
   const summaryMetaParts = statusSummary ? [...summaryParts, statusSummary] : summaryParts
 
-  <tsx:react>
-    <article class={rowClass}>
-      <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
-        <div class={rowColumnClass} style={{ width: "100%" }}>
-          <details class={toolDisclosureClass}>
-            <summary class={toolSummaryClass}>
-              <span class={toolSummaryTextClass}>
-                <span class={toolInlineMetaClass}>
-                  {renderMetaParts(summaryMetaParts, `${props.groupId}:summary`)}
-                </span>
+  <article class={rowClass}>
+    <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
+      <div class={rowColumnClass} style={{ width: "100%" }}>
+        <details class={toolDisclosureClass}>
+          <summary class={toolSummaryClass}>
+            <span class={toolSummaryTextClass}>
+              <span class={toolInlineMetaClass}>
+                {renderMetaParts(summaryMetaParts, `${props.groupId}:summary`)}
               </span>
-              <span class={toolToggleHintClass}>Details</span>
-            </summary>
-            <ol class={toolDetailListClass}>
-              {props.toolCalls.map(
-                (toolCall) => <tsx:react>
-                  <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
-                    <article>
-                      <div class={toolDetailHeadingClass}>
-                        <span class={toolInlineMetaClass}>
-                          {renderMetaParts(
-                            [
-                              toolCall.title,
-                              formatToolKindLabel(toolCall.toolKind),
-                              formatToolStatusLabel(toolCall.status),
-                            ],
-                            `${props.groupId}:${toolCall.id}:heading`,
-                          )}
-                        </span>
-                      </div>
-                      {toolCall.content.map(
-                        (content, index) => renderToolContent(
-                          content,
-                          `${toolCall.id}:content:${index}`,
-                        ),
-                      )}
-                      {renderToolLocations(toolCall.locations)}
-                      {toolCall.content.length === 0 && toolCall.locations.length === 0
-                        ? <tsx:react>
-                            <div class={toolDetailTextClass}>No tool output was attached to this call.</div>
-                          </tsx:react>
-                        : null}
-                    </article>
-                  </li>
-                </tsx:react>,
-              )}
-            </ol>
-          </details>
-        </div>
+            </span>
+            <span class={toolToggleHintClass}>
+              Details
+            </span>
+          </summary>
+          <ol class={toolDetailListClass}>
+            {props.toolCalls.map(
+              (toolCall) => <tsx:react>
+                <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
+                  <article>
+                    <div class={toolDetailHeadingClass}>
+                      <span class={toolInlineMetaClass}>
+                        {renderMetaParts(
+                          [
+                            toolCall.title,
+                            formatToolKindLabel(toolCall.toolKind),
+                            formatToolStatusLabel(toolCall.status),
+                          ],
+                          `${props.groupId}:${toolCall.id}:heading`,
+                        )}
+                      </span>
+                    </div>
+                    {toolCall.content.map(
+                      (content, index) => renderToolContent(
+                        content,
+                        `${toolCall.id}:content:${index}`,
+                      ),
+                    )}
+                    {renderToolLocations(toolCall.locations)}
+                    {toolCall.content.length === 0 && toolCall.locations.length === 0
+                      ? <tsx:react>
+                          <div class={toolDetailTextClass}>No tool output was attached to this call.</div>
+                        </tsx:react>
+                      : null}
+                  </article>
+                </li>
+              </tsx:react>,
+            )}
+          </ol>
+        </details>
       </div>
-    </article>
-  </tsx:react>
+    </div>
+  </article>
 }

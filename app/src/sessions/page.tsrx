@@ -69,16 +69,22 @@ component SessionsPage() {
     )
   }
 
-  <tsx:react>
-    <div class={styles.root}>
-      <ListToolbar searchQuery={searchQuery} onSearchInput={(value) => {
+  <div class={styles.root}>
+    <ListToolbar
+      {searchQuery}
+      onSearchInput={(value) => {
         setSearchQuery(value)
-      }} />
-      <div class={styles.listBody}>
-        <SessionsList onOpenChanges={openSessionChanges} onOpenSession={openSession} searchQuery={searchQuery} sessions={visibleSessions} />
-      </div>
+      }}
+    />
+    <div class={styles.listBody}>
+      <SessionsList
+        onOpenChanges={openSessionChanges}
+        onOpenSession={openSession}
+        {searchQuery}
+        sessions={visibleSessions}
+      />
     </div>
-  </tsx:react>
+  </div>
 }
 
 export default SessionsPage

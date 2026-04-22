@@ -71,21 +71,19 @@ export component AppStateProvider(props: {
     workbenchTabSet,
   ])
 
-  <tsx:react>
-    <appearanceContext.Provider value={appearance}>
-      <navigationContext.Provider value={navigation}>
-        <projectContextContext.Provider value={projectContext}>
-          <projectRegistryContext.Provider value={projectRegistry}>
-            <shortcutRegistryContext.Provider value={shortcutRegistry}>
-              <workbenchTabSetContext.Provider value={workbenchTabSet}>
-                {props.children}
-              </workbenchTabSetContext.Provider>
-            </shortcutRegistryContext.Provider>
-          </projectRegistryContext.Provider>
-        </projectContextContext.Provider>
-      </navigationContext.Provider>
-    </appearanceContext.Provider>
-  </tsx:react>
+  <appearanceContext.Provider value={appearance}>
+    <navigationContext.Provider value={navigation}>
+      <projectContextContext.Provider value={projectContext}>
+        <projectRegistryContext.Provider value={projectRegistry}>
+          <shortcutRegistryContext.Provider value={shortcutRegistry}>
+            <workbenchTabSetContext.Provider value={workbenchTabSet}>
+              {props.children}
+            </workbenchTabSetContext.Provider>
+          </shortcutRegistryContext.Provider>
+        </projectRegistryContext.Provider>
+      </projectContextContext.Provider>
+    </navigationContext.Provider>
+  </appearanceContext.Provider>
 }
 
 export function useAppearance() {
