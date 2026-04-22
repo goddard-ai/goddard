@@ -15,6 +15,9 @@ function createMainWindow(url: string) {
     titleBarStyle: "hiddenInset",
     url,
     rpc: appRpc,
+    // Dev mode falls back to the native renderer when build.json is absent, so
+    // opt into CEF here instead of relying on packaged build defaults.
+    renderer: "cef",
     styleMask: {
       FullSizeContentView: false,
     },
