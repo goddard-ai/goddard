@@ -1,5 +1,5 @@
 import preact from "@preact/preset-vite"
-import tsrxReact from "@tsrx/vite-plugin-react"
+import tsrxPreact from "@tsrx/vite-plugin-preact"
 import { defineConfig } from "vite"
 
 import svgIcons from "./plugins/svg-icon-build-plugin.ts"
@@ -9,7 +9,7 @@ export default defineConfig({
   root: "src/main",
   base: "./",
   publicDir: "../../public",
-  plugins: [svgIcons(), tsrxReact({ jsxImportSource: "preact" }), preact()],
+  plugins: [svgIcons(), tsrxPreact(), preact()],
   server: {
     host: "127.0.0.1",
     port: 5173,
