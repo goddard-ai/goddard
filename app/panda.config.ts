@@ -1,11 +1,11 @@
-import { defineConfig } from "@pandacss/dev";
+import { defineConfig } from "@pandacss/dev"
 
-import { globalCss } from "./src/panda-css/global.css.ts";
+import { globalCss } from "./src/panda-css/global.css.ts"
 
 export default defineConfig({
   preflight: true,
   presets: [],
-  include: ["./src/**/*.{js,jsx,ts,tsx}"],
+  include: ["./src/**/*.{js,jsx,ts,tsrx}"],
   exclude: [],
   outdir: "styled-system",
   jsxFramework: "preact",
@@ -57,4 +57,4 @@ export default defineConfig({
       },
     },
   },
-});
+})

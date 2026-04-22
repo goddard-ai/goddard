@@ -1,0 +1,45 @@
+diff --git a/src/transform.js b/src/transform.js
+index 149c18d6c..7ad4d3734 100644
+--- a/src/transform.js
++++ b/src/transform.js
+@@ -8,7 +8,6 @@ import {
+ 	renderStylesheets,
+ 	setLocation,
+ 	applyLazyTransforms as apply_lazy_transforms,
+-	findFirstTopLevelAwaitInComponentBody as find_first_top_level_await_in_component_body,
+ 	collectLazyBindingsFromComponent as collect_lazy_bindings_from_component,
+ 	preallocateLazyIds as preallocate_lazy_ids,
+ 	replaceLazyParams as replace_lazy_params,
+@@ -69,21 +68,6 @@ export function transform(ast, source, filename) {
+ 	walk(/** @type {any} */ (ast), transform_context, {
+ 		Component(node, { next, state }) {
+ 			const as_any = /** @type {any} */ (node);
+-			const await_expression = find_first_top_level_await_in_component_body(as_any.body || []);
+-
+-			if (await_expression && !module_uses_server_directive) {
+-				throw create_compile_error(
+-					await_expression,
+-					'React components can only use `await` when the module has a top-level "use server" directive.',
+-				);
+-			}
+-
+-			if (await_expression) {
+-				as_any.metadata = /** @type {any} */ ({
+-					...(as_any.metadata || {}),
+-					contains_top_level_await: true,
+-				});
+-			}
+ 
+ 			const css = as_any.css;
+ 			if (css) {
+@@ -212,9 +196,7 @@ function component_to_function_declaration(component, transform_context, walk_he
+ 	const helper_state = walk_helper_state || create_helper_state(component.id?.name || 'Component');
+ 	const params = component.params || [];
+ 	const body = /** @type {any[]} */ (component.body || []);
+-	const is_async_component =
+-		!!component?.metadata?.contains_top_level_await ||
+-		find_first_top_level_await_in_component_body(body) !== null;
++	const is_async_component = !!component?.metadata?.contains_top_level_await;
+ 
+ 	// Collect param bindings from original patterns (lazy patterns still intact).
+ 	const param_bindings = collect_param_bindings(params);

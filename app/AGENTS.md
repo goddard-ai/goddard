@@ -49,7 +49,7 @@
   - Use all-lowercase kebab-case component filenames and avoid repeating the parent feature name in child component names.
   - Do not use bare generic component names like `List`, `View`, `Page`, or `Dialog`; include feature-specific context in exported component names.
   - Import-path precedence is `./...`, then `~/...`, then `../...`.
-  - Use explicit TypeScript source extensions on those imports. Prefer `.ts` for `.ts` modules and `.tsx` for `.tsx` modules, including `~/...` imports.
+  - Use explicit TypeScript source extensions on those imports. Prefer `.ts` for `.ts` modules and `.tsrx` for `.tsrx` modules, including `~/...` imports.
   - Use `./...` for same-folder modules first.
   - Use `~/...` for imports that would otherwise traverse up to `src/` or across feature roots.
   - Use `../...` only when it does not traverse up to `src/` itself. A single `../...` is allowed when it still lands inside a child path such as `src/foo/...`, but do not use `../...` to reach `src/...` broadly.

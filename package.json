@@ -52,6 +52,7 @@
   },
   "packageManager": "bun@1.3.11",
   "patchedDependencies": {
+    "@tsrx/react@0.0.7": "patches/@tsrx%2Freact@0.0.7.patch",
     "@zag-js/popover@1.39.1": "patches/@zag-js%2Fpopover@1.39.1.patch",
     "@ark-ui/react@5.36.0": "patches/@ark-ui%2Freact@5.36.0.patch"
   }

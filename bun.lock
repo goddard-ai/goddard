@@ -225,6 +225,7 @@
   "patchedDependencies": {
     "@zag-js/popover@1.39.1": "patches/@zag-js%2Fpopover@1.39.1.patch",
     "@ark-ui/react@5.36.0": "patches/@ark-ui%2Freact@5.36.0.patch",
+    "@tsrx/react@0.0.7": "patches/@tsrx%2Freact@0.0.7.patch",
   },
   "packages": {
     "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@0.19.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-U9I8ws9WTOk6jCBAWpXefGSDgVXn14/kV6HFzwWGcstQ02mOQgClMAROHmoIn9GqZbDBDEOkdIbP4P4TEMQdug=="],
