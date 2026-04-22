@@ -89,10 +89,7 @@ component ToolContentDetail(props: {
     <div class={toolDetailTextClass}>
       {props.content.text?.trim() || "Structured tool output."}
     </div>
-    return
-  }
-
-  if (props.content.type === "diff") {
+  } else if (props.content.type === "diff") {
     <div class={toolDetailListClass}>
       if (props.content.path) {
         <div class={toolDetailMonoClass}>
@@ -104,13 +101,12 @@ component ToolContentDetail(props: {
         {buildToolDiffPreview(props.content)}
       </div>
     </div>
-    return
+  } else {
+    <div class={toolDetailMonoClass}>
+      {"Terminal session "}
+      {props.content.terminalId}
+    </div>
   }
-
-  <div class={toolDetailMonoClass}>
-    {"Terminal session "}
-    {props.content.terminalId}
-  </div>
 }
 
 component ToolLocationsList(props: {

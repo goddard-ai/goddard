@@ -71,17 +71,16 @@ component TranscriptContentBlock(props: {
         {getResourceLinkDetail(props.block)}
       </div>
     </div>
-    return
+  } else {
+    const markdownRole =
+      props.message.role === "user" ? "user" : "assistant"
+
+    <MarkdownMessage
+      markdown={props.block.text}
+      role={markdownRole}
+      streaming={props.message.streaming && props.blockIndex === props.lastTextBlockIndex}
+    />
   }
-
-  const markdownRole =
-    props.message.role === "user" ? "user" : "assistant"
-
-  <MarkdownMessage
-    markdown={props.block.text}
-    role={markdownRole}
-    streaming={props.message.streaming && props.blockIndex === props.lastTextBlockIndex}
-  />
 }
 
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
