@@ -15,7 +15,7 @@ export component AppShellWorkbenchContent() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
 
-  <Suspense fallback={<tsx><div /></tsx>}>
+  <Suspense fallback={null}>
     if (workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id) {
       <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
         <MainWorkbenchView />
@@ -93,7 +93,6 @@ component WorkbenchTabPanel() {
   const activeTab = workbenchTabSet.activeTab
 
   if (!activeTab) {
-    <div />
     return
   }
 

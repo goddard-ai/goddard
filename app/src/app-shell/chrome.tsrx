@@ -490,6 +490,7 @@ component TabButton(props: {
         {props.title}
       </span>
     </button>
+
     if (!isHome) {
       <div
         class={styles.tabTail}
