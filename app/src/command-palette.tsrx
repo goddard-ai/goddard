@@ -57,38 +57,48 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                 {"No matching commands."}
               </div>
             </tsx>}
-          >
-            {(item, state) => {
-              const Icon = item.icon
-              const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
-              const shortcut =
-                typeof shortcutBinding === "string"
-                  ? shortcutBinding
-                  : shortcutBinding?.combo ?? shortcutBinding?.sequence
-
-              return <tsx>
-                <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
-                  gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
-                }}>
-                  if (Icon)
-                  {<Icon aria-hidden={true} size={16} strokeWidth={2} style={{
-                    color: state.active ? token.var("colors.text") : token.var("colors.muted"),
-                  }} />}
-                  <span class={styles.itemLabel}>
-                    {item.label}
-                  </span>
-                  if (shortcut)
-                  {<span class={styles.shortcut}>
-                    {shortcut}
-                  </span>}
-                </div>
-              </tsx>
-            }}
-          </Command.List>
+            children={(item, state) => <tsx><CommandPaletteItem item={item} state={state} /></tsx>}
+          />
         </Command.Root>
       </Dialog.Content>
     </Dialog.Positioner>
   </DialogPortal>
+}
+
+component CommandPaletteItem({ item, state }: { item: AppCommand; state: CommandState }) {
+  const Icon = item.icon
+  const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
+  const shortcut =
+    typeof shortcutBinding === "string"
+      ? shortcutBinding
+      : shortcutBinding?.combo ?? shortcutBinding?.sequence
+
+  <div
+    class={styles.item}
+    data-active={state.active ? "true" : "false"}
+    style={{
+      gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+    }}
+  >
+    if (Icon) {
+      <Icon
+        aria-hidden={true}
+        size={16}
+        strokeWidth={2}
+        style={{
+          color: state.active ? token.var("colors.text") : token.var("colors.muted"),
+        }}
+      />
+    }
+    <span class={styles.itemLabel}>
+      {item.label}
+    </span>
+    if (shortcut) {
+      <span class={styles.shortcut}>
+        {shortcut}
+      </span>
+    }
+  </div>
 }
 
 export default CommandPalette
