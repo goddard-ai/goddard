@@ -22,14 +22,13 @@ function useAppShellTabStrip(
   selectedNavigationId: string,
   tabs: readonly { id: string }[],
 ) {
-  const tabStripRef = useRef<HTMLDivElement | null>(null)
-  const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  let tabStripElement: HTMLDivElement | null = null
+  let tabElements: Record<string, HTMLDivElement | null> = {}
   const dragSourceTabId = useRef<string | null>(null)
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
 
   function syncIndicator() {
-    const activeTabElement = tabRefs.current[activeTabId]
-    const tabStripElement = tabStripRef.current
+    const activeTabElement = tabElements[activeTabId]
 
     if (!activeTabElement || !tabStripElement) {
       setIndicator(
@@ -54,8 +53,6 @@ function useAppShellTabStrip(
   }, [activeTabId, selectedNavigationId, tabs])
 
   useEffect(() => {
-    const tabStripElement = tabStripRef.current
-
     if (!tabStripElement) {
       return
     }
@@ -66,7 +63,7 @@ function useAppShellTabStrip(
 
     observer.observe(tabStripElement)
 
-    for (const tabElement of Object.values(tabRefs.current)) {
+    for (const tabElement of Object.values(tabElements)) {
       if (tabElement) {
         observer.observe(tabElement)
       }
@@ -75,13 +72,17 @@ function useAppShellTabStrip(
     return () => {
       observer.disconnect()
     }
-  }, [selectedNavigationId, tabs])
+  }, [activeTabId, selectedNavigationId, tabs])
 
   return {
     dragSourceTabId,
     indicator,
-    tabRefs,
-    tabStripRef,
+    registerTabElement: (id: string, element: HTMLDivElement | null) => {
+      tabElements[id] = element
+    },
+    registerTabStripElement: (element: HTMLDivElement | null) => {
+      tabStripElement = element
+    },
   }
 }
 
@@ -259,7 +260,7 @@ export component AppShellChrome() {
       />
     </nav>
     <div class={styles.main}>
-      <div ref={tabStrip.tabStripRef} class={styles.tabStrip}>
+      <div {ref tabStrip.registerTabStripElement} class={styles.tabStrip}>
         <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
           <TabButton
             activeTabId={workbenchTabSet.activeTabId}
@@ -270,7 +271,7 @@ export component AppShellChrome() {
               workbenchTabSet.activateTab(id)
             }}
             refCallback={(element) => {
-              tabStrip.tabRefs.current[WORKBENCH_PRIMARY_TAB.id] = element
+              tabStrip.registerTabElement(WORKBENCH_PRIMARY_TAB.id, element)
             }}
             title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
           />
@@ -300,7 +301,7 @@ export component AppShellChrome() {
                 workbenchTabSet.activateTab(id)
               }}
               refCallback={(element) => {
-                tabStrip.tabRefs.current[tab.id] = element
+                tabStrip.registerTabElement(tab.id, element)
               }}
               title={tab.title}
             />
@@ -435,7 +436,7 @@ component TabButton(props: {
           : `color-mix(in srgb, ${textColor} 34%, transparent)`
 
   <div
-    ref={props.refCallback}
+    {ref props.refCallback}
     class={styles.tab}
     draggable={!isHome}
     role="presentation"

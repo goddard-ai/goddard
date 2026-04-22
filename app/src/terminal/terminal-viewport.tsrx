@@ -1,5 +1,5 @@
 import { cx } from "@goddard-ai/styled-system/css"
-import { useEffect, useRef } from "preact/hooks"
+import { useEffect } from "preact/hooks"
 
 import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model.ts"
 import styles from "./terminal-viewport.style.ts"
@@ -9,10 +9,10 @@ export component TerminalViewport(props: {
   class?: string;
   ariaLabel?: string;
 }) {
-  const viewportRef = useRef<HTMLDivElement | null>(null)
+  let viewportElement: HTMLDivElement | null = null
 
   useEffect(() => {
-    props.terminal.attachViewport(viewportRef.current)
+    props.terminal.attachViewport(viewportElement)
     return () => {
       props.terminal.attachViewport(null)
     }
@@ -49,7 +49,7 @@ export component TerminalViewport(props: {
         event.preventDefault()
         props.terminal.scrollViewport(event.deltaY, event.deltaMode)
       }}
-      ref={viewportRef}
+      {ref viewportElement}
       role="region"
       style={{
         backgroundColor: props.terminal.theme.background,

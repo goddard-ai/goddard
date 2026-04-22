@@ -29,7 +29,7 @@ function getExactShortcutSearch(searchText: string) {
 
 component KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  let searchInputElement: HTMLInputElement | null = null
   const searchRecordingSessionRef = useRef<RecordingSession | null>(null)
   const [searchText, setSearchText] = useState("")
   const [isRecordingSearchEnabled, setIsRecordingSearchEnabled] = useState(false)
@@ -89,7 +89,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
     }
 
     let isDisposed = false
-    searchInputRef.current?.focus()
+    searchInputElement?.focus()
 
     function beginRecording() {
       if (isDisposed) {
@@ -99,7 +99,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
       try {
         const session = shortcutRegistry.runtime.record(
           {
-            target: searchInputRef.current ?? document,
+            target: searchInputElement ?? document,
             suppressHandlers: true,
             consumeEvents: true,
             onUpdate: (recording) => {
@@ -230,7 +230,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
       <span class={styles.srOnly}>{"Search shortcuts"}</span>
       <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
       <input
-        ref={searchInputRef}
+        {ref searchInputElement}
         class={styles.searchInput}
         placeholder={isRecordingSearchEnabled
           ? "Type a key binding"
@@ -262,7 +262,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
             return
           }
 
-          searchInputRef.current?.focus()
+          searchInputElement?.focus()
           setIsRecordingSearchEnabled(true)
         }}
       >
@@ -400,7 +400,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                               stopSearchRecording()
                               setIsRecordingSearchEnabled(false)
                               setSearchText(formatShortcutSearch(row.shortcut))
-                              searchInputRef.current?.focus()
+                              searchInputElement?.focus()
                             }}
                           >
                             {"Show commands with same shortcut"}

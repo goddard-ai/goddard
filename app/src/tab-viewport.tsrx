@@ -3,7 +3,7 @@ import { useContext, useEffect, useState } from "preact/hooks"
 
 /** Shared viewport metrics exposed to detail-tab surfaces that render inside one scroller. */
 export type TabViewportSnapshot = {
-  viewportRef: preact.RefObject<HTMLDivElement | null>;
+  viewportElement: HTMLDivElement | null;
   width: number;
   height: number;
   scrollTop: number;
@@ -51,7 +51,7 @@ function useFontsReady(): boolean {
 /** Props accepted by the shared tab viewport provider. */
 export type TabViewportProviderProps = {
   children: preact.ComponentChildren;
-  viewportRef: preact.RefObject<HTMLDivElement | null>;
+  viewportElement: HTMLDivElement | null;
   scrollTop: number;
 }
 
@@ -66,7 +66,7 @@ export component TabViewportProvider(props: TabViewportProviderProps) {
   )
 
   useEffect(() => {
-    const viewportElement = props.viewportRef.current
+    const viewportElement = props.viewportElement
 
     if (!viewportElement) {
       return
@@ -99,11 +99,11 @@ export component TabViewportProvider(props: TabViewportProviderProps) {
     return () => {
       resizeObserver.disconnect()
     }
-  }, [props.viewportRef])
+  }, [props.viewportElement])
 
   <tabViewportContext.Provider
     value={{
-      viewportRef: props.viewportRef,
+      viewportElement: props.viewportElement,
       width: viewport.width,
       height: viewport.height,
       scrollTop: props.scrollTop,

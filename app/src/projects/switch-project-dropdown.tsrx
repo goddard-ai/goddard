@@ -1,6 +1,6 @@
 import { Search } from "lucide-react"
 import { useListener } from "preact-sigma"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useEffect, useState } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -35,10 +35,10 @@ export component SwitchProjectDropdown() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const contentRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  let triggerElement: HTMLButtonElement | null = null
+  let contentElement: HTMLDivElement | null = null
+  let inputElement: HTMLInputElement | null = null
+  let itemElements: Record<string, HTMLButtonElement | null> = {}
 
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -140,7 +140,7 @@ export component SwitchProjectDropdown() {
     }
 
     queueMicrotask(() => {
-      const input = inputRef.current
+      const input = inputElement
       input?.focus()
       input?.setSelectionRange(input.value.length, input.value.length)
     })
@@ -151,7 +151,7 @@ export component SwitchProjectDropdown() {
       return
     }
 
-    itemRefs.current[highlightedItemId]?.scrollIntoView(
+    itemElements[highlightedItemId]?.scrollIntoView(
       {
         block: "nearest",
       },
@@ -169,7 +169,7 @@ export component SwitchProjectDropdown() {
       return
     }
 
-    if (contentRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+    if (contentElement?.contains(target) || triggerElement?.contains(target)) {
       return
     }
 
@@ -184,12 +184,12 @@ export component SwitchProjectDropdown() {
     event.preventDefault()
     setIsOpen(false)
     queueMicrotask(() => {
-      triggerRef.current?.focus()
+      triggerElement?.focus()
     })
   })
 
   <button
-    ref={triggerRef}
+    {ref triggerElement}
     aria-expanded={isOpen ? "true" : "false"}
     aria-haspopup="dialog"
     aria-label="Switch project"
@@ -210,12 +210,12 @@ export component SwitchProjectDropdown() {
     </span>
   </button>
   if (isOpen) {
-    <div ref={contentRef} class={styles.content}>
+    <div {ref contentElement} class={styles.content}>
       <label class={styles.searchField}>
         <span class={styles.srOnly}>{"Search projects"}</span>
         <Search aria-hidden={true} size={16} strokeWidth={2.1} />
         <input
-          ref={inputRef}
+          {ref inputElement}
           class={styles.searchInput}
           placeholder="Search projects"
           value={search}
@@ -248,8 +248,8 @@ export component SwitchProjectDropdown() {
           for (const item of items; index index) {
             <li key={item.id}>
               <button
-                ref={(element) => {
-                  itemRefs.current[item.id] = element
+                {ref (element) => {
+                  itemElements[item.id] = element
                 }}
                 class={styles.item}
                 data-highlighted={highlightedItemIndex === index ? "true" : "false"}

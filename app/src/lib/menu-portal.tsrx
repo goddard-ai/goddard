@@ -1,5 +1,4 @@
 import { Portal } from "@ark-ui/react/portal"
-import { useRef } from "preact/hooks"
 
 export const menuPortalId = "menu-portal"
 const menuPortalElement =
@@ -7,14 +6,13 @@ const menuPortalElement =
 
 /** Renders menus into a shared host that layers above the dialog portal. */
 export component MenuPortal(props: { children?: preact.ComponentChildren }) {
-  const containerRef = useRef<HTMLElement | null>(menuPortalElement)
-  containerRef.current = menuPortalElement
+  const containerElement = menuPortalElement
 
-  if (!containerRef.current) {
+  if (!containerElement) {
     return
   }
 
-  <Portal container={containerRef}>
+  <Portal container={containerElement}>
     {props.children}
   </Portal>
 }

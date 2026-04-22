@@ -71,7 +71,7 @@ component SuggestionIcon(props: { suggestion: SessionInputSuggestion }) {
 export component SessionInputMenu(props: {
   isLoadingSuggestions: boolean;
   menu: SessionInputMenuState | null;
-  menuRef: preact.RefObject<HTMLDivElement | null>;
+  menuRef: (element: HTMLDivElement | null) => void;
   onAcceptSuggestion: (suggestion: SessionInputSuggestion) => void;
   onHighlight: (index: number) => void;
   selectedIndex: number;
@@ -83,7 +83,7 @@ export component SessionInputMenu(props: {
 
   <MenuPortal>
     <div
-      ref={props.menuRef}
+      {ref props.menuRef}
       class={inputMenuClass}
       style={{
         left: `${props.menu.anchorLeft}px`,

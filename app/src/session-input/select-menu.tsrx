@@ -3,7 +3,7 @@ import { Popover } from "@ark-ui/react/popover"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { ChevronDown, LoaderCircle } from "lucide-react"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useEffect, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
@@ -35,10 +35,10 @@ export type SessionInputSelectProps = {
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
 export component SessionInputSelect(props: SessionInputSelectProps) {
-  const menuRef = useRef<HTMLDivElement | null>(null)
-  const filterInputRef = useRef<HTMLInputElement | null>(null)
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  let menuElement: HTMLDivElement | null = null
+  let filterInputElement: HTMLInputElement | null = null
+  let triggerElement: HTMLButtonElement | null = null
+  let itemElements: Record<string, HTMLButtonElement | null> = {}
 
   const [query, setQuery] = useState("")
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -83,7 +83,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       return
     }
 
-    itemRefs.current[highlightedItem.value]?.scrollIntoView(
+    itemElements[highlightedItem.value]?.scrollIntoView(
       {
         block: "nearest",
       },
@@ -123,15 +123,15 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   <Popover.Root
     autoFocus={true}
     closeOnInteractOutside={true}
-    finalFocusEl={() => triggerRef.current}
+    finalFocusEl={() => triggerElement}
     immediate={true}
-    initialFocusEl={() => isFilterable ? filterInputRef.current : menuRef.current}
+    initialFocusEl={() => isFilterable ? filterInputElement : menuElement}
     lazyMount={true}
     modal={isFilterable}
     open={isMenuOpen}
     positioning={{
       fitViewport: true,
-      getAnchorElement: () => triggerRef.current,
+      getAnchorElement: () => triggerElement,
       gutter: 8,
       placement: "bottom-start",
       sameWidth: true,
@@ -159,7 +159,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         <span class={styles.tooltipTrigger}>
           <Popover.Trigger asChild>
             <button
-              ref={triggerRef}
+              {ref triggerElement}
               aria-expanded={isMenuOpen}
               aria-haspopup="menu"
               aria-label={ariaLabel}
@@ -202,7 +202,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       <MenuPortal>
         <Popover.Positioner>
           <Popover.Content
-            ref={menuRef}
+            {ref menuElement}
             class={styles.menu}
             tabIndex={isFilterable ? undefined : -1}
             onKeyDown={(event) => {
@@ -236,7 +236,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           >
             if (isFilterable) {
               <input
-                ref={filterInputRef}
+                {ref filterInputElement}
                 class={styles.menuFilter}
                 placeholder="Type to filter"
                 value={query}
@@ -291,8 +291,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                 for (const item of filteredItems; index index) {
                   <li key={item.value}>
                     <button
-                      ref={(element) => {
-                        itemRefs.current[item.value] = element
+                      {ref (element) => {
+                        itemElements[item.value] = element
                       }}
                       class={cx(
                         styles.menuButton,
