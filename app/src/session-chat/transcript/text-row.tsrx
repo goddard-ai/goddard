@@ -47,40 +47,41 @@ function getResourceLinkDetail(block: Extract<SessionTranscriptContentBlock, {
   return block.uri
 }
 
-function renderContentBlock(props: {
+component TranscriptContentBlock(props: {
   block: SessionTranscriptContentBlock;
   blockIndex: number;
   lastTextBlockIndex: number;
   message: SessionTranscriptTextMessage;
 }) {
   if (props.block.type === "resource_link") {
-    return <tsx>
-      <div key={`${props.message.id}:block:${props.blockIndex}`} class={attachmentCardClass}>
-        <div class={attachmentHeadingClass}>
-          <span class={attachmentIconClass} aria-hidden="true">
-            if (isSkillResourceLink(props.block))
-            {<BookOpen size={14} strokeWidth={2.2} />}
-            else
-            {<Link2 size={14} strokeWidth={2.2} />}
-          </span>
-          <span>
-            {props.block.name}
-          </span>
-        </div>
-        <div class={attachmentDetailClass}>
-          {getResourceLinkDetail(props.block)}
-        </div>
+    <div class={attachmentCardClass}>
+      <div class={attachmentHeadingClass}>
+        <span class={attachmentIconClass} aria-hidden="true">
+          if (isSkillResourceLink(props.block)) {
+            <BookOpen size={14} strokeWidth={2.2} />
+          } else {
+            <Link2 size={14} strokeWidth={2.2} />
+          }
+        </span>
+        <span>
+          {props.block.name}
+        </span>
       </div>
-    </tsx>
+      <div class={attachmentDetailClass}>
+        {getResourceLinkDetail(props.block)}
+      </div>
+    </div>
+    return
   }
 
   const markdownRole =
     props.message.role === "user" ? "user" : "assistant"
 
-  return <tsx>
-    <MarkdownMessage key={`${props.message.id}:block:${props.blockIndex}`} markdown={props.block.text} role={markdownRole} streaming={props.message.streaming &&
-      props.blockIndex === props.lastTextBlockIndex} />
-  </tsx>
+  <MarkdownMessage
+    markdown={props.block.text}
+    role={markdownRole}
+    streaming={props.message.streaming && props.blockIndex === props.lastTextBlockIndex}
+  />
 }
 
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
@@ -117,14 +118,13 @@ export component TextTranscriptRow(props: {
         >
           <div class={transcriptContentClass}>
             for (const block of message.content; index blockIndex) {
-              {renderContentBlock(
-                {
-                  block,
-                  blockIndex,
-                  lastTextBlockIndex,
-                  message,
-                },
-              )}
+              <TranscriptContentBlock
+                key={`${message.id}:block:${blockIndex}`}
+                {block}
+                {blockIndex}
+                {lastTextBlockIndex}
+                {message}
+              />
             }
           </div>
         </div>

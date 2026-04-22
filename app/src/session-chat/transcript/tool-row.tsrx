@@ -63,74 +63,71 @@ function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[])
   ).join(", ")
 }
 
-function renderMetaParts(parts: readonly string[], keyPrefix: string) {
-  return parts.flatMap((part, index) => {
-    const partNode = <tsx>
-      <span key={`${keyPrefix}:part:${index}`}>
-        {part}
-      </span>
-    </tsx>
-
-    if (index === 0) {
-      return [partNode]
+component ToolMetaParts(props: {
+  parts: readonly string[];
+  keyPrefix: string;
+}) {
+  for (const part of props.parts; index index) {
+    if (index > 0) {
+      <span
+        key={`${props.keyPrefix}:separator:${index}`}
+        aria-hidden="true"
+        class={toolInlineSeparatorClass}
+      />
     }
 
-    return [
-      <tsx>
-        <span key={`${keyPrefix}:separator:${index}`} aria-hidden="true" class={toolInlineSeparatorClass} />
-      </tsx>,
-      partNode,
-    ]
-  })
+    <span key={`${props.keyPrefix}:part:${index}`}>
+      {part}
+    </span>
+  }
 }
 
-function renderToolContent(content: SessionTranscriptToolContent, key: string) {
-  if (content.type === "content") {
-    return <tsx>
-      <div key={key} class={toolDetailTextClass}>
-        {content.text?.trim() || "Structured tool output."}
-      </div>
-    </tsx>
-  }
-
-  if (content.type === "diff") {
-    return <tsx>
-      <div key={key} class={toolDetailListClass}>
-        if (content.path)
-        {<div class={toolDetailMonoClass}>
-          {content.path}
-        </div>}
-        <div class={toolDetailMonoClass}>
-          {buildToolDiffPreview(content)}
-        </div>
-      </div>
-    </tsx>
-  }
-
-  return <tsx>
-    <div key={key} class={toolDetailMonoClass}>
-      {"Terminal session "}
-      {content.terminalId}
+component ToolContentDetail(props: {
+  content: SessionTranscriptToolContent;
+}) {
+  if (props.content.type === "content") {
+    <div class={toolDetailTextClass}>
+      {props.content.text?.trim() || "Structured tool output."}
     </div>
-  </tsx>
-}
-
-function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) {
-  if (locations.length === 0) {
-    return null
+    return
   }
 
-  return <tsx>
+  if (props.content.type === "diff") {
     <div class={toolDetailListClass}>
-      for (const location of locations; index index)
-      {<div class={toolDetailMonoClass} key={`${location.path}:${
-        location.line ?? "none"
-      }:${index}`}>
+      if (props.content.path) {
+        <div class={toolDetailMonoClass}>
+          {props.content.path}
+        </div>
+      }
+
+      <div class={toolDetailMonoClass}>
+        {buildToolDiffPreview(props.content)}
+      </div>
+    </div>
+    return
+  }
+
+  <div class={toolDetailMonoClass}>
+    {"Terminal session "}
+    {props.content.terminalId}
+  </div>
+}
+
+component ToolLocationsList(props: {
+  locations: SessionTranscriptToolCall["locations"];
+}) {
+  if (props.locations.length === 0) {
+    return
+  }
+
+  <div class={toolDetailListClass}>
+    for (const location of props.locations; index index) {
+      <div class={toolDetailMonoClass} key={`${location.path}:${location.line ?? "none"}:${index}`}>
         {location.path}
         {location.line != null ? `:${location.line}` : ""}
-      </div>}
-    </div>
-  </tsx>
+      </div>
+    }
+  </div>
 }
 
 /** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
@@ -149,7 +146,7 @@ export component ToolTranscriptRow(props: {
           <summary class={toolSummaryClass}>
             <span class={toolSummaryTextClass}>
               <span class={toolInlineMetaClass}>
-                {renderMetaParts(summaryMetaParts, `${props.groupId}:summary`)}
+                <ToolMetaParts parts={summaryMetaParts} keyPrefix={`${props.groupId}:summary`} />
               </span>
             </span>
             <span class={toolToggleHintClass}>{"Details"}</span>
@@ -160,22 +157,22 @@ export component ToolTranscriptRow(props: {
                 <article>
                   <div class={toolDetailHeadingClass}>
                     <span class={toolInlineMetaClass}>
-                      {renderMetaParts(
-                        [
+                      <ToolMetaParts
+                        parts={[
                           toolCall.title,
                           formatToolKindLabel(toolCall.toolKind),
                           formatToolStatusLabel(toolCall.status),
-                        ],
-                        `${props.groupId}:${toolCall.id}:heading`,
-                      )}
+                        ]}
+                        keyPrefix={`${props.groupId}:${toolCall.id}:heading`}
+                      />
                     </span>
                   </div>
 
                   for (const content of toolCall.content; index index) {
-                    {renderToolContent(content, `${toolCall.id}:content:${index}`)}
+                    <ToolContentDetail key={`${toolCall.id}:content:${index}`} {content} />
                   }
 
-                  {renderToolLocations(toolCall.locations)}
+                  <ToolLocationsList locations={toolCall.locations} />
                   if (toolCall.content.length === 0 && toolCall.locations.length === 0) {
                     <div class={toolDetailTextClass}>
                       {"No tool output was attached to this call."}
