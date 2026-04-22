@@ -119,16 +119,16 @@ export component TextTranscriptRow(props: {
             : cx(assistantMessageClass, assistantBubbleClass)}
         >
           <div class={transcriptContentClass}>
-            {message.content.map(
-              (block, blockIndex) => renderContentBlock(
+            for (const block of message.content; index blockIndex) {
+              {renderContentBlock(
                 {
                   block,
                   blockIndex,
                   lastTextBlockIndex,
                   message,
                 },
-              ),
-            )}
+              )}
+            }
           </div>
         </div>
       </div>

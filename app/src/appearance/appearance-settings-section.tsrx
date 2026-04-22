@@ -57,26 +57,29 @@ export component AppearanceSettingsSection() {
         {appearance.effectiveTheme}
       </SettingsHelperText>
       <SettingsChoiceList>
-        {themeModeOptions.map((option) => {
-          return <tsx>
-            <SettingsChoiceItem key={option.mode}>
-              <SettingsChoiceLabel>
-                <SettingsChoiceInput checked={appearance.mode ===
-                  option.mode} name="appearance-mode" type="radio" value={option.mode} onInput={() => {
+        for (const option of themeModeOptions) {
+          <SettingsChoiceItem key={option.mode}>
+            <SettingsChoiceLabel>
+              <SettingsChoiceInput
+                checked={appearance.mode === option.mode}
+                name="appearance-mode"
+                type="radio"
+                value={option.mode}
+                onInput={() => {
                   appearance.setMode(option.mode)
-                }} />
-                <SettingsChoiceBody>
-                  <SettingsChoiceTitle>
-                    {option.label}
-                  </SettingsChoiceTitle>
-                  <SettingsChoiceDescription>
-                    {option.description}
-                  </SettingsChoiceDescription>
-                </SettingsChoiceBody>
-              </SettingsChoiceLabel>
-            </SettingsChoiceItem>
-          </tsx>
-        })}
+                }}
+              />
+              <SettingsChoiceBody>
+                <SettingsChoiceTitle>
+                  {option.label}
+                </SettingsChoiceTitle>
+                <SettingsChoiceDescription>
+                  {option.description}
+                </SettingsChoiceDescription>
+              </SettingsChoiceBody>
+            </SettingsChoiceLabel>
+          </SettingsChoiceItem>
+        }
       </SettingsChoiceList>
     </SettingsFieldset>
     <SettingsFieldset>

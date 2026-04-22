@@ -274,27 +274,36 @@ export component AppShellChrome() {
             }}
             title={selectedNavigation?.label ?? WORKBENCH_PRIMARY_TAB.title}
           />
-          {workbenchTabSet.tabList.map(
-            (tab) => <tsx>
-              <TabButton key={tab.id} activeTabId={workbenchTabSet.activeTabId} dirty={tab.dirty} icon={getWorkbenchTabIcon(
-                tab.kind,
-              )} id={tab.id} onClose={(id) => {
+          for (const tab of workbenchTabSet.tabList) {
+            <TabButton
+              activeTabId={workbenchTabSet.activeTabId}
+              dirty={tab.dirty}
+              icon={getWorkbenchTabIcon(tab.kind)}
+              id={tab.id}
+              key={tab.id}
+              onClose={(id) => {
                 workbenchTabSet.closeTab(id)
-              }} onDragEnd={() => {
+              }}
+              onDragEnd={() => {
                 tabStrip.dragSourceTabId.current = null
-              }} onDragEnter={(id) => {
+              }}
+              onDragEnter={(id) => {
                 if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
                   workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
                 }
-              }} onDragStart={(id) => {
+              }}
+              onDragStart={(id) => {
                 tabStrip.dragSourceTabId.current = id
-              }} onSelect={(id) => {
+              }}
+              onSelect={(id) => {
                 workbenchTabSet.activateTab(id)
-              }} refCallback={(element) => {
+              }}
+              refCallback={(element) => {
                 tabStrip.tabRefs.current[tab.id] = element
-              }} title={tab.title} />
-            </tsx>,
-          )}
+              }}
+              title={tab.title}
+            />
+          }
           <span
             aria-hidden="true"
             class={styles.indicator}
@@ -332,14 +341,17 @@ component AppShellSidebarSection(props: {
   }) => void;
   selectedNavigationId: NavigationItemId;
 }) {
-  {props.items.map(
-    (item) => <tsx>
-      <SidebarItem key={item.id} icon={item.icon} isSelected={item.id ===
-        props.selectedNavigationId} label={item.label} onSelect={(options) => {
+  for (const item of props.items) {
+    <SidebarItem
+      icon={item.icon}
+      isSelected={item.id === props.selectedNavigationId}
+      key={item.id}
+      label={item.label}
+      onSelect={(options) => {
         props.onNavigationSelect(item.id, options)
-      }} />
-    </tsx>,
-  )}
+      }}
+    />
+  }
 }
 
 component ActionButton(props: {

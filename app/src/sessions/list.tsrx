@@ -45,16 +45,18 @@ export component SessionsList(props: {
   }
 
   <ul class={styles.list}>
-    {props.sessions.map(
-      (session) => <tsx>
-        <li key={session.id}>
-          <ListRow onOpen={() => {
+    for (const session of props.sessions) {
+      <li key={session.id}>
+        <ListRow
+          onOpen={() => {
             props.onOpenSession(session.id)
-          }} onOpenChanges={() => {
+          }}
+          onOpenChanges={() => {
             props.onOpenChanges(session.id)
-          }} session={session} />
-        </li>
-      </tsx>,
-    )}
+          }}
+          {session}
+        />
+      </li>
+    }
   </ul>
 }

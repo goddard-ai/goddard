@@ -129,14 +129,17 @@ component ProjectList(props: {
   onOpenProjectTab: (id: string) => void;
 }) {
   <ul class={styles.list}>
-    {props.projects.map(
-      (project) => <tsx>
-        <li key={project.path}>
-          <ProjectListRow isSelected={props.selectedProjectPath ===
-            project.path} onOpenProjectTab={props.onOpenProjectTab} onRemove={props.onRemove} onSelect={props.onSelect} project={project} />
-        </li>
-      </tsx>,
-    )}
+    for (const project of props.projects) {
+      <li key={project.path}>
+        <ProjectListRow
+          isSelected={props.selectedProjectPath === project.path}
+          onOpenProjectTab={props.onOpenProjectTab}
+          onRemove={props.onRemove}
+          onSelect={props.onSelect}
+          {project}
+        />
+      </li>
+    }
   </ul>
 }
 

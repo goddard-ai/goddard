@@ -291,26 +291,21 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                   </tsx>
                 : <tsx>
                     <ul class={styles.menuList}>
-                      {filteredItems.map((item, index) => {
-                        const isActive = index === selectedIndex
-
-                        return <tsx>
-                          <li key={item.value}>
-                            <button ref={(element) => {
-                              itemRefs.current[item.value] = element
-                            }} class={cx(
-                              styles.menuButton,
-                              isActive && styles.menuButtonActive,
-                            )} disabled={item.disabled} type="button" onMouseEnter={() => {
-                              setSelectedIndex(index)
-                            }} onClick={() => {
-                              commitSelection(item)
-                            }}>
-                              {item.label}
-                            </button>
-                          </li>
-                        </tsx>
-                      })}
+                      for (const item of filteredItems; index index)
+                      {<li key={item.value}>
+                        <button ref={(element) => {
+                          itemRefs.current[item.value] = element
+                        }} class={cx(
+                          styles.menuButton,
+                          index === selectedIndex && styles.menuButtonActive,
+                        )} disabled={item.disabled} type="button" onMouseEnter={() => {
+                          setSelectedIndex(index)
+                        }} onClick={() => {
+                          commitSelection(item)
+                        }}>
+                          {item.label}
+                        </button>
+                      </li>}
                     </ul>
                   </tsx>}
           </Popover.Content>

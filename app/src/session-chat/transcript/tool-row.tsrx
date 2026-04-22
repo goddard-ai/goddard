@@ -125,16 +125,13 @@ function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) 
 
   return <tsx>
     <div class={toolDetailListClass}>
-      {locations.map(
-        (location, index) => <tsx>
-          <div key={`${location.path}:${
-            location.line ?? "none"
-          }:${index}`} class={toolDetailMonoClass}>
-            {location.path}
-            {location.line != null ? `:${location.line}` : ""}
-          </div>
-        </tsx>,
-      )}
+      for (const location of locations; index index)
+      {<div class={toolDetailMonoClass} key={`${location.path}:${
+        location.line ?? "none"
+      }:${index}`}>
+        {location.path}
+        {location.line != null ? `:${location.line}` : ""}
+      </div>}
     </div>
   </tsx>
 }
@@ -161,40 +158,35 @@ export component ToolTranscriptRow(props: {
             <span class={toolToggleHintClass}>{"Details"}</span>
           </summary>
           <ol class={toolDetailListClass}>
-            {props.toolCalls.map(
-              (toolCall) => <tsx>
-                <li key={`${props.groupId}:${toolCall.id}`} class={toolDetailItemClass}>
-                  <article>
-                    <div class={toolDetailHeadingClass}>
-                      <span class={toolInlineMetaClass}>
-                        {renderMetaParts(
-                          [
-                            toolCall.title,
-                            formatToolKindLabel(toolCall.toolKind),
-                            formatToolStatusLabel(toolCall.status),
-                          ],
-                          `${props.groupId}:${toolCall.id}:heading`,
-                        )}
-                      </span>
-                    </div>
-                    {toolCall.content.map(
-                      (content, index) => renderToolContent(
-                        content,
-                        `${toolCall.id}:content:${index}`,
-                      ),
-                    )}
-                    {renderToolLocations(toolCall.locations)}
-                    {toolCall.content.length === 0 && toolCall.locations.length === 0
-                      ? <tsx>
-                          <div class={toolDetailTextClass}>
-                            {"No tool output was attached to this call."}
-                          </div>
-                        </tsx>
-                      : null}
-                  </article>
-                </li>
-              </tsx>,
-            )}
+            for (const toolCall of props.toolCalls) {
+              <li class={toolDetailItemClass} key={`${props.groupId}:${toolCall.id}`}>
+                <article>
+                  <div class={toolDetailHeadingClass}>
+                    <span class={toolInlineMetaClass}>
+                      {renderMetaParts(
+                        [
+                          toolCall.title,
+                          formatToolKindLabel(toolCall.toolKind),
+                          formatToolStatusLabel(toolCall.status),
+                        ],
+                        `${props.groupId}:${toolCall.id}:heading`,
+                      )}
+                    </span>
+                  </div>
+                  for (const content of toolCall.content; index index) {
+                    {renderToolContent(content, `${toolCall.id}:content:${index}`)}
+                  }
+                  {renderToolLocations(toolCall.locations)}
+                  {toolCall.content.length === 0 && toolCall.locations.length === 0
+                    ? <tsx>
+                        <div class={toolDetailTextClass}>
+                          {"No tool output was attached to this call."}
+                        </div>
+                      </tsx>
+                    : null}
+                </article>
+              </li>
+            }
           </ol>
         </details>
       </div>

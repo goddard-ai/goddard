@@ -115,32 +115,34 @@ export component SessionInputMenu(props: {
                   {"No matches for this trigger yet."}
                 </div>
               </tsx>
-            : (props.suggestions.map(
-                (suggestion, index) => <tsx>
-                  <button key={suggestionKey(suggestion)} class={cx(
-                    inputMenuButtonClass,
-                    index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
-                  )} type="button" onMouseDown={(event) => {
-                    event.preventDefault()
-                  }} onMouseEnter={() => {
-                    props.onHighlight(index)
-                  }} onClick={() => {
-                    props.onAcceptSuggestion(suggestion)
-                  }}>
-                    <span class={inputMenuIconClass} aria-hidden="true">
-                      <SuggestionIcon suggestion={suggestion} />
+            : <tsx>
+                for (
+                  const suggestion of props.suggestions;
+                  index index
+                )
+                {<button class={cx(
+                  inputMenuButtonClass,
+                  index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
+                )} key={suggestionKey(suggestion)} type="button" onMouseDown={(event) => {
+                  event.preventDefault()
+                }} onMouseEnter={() => {
+                  props.onHighlight(index)
+                }} onClick={() => {
+                  props.onAcceptSuggestion(suggestion)
+                }}>
+                  <span class={inputMenuIconClass} aria-hidden="true">
+                    <SuggestionIcon suggestion={suggestion} />
+                  </span>
+                  <span class={inputMenuBodyClass}>
+                    <span class={inputMenuLabelClass}>
+                      {getSuggestionLabel(suggestion)}
                     </span>
-                    <span class={inputMenuBodyClass}>
-                      <span class={inputMenuLabelClass}>
-                        {getSuggestionLabel(suggestion)}
-                      </span>
-                      <span class={inputMenuDetailClass}>
-                        {getSuggestionDetail(suggestion)}
-                      </span>
+                    <span class={inputMenuDetailClass}>
+                      {getSuggestionDetail(suggestion)}
                     </span>
-                  </button>
-                </tsx>,
-              ))}
+                  </span>
+                </button>}
+              </tsx>}
       </div>
     </div>
   </MenuPortal>

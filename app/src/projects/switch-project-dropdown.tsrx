@@ -244,66 +244,45 @@ export component SwitchProjectDropdown() {
           {items.length > 0
             ? <tsx>
                 <ul class={styles.list}>
-                  {items.map((item, index) => {
-                    const isHighlighted = highlightedItemIndex === index
-
-                    if (item.kind === "open-folder") {
-                      return <tsx>
-                        <li key={item.id}>
-                          <button ref={(element) => {
-                            itemRefs.current[item.id] = element
-                          }} class={styles.item} data-highlighted={isHighlighted
-                            ? "true"
-                            : "false"} type="button" onMouseEnter={() => {
-                            setHighlightedIndex(index)
-                          }} onClick={() => {
-                            activateItem(item)
-                          }}>
-                            <span class={styles.itemBody}>
+                  for (const item of items; index index)
+                  {<li key={item.id}>
+                    <button ref={(element) => {
+                      itemRefs.current[item.id] = element
+                    }} class={styles.item} data-highlighted={highlightedItemIndex === index
+                      ? "true"
+                      : "false"} type="button" onMouseEnter={() => {
+                      setHighlightedIndex(index)
+                    }} onClick={() => {
+                      activateItem(item)
+                    }}>
+                      <span class={styles.itemBody}>
+                        {item.kind === "open-folder"
+                          ? <tsx>
                               <span class={styles.itemTitle}>
                                 {"Open folder…"}
                               </span>
                               <span class={styles.itemDetail}>
                                 {"Add a local project from your filesystem."}
                               </span>
+                            </tsx>
+                          : <tsx>
+                              <span class={styles.itemTitleEllipsis}>
+                                {item.project.name}
+                              </span>
+                              <span class={styles.itemDetailEllipsis}>
+                                {item.project.path}
+                              </span>
+                            </tsx>}
+                      </span>
+                      {item.kind === "project" && activeProject?.path === item.project.path
+                        ? <tsx>
+                            <span class={styles.activeBadge}>
+                              {"Active"}
                             </span>
-                          </button>
-                        </li>
-                      </tsx>
-                    }
-
-                    const isActiveProject = activeProject?.path === item.project.path
-
-                    return <tsx>
-                      <li key={item.id}>
-                        <button ref={(element) => {
-                          itemRefs.current[item.id] = element
-                        }} class={styles.item} data-highlighted={isHighlighted
-                          ? "true"
-                          : "false"} type="button" onMouseEnter={() => {
-                          setHighlightedIndex(index)
-                        }} onClick={() => {
-                          activateItem(item)
-                        }}>
-                          <span class={styles.itemBody}>
-                            <span class={styles.itemTitleEllipsis}>
-                              {item.project.name}
-                            </span>
-                            <span class={styles.itemDetailEllipsis}>
-                              {item.project.path}
-                            </span>
-                          </span>
-                          {isActiveProject
-                            ? <tsx>
-                                <span class={styles.activeBadge}>
-                                  {"Active"}
-                                </span>
-                              </tsx>
-                            : null}
-                        </button>
-                      </li>
-                    </tsx>
-                  })}
+                          </tsx>
+                        : null}
+                    </button>
+                  </li>}
                 </ul>
               </tsx>
             : <tsx>
