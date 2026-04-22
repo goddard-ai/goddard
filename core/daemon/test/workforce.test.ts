@@ -23,7 +23,6 @@ afterEach(async () => {
 test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
   const packageDir = join(repoDir, "packages", "ui")
-  const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-ipc-"))
   cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
 
   await mkdir(packageDir, { recursive: true })
@@ -67,12 +66,11 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
       },
     },
     {
-      socketPath: join(socketDir, "daemon.sock"),
+      port: 0,
     },
   )
   cleanup.push(async () => {
     await daemon.close()
-    await rm(socketDir, { recursive: true, force: true })
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -105,7 +103,6 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
 
 test("daemon workforce event stream rejects inactive repositories", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
-  const socketDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-ipc-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
 
   const daemon = await startDaemonServer(
@@ -136,12 +133,11 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
       },
     },
     {
-      socketPath: join(socketDir, "daemon.sock"),
+      port: 0,
     },
   )
   cleanup.push(async () => {
     await daemon.close()
-    await rm(socketDir, { recursive: true, force: true })
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

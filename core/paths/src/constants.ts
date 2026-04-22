@@ -7,9 +7,6 @@ export const GODDARD_CACHE_DIRECTORY_NAME = "goddard"
 /** Filename used for the root JSON configuration document. */
 export const GODDARD_CONFIG_FILENAME = "config.json"
 
-/** Filename used for the daemon Unix socket or named-pipe basename. */
-export const GODDARD_DAEMON_SOCKET_FILENAME = "daemon.sock"
-
 /** Filename used for the daemon auth token store. */
 export const GODDARD_AUTH_TOKEN_FILENAME = "credentials.json"
 

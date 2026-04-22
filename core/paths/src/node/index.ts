@@ -6,7 +6,6 @@ import {
   GODDARD_AUTH_TOKEN_FILENAME,
   GODDARD_CACHE_DIRECTORY_NAME,
   GODDARD_CONFIG_FILENAME,
-  GODDARD_DAEMON_SOCKET_FILENAME,
   GODDARD_DATABASE_FILENAME,
   GODDARD_DEVELOPMENT_DATA_DIRECTORY,
   GODDARD_DIRECTORY_NAME,
@@ -62,11 +61,6 @@ export function getAcpRegistryCacheDir(): string {
 /** Returns the global root config file path. */
 export function getGlobalConfigPath(): string {
   return join(getGoddardGlobalDir(), GODDARD_CONFIG_FILENAME)
-}
-
-/** Returns the daemon socket file path under the global `.goddard` directory. */
-export function getDaemonSocketPath(): string {
-  return join(getGoddardGlobalDir(), GODDARD_DAEMON_SOCKET_FILENAME)
 }
 
 /** Returns the repository-scoped local `.goddard` directory. */

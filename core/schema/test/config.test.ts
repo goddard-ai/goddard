@@ -19,6 +19,16 @@ test("UserConfig accepts session title generator model config", () => {
   })
 })
 
+test("UserConfig accepts a global daemon port override", () => {
+  const config = UserConfig.parse({
+    daemon: {
+      port: 49828,
+    },
+  })
+
+  expect(config.daemon?.port).toBe(49828)
+})
+
 test("generated goddard schema embeds the model schema once under local defs", () => {
   const goddardSchema = buildGeneratedSchemaArtifacts().find(
     (artifact: { name: string }) => artifact.name === "goddard.json",

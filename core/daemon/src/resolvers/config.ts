@@ -117,21 +117,28 @@ export async function readMergedRootConfig(
     config: mergeRootConfigLayers(
       await readJsonConfig(getGlobalConfigPath(), UserConfig, "Global config", "goddard.json"),
       await readJsonConfig(getLocalConfigPath(cwd), UserConfig, "Local config", "goddard.json", {
-        validateNormalized: assertLocalConfigDoesNotDeclareWorktreePlugins,
+        validateNormalized: assertLocalConfigIsWithinSupportedScope,
       }),
     ),
   }
 }
 
 /**
- * Prevents repository-local config from selecting arbitrary daemon-loaded worktree plugins.
+ * Prevents repository-local config from declaring daemon-owned global-only settings.
  */
-function assertLocalConfigDoesNotDeclareWorktreePlugins(normalized: unknown) {
+function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized)) {
     return
   }
 
-  const worktrees = (normalized as Record<string, unknown>).worktrees
+  const config = normalized as Record<string, unknown>
+  if ("daemon" in config) {
+    throw new Error(
+      "`daemon` is only supported in the global Goddard config, not repository-local config.",
+    )
+  }
+
+  const worktrees = config.worktrees
   if (typeof worktrees !== "object" || worktrees === null || Array.isArray(worktrees)) {
     return
   }

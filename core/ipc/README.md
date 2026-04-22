@@ -7,7 +7,7 @@ Typed IPC contract helpers shared across host environments.
 - `@goddard-ai/ipc`
   - Schema declarations, typed client creation, transport types, and shared request-handler types.
 - `@goddard-ai/ipc/node`
-  - Node socket transport and Node IPC server implementation.
+  - Node TCP transport and Node IPC server implementation.
 
 ## License
 

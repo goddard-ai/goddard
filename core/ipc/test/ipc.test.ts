@@ -1,9 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { once } from "node:events"
-import { mkdtemp, rm } from "node:fs/promises"
-import { request } from "node:http"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { request, type Server } from "node:http"
+import { createServer as createTcpServer } from "node:net"
 import { afterEach, describe, expect, test, vi } from "bun:test"
 import { z } from "zod"
 
@@ -48,10 +46,8 @@ afterEach(async () => {
 })
 
 async function createFixture() {
-  const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-"))
-  const socketPath = join(directory, "ipc.sock")
   const ipcServer = createServer({
-    socketPath,
+    port: 0,
     schema,
     handlers: {
       ping: () => ({ ok: true as const }),
@@ -66,6 +62,7 @@ async function createFixture() {
   })
 
   await once(ipcServer.server, "listening")
+  const address = readTcpAddress(ipcServer.server)
 
   cleanups.push(async () => {
     await new Promise<void>((resolve, reject) => {
@@ -77,23 +74,23 @@ async function createFixture() {
         resolve()
       })
     })
-    await rm(directory, { recursive: true, force: true })
   })
 
   return {
-    socketPath,
-    client: createNodeClient(socketPath, schema),
+    address,
+    client: createNodeClient(address, schema),
     publish: ipcServer.publish,
   }
 }
 
-async function postRaw(socketPath: string, body: unknown) {
+async function postRaw(address: { hostname: string; port: number }, body: unknown) {
   const payload = JSON.stringify(body)
 
   return new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
     const req = request(
       {
-        socketPath,
+        hostname: address.hostname,
+        port: address.port,
         path: "/",
         method: "POST",
         headers: {
@@ -122,17 +119,57 @@ async function postRaw(socketPath: string, body: unknown) {
   })
 }
 
+function readTcpAddress(server: Server) {
+  const address = server.address()
+  if (!address || typeof address === "string") {
+    throw new Error("IPC server did not bind to a TCP port")
+  }
+
+  return {
+    hostname: address.address,
+    port: address.port,
+  }
+}
+
+async function getUnusedTcpAddress() {
+  const server = createTcpServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject)
+      resolve()
+    })
+  })
+
+  const address = server.address()
+  if (!address || typeof address === "string") {
+    throw new Error("TCP probe did not bind to a port")
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
+
+  return {
+    hostname: address.address,
+    port: address.port,
+  }
+}
+
 describe("core/ipc", () => {
-  test("sends validated request/response messages over a unix socket", async () => {
+  test("sends validated request/response messages over TCP", async () => {
     const { client } = await createFixture()
 
     await expect(client.send("ping")).resolves.toEqual({ ok: true })
-    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({
-      echoed: "hello",
-    })
-    await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({
-      sum: 5,
-    })
+    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({ echoed: "hello" })
+    await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
   })
 
   test("rejects invalid request payloads before they cross the process boundary", async () => {
@@ -149,27 +186,25 @@ describe("core/ipc", () => {
   })
 
   test("returns a structured error for unknown requests", async () => {
-    const { socketPath } = await createFixture()
+    const { address } = await createFixture()
 
-    await expect(postRaw(socketPath, { name: "missing", payload: {} })).resolves.toEqual({
+    await expect(postRaw(address, { name: "missing", payload: {} })).resolves.toEqual({
       statusCode: 400,
       body: JSON.stringify({ error: "Unknown request: missing" }),
     })
   })
 
   test("returns the expected payload shape when a raw request omits its payload object", async () => {
-    const { socketPath } = await createFixture()
+    const { address } = await createFixture()
     const expectedMessage = ["Expected input shape:", "{", "  text: string", "}"].join("\n")
 
-    await expect(postRaw(socketPath, { name: "echo" })).resolves.toEqual({
+    await expect(postRaw(address, { name: "echo" })).resolves.toEqual({
       statusCode: 400,
       body: JSON.stringify({ error: expectedMessage }),
     })
   })
 
   test("creates request context and fires request lifecycle hooks", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-hooks-"))
-    const socketPath = join(directory, "ipc.sock")
     const requestContext = new AsyncLocalStorage<{ traceId: string }>()
     const received: Array<{ name: string; payload: unknown; traceId: string }> = []
     const responded: Array<{
@@ -190,7 +225,7 @@ describe("core/ipc", () => {
       return traceId
     }
     const ipcServer = createServer({
-      socketPath,
+      port: 0,
       schema,
       handlers: {
         ping: () => {
@@ -218,17 +253,12 @@ describe("core/ipc", () => {
         received.push({ name, payload, traceId: readTraceId() })
       },
       onResponseSent: ({ name, payload, response, durationMs }) => {
-        responded.push({
-          name,
-          payload,
-          response,
-          durationMs,
-          traceId: readTraceId(),
-        })
+        responded.push({ name, payload, response, durationMs, traceId: readTraceId() })
       },
     })
 
     await once(ipcServer.server, "listening")
+    const address = readTcpAddress(ipcServer.server)
     cleanups.push(async () => {
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {
@@ -239,10 +269,9 @@ describe("core/ipc", () => {
           resolve()
         })
       })
-      await rm(directory, { recursive: true, force: true })
     })
 
-    const client = createNodeClient(socketPath, schema)
+    const client = createNodeClient(address, schema)
     await expect(client.send("ping")).resolves.toEqual({ ok: true })
     await expect(client.send("echo", { text: "hello" })).resolves.toEqual({
       echoed: "hello:echo-2",
@@ -274,12 +303,11 @@ describe("core/ipc", () => {
     let resolveAlert:
       | ((payload: { message: string; level: "info" | "warn" | "error" }) => void)
       | null = null
-    const alertPromise = new Promise<{
-      message: string
-      level: "info" | "warn" | "error"
-    }>((resolve) => {
-      resolveAlert = resolve
-    })
+    const alertPromise = new Promise<{ message: string; level: "info" | "warn" | "error" }>(
+      (resolve) => {
+        resolveAlert = resolve
+      },
+    )
     const unsubscribe = await client.subscribe("systemAlert", (payload) => {
       resolveAlert?.(payload)
     })
@@ -290,10 +318,7 @@ describe("core/ipc", () => {
     await new Promise((resolve) => setTimeout(resolve, 25))
     publish("systemAlert", { message: "Heads up", level: "warn" })
 
-    await expect(alertPromise).resolves.toEqual({
-      message: "Heads up",
-      level: "warn",
-    })
+    await expect(alertPromise).resolves.toEqual({ message: "Heads up", level: "warn" })
   })
 
   test("applies stream filters on the server side", async () => {
@@ -314,10 +339,7 @@ describe("core/ipc", () => {
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     expect(onMessage).toHaveBeenCalledTimes(1)
-    expect(onMessage).toHaveBeenCalledWith({
-      userId: "user-1",
-      message: "deliver me",
-    })
+    expect(onMessage).toHaveBeenCalledWith({ userId: "user-1", message: "deliver me" })
   })
 
   test("rejects stream filters when the server-side validator fails", async () => {
@@ -329,15 +351,13 @@ describe("core/ipc", () => {
   })
 
   test("fires stream lifecycle hooks and unsubscribes exactly once", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-stream-hooks-"))
-    const socketPath = join(directory, "ipc.sock")
     const events: Array<{
       phase: "subscribe" | "unsubscribe"
       name: string
       filter: unknown
     }> = []
     const ipcServer = createServer({
-      socketPath,
+      port: 0,
       schema,
       handlers: {
         ping: () => ({ ok: true as const }),
@@ -353,6 +373,7 @@ describe("core/ipc", () => {
     })
 
     await once(ipcServer.server, "listening")
+    const address = readTcpAddress(ipcServer.server)
     cleanups.push(async () => {
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {
@@ -363,10 +384,9 @@ describe("core/ipc", () => {
           resolve()
         })
       })
-      await rm(directory, { recursive: true, force: true })
     })
 
-    const client = createNodeClient(socketPath, schema)
+    const client = createNodeClient(address, schema)
     const unsubscribe = await client.subscribe(
       { name: "userAlert", filter: { userId: "user-1" } },
       () => {},
@@ -392,8 +412,6 @@ describe("core/ipc", () => {
   })
 
   test("fires request-failed hooks when a handler throws", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-errors-"))
-    const socketPath = join(directory, "ipc.sock")
     const requestContext = new AsyncLocalStorage<{ traceId: string }>()
     const failures: Array<{
       name: string
@@ -403,7 +421,7 @@ describe("core/ipc", () => {
       traceId: string
     }> = []
     const ipcServer = createServer({
-      socketPath,
+      port: 0,
       schema,
       handlers: {
         ping: () => ({ ok: true as const }),
@@ -430,6 +448,7 @@ describe("core/ipc", () => {
     })
 
     await once(ipcServer.server, "listening")
+    const address = readTcpAddress(ipcServer.server)
     cleanups.push(async () => {
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {
@@ -440,10 +459,9 @@ describe("core/ipc", () => {
           resolve()
         })
       })
-      await rm(directory, { recursive: true, force: true })
     })
 
-    const client = createNodeClient(socketPath, schema)
+    const client = createNodeClient(address, schema)
     await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Internal server error")
 
     expect(failures).toHaveLength(1)
@@ -457,10 +475,8 @@ describe("core/ipc", () => {
   })
 
   test("returns client-visible handler failures unchanged", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-client-errors-"))
-    const socketPath = join(directory, "ipc.sock")
     const ipcServer = createServer({
-      socketPath,
+      port: 0,
       schema,
       handlers: {
         ping: () => ({ ok: true as const }),
@@ -472,6 +488,7 @@ describe("core/ipc", () => {
     })
 
     await once(ipcServer.server, "listening")
+    const address = readTcpAddress(ipcServer.server)
     cleanups.push(async () => {
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {
@@ -482,36 +499,33 @@ describe("core/ipc", () => {
           resolve()
         })
       })
-      await rm(directory, { recursive: true, force: true })
     })
 
-    const client = createNodeClient(socketPath, schema)
+    const client = createNodeClient(address, schema)
     await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Add is disabled")
   })
 
-  test("rewords missing IPC socket send failures", async () => {
-    const missingSocketPath = join(tmpdir(), "goddard-ipc-missing-send.sock")
-    const client = createNodeClient(missingSocketPath, schema)
+  test("rewords missing IPC send failures", async () => {
+    const missingAddress = await getUnusedTcpAddress()
+    const client = createNodeClient(missingAddress, schema)
 
     await expect(client.send("ping")).rejects.toThrow(
-      `Could not connect to IPC socket at ${missingSocketPath}.`,
+      `Could not connect to IPC server at http://${missingAddress.hostname}:${missingAddress.port}/.`,
     )
   })
 
-  test("rewords missing IPC socket subscribe failures", async () => {
-    const missingSocketPath = join(tmpdir(), "goddard-ipc-missing-subscribe.sock")
-    const client = createNodeClient(missingSocketPath, schema)
+  test("rewords missing IPC subscribe failures", async () => {
+    const missingAddress = await getUnusedTcpAddress()
+    const client = createNodeClient(missingAddress, schema)
 
     await expect(client.subscribe("systemAlert", () => {})).rejects.toThrow(
-      `Could not connect to IPC socket at ${missingSocketPath}.`,
+      `Could not connect to IPC server at http://${missingAddress.hostname}:${missingAddress.port}/.`,
     )
   })
 
   test("returns generic raw errors for unexpected handler failures", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "goddard-ipc-raw-errors-"))
-    const socketPath = join(directory, "ipc.sock")
     const ipcServer = createServer({
-      socketPath,
+      port: 0,
       schema,
       handlers: {
         ping: () => ({ ok: true as const }),
@@ -523,6 +537,7 @@ describe("core/ipc", () => {
     })
 
     await once(ipcServer.server, "listening")
+    const address = readTcpAddress(ipcServer.server)
     cleanups.push(async () => {
       await new Promise<void>((resolve, reject) => {
         ipcServer.server.close((error) => {
@@ -533,10 +548,9 @@ describe("core/ipc", () => {
           resolve()
         })
       })
-      await rm(directory, { recursive: true, force: true })
     })
 
-    await expect(postRaw(socketPath, { name: "add", payload: { a: 1, b: 2 } })).resolves.toEqual({
+    await expect(postRaw(address, { name: "add", payload: { a: 1, b: 2 } })).resolves.toEqual({
       statusCode: 500,
       body: JSON.stringify({ error: "Internal server error" }),
     })

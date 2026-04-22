@@ -8,10 +8,10 @@
 
 ## Package Surfaces
 
-| Import                 | Owns                                                             | Does not own                                                 |
-| ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
-| `@goddard-ai/sdk`      | Browser-safe daemon IPC methods exposed through one SDK instance | Host-specific daemon URL defaults and socket transport setup |
-| `@goddard-ai/sdk/node` | The same SDK surface with Node daemon-client injection           | Local config loading or extra Node-only wrapper methods      |
+| Import | Owns | Does not own |
+| --- | --- | --- |
+| `@goddard-ai/sdk` | Browser-safe daemon IPC methods exposed through one SDK instance | Host-specific daemon URL defaults and TCP transport setup |
+| `@goddard-ai/sdk/node` | The same SDK surface with Node daemon-client injection | Local config loading or extra Node-only wrapper methods |
 
 ## Relationship To `daemon-client`
 
@@ -23,7 +23,7 @@ Use `@goddard-ai/daemon-client` when you need to:
 Use `@goddard-ai/daemon-client/node` when you need to:
 
 - Resolve daemon connection settings from environment variables.
-- Use the default Node socket transport.
+- Use the default Node TCP transport.
 
 Use `@goddard-ai/sdk` when you need to:
 
@@ -73,7 +73,7 @@ const sdk = new GoddardSdk({
   client: createClient(daemonIpcSchema, {
     send(name, payload) {
       return desktopHost.send({
-        socketPath: "/tmp/goddard-daemon.sock",
+        daemonUrl: "http://127.0.0.1:49827/",
         name,
         payload,
       })
@@ -81,7 +81,7 @@ const sdk = new GoddardSdk({
     subscribe(name, filter, onMessage) {
       return desktopHost.subscribe(
         {
-          socketPath: "/tmp/goddard-daemon.sock",
+          daemonUrl: "http://127.0.0.1:49827/",
           name,
           filter,
         },

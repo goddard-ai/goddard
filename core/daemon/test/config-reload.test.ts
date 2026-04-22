@@ -298,9 +298,8 @@ function createFeedbackEvent(): FeedbackEvent {
 }
 
 async function startServer(configManager: ReturnType<typeof createConfigManager>) {
-  const socketDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-daemon-"))
   const runtime = resolveRuntimeConfig({
-    socketPath: join(socketDir, "daemon.sock"),
+    port: 0,
   })
   const daemonClient = {
     auth: {
@@ -330,13 +329,12 @@ async function startServer(configManager: ReturnType<typeof createConfigManager>
   }
   const daemon = await SetupContext.run({ runtime, configManager }, () =>
     startDaemonServer(daemonClient, {
-      socketPath: runtime.socketPath,
+      port: runtime.port,
       agentBinDir: runtime.agentBinDir,
     }),
   )
   cleanup.push(async () => {
     await daemon.close()
-    await rm(socketDir, { recursive: true, force: true })
   })
   return daemon
 }

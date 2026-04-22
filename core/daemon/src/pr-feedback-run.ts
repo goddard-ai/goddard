@@ -1,7 +1,7 @@
 import { resolveDefaultAgent } from "@goddard-ai/config"
 /** Launches daemon-managed sessions for individual PR feedback events. */
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 
 import type { ConfigManager } from "./config-manager.ts"
 import { prependAgentBinToPath } from "./config.ts"
@@ -69,7 +69,7 @@ export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<num
   }
 
   try {
-    readSocketPathFromDaemonUrl(input.daemonUrl)
+    readDaemonTcpAddressFromDaemonUrl(input.daemonUrl)
     const rootConfig = input.configManager
       ? (await input.configManager.getRootConfig(projectDir)).config
       : undefined

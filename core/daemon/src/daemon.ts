@@ -17,7 +17,7 @@ import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
   baseUrl: string
-  socketPath?: string
+  port?: number
   agentBinDir?: string
   enableIpc?: boolean
   enableStream?: boolean
@@ -34,7 +34,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
   const enableStream = input.enableStream ?? true
   const runtime = resolveRuntimeConfig({
     baseUrl: input.baseUrl,
-    socketPath: input.socketPath,
+    port: input.port,
     agentBinDir: input.agentBinDir,
   })
   const configManager = createConfigManager()
@@ -43,7 +43,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
   try {
     logger.log("daemon.startup", {
       baseUrl: runtime.baseUrl,
-      socketPath: runtime.socketPath,
+      port: runtime.port,
       agentBinDir: runtime.agentBinDir,
     })
 
@@ -56,7 +56,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
     if (enableIpc) {
       ipcServer = await SetupContext.run({ runtime, configManager }, () =>
         startDaemonServer(client, {
-          socketPath: runtime.socketPath,
+          port: runtime.port,
           agentBinDir: runtime.agentBinDir,
         }),
       )
@@ -89,7 +89,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
         activeIpcServer
           ? {
               daemonUrl: activeIpcServer.daemonUrl,
-              socketPath: activeIpcServer.socketPath,
+              port: activeIpcServer.port,
             }
           : {},
       )
@@ -168,7 +168,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
       ]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      socketPath: runtime.socketPath,
+      port: ipcServer?.port ?? runtime.port,
     })
     return 0
   } catch (error) {

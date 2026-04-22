@@ -7,7 +7,6 @@ import type {
   ValidStreamName,
 } from "@goddard-ai/ipc"
 import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-import { readSocketPathFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 
 /** Daemon IPC schema used by the SDK facade. */
 type IpcSchema = typeof daemonIpcSchema
@@ -44,6 +43,6 @@ export function resolveIpcClient(options: IpcClientOptions): DaemonIpcClient {
   }
   const { createClient, daemonUrl } = options
   return createClient({
-    socketPath: readSocketPathFromDaemonUrl(daemonUrl),
+    daemonUrl,
   })
 }

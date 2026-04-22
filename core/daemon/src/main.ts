@@ -63,6 +63,19 @@ function applyDataProfile(value?: (typeof daemonDataProfiles)[number]) {
   process.env.GODDARD_DATA_PROFILE = value
 }
 
+function resolveCliPort(value?: string) {
+  if (!value) {
+    return undefined
+  }
+
+  const port = Number(value)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("--port must be an integer TCP port between 1 and 65535")
+  }
+
+  return port
+}
+
 /** Runs the daemon CLI with the provided process arguments. */
 export async function main(argv = process.argv.slice(2)) {
   const app = subcommands({
@@ -80,10 +93,10 @@ export async function main(argv = process.argv.slice(2)) {
             defaultValue: () => "https://goddardai.org/api",
             description: "Base URL for the Goddard API",
           }),
-          socketPath: option({
+          port: option({
             type: optional(string),
-            long: "socket-path",
-            description: "Unix socket path for daemon IPC control",
+            long: "port",
+            description: "TCP port for daemon IPC control",
           }),
           agentBinDir: option({
             type: optional(string),
@@ -119,7 +132,7 @@ export async function main(argv = process.argv.slice(2)) {
           const featureFlags = resolveRunFeatureFlags(args.features)
           const exitCode = await runDaemon({
             baseUrl: args.baseUrl,
-            socketPath: args.socketPath,
+            port: resolveCliPort(args.port),
             agentBinDir: args.agentBinDir,
             enableIpc: featureFlags.enableIpc,
             enableStream: featureFlags.enableStream,

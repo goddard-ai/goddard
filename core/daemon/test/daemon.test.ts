@@ -8,10 +8,11 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
+import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import {
   createDaemonUrl,
-  readSocketPathFromDaemonUrl,
+  readDaemonTcpAddressFromDaemonUrl,
   resolveReplyRequestFromGit,
   resolveSubmitRequestFromGit,
 } from "../src/ipc.ts"
@@ -82,12 +83,12 @@ test(
       cwd: secondRepoDir,
     })
 
-    const socketPath = join(process.env.HOME!, "custom-daemon.sock")
+    const port = await getUnusedTcpPort()
 
     const { logs, result: exitCode } = await captureJsonLogs(async (output) => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
-        socketPath,
+        port,
         agentBinDir,
         logMode: "json",
       })
@@ -95,7 +96,7 @@ test(
 
       try {
         await waitFor(async () => {
-          const healthy = await isDaemonHealthy(socketPath)
+          const healthy = await isDaemonHealthy(port)
           return healthy && backend.subscriptionCount() === 1
         })
 
@@ -183,7 +184,7 @@ test(
       at: startupLog?.at,
       event: "daemon.startup",
       baseUrl: backend.baseUrl,
-      socketPath,
+      port,
       agentBinDir,
     })
     expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(true)
@@ -213,12 +214,12 @@ test(
     cleanup.push(() => backend.close())
     db.metadata.set("authToken", "tok")
 
-    const socketPath = join(process.env.HOME!, "ipc-only.sock")
+    const port = await getUnusedTcpPort()
 
     const { logs, result: exitCode } = await captureJsonLogs(async () => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
-        socketPath,
+        port,
         agentBinDir,
         enableIpc: true,
         enableStream: false,
@@ -228,7 +229,7 @@ test(
 
       try {
         await waitFor(async () => {
-          return isDaemonHealthy(socketPath)
+          return isDaemonHealthy(port)
         })
         await stopDaemon()
         return await daemonPromise
@@ -311,12 +312,12 @@ test(
     cleanup.push(() => backend.close())
     db.metadata.set("authToken", "tok")
 
-    const socketPath = join(process.env.HOME!, "degraded-auth.sock")
+    const port = await getUnusedTcpPort()
 
     const { logs, result: exitCode } = await captureJsonLogs(async (output) => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
-        socketPath,
+        port,
         agentBinDir,
         logMode: "json",
       })
@@ -324,7 +325,7 @@ test(
 
       try {
         await waitFor(async () => {
-          const healthy = await isDaemonHealthy(socketPath)
+          const healthy = await isDaemonHealthy(port)
           return (
             healthy &&
             parseJsonLogs(output).some(
@@ -403,12 +404,25 @@ test("daemon run supports verbose terminal logs with expanded fields", async () 
   expect(output.every((line) => line.trim().startsWith("{"))).toBe(false)
 })
 
-test("daemon URL round-trips the socket path", () => {
-  const socketPath = "/tmp/goddard-daemon.sock"
-  const daemonUrl = createDaemonUrl(socketPath)
+test("daemon URL round-trips the TCP address", () => {
+  const daemonUrl = createDaemonUrl(49827)
 
-  expect(daemonUrl).toBe("http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock")
-  expect(readSocketPathFromDaemonUrl(daemonUrl)).toBe(socketPath)
+  expect(daemonUrl).toBe("http://127.0.0.1:49827/")
+  expect(readDaemonTcpAddressFromDaemonUrl(daemonUrl)).toEqual({
+    hostname: "127.0.0.1",
+    port: 49827,
+  })
+})
+
+test("daemon runtime resolves the global daemon port override", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    daemon: {
+      port: 41236,
+    },
+  })
+
+  expect(resolveRuntimeConfig().port).toBe(41236)
 })
 
 test("daemon resolves PR context from git metadata", async () => {
@@ -660,10 +674,50 @@ async function startBackendHarness(
   }
 }
 
-async function isDaemonHealthy(socketPath: string) {
+async function getUnusedTcpPort() {
+  const server = createServer((_request, response) => {
+    response.writeHead(204)
+    response.end()
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off("listening", onListening)
+      reject(error)
+    }
+    const onListening = () => {
+      server.off("error", onError)
+      resolve()
+    }
+
+    server.once("error", onError)
+    server.once("listening", onListening)
+    server.listen(0, "127.0.0.1")
+  })
+
+  const address = server.address()
+  if (!address || typeof address === "string") {
+    throw new Error("TCP port probe did not bind to a TCP port")
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
+
+  return address.port
+}
+
+async function isDaemonHealthy(port: number) {
   try {
     const client = createDaemonIpcClient({
-      daemonUrl: createDaemonUrl(socketPath),
+      daemonUrl: createDaemonUrl(port),
     })
     const response = await client.send("health")
     return response.ok === true

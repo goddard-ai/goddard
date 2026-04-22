@@ -5,8 +5,14 @@ import { IpcClientError } from "../errors.ts"
 import { type IpcSchema } from "../schema.ts"
 import { type IpcTransport } from "../transport.ts"
 
+/** TCP address used by the Node IPC transport. */
+export type NodeTcpAddress = {
+  hostname: string
+  port: number
+}
+
 /** Normalizes one failed IPC response body into a human-readable error message. */
-function getErrorMessage(body: string): string {
+function getErrorMessage(body: string) {
   if (!body) {
     return "IPC request failed"
   }
@@ -23,38 +29,35 @@ function getErrorMessage(body: string): string {
   return body
 }
 
-/** Rewords low-level socket connection failures with the requested IPC socket path. */
-function toSocketConnectionError(error: unknown, socketPath: string) {
+/** Rewords low-level TCP connection failures with the requested IPC server address. */
+function toTcpConnectionError(error: unknown, address: NodeTcpAddress) {
   if (!(error instanceof Error)) {
     return error
   }
 
   const errorCode = (error as Error & { code?: unknown }).code
-  if (
-    errorCode !== "FailedToOpenSocket" &&
-    errorCode !== "ENOENT" &&
-    errorCode !== "ECONNREFUSED"
-  ) {
+  if (errorCode !== "ECONNREFUSED" && errorCode !== "EHOSTUNREACH" && errorCode !== "ENOTFOUND") {
     return error
   }
 
   return new IpcClientError(
-    `Could not connect to IPC socket at ${socketPath}. ` +
-      "The server may not be running, or the socket path may be wrong.",
+    `Could not connect to IPC server at ${formatAddress(address)}. ` +
+      "The server may not be running, or the TCP address may be wrong.",
     {
       cause: error,
     },
   )
 }
 
-/** Creates the Node HTTP-over-socket transport for one daemon socket path. */
-export function createNodeTransport(socketPath: string): IpcTransport {
+/** Creates the Node HTTP-over-TCP transport for one daemon address. */
+export function createNodeTransport(address: NodeTcpAddress): IpcTransport {
   async function send(name: string, payload: unknown): Promise<unknown> {
     const wireData = JSON.stringify({ name, payload })
     return new Promise((resolve, reject) => {
       const req = http.request(
         {
-          socketPath,
+          hostname: address.hostname,
+          port: address.port,
           path: "/",
           method: "POST",
           headers: {
@@ -84,7 +87,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
       )
 
       req.on("error", (error: unknown) => {
-        reject(toSocketConnectionError(error, socketPath))
+        reject(toTcpConnectionError(error, address))
       })
       req.write(wireData)
       req.end()
@@ -103,7 +106,8 @@ export function createNodeTransport(socketPath: string): IpcTransport {
 
       const req = http.request(
         {
-          socketPath,
+          hostname: address.hostname,
+          port: address.port,
           path: `/stream?name=${encodeURIComponent(name)}${
             filter === undefined ? "" : `&filter=${encodeURIComponent(JSON.stringify(filter))}`
           }`,
@@ -161,7 +165,7 @@ export function createNodeTransport(socketPath: string): IpcTransport {
       req.on("error", (error: unknown) => {
         if (!settled) {
           settled = true
-          reject(toSocketConnectionError(error, socketPath))
+          reject(toTcpConnectionError(error, address))
         }
       })
       req.end()
@@ -171,7 +175,14 @@ export function createNodeTransport(socketPath: string): IpcTransport {
   return { send, subscribe }
 }
 
-/** Creates the typed IPC client backed by the Node socket transport. */
-export function createNodeClient<S extends IpcSchema>(socketPath: string, schema: S) {
-  return createClient(schema, createNodeTransport(socketPath))
+/** Creates the typed IPC client backed by the Node TCP transport. */
+export function createNodeClient<S extends IpcSchema>(address: NodeTcpAddress, schema: S) {
+  return createClient(schema, createNodeTransport(address))
+}
+
+function formatAddress(address: NodeTcpAddress) {
+  const url = new URL("http://localhost")
+  url.hostname = address.hostname
+  url.port = String(address.port)
+  return url.toString()
 }

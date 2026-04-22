@@ -7,7 +7,7 @@ Low-level daemon connection helpers shared by Node, the app, and SDK composition
 - `@goddard-ai/daemon-client`
   - Shared daemon IPC client types only.
 - `@goddard-ai/daemon-client/node`
-  - Node env/default helpers and the default socket transport.
+  - Node env/default helpers and the default TCP transport.
 
 Use `@goddard-ai/daemon-client` when you need to:
 
@@ -16,7 +16,7 @@ Use `@goddard-ai/daemon-client` when you need to:
 Use `@goddard-ai/daemon-client/node` when you need to:
 
 - Create a daemon IPC client from an explicit daemon URL.
-- Create the default Node socket client from env/default settings.
+- Create the default Node TCP client from env/default settings.
 
 Use `@goddard-ai/sdk` for explicit browser-safe daemon calls, or `@goddard-ai/sdk/node` when you want the same SDK surface with Node daemon-client injection.
 
@@ -28,14 +28,14 @@ import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 const desktopHost = globalThis.desktopHost
 
 const client = createDaemonIpcClient({
-  daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fgoddard-daemon.sock",
-  createClient: ({ socketPath }) =>
+  daemonUrl: "http://127.0.0.1:49827/",
+  createClient: ({ daemonUrl }) =>
     createClient(daemonIpcSchema, {
       send(name, payload) {
-        return desktopHost.send({ socketPath, name, payload })
+        return desktopHost.send({ daemonUrl, name, payload })
       },
       subscribe(name, filter, onMessage) {
-        return desktopHost.subscribe({ socketPath, name, filter }, onMessage)
+        return desktopHost.subscribe({ daemonUrl, name, filter }, onMessage)
       },
     }),
 })

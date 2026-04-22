@@ -1828,9 +1828,6 @@ async function startServer(
     await useTempHome()
   }
 
-  const socketDir = await mkdtemp(join(tmpdir(), "goddard-daemon-session-"))
-  const socketPath = join(socketDir, "daemon.sock")
-
   const daemon = await startDaemonServer(
     {
       auth: {
@@ -1862,14 +1859,13 @@ async function startServer(
       },
     },
     {
-      socketPath,
+      port: 0,
       idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
     },
   )
 
   cleanup.push(async () => {
     await daemon.close().catch(() => {})
-    await rm(socketDir, { recursive: true, force: true })
   })
 
   return daemon

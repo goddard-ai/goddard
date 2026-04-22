@@ -9,7 +9,7 @@ import type { FeedbackEvent } from "./feedback.ts"
 export type SetupContext = {
   runtime: {
     baseUrl: string
-    socketPath: string
+    port: number
     agentBinDir: string
   }
   configManager: ConfigManager

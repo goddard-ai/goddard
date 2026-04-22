@@ -1,4 +1,3 @@
-import { existsSync, unlinkSync } from "node:fs"
 import * as http from "node:http"
 
 import { IpcClientError } from "../errors.ts"
@@ -24,7 +23,7 @@ function getErrorResponse(error: unknown): {
     : { statusCode: 500, message: INTERNAL_SERVER_ERROR_MESSAGE }
 }
 
-/** Writes one JSON response to the socket-backed HTTP response. */
+/** Writes one JSON response to the TCP-backed HTTP response. */
 function sendJson(res: http.ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { "Content-Type": "application/json" })
   res.end(JSON.stringify(body))
@@ -37,21 +36,6 @@ async function readBody(req: http.IncomingMessage): Promise<string> {
     body += chunk
   }
   return body
-}
-
-/** Removes one stale socket path while tolerating races with other cleanup. */
-function safeUnlink(socketPath: string): void {
-  if (!existsSync(socketPath)) {
-    return
-  }
-
-  try {
-    unlinkSync(socketPath)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error
-    }
-  }
 }
 
 /** Normalizes shorthand and object stream definitions into optional filter schemas. */
@@ -126,7 +110,8 @@ type RunHandlerHook<TSchema extends IpcSchema> = <T>(
 
 /** Optional hooks that run during request and stream-filter handling. */
 type CreateServerConfig<TSchema extends IpcSchema> = {
-  socketPath: string
+  port: number
+  hostname?: string
   schema: TSchema
   handlers: Handlers<TSchema>
   runHandler?: RunHandlerHook<TSchema>
@@ -146,10 +131,11 @@ function invokeStreamLifecycleHook<TSchema extends IpcSchema>(
   return Promise.resolve(hook?.(input))
 }
 
-/** Creates the Node IPC server for one socket-backed application schema. */
+/** Creates the Node IPC server for one TCP-backed application schema. */
 export function createServer<TSchema extends IpcSchema>(config: CreateServerConfig<TSchema>) {
   const {
-    socketPath,
+    port,
+    hostname = "127.0.0.1",
     schema,
     handlers,
     runHandler,
@@ -390,11 +376,7 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
     res.end()
   })
 
-  safeUnlink(socketPath)
-  server.listen(socketPath)
-  server.on("close", () => {
-    safeUnlink(socketPath)
-  })
+  server.listen(port, hostname)
 
   return { server, publish }
 }

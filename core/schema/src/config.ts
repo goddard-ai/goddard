@@ -150,6 +150,36 @@ export const LoopConfig = z
 
 export type LoopConfig = z.infer<typeof LoopConfig>
 
+/** Schema for persisted daemon connection defaults loaded from JSON. */
+export const DaemonConfig = z
+  .strictObject({
+    port: z
+      .number()
+      .int()
+      .min(1)
+      .max(65535)
+      .optional()
+      .describe(
+        "TCP port used by the local daemon control server. Only supported in the global Goddard config.",
+      ),
+  })
+  .describe("Persisted daemon connection defaults loaded from JSON.")
+
+export type DaemonConfig = z.infer<typeof DaemonConfig>
+
+/** Schema that extracts only the daemon config slice from a root config document. */
+export const RootDaemonConfig = z
+  .object({
+    daemon: DaemonConfig.optional(),
+  })
+  .passthrough()
+  .describe("Root config slice used when only daemon connection defaults need validation.")
+
+/** Reads the daemon config slice without validating unrelated root-config fields. */
+export function readDaemonConfigFromRootConfig(value: unknown) {
+  return RootDaemonConfig.parse(value).daemon
+}
+
 /** Schema for one custom worktree plugin loaded from a filesystem path. */
 export const WorktreePluginPathReference = z
   .strictObject({
@@ -269,6 +299,7 @@ export type SessionTitlesConfig = z.infer<typeof SessionTitlesConfig> & {
 /** Schema for the shared root config document. */
 export const UserConfig = z
   .strictObject({
+    daemon: DaemonConfig.optional().describe("Default settings for the local daemon server."),
     worktrees: WorktreesConfig.optional().describe(
       "Default settings for daemon-managed worktrees.",
     ),
@@ -330,28 +361,16 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   // Types inherited from ACP schema: https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json
   acpRegistry.add(McpServer)
 
-  z.globalRegistry.add(AgentSetting, {
-    id: "AgentSetting",
-    examples: [...ACPAdapterNames],
-  })
+  z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...ACPAdapterNames] })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(ActionConfig, { id: "ActionConfig" })
   z.globalRegistry.add(LoopConfig, { id: "LoopConfig" })
-  z.globalRegistry.add(WorktreePluginPathReference, {
-    id: "WorktreePluginPathReference",
-  })
-  z.globalRegistry.add(WorktreePluginPackageReference, {
-    id: "WorktreePluginPackageReference",
-  })
-  z.globalRegistry.add(WorktreePluginReference, {
-    id: "WorktreePluginReference",
-  })
-  z.globalRegistry.add(WorktreeBootstrapPackageManager, {
-    id: "WorktreeBootstrapPackageManager",
-  })
-  z.globalRegistry.add(WorktreeBootstrapConfig, {
-    id: "WorktreeBootstrapConfig",
-  })
+  z.globalRegistry.add(DaemonConfig, { id: "DaemonConfig" })
+  z.globalRegistry.add(WorktreePluginPathReference, { id: "WorktreePluginPathReference" })
+  z.globalRegistry.add(WorktreePluginPackageReference, { id: "WorktreePluginPackageReference" })
+  z.globalRegistry.add(WorktreePluginReference, { id: "WorktreePluginReference" })
+  z.globalRegistry.add(WorktreeBootstrapPackageManager, { id: "WorktreeBootstrapPackageManager" })
+  z.globalRegistry.add(WorktreeBootstrapConfig, { id: "WorktreeBootstrapConfig" })
   z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
   z.globalRegistry.add(SessionTitlesConfig, { id: "SessionTitlesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })

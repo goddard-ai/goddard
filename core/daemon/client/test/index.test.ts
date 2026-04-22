@@ -1,57 +1,96 @@
-import { expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, expect, test } from "bun:test"
 
-import { createDaemonIpcClient, createDaemonIpcClientFromEnv } from "../src/node/index.ts"
+import {
+  createDaemonIpcClient,
+  createDaemonIpcClientFromEnv,
+  resolveDaemonUrl,
+} from "../src/node/index.ts"
 
-test("createDaemonIpcClient passes the explicit socket path to the injected factory", () => {
-  const calls: Array<{ socketPath: string }> = []
+const cleanup: Array<() => Promise<void>> = []
+const originalHome = process.env.HOME
+
+afterEach(async () => {
+  if (originalHome === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = originalHome
+  }
+
+  while (cleanup.length > 0) {
+    await cleanup.pop()?.()
+  }
+})
+
+test("createDaemonIpcClient passes the explicit daemon URL to the injected factory", () => {
+  const calls: Array<{ daemonUrl: string }> = []
   const client = createDaemonIpcClient({
-    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
-    createClient: ({ socketPath }) => {
-      calls.push({ socketPath })
-      return { kind: "custom" as const, socketPath }
+    daemonUrl: "http://127.0.0.1:49827/",
+    createClient: ({ daemonUrl }) => {
+      calls.push({ daemonUrl })
+      return { kind: "custom" as const, daemonUrl }
     },
   })
 
   expect(client).toEqual({
     kind: "custom",
-    socketPath: "/tmp/daemon.sock",
+    daemonUrl: "http://127.0.0.1:49827/",
   })
-  expect(calls).toEqual([{ socketPath: "/tmp/daemon.sock" }])
+  expect(calls).toEqual([{ daemonUrl: "http://127.0.0.1:49827/" }])
 })
 
-test("createDaemonIpcClientFromEnv passes the resolved socket path to the injected factory", () => {
-  const calls: Array<{ socketPath: string }> = []
+test("createDaemonIpcClientFromEnv passes the resolved daemon URL to the injected factory", () => {
+  const calls: Array<{ daemonUrl: string }> = []
   const result = createDaemonIpcClientFromEnv({
     env: {
-      GODDARD_DAEMON_URL: "http://unix/?socketPath=%2Ftmp%2Fdaemon.sock",
+      GODDARD_DAEMON_URL: "http://127.0.0.1:49829/",
     },
-    createClient: ({ socketPath }) => {
-      calls.push({ socketPath })
-      return { kind: "custom" as const, socketPath }
+    createClient: ({ daemonUrl }) => {
+      calls.push({ daemonUrl })
+      return { kind: "custom" as const, daemonUrl }
     },
   })
 
-  expect(result.daemonUrl).toBe("http://unix/?socketPath=%2Ftmp%2Fdaemon.sock")
+  expect(result.daemonUrl).toBe("http://127.0.0.1:49829/")
   expect(result.client).toEqual({
     kind: "custom",
-    socketPath: "/tmp/daemon.sock",
+    daemonUrl: "http://127.0.0.1:49829/",
   })
-  expect(calls).toEqual([{ socketPath: "/tmp/daemon.sock" }])
+  expect(calls).toEqual([{ daemonUrl: "http://127.0.0.1:49829/" }])
 })
 
-test("createDaemonIpcClientFromEnv can derive the daemon URL from an explicit socket path", () => {
-  const result = createDaemonIpcClientFromEnv({
-    env: {
-      GODDARD_DAEMON_SOCKET_PATH: "/tmp/custom-daemon.sock",
-    },
-    createClient: ({ socketPath }) => ({ kind: "custom" as const, socketPath }),
-  })
-
-  expect(result).toEqual({
-    daemonUrl: "http://unix/?socketPath=%2Ftmp%2Fcustom-daemon.sock",
-    client: {
-      kind: "custom",
-      socketPath: "/tmp/custom-daemon.sock",
-    },
-  })
+test("resolveDaemonUrl can derive the daemon URL from an explicit daemon port", () => {
+  expect(
+    resolveDaemonUrl({
+      GODDARD_DAEMON_PORT: "41234",
+    }),
+  ).toBe("http://127.0.0.1:41234/")
 })
+
+test("resolveDaemonUrl falls back to the configured global daemon port", async () => {
+  const homeDir = await useTempHome()
+
+  const configDir = join(homeDir, ".goddard")
+  await mkdir(configDir, { recursive: true })
+  await writeFile(
+    join(configDir, "config.json"),
+    `${JSON.stringify({ daemon: { port: 41235 } }, null, 2)}\n`,
+    "utf8",
+  )
+
+  expect(resolveDaemonUrl({})).toBe("http://127.0.0.1:41235/")
+})
+
+test("resolveDaemonUrl falls back to the default daemon port", async () => {
+  await useTempHome()
+  expect(resolveDaemonUrl({})).toBe("http://127.0.0.1:49827/")
+})
+
+async function useTempHome() {
+  const homeDir = await mkdtemp(join(tmpdir(), "goddard-daemon-client-home-"))
+  process.env.HOME = homeDir
+  cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
+  return homeDir
+}

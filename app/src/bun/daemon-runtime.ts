@@ -2,9 +2,9 @@
 import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getDaemonSocketPath, getGoddardGlobalDir } from "@goddard-ai/paths/node"
-import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import { createDaemonIpcClient, resolveDaemonUrl } from "@goddard-ai/daemon-client/node"
+import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
+import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { Updater } from "electrobun/bun"
 
 import {
@@ -27,8 +27,6 @@ type PreparedDaemonRuntime = {
 const daemonInstallRootDir = join(getGoddardGlobalDir(), "desktop-runtime")
 const daemonInstallStatePath = join(daemonInstallRootDir, "installed-daemon.json")
 const daemonInstallVersionsDir = join(daemonInstallRootDir, "daemon-installs")
-const daemonSocketPath = getDaemonSocketPath()
-const daemonUrl = createDaemonUrl(daemonSocketPath)
 
 let ensuredRuntime: Promise<{ daemonUrl: string }> | undefined
 
@@ -43,9 +41,11 @@ export function ensureDaemonRuntime() {
 
 /** Reads the app-bundled manifest, installs runtime files, and starts or updates the daemon service. */
 async function ensureDaemonRuntimeInner() {
+  const daemon = resolveDaemonConnection()
+
   if (isDevelopmentRuntime()) {
-    await ensureDevelopmentDaemonRuntime()
-    return { daemonUrl }
+    await ensureDevelopmentDaemonRuntime(daemon.daemonUrl)
+    return { daemonUrl: daemon.daemonUrl }
   }
 
   const manifest = await readEmbeddedRuntimeManifest()
@@ -55,27 +55,27 @@ async function ensureDaemonRuntimeInner() {
 
   if (
     installedState?.runtimeHash === preparedRuntime.runtimeHash &&
-    (await pingDaemon().catch(() => false))
+    (await pingDaemon(daemon.daemonUrl).catch(() => false))
   ) {
-    return { daemonUrl }
+    return { daemonUrl: daemon.daemonUrl }
   }
 
   if (process.platform === "win32") {
-    await installWindowsDaemonStartup(preparedRuntime, baseUrl)
+    await installWindowsDaemonStartup(preparedRuntime, baseUrl, daemon.port)
   } else {
-    await installUnixDaemonService(manifest, preparedRuntime, baseUrl)
+    await installUnixDaemonService(manifest, preparedRuntime, baseUrl, daemon.port)
   }
 
-  await waitForDaemonReady()
+  await waitForDaemonReady(daemon.daemonUrl)
   await writeInstalledDaemonState({ runtimeHash: preparedRuntime.runtimeHash })
 
-  return { daemonUrl }
+  return { daemonUrl: daemon.daemonUrl }
 }
 
 /** In development, reuse the separately watched daemon process instead of the app-bundled runtime. */
-async function ensureDevelopmentDaemonRuntime() {
+async function ensureDevelopmentDaemonRuntime(daemonUrl: string) {
   try {
-    await waitForDaemonReady(5_000)
+    await waitForDaemonReady(daemonUrl, 5_000)
   } catch {
     throw new Error(
       "Development mode expects a running Goddard daemon. Start `bun run dev` from the workspace root, or launch `core/daemon` before starting the app.",
@@ -147,10 +147,7 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
     const stagedInstallDir = join(stagingRoot, "runtime")
 
     try {
-      await cp(embeddedDaemonRootDir, stagedInstallDir, {
-        recursive: true,
-        force: true,
-      })
+      await cp(embeddedDaemonRootDir, stagedInstallDir, { recursive: true, force: true })
       await rename(stagedInstallDir, installDir)
     } catch (error) {
       await rm(stagingRoot, { recursive: true, force: true }).catch(() => {})
@@ -171,6 +168,7 @@ async function installUnixDaemonService(
   manifest: EmbeddedRuntimeManifest,
   runtime: PreparedDaemonRuntime,
   baseUrl: string,
+  daemonPort: number,
 ) {
   const dataProfile = await resolveDaemonDataProfile()
   const servicemanLauncherPath = join(
@@ -205,8 +203,8 @@ async function installUnixDaemonService(
     "run",
     "--base-url",
     baseUrl,
-    "--socket-path",
-    daemonSocketPath,
+    "--port",
+    String(daemonPort),
     "--agent-bin-dir",
     runtime.agentBinDir,
   )
@@ -222,15 +220,19 @@ async function installUnixDaemonService(
 }
 
 /** Installs the daemon autostart entry in the user Run registry and launches the current binary now. */
-async function installWindowsDaemonStartup(runtime: PreparedDaemonRuntime, baseUrl: string) {
+async function installWindowsDaemonStartup(
+  runtime: PreparedDaemonRuntime,
+  baseUrl: string,
+  daemonPort: number,
+) {
   const dataProfile = await resolveDaemonDataProfile()
   const daemonArgs = [
     runtime.daemonExecutablePath,
     "run",
     "--base-url",
     baseUrl,
-    "--socket-path",
-    daemonSocketPath,
+    "--port",
+    String(daemonPort),
     "--agent-bin-dir",
     runtime.agentBinDir,
   ]
@@ -267,22 +269,22 @@ async function installWindowsDaemonStartup(runtime: PreparedDaemonRuntime, baseU
 }
 
 /** Waits for the daemon IPC endpoint to accept health checks after install or restart. */
-async function waitForDaemonReady(timeoutMs = 15_000) {
+async function waitForDaemonReady(daemonUrl: string, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    if (await pingDaemon().catch(() => false)) {
+    if (await pingDaemon(daemonUrl).catch(() => false)) {
       return
     }
 
     await Bun.sleep(250)
   }
 
-  throw new Error(`Timed out waiting for the Goddard daemon at ${daemonSocketPath}`)
+  throw new Error(`Timed out waiting for the Goddard daemon at ${daemonUrl}`)
 }
 
 /** Sends a daemon health check request and returns whether the daemon answered successfully. */
-async function pingDaemon() {
+async function pingDaemon(daemonUrl: string) {
   const client = createDaemonIpcClient({ daemonUrl })
   const response = await client.send("health")
   return response.ok === true
@@ -351,4 +353,14 @@ function quoteWindowsCommandArgument(value: string) {
 /** Checks whether one filesystem path currently exists. */
 async function pathExists(path: string) {
   return Boolean(await stat(path).catch(() => null))
+}
+
+function resolveDaemonConnection() {
+  const daemonUrl = resolveDaemonUrl()
+  const address = readDaemonTcpAddressFromDaemonUrl(daemonUrl)
+
+  return {
+    daemonUrl,
+    port: address.port,
+  }
 }

@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
+import type { Server } from "node:http"
 import * as acp from "@agentclientprotocol/sdk"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import type { DaemonSession, SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
@@ -29,13 +31,12 @@ import {
 import { createWorkforceManager, type WorkforceManager } from "../workforce/index.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
-import { cleanupSocketPath, createDaemonUrl, prepareSocketPath } from "./socket.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
 
 export async function startDaemonServer(
   client: BackendPrClient,
   options: {
-    socketPath?: string
+    port?: number
     agentBinDir?: string
     idleSessionShutdownTimeoutMs?: number
   } = {},
@@ -45,15 +46,12 @@ export async function startDaemonServer(
   const runtime =
     setupContext?.runtime ??
     resolveRuntimeConfig({
-      socketPath: options.socketPath,
+      port: options.port,
       agentBinDir: options.agentBinDir,
     })
-  const socketPath = runtime.socketPath
-  const daemonUrl = createDaemonUrl(socketPath)
   const configManager = setupContext?.configManager ?? createConfigManager()
   const ownsConfigManager = setupContext == null
 
-  await prepareSocketPath(socketPath)
   const registryService = createACPRegistryService()
 
   let sessionManager!: SessionManager
@@ -517,7 +515,7 @@ export async function startDaemonServer(
   } satisfies Handlers<typeof daemonIpcSchema>
 
   const ipcServer = createServer({
-    socketPath,
+    port: runtime.port,
     schema: daemonIpcSchema,
     handlers: requestHandlers,
     runHandler: ({ payload }, handler) => {
@@ -586,6 +584,10 @@ export async function startDaemonServer(
     },
   })
 
+  await once(ipcServer.server, "listening")
+  const port = readBoundTcpPort(ipcServer.server)
+  const daemonUrl = createDaemonUrl(port)
+
   sessionManager = createSessionManager({
     daemonUrl,
     agentBinDir: runtime.agentBinDir,
@@ -610,10 +612,8 @@ export async function startDaemonServer(
       ipcServer.publish("workforceEvent", payload)
     },
   })
-
-  await once(ipcServer.server, "listening")
   logger.log("ipc.server_listening", {
-    socketPath,
+    port,
     daemonUrl,
   })
 
@@ -621,14 +621,14 @@ export async function startDaemonServer(
 
   return {
     daemonUrl,
-    socketPath,
+    port,
     close: async () => {
       if (closed) {
         return
       }
       closed = true
       logger.log("ipc.server_closing", {
-        socketPath,
+        port,
         daemonUrl,
       })
       await loopManager.close().catch(() => {})
@@ -646,11 +646,19 @@ export async function startDaemonServer(
           resolve()
         })
       })
-      await cleanupSocketPath(socketPath)
       logger.log("ipc.server_closed", {
-        socketPath,
+        port,
         daemonUrl,
       })
     },
   }
+}
+
+function readBoundTcpPort(server: Server) {
+  const address = server.address()
+  if (!address || typeof address === "string") {
+    throw new Error("IPC server did not bind to a TCP port")
+  }
+
+  return address.port
 }

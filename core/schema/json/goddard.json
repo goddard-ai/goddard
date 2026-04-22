@@ -2,6 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "daemon": {
+      "description": "Default settings for the local daemon server.",
+      "$ref": "#/$defs/DaemonConfig"
+    },
     "worktrees": {
       "description": "Default settings for daemon-managed worktrees.",
       "$ref": "#/$defs/WorktreesConfig"
@@ -390,6 +394,19 @@
   "required": ["$schema"],
   "additionalProperties": false,
   "$defs": {
+    "DaemonConfig": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "description": "TCP port used by the local daemon control server. Only supported in the global Goddard config.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": false,
+      "id": "DaemonConfig"
+    },
     "WorktreesConfig": {
       "type": "object",
       "properties": {

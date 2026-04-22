@@ -380,9 +380,6 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
     await useTempHome()
   }
 
-  const socketDir = await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-"))
-  const socketPath = join(socketDir, "daemon.sock")
-
   const daemon = await startDaemonServer(
     {
       auth: {
@@ -421,12 +418,11 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
         reply: options.sdk?.pr?.reply ?? (async () => ({ success: true })),
       },
     },
-    { socketPath },
+    { port: 0 },
   )
 
   cleanup.push(async () => {
     await daemon.close()
-    await rm(socketDir, { recursive: true, force: true })
   })
 
   return daemon

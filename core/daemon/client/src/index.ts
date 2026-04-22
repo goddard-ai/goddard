@@ -2,9 +2,9 @@
 import type { createClient } from "@goddard-ai/ipc"
 import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 
-/** Socket metadata passed to environment-specific IPC client factories. */
+/** Daemon connection metadata passed to environment-specific IPC client factories. */
 export type DaemonIpcClientFactoryInput = {
-  socketPath: string
+  daemonUrl: string
 }
 
 /** IPC client type shared by all daemon transport implementations. */
