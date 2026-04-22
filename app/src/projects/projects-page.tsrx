@@ -14,7 +14,7 @@ import { lookupProject, type ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
 
 /** Renders the projects page plus its local add-project modal flow. */
-export function ProjectsPage() {
+export component ProjectsPage() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -48,7 +48,7 @@ export function ProjectsPage() {
     )
   }
 
-  return <tsx:react>
+  <tsx:react>
     <Dialog.RootProvider value={addProjectDialog} lazyMount unmountOnExit>
       <div class={styles.root}>
         <section class={styles.panel}>
@@ -120,14 +120,14 @@ export function ProjectsPage() {
 export default ProjectsPage
 
 /** Renders the machine-wide project list. */
-function ProjectList(props: {
+component ProjectList(props: {
   projects: readonly ProjectRecord[];
   selectedProjectPath: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onOpenProjectTab: (id: string) => void;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <ul class={styles.list}>
       {props.projects.map(
         (project) => <tsx:react>
@@ -142,14 +142,14 @@ function ProjectList(props: {
 }
 
 /** Renders one project row with quick actions and identity metadata. */
-function ProjectListRow(props: {
+component ProjectListRow(props: {
   project: ProjectRecord;
   isSelected: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onOpenProjectTab: (id: string) => void;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <article class={styles.row} style={{
       borderInlineStartColor: props.isSelected ? token.var("colors.accent") : "transparent",
       backgroundColor: props.isSelected ? token.var("colors.surface") : "transparent",
@@ -196,8 +196,8 @@ function ProjectListRow(props: {
 }
 
 /** Renders one small inspector card. */
-function InfoCard(props: { label: string; value: string }) {
-  return <tsx:react>
+component InfoCard(props: { label: string; value: string }) {
+  <tsx:react>
     <dl class={styles.infoCard}>
       <dt class={styles.quietLabel}>
         {props.label}
@@ -210,7 +210,7 @@ function InfoCard(props: { label: string; value: string }) {
 }
 
 /** Renders the modal flow used to add one project. */
-function AddProjectDialog(props: {
+component AddProjectDialog(props: {
   dialog: UseDialogReturn;
   selectedProjectPath: Signal<string | null>;
 }) {
@@ -287,7 +287,7 @@ function AddProjectDialog(props: {
     resetDraft()
   }, [props.dialog.open])
 
-  return <tsx:react>
+  <tsx:react>
     <DialogPortal>
       <Dialog.Backdrop class={styles.dialogOverlay} />
       <Dialog.Positioner class={styles.dialogPositioner}>

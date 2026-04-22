@@ -114,33 +114,36 @@ function importComposerChipFromElement(element: HTMLElement) {
 }
 
 /** Renders the shared icon used by one visible composer chip. */
-function ChipIcon(props: { chip: ComposerChipData }) {
+component ChipIcon(props: { chip: ComposerChipData }) {
   if (props.chip.kind === "folder") {
-    return <tsx:react>
+    <tsx:react>
       <Folder size={14} strokeWidth={2.2} />
     </tsx:react>
+    return
   }
 
   if (props.chip.kind === "file") {
-    return <tsx:react>
+    <tsx:react>
       <File size={14} strokeWidth={2.2} />
     </tsx:react>
+    return
   }
 
   if (props.chip.kind === "skill") {
-    return <tsx:react>
+    <tsx:react>
       <BookOpen size={14} strokeWidth={2.2} />
     </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <Command size={14} strokeWidth={2.2} />
   </tsx:react>
 }
 
 /** Visual chip surface rendered inline by the Lexical decorator node. */
-function ComposerChipView(props: { chip: ComposerChipData }) {
-  return <tsx:react>
+component ComposerChipView(props: { chip: ComposerChipData }) {
+  <tsx:react>
     <span class={styles.chip} data-chip-kind={props.chip.kind}>
       <span class={cx(styles.muted)} aria-hidden="true">
         <ChipIcon chip={props.chip} />

@@ -28,7 +28,7 @@ function createMessageParser() {
   )
 }
 
-export function MarkdownMessage(props: {
+export component MarkdownMessage(props: {
   markdown: string;
   role: "assistant" | "user";
   streaming?: boolean;
@@ -76,14 +76,15 @@ export function MarkdownMessage(props: {
   }, [props.markdown, props.streaming])
 
   if (!tree) {
-    return <tsx:react>
+    <tsx:react>
       <div class={cx(renderClass, styles.fallback)}>
         {props.markdown}
       </div>
     </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <ComarkRenderer caret={props.streaming
       ? { class: styles.caret }
       : false} className={renderClass} streaming={props.streaming} tree={tree} />

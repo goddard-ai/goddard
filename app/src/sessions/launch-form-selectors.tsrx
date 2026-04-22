@@ -26,13 +26,13 @@ function getShortcutLabel(binding: unknown) {
   return null
 }
 
-export function SessionLaunchLoadingSelect(props: { label: string }) {
-  return <tsx:react>
+export component SessionLaunchLoadingSelect(props: { label: string }) {
+  <tsx:react>
     <SessionInputSelect disabled={true} filterable={false} items={[]} label={props.label} loading={true} open={false} placeholder="Loading options..." value={null} onOpenChange={() => {}} onValueChange={() => {}} />
   </tsx:react>
 }
 
-export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
+export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const adapterCatalog = useQuery(goddardSdk.adapter.list, [
@@ -54,7 +54,7 @@ export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
     form.adapterCatalog.value = adapterCatalog
   }, [adapterCatalog, form])
 
-  return <tsx:react>
+  <tsx:react>
     <SessionInputSelect disabled={!form.draftProjectPath.value} filterable={true} items={items} label="Adapter" open={form.openPicker.value ===
       "adapter"} placeholder="Select an adapter" shortcut={adapterShortcut} value={form.draftAdapterId.value} onOpenChange={(
       open,
@@ -68,7 +68,7 @@ export function AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   </tsx:react>
 }
 
-export function SessionLaunchPreviewSelectors(props: {
+export component SessionLaunchPreviewSelectors(props: {
   form: SessionLaunchFormState;
 }) {
   const { form } = props
@@ -159,7 +159,7 @@ export function SessionLaunchPreviewSelectors(props: {
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
   )
 
-  return <tsx:react>
+  <tsx:react>
     <>
       <div class={styles.grid}>
         <SessionInputSelect disabled={!form.draftProjectPath.value} filterable={false} items={locationItems} label="Launch location" open={form.openPicker.value ===

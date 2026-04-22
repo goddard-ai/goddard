@@ -5,14 +5,14 @@ import { Tooltip } from "@ark-ui/react/tooltip"
 import styles from "./good-tooltip.style.ts"
 
 /** Attaches the shared app tooltip treatment to one trigger element. */
-export function GoodTooltip(props: {
+export component GoodTooltip(props: {
   ariaLabel?: string;
   children: preact.ComponentChildren;
   content: preact.ComponentChildren;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <Tooltip.Root closeDelay={80} closeOnPointerDown={false} openDelay={450} positioning={{
       gutter: props.sideOffset ?? 8,
       placement: props.side ?? "top",

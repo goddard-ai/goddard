@@ -44,7 +44,7 @@ function getShortcutLabel(binding: unknown) {
   return null
 }
 
-export function SessionLaunchForm(props: {
+export component SessionLaunchForm(props: {
   form: SessionLaunchFormState;
   onEscape?: () => void;
   onSubmit: () => Promise<void> | void;
@@ -80,7 +80,7 @@ export function SessionLaunchForm(props: {
     form.launchPreview.value = null
   }, [form, props.projects])
 
-  return <tsx:react>
+  <tsx:react>
     <div class={selectorStyles.section}>
       <div class={selectorStyles.grid}>
         <SessionInputSelect disabled={props.projects.length ===

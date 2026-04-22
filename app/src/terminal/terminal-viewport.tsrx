@@ -4,7 +4,7 @@ import { useEffect, useRef } from "preact/hooks"
 import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model.ts"
 import styles from "./terminal-viewport.style.ts"
 
-export function TerminalViewport(props: {
+export component TerminalViewport(props: {
   terminal: TerminalViewportModel;
   class?: string;
   ariaLabel?: string;
@@ -18,7 +18,7 @@ export function TerminalViewport(props: {
     }
   }, [props.terminal])
 
-  return <tsx:react>
+  <tsx:react>
     <div class={cx(styles.frame, props.class)}>
       <div aria-label={props.ariaLabel ??
         "Terminal viewport"} class={styles.viewport} onFocus={() => {

@@ -20,7 +20,7 @@ export type CommandDialogProps = {
 }
 
 /** Provides one Ark dialog controller for a lazily loaded command-dialog surface. */
-export function CommandDialog(props: CommandDialogProps) {
+export component CommandDialog(props: CommandDialogProps) {
   const Content = useMemo(() => lazy(props.content), [])
   const dialogId = useId()
 
@@ -51,7 +51,7 @@ export function CommandDialog(props: CommandDialogProps) {
     dialog.setOpen(true)
   })
 
-  return <tsx:react>
+  <tsx:react>
     <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
       <Suspense fallback={null}>
         <Content dialog={dialog} />

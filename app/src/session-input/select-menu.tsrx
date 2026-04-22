@@ -34,7 +34,7 @@ export type SessionInputSelectProps = {
 }
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
-export function SessionInputSelect(props: SessionInputSelectProps) {
+export component SessionInputSelect(props: SessionInputSelectProps) {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const filterInputRef = useRef<HTMLInputElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -120,7 +120,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) {
     props.onOpenChange(false)
   }
 
-  return <tsx:react>
+  <tsx:react>
     <Popover.Root autoFocus={true} closeOnInteractOutside={true} finalFocusEl={() => triggerRef.current} immediate={true} initialFocusEl={() => isFilterable
       ? filterInputRef.current
       : menuRef.current} lazyMount={true} modal={isFilterable} open={isMenuOpen} positioning={{

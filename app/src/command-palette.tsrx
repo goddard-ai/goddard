@@ -11,7 +11,7 @@ import { AppCommand, appCommandList } from "./commands/app-command.ts"
 import { isCommandAvailable } from "./commands/command-context.ts"
 import { DialogPortal } from "./lib/dialog-portal.tsrx"
 
-export default function CommandPalette(props: { dialog: UseDialogReturn }) {
+component CommandPalette(props: { dialog: UseDialogReturn }) {
   const { open } = props.dialog
   const shortcutRegistry = useShortcutRegistry()
 
@@ -27,7 +27,7 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
       isCommandAvailable(shortcutRegistry.runtime, command),
   )
 
-  return <tsx:react>
+  <tsx:react>
     <DialogPortal>
       <Dialog.Backdrop class={styles.backdrop} />
       <Dialog.Positioner class={styles.positioner}>
@@ -91,3 +91,5 @@ export default function CommandPalette(props: { dialog: UseDialogReturn }) {
     </DialogPortal>
   </tsx:react>
 }
+
+export default CommandPalette

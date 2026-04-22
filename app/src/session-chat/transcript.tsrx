@@ -90,26 +90,27 @@ function estimateToolGroupRowHeight(
 }
 
 /** Renders one transcript row using the row-specific presentation path. */
-function TranscriptRow(props: { row: MessageListRow<RenderTranscriptItem> }) {
+component TranscriptRow(props: { row: MessageListRow<RenderTranscriptItem> }) {
   if (props.row.item.kind === "toolGroup") {
-    return <tsx:react>
+    <tsx:react>
       <ToolTranscriptRow groupId={props.row.item.id} toolCalls={props.row.item.toolCalls} />
     </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
   </tsx:react>
 }
 
 /** Renders one chat transcript inside the shared message-list virtualizer. */
-export function Transcript(props: TranscriptProps) {
+export component Transcript(props: TranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
   const renderItems = useMemo(() => coalesceTranscriptItems(props.messages), [
     props.messages,
   ])
 
-  return <tsx:react>
+  <tsx:react>
     <div class={cx(transcriptViewportClass, props.class)}>
       <MessageList defaultRowHeight={DEFAULT_ROW_HEIGHT} estimateRowHeight={(
         message,

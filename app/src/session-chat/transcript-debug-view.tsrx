@@ -9,10 +9,10 @@ export type TranscriptDebugViewProps = {
 }
 
 /** Renders the standalone transcript-debug surface used by the native development menu. */
-export function TranscriptDebugView(props: TranscriptDebugViewProps) {
+export component TranscriptDebugView(props: TranscriptDebugViewProps) {
   const messages = props.messages ?? SESSION_CHAT_TRANSCRIPT_DEBUG_MESSAGES
 
-  return <tsx:react>
+  <tsx:react>
     <div class={styles.page}>
       <section class={styles.header}>
         <div class={styles.eyebrow}>Debug Surface</div>
@@ -29,4 +29,4 @@ export function TranscriptDebugView(props: TranscriptDebugViewProps) {
   </tsx:react>
 }
 
-export { TranscriptDebugView as default }
+export default TranscriptDebugView

@@ -140,7 +140,7 @@ function renderToolLocations(locations: SessionTranscriptToolCall["locations"]) 
 }
 
 /** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
-export function ToolTranscriptRow(props: {
+export component ToolTranscriptRow(props: {
   groupId: string;
   toolCalls: readonly SessionTranscriptToolCall[];
 }) {
@@ -148,7 +148,7 @@ export function ToolTranscriptRow(props: {
   const statusSummary = buildToolStatusSummary(props.toolCalls)
   const summaryMetaParts = statusSummary ? [...summaryParts, statusSummary] : summaryParts
 
-  return <tsx:react>
+  <tsx:react>
     <article class={rowClass}>
       <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
         <div class={rowColumnClass} style={{ width: "100%" }}>

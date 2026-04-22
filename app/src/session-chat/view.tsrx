@@ -11,7 +11,7 @@ import { Composer } from "./composer.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 
-export function SessionChatView(props: { sessionId: string }) {
+export component SessionChatView(props: { sessionId: string }) {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -31,7 +31,7 @@ export function SessionChatView(props: { sessionId: string }) {
     }
   }, [projectContext, resolvedProjectPath, workbenchTabSet.activeTabId])
 
-  return <tsx:react>
+  <tsx:react>
     <main class={styles.root}>
       <Transcript class={styles.transcript} initialScrollPosition="bottom" messages={messages} scrollCacheKey={`detail:session:${session.id}:transcript`} />
       <footer class={styles.composerDock}>

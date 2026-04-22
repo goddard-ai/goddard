@@ -14,7 +14,7 @@ import { SessionLaunchFormState } from "./launch-form-state.ts"
 import { SessionLaunchForm } from "./launch-form.tsrx"
 import { getSessionDisplayTitle } from "./presentation.ts"
 
-export default function SessionLaunchDialog(props: {
+component SessionLaunchDialog(props: {
   dialog: UseDialogReturn;
 }) {
   const projectContext = useProjectContext()
@@ -178,7 +178,7 @@ export default function SessionLaunchDialog(props: {
   useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, openThinkingLevelSelector)
   useAppCommand(AppCommand.sessionInput.submit, submitSessionLaunch)
 
-  return <tsx:react>
+  <tsx:react>
     <DialogPortal>
       <Dialog.Backdrop class={styles.backdrop} />
       <Dialog.Positioner class={styles.positioner}>
@@ -197,3 +197,5 @@ export default function SessionLaunchDialog(props: {
     </DialogPortal>
   </tsx:react>
 }
+
+export default SessionLaunchDialog

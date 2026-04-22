@@ -31,7 +31,7 @@ function projectMatchesSearch(project: ProjectRecord, search: string) {
 }
 
 /** Renders the header-anchored searchable project switcher dropdown. */
-export function SwitchProjectDropdown() {
+export component SwitchProjectDropdown() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -188,7 +188,7 @@ export function SwitchProjectDropdown() {
     })
   })
 
-  return <tsx:react>
+  <tsx:react>
     <>
       <button ref={triggerRef} aria-expanded={isOpen
         ? "true"

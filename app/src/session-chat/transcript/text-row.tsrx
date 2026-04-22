@@ -87,7 +87,7 @@ function renderContentBlock(props: {
 }
 
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
-export function TextTranscriptRow(props: {
+export component TextTranscriptRow(props: {
   row: MessageListRow<SessionTranscriptTextMessage>;
 }) {
   const message = props.row.item
@@ -100,10 +100,10 @@ export function TextTranscriptRow(props: {
     : { justifyContent: "flex-start" }
 
   if (message.role === "system") {
-    return null
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <article class={rowClass}>
       <div class={rowInnerClass} style={alignmentStyle}>
         <div class={rowColumnClass} style={{

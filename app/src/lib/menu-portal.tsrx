@@ -6,15 +6,15 @@ const menuPortalElement =
   typeof document === "undefined" ? null : document.getElementById(menuPortalId)
 
 /** Renders menus into a shared host that layers above the dialog portal. */
-export function MenuPortal(props: { children?: preact.ComponentChildren }) {
+export component MenuPortal(props: { children?: preact.ComponentChildren }) {
   const containerRef = useRef<HTMLElement | null>(menuPortalElement)
   containerRef.current = menuPortalElement
 
   if (!containerRef.current) {
-    return null
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <Portal container={containerRef}>
       {props.children}
     </Portal>

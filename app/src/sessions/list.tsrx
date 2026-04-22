@@ -3,7 +3,7 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import { ListRow } from "./list-row.tsrx"
 import styles from "./list.style.ts"
 
-export function SessionsList(props: {
+export component SessionsList(props: {
   errorMessage?: string | null;
   listStatus?: "idle" | "loading" | "ready" | "error";
   onOpenChanges: (sessionId: DaemonSession["id"]) => void;
@@ -12,13 +12,14 @@ export function SessionsList(props: {
   sessions: readonly DaemonSession[];
 }) {
   if (props.listStatus === "loading" && props.sessions.length === 0) {
-    return <tsx:react>
+    <tsx:react>
       <div class={styles.loading}>Loading sessions...</div>
     </tsx:react>
+    return
   }
 
   if (props.listStatus === "error" && props.sessions.length === 0) {
-    return <tsx:react>
+    <tsx:react>
       <div class={styles.error}>
         <div class={styles.errorContent}>
           <h2 class={styles.title}>Couldn't load sessions</h2>
@@ -28,10 +29,11 @@ export function SessionsList(props: {
         </div>
       </div>
     </tsx:react>
+    return
   }
 
   if (props.sessions.length === 0) {
-    return <tsx:react>
+    <tsx:react>
       <div class={styles.empty}>
         <div class={styles.emptyContent}>
           <h2 class={styles.title}>
@@ -45,9 +47,10 @@ export function SessionsList(props: {
         </div>
       </div>
     </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <ul class={styles.list}>
       {props.sessions.map(
         (session) => <tsx:react>

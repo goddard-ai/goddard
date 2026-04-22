@@ -27,7 +27,7 @@ function getExactShortcutSearch(searchText: string) {
   return trimmedSearch.slice(1, -1).trim().toLowerCase()
 }
 
-export default function KeyboardShortcutsView(props: { class?: string }) {
+component KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const searchRecordingSessionRef = useRef<RecordingSession | null>(null)
@@ -175,21 +175,20 @@ export default function KeyboardShortcutsView(props: { class?: string }) {
           whenClause: command.when ?? null,
         },
       )
-      continue
+    } else {
+      bindings.forEach((binding, bindingIndex) => {
+        allRows.push(
+          {
+            rowKey: `${command.id}:${bindingIndex}`,
+            commandId: command.id,
+            label: command.label,
+            bindingIndex,
+            shortcut: getShortcutBindingExpression(binding),
+            whenClause: getShortcutBindingWhen(binding) ?? command.when ?? null,
+          },
+        )
+      })
     }
-
-    bindings.forEach((binding, bindingIndex) => {
-      allRows.push(
-        {
-          rowKey: `${command.id}:${bindingIndex}`,
-          commandId: command.id,
-          label: command.label,
-          bindingIndex,
-          shortcut: getShortcutBindingExpression(binding),
-          whenClause: getShortcutBindingWhen(binding) ?? command.when ?? null,
-        },
-      )
-    })
   }
 
   allRows.sort((left, right) => {
@@ -226,7 +225,7 @@ export default function KeyboardShortcutsView(props: { class?: string }) {
       row.whenClause?.toLowerCase().includes(normalizedSearch)
   })
 
-  return <tsx:react>
+  <tsx:react>
     <section class={cx(styles.page, props.class)}>
       <label class={styles.searchField}>
         <span class={styles.srOnly}>Search shortcuts</span>
@@ -478,3 +477,5 @@ export default function KeyboardShortcutsView(props: { class?: string }) {
     </section>
   </tsx:react>
 }
+
+export default KeyboardShortcutsView

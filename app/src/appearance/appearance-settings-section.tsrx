@@ -40,10 +40,10 @@ const themeModeOptions: readonly {
   },
 ]
 
-export function AppearanceSettingsSection() {
+export component AppearanceSettingsSection() {
   const appearance = useAppearance()
 
-  return <tsx:react>
+  <tsx:react>
     <SettingsSection aria-labelledby="settings-appearance-heading">
       <SettingsSectionHeader>
         <SettingsSectionTitle id="settings-appearance-heading">Appearance</SettingsSectionTitle>

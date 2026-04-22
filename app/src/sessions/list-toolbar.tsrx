@@ -2,11 +2,11 @@ import { Search } from "lucide-react"
 
 import styles from "./list-toolbar.style.ts"
 
-export function ListToolbar(props: {
+export component ListToolbar(props: {
   searchQuery: string;
   onSearchInput: (value: string) => void;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <label class={styles.searchField}>
       <span class={styles.srOnly}>Search session titles</span>
       <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />

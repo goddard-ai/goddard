@@ -256,7 +256,7 @@ export function insertSessionInputSuggestion(
   }, { discrete: true })
 }
 
-export function SessionInputPlugins(props: {
+export component SessionInputPlugins(props: {
   menu: SessionInputMenuState | null;
   onEditorReady: (editor: LexicalEditor) => void;
   onDismissMenu: () => void;
@@ -370,7 +370,7 @@ export function SessionInputPlugins(props: {
     }
   }, [editor, props])
 
-  return <tsx:react>
+  <tsx:react>
     <>
       <HistoryPlugin />
       <OnChangePlugin ignoreSelectionChange={true} onInput={(editorState) => {

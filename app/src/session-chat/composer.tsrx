@@ -16,7 +16,7 @@ const composerClasses: SessionInputClasses = {
   submitButton: styles.submitButton,
 }
 
-export function Composer(props: {
+export component Composer(props: {
   loadSuggestions: SessionInputSuggestionLoader;
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
@@ -24,7 +24,7 @@ export function Composer(props: {
   helperText?: string;
   submitLabel?: string;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <SessionInput classes={composerClasses} helperText={props.helperText} loadSuggestions={props.loadSuggestions} onPromptChange={props.onPromptChange} placeholder={props.placeholder} submitLabel={props.submitLabel} onSubmit={props.onSubmit} />
   </tsx:react>
 }

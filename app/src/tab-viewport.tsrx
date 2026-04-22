@@ -56,7 +56,7 @@ export type TabViewportProviderProps = {
 }
 
 /** Publishes one externally owned scroller into the shared tab viewport context. */
-export function TabViewportProvider(props: TabViewportProviderProps) {
+export component TabViewportProvider(props: TabViewportProviderProps) {
   const fontsReady = useFontsReady()
   const [viewport, setViewport] = useState(
     {
@@ -101,7 +101,7 @@ export function TabViewportProvider(props: TabViewportProviderProps) {
     }
   }, [props.viewportRef])
 
-  return <tsx:react>
+  <tsx:react>
     <tabViewportContext.Provider value={{
       viewportRef: props.viewportRef,
       width: viewport.width,

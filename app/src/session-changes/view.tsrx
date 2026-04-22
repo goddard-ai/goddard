@@ -4,7 +4,7 @@ import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import styles from "./view.style.ts"
 
-export default function SessionChangesView(props: {
+component SessionChangesView(props: {
   repositoryLabel: string;
   sessionId: DaemonSession["id"];
   sessionTitle: string;
@@ -13,7 +13,7 @@ export default function SessionChangesView(props: {
     { id: props.sessionId },
   ])
 
-  return <tsx:react>
+  <tsx:react>
     <section class={styles.root}>
       <header class={styles.header}>
         <p class={styles.repository}>
@@ -57,3 +57,5 @@ export default function SessionChangesView(props: {
     </section>
   </tsx:react>
 }
+
+export default SessionChangesView

@@ -47,7 +47,7 @@ function getInitialTopMostItemIndex<Item>(
 }
 
 /** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
-export function MessageList<Item>(props: MessageListProps<Item>) {
+export component MessageList<Item>(props: MessageListProps<Item>) {
   const viewport = useTabViewport()
   const virtuosoRef = useRef<VirtuosoHandle | null>(null)
   const scrollCacheKey = props.scrollCacheKey
@@ -86,13 +86,13 @@ export function MessageList<Item>(props: MessageListProps<Item>) {
   }, [props.estimateRowHeight, props.items, viewport.width])
 
   if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
-    return props.loadingFallback ??
-      <tsx:react>
-        <div class={styles.loading}>Preparing paragraph layout...</div>
-      </tsx:react>
+    <tsx:react>
+      {props.loadingFallback ?? <div class={styles.loading}>Preparing paragraph layout...</div>}
+    </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <Virtuoso ref={virtuosoRef} alignToBottom={effectiveInitialScroll ===
       "bottom"} computeItemKey={(index, item) => props.getItemKey?.(item, index) ??
       index} customScrollParent={viewport.viewportRef.current} data={props.items} defaultItemHeight={props.defaultRowHeight} heightEstimates={heightEstimates} itemContent={(

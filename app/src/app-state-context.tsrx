@@ -25,7 +25,7 @@ function requireContext<Value>(value: Value | null, name: string): Value {
   return value
 }
 
-export function AppStateProvider(props: {
+export component AppStateProvider(props: {
   children: preact.ComponentChildren;
   initialAppearanceSnapshot: AppearanceSnapshot;
 }) {
@@ -71,7 +71,7 @@ export function AppStateProvider(props: {
     workbenchTabSet,
   ])
 
-  return <tsx:react>
+  <tsx:react>
     <appearanceContext.Provider value={appearance}>
       <navigationContext.Provider value={navigation}>
         <projectContextContext.Provider value={projectContext}>

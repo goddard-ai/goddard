@@ -15,7 +15,7 @@ import {
   getSessionRepositoryLabel,
 } from "./presentation.ts"
 
-export default function SessionsPage() {
+component SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const [searchQuery, setSearchQuery] = useState("")
@@ -69,7 +69,7 @@ export default function SessionsPage() {
     )
   }
 
-  return <tsx:react>
+  <tsx:react>
     <div class={styles.root}>
       <ListToolbar searchQuery={searchQuery} onSearchInput={(value) => {
         setSearchQuery(value)
@@ -80,3 +80,5 @@ export default function SessionsPage() {
     </div>
   </tsx:react>
 }
+
+export default SessionsPage

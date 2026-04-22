@@ -11,11 +11,11 @@ import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 const panelScrollCache = new Map<string, number>()
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
-export function AppShellWorkbenchContent() {
+export component AppShellWorkbenchContent() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
 
-  return <tsx:react>
+  <tsx:react>
     <Suspense fallback={<tsx:react>
       <div />
     </tsx:react>}>
@@ -35,7 +35,7 @@ export function AppShellWorkbenchContent() {
 }
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
-function WorkbenchScrollPanel(props: {
+component WorkbenchScrollPanel(props: {
   scrollKey: string;
   children: preact.ComponentChildren;
 }) {
@@ -54,7 +54,7 @@ function WorkbenchScrollPanel(props: {
     setScrollTop(restoredScrollTop)
   }, [props.scrollKey])
 
-  return <tsx:react>
+  <tsx:react>
     <TabViewportProvider scrollTop={scrollTop} viewportRef={scrollerRef}>
       <div ref={scrollerRef} class={css(
         {
@@ -82,30 +82,31 @@ function WorkbenchScrollPanel(props: {
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
-function MainWorkbenchView() {
+component MainWorkbenchView() {
   const navigation = useNavigation()
   const ActiveNavigationComponent = getWorkbenchTabComponent(navigation.selectedNavId)
 
-  return <tsx:react>
+  <tsx:react>
     <ActiveNavigationComponent />
   </tsx:react>
 }
 
 /** Renders the active closable workbench tab panel. */
-function WorkbenchTabPanel() {
+component WorkbenchTabPanel() {
   const workbenchTabSet = useWorkbenchTabSet()
   const activeTab = workbenchTabSet.activeTab
 
   if (!activeTab) {
-    return <tsx:react>
+    <tsx:react>
       <div />
     </tsx:react>
+    return
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
   const activeTabPayload = activeTab.payload as Record<string, unknown>
 
-  return <tsx:react>
+  <tsx:react>
     <ActiveTabComponent />
   </tsx:react>
 }

@@ -11,7 +11,7 @@ const terminalDebugPrompt = "debug@goddard:~/workspace$ "
 export type TerminalDebugViewProps = Record<string, never>
 
 /** Renders the standalone terminal-debug surface used by the native development menu. */
-export function TerminalDebugView(_props: TerminalDebugViewProps) {
+export component TerminalDebugView(_props: TerminalDebugViewProps) {
   const terminal = useSigma(() => new TerminalViewportModel(), [
     {
       minimumCols: 56,
@@ -214,7 +214,7 @@ export function TerminalDebugView(_props: TerminalDebugViewProps) {
     setTerminalSize(nextSize)
   })
 
-  return <tsx:react>
+  <tsx:react>
     <div class={styles.page}>
       <section class={styles.header}>
         <div class={styles.eyebrow}>Debug Surface</div>
@@ -240,4 +240,4 @@ export function TerminalDebugView(_props: TerminalDebugViewProps) {
   </tsx:react>
 }
 
-export { TerminalDebugView as default }
+export default TerminalDebugView

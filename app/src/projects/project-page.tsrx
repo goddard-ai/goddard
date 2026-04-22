@@ -4,12 +4,12 @@ import styles from "./project-page.style.ts"
 import { lookupProject } from "./project-registry.ts"
 
 /** Renders one project-backed closable workbench tab. */
-export function ProjectPage(props: { projectPath: string }) {
+export component ProjectPage(props: { projectPath: string }) {
   const projectRegistry = useProjectRegistry()
   const project = lookupProject(projectRegistry, props.projectPath)
 
   if (!project) {
-    return <tsx:react>
+    <tsx:react>
       <div class={styles.page}>
         <section class={styles.card}>
           <h1 class={styles.title}>Project unavailable</h1>
@@ -18,9 +18,10 @@ export function ProjectPage(props: { projectPath: string }) {
         </section>
       </div>
     </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <div class={styles.page}>
       <section class={styles.card}>
         <div class={styles.badge}>

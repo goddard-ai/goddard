@@ -37,7 +37,7 @@ export type SessionInputClasses = {
 
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 
-export function SessionInput(props: {
+export component SessionInput(props: {
   autoFocus?: boolean;
   classes?: Partial<SessionInputClasses>;
   loadSuggestions: SessionInputSuggestionLoader;
@@ -310,7 +310,7 @@ export function SessionInput(props: {
     hideMenu()
   })
 
-  return <tsx:react>
+  <tsx:react>
     <form ref={formRef} class={classes.form} onSubmit={(event) => {
       event.preventDefault()
       void submitPrompt()

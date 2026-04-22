@@ -7,7 +7,7 @@ import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { DialogPortal } from "~/lib/dialog-portal.tsrx"
 import styles from "./capture-dialog.style.ts"
 
-export function KeyboardShortcutCaptureDialog(props: {
+export component KeyboardShortcutCaptureDialog(props: {
   dialog: UseDialogReturn;
   label: string;
   mode: "add" | "change";
@@ -91,7 +91,7 @@ export function KeyboardShortcutCaptureDialog(props: {
     }
   }, [props.currentExpression, props.dialog.open, shortcutRegistry.runtime])
 
-  return <tsx:react>
+  <tsx:react>
     <DialogPortal>
       <Dialog.Backdrop class={styles.backdrop} />
       <Dialog.Positioner class={styles.positioner}>

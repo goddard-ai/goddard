@@ -12,8 +12,8 @@ export const appToaster = createToaster(
   },
 )
 
-export function GoodToaster() {
-  return <tsx:react>
+export component GoodToaster() {
+  <tsx:react>
     <Portal>
       <Toaster toaster={appToaster} class={styles.group}>
         {(toast) => <tsx:react>

@@ -2,8 +2,8 @@ import { css } from "@goddard-ai/styled-system/css"
 
 import { AppearanceSettingsSection } from "~/appearance/appearance-settings-section.tsrx"
 
-export function SettingsPage() {
-  return <tsx:react>
+export component SettingsPage() {
+  <tsx:react>
     <main class={css(
       {
         display: "grid",

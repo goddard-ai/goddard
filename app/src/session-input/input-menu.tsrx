@@ -49,31 +49,34 @@ function suggestionKey(suggestion: SessionInputSuggestion) {
   return `${suggestion.type}:${suggestion.path}`
 }
 
-function SuggestionIcon(props: { suggestion: SessionInputSuggestion }) {
+component SuggestionIcon(props: { suggestion: SessionInputSuggestion }) {
   if (props.suggestion.type === "folder") {
-    return <tsx:react>
+    <tsx:react>
       <Folder size={14} strokeWidth={2.2} />
     </tsx:react>
+    return
   }
 
   if (props.suggestion.type === "file") {
-    return <tsx:react>
+    <tsx:react>
       <File size={14} strokeWidth={2.2} />
     </tsx:react>
+    return
   }
 
   if (props.suggestion.type === "skill") {
-    return <tsx:react>
+    <tsx:react>
       <BookOpen size={14} strokeWidth={2.2} />
     </tsx:react>
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <Command size={14} strokeWidth={2.2} />
   </tsx:react>
 }
 
-export function SessionInputMenu(props: {
+export component SessionInputMenu(props: {
   isLoadingSuggestions: boolean;
   menu: SessionInputMenuState | null;
   menuRef: preact.RefObject<HTMLDivElement | null>;
@@ -83,10 +86,10 @@ export function SessionInputMenu(props: {
   suggestions: readonly SessionInputSuggestion[];
 }) {
   if (!props.menu) {
-    return null
+    return
   }
 
-  return <tsx:react>
+  <tsx:react>
     <MenuPortal>
       <div ref={props.menuRef} class={inputMenuClass} style={{
         left: `${props.menu.anchorLeft}px`,

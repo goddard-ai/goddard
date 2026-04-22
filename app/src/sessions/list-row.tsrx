@@ -102,7 +102,7 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
   }
 }
 
-export function ListRow(props: {
+export component ListRow(props: {
   onOpen: () => void;
   onOpenChanges: () => void;
   session: DaemonSession;
@@ -111,7 +111,7 @@ export function ListRow(props: {
   const StatusIcon = status.icon
   const sessionTitle = getSessionDisplayTitle(props.session)
 
-  return <tsx:react>
+  <tsx:react>
     <div class={styles.row} data-session-row="true" role="button" tabIndex={0} onClick={props.onOpen} onKeyDown={(
       event,
     ) => {

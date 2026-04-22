@@ -86,7 +86,7 @@ function useAppShellTabStrip(
 }
 
 /** Renders the merged shell chrome and owns its local interaction wiring. */
-export function AppShellChrome() {
+export component AppShellChrome() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
   const navigationItems: Array<{
@@ -194,7 +194,7 @@ export function AppShellChrome() {
     )
   })
 
-  return <tsx:react>
+  <tsx:react>
     <div class={styles.root}>
       <header class={cx(styles.header, "electrobun-webkit-app-region-drag")} onDblClick={(
         event,
@@ -298,7 +298,7 @@ export function AppShellChrome() {
 }
 
 /** Renders one grouped section of the left navigation rail. */
-function AppShellSidebarSection(props: {
+component AppShellSidebarSection(props: {
   items: Array<{
     icon: SvgIconName;
     id: NavigationItemId;
@@ -309,7 +309,7 @@ function AppShellSidebarSection(props: {
   }) => void;
   selectedNavigationId: NavigationItemId;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <>
       {props.items.map(
         (item) => <tsx:react>
@@ -323,12 +323,12 @@ function AppShellSidebarSection(props: {
   </tsx:react>
 }
 
-function ActionButton(props: {
+component ActionButton(props: {
   ariaLabel: string;
   icon: preact.JSX.Element;
   onAction: () => void;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <button aria-label={props.ariaLabel} class={cx(
       styles.actionButton,
       styles.actionItem,
@@ -340,13 +340,13 @@ function ActionButton(props: {
   </tsx:react>
 }
 
-function SidebarItem(props: {
+component SidebarItem(props: {
   icon: SvgIconName;
   isSelected: boolean;
   label: string;
   onSelect: (options?: { openInTab?: boolean }) => void;
 }) {
-  return <tsx:react>
+  <tsx:react>
     <button aria-current={props.isSelected
       ? "page"
       : undefined} aria-label={props.label} class={styles.sidebarItem} style={{
@@ -359,7 +359,7 @@ function SidebarItem(props: {
   </tsx:react>
 }
 
-function TabButton(props: {
+component TabButton(props: {
   activeTabId: string;
   dirty?: boolean;
   icon: SvgIconName;
@@ -398,7 +398,7 @@ function TabButton(props: {
           ? `color-mix(in srgb, ${textColor} 52%, transparent)`
           : `color-mix(in srgb, ${textColor} 34%, transparent)`
 
-  return <tsx:react>
+  <tsx:react>
     <div ref={props.refCallback} class={styles.tab} draggable={!isHome} role="presentation" onDragEnd={() => {
       props.onDragEnd?.()
     }} onDragEnter={() => {
@@ -459,10 +459,10 @@ function TabButton(props: {
   </tsx:react>
 }
 
-function InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
+component InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
   const [width, height = width] = props.size.split(" ")
 
-  return <tsx:react>
+  <tsx:react>
     <GoodIcon class={styles.icon} name={props.icon} height={height} width={width} />
   </tsx:react>
 }

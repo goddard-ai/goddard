@@ -16,7 +16,7 @@ import {
 import { CommandDialog } from "./commands/command-dialog.tsrx"
 import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
 
-export function AppShell() {
+export component AppShell() {
   const navigation = useNavigation()
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
@@ -112,7 +112,7 @@ export function AppShell() {
     }
   })
 
-  return <tsx:react>
+  <tsx:react>
     <>
       <CommandDialog command={AppCommand.navigation.openCommandPalette} content={() => import("~/command-palette.tsrx")} />
       <AppShellChrome />
