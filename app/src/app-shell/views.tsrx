@@ -1,7 +1,7 @@
 /** Workbench content surfaces rendered inside the merged app shell chrome. */
 import { css } from "@goddard-ai/styled-system/css"
 import { Suspense } from "preact/compat"
-import { useLayoutEffect, useState } from "preact/hooks"
+import { useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { TabViewportProvider } from "~/tab-viewport.tsrx"
@@ -33,29 +33,24 @@ component WorkbenchScrollPanel(props: {
   scrollKey: string;
   children: preact.ComponentChildren;
 }) {
-  let scrollerElement: HTMLDivElement | null = null
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
   const [scrollTop, setScrollTop] = useState(panelScrollCache.get(props.scrollKey) ?? 0)
-  const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null)
 
   useLayoutEffect(() => {
-    setViewportElement(
-      (currentElement) => currentElement === scrollerElement ? currentElement : scrollerElement,
-    )
-  })
+    const scrollerElement = scrollerRef.current
 
-  useLayoutEffect(() => {
-    if (!viewportElement) {
+    if (!scrollerElement) {
       return
     }
 
     const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
-    viewportElement.scrollTop = restoredScrollTop
+    scrollerElement.scrollTop = restoredScrollTop
     setScrollTop(restoredScrollTop)
-  }, [props.scrollKey, viewportElement])
+  }, [props.scrollKey])
 
-  <TabViewportProvider {scrollTop} {viewportElement}>
+  <TabViewportProvider {scrollTop} viewportRef={scrollerRef}>
     <div
-      {ref scrollerElement}
+      ref={scrollerRef}
       class={css(
         {
           minHeight: "0",

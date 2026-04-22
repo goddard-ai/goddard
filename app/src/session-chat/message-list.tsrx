@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "preact/hooks"
+import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
 
 import { useTabViewport } from "~/tab-viewport.tsrx"
@@ -49,7 +49,7 @@ function getInitialTopMostItemIndex<Item>(
 /** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
 export component MessageList<Item>(props: MessageListProps<Item>) {
   const viewport = useTabViewport()
-  let virtuosoHandle: VirtuosoHandle | null = null
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null)
   const scrollCacheKey = props.scrollCacheKey
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
@@ -67,7 +67,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
         return
       }
 
-      virtuosoHandle?.getState((state) => {
+      virtuosoRef.current?.getState((state) => {
         messageListStateCache.set(scrollCacheKey, state)
       })
     }
@@ -85,7 +85,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     )
   }, [props.estimateRowHeight, props.items, viewport.width])
 
-  if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportElement) {
+  if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
     {props.loadingFallback ??
       <tsx>
         <div class={styles.loading}>
@@ -96,10 +96,10 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   }
 
   <Virtuoso
-    {ref virtuosoHandle}
+    ref={virtuosoRef}
     alignToBottom={effectiveInitialScroll === "bottom"}
     computeItemKey={(index, item) => props.getItemKey?.(item, index) ?? index}
-    customScrollParent={viewport.viewportElement}
+    customScrollParent={viewport.viewportRef.current}
     data={props.items}
     defaultItemHeight={props.defaultRowHeight}
     {heightEstimates}
