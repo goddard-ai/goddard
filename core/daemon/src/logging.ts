@@ -277,7 +277,7 @@ function formatVerboseValue(value: unknown): string {
     colors: false,
     compact: false,
     breakLength: 100,
-  }).replace(/\n/g, "\n    ")
+  }).replace(/\n/g, "\n  ")
 }
 
 function sanitizeValue(
