@@ -7,7 +7,7 @@ async function main() {
   const daemon = supervise({
     name: "daemon",
     command: "bun",
-    args: ["dev", "run"],
+    args: ["dev", "run", "--verbose"],
     cwd: "core/daemon",
   })
 

@@ -192,7 +192,9 @@ function formatPrettyLogEntry(entry: LogEntry): string {
 }
 
 function formatVerboseLogEntry(entry: LogEntry): string {
-  const fields = Object.entries(entry).filter(([key]) => isMetadataField(key) === false)
+  const fields = Object.entries(entry).filter(
+    ([key, value]) => value !== undefined && value !== null && isMetadataField(key) === false,
+  )
   if (fields.length === 0) {
     return `${kleur.dim(formatTimestamp(entry.at))} ${kleur.bold().cyan(entry.event)}`
   }
