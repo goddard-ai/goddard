@@ -1,13 +1,13 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 
+import { useActions } from "~/lib/actions-provider.tsx"
+import { SessionsPageActions } from "./actions.ts"
 import { ListRow } from "./list-row.tsrx"
 import styles from "./list.style.ts"
 
 export component SessionsList(props: {
   errorMessage?: string | null;
   listStatus?: "idle" | "loading" | "ready" | "error";
-  onOpenChanges: (sessionId: DaemonSession["id"]) => void;
-  onOpenSession: (sessionId: DaemonSession["id"]) => void;
   searchQuery: string;
   sessions: readonly DaemonSession[];
 }) {
@@ -47,15 +47,7 @@ export component SessionsList(props: {
   <ul class={styles.list}>
     for (const session of props.sessions) {
       <li key={session.id}>
-        <ListRow
-          onOpen={() => {
-            props.onOpenSession(session.id)
-          }}
-          onOpenChanges={() => {
-            props.onOpenChanges(session.id)
-          }}
-          {session}
-        />
+        <ListRow {session} />
       </li>
     }
   </ul>

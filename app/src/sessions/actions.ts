@@ -1,5 +1,6 @@
-import type { CreateSessionRequest, SessionPromptRequest } from "@goddard-ai/sdk"
+import type { CreateSessionRequest, DaemonSession, SessionPromptRequest } from "@goddard-ai/sdk"
 
+import { createActionsProvider } from "~/lib/actions-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "./queries.ts"
@@ -22,3 +23,8 @@ export async function submitSessionPrompt(props: SessionPromptRequest) {
   queryClient.invalidate(goddardSdk.session.get, [{ id: props.id }])
   queryClient.invalidate(goddardSdk.session.history, [{ id: props.id }])
 }
+
+export const SessionsPageActions = createActionsProvider<{
+  openSession: (sessionId: DaemonSession["id"]) => void
+  openSessionChanges: (sessionId: DaemonSession["id"]) => void
+}>("SessionsPageActions")

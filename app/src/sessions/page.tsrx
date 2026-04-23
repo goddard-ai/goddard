@@ -1,6 +1,7 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { useState } from "preact/hooks"
 
+import { SessionsPageActions } from "./actions.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { findNearestProjectPath } from "~/projects/project-context.ts"
@@ -18,74 +19,77 @@ import {
 component SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  const [searchQuery, setSearchQuery] = useState("")
 
   const { sessions } = useQuery(goddardSdk.session.list, [
     { limit: SESSION_LIST_LIMIT },
   ])
 
-  <div class={styles.root}>
-    <ListToolbar
-      {searchQuery}
-      onSearchInput={(value) => {
-        setSearchQuery(value)
-      }}
-    />
-    <div class={styles.listBody}>
-      const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+  function openSession(sessionId: DaemonSession["id"]) {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
 
-      function openSession(sessionId: DaemonSession["id"]) {
-        const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      return
+    }
 
-        if (!session) {
-          return
-        }
+    workbenchTabSet.openOrFocusTab(
+      {
+        id: `session:${session.id}`,
+        kind: "sessionChat",
+        title: getSessionDisplayTitle(session),
+        payload: {
+          projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
+          sessionId: session.id,
+        },
+        dirty: false,
+      },
+    )
+  }
 
-        workbenchTabSet.openOrFocusTab(
-          {
-            id: `session:${session.id}`,
-            kind: "sessionChat",
-            title: getSessionDisplayTitle(session),
-            payload: {
-              projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
-              sessionId: session.id,
-            },
-            dirty: false,
-          },
-        )
-      }
+  function openSessionChanges(sessionId: DaemonSession["id"]) {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
 
-      function openSessionChanges(sessionId: DaemonSession["id"]) {
-        const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      return
+    }
 
-        if (!session) {
-          return
-        }
+    queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
+    workbenchTabSet.openOrFocusTab(
+      {
+        id: `session-changes:${session.id}`,
+        kind: "sessionChanges",
+        title: `Changes · ${getSessionDisplayTitle(session)}`,
+        payload: {
+          sessionId: session.id,
+          sessionTitle: getSessionDisplayTitle(session),
+          repositoryLabel: getSessionRepositoryLabel(session),
+        },
+        dirty: false,
+      },
+    )
+  }
 
-        queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
-        workbenchTabSet.openOrFocusTab(
-          {
-            id: `session-changes:${session.id}`,
-            kind: "sessionChanges",
-            title: `Changes · ${getSessionDisplayTitle(session)}`,
-            payload: {
-              sessionId: session.id,
-              sessionTitle: getSessionDisplayTitle(session),
-              repositoryLabel: getSessionRepositoryLabel(session),
-            },
-            dirty: false,
-          },
-        )
-      }
+  <SessionsPageActions
+    actions={{
+      openSession,
+      openSessionChanges,
+    }}
+  >
+    <div class={styles.root}>
+      const [searchQuery, setSearchQuery] = useState("")
 
-      <SessionsList
-        onOpenChanges={openSessionChanges}
-        onOpenSession={openSession}
+      <ListToolbar
         {searchQuery}
-        sessions={visibleSessions}
+        onSearchInput={(value) => {
+          setSearchQuery(value)
+        }}
       />
+      <div class={styles.listBody}>
+        const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+
+        <SessionsList {searchQuery} sessions={visibleSessions} />
+      </div>
     </div>
-  </div>
+  </SessionsPageActions>
 }
 
 export default SessionsPage

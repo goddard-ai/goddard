@@ -103,22 +103,22 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
 }
 
 export component ListRow(props: {
-  onOpen: () => void;
-  onOpenChanges: () => void;
   session: DaemonSession;
 }) {
   const status = getSessionStatusPresentation(props.session.status)
   const StatusIcon = status.icon
   const sessionTitle = getSessionDisplayTitle(props.session)
 
+  const { openSession, openSessionChanges } = useActions(SessionsPageActions)
+
   <div
     class={styles.row}
     data-session-row="true"
     role="button"
     tabIndex={0}
-    onClick={props.onOpen}
+    onClick={() => openSession(props.session.id)}
     onKeyDown={(event) => {
-      handleButtonLikeKeyDown(event, props.onOpen)
+      handleButtonLikeKeyDown(event, () => openSession(props.session.id))
     }}
   >
     <span class={styles.statusIcon} aria-label={status.label} title={status.label}>
@@ -159,7 +159,7 @@ export component ListRow(props: {
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            props.onOpenChanges()
+            openSessionChanges(props.session.id)
           }}
           onKeyDown={(event) => {
             event.stopPropagation()
