@@ -1,3 +1,4 @@
+import { concat } from "radashi"
 import { Search } from "lucide-react"
 import { useListener } from "preact-sigma"
 import { useEffect, useState } from "preact/hooks"
@@ -88,65 +89,28 @@ export component SwitchProjectDropdown() {
       {activeProject?.name ?? "Open project"}
     </span>
   </button>
-  if (isOpen) {
-    <SwitchProjectDropdownContent
-      activeProjectPath={activeProject?.path ?? null}
-      onClose={() => {
-        setIsOpen(false)
-      }}
-      onOpenFolder={openFolderFromSwitcher}
-      onOpenProject={(projectPath) => {
-        setIsOpen(false)
-        openProjectTab(
-          {
-            projectContext,
-            projectPath,
-            projectRegistry,
-            workbenchTabSet,
-          },
-        )
-      }}
-      {projects}
-      {triggerElement}
-    />
-  }
-}
 
-component SwitchProjectDropdownContent(props: {
-  activeProjectPath: string | null;
-  onClose: () => void;
-  onOpenFolder: () => Promise<void> | void;
-  onOpenProject: (projectPath: string) => void;
-  projects: readonly ProjectRecord[];
-  triggerElement: HTMLButtonElement | null;
-}) {
-  let contentElement: HTMLDivElement | null = null
+  if (!isOpen) {
+    return
+  }
+
   let inputElement: HTMLInputElement | null = null
-  let itemElements: Record<string, HTMLButtonElement | null> = {}
 
   const [search, setSearch] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const [itemElements] = useState((): Record<string, HTMLButtonElement | null> => ({}))
 
-  const filteredProjects = props.projects.filter((project) => projectMatchesSearch(project, search))
-  const items: SwitchProjectItem[] =
-    search.trim().length === 0
-      ? [
-          { id: "open-folder", kind: "open-folder" },
-          ...filteredProjects.map(
-            (project) => ({
-              id: project.path,
-              kind: "project" as const,
-              project,
-            }),
-          ),
-        ]
-      : filteredProjects.map(
-          (project) => ({
-            id: project.path,
-            kind: "project" as const,
-            project,
-          }),
-        )
+  const items: SwitchProjectItem[] = concat(
+    search.trim().length === 0 ? { id: "open-folder", kind: "open-folder" } : undefined,
+    projects.filter((project) => projectMatchesSearch(project, search)).map(
+      (project) => ({
+        id: project.path,
+        kind: "project" as const,
+        project,
+      }),
+    ),
+  )
+
   const highlightedItemIndex =
     items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
   const highlightedItem = items[highlightedItemIndex]
@@ -172,60 +136,34 @@ component SwitchProjectDropdownContent(props: {
     }
 
     if (item.kind === "open-folder") {
-      void props.onOpenFolder()
+      void openFolderFromSwitcher()
       return
     }
 
-    props.onOpenProject(item.project.path)
+    setIsOpen(false)
+    openProjectTab(
+      {
+        projectContext,
+        projectPath: item.project.path,
+        projectRegistry,
+        workbenchTabSet,
+      },
+    )
   }
 
   useEffect(() => {
     queueMicrotask(() => {
-      const input = inputElement
-      input?.focus()
-      input?.setSelectionRange(input.value.length, input.value.length)
+      if (!inputElement) {
+        return
+      }
+
+      const length = inputElement.value.length
+      inputElement.focus()
+      inputElement.setSelectionRange(length, length)
     })
   }, [])
 
-  useEffect(() => {
-    if (!highlightedItemId) {
-      return
-    }
-
-    itemElements[highlightedItemId]?.scrollIntoView(
-      {
-        block: "nearest",
-      },
-    )
-  }, [highlightedItemId])
-
-  useListener(document, "mousedown", (event) => {
-    const target = event.target
-
-    if (!(target instanceof Node)) {
-      return
-    }
-
-    if (contentElement?.contains(target) || props.triggerElement?.contains(target)) {
-      return
-    }
-
-    props.onClose()
-  })
-
-  useListener(document, "keydown", (event) => {
-    if (event.key !== "Escape") {
-      return
-    }
-
-    event.preventDefault()
-    props.onClose()
-    queueMicrotask(() => {
-      props.triggerElement?.focus()
-    })
-  })
-
-  <div {ref contentElement} class={styles.content}>
+  <div class={styles.content}>
     <label class={styles.searchField}>
       <span class={styles.srOnly}>{"Search projects"}</span>
       <Search aria-hidden={true} size={16} strokeWidth={2.1} />
@@ -258,6 +196,7 @@ component SwitchProjectDropdownContent(props: {
         }}
       />
     </label>
+
     if (items.length > 0) {
       <ul class={styles.list}>
         for (const item of items; index index) {
@@ -291,7 +230,7 @@ component SwitchProjectDropdownContent(props: {
                   </span>
                 }
               </span>
-              if (item.kind === "project" && props.activeProjectPath === item.project.path) {
+              if (item.kind === "project" && activeProjectPath?.path === item.project.path) {
                 <span class={styles.activeBadge}>{"Active"}</span>
               }
             </button>
