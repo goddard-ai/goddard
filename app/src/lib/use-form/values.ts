@@ -72,24 +72,6 @@ function areFieldValuesEqual(leftValue: unknown, rightValue: unknown) {
   return leftValue.every((entry, index) => entry === rightValue[index])
 }
 
-export function compareControlsByDomOrder(leftControl: FormControl, rightControl: FormControl) {
-  if (leftControl === rightControl) {
-    return 0
-  }
-
-  const position = leftControl.compareDocumentPosition(rightControl)
-
-  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
-    return -1
-  }
-
-  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
-    return 1
-  }
-
-  return 0
-}
-
 export function getObservedEventName(control: FormControl) {
   if (control instanceof HTMLSelectElement) {
     return "change"

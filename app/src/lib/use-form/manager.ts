@@ -1,47 +1,37 @@
-import { SigmaType } from "preact-sigma"
+import { SigmaType, type SigmaRef } from "preact-sigma"
 import { z } from "zod"
 
-import {
-  collectSubmissionValues,
-  detachFieldControl,
-  focusFirstInvalidField,
-  getFieldControls,
-  hydrateField,
-  sweepDisconnectedControls,
-} from "./dom.ts"
-import type { FormControl } from "./schema.ts"
-import type {
-  FormCallbacksState,
-  FormManagerShape,
-  FormRuntimeState,
-  FormStateAccess,
-  FormValueRecord,
-  MutableFormErrorState,
-} from "./types.ts"
+import type { AnyObjectSchema, FormControl, FormSchema } from "./schema.ts"
+import type { FieldErrorRecord, FormValueRecord } from "./types.ts"
 import {
   assignRecordValue,
   areValueRecordsEqual,
   cloneValueRecord,
   createEmptyErrors,
   getEmptyFieldValue,
+  isFormControl,
   readFieldValue,
   setDraftFieldValue,
   writeFieldValue,
 } from "./values.ts"
 
-export class FormCallbacksRuntime implements FormCallbacksState {
+export class FormCallbacksRuntime {
   onChange?: (values: FormValueRecord) => void
   onInvalid?: (error: z.ZodError) => void
   onSubmit: (values: unknown) => void | Promise<void> = () => {}
 
-  sync(nextCallbacks: FormCallbacksState) {
+  sync(nextCallbacks: {
+    onChange?(values: FormValueRecord): void
+    onInvalid?(error: z.ZodError): void
+    onSubmit(values: unknown): void | Promise<void>
+  }) {
     this.onChange = nextCallbacks.onChange
     this.onInvalid = nextCallbacks.onInvalid
     this.onSubmit = nextCallbacks.onSubmit
   }
 }
 
-export class FormRuntime implements FormRuntimeState {
+export class FormRuntime {
   controlsByField = new Map<string, Set<FormControl>>()
   fieldNameByControl = new WeakMap<FormControl, string>()
   cleanupByControl = new WeakMap<FormControl, () => void>()
@@ -53,6 +43,15 @@ export class FormRuntime implements FormRuntimeState {
     this.lastEmittedValues = cloneValueRecord(initialValues)
     this.previousInitialValues = initialValues
   }
+}
+
+type FormManagerShape = {
+  schema: SigmaRef<FormSchema<AnyObjectSchema>>
+  callbacks: SigmaRef<FormCallbacksRuntime>
+  runtime: SigmaRef<FormRuntime>
+  draftValues: FormValueRecord
+  errors: FieldErrorRecord
+  isSubmitting: boolean
 }
 
 /** Local sigma state for one uncontrolled Zod-backed form instance. */
@@ -82,7 +81,7 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
           fieldName,
           nextInitialValueRecord[fieldName],
         )
-        hydrateField(this, fieldName)
+        hydrateField(this.runtime, this.draftValues, fieldName)
       }
     },
 
@@ -91,7 +90,7 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
       const previousFieldName = this.runtime.fieldNameByControl.get(control)
 
       if (previousFieldName && previousFieldName !== fieldName) {
-        detachFieldControl(this, previousFieldName, control)
+        detachFieldControl(this.runtime, previousFieldName, control)
       }
 
       control.name = fieldName
@@ -101,32 +100,32 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
       this.runtime.controlsByField.set(fieldName, fieldControls)
       this.runtime.fieldNameByControl.set(control, fieldName)
 
-      hydrateField(this, fieldName)
+      hydrateField(this.runtime, this.draftValues, fieldName)
     },
 
     /** Removes one field control and any listener bookkeeping owned by this form. */
     detachFieldControl(fieldName: string, control: FormControl) {
-      detachFieldControl(this, fieldName, control)
+      detachFieldControl(this.runtime, fieldName, control)
     },
 
     /** Prunes controls that have disconnected since the last render pass or submit. */
     sweepDisconnectedControls(fieldName: string) {
-      sweepDisconnectedControls(this, fieldName)
+      sweepDisconnectedControls(this.runtime, fieldName)
     },
 
     /** Mirrors one uncontrolled field change into the draft snapshot and persistence callback. */
     handleFieldChange(fieldName: string) {
       this.runtime.dirtyFields.add(fieldName)
-      clearFieldError(this, fieldName)
+      this.errors = clearFieldError(this.errors, fieldName)
 
       const nextValues = setDraftFieldValue(
         this.draftValues,
         fieldName,
-        readFieldValue(getFieldControls(this, fieldName)),
+        readFieldValue(getFieldControls(this.runtime, fieldName)),
       )
 
       this.draftValues = nextValues
-      emitChange(this, nextValues)
+      emitChange(this.callbacks.onChange, this.runtime, nextValues)
     },
 
     /** Clears every registered field back to its empty DOM state and emits the raw values. */
@@ -136,14 +135,14 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
       for (const fieldName of this.schema.keys) {
         this.runtime.dirtyFields.add(fieldName)
 
-        const fieldControls = getFieldControls(this, fieldName)
+        const fieldControls = getFieldControls(this.runtime, fieldName)
         writeFieldValue(fieldControls, getEmptyFieldValue(fieldControls))
         assignRecordValue(nextValues, fieldName, readFieldValue(fieldControls))
       }
 
       this.draftValues = nextValues
-      clearAllErrors(this)
-      emitChange(this, nextValues)
+      this.errors = clearAllErrors(this.errors, this.schema.keys)
+      emitChange(this.callbacks.onChange, this.runtime, nextValues)
     },
 
     /** Collects live DOM values, validates them, and runs the async submit callback. */
@@ -152,17 +151,19 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
         return
       }
 
-      const parsed = this.schema.zod.safeParse(collectSubmissionValues(this, formElement))
+      const parsed = this.schema.zod.safeParse(
+        collectSubmissionValues(this.schema.keys, this.runtime, formElement),
+      )
 
       if (!parsed.success) {
         this.errors = buildFieldErrors(this.schema.keys, parsed.error)
         this.callbacks.onInvalid?.(parsed.error)
-        focusFirstInvalidField(this, parsed.error, formElement)
+        focusFirstInvalidField(this.runtime, parsed.error, formElement)
         this.commit()
         return
       }
 
-      clearAllErrors(this)
+      this.errors = clearAllErrors(this.errors, this.schema.keys)
       this.isSubmitting = true
       this.commit()
 
@@ -175,39 +176,41 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
     },
   })
 
-function emitChange(form: FormStateAccess, nextValues: FormValueRecord) {
-  const onChange = form.callbacks.onChange
-
+function emitChange(
+  onChange: ((values: FormValueRecord) => void) | undefined,
+  runtime: FormRuntime,
+  nextValues: FormValueRecord,
+) {
   if (!onChange) {
     return
   }
 
-  if (areValueRecordsEqual(form.runtime.lastEmittedValues, nextValues)) {
+  if (areValueRecordsEqual(runtime.lastEmittedValues, nextValues)) {
     return
   }
 
   const snapshot = cloneValueRecord(nextValues)
-  form.runtime.lastEmittedValues = snapshot
+  runtime.lastEmittedValues = snapshot
   onChange(snapshot)
 }
 
-function clearFieldError(form: MutableFormErrorState, fieldName: string) {
-  if (form.errors[fieldName] === null) {
-    return
+function clearFieldError(errors: FieldErrorRecord, fieldName: string) {
+  if (errors[fieldName] === null) {
+    return errors
   }
 
-  form.errors = {
-    ...form.errors,
+  return {
+    ...errors,
     [fieldName]: null,
   }
 }
 
-function clearAllErrors(form: MutableFormErrorState) {
-  if (Object.values(form.errors).every((message) => message === null)) {
-    return
+function clearAllErrors(errors: FieldErrorRecord, fieldNames: readonly string[]) {
+  if (Object.values(errors).every((message) => message === null)) {
+    return errors
   }
 
-  form.errors = createEmptyErrors(form.schema.keys)
+  return createEmptyErrors(fieldNames)
 }
 
 function buildFieldErrors(fieldNames: readonly string[], error: z.ZodError) {
@@ -224,4 +227,99 @@ function buildFieldErrors(fieldNames: readonly string[], error: z.ZodError) {
   }
 
   return nextErrors
+}
+
+/**
+ * Reads the live values for the controls inside the submitted form instead of relying on stored
+ * draft state, so hidden or unmounted fields are not silently submitted.
+ */
+function collectSubmissionValues(
+  fieldNames: readonly string[],
+  runtime: FormRuntime,
+  formElement: HTMLFormElement,
+) {
+  const formControls = [...formElement.elements].filter(
+    (control): control is FormControl =>
+      isFormControl(control) && runtime.fieldNameByControl.has(control),
+  )
+  const submissionValues: FormValueRecord = {}
+
+  for (const fieldName of fieldNames) {
+    assignRecordValue(
+      submissionValues,
+      fieldName,
+      readFieldValue(formControls.filter((control) => control.name === fieldName)),
+    )
+  }
+
+  return submissionValues
+}
+
+function focusFirstInvalidField(
+  runtime: FormRuntime,
+  error: z.ZodError,
+  formElement: HTMLFormElement,
+) {
+  for (const issue of error.issues) {
+    const fieldName = typeof issue.path[0] === "string" ? issue.path[0] : null
+
+    if (!fieldName) {
+      continue
+    }
+
+    const control = getFieldControls(runtime, fieldName, formElement)[0]
+
+    if (control) {
+      control.focus()
+      return
+    }
+  }
+}
+
+function hydrateField(runtime: FormRuntime, draftValues: FormValueRecord, fieldName: string) {
+  writeFieldValue(getFieldControls(runtime, fieldName), draftValues[fieldName])
+}
+
+function getFieldControls(runtime: FormRuntime, fieldName: string, formElement?: HTMLFormElement) {
+  sweepDisconnectedControls(runtime, fieldName)
+
+  const fieldControls = [...(runtime.controlsByField.get(fieldName) ?? [])].filter(
+    (control) => !formElement || formElement.contains(control),
+  )
+
+  fieldControls.sort(compareControlsByDomOrder)
+  return fieldControls
+}
+
+function compareControlsByDomOrder(leftControl: FormControl, rightControl: FormControl) {
+  if (leftControl === rightControl) {
+    return 0
+  }
+
+  const position = leftControl.compareDocumentPosition(rightControl)
+
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+    return -1
+  }
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+    return 1
+  }
+  return 0
+}
+
+function sweepDisconnectedControls(runtime: FormRuntime, fieldName: string) {
+  for (const control of runtime.controlsByField.get(fieldName) ?? []) {
+    if (control.isConnected) {
+      continue
+    }
+
+    detachFieldControl(runtime, fieldName, control)
+  }
+}
+
+function detachFieldControl(runtime: FormRuntime, fieldName: string, control: FormControl) {
+  runtime.controlsByField.get(fieldName)?.delete(control)
+  runtime.cleanupByControl.get(control)?.()
+  runtime.cleanupByControl.delete(control)
+  runtime.fieldNameByControl.delete(control)
 }
