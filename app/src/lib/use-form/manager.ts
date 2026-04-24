@@ -1,6 +1,14 @@
 import { SigmaType, type SigmaRef } from "preact-sigma"
 import { z } from "zod"
 
+import {
+  collectSubmissionValues,
+  detachFieldControl,
+  focusFirstInvalidField,
+  getFieldControls,
+  hydrateField,
+  sweepDisconnectedControls,
+} from "./dom.ts"
 import type { AnyObjectSchema, FormControl, FormSchema } from "./schema.ts"
 import type { FieldErrorRecord, FormValueRecord } from "./types.ts"
 import {
@@ -9,7 +17,6 @@ import {
   cloneValueRecord,
   createEmptyErrors,
   getEmptyFieldValue,
-  isFormControl,
   readFieldValue,
   setDraftFieldValue,
   writeFieldValue,
@@ -227,99 +234,4 @@ function buildFieldErrors(fieldNames: readonly string[], error: z.ZodError) {
   }
 
   return nextErrors
-}
-
-/**
- * Reads the live values for the controls inside the submitted form instead of relying on stored
- * draft state, so hidden or unmounted fields are not silently submitted.
- */
-function collectSubmissionValues(
-  fieldNames: readonly string[],
-  runtime: FormRuntime,
-  formElement: HTMLFormElement,
-) {
-  const formControls = [...formElement.elements].filter(
-    (control): control is FormControl =>
-      isFormControl(control) && runtime.fieldNameByControl.has(control),
-  )
-  const submissionValues: FormValueRecord = {}
-
-  for (const fieldName of fieldNames) {
-    assignRecordValue(
-      submissionValues,
-      fieldName,
-      readFieldValue(formControls.filter((control) => control.name === fieldName)),
-    )
-  }
-
-  return submissionValues
-}
-
-function focusFirstInvalidField(
-  runtime: FormRuntime,
-  error: z.ZodError,
-  formElement: HTMLFormElement,
-) {
-  for (const issue of error.issues) {
-    const fieldName = typeof issue.path[0] === "string" ? issue.path[0] : null
-
-    if (!fieldName) {
-      continue
-    }
-
-    const control = getFieldControls(runtime, fieldName, formElement)[0]
-
-    if (control) {
-      control.focus()
-      return
-    }
-  }
-}
-
-function hydrateField(runtime: FormRuntime, draftValues: FormValueRecord, fieldName: string) {
-  writeFieldValue(getFieldControls(runtime, fieldName), draftValues[fieldName])
-}
-
-function getFieldControls(runtime: FormRuntime, fieldName: string, formElement?: HTMLFormElement) {
-  sweepDisconnectedControls(runtime, fieldName)
-
-  const fieldControls = [...(runtime.controlsByField.get(fieldName) ?? [])].filter(
-    (control) => !formElement || formElement.contains(control),
-  )
-
-  fieldControls.sort(compareControlsByDomOrder)
-  return fieldControls
-}
-
-function compareControlsByDomOrder(leftControl: FormControl, rightControl: FormControl) {
-  if (leftControl === rightControl) {
-    return 0
-  }
-
-  const position = leftControl.compareDocumentPosition(rightControl)
-
-  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
-    return -1
-  }
-  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
-    return 1
-  }
-  return 0
-}
-
-function sweepDisconnectedControls(runtime: FormRuntime, fieldName: string) {
-  for (const control of runtime.controlsByField.get(fieldName) ?? []) {
-    if (control.isConnected) {
-      continue
-    }
-
-    detachFieldControl(runtime, fieldName, control)
-  }
-}
-
-function detachFieldControl(runtime: FormRuntime, fieldName: string, control: FormControl) {
-  runtime.controlsByField.get(fieldName)?.delete(control)
-  runtime.cleanupByControl.get(control)?.()
-  runtime.cleanupByControl.delete(control)
-  runtime.fieldNameByControl.delete(control)
 }
