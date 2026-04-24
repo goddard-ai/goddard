@@ -1,6 +1,10 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterEach } from "bun:test"
 
+import tsrxPlugin from "./plugins/tsrx-bun-plugin.ts"
+
+Bun.plugin(tsrxPlugin())
+
 GlobalRegistrator.register({
   url: "http://localhost",
 })
