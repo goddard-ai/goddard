@@ -52,6 +52,7 @@
         "comark": "0.2.1",
         "culori": "^4.0.2",
         "electrobun": "^1.16.0",
+        "fuzzysort2": "^0.1.1",
         "hash-sum": "^2.0.0",
         "immer": "^11.1.4",
         "lexical": "^0.30.0",
@@ -1746,6 +1747,8 @@
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "function-bind": ["function-bind@1.1.2", "", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
+
+    "fuzzysort2": ["fuzzysort2@0.1.1", "", {}, "sha512-caiBLenyRHorZF8uH0edVVSChS3d0ntYLqoz06P1CL2Dfk28x+NLXURt67Vb6JkPF1uCSGQGiWOhSnc7CwGiww=="],
 
     "gensync": ["gensync@1.0.0-beta.2", "", {}, "sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg=="],
 

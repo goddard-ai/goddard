@@ -3,18 +3,33 @@ import {
   type CreateSessionRequest,
   type InitialSessionConfigOption,
   type ListAdaptersResponse,
-  type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
   type SessionPromptRequest,
 } from "@goddard-ai/sdk"
 import { computed, createModel, signal } from "@preact/signals"
+import * as fuzzysort from "fuzzysort2"
 
+import { isEmptyQuery } from "~/lib/search-query.ts"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 type LaunchPickerId = "project" | "adapter" | "location" | "branch" | "model" | "thinking" | null
+/** One slash-command suggestion shown in the session launch composer. */
+type SlashCommandSuggestion = SessionLaunchPreviewResponse["slashCommands"][number]
+/** One prepared slash-command suggestion cached by source array identity. */
+type PreparedSlashCommandSuggestion = {
+  suggestion: SlashCommandSuggestion
+  preparedDescription: fuzzysort.PreparedTarget | null
+  preparedInputHint: fuzzysort.PreparedTarget | null
+  preparedName: fuzzysort.PreparedTarget
+}
 
 export type SessionLaunchLocation = "local" | "worktree"
+
+const preparedSlashCommandSuggestions = new WeakMap<
+  readonly SlashCommandSuggestion[],
+  readonly PreparedSlashCommandSuggestion[]
+>()
 
 function isConfigOptionGroup(option: unknown): option is {
   name: string
@@ -28,6 +43,26 @@ function isConfigOptionGroup(option: unknown): option is {
   )
 }
 
+/** Returns the prepared slash-command suggestions cached for one suggestion array instance. */
+function getPreparedSlashCommandSuggestions(suggestions: readonly SlashCommandSuggestion[]) {
+  const existingSuggestions = preparedSlashCommandSuggestions.get(suggestions)
+
+  if (existingSuggestions) {
+    return existingSuggestions
+  }
+
+  const nextSuggestions = suggestions.map((suggestion) => ({
+    preparedDescription: suggestion.description ? fuzzysort.prepare(suggestion.description) : null,
+    preparedInputHint: suggestion.inputHint ? fuzzysort.prepare(suggestion.inputHint) : null,
+    preparedName: fuzzysort.prepare(suggestion.name),
+    suggestion,
+  }))
+
+  preparedSlashCommandSuggestions.set(suggestions, nextSuggestions)
+  return nextSuggestions
+}
+
+/** Flattens grouped select options into one ordered list of concrete values. */
 export function flattenConfigOptionValues(
   option: Extract<
     NonNullable<SessionLaunchPreviewResponse["configOptions"]>[number],
@@ -52,32 +87,28 @@ export function flattenConfigOptionValues(
   return flattenedOptions
 }
 
+/** Fuzzy-filters slash-command suggestions while preserving the default result cap. */
 export function filterSlashCommandSuggestions(
-  suggestions: readonly SessionLaunchPreviewResponse["slashCommands"][number][],
+  suggestions: readonly SlashCommandSuggestion[],
   query: string,
   limit = 20,
 ) {
-  const normalizedQuery = query.trim().toLowerCase()
-  const filteredSuggestions: SessionComposerSuggestionsResponse["suggestions"] = []
-
-  for (const suggestion of suggestions) {
-    if (
-      normalizedQuery.length > 0 &&
-      suggestion.name.toLowerCase().includes(normalizedQuery) === false &&
-      suggestion.description.toLowerCase().includes(normalizedQuery) === false &&
-      (suggestion.inputHint?.toLowerCase().includes(normalizedQuery) ?? false) === false
-    ) {
-      continue
-    }
-
-    filteredSuggestions.push(suggestion)
-
-    if (filteredSuggestions.length >= limit) {
-      break
-    }
+  if (isEmptyQuery(query)) {
+    return suggestions.slice(0, limit)
   }
 
-  return filteredSuggestions
+  return fuzzysort
+    .searchFields(
+      query,
+      getPreparedSlashCommandSuggestions(suggestions),
+      [
+        { key: "name", extract: (entry) => entry.preparedName },
+        { key: "description", extract: (entry) => entry.preparedDescription },
+        { key: "inputHint", extract: (entry) => entry.preparedInputHint },
+      ],
+      { limit, threshold: 0 },
+    )
+    .items.map((entry) => entry.value.suggestion)
 }
 
 export const SessionLaunchFormState = createModel(function () {

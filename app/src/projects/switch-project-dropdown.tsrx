@@ -1,9 +1,11 @@
+import * as fuzzysort from "fuzzysort2"
 import { concat } from "radashi"
 import { Search } from "lucide-react"
-import { useEffect, useState } from "preact/hooks"
+import { useEffect, useMemo, useState } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { isEmptyQuery } from "~/lib/search-query.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./actions.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
 import type { ProjectRecord } from "./project-registry.ts"
@@ -18,17 +20,6 @@ type SwitchProjectItem = {
   project: ProjectRecord;
 }
 
-function projectMatchesSearch(project: ProjectRecord, search: string) {
-  const normalizedSearch = search.trim().toLowerCase()
-
-  if (normalizedSearch.length === 0) {
-    return true
-  }
-
-  return project.name.toLowerCase().includes(normalizedSearch) ||
-    project.path.toLowerCase().includes(normalizedSearch)
-}
-
 /** Renders the header-anchored searchable project switcher dropdown. */
 export component SwitchProjectDropdown() {
   const projectContext = useProjectContext()
@@ -36,6 +27,9 @@ export component SwitchProjectDropdown() {
   const workbenchTabSet = useWorkbenchTabSet()
 
   const [isOpen, setIsOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const [itemElements] = useState((): Record<string, HTMLButtonElement | null> => ({}))
 
   const projects = orderProjectsByRecentActivity(
     projectRegistry.projectList,
@@ -45,6 +39,44 @@ export component SwitchProjectDropdown() {
     projectContext.activeProjectPath === null
       ? null
       : projectRegistry.projectsByPath[projectContext.activeProjectPath] ?? null
+  const searchableProjects = useMemo(
+    () => projects.map(
+      (project) => ({
+        preparedName: fuzzysort.prepare(project.name),
+        preparedPath: fuzzysort.prepare(project.path),
+        project,
+      }),
+    ),
+    [projects],
+  )
+  const filteredProjects = useMemo(() => {
+    if (isEmptyQuery(search)) {
+      return projects
+    }
+
+    return fuzzysort.searchFields(
+      search,
+      searchableProjects,
+      [
+        { key: "name", extract: (item) => item.preparedName },
+        { key: "path", extract: (item) => item.preparedPath },
+      ],
+      { threshold: 0 },
+    ).items.map((item) => item.value.project)
+  }, [projects, search, searchableProjects])
+  const items: SwitchProjectItem[] = useMemo(
+    () => concat(
+      isEmptyQuery(search) ? { id: "open-folder", kind: "open-folder" } : undefined,
+      filteredProjects.map(
+        (project) => ({
+          id: project.path,
+          kind: "project" as const,
+          project,
+        }),
+      ),
+    ),
+    [filteredProjects, search],
+  )
 
   async function openFolderFromSwitcher() {
     setIsOpen(false)
@@ -56,6 +88,13 @@ export component SwitchProjectDropdown() {
       },
     )
   }
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearch("")
+      setHighlightedIndex(0)
+    }
+  }, [isOpen])
 
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
     setIsOpen(true)
@@ -91,21 +130,6 @@ export component SwitchProjectDropdown() {
   }
 
   let inputElement: HTMLInputElement | undefined
-
-  const [search, setSearch] = useState("")
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const [itemElements] = useState((): Record<string, HTMLButtonElement | null> => ({}))
-
-  const items: SwitchProjectItem[] = concat(
-    search.trim().length === 0 ? { id: "open-folder", kind: "open-folder" } : undefined,
-    projects.filter((project) => projectMatchesSearch(project, search)).map(
-      (project) => ({
-        id: project.path,
-        kind: "project" as const,
-        project,
-      }),
-    ),
-  )
 
   const highlightedItemIndex =
     items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
@@ -226,7 +250,7 @@ export component SwitchProjectDropdown() {
                   </span>
                 }
               </span>
-              if (item.kind === "project" && activeProjectPath?.path === item.project.path) {
+              if (item.kind === "project" && activeProject?.path === item.project.path) {
                 <span class={styles.activeBadge}>{"Active"}</span>
               }
             </button>

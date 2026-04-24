@@ -2,11 +2,13 @@
 import { Popover } from "@ark-ui/react/popover"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import * as fuzzysort from "fuzzysort2"
 import { ChevronDown, LoaderCircle } from "lucide-react"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
+import { isEmptyQuery } from "~/lib/search-query.ts"
 import styles from "./select-menu.style.ts"
 
 /** One item rendered inside a launch-session selector menu. */
@@ -159,21 +161,33 @@ component SelectMenuContainer(props: {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
 
-  const normalizedQuery = query.trim().toLowerCase()
-  const filteredItems =
-    !props.isFilterable || normalizedQuery.length === 0
-      ? props.items
-      : props.items.filter((item) => {
-          const searchableText = ([
-            item.label,
-            item.detail,
-            item.searchText,
-          ].filter((value) => typeof value === "string" && value.length > 0) as string[]).join(
-            "\n",
-          ).toLowerCase()
+  const searchableItems = useMemo(
+    () => props.items.map(
+      (item) => ({
+        item,
+        preparedDetail: item.detail ? fuzzysort.prepare(item.detail) : null,
+        preparedLabel: fuzzysort.prepare(item.label),
+        preparedSearchText: item.searchText ? fuzzysort.prepare(item.searchText) : null,
+      }),
+    ),
+    [props.items],
+  )
+  const filteredItems = useMemo(() => {
+    if (!props.isFilterable || isEmptyQuery(query)) {
+      return props.items
+    }
 
-          return searchableText.includes(normalizedQuery)
-        })
+    return fuzzysort.searchFields(
+      query,
+      searchableItems,
+      [
+        { key: "label", extract: (entry) => entry.preparedLabel },
+        { key: "detail", extract: (entry) => entry.preparedDetail },
+        { key: "searchText", extract: (entry) => entry.preparedSearchText },
+      ],
+      { threshold: 0 },
+    ).items.map((entry) => entry.value.item)
+  }, [props.isFilterable, props.items, query, searchableItems])
   const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
   const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
 
