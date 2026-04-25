@@ -3,7 +3,7 @@ import { useEffect, useRef } from "preact/hooks"
 import { z } from "zod"
 
 import { createFieldRefs } from "./use-form/dom.ts"
-import { FormManager, FormCallbacksRuntime, FormRuntime } from "./use-form/manager.ts"
+import { FormCallbacksRuntime, FormManager, FormRuntime } from "./use-form/manager.ts"
 import {
   createForm,
   type AnyObjectSchema,
@@ -13,7 +13,7 @@ import {
   type FormSchema,
 } from "./use-form/schema.ts"
 import type { FormRefRecord } from "./use-form/types.ts"
-import { createEmptyErrors, cloneValueRecord } from "./use-form/values.ts"
+import { cloneValueRecord, createEmptyErrors } from "./use-form/values.ts"
 
 export { createForm } from "./use-form/schema.ts"
 
@@ -70,8 +70,12 @@ export function useForm<const T extends AnyObjectSchema>(
 
   return {
     refs: refsRef.current as FormRefs<T>,
-    errors: form.errors as FormErrors<T>,
-    isSubmitting: form.isSubmitting,
+    get errors() {
+      return form.errors as FormErrors<T>
+    },
+    get isSubmitting() {
+      return form.isSubmitting
+    },
     submit(event: preact.TargetedSubmitEvent<HTMLFormElement>) {
       event.preventDefault()
       void form.submit(event.currentTarget)

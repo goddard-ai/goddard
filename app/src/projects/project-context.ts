@@ -152,7 +152,15 @@ export class ProjectContext extends Sigma<ProjectContextState> {
 
   /** Marks one project as active and moves it to the front of recent-project order. */
   setActiveProject(path: string | null) {
-    this.#setActiveProject(path)
+    if (this.activeProjectPath === path) {
+      return
+    }
+
+    this.activeProjectPath = path
+
+    if (path) {
+      this.recentProjectPaths = [path, ...this.recentProjectPaths.filter((item) => item !== path)]
+    }
   }
 
   /** Applies the currently focused tab and any synchronous project resolution it already knows. */
@@ -169,7 +177,7 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     this.#reportedTabProjectsByTabId[tabId] = path
 
     if (path) {
-      this.#setActiveProject(path)
+      this.setActiveProject(path)
     }
   }
 
@@ -185,7 +193,7 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     this.#reportedTabProjectsByTabId[tabId] = path
 
     if (this.#focusedTabId === tabId && path) {
-      this.#setActiveProject(path)
+      this.setActiveProject(path)
     }
   }
 
@@ -213,23 +221,11 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     }
 
     if (focusedTabProjectPath) {
-      this.#setActiveProject(focusedTabProjectPath)
+      this.setActiveProject(focusedTabProjectPath)
       return
     }
 
     this.activeProjectPath = nextRecentProjectPaths[0] ?? null
-  }
-
-  #setActiveProject(path: string | null) {
-    if (this.activeProjectPath === path) {
-      return
-    }
-
-    this.activeProjectPath = path
-
-    if (path) {
-      this.recentProjectPaths = [path, ...this.recentProjectPaths.filter((item) => item !== path)]
-    }
   }
 }
 
