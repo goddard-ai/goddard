@@ -12,9 +12,9 @@ const SignupForm = createForm({
 
 function useSignupForm(options: {
   initialValues?: { name?: string }
-  onChange?(values: { name?: string }): void
-  onInvalid?(error: z.ZodError): void
+  onInvalid?(result: { error: z.ZodError; errors: { name: string | null } }): void
   onSubmit(values: { name: string }): void | Promise<void>
+  onValues?(values: { name?: string }): void
 }) {
   return useForm(SignupForm, options)
 }
@@ -46,16 +46,16 @@ function createHarness() {
 
   function TestHarness(props: {
     initialValues?: { name?: string }
-    onChange?(values: { name?: string }): void
-    onInvalid?(error: z.ZodError): void
+    onInvalid?(result: { error: z.ZodError; errors: { name: string | null } }): void
     onRender(form: ReturnType<typeof useSignupForm>): void
     onSubmit(values: { name: string }): void | Promise<void>
+    onValues?(values: { name?: string }): void
   }) {
     const form = useSignupForm({
       initialValues: props.initialValues,
-      onChange: props.onChange,
       onInvalid: props.onInvalid,
       onSubmit: props.onSubmit,
+      onValues: props.onValues,
     })
 
     useEffect(() => {
@@ -127,13 +127,13 @@ function createHarness() {
   }
 }
 
-test("initialValues hydrate the uncontrolled input and onChange receives raw values", async () => {
-  const onChange = vi.fn()
+test("initialValues hydrate the uncontrolled input and onValues receives raw values", async () => {
+  const onValues = vi.fn()
   const harness = createHarness()
 
   await harness.render({
     initialValues: { name: "John" },
-    onChange,
+    onValues,
     onSubmit() {},
   })
 
@@ -144,8 +144,8 @@ test("initialValues hydrate the uncontrolled input and onChange receives raw val
     harness.input.dispatchEvent(new Event("input", { bubbles: true }))
   })
 
-  expect(onChange).toHaveBeenCalledTimes(1)
-  expect(onChange).toHaveBeenLastCalledWith({ name: "Jane" })
+  expect(onValues).toHaveBeenCalledTimes(1)
+  expect(onValues).toHaveBeenLastCalledWith({ name: "Jane" })
 })
 
 test("submit parses the current values and keeps isSubmitting true until the promise settles", async () => {
@@ -182,10 +182,12 @@ test("submit parses the current values and keeps isSubmitting true until the pro
   expect(harness.form.isSubmitting).toBe(false)
 })
 
-test("invalid submit exposes keyed errors and clears them when the field changes", async () => {
+test("invalid submit exposes keyed errors, reports them, and clears them when the field changes", async () => {
+  const onInvalid = vi.fn()
   const harness = createHarness()
 
   await harness.render({
+    onInvalid,
     onSubmit() {},
   })
 
@@ -197,6 +199,13 @@ test("invalid submit exposes keyed errors and clears them when the field changes
   })
 
   expect(harness.form.errors.name).toBe("Name is required")
+  expect(onInvalid).toHaveBeenCalledTimes(1)
+  expect(onInvalid).toHaveBeenLastCalledWith({
+    error: expect.any(z.ZodError),
+    errors: {
+      name: "Name is required",
+    },
+  })
 
   await act(async () => {
     harness.input.value = "Jane"
@@ -207,12 +216,12 @@ test("invalid submit exposes keyed errors and clears them when the field changes
 })
 
 test("clear resets the uncontrolled input and emits the emptied values", async () => {
-  const onChange = vi.fn()
+  const onValues = vi.fn()
   const harness = createHarness()
 
   await harness.render({
     initialValues: { name: "John" },
-    onChange,
+    onValues,
     onSubmit() {},
   })
 
@@ -222,8 +231,36 @@ test("clear resets the uncontrolled input and emits the emptied values", async (
   })
 
   expect(harness.input.value).toBe("")
-  expect(onChange).toHaveBeenCalledTimes(1)
-  expect(onChange).toHaveBeenLastCalledWith({ name: "" })
+  expect(onValues).toHaveBeenCalledTimes(1)
+  expect(onValues).toHaveBeenLastCalledWith({ name: "" })
+})
+
+test("reset restores the latest initialValues and emits the restored values", async () => {
+  const onValues = vi.fn()
+  const harness = createHarness()
+
+  await harness.render({
+    initialValues: { name: "John" },
+    onSubmit() {},
+    onValues,
+  })
+
+  await act(async () => {
+    harness.input.value = "Jane"
+    harness.input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+
+  await harness.rerender({
+    initialValues: { name: "Jill" },
+  })
+
+  await act(async () => {
+    harness.form.reset()
+    await Promise.resolve()
+  })
+
+  expect(harness.input.value).toBe("Jill")
+  expect(onValues).toHaveBeenLastCalledWith({ name: "Jill" })
 })
 
 test("new initialValues rehydrate pristine fields but do not overwrite dirty ones", async () => {
@@ -250,4 +287,14 @@ test("new initialValues rehydrate pristine fields but do not overwrite dirty one
   })
 
   expect(harness.input.value).toBe("Jack")
+})
+
+test("createForm rejects nested field inputs", () => {
+  expect(() =>
+    createForm({
+      profile: z.object({
+        name: z.string(),
+      }),
+    }),
+  ).toThrow('createForm only supports flat field inputs. "profile" requires nested input values.')
 })

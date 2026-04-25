@@ -8,6 +8,7 @@ import {
   createForm,
   type AnyObjectSchema,
   type FormErrors,
+  type FormInvalidResult,
   type FormRefs,
   type FormSchema,
 } from "./use-form/schema.ts"
@@ -24,24 +25,28 @@ export function useForm<const T extends AnyObjectSchema>(
   schema: FormSchema<T>,
   options: {
     initialValues?: Partial<z.input<T>>
-    onChange?(values: Partial<z.input<T>>): void
-    onInvalid?(error: z.ZodError): void
+    onInvalid?(result: FormInvalidResult<T>): void
     onSubmit(values: z.output<T>): void | Promise<void>
+    onValues?(values: Partial<z.input<T>>): void
   },
 ) {
   const callbacksRef = useRef<FormCallbacksRuntime>(new FormCallbacksRuntime())
   const refsRef = useRef<FormRefRecord | null>(null)
 
   callbacksRef.current.sync({
-    onChange: options.onChange
-      ? (values) => {
-          options.onChange?.(values as Partial<z.input<T>>)
+    onInvalid: options.onInvalid
+      ? (result) => {
+          options.onInvalid?.(result as FormInvalidResult<T>)
         }
       : undefined,
-    onInvalid: options.onInvalid,
     onSubmit: (values) => {
       return options.onSubmit(values as z.output<T>)
     },
+    onValues: options.onValues
+      ? (values) => {
+          options.onValues?.(values as Partial<z.input<T>>)
+        }
+      : undefined,
   })
 
   const form = useSigma(
@@ -73,6 +78,9 @@ export function useForm<const T extends AnyObjectSchema>(
     },
     clear() {
       form.clear()
+    },
+    reset() {
+      form.reset()
     },
   }
 }

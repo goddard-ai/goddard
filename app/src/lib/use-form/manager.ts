@@ -22,17 +22,22 @@ import {
   writeFieldValue,
 } from "./values.ts"
 
+type FormInvalidDetails = {
+  errors: FieldErrorRecord
+  error: z.ZodError
+}
+
 export class FormCallbacksRuntime {
-  onChange?: (values: FormValueRecord) => void
-  onInvalid?: (error: z.ZodError) => void
+  onValues?: (values: FormValueRecord) => void
+  onInvalid?: (details: FormInvalidDetails) => void
   onSubmit: (values: unknown) => void | Promise<void> = () => {}
 
   sync(nextCallbacks: {
-    onChange?(values: FormValueRecord): void
-    onInvalid?(error: z.ZodError): void
+    onValues?(values: FormValueRecord): void
+    onInvalid?(details: FormInvalidDetails): void
     onSubmit(values: unknown): void | Promise<void>
   }) {
-    this.onChange = nextCallbacks.onChange
+    this.onValues = nextCallbacks.onValues
     this.onInvalid = nextCallbacks.onInvalid
     this.onSubmit = nextCallbacks.onSubmit
   }
@@ -132,7 +137,7 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
       )
 
       this.draftValues = nextValues
-      emitChange(this.callbacks.onChange, this.runtime, nextValues)
+      emitValues(this.callbacks.onValues, this.runtime, nextValues)
     },
 
     /** Clears every registered field back to its empty DOM state and emits the raw values. */
@@ -149,7 +154,22 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
 
       this.draftValues = nextValues
       this.errors = clearAllErrors(this.errors, this.schema.keys)
-      emitChange(this.callbacks.onChange, this.runtime, nextValues)
+      emitValues(this.callbacks.onValues, this.runtime, nextValues)
+    },
+
+    /** Restores the latest persisted initial values and marks every field pristine again. */
+    reset() {
+      const nextValues = cloneValueRecord(this.runtime.previousInitialValues)
+
+      this.runtime.dirtyFields.clear()
+
+      for (const fieldName of this.schema.keys) {
+        hydrateField(this.runtime, nextValues, fieldName)
+      }
+
+      this.draftValues = nextValues
+      this.errors = clearAllErrors(this.errors, this.schema.keys)
+      emitValues(this.callbacks.onValues, this.runtime, nextValues)
     },
 
     /** Collects live DOM values, validates them, and runs the async submit callback. */
@@ -163,8 +183,13 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
       )
 
       if (!parsed.success) {
-        this.errors = buildFieldErrors(this.schema.keys, parsed.error)
-        this.callbacks.onInvalid?.(parsed.error)
+        const errors = buildFieldErrors(this.schema.keys, parsed.error)
+
+        this.errors = errors
+        this.callbacks.onInvalid?.({
+          errors,
+          error: parsed.error,
+        })
         focusFirstInvalidField(this.runtime, parsed.error, formElement)
         this.commit()
         return
@@ -183,12 +208,12 @@ export const FormManager = new SigmaType<FormManagerShape>("FormManager")
     },
   })
 
-function emitChange(
-  onChange: ((values: FormValueRecord) => void) | undefined,
+function emitValues(
+  onValues: ((values: FormValueRecord) => void) | undefined,
   runtime: FormRuntime,
   nextValues: FormValueRecord,
 ) {
-  if (!onChange) {
+  if (!onValues) {
     return
   }
 
@@ -198,7 +223,7 @@ function emitChange(
 
   const snapshot = cloneValueRecord(nextValues)
   runtime.lastEmittedValues = snapshot
-  onChange(snapshot)
+  onValues(snapshot)
 }
 
 function clearFieldError(errors: FieldErrorRecord, fieldName: string) {
