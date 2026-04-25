@@ -26,14 +26,12 @@ export type NavigationItem = {
 }
 
 /** Public state owned by the navigation model. */
-type NavigationShape = {
+type NavigationState = {
   selectedNavId: NavigationItemId
 }
 
 /** Sigma state for the app shell's primary navigation rail. */
-export class Navigation extends Sigma<NavigationShape> {
-  declare selectedNavId: NavigationItemId
-
+export class Navigation extends Sigma<NavigationState> {
   constructor() {
     super({
       selectedNavId: "inbox",
@@ -69,3 +67,5 @@ export class Navigation extends Sigma<NavigationShape> {
     }
   }
 }
+
+export interface Navigation extends NavigationState {}

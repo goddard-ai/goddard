@@ -18,7 +18,7 @@ import {
   type ShortcutKeymapOverrides,
 } from "~/shared/shortcut-keymap.ts"
 
-type ShortcutRegistryShape = {
+type ShortcutRegistryState = {
   runtime: SigmaRef<ShortcutRuntime>
   bindingSet: SigmaRef<BindingSet>
   selectedProfileId: KeymapProfileId
@@ -55,17 +55,8 @@ function normalizeWhenClause(whenClause: string | null | undefined) {
 }
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
-export class ShortcutRegistry extends Sigma<ShortcutRegistryShape> {
-  declare runtime: SigmaRef<ShortcutRuntime>
-  declare bindingSet: SigmaRef<BindingSet>
-  declare selectedProfileId: KeymapProfileId
-  declare overrides: ShortcutKeymapOverrides
-  declare resolvedBindings: ShortcutKeymapBindings
-  declare loadError: string | null
-  declare writeError: string | null
-  declare isHydrated: boolean
-
-  constructor(services: Pick<ShortcutRegistryShape, "runtime" | "bindingSet">) {
+export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
+  constructor(services: Pick<ShortcutRegistryState, "runtime" | "bindingSet">) {
     super({
       runtime: services.runtime,
       bindingSet: services.bindingSet,
@@ -324,6 +315,8 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryShape> {
     ]
   }
 }
+
+export interface ShortcutRegistry extends ShortcutRegistryState {}
 
 /** Module-scoped shortcut registry singleton shared across the app shell. */
 const runtime = createShortcuts({

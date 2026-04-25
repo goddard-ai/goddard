@@ -32,7 +32,7 @@ type WorkbenchTabsSnapshot = {
 }
 
 /** Top-level public state owned by the workbench tab model. */
-type WorkbenchTabSetShape = {
+type WorkbenchTabSetState = {
   tabs: Record<string, WorkbenchDetailTab>
   orderedTabIds: string[]
   activeTabId: string
@@ -63,7 +63,7 @@ function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchDetailTa
 }
 
 /** Persists the current tab layout into local workspace storage. */
-function persistTabs(state: WorkbenchTabSetShape): void {
+function persistTabs(state: WorkbenchTabSetState): void {
   writeJsonStorage(WORKBENCH_TABS_STORAGE_KEY, {
     tabs: state.orderedTabIds
       .map((tabId) => state.tabs[tabId])
@@ -74,12 +74,7 @@ function persistTabs(state: WorkbenchTabSetShape): void {
 }
 
 /** Sigma state for the shell's closable workbench tab strip. */
-export class WorkbenchTabSet extends Sigma<WorkbenchTabSetShape> {
-  declare tabs: Record<string, WorkbenchDetailTab>
-  declare orderedTabIds: string[]
-  declare activeTabId: string
-  declare recency: string[]
-
+export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   constructor() {
     super({
       tabs: {},
@@ -208,3 +203,5 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetShape> {
     this.recency = snapshot.recency.filter((tabId) => Boolean(tabs[tabId]))
   }
 }
+
+export interface WorkbenchTabSet extends WorkbenchTabSetState {}

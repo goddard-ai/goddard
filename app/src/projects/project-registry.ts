@@ -16,13 +16,13 @@ type ProjectRegistrySnapshot = {
 }
 
 /** Top-level public state for the machine-wide project registry. */
-type ProjectRegistryShape = {
+type ProjectRegistryState = {
   projectsByPath: Record<string, ProjectRecord>
   orderedProjectPaths: string[]
 }
 
 /** Persists the visible projects in their current render order. */
-function persistProjects(state: ProjectRegistryShape): void {
+function persistProjects(state: ProjectRegistryState): void {
   writeJsonStorage(PROJECT_REGISTRY_STORAGE_KEY, {
     projects: state.orderedProjectPaths
       .map((projectPath) => state.projectsByPath[projectPath])
@@ -31,10 +31,7 @@ function persistProjects(state: ProjectRegistryShape): void {
 }
 
 /** Sigma state for the app's machine-wide project registry. */
-export class ProjectRegistry extends Sigma<ProjectRegistryShape> {
-  declare projectsByPath: Record<string, ProjectRecord>
-  declare orderedProjectPaths: string[]
-
+export class ProjectRegistry extends Sigma<ProjectRegistryState> {
   constructor() {
     super({
       projectsByPath: {},
@@ -86,3 +83,5 @@ export class ProjectRegistry extends Sigma<ProjectRegistryShape> {
 export function lookupProject(registry: ProjectRegistry, path: string): ProjectRecord | null {
   return registry.projectsByPath[path] ?? null
 }
+
+export interface ProjectRegistry extends ProjectRegistryState {}

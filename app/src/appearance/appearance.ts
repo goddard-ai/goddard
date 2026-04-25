@@ -7,13 +7,13 @@ import {
   type AppearanceSnapshot,
 } from "./theme.ts"
 
-type AppearanceShape = {
+type AppearanceState = {
   mode: AppearanceMode
   highContrast: boolean
   systemTheme: AppearanceSnapshot["systemTheme"]
 }
 
-function persistAndApplyAppearance(state: AppearanceShape) {
+function persistAndApplyAppearance(state: AppearanceState) {
   writeAppearancePreferences(state.mode, state.highContrast)
   applyAppearanceSnapshot({
     mode: state.mode,
@@ -22,11 +22,7 @@ function persistAndApplyAppearance(state: AppearanceShape) {
   })
 }
 
-export class Appearance extends Sigma<AppearanceShape> {
-  declare mode: AppearanceMode
-  declare highContrast: boolean
-  declare systemTheme: AppearanceSnapshot["systemTheme"]
-
+export class Appearance extends Sigma<AppearanceState> {
   constructor(initialSnapshot: AppearanceSnapshot) {
     super({
       mode: initialSnapshot.mode,
@@ -71,3 +67,5 @@ export class Appearance extends Sigma<AppearanceShape> {
     return []
   }
 }
+
+export interface Appearance extends AppearanceState {}

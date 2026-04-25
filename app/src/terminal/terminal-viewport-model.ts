@@ -63,7 +63,7 @@ export type TerminalViewportRow = {
   segments: TerminalViewportSegment[]
 }
 
-type TerminalViewportShape = {
+type TerminalViewportState = {
   cols: number
   rows: number
   viewRows: TerminalViewportRow[]
@@ -93,24 +93,8 @@ type TerminalCell = ReturnType<Terminal["buffer"]["active"]["getNullCell"]>
 /** Long-lived terminal model that can outlive any single viewport mount. */
 export class TerminalViewportModel extends SigmaTarget<
   TerminalViewportEvents,
-  TerminalViewportShape
+  TerminalViewportState
 > {
-  declare cols: number
-  declare rows: number
-  declare viewRows: TerminalViewportRow[]
-  declare fontFamily: string
-  declare fontSize: number
-  declare lineHeight: number
-  declare letterSpacing: number
-  declare theme: Readonly<ITheme>
-  declare minimumCols: number
-  declare minimumRows: number
-  declare terminal: SigmaRef<Terminal> | null
-  declare viewportElement: HTMLDivElement | null
-  declare resizeObserver: ResizeObserver | null
-  declare processedChunkCount: number
-  declare writeVersion: number
-
   constructor(config: TerminalViewportSetup = {}) {
     super({
       cols: DEFAULT_MINIMUM_COLS,
@@ -315,6 +299,8 @@ export class TerminalViewportModel extends SigmaTarget<
   }
 }
 
+export interface TerminalViewportModel extends TerminalViewportState {}
+
 export function translateKeyboardEvent(
   event: preact.TargetedKeyboardEvent<HTMLDivElement>,
 ): string | null {
@@ -407,7 +393,7 @@ async function syncTerminalChunks(
 function buildViewportSnapshot(
   terminal: Terminal,
   theme: ITheme,
-): Pick<TerminalViewportShape, "cols" | "rows" | "viewRows"> {
+): Pick<TerminalViewportState, "cols" | "rows" | "viewRows"> {
   const buffer = terminal.buffer.active
   const cursorLine = buffer.baseY + buffer.cursorY
   const viewRows: TerminalViewportRow[] = []

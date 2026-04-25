@@ -10,7 +10,7 @@ type ProjectContextSnapshot = {
   recentProjectPaths: string[]
 }
 
-type ProjectContextShape = {
+type ProjectContextState = {
   activeProjectPath: string | null
   focusedTabId: string | null
   recentProjectPaths: string[]
@@ -61,7 +61,7 @@ function uniqueProjectPaths(paths: readonly string[]) {
   return [...new Set(paths)]
 }
 
-function setActiveProjectState(state: ProjectContextShape, path: string | null) {
+function setActiveProjectState(state: ProjectContextState, path: string | null) {
   if (state.activeProjectPath === path) {
     return
   }
@@ -137,12 +137,7 @@ export function orderProjectsByRecentActivity(
 }
 
 /** Sigma state for the app-wide active project context and recent-project order. */
-export class ProjectContext extends Sigma<ProjectContextShape> {
-  declare activeProjectPath: string | null
-  declare focusedTabId: string | null
-  declare recentProjectPaths: string[]
-  declare reportedTabProjectsByTabId: Record<string, string | null>
-
+export class ProjectContext extends Sigma<ProjectContextState> {
   constructor() {
     super({
       activeProjectPath: null,
@@ -281,3 +276,5 @@ export class ProjectContext extends Sigma<ProjectContextShape> {
     persistProjectContext(this)
   }
 }
+
+export interface ProjectContext extends ProjectContextState {}

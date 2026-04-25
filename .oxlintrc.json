@@ -14,6 +14,7 @@
     "tsrx/no-lazy-destructuring-in-modules": "error",
     "tsrx/valid-for-of-key": "error",
     "import/no-duplicates": "error",
+    "no-unsafe-declaration-merging": "off",
     "no-unused-vars": [
       "error",
       {
