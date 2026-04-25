@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import {
   collectSubmissionValues,
+  createFieldRefs,
   detachFieldControl,
   focusFirstInvalidField,
   getEmptyFieldValue,
@@ -13,7 +14,14 @@ import {
   sweepDisconnectedControls,
   writeFieldValue,
 } from "./dom.ts"
-import type { AnyObjectSchema, FormControl, FormInvalidResult, FormSchema } from "./schema.ts"
+import type {
+  AnyObjectSchema,
+  FormControl,
+  FormErrors,
+  FormInvalidResult,
+  FormRefs,
+  FormSchema,
+} from "./schema.ts"
 import type { FieldErrorRecord, FormValueRecord } from "./types.ts"
 import {
   areValueRecordsEqual,
@@ -26,9 +34,9 @@ import {
 declare const formManagerSchemaType: unique symbol
 
 /** Reactive state for one uncontrolled Zod-backed form instance. */
-type FormManagerState = {
+type FormManagerState<T extends AnyObjectSchema> = {
   draftValues: FormValueRecord
-  errors: FieldErrorRecord
+  errors: FormErrors<T>
   isSubmitting: boolean
 }
 
@@ -43,9 +51,11 @@ type FormManagerSetup<T extends AnyObjectSchema> = {
 }
 
 /** Local sigma state for one uncontrolled Zod-backed form instance. */
-export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerState> {
+export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerState<T>> {
   /** Zod-backed field contract used for validation and ordering; it is constructor wiring, not form state. */
   #schema: FormSchema<T>
+  /** Stable field refs exposed to components; each callback delegates back to this manager. */
+  #refs: FormRefs<T>
   /** Latest values callback invoked only when the raw flat value snapshot actually changes. */
   #onValues: ((values: Partial<z.input<T>>) => void) | undefined
   /** Latest invalid-submit callback invoked after validation errors are committed. */
@@ -70,16 +80,26 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
 
     super({
       draftValues,
-      errors: createEmptyErrors(setup.schema.keys),
+      errors: createFormErrors<T>(setup.schema.keys),
       isSubmitting: setup.isSubmitting ?? false,
     })
 
     this.#schema = setup.schema
+    this.#refs = createFieldRefs(this, setup.schema.keys) as FormRefs<T>
     this.#onValues = setup.onValues
     this.#onInvalid = setup.onInvalid
     this.#onSubmit = setup.onSubmit
     this.#lastEmittedValues = cloneValueRecord(setup.initialValues as Record<string, unknown>)
     this.#previousInitialValues = setup.initialValues
+  }
+
+  get refs() {
+    return this.#refs
+  }
+
+  submit = (event: preact.TargetedSubmitEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void this.submitForm(event.currentTarget)
   }
 
   /** Reconciles new persisted initial values into still-pristine uncontrolled fields. */
@@ -112,7 +132,13 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     const previousFieldName = this.#fieldNameByControl.get(control)
 
     if (previousFieldName && previousFieldName !== fieldName) {
-      this.#detachFieldControl(previousFieldName, control)
+      detachFieldControl(
+        this.#controlsByField,
+        this.#fieldNameByControl,
+        this.#cleanupByControl,
+        previousFieldName,
+        control,
+      )
     }
 
     control.name = fieldName
@@ -128,18 +154,29 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
 
   /** Removes one field control and any listener bookkeeping owned by this form. */
   detachFieldControl(fieldName: string, control: FormControl) {
-    this.#detachFieldControl(fieldName, control)
+    detachFieldControl(
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      fieldName,
+      control,
+    )
   }
 
   /** Prunes controls that have disconnected since the last render pass or submit. */
   sweepDisconnectedControls(fieldName: string) {
-    this.#sweepDisconnectedControls(fieldName)
+    sweepDisconnectedControls(
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      fieldName,
+    )
   }
 
   /** Mirrors one uncontrolled field change into the draft snapshot and persistence callback. */
   handleFieldChange(fieldName: string) {
     this.#dirtyFields.add(fieldName)
-    this.errors = clearFieldError(this.errors, fieldName)
+    this.errors = clearFieldError<T>(this.errors, fieldName)
 
     const nextValues = setDraftFieldValue(
       this.draftValues,
@@ -165,7 +202,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     }
 
     this.draftValues = nextValues
-    this.errors = clearAllErrors(this.errors, this.#schema.keys)
+    this.errors = clearAllErrors<T>(this.errors, this.#schema.keys)
     this.commit()
     this.#emitValues(nextValues)
   }
@@ -183,13 +220,13 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     }
 
     this.draftValues = nextValues
-    this.errors = clearAllErrors(this.errors, this.#schema.keys)
+    this.errors = clearAllErrors<T>(this.errors, this.#schema.keys)
     this.commit()
     this.#emitValues(nextValues)
   }
 
   /** Collects live DOM values, validates them, and runs the async submit callback. */
-  async submit(formElement: HTMLFormElement) {
+  async submitForm(formElement: HTMLFormElement) {
     if (this.isSubmitting) {
       return
     }
@@ -197,19 +234,19 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     const parsed = this.#schema.zod.safeParse(this.#collectSubmissionValues(formElement))
 
     if (!parsed.success) {
-      const errors = buildFieldErrors(this.#schema.keys, parsed.error)
+      const errors = buildFieldErrors<T>(this.#schema.keys, parsed.error)
 
       this.errors = errors
       this.commit()
       this.#onInvalid?.({
-        errors: errors as FormInvalidResult<T>["errors"],
+        errors,
         error: parsed.error as FormInvalidResult<T>["error"],
       })
       this.#focusFirstInvalidField(formElement, parsed.error)
       return
     }
 
-    this.errors = clearAllErrors(this.errors, this.#schema.keys)
+    this.errors = clearAllErrors<T>(this.errors, this.#schema.keys)
     this.isSubmitting = true
     this.commit()
 
@@ -261,25 +298,6 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     })
   }
 
-  #sweepDisconnectedControls(fieldName: string) {
-    sweepDisconnectedControls(
-      this.#controlsByField,
-      this.#fieldNameByControl,
-      this.#cleanupByControl,
-      fieldName,
-    )
-  }
-
-  #detachFieldControl(fieldName: string, control: FormControl) {
-    detachFieldControl(
-      this.#controlsByField,
-      this.#fieldNameByControl,
-      this.#cleanupByControl,
-      fieldName,
-      control,
-    )
-  }
-
   #emitValues(nextValues: FormValueRecord) {
     if (!this.#onValues) {
       return
@@ -295,30 +313,40 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
   }
 }
 
-export interface FormManager<T extends AnyObjectSchema> extends FormManagerState {
+export interface FormManager<T extends AnyObjectSchema> extends FormManagerState<T> {
   readonly [formManagerSchemaType]?: T
 }
 
-function clearFieldError(errors: FieldErrorRecord, fieldName: string) {
-  if (errors[fieldName] === null) {
+function createFormErrors<T extends AnyObjectSchema>(fieldNames: readonly string[]) {
+  return createEmptyErrors(fieldNames) as FormErrors<T>
+}
+
+function clearFieldError<T extends AnyObjectSchema>(errors: FormErrors<T>, fieldName: string) {
+  if ((errors as FieldErrorRecord)[fieldName] === null) {
     return errors
   }
 
   return {
     ...errors,
     [fieldName]: null,
-  }
+  } as FormErrors<T>
 }
 
-function clearAllErrors(errors: FieldErrorRecord, fieldNames: readonly string[]) {
+function clearAllErrors<T extends AnyObjectSchema>(
+  errors: FormErrors<T>,
+  fieldNames: readonly string[],
+) {
   if (Object.values(errors).every((message) => message === null)) {
     return errors
   }
 
-  return createEmptyErrors(fieldNames)
+  return createFormErrors<T>(fieldNames)
 }
 
-function buildFieldErrors(fieldNames: readonly string[], error: z.ZodError) {
+function buildFieldErrors<T extends AnyObjectSchema>(
+  fieldNames: readonly string[],
+  error: z.ZodError,
+) {
   const nextErrors = createEmptyErrors(fieldNames)
 
   for (const issue of error.issues) {
@@ -331,5 +359,5 @@ function buildFieldErrors(fieldNames: readonly string[], error: z.ZodError) {
     nextErrors[fieldName] = issue.message
   }
 
-  return nextErrors
+  return nextErrors as FormErrors<T>
 }
