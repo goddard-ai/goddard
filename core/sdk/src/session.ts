@@ -43,6 +43,8 @@ export type {
   SessionHistoryTurn,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
+  SessionWorkforceParams,
+  SessionWorktreeParams,
   ListSessionsRequest,
   ListSessionsResponse,
   ShutdownSessionResponse,
@@ -69,18 +71,12 @@ export function createSessionPromptMessage(input: SessionPromptRequest) {
   } satisfies acp.AnyMessage
 }
 
-/** Structured worktree settings accepted when starting one daemon-backed session. */
-export interface SessionWorktreeOptions extends SessionWorktreeParams {}
-
-/** Structured workforce attachment accepted when starting one daemon-backed session. */
-export interface SessionWorkforceOptions extends SessionWorkforceParams {}
-
 /** Shared session creation fields used by both new and reconnect flows. */
 interface BaseSessionParams {
   agent?: ACPAdapterName | AgentDistribution
   cwd: string
-  worktree?: SessionWorktreeOptions
-  workforce?: SessionWorkforceOptions
+  worktree?: SessionWorktreeParams
+  workforce?: SessionWorkforceParams
   mcpServers: acp.McpServer[]
   systemPrompt?: string
   initialModelId?: string
