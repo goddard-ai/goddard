@@ -1,15 +1,7 @@
 import { Sigma } from "preact-sigma"
 import { z } from "zod"
 
-import {
-  collectSubmissionValues,
-  detachFieldControl,
-  focusFirstInvalidField,
-  getFieldControls,
-  hydrateField,
-  sweepDisconnectedControls,
-} from "./dom.ts"
-import type { AnyObjectSchema, FormControl, FormSchema } from "./schema.ts"
+import type { AnyObjectSchema, FormControl, FormInvalidResult, FormSchema } from "./schema.ts"
 import type { FieldErrorRecord, FormValueRecord } from "./types.ts"
 import {
   areValueRecordsEqual,
@@ -18,45 +10,13 @@ import {
   createEmptyErrors,
   getEmptyFieldValue,
   getObservedEventName,
+  isFormControl,
   readFieldValue,
   setDraftFieldValue,
   writeFieldValue,
 } from "./values.ts"
 
-type FormInvalidDetails = {
-  errors: FieldErrorRecord
-  error: z.ZodError
-}
-
-export class FormCallbacksRuntime {
-  onValues?: (values: FormValueRecord) => void
-  onInvalid?: (details: FormInvalidDetails) => void
-  onSubmit: (values: unknown) => void | Promise<void> = () => {}
-
-  sync(nextCallbacks: {
-    onValues?(values: FormValueRecord): void
-    onInvalid?(details: FormInvalidDetails): void
-    onSubmit(values: unknown): void | Promise<void>
-  }) {
-    this.onValues = nextCallbacks.onValues
-    this.onInvalid = nextCallbacks.onInvalid
-    this.onSubmit = nextCallbacks.onSubmit
-  }
-}
-
-export class FormRuntime {
-  controlsByField = new Map<string, Set<FormControl>>()
-  fieldNameByControl = new WeakMap<FormControl, string>()
-  cleanupByControl = new WeakMap<FormControl, () => void>()
-  dirtyFields = new Set<string>()
-  lastEmittedValues: FormValueRecord
-  previousInitialValues: Record<string, unknown> | undefined
-
-  constructor(initialValues?: Record<string, unknown>) {
-    this.lastEmittedValues = cloneValueRecord(initialValues)
-    this.previousInitialValues = initialValues
-  }
-}
+declare const formManagerSchemaType: unique symbol
 
 /** Reactive state for one uncontrolled Zod-backed form instance. */
 type FormManagerState = {
@@ -66,45 +26,68 @@ type FormManagerState = {
 }
 
 /** Constructor inputs for one form manager instance. */
-type FormManagerSetup = Omit<FormManagerState, "isSubmitting"> & {
-  schema: FormSchema<AnyObjectSchema>
-  callbacks: FormCallbacksRuntime
-  runtime: FormRuntime
+type FormManagerSetup<T extends AnyObjectSchema> = {
+  schema: FormSchema<T>
+  initialValues?: Partial<z.input<T>>
   isSubmitting?: boolean
+  onValues?(values: Partial<z.input<T>>): void
+  onInvalid?(details: FormInvalidResult<T>): void
+  onSubmit(values: z.output<T>): void | Promise<void>
 }
 
 /** Local sigma state for one uncontrolled Zod-backed form instance. */
-export class FormManager extends Sigma<FormManagerState> {
+export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerState> {
   /** Zod-backed field contract used for validation and ordering; it is constructor wiring, not form state. */
-  #schema: FormSchema<AnyObjectSchema>
-  /** Stable callback holder supplied by the hook so callback churn does not become reactive form state. */
-  #callbacks: FormCallbacksRuntime
-  /** Browser control and dirty-field bookkeeping for uncontrolled inputs. */
-  #runtime: FormRuntime
+  #schema: FormSchema<T>
+  /** Latest values callback invoked only when the raw flat value snapshot actually changes. */
+  #onValues: ((values: Partial<z.input<T>>) => void) | undefined
+  /** Latest invalid-submit callback invoked after validation errors are committed. */
+  #onInvalid: ((details: FormInvalidResult<T>) => void) | undefined
+  /** Latest submit callback that receives successfully parsed Zod output. */
+  #onSubmit: (values: z.output<T>) => void | Promise<void>
+  /** Connected controls grouped by flat field name for hydration, reads, and cleanup. */
+  #controlsByField = new Map<string, Set<FormControl>>()
+  /** Reverse lookup from DOM control to flat field name, used by delegated listeners and submit reads. */
+  #fieldNameByControl = new WeakMap<FormControl, string>()
+  /** DOM listener cleanup owned by this form for each observed uncontrolled control. */
+  #cleanupByControl = new WeakMap<FormControl, () => void>()
+  /** Fields changed by the user and therefore protected from later initial-value hydration. */
+  #dirtyFields = new Set<string>()
+  /** Last raw value snapshot emitted to `onValues`, used to suppress duplicate notifications. */
+  #lastEmittedValues: FormValueRecord
+  /** Latest initial value object identity observed by the hook for pristine-field reconciliation. */
+  #previousInitialValues: Partial<z.input<T>> | undefined
 
-  constructor(setup: FormManagerSetup) {
+  constructor(setup: FormManagerSetup<T>) {
+    const draftValues = cloneValueRecord(setup.initialValues as Record<string, unknown> | undefined)
+
     super({
-      draftValues: setup.draftValues,
-      errors: setup.errors,
+      draftValues,
+      errors: createEmptyErrors(setup.schema.keys),
       isSubmitting: setup.isSubmitting ?? false,
     })
 
     this.#schema = setup.schema
-    this.#callbacks = setup.callbacks
-    this.#runtime = setup.runtime
+    this.#onValues = setup.onValues
+    this.#onInvalid = setup.onInvalid
+    this.#onSubmit = setup.onSubmit
+    this.#lastEmittedValues = cloneValueRecord(setup.initialValues as Record<string, unknown>)
+    this.#previousInitialValues = setup.initialValues
   }
 
   /** Reconciles new persisted initial values into still-pristine uncontrolled fields. */
-  syncInitialValues(nextInitialValues?: Record<string, unknown>) {
-    if (this.#runtime.previousInitialValues === nextInitialValues) {
+  syncInitialValues(nextInitialValues?: Partial<z.input<T>>) {
+    if (this.#previousInitialValues === nextInitialValues) {
       return
     }
 
-    this.#runtime.previousInitialValues = nextInitialValues
-    const nextInitialValueRecord = cloneValueRecord(nextInitialValues)
+    this.#previousInitialValues = nextInitialValues
+    const nextInitialValueRecord = cloneValueRecord(
+      nextInitialValues as Record<string, unknown> | undefined,
+    )
 
     for (const fieldName of this.#schema.keys) {
-      if (this.#runtime.dirtyFields.has(fieldName)) {
+      if (this.#dirtyFields.has(fieldName)) {
         continue
       }
 
@@ -113,53 +96,53 @@ export class FormManager extends Sigma<FormManagerState> {
         fieldName,
         nextInitialValueRecord[fieldName],
       )
-      hydrateField(this.#runtime, this.draftValues, fieldName)
+      this.#hydrateField(this.draftValues, fieldName)
     }
   }
 
   /** Tracks one connected field control and reapplies the current draft value into it. */
   attachFieldControl(fieldName: string, control: FormControl) {
-    const previousFieldName = this.#runtime.fieldNameByControl.get(control)
+    const previousFieldName = this.#fieldNameByControl.get(control)
 
     if (previousFieldName && previousFieldName !== fieldName) {
-      detachFieldControl(this.#runtime, previousFieldName, control)
+      this.#detachFieldControl(previousFieldName, control)
     }
 
     control.name = fieldName
 
-    const fieldControls = this.#runtime.controlsByField.get(fieldName) ?? new Set<FormControl>()
+    const fieldControls = this.#controlsByField.get(fieldName) ?? new Set<FormControl>()
     fieldControls.add(control)
-    this.#runtime.controlsByField.set(fieldName, fieldControls)
-    this.#runtime.fieldNameByControl.set(control, fieldName)
+    this.#controlsByField.set(fieldName, fieldControls)
+    this.#fieldNameByControl.set(control, fieldName)
     this.#observeControl(control)
 
-    hydrateField(this.#runtime, this.draftValues, fieldName)
+    this.#hydrateField(this.draftValues, fieldName)
   }
 
   /** Removes one field control and any listener bookkeeping owned by this form. */
   detachFieldControl(fieldName: string, control: FormControl) {
-    detachFieldControl(this.#runtime, fieldName, control)
+    this.#detachFieldControl(fieldName, control)
   }
 
   /** Prunes controls that have disconnected since the last render pass or submit. */
   sweepDisconnectedControls(fieldName: string) {
-    sweepDisconnectedControls(this.#runtime, fieldName)
+    this.#sweepDisconnectedControls(fieldName)
   }
 
   /** Mirrors one uncontrolled field change into the draft snapshot and persistence callback. */
   handleFieldChange(fieldName: string) {
-    this.#runtime.dirtyFields.add(fieldName)
+    this.#dirtyFields.add(fieldName)
     this.errors = clearFieldError(this.errors, fieldName)
 
     const nextValues = setDraftFieldValue(
       this.draftValues,
       fieldName,
-      readFieldValue(getFieldControls(this.#runtime, fieldName)),
+      readFieldValue(this.#getFieldControls(fieldName)),
     )
 
     this.draftValues = nextValues
     this.commit()
-    emitValues(this.#callbacks.onValues, this.#runtime, nextValues)
+    this.#emitValues(nextValues)
   }
 
   /** Clears every registered field back to its empty DOM state and emits the raw values. */
@@ -167,9 +150,9 @@ export class FormManager extends Sigma<FormManagerState> {
     const nextValues: FormValueRecord = {}
 
     for (const fieldName of this.#schema.keys) {
-      this.#runtime.dirtyFields.add(fieldName)
+      this.#dirtyFields.add(fieldName)
 
-      const fieldControls = getFieldControls(this.#runtime, fieldName)
+      const fieldControls = this.#getFieldControls(fieldName)
       writeFieldValue(fieldControls, getEmptyFieldValue(fieldControls))
       assignRecordValue(nextValues, fieldName, readFieldValue(fieldControls))
     }
@@ -177,23 +160,25 @@ export class FormManager extends Sigma<FormManagerState> {
     this.draftValues = nextValues
     this.errors = clearAllErrors(this.errors, this.#schema.keys)
     this.commit()
-    emitValues(this.#callbacks.onValues, this.#runtime, nextValues)
+    this.#emitValues(nextValues)
   }
 
   /** Restores the latest persisted initial values and marks every field pristine again. */
   reset() {
-    const nextValues = cloneValueRecord(this.#runtime.previousInitialValues)
+    const nextValues = cloneValueRecord(
+      this.#previousInitialValues as Record<string, unknown> | undefined,
+    )
 
-    this.#runtime.dirtyFields.clear()
+    this.#dirtyFields.clear()
 
     for (const fieldName of this.#schema.keys) {
-      hydrateField(this.#runtime, nextValues, fieldName)
+      this.#hydrateField(nextValues, fieldName)
     }
 
     this.draftValues = nextValues
     this.errors = clearAllErrors(this.errors, this.#schema.keys)
     this.commit()
-    emitValues(this.#callbacks.onValues, this.#runtime, nextValues)
+    this.#emitValues(nextValues)
   }
 
   /** Collects live DOM values, validates them, and runs the async submit callback. */
@@ -202,20 +187,18 @@ export class FormManager extends Sigma<FormManagerState> {
       return
     }
 
-    const parsed = this.#schema.zod.safeParse(
-      collectSubmissionValues(this.#schema.keys, this.#runtime, formElement),
-    )
+    const parsed = this.#schema.zod.safeParse(this.#collectSubmissionValues(formElement))
 
     if (!parsed.success) {
       const errors = buildFieldErrors(this.#schema.keys, parsed.error)
 
       this.errors = errors
       this.commit()
-      this.#callbacks.onInvalid?.({
-        errors,
-        error: parsed.error,
+      this.#onInvalid?.({
+        errors: errors as FormInvalidResult<T>["errors"],
+        error: parsed.error as FormInvalidResult<T>["error"],
       })
-      focusFirstInvalidField(this.#runtime, parsed.error, formElement)
+      this.#focusFirstInvalidField(parsed.error, formElement)
       return
     }
 
@@ -224,22 +207,72 @@ export class FormManager extends Sigma<FormManagerState> {
     this.commit()
 
     try {
-      await this.#callbacks.onSubmit(parsed.data)
+      await this.#onSubmit(parsed.data)
     } finally {
       this.isSubmitting = false
       this.commit()
     }
   }
 
+  #collectSubmissionValues(formElement: HTMLFormElement) {
+    const formControls = [...formElement.elements].filter(
+      (control): control is FormControl =>
+        isFormControl(control) && this.#fieldNameByControl.has(control),
+    )
+    const submissionValues: FormValueRecord = {}
+
+    for (const fieldName of this.#schema.keys) {
+      assignRecordValue(
+        submissionValues,
+        fieldName,
+        readFieldValue(formControls.filter((control) => control.name === fieldName)),
+      )
+    }
+
+    return submissionValues
+  }
+
+  #focusFirstInvalidField(error: z.ZodError, formElement: HTMLFormElement) {
+    for (const issue of error.issues) {
+      const fieldName = typeof issue.path[0] === "string" ? issue.path[0] : null
+
+      if (!fieldName) {
+        continue
+      }
+
+      const control = this.#getFieldControls(fieldName, formElement)[0]
+
+      if (control) {
+        control.focus()
+        return
+      }
+    }
+  }
+
+  #hydrateField(draftValues: FormValueRecord, fieldName: string) {
+    writeFieldValue(this.#getFieldControls(fieldName), draftValues[fieldName])
+  }
+
+  #getFieldControls(fieldName: string, formElement?: HTMLFormElement) {
+    this.#sweepDisconnectedControls(fieldName)
+
+    const fieldControls = [...(this.#controlsByField.get(fieldName) ?? [])].filter(
+      (control) => !formElement || formElement.contains(control),
+    )
+
+    fieldControls.sort(compareControlsByDomOrder)
+    return fieldControls
+  }
+
   #observeControl(control: FormControl) {
-    if (this.#runtime.cleanupByControl.has(control)) {
+    if (this.#cleanupByControl.has(control)) {
       return
     }
 
     const eventName = getObservedEventName(control)
     const handleControlChange = () => {
       // Controls can be reattached under another field name without reinstalling listeners.
-      const fieldName = this.#runtime.fieldNameByControl.get(control)
+      const fieldName = this.#fieldNameByControl.get(control)
 
       if (fieldName) {
         this.handleFieldChange(fieldName)
@@ -247,30 +280,61 @@ export class FormManager extends Sigma<FormManagerState> {
     }
 
     control.addEventListener(eventName, handleControlChange)
-    this.#runtime.cleanupByControl.set(control, () => {
+    this.#cleanupByControl.set(control, () => {
       control.removeEventListener(eventName, handleControlChange)
     })
   }
+
+  #sweepDisconnectedControls(fieldName: string) {
+    for (const control of this.#controlsByField.get(fieldName) ?? []) {
+      if (control.isConnected) {
+        continue
+      }
+
+      this.#detachFieldControl(fieldName, control)
+    }
+  }
+
+  #detachFieldControl(fieldName: string, control: FormControl) {
+    this.#controlsByField.get(fieldName)?.delete(control)
+    this.#cleanupByControl.get(control)?.()
+    this.#cleanupByControl.delete(control)
+    this.#fieldNameByControl.delete(control)
+  }
+
+  #emitValues(nextValues: FormValueRecord) {
+    if (!this.#onValues) {
+      return
+    }
+
+    if (areValueRecordsEqual(this.#lastEmittedValues, nextValues)) {
+      return
+    }
+
+    const snapshot = cloneValueRecord(nextValues)
+    this.#lastEmittedValues = snapshot
+    this.#onValues(snapshot as Partial<z.input<T>>)
+  }
 }
 
-export interface FormManager extends FormManagerState {}
+export interface FormManager<T extends AnyObjectSchema> extends FormManagerState {
+  readonly [formManagerSchemaType]?: T
+}
 
-function emitValues(
-  onValues: ((values: FormValueRecord) => void) | undefined,
-  runtime: FormRuntime,
-  nextValues: FormValueRecord,
-) {
-  if (!onValues) {
-    return
+function compareControlsByDomOrder(leftControl: FormControl, rightControl: FormControl) {
+  if (leftControl === rightControl) {
+    return 0
   }
 
-  if (areValueRecordsEqual(runtime.lastEmittedValues, nextValues)) {
-    return
-  }
+  const position = leftControl.compareDocumentPosition(rightControl)
 
-  const snapshot = cloneValueRecord(nextValues)
-  runtime.lastEmittedValues = snapshot
-  onValues(snapshot)
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+    return -1
+  }
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+    return 1
+  }
+  return 0
 }
 
 function clearFieldError(errors: FieldErrorRecord, fieldName: string) {

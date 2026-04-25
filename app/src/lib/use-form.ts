@@ -3,7 +3,7 @@ import { useEffect, useRef } from "preact/hooks"
 import { z } from "zod"
 
 import { createFieldRefs } from "./use-form/dom.ts"
-import { FormCallbacksRuntime, FormManager, FormRuntime } from "./use-form/manager.ts"
+import { FormManager } from "./use-form/manager.ts"
 import {
   createForm,
   type AnyObjectSchema,
@@ -13,7 +13,6 @@ import {
   type FormSchema,
 } from "./use-form/schema.ts"
 import type { FormRefRecord } from "./use-form/types.ts"
-import { cloneValueRecord, createEmptyErrors } from "./use-form/values.ts"
 
 export { createForm } from "./use-form/schema.ts"
 
@@ -30,33 +29,25 @@ export function useForm<const T extends AnyObjectSchema>(
     onValues?(values: Partial<z.input<T>>): void
   },
 ) {
-  const callbacksRef = useRef<FormCallbacksRuntime>(new FormCallbacksRuntime())
+  const optionsRef = useRef(options)
   const refsRef = useRef<FormRefRecord | null>(null)
 
-  callbacksRef.current.sync({
-    onInvalid: options.onInvalid
-      ? (result) => {
-          options.onInvalid?.(result as FormInvalidResult<T>)
-        }
-      : undefined,
-    onSubmit: (values) => {
-      return options.onSubmit(values as z.output<T>)
-    },
-    onValues: options.onValues
-      ? (values) => {
-          options.onValues?.(values as Partial<z.input<T>>)
-        }
-      : undefined,
-  })
+  optionsRef.current = options
 
   const form = useSigma(
     () =>
       new FormManager({
         schema,
-        callbacks: callbacksRef.current,
-        runtime: new FormRuntime(options.initialValues),
-        draftValues: cloneValueRecord(options.initialValues),
-        errors: createEmptyErrors(schema.keys),
+        initialValues: options.initialValues,
+        onInvalid: (result) => {
+          optionsRef.current.onInvalid?.(result)
+        },
+        onSubmit: (values) => {
+          return optionsRef.current.onSubmit(values)
+        },
+        onValues: (values) => {
+          optionsRef.current.onValues?.(values)
+        },
       }),
   )
 
