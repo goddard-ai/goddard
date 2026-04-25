@@ -23,19 +23,35 @@ import { ProjectRegistry } from "./projects/project-registry.ts"
 import { shortcutRegistry, type ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet } from "./workbench-tab-set.ts"
 
-const appearanceContext = createContext<Protected<Appearance> | null>(null)
-const navigationContext = createContext<Protected<Navigation> | null>(null)
-const projectContextContext = createContext<Protected<ProjectContext> | null>(null)
-const projectRegistryContext = createContext<Protected<ProjectRegistry> | null>(null)
-const shortcutRegistryContext = createContext<ShortcutRegistry | null>(null)
-const workbenchTabSetContext = createContext<Protected<WorkbenchTabSet> | null>(null)
-
 function requireContext<Value>(value: Value | null, name: string) {
   if (!value) {
     throw new Error(`${name} is missing.`)
   }
 
   return value
+}
+
+type RequiredContext<Value> = preact.Context<Value | null> & {
+  use(): Value;
+}
+
+function createRequiredContext<Value>(name: string): RequiredContext<Value> {
+  const nextContext = createContext<Value | null>(null) as RequiredContext<Value>
+
+  nextContext.use = () => {
+    return requireContext(useContext(nextContext), name)
+  }
+
+  return nextContext
+}
+
+const context = {
+  Appearance: createRequiredContext<Protected<Appearance>>("appearanceContext"),
+  Navigation: createRequiredContext<Protected<Navigation>>("navigationContext"),
+  ProjectContext: createRequiredContext<Protected<ProjectContext>>("projectContextContext"),
+  ProjectRegistry: createRequiredContext<Protected<ProjectRegistry>>("projectRegistryContext"),
+  ShortcutRegistry: createRequiredContext<ShortcutRegistry>("shortcutRegistryContext"),
+  WorkbenchTabSet: createRequiredContext<Protected<WorkbenchTabSet>>("workbenchTabSetContext"),
 }
 
 function requireRef<Value>(value: Value | null, name: string) {
@@ -90,17 +106,17 @@ export component AppStateProvider(props: {
   })
 
   useEffect(() => {
-    const appearanceInstance = requireRef(appearanceRef.current, "appearance")
-    const navigationInstance = requireRef(navigationRef.current, "navigation")
-    const projectContextInstance = requireRef(projectContextRef.current, "projectContext")
-    const projectRegistryInstance = requireRef(projectRegistryRef.current, "projectRegistry")
-    const workbenchTabSetInstance = requireRef(workbenchTabSetRef.current, "workbenchTabSet")
+    const appearance = requireRef(appearanceRef.current, "appearance")
+    const navigation = requireRef(navigationRef.current, "navigation")
+    const projectContext = requireRef(projectContextRef.current, "projectContext")
+    const projectRegistry = requireRef(projectRegistryRef.current, "projectRegistry")
+    const workbenchTabSet = requireRef(workbenchTabSetRef.current, "workbenchTabSet")
     const persistenceHandles = [
-      persistAppearanceState(appearanceInstance),
-      persistNavigationState(navigationInstance),
-      persistProjectContextState(projectContextInstance),
-      persistProjectRegistryState(projectRegistryInstance),
-      persistWorkbenchTabSetState(workbenchTabSetInstance),
+      persistAppearanceState(appearance),
+      persistNavigationState(navigation),
+      persistProjectContextState(projectContext),
+      persistProjectRegistryState(projectRegistry),
+      persistWorkbenchTabSetState(workbenchTabSet),
     ]
     const shortcutPersistence = hydrateShortcutRegistryState(shortcutRegistry)
     const cleanupShortcutRegistry = shortcutRegistry.setup()
@@ -142,41 +158,24 @@ export component AppStateProvider(props: {
     workbenchTabSet,
   ])
 
-  <appearanceContext.Provider value={appearance}>
-    <navigationContext.Provider value={navigation}>
-      <projectContextContext.Provider value={projectContext}>
-        <projectRegistryContext.Provider value={projectRegistry}>
-          <shortcutRegistryContext.Provider value={shortcutRegistry}>
-            <workbenchTabSetContext.Provider value={workbenchTabSet}>
+  <context.Appearance value={appearance}>
+    <context.Navigation value={navigation}>
+      <context.ProjectContext value={projectContext}>
+        <context.ProjectRegistry value={projectRegistry}>
+          <context.ShortcutRegistry value={shortcutRegistry}>
+            <context.WorkbenchTabSet value={workbenchTabSet}>
               {props.children}
-            </workbenchTabSetContext.Provider>
-          </shortcutRegistryContext.Provider>
-        </projectRegistryContext.Provider>
-      </projectContextContext.Provider>
-    </navigationContext.Provider>
-  </appearanceContext.Provider>
+            </context.WorkbenchTabSet>
+          </context.ShortcutRegistry>
+        </context.ProjectRegistry>
+      </context.ProjectContext>
+    </context.Navigation>
+  </context.Appearance>
 }
 
-export function useAppearance() {
-  return requireContext(useContext(appearanceContext), "appearanceContext")
-}
-
-export function useNavigation() {
-  return requireContext(useContext(navigationContext), "navigationContext")
-}
-
-export function useProjectContext() {
-  return requireContext(useContext(projectContextContext), "projectContextContext")
-}
-
-export function useProjectRegistry() {
-  return requireContext(useContext(projectRegistryContext), "projectRegistryContext")
-}
-
-export function useShortcutRegistry() {
-  return requireContext(useContext(shortcutRegistryContext), "shortcutRegistryContext")
-}
-
-export function useWorkbenchTabSet() {
-  return requireContext(useContext(workbenchTabSetContext), "workbenchTabSetContext")
-}
+export const useAppearance = context.Appearance.use
+export const useNavigation = context.Navigation.use
+export const useProjectContext = context.ProjectContext.use
+export const useProjectRegistry = context.ProjectRegistry.use
+export const useShortcutRegistry = context.ShortcutRegistry.use
+export const useWorkbenchTabSet = context.WorkbenchTabSet.use
