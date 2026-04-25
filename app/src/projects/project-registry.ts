@@ -21,15 +21,6 @@ type ProjectRegistryState = {
   orderedProjectPaths: string[]
 }
 
-/** Persists the visible projects in their current render order. */
-function persistProjects(state: ProjectRegistryState): void {
-  writeJsonStorage(PROJECT_REGISTRY_STORAGE_KEY, {
-    projects: state.orderedProjectPaths
-      .map((projectPath) => state.projectsByPath[projectPath])
-      .filter((project): project is ProjectRecord => Boolean(project)),
-  })
-}
-
 /** Sigma state for the app's machine-wide project registry. */
 export class ProjectRegistry extends Sigma<ProjectRegistryState> {
   constructor() {
@@ -66,7 +57,7 @@ export class ProjectRegistry extends Sigma<ProjectRegistryState> {
       this.orderedProjectPaths.push(project.path)
     }
 
-    persistProjects(this)
+    this.#persistProjects()
   }
 
   /** Removes one project from the machine-wide workspace scope. */
@@ -75,7 +66,15 @@ export class ProjectRegistry extends Sigma<ProjectRegistryState> {
     this.orderedProjectPaths = this.orderedProjectPaths.filter(
       (projectPath) => projectPath !== path,
     )
-    persistProjects(this)
+    this.#persistProjects()
+  }
+
+  #persistProjects() {
+    writeJsonStorage(PROJECT_REGISTRY_STORAGE_KEY, {
+      projects: this.orderedProjectPaths
+        .map((projectPath) => this.projectsByPath[projectPath])
+        .filter((project): project is ProjectRecord => Boolean(project)),
+    })
   }
 }
 

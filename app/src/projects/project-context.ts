@@ -12,19 +12,7 @@ type ProjectContextSnapshot = {
 
 type ProjectContextState = {
   activeProjectPath: string | null
-  focusedTabId: string | null
   recentProjectPaths: string[]
-  reportedTabProjectsByTabId: Record<string, string | null>
-}
-
-function persistProjectContext(state: {
-  activeProjectPath: string | null
-  recentProjectPaths: readonly string[]
-}) {
-  writeJsonStorage(PROJECT_CONTEXT_STORAGE_KEY, {
-    activeProjectPath: state.activeProjectPath,
-    recentProjectPaths: state.recentProjectPaths,
-  })
 }
 
 function normalizeProjectPath(path: string) {
@@ -59,20 +47,6 @@ function isContainingProjectPath(containerPath: string, candidatePath: string) {
 
 function uniqueProjectPaths(paths: readonly string[]) {
   return [...new Set(paths)]
-}
-
-function setActiveProjectState(state: ProjectContextState, path: string | null) {
-  if (state.activeProjectPath === path) {
-    return
-  }
-
-  state.activeProjectPath = path
-
-  if (path) {
-    state.recentProjectPaths = [path, ...state.recentProjectPaths.filter((item) => item !== path)]
-  }
-
-  persistProjectContext(state)
 }
 
 /** Resolves one filesystem path to the nearest containing opened project path. */
@@ -138,12 +112,13 @@ export function orderProjectsByRecentActivity(
 
 /** Sigma state for the app-wide active project context and recent-project order. */
 export class ProjectContext extends Sigma<ProjectContextState> {
+  #focusedTabId: string | null = null
+  #reportedTabProjectsByTabId: Record<string, string | null> = {}
+
   constructor() {
     super({
       activeProjectPath: null,
-      focusedTabId: null,
       recentProjectPaths: [],
-      reportedTabProjectsByTabId: {},
     })
   }
 
@@ -154,9 +129,9 @@ export class ProjectContext extends Sigma<ProjectContextState> {
       recentProjectPaths: [],
     })
     const focusedTabProjectPath =
-      this.focusedTabId === null
+      this.#focusedTabId === null
         ? null
-        : (this.reportedTabProjectsByTabId[this.focusedTabId] ?? null)
+        : (this.#reportedTabProjectsByTabId[this.#focusedTabId] ?? null)
 
     this.activeProjectPath = focusedTabProjectPath ?? snapshot.activeProjectPath
     this.recentProjectPaths = focusedTabProjectPath
@@ -179,7 +154,7 @@ export class ProjectContext extends Sigma<ProjectContextState> {
       this.recentProjectPaths.filter((path) => validProjectPathSet.has(path)),
     )
     const nextReportedTabProjectsByTabId = Object.fromEntries(
-      Object.entries(this.reportedTabProjectsByTabId).filter((entry) => {
+      Object.entries(this.#reportedTabProjectsByTabId).filter((entry) => {
         const reportedPath = entry[1]
         return reportedPath === null || validProjectPathSet.has(reportedPath)
       }),
@@ -189,9 +164,9 @@ export class ProjectContext extends Sigma<ProjectContextState> {
       this.activeProjectPath === nextActiveProjectPath &&
       this.recentProjectPaths.length === nextRecentProjectPaths.length &&
       this.recentProjectPaths.every((path, index) => path === nextRecentProjectPaths[index]) &&
-      Object.keys(this.reportedTabProjectsByTabId).length ===
+      Object.keys(this.#reportedTabProjectsByTabId).length ===
         Object.keys(nextReportedTabProjectsByTabId).length &&
-      Object.entries(this.reportedTabProjectsByTabId).every(
+      Object.entries(this.#reportedTabProjectsByTabId).every(
         ([tabId, path]) => nextReportedTabProjectsByTabId[tabId] === path,
       )
     ) {
@@ -200,80 +175,101 @@ export class ProjectContext extends Sigma<ProjectContextState> {
 
     this.activeProjectPath = nextActiveProjectPath
     this.recentProjectPaths = nextRecentProjectPaths
-    this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
-    persistProjectContext(this)
+    this.#reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
+    this.#persistProjectContext()
   }
 
   /** Marks one project as active and moves it to the front of recent-project order. */
   setActiveProject(path: string | null) {
-    setActiveProjectState(this, path)
+    this.#setActiveProject(path)
   }
 
   /** Applies the currently focused tab and any synchronous project resolution it already knows. */
   applyFocusedTabProject(tabId: string, path: string | null) {
     if (
-      this.focusedTabId === tabId &&
-      this.reportedTabProjectsByTabId[tabId] === path &&
+      this.#focusedTabId === tabId &&
+      this.#reportedTabProjectsByTabId[tabId] === path &&
       (path === null || this.activeProjectPath === path)
     ) {
       return
     }
 
-    this.focusedTabId = tabId
-    this.reportedTabProjectsByTabId[tabId] = path
+    this.#focusedTabId = tabId
+    this.#reportedTabProjectsByTabId[tabId] = path
 
     if (path) {
-      setActiveProjectState(this, path)
+      this.#setActiveProject(path)
     }
   }
 
   /** Reports one asynchronously resolved project path for a tab that may still be focused. */
   reportTabProject(tabId: string, path: string | null) {
     if (
-      this.reportedTabProjectsByTabId[tabId] === path &&
-      (this.focusedTabId !== tabId || path === null || this.activeProjectPath === path)
+      this.#reportedTabProjectsByTabId[tabId] === path &&
+      (this.#focusedTabId !== tabId || path === null || this.activeProjectPath === path)
     ) {
       return
     }
 
-    this.reportedTabProjectsByTabId[tabId] = path
+    this.#reportedTabProjectsByTabId[tabId] = path
 
-    if (this.focusedTabId === tabId && path) {
-      setActiveProjectState(this, path)
+    if (this.#focusedTabId === tabId && path) {
+      this.#setActiveProject(path)
     }
   }
 
   /** Clears one tab-scoped reported project after the tab stops being active. */
   clearTabProject(tabId: string) {
-    delete this.reportedTabProjectsByTabId[tabId]
+    delete this.#reportedTabProjectsByTabId[tabId]
   }
 
   /** Removes one project path from active, recent, and reported project-context state. */
   removeProject(path: string) {
     const nextRecentProjectPaths = this.recentProjectPaths.filter((item) => item !== path)
     const nextReportedTabProjectsByTabId = Object.fromEntries(
-      Object.entries(this.reportedTabProjectsByTabId).filter((entry) => entry[1] !== path),
+      Object.entries(this.#reportedTabProjectsByTabId).filter((entry) => entry[1] !== path),
     )
     const focusedTabProjectPath =
-      this.focusedTabId === null
+      this.#focusedTabId === null
         ? null
-        : (nextReportedTabProjectsByTabId[this.focusedTabId] ?? null)
+        : (nextReportedTabProjectsByTabId[this.#focusedTabId] ?? null)
 
     this.recentProjectPaths = nextRecentProjectPaths
-    this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
+    this.#reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
 
     if (this.activeProjectPath !== path) {
-      persistProjectContext(this)
+      this.#persistProjectContext()
       return
     }
 
     if (focusedTabProjectPath) {
-      setActiveProjectState(this, focusedTabProjectPath)
+      this.#setActiveProject(focusedTabProjectPath)
       return
     }
 
     this.activeProjectPath = nextRecentProjectPaths[0] ?? null
-    persistProjectContext(this)
+    this.#persistProjectContext()
+  }
+
+  #setActiveProject(path: string | null) {
+    if (this.activeProjectPath === path) {
+      return
+    }
+
+    this.activeProjectPath = path
+
+    if (path) {
+      this.recentProjectPaths = [path, ...this.recentProjectPaths.filter((item) => item !== path)]
+    }
+
+    this.#persistProjectContext()
+  }
+
+  #persistProjectContext() {
+    writeJsonStorage(PROJECT_CONTEXT_STORAGE_KEY, {
+      activeProjectPath: this.activeProjectPath,
+      recentProjectPaths: this.recentProjectPaths,
+    })
   }
 }
 

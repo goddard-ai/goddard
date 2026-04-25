@@ -62,17 +62,6 @@ function isStoredWorkbenchTab(tab: StoredWorkbenchTab): tab is WorkbenchDetailTa
   )
 }
 
-/** Persists the current tab layout into local workspace storage. */
-function persistTabs(state: WorkbenchTabSetState): void {
-  writeJsonStorage(WORKBENCH_TABS_STORAGE_KEY, {
-    tabs: state.orderedTabIds
-      .map((tabId) => state.tabs[tabId])
-      .filter((tab): tab is WorkbenchDetailTab => Boolean(tab)),
-    activeTabId: state.activeTabId,
-    recency: state.recency,
-  })
-}
-
 /** Sigma state for the shell's closable workbench tab strip. */
 export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   constructor() {
@@ -103,7 +92,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     if (this.tabs[tab.id]) {
       this.tabs[tab.id] = { ...this.tabs[tab.id], ...tab }
       this.activateTab(tab.id)
-      persistTabs(this)
+      this.#persistTabs()
       return
     }
 
@@ -115,7 +104,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.orderedTabIds.push(tab.id)
     this.activeTabId = tab.id
     this.recency = [tab.id, ...this.recency.filter((tabId) => tabId !== tab.id)]
-    persistTabs(this)
+    this.#persistTabs()
   }
 
   /** Activates one visible tab and updates the recency stack used for LRU eviction. */
@@ -126,7 +115,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
       this.recency = [tabId, ...this.recency.filter((id) => id !== tabId)]
     }
 
-    persistTabs(this)
+    this.#persistTabs()
   }
 
   /** Closes one closable tab and falls back to the primary tab when needed. */
@@ -146,7 +135,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
         this.orderedTabIds[this.orderedTabIds.length - 1] ?? WORKBENCH_PRIMARY_TAB.id
     }
 
-    persistTabs(this)
+    this.#persistTabs()
   }
 
   /** Enforces the tab cap by closing the least-recently-used closable tab. */
@@ -176,7 +165,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     nextOrder.splice(fromIndex, 1)
     nextOrder.splice(toIndex, 0, fromId)
     this.orderedTabIds = nextOrder
-    persistTabs(this)
+    this.#persistTabs()
   }
 
   /** Rehydrates open tabs from local workspace storage after the shell boots. */
@@ -201,6 +190,16 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.orderedTabIds = orderedTabIds
     this.activeTabId = activeTabId
     this.recency = snapshot.recency.filter((tabId) => Boolean(tabs[tabId]))
+  }
+
+  #persistTabs() {
+    writeJsonStorage(WORKBENCH_TABS_STORAGE_KEY, {
+      tabs: this.orderedTabIds
+        .map((tabId) => this.tabs[tabId])
+        .filter((tab): tab is WorkbenchDetailTab => Boolean(tab)),
+      activeTabId: this.activeTabId,
+      recency: this.recency,
+    })
   }
 }
 

@@ -74,11 +74,6 @@ type TerminalViewportState = {
   theme: Readonly<ITheme>
   minimumCols: number
   minimumRows: number
-  terminal: SigmaRef<Terminal> | null
-  viewportElement: HTMLDivElement | null
-  resizeObserver: ResizeObserver | null
-  processedChunkCount: number
-  writeVersion: number
 }
 
 type TerminalViewportEvents = {
@@ -95,6 +90,12 @@ export class TerminalViewportModel extends SigmaTarget<
   TerminalViewportEvents,
   TerminalViewportState
 > {
+  #terminal: SigmaRef<Terminal> | null = null
+  #viewportElement: HTMLDivElement | null = null
+  #resizeObserver: ResizeObserver | null = null
+  #processedChunkCount = 0
+  #writeVersion = 0
+
   constructor(config: TerminalViewportSetup = {}) {
     super({
       cols: DEFAULT_MINIMUM_COLS,
@@ -107,24 +108,19 @@ export class TerminalViewportModel extends SigmaTarget<
       theme: mergeTerminalTheme(config.theme),
       minimumCols: config.minimumCols ?? DEFAULT_MINIMUM_COLS,
       minimumRows: config.minimumRows ?? DEFAULT_MINIMUM_ROWS,
-      terminal: null,
-      viewportElement: null,
-      resizeObserver: null,
-      processedChunkCount: 0,
-      writeVersion: 0,
     })
   }
 
   /** Rebuilds the renderable rows from the current terminal buffer. */
   refreshSnapshot() {
-    if (!this.terminal) {
+    if (!this.#terminal) {
       this.cols = 0
       this.rows = 0
       this.viewRows = []
       return
     }
 
-    const nextSnapshot = buildViewportSnapshot(this.terminal, this.theme)
+    const nextSnapshot = buildViewportSnapshot(this.#terminal, this.theme)
     this.cols = nextSnapshot.cols
     this.rows = nextSnapshot.rows
     this.viewRows = nextSnapshot.viewRows
@@ -132,13 +128,13 @@ export class TerminalViewportModel extends SigmaTarget<
 
   /** Attaches or detaches one DOM viewport without affecting terminal lifetime. */
   attachViewport(viewportElement: HTMLDivElement | null) {
-    if (this.viewportElement === viewportElement) {
+    if (this.#viewportElement === viewportElement) {
       return
     }
 
-    this.resizeObserver?.disconnect()
-    this.resizeObserver = null
-    this.viewportElement = viewportElement
+    this.#resizeObserver?.disconnect()
+    this.#resizeObserver = null
+    this.#viewportElement = viewportElement
 
     if (!viewportElement) {
       return
@@ -151,18 +147,18 @@ export class TerminalViewportModel extends SigmaTarget<
     })
 
     observer.observe(viewportElement)
-    this.resizeObserver = observer
+    this.#resizeObserver = observer
   }
 
   /** Recomputes terminal dimensions from the current viewport box. */
   fitViewport() {
-    if (!this.terminal || !this.viewportElement) {
+    if (!this.#terminal || !this.#viewportElement) {
       return
     }
 
     const nextSize = measureTerminalSize(
-      this.viewportElement.clientWidth,
-      this.viewportElement.clientHeight,
+      this.#viewportElement.clientWidth,
+      this.#viewportElement.clientHeight,
       this.fontFamily,
       this.fontSize,
       this.lineHeight,
@@ -171,33 +167,33 @@ export class TerminalViewportModel extends SigmaTarget<
       this.minimumRows,
     )
 
-    if (nextSize.cols !== this.terminal.cols || nextSize.rows !== this.terminal.rows) {
-      this.terminal.resize(nextSize.cols, nextSize.rows)
+    if (nextSize.cols !== this.#terminal.cols || nextSize.rows !== this.#terminal.rows) {
+      this.#terminal.resize(nextSize.cols, nextSize.rows)
     }
   }
 
   /** Streams append-only PTY output chunks into the terminal. */
   syncChunks(chunks: readonly TerminalViewportChunk[]) {
-    if (!this.terminal) {
+    if (!this.#terminal) {
       return
     }
 
-    if (chunks.length < this.processedChunkCount) {
-      this.processedChunkCount = 0
-      this.writeVersion += 1
-      this.terminal.reset()
-      this.terminal.clear()
+    if (chunks.length < this.#processedChunkCount) {
+      this.#processedChunkCount = 0
+      this.#writeVersion += 1
+      this.#terminal.reset()
+      this.#terminal.clear()
       this.refreshSnapshot()
     }
 
-    if (chunks.length === this.processedChunkCount) {
+    if (chunks.length === this.#processedChunkCount) {
       return
     }
 
-    const nextVersion = this.writeVersion + 1
-    this.writeVersion = nextVersion
+    const nextVersion = this.#writeVersion + 1
+    this.#writeVersion = nextVersion
 
-    void syncTerminalChunks(this, chunks, this.processedChunkCount, nextVersion)
+    void this.#syncTerminalChunks(chunks, this.#processedChunkCount, nextVersion)
   }
 
   /** Emits one terminal input event for the owner to forward to its PTY. */
@@ -218,7 +214,7 @@ export class TerminalViewportModel extends SigmaTarget<
 
   /** Scrolls the visible viewport using one wheel delta. */
   scrollViewport(deltaY: number, deltaMode: number) {
-    if (!this.terminal) {
+    if (!this.#terminal) {
       return
     }
 
@@ -231,23 +227,23 @@ export class TerminalViewportModel extends SigmaTarget<
       return
     }
 
-    this.terminal.scrollLines(lines)
+    this.#terminal.scrollLines(lines)
     this.refreshSnapshot()
   }
 
   /** Finalizes one successful async chunk sync on the public model state. */
-  finishChunkSync(chunksLength: number) {
-    this.processedChunkCount = chunksLength
+  #finishChunkSync(chunksLength: number) {
+    this.#processedChunkCount = chunksLength
     this.refreshSnapshot()
   }
 
   onSetup() {
     this.act(function () {
-      if (this.terminal) {
+      if (this.#terminal) {
         return
       }
 
-      this.terminal = new Terminal({
+      this.#terminal = new Terminal({
         cols: Math.max(this.minimumCols, 1),
         rows: Math.max(this.minimumRows, 1),
         convertEol: true,
@@ -261,41 +257,63 @@ export class TerminalViewportModel extends SigmaTarget<
       this.refreshSnapshot()
     })
 
-    if (!this.terminal) {
+    if (!this.#terminal) {
       return []
     }
 
     return [
-      this.terminal.onScroll(() => {
+      this.#terminal.onScroll(() => {
         this.refreshSnapshot()
       }),
-      this.terminal.onWriteParsed(() => {
+      this.#terminal.onWriteParsed(() => {
         this.refreshSnapshot()
       }),
-      this.terminal.onResize((nextSize: { cols: number; rows: number }) => {
+      this.#terminal.onResize((nextSize: { cols: number; rows: number }) => {
         this.act(function () {
           this.refreshSnapshot()
           this.commit()
           this.emit("resize", { cols: nextSize.cols, rows: nextSize.rows })
         })
       }),
-      this.terminal.onTitleChange(() => {
+      this.#terminal.onTitleChange(() => {
         this.refreshSnapshot()
       }),
       () => {
         this.act(function () {
-          this.resizeObserver?.disconnect()
-          this.resizeObserver = null
+          this.#resizeObserver?.disconnect()
+          this.#resizeObserver = null
 
-          this.terminal?.dispose()
-          this.terminal = null
-          this.viewportElement = null
-          this.processedChunkCount = 0
-          this.writeVersion += 1
+          this.#terminal?.dispose()
+          this.#terminal = null
+          this.#viewportElement = null
+          this.#processedChunkCount = 0
+          this.#writeVersion += 1
           this.refreshSnapshot()
         })
       },
     ]
+  }
+
+  async #syncTerminalChunks(
+    chunks: readonly TerminalViewportChunk[],
+    startIndex: number,
+    writeVersion: number,
+  ) {
+    if (!this.#terminal) {
+      return
+    }
+
+    const terminal = this.#terminal
+
+    for (const chunk of chunks.slice(startIndex)) {
+      await writeToTerminal(terminal, chunk.data)
+
+      if (this.#writeVersion !== writeVersion) {
+        return
+      }
+    }
+
+    this.#finishChunkSync(chunks.length)
   }
 }
 
@@ -363,31 +381,6 @@ export function translateKeyboardEvent(
   }
 
   return event.key
-}
-
-async function syncTerminalChunks(
-  terminalViewport: {
-    terminal: SigmaRef<Terminal> | null
-    writeVersion: number
-    finishChunkSync: (chunksLength: number) => void
-  },
-  chunks: readonly TerminalViewportChunk[],
-  startIndex: number,
-  writeVersion: number,
-): Promise<void> {
-  if (!terminalViewport.terminal) {
-    return
-  }
-
-  for (const chunk of chunks.slice(startIndex)) {
-    await writeToTerminal(terminalViewport.terminal, chunk.data)
-
-    if (terminalViewport.writeVersion !== writeVersion) {
-      return
-    }
-  }
-
-  terminalViewport.finishChunkSync(chunks.length)
 }
 
 function buildViewportSnapshot(

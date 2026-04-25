@@ -19,14 +19,17 @@ import {
 } from "~/shared/shortcut-keymap.ts"
 
 type ShortcutRegistryState = {
-  runtime: SigmaRef<ShortcutRuntime>
-  bindingSet: SigmaRef<BindingSet>
   selectedProfileId: KeymapProfileId
   overrides: ShortcutKeymapOverrides
   resolvedBindings: ShortcutKeymapBindings
   loadError: string | null
   writeError: string | null
   isHydrated: boolean
+}
+
+type ShortcutRegistryServices = {
+  runtime: SigmaRef<ShortcutRuntime>
+  bindingSet: SigmaRef<BindingSet>
 }
 
 function getDefaultResolvedBindings() {
@@ -56,10 +59,11 @@ function normalizeWhenClause(whenClause: string | null | undefined) {
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
 export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
-  constructor(services: Pick<ShortcutRegistryState, "runtime" | "bindingSet">) {
+  #runtime: SigmaRef<ShortcutRuntime>
+  #bindingSet: SigmaRef<BindingSet>
+
+  constructor(services: ShortcutRegistryServices) {
     super({
-      runtime: services.runtime,
-      bindingSet: services.bindingSet,
       selectedProfileId: "goddard",
       overrides: {},
       resolvedBindings: getDefaultResolvedBindings(),
@@ -67,6 +71,13 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       writeError: null,
       isHydrated: false,
     })
+
+    this.#runtime = services.runtime
+    this.#bindingSet = services.bindingSet
+  }
+
+  get runtime() {
+    return this.#runtime
   }
 
   /** Loads the persisted user keymap from the Bun host and reapplies the effective bindings. */
@@ -294,12 +305,12 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       }
     }
 
-    this.bindingSet.replace(nextBindings)
+    this.#bindingSet.replace(nextBindings)
   }
 
   onSetup() {
     const disposeContextSync = effect(() => {
-      this.runtime.batchContext(commandContext.whenContext.value)
+      this.#runtime.batchContext(commandContext.whenContext.value)
     })
 
     this.act(function () {
@@ -309,9 +320,9 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
     return [
       () => {
         disposeContextSync()
-        this.bindingSet.dispose()
+        this.#bindingSet.dispose()
       },
-      this.runtime,
+      this.#runtime,
     ]
   }
 }

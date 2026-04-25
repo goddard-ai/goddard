@@ -13,15 +13,6 @@ type AppearanceState = {
   systemTheme: AppearanceSnapshot["systemTheme"]
 }
 
-function persistAndApplyAppearance(state: AppearanceState) {
-  writeAppearancePreferences(state.mode, state.highContrast)
-  applyAppearanceSnapshot({
-    mode: state.mode,
-    highContrast: state.highContrast,
-    systemTheme: state.systemTheme,
-  })
-}
-
 export class Appearance extends Sigma<AppearanceState> {
   constructor(initialSnapshot: AppearanceSnapshot) {
     super({
@@ -37,12 +28,12 @@ export class Appearance extends Sigma<AppearanceState> {
 
   setMode(mode: AppearanceMode) {
     this.mode = mode
-    persistAndApplyAppearance(this)
+    this.#persistAndApplyAppearance()
   }
 
   setHighContrast(highContrast: boolean) {
     this.highContrast = highContrast
-    persistAndApplyAppearance(this)
+    this.#persistAndApplyAppearance()
   }
 
   syncSystemTheme(systemTheme: AppearanceSnapshot["systemTheme"]) {
@@ -65,6 +56,15 @@ export class Appearance extends Sigma<AppearanceState> {
     })
 
     return []
+  }
+
+  #persistAndApplyAppearance() {
+    writeAppearancePreferences(this.mode, this.highContrast)
+    applyAppearanceSnapshot({
+      mode: this.mode,
+      highContrast: this.highContrast,
+      systemTheme: this.systemTheme,
+    })
   }
 }
 
