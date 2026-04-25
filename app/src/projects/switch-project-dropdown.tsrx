@@ -7,7 +7,6 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./actions.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
 import type { ProjectRecord } from "./project-registry.ts"
-import { lookupProject } from "./project-registry.ts"
 import styles from "./switch-project-dropdown.style.ts"
 
 type SwitchProjectItem = {
@@ -46,7 +45,7 @@ export component SwitchProjectDropdown() {
   const activeProject =
     projectContext.activeProjectPath === null
       ? null
-      : lookupProject(projectRegistry, projectContext.activeProjectPath)
+      : projectRegistry.projectsByPath[projectContext.activeProjectPath] ?? null
 
   async function openFolderFromSwitcher() {
     setIsOpen(false)

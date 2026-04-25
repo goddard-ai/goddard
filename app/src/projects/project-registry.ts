@@ -46,9 +46,4 @@ export class ProjectRegistry extends Sigma<ProjectRegistryState> {
   }
 }
 
-/** Looks up one project by its stable path. */
-export function lookupProject(registry: ProjectRegistry, path: string): ProjectRecord | null {
-  return registry.projectsByPath[path] ?? null
-}
-
 export interface ProjectRegistry extends ProjectRegistryState {}

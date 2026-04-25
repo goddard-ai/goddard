@@ -1,12 +1,11 @@
 import { useProjectRegistry } from "~/app-state-context.tsrx"
 import { GoodIcon } from "~/lib/good-icon.tsrx"
 import styles from "./project-page.style.ts"
-import { lookupProject } from "./project-registry.ts"
 
 /** Renders one project-backed closable workbench tab. */
 export component ProjectPage(props: { projectPath: string }) {
   const projectRegistry = useProjectRegistry()
-  const project = lookupProject(projectRegistry, props.projectPath)
+  const project = projectRegistry.projectsByPath[props.projectPath] ?? null
 
   if (!project) {
     <div class={styles.page}>

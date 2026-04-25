@@ -10,7 +10,7 @@ import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { DialogPortal } from "~/lib/dialog-portal.tsrx"
 import { openProjectTab } from "./actions.ts"
 import { deriveProjectName } from "./project-name.ts"
-import { lookupProject, type ProjectRecord } from "./project-registry.ts"
+import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
 
 /** Renders the projects page plus its local add-project modal flow. */
@@ -25,8 +25,9 @@ export component ProjectsPage() {
     selectedProjectPath.value && projectRegistry.projectsByPath[selectedProjectPath.value]
       ? selectedProjectPath.value
       : projects[0]?.path ?? null
-  const selectedProject =
-    resolvedSelectedProjectPath ? lookupProject(projectRegistry, resolvedSelectedProjectPath) : null
+  const selectedProject = resolvedSelectedProjectPath
+    ? projectRegistry.projectsByPath[resolvedSelectedProjectPath] ?? null
+    : null
 
   function selectProject(projectPath: string): void {
     selectedProjectPath.value = projectPath

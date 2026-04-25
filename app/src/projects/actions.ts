@@ -2,7 +2,7 @@ import { browseForProject } from "~/desktop-host.ts"
 import type { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import type { ProjectContext } from "./project-context.ts"
 import { deriveProjectName } from "./project-name.ts"
-import { lookupProject, type ProjectRecord, type ProjectRegistry } from "./project-registry.ts"
+import type { ProjectRecord, ProjectRegistry } from "./project-registry.ts"
 
 /** Opens one project-backed workbench tab and marks that project active. */
 export function openProjectTab(props: {
@@ -11,7 +11,7 @@ export function openProjectTab(props: {
   projectRegistry: ProjectRegistry
   workbenchTabSet: WorkbenchTabSet
 }) {
-  const project = lookupProject(props.projectRegistry, props.projectPath)
+  const project = props.projectRegistry.projectsByPath[props.projectPath] ?? null
 
   if (!project) {
     return null
@@ -40,7 +40,7 @@ export async function openProjectFromFilesystem(props: {
     return null
   }
 
-  const existingProject = lookupProject(props.projectRegistry, selectedPath)
+  const existingProject = props.projectRegistry.projectsByPath[selectedPath] ?? null
   const projectName = existingProject?.name ?? deriveProjectName(selectedPath)
   const nextProject: ProjectRecord = existingProject ?? {
     path: selectedPath,
