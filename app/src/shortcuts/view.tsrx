@@ -5,6 +5,7 @@ import { Command, Search } from "lucide-react"
 import type { RecordingSession } from "powerkeys"
 import { useEffect, useRef, useState } from "preact/hooks"
 
+import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandList } from "~/commands/app-command.ts"
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
@@ -29,6 +30,7 @@ function getExactShortcutSearch(searchText: string) {
 
 component KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
+  const persistenceErrors = shortcutPersistenceErrors.value
   let searchInputElement: HTMLInputElement | null = null
   const searchRecordingSessionRef = useRef<RecordingSession | null>(null)
   const [searchText, setSearchText] = useState("")
@@ -269,16 +271,16 @@ component KeyboardShortcutsView(props: { class?: string }) {
         <Command size={15} strokeWidth={2.2} />
       </button>
     </label>
-    if (shortcutRegistry.loadError) {
+    if (persistenceErrors.loadError) {
       <div class={styles.warning}>
         {"The saved keymap could not be loaded, so the built-in profile is active."}
         <br />
-        {shortcutRegistry.loadError}
+        {persistenceErrors.loadError}
       </div>
     }
-    if (shortcutRegistry.writeError) {
+    if (persistenceErrors.writeError) {
       <div class={styles.error}>
-        {shortcutRegistry.writeError}
+        {persistenceErrors.writeError}
       </div>
     }
     <div class={styles.tableFrame}>

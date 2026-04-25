@@ -1,13 +1,9 @@
 import { Sigma } from "preact-sigma"
 
-import {
-  applyAppearanceSnapshot,
-  writeAppearancePreferences,
-  type AppearanceMode,
-  type AppearanceSnapshot,
-} from "./theme.ts"
+import { applyAppearanceSnapshot, type AppearanceMode, type AppearanceSnapshot } from "./theme.ts"
 
-type AppearanceState = {
+/** Public state for the app shell's appearance model. */
+export type AppearanceState = {
   mode: AppearanceMode
   highContrast: boolean
   systemTheme: AppearanceSnapshot["systemTheme"]
@@ -28,12 +24,12 @@ export class Appearance extends Sigma<AppearanceState> {
 
   setMode(mode: AppearanceMode) {
     this.mode = mode
-    this.#persistAndApplyAppearance()
+    this.#applyAppearance()
   }
 
   setHighContrast(highContrast: boolean) {
     this.highContrast = highContrast
-    this.#persistAndApplyAppearance()
+    this.#applyAppearance()
   }
 
   syncSystemTheme(systemTheme: AppearanceSnapshot["systemTheme"]) {
@@ -58,8 +54,7 @@ export class Appearance extends Sigma<AppearanceState> {
     return []
   }
 
-  #persistAndApplyAppearance() {
-    writeAppearancePreferences(this.mode, this.highContrast)
+  #applyAppearance() {
     applyAppearanceSnapshot({
       mode: this.mode,
       highContrast: this.highContrast,

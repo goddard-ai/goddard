@@ -4,10 +4,8 @@ import { Sigma } from "preact-sigma"
 
 import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
-import { desktopHost } from "~/desktop-host.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
-  createDefaultShortcutKeymapFile,
   createShortcutBinding,
   getShortcutBindingExpression,
   resolveShortcutBindings,
@@ -18,26 +16,10 @@ import {
   type ShortcutKeymapOverrides,
 } from "~/shared/shortcut-keymap.ts"
 
-type ShortcutRegistryState = {
+/** Public state for the app-wide keyboard shortcut registry. */
+export type ShortcutRegistryState = {
   selectedProfileId: KeymapProfileId
   overrides: ShortcutKeymapOverrides
-  resolvedBindings: ShortcutKeymapBindings
-  loadError: string | null
-  writeError: string | null
-  isHydrated: boolean
-}
-
-function getDefaultResolvedBindings() {
-  const defaultKeymap = createDefaultShortcutKeymapFile()
-  return resolveShortcutBindings(defaultKeymap.profile, defaultKeymap.overrides)
-}
-
-function getWriteErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-
-  return typeof error === "string" && error.length > 0 ? error : "Unknown error."
 }
 
 function areBindingsEqual(
@@ -61,10 +43,6 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
     super({
       selectedProfileId: "goddard",
       overrides: {},
-      resolvedBindings: getDefaultResolvedBindings(),
-      loadError: null,
-      writeError: null,
-      isHydrated: false,
     })
 
     this.#runtime = createShortcuts({
@@ -82,50 +60,21 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
     return this.#runtime
   }
 
-  /** Loads the persisted user keymap from the Bun host and reapplies the effective bindings. */
-  async hydrateKeymap() {
-    const response = await desktopHost.readShortcutKeymap()
-    const keymap = response.keymap ?? createDefaultShortcutKeymapFile()
-
-    this.applyKeymapSnapshot(keymap.profile, keymap.overrides, response.error)
+  /** Resolves the active profile and user overrides into effective runtime bindings. */
+  get resolvedBindings(): ShortcutKeymapBindings {
+    return resolveShortcutBindings(this.selectedProfileId, this.overrides)
   }
 
   /** Replaces the active profile and override snapshot, then reapplies runtime bindings. */
-  applyKeymapSnapshot(
-    profile: KeymapProfileId,
-    overrides: ShortcutKeymapOverrides,
-    loadError: string | null,
-  ) {
+  applyKeymapSnapshot(profile: KeymapProfileId, overrides: ShortcutKeymapOverrides) {
     this.selectedProfileId = profile
     this.overrides = overrides
-    this.resolvedBindings = resolveShortcutBindings(profile, overrides)
-    this.loadError = loadError
-    this.writeError = null
-    this.isHydrated = true
-    this.rebindRuntime()
     this.commit()
+    this.rebindRuntime()
   }
 
-  /** Persists one override snapshot and reapplies the runtime bindings when it succeeds. */
-  async persistOverrides(overrides: ShortcutKeymapOverrides) {
-    try {
-      const keymap = await desktopHost.writeShortcutKeymap({
-        version: 1,
-        profile: this.selectedProfileId,
-        overrides,
-      })
-
-      this.applyKeymapSnapshot(keymap.profile, keymap.overrides, this.loadError)
-      return true
-    } catch (error) {
-      this.writeError = `Failed to save shortcut overrides: ${getWriteErrorMessage(error)}`
-      this.commit()
-      return false
-    }
-  }
-
-  /** Recomputes one command override from its next effective binding list and persists it. */
-  async persistCommandBindings(commandId: AppCommandId, bindings: readonly ShortcutBinding[]) {
+  /** Recomputes one command override from its next effective binding list. */
+  setCommandBindings(commandId: AppCommandId, bindings: readonly ShortcutBinding[]) {
     const nextOverrides: ShortcutKeymapOverrides = {
       ...this.overrides,
     }
@@ -145,14 +94,15 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       nextOverrides[commandId] = [...bindings]
     }
 
-    return await this.persistOverrides(nextOverrides)
+    this.applyKeymapSnapshot(this.selectedProfileId, nextOverrides)
+    return true
   }
 
   /** Appends one recorded shortcut to the command's effective binding list. */
-  async addCommandBinding(commandId: AppCommandId, expression: string, whenClause?: string | null) {
+  addCommandBinding(commandId: AppCommandId, expression: string, whenClause?: string | null) {
     const normalizedWhenClause = normalizeWhenClause(whenClause)
 
-    return await this.persistCommandBindings(commandId, [
+    return this.setCommandBindings(commandId, [
       ...Array.from(
         this.resolvedBindings[commandId] ?? [],
         (binding) => binding as ShortcutBinding,
@@ -164,7 +114,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
   }
 
   /** Replaces one existing binding expression while preserving its binding-local metadata. */
-  async replaceCommandBinding(commandId: AppCommandId, bindingIndex: number, expression: string) {
+  replaceCommandBinding(commandId: AppCommandId, bindingIndex: number, expression: string) {
     const nextBindings = Array.from(this.resolvedBindings[commandId] ?? [], (binding) => {
       return binding as ShortcutBinding
     })
@@ -179,11 +129,11 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
         ? this.toPersistedBinding(commandId, expression)
         : this.toPersistedBinding(commandId, expression, currentBinding)
 
-    return await this.persistCommandBindings(commandId, nextBindings)
+    return this.setCommandBindings(commandId, nextBindings)
   }
 
   /** Removes one binding entry from the command. */
-  async removeCommandBinding(commandId: AppCommandId, bindingIndex: number) {
+  removeCommandBinding(commandId: AppCommandId, bindingIndex: number) {
     const nextBindings = Array.from(this.resolvedBindings[commandId] ?? [], (binding) => {
       return binding as ShortcutBinding
     })
@@ -193,11 +143,11 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
     }
 
     nextBindings.splice(bindingIndex, 1)
-    return await this.persistCommandBindings(commandId, nextBindings)
+    return this.setCommandBindings(commandId, nextBindings)
   }
 
   /** Updates one binding-local `when` clause and collapses back to shorthand when possible. */
-  async updateCommandBindingWhen(
+  updateCommandBindingWhen(
     commandId: AppCommandId,
     bindingIndex: number,
     whenClause: string | null,
@@ -227,7 +177,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
             when: normalizeWhenClause(whenClause),
           })
 
-    return await this.persistCommandBindings(commandId, nextBindings)
+    return this.setCommandBindings(commandId, nextBindings)
   }
 
   /** Normalizes one expression into the smallest persisted binding entry for the command. */

@@ -1,16 +1,9 @@
 import { Sigma } from "preact-sigma"
 
-import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 import type { ProjectRecord } from "./project-registry.ts"
 
-const PROJECT_CONTEXT_STORAGE_KEY = "goddard.app.project-context.v1"
-
-type ProjectContextSnapshot = {
-  activeProjectPath: string | null
-  recentProjectPaths: string[]
-}
-
-type ProjectContextState = {
+/** Public state for the active project context and recent-project order. */
+export type ProjectContextState = {
   activeProjectPath: string | null
   recentProjectPaths: string[]
 }
@@ -122,27 +115,6 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     })
   }
 
-  /** Loads persisted project-context state and prunes paths that no longer exist. */
-  hydrate(validProjectPaths: readonly string[]) {
-    const snapshot = readJsonStorage<ProjectContextSnapshot>(PROJECT_CONTEXT_STORAGE_KEY, {
-      activeProjectPath: null,
-      recentProjectPaths: [],
-    })
-    const focusedTabProjectPath =
-      this.#focusedTabId === null
-        ? null
-        : (this.#reportedTabProjectsByTabId[this.#focusedTabId] ?? null)
-
-    this.activeProjectPath = focusedTabProjectPath ?? snapshot.activeProjectPath
-    this.recentProjectPaths = focusedTabProjectPath
-      ? [
-          focusedTabProjectPath,
-          ...snapshot.recentProjectPaths.filter((path) => path !== focusedTabProjectPath),
-        ]
-      : snapshot.recentProjectPaths
-    this.syncProjects(validProjectPaths)
-  }
-
   /** Removes active, recent, and reported paths that no longer exist in the registry. */
   syncProjects(validProjectPaths: readonly string[]) {
     const validProjectPathSet = new Set(validProjectPaths)
@@ -176,7 +148,6 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     this.activeProjectPath = nextActiveProjectPath
     this.recentProjectPaths = nextRecentProjectPaths
     this.#reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
-    this.#persistProjectContext()
   }
 
   /** Marks one project as active and moves it to the front of recent-project order. */
@@ -238,7 +209,6 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     this.#reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
 
     if (this.activeProjectPath !== path) {
-      this.#persistProjectContext()
       return
     }
 
@@ -248,7 +218,6 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     }
 
     this.activeProjectPath = nextRecentProjectPaths[0] ?? null
-    this.#persistProjectContext()
   }
 
   #setActiveProject(path: string | null) {
@@ -261,15 +230,6 @@ export class ProjectContext extends Sigma<ProjectContextState> {
     if (path) {
       this.recentProjectPaths = [path, ...this.recentProjectPaths.filter((item) => item !== path)]
     }
-
-    this.#persistProjectContext()
-  }
-
-  #persistProjectContext() {
-    writeJsonStorage(PROJECT_CONTEXT_STORAGE_KEY, {
-      activeProjectPath: this.activeProjectPath,
-      recentProjectPaths: this.recentProjectPaths,
-    })
   }
 }
 

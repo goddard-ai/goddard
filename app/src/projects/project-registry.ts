@@ -1,22 +1,13 @@
 import { Sigma } from "preact-sigma"
 
-import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
-
-const PROJECT_REGISTRY_STORAGE_KEY = "goddard.app.projects.v1"
-
 /** One user-added project root stored by the app shell. */
 export type ProjectRecord = {
   path: string
   name: string
 }
 
-/** Persisted project registry snapshot. */
-type ProjectRegistrySnapshot = {
-  projects: ProjectRecord[]
-}
-
 /** Top-level public state for the machine-wide project registry. */
-type ProjectRegistryState = {
+export type ProjectRegistryState = {
   projectsByPath: Record<string, ProjectRecord>
   orderedProjectPaths: string[]
 }
@@ -37,18 +28,6 @@ export class ProjectRegistry extends Sigma<ProjectRegistryState> {
       .filter((project): project is ProjectRecord => Boolean(project))
   }
 
-  /** Loads the persisted project registry into memory. */
-  loadProjects() {
-    const snapshot = readJsonStorage<ProjectRegistrySnapshot>(PROJECT_REGISTRY_STORAGE_KEY, {
-      projects: [],
-    })
-
-    this.projectsByPath = Object.fromEntries(
-      snapshot.projects.map((project) => [project.path, project]),
-    )
-    this.orderedProjectPaths = snapshot.projects.map((project) => project.path)
-  }
-
   /** Adds or updates one project in the machine-wide registry. */
   addProject(project: ProjectRecord) {
     this.projectsByPath[project.path] = project
@@ -56,8 +35,6 @@ export class ProjectRegistry extends Sigma<ProjectRegistryState> {
     if (!this.orderedProjectPaths.includes(project.path)) {
       this.orderedProjectPaths.push(project.path)
     }
-
-    this.#persistProjects()
   }
 
   /** Removes one project from the machine-wide workspace scope. */
@@ -66,15 +43,6 @@ export class ProjectRegistry extends Sigma<ProjectRegistryState> {
     this.orderedProjectPaths = this.orderedProjectPaths.filter(
       (projectPath) => projectPath !== path,
     )
-    this.#persistProjects()
-  }
-
-  #persistProjects() {
-    writeJsonStorage(PROJECT_REGISTRY_STORAGE_KEY, {
-      projects: this.orderedProjectPaths
-        .map((projectPath) => this.projectsByPath[projectPath])
-        .filter((project): project is ProjectRecord => Boolean(project)),
-    })
   }
 }
 

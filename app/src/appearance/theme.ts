@@ -9,9 +9,6 @@ import {
   wcagContrast,
 } from "culori/fn"
 
-import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
-
-const APPEARANCE_STORAGE_KEY = "goddard.app.appearance.v1"
 const SYSTEM_COLOR_SCHEME_MEDIA_QUERY = "(prefers-color-scheme: dark)"
 
 useMode(modeRgb)
@@ -46,11 +43,6 @@ type OklchColor = {
   c: number
   h: number
   alpha?: number
-}
-
-type StoredAppearancePreferences = {
-  mode?: unknown
-  highContrast?: unknown
 }
 
 type ThemeSeeds = {
@@ -136,17 +128,9 @@ function serializeColor(color: OklchColor) {
   return formatRgb(toRgb(color) ?? color)
 }
 
-function isAppearanceMode(value: unknown): value is AppearanceMode {
+/** Returns whether one runtime value is a supported appearance mode. */
+export function isAppearanceMode(value: unknown): value is AppearanceMode {
   return value === "system" || value === "light" || value === "dark"
-}
-
-function readStoredAppearancePreferences() {
-  const stored = readJsonStorage<StoredAppearancePreferences>(APPEARANCE_STORAGE_KEY, {})
-
-  return {
-    mode: isAppearanceMode(stored.mode) ? stored.mode : "system",
-    highContrast: stored.highContrast === true,
-  }
 }
 
 function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean) {
@@ -256,14 +240,6 @@ export function getSystemThemeMediaQuery() {
   return SYSTEM_COLOR_SCHEME_MEDIA_QUERY
 }
 
-/** Persists the current appearance choices into workspace-local storage. */
-export function writeAppearancePreferences(mode: AppearanceMode, highContrast: boolean) {
-  writeJsonStorage(APPEARANCE_STORAGE_KEY, {
-    mode,
-    highContrast,
-  })
-}
-
 /** Builds one resolved document-theme payload from the current appearance snapshot. */
 export function buildAppearanceDocumentState(
   snapshot: AppearanceSnapshot,
@@ -295,18 +271,4 @@ export function applyAppearanceSnapshot(snapshot: AppearanceSnapshot) {
   for (const [name, value] of Object.entries(documentState.variables)) {
     root.style.setProperty(name, value)
   }
-}
-
-/** Reads persisted appearance preferences, applies them, and returns the initial snapshot. */
-export function getInitialAppearanceSnapshot() {
-  const storedPreferences = readStoredAppearancePreferences()
-  const snapshot = {
-    mode: storedPreferences.mode,
-    highContrast: storedPreferences.highContrast,
-    systemTheme: readSystemThemeName(),
-  } satisfies AppearanceSnapshot
-
-  applyAppearanceSnapshot(snapshot)
-
-  return snapshot
 }

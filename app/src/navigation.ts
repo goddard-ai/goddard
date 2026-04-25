@@ -1,9 +1,5 @@
 import { Sigma } from "preact-sigma"
 
-import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
-
-const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
-
 const defaultNavigationItems = [
   { id: "inbox", label: "Inbox" },
   { id: "sessions", label: "Sessions" },
@@ -26,8 +22,13 @@ export type NavigationItem = {
 }
 
 /** Public state owned by the navigation model. */
-type NavigationState = {
+export type NavigationState = {
   selectedNavId: NavigationItemId
+}
+
+/** Returns whether one runtime value is a supported primary navigation id. */
+export function isNavigationItemId(value: unknown): value is NavigationItemId {
+  return typeof value === "string" && defaultNavigationItems.some((item) => item.id === value)
 }
 
 /** Sigma state for the app shell's primary navigation rail. */
@@ -48,23 +49,9 @@ export class Navigation extends Sigma<NavigationState> {
     return this.items.find((item) => item.id === this.selectedNavId) ?? this.items[0]
   }
 
-  /** Selects one primary workbench view and persists it for the next launch. */
+  /** Selects one primary workbench view. */
   selectNavItem(id: NavigationItemId) {
     this.selectedNavId = id
-    writeJsonStorage(NAVIGATION_STORAGE_KEY, { selectedNavId: id })
-  }
-
-  /** Rehydrates the selected primary view from persisted workspace storage. */
-  hydrateNavigation() {
-    const snapshot = readJsonStorage<{ selectedNavId?: NavigationItemId }>(
-      NAVIGATION_STORAGE_KEY,
-      {},
-    )
-    const selectedNavId = snapshot.selectedNavId
-
-    if (selectedNavId && this.items.some((item) => item.id === selectedNavId)) {
-      this.selectedNavId = selectedNavId
-    }
   }
 }
 

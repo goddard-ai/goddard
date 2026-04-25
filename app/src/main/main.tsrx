@@ -3,7 +3,7 @@ import { render } from "preact"
 
 import { AppShell } from "~/app-shell.tsrx"
 import { AppStateProvider } from "~/app-state-context.tsrx"
-import { getInitialAppearanceSnapshot } from "~/appearance/theme.ts"
+import { getInitialAppearanceSnapshot } from "~/app-state-persistence.ts"
 import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 

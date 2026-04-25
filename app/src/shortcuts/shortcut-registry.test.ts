@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 
 import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
-import { desktopHost } from "~/desktop-host.ts"
 import { ShortcutRegistry } from "./shortcut-registry.ts"
 
 /** Creates one registry instance with an isolated document-like event boundary. */
@@ -48,13 +47,9 @@ test("keydown dispatches one typed app command event", () => {
   const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, (match) => {
     matches.push(match)
   })
-  registry.applyKeymapSnapshot(
-    "goddard",
-    {
-      "navigation.openNewSessionDialog": ["Alt+n"],
-    },
-    null,
-  )
+  registry.applyKeymapSnapshot("goddard", {
+    "navigation.openNewSessionDialog": ["Alt+n"],
+  })
 
   try {
     dispatchKeydown(runtimeDocument, {
@@ -88,7 +83,7 @@ test("default keymap dispatches switch-project from Mod+o", () => {
   })
 
   try {
-    registry.applyKeymapSnapshot("goddard", {}, null)
+    registry.applyKeymapSnapshot("goddard", {})
 
     dispatchKeydown(runtimeDocument, {
       key: "o",
@@ -121,13 +116,9 @@ test("applyKeymapSnapshot replaces previous bindings instead of accumulating the
   })
 
   try {
-    registry.applyKeymapSnapshot(
-      "goddard",
-      {
-        "navigation.openNewSessionDialog": ["Alt+n"],
-      },
-      null,
-    )
+    registry.applyKeymapSnapshot("goddard", {
+      "navigation.openNewSessionDialog": ["Alt+n"],
+    })
 
     dispatchKeydown(runtimeDocument, {
       key: "n",
@@ -135,13 +126,9 @@ test("applyKeymapSnapshot replaces previous bindings instead of accumulating the
       altKey: true,
     })
 
-    registry.applyKeymapSnapshot(
-      "goddard",
-      {
-        "navigation.openNewSessionDialog": ["Shift+n"],
-      },
-      null,
-    )
+    registry.applyKeymapSnapshot("goddard", {
+      "navigation.openNewSessionDialog": ["Shift+n"],
+    })
 
     dispatchKeydown(runtimeDocument, {
       key: "n",
@@ -167,16 +154,11 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
   const { registry, cleanup } = createTestRegistry()
 
   try {
-    registry.applyKeymapSnapshot(
-      "goddard",
-      {
-        "navigation.openNewSessionDialog": ["Mod+Shift+n"],
-        "navigation.openInbox": null,
-      },
-      null,
-    )
+    registry.applyKeymapSnapshot("goddard", {
+      "navigation.openNewSessionDialog": ["Mod+Shift+n"],
+      "navigation.openInbox": null,
+    })
 
-    expect(registry.isHydrated).toBe(true)
     expect(registry.resolvedBindings["navigation.openNewSessionDialog"]).toEqual(["Mod+Shift+n"])
     expect(registry.resolvedBindings["navigation.openInbox"]).toBeUndefined()
   } finally {
@@ -270,7 +252,7 @@ test("session input context lets launch-dialog selectors override the global pal
   })
 
   try {
-    registry.applyKeymapSnapshot("goddard", {}, null)
+    registry.applyKeymapSnapshot("goddard", {})
 
     dispatchKeydown(runtimeDocument, {
       key: "p",
@@ -299,13 +281,11 @@ test("session input context lets launch-dialog selectors override the global pal
   }
 })
 
-test("addCommandBinding persists shortcuts for commands without built-in defaults", async () => {
+test("addCommandBinding updates overrides for commands without built-in defaults", async () => {
   const { registry, cleanup } = createTestRegistry()
-  const originalWriteShortcutKeymap = desktopHost.writeShortcutKeymap
-  desktopHost.writeShortcutKeymap = async (keymap) => keymap
 
   try {
-    registry.applyKeymapSnapshot("goddard", {}, null)
+    registry.applyKeymapSnapshot("goddard", {})
 
     expect(
       await registry.addCommandBinding(AppCommand.navigation.openKeyboardShortcuts.id, "Mod+/"),
@@ -315,18 +295,15 @@ test("addCommandBinding persists shortcuts for commands without built-in default
     ])
     expect(registry.overrides[AppCommand.navigation.openKeyboardShortcuts.id]).toEqual(["Mod+/"])
   } finally {
-    desktopHost.writeShortcutKeymap = originalWriteShortcutKeymap
     cleanup()
   }
 })
 
 test("updateCommandBindingWhen promotes and collapses binding-local when overrides", async () => {
   const { registry, cleanup } = createTestRegistry()
-  const originalWriteShortcutKeymap = desktopHost.writeShortcutKeymap
-  desktopHost.writeShortcutKeymap = async (keymap) => keymap
 
   try {
-    registry.applyKeymapSnapshot("goddard", {}, null)
+    registry.applyKeymapSnapshot("goddard", {})
 
     expect(
       await registry.updateCommandBindingWhen(
@@ -353,7 +330,6 @@ test("updateCommandBindingWhen promotes and collapses binding-local when overrid
       "Mod+p",
     ])
   } finally {
-    desktopHost.writeShortcutKeymap = originalWriteShortcutKeymap
     cleanup()
   }
 })

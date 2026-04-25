@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test"
 
+import { restoreNavigationState } from "./app-state-persistence.ts"
 import { Navigation } from "./navigation.ts"
 
-const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v2"
+const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v3"
 
 test("navigation omits projects from the primary workbench items", () => {
   window.localStorage.clear()
@@ -19,13 +20,20 @@ test("navigation omits projects from the primary workbench items", () => {
   ])
 })
 
-test("hydrateNavigation ignores removed persisted navigation ids", () => {
+test("navigation persistence ignores removed navigation ids", () => {
   window.localStorage.clear()
-  window.localStorage.setItem(NAVIGATION_STORAGE_KEY, JSON.stringify({ selectedNavId: "projects" }))
+  window.localStorage.setItem(
+    NAVIGATION_STORAGE_KEY,
+    JSON.stringify({
+      version: 1,
+      savedAt: 100,
+      value: { selectedNavId: "projects" },
+    }),
+  )
 
   const navigation = new Navigation()
 
-  navigation.hydrateNavigation()
+  restoreNavigationState(navigation)
 
   expect(navigation.selectedNavId).toBe("inbox")
 })

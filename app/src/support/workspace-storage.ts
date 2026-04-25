@@ -1,26 +1,48 @@
-/**
- * Reads one JSON payload from local storage and falls back cleanly when parsing fails.
- */
-export function readJsonStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") {
-    return fallback
-  }
+import type { PersistRecord, SyncPersistStore } from "preact-sigma/persist"
 
-  try {
-    const rawValue = window.localStorage.getItem(key)
-    return rawValue ? (JSON.parse(rawValue) as T) : fallback
-  } catch {
-    return fallback
-  }
+function isPersistRecord<TStored>(value: unknown): value is PersistRecord<TStored> {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as { version?: unknown }).version === "number" &&
+    typeof (value as { savedAt?: unknown }).savedAt === "number" &&
+    "value" in value,
+  )
 }
 
-/**
- * Writes one JSON payload into local storage when the browser runtime is available.
- */
-export function writeJsonStorage(key: string, value: unknown): void {
-  if (typeof window === "undefined") {
-    return
-  }
+/** Creates one localStorage-backed JSON store for `preact-sigma/persist` records. */
+export function createWorkspaceStorageStore<TStored>(): SyncPersistStore<TStored> {
+  return {
+    get(key) {
+      if (typeof window === "undefined") {
+        return undefined
+      }
 
-  window.localStorage.setItem(key, JSON.stringify(value))
+      try {
+        const rawValue = window.localStorage.getItem(key)
+        const parsed = rawValue ? (JSON.parse(rawValue) as unknown) : undefined
+
+        return isPersistRecord<TStored>(parsed) ? parsed : undefined
+      } catch {
+        return undefined
+      }
+    },
+
+    set(key, record) {
+      if (typeof window === "undefined") {
+        return
+      }
+
+      window.localStorage.setItem(key, JSON.stringify(record))
+    },
+
+    delete(key) {
+      if (typeof window === "undefined") {
+        return
+      }
+
+      window.localStorage.removeItem(key)
+    },
+  }
 }
