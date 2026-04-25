@@ -28,36 +28,36 @@ import {
   assignRecordValue,
   cloneValueRecord,
   createEmptyErrors,
-  setDraftFieldValue,
+  setFormFieldValue,
 } from "./values.ts"
 
-declare const formManagerSchemaType: unique symbol
+declare const formControllerSchemaType: unique symbol
 
 /** Reactive state for one uncontrolled Zod-backed form instance. */
-type FormManagerState<T extends AnyObjectSchema> = {
-  draftValues: FormValueRecord
+type FormControllerState<T extends AnyObjectSchema> = {
+  values: FormValueRecord
   errors: FormErrors<T>
   isSubmitting: boolean
 }
 
-/** Constructor inputs for one form manager instance. */
-type FormManagerSetup<T extends AnyObjectSchema> = {
+/** Constructor inputs for one form controller instance. */
+type FormControllerSetup<T extends AnyObjectSchema> = {
   schema: FormSchema<T>
-  initialValues?: Partial<z.input<T>>
+  defaultValues?: Partial<z.input<T>>
   isSubmitting?: boolean
-  onValues?(values: Partial<z.input<T>>): void
+  onValuesChange?(values: Partial<z.input<T>>): void
   onInvalid?(details: FormInvalidResult<T>): void
   onSubmit(values: z.output<T>): void | Promise<void>
 }
 
 /** Local sigma state for one uncontrolled Zod-backed form instance. */
-export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerState<T>> {
+export class FormController<T extends AnyObjectSchema> extends Sigma<FormControllerState<T>> {
   /** Zod-backed field contract used for validation and ordering; it is constructor wiring, not form state. */
   #schema: FormSchema<T>
-  /** Stable field refs exposed to components; each callback delegates back to this manager. */
+  /** Stable field refs exposed to components; each callback delegates back to this controller. */
   #refs: FormRefs<T>
   /** Latest values callback invoked only when the raw flat value snapshot actually changes. */
-  #onValues: ((values: Partial<z.input<T>>) => void) | undefined
+  #onValuesChange: ((values: Partial<z.input<T>>) => void) | undefined
   /** Latest invalid-submit callback invoked after validation errors are committed. */
   #onInvalid: ((details: FormInvalidResult<T>) => void) | undefined
   /** Latest submit callback that receives successfully parsed Zod output. */
@@ -68,49 +68,49 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
   #fieldNameByControl = new WeakMap<FormControl, string>()
   /** DOM listener cleanup owned by this form for each observed uncontrolled control. */
   #cleanupByControl = new WeakMap<FormControl, () => void>()
-  /** Fields changed by the user and therefore protected from later initial-value hydration. */
+  /** Fields changed by the user and therefore protected from later default-value hydration. */
   #dirtyFields = new Set<string>()
-  /** Last raw value snapshot emitted to `onValues`, used to suppress duplicate notifications. */
+  /** Last raw value snapshot emitted to `onValuesChange`, used to suppress duplicate notifications. */
   #lastEmittedValues: FormValueRecord
-  /** Latest initial value object identity observed by the hook for pristine-field reconciliation. */
-  #previousInitialValues: Partial<z.input<T>> | undefined
+  /** Latest default value object identity observed by the hook for pristine-field reconciliation. */
+  #defaultValues: Partial<z.input<T>> | undefined
 
-  constructor(setup: FormManagerSetup<T>) {
-    const draftValues = cloneValueRecord(setup.initialValues as Record<string, unknown> | undefined)
+  constructor(setup: FormControllerSetup<T>) {
+    const values = cloneValueRecord(setup.defaultValues as Record<string, unknown> | undefined)
 
     super({
-      draftValues,
+      values,
       errors: createFormErrors<T>(setup.schema.keys),
       isSubmitting: setup.isSubmitting ?? false,
     })
 
     this.#schema = setup.schema
     this.#refs = createFieldRefs(this, setup.schema.keys) as FormRefs<T>
-    this.#onValues = setup.onValues
+    this.#onValuesChange = setup.onValuesChange
     this.#onInvalid = setup.onInvalid
     this.#onSubmit = setup.onSubmit
-    this.#lastEmittedValues = cloneValueRecord(setup.initialValues as Record<string, unknown>)
-    this.#previousInitialValues = setup.initialValues
+    this.#lastEmittedValues = cloneValueRecord(setup.defaultValues as Record<string, unknown>)
+    this.#defaultValues = setup.defaultValues
   }
 
   get refs() {
     return this.#refs
   }
 
-  submit = (event: preact.TargetedSubmitEvent<HTMLFormElement>) => {
+  handleSubmit = (event: preact.TargetedSubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
-    void this.submitForm(event.currentTarget)
+    void this.submit(event.currentTarget)
   }
 
-  /** Reconciles new persisted initial values into still-pristine uncontrolled fields. */
-  syncInitialValues(nextInitialValues?: Partial<z.input<T>>) {
-    if (this.#previousInitialValues === nextInitialValues) {
+  /** Reconciles new default values into still-pristine uncontrolled fields. */
+  syncDefaultValues(nextDefaultValues?: Partial<z.input<T>>) {
+    if (this.#defaultValues === nextDefaultValues) {
       return
     }
 
-    this.#previousInitialValues = nextInitialValues
-    const nextInitialValueRecord = cloneValueRecord(
-      nextInitialValues as Record<string, unknown> | undefined,
+    this.#defaultValues = nextDefaultValues
+    const nextDefaultValueRecord = cloneValueRecord(
+      nextDefaultValues as Record<string, unknown> | undefined,
     )
 
     for (const fieldName of this.#schema.keys) {
@@ -118,16 +118,12 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
         continue
       }
 
-      this.draftValues = setDraftFieldValue(
-        this.draftValues,
-        fieldName,
-        nextInitialValueRecord[fieldName],
-      )
-      this.#hydrateField(fieldName, this.draftValues)
+      this.values = setFormFieldValue(this.values, fieldName, nextDefaultValueRecord[fieldName])
+      this.#hydrateField(fieldName, this.values)
     }
   }
 
-  /** Tracks one connected field control and reapplies the current draft value into it. */
+  /** Tracks one connected field control and reapplies the current form value into it. */
   attachFieldControl(fieldName: string, control: FormControl) {
     const previousFieldName = this.#fieldNameByControl.get(control)
 
@@ -149,7 +145,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     this.#fieldNameByControl.set(control, fieldName)
     this.#observeControl(control)
 
-    this.#hydrateField(fieldName, this.draftValues)
+    this.#hydrateField(fieldName, this.values)
   }
 
   /** Removes one field control and any listener bookkeeping owned by this form. */
@@ -173,18 +169,18 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     )
   }
 
-  /** Mirrors one uncontrolled field change into the draft snapshot and persistence callback. */
+  /** Mirrors one uncontrolled field change into the current value snapshot and change callback. */
   handleFieldChange(fieldName: string) {
     this.#dirtyFields.add(fieldName)
     this.errors = clearFieldError<T>(this.errors, fieldName)
 
-    const nextValues = setDraftFieldValue(
-      this.draftValues,
+    const nextValues = setFormFieldValue(
+      this.values,
       fieldName,
       readFieldValue(this.#getFieldControls(fieldName)),
     )
 
-    this.draftValues = nextValues
+    this.values = nextValues
     this.commit()
     this.#emitValues(nextValues)
   }
@@ -201,17 +197,15 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
       assignRecordValue(nextValues, fieldName, readFieldValue(fieldControls))
     }
 
-    this.draftValues = nextValues
+    this.values = nextValues
     this.errors = clearAllErrors<T>(this.errors, this.#schema.keys)
     this.commit()
     this.#emitValues(nextValues)
   }
 
-  /** Restores the latest persisted initial values and marks every field pristine again. */
+  /** Restores the latest default values and marks every field pristine again. */
   reset() {
-    const nextValues = cloneValueRecord(
-      this.#previousInitialValues as Record<string, unknown> | undefined,
-    )
+    const nextValues = cloneValueRecord(this.#defaultValues as Record<string, unknown> | undefined)
 
     this.#dirtyFields.clear()
 
@@ -219,14 +213,14 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
       this.#hydrateField(fieldName, nextValues)
     }
 
-    this.draftValues = nextValues
+    this.values = nextValues
     this.errors = clearAllErrors<T>(this.errors, this.#schema.keys)
     this.commit()
     this.#emitValues(nextValues)
   }
 
   /** Collects live DOM values, validates them, and runs the async submit callback. */
-  async submitForm(formElement: HTMLFormElement) {
+  async submit(formElement: HTMLFormElement) {
     if (this.isSubmitting) {
       return
     }
@@ -272,9 +266,9 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     )
   }
 
-  #hydrateField(fieldName: string, draftValues: FormValueRecord) {
+  #hydrateField(fieldName: string, values: FormValueRecord) {
     hydrateField(
-      draftValues,
+      values,
       this.#controlsByField,
       this.#fieldNameByControl,
       this.#cleanupByControl,
@@ -299,7 +293,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
   }
 
   #emitValues(nextValues: FormValueRecord) {
-    if (!this.#onValues) {
+    if (!this.#onValuesChange) {
       return
     }
 
@@ -309,12 +303,12 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
 
     const snapshot = cloneValueRecord(nextValues)
     this.#lastEmittedValues = snapshot
-    this.#onValues(snapshot as Partial<z.input<T>>)
+    this.#onValuesChange(snapshot as Partial<z.input<T>>)
   }
 }
 
-export interface FormManager<T extends AnyObjectSchema> extends FormManagerState<T> {
-  readonly [formManagerSchemaType]?: T
+export interface FormController<T extends AnyObjectSchema> extends FormControllerState<T> {
+  readonly [formControllerSchemaType]?: T
 }
 
 function createFormErrors<T extends AnyObjectSchema>(fieldNames: readonly string[]) {

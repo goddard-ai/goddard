@@ -24,11 +24,7 @@ export function cloneValueRecord(values?: Record<string, unknown>) {
   return snapshot
 }
 
-export function setDraftFieldValue(
-  values: FormValueRecord,
-  fieldName: string,
-  fieldValue: unknown,
-) {
+export function setFormFieldValue(values: FormValueRecord, fieldName: string, fieldValue: unknown) {
   const nextValues = cloneValueRecord(values)
   assignRecordValue(nextValues, fieldName, fieldValue)
   return nextValues

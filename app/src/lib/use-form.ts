@@ -2,7 +2,7 @@ import { useSigma } from "preact-sigma"
 import { useEffect, useRef } from "preact/hooks"
 import { z } from "zod"
 
-import { FormManager } from "./use-form/manager.ts"
+import { FormController } from "./use-form/controller.ts"
 import {
   createForm,
   type AnyObjectSchema,
@@ -19,10 +19,10 @@ export { createForm } from "./use-form/schema.ts"
 export function useForm<const T extends AnyObjectSchema>(
   schema: FormSchema<T>,
   options: {
-    initialValues?: Partial<z.input<T>>
+    defaultValues?: Partial<z.input<T>>
     onInvalid?(result: FormInvalidResult<T>): void
     onSubmit(values: z.output<T>): void | Promise<void>
-    onValues?(values: Partial<z.input<T>>): void
+    onValuesChange?(values: Partial<z.input<T>>): void
   },
 ) {
   const optionsRef = useRef(options)
@@ -31,24 +31,24 @@ export function useForm<const T extends AnyObjectSchema>(
 
   const form = useSigma(
     () =>
-      new FormManager({
+      new FormController({
         schema,
-        initialValues: options.initialValues,
+        defaultValues: options.defaultValues,
         onInvalid: (result) => {
           optionsRef.current.onInvalid?.(result)
         },
         onSubmit: (values) => {
           return optionsRef.current.onSubmit(values)
         },
-        onValues: (values) => {
-          optionsRef.current.onValues?.(values)
+        onValuesChange: (values) => {
+          optionsRef.current.onValuesChange?.(values)
         },
       }),
   )
 
   useEffect(() => {
-    form.syncInitialValues(options.initialValues)
-  }, [form, options.initialValues])
+    form.syncDefaultValues(options.defaultValues)
+  }, [form, options.defaultValues])
 
   return form
 }

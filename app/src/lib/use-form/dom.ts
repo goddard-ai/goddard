@@ -82,9 +82,9 @@ export function focusFirstInvalidField(
   }
 }
 
-/** Writes one draft field value into all currently connected controls for that field. */
+/** Writes one tracked field value into all currently connected controls for that field. */
 export function hydrateField(
-  draftValues: FormValueRecord,
+  values: FormValueRecord,
   controlsByField: Map<string, Set<FormControl>>,
   fieldNameByControl: WeakMap<FormControl, string>,
   cleanupByControl: WeakMap<FormControl, () => void>,
@@ -92,7 +92,7 @@ export function hydrateField(
 ) {
   writeFieldValue(
     getFieldControls(controlsByField, fieldNameByControl, cleanupByControl, fieldName),
-    draftValues[fieldName],
+    values[fieldName],
   )
 }
 
@@ -114,7 +114,7 @@ export function getFieldControls(
   return fieldControls
 }
 
-/** Installs the control's value-change listener exactly once for the owning form manager. */
+/** Installs the control's value-change listener exactly once for the owning form controller. */
 export function observeControl(
   fieldNameByControl: WeakMap<FormControl, string>,
   cleanupByControl: WeakMap<FormControl, () => void>,

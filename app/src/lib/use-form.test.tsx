@@ -11,10 +11,10 @@ const SignupForm = createForm({
 })
 
 function useSignupForm(options: {
-  initialValues?: { name?: string }
+  defaultValues?: { name?: string }
   onInvalid?(result: { error: z.ZodError; errors: { name: string | null } }): void
   onSubmit(values: { name: string }): void | Promise<void>
-  onValues?(values: { name?: string }): void
+  onValuesChange?(values: { name?: string }): void
 }) {
   return useForm(SignupForm, options)
 }
@@ -45,17 +45,17 @@ function createHarness() {
   let currentProps: Omit<Parameters<typeof TestHarness>[0], "onRender"> | null = null
 
   function TestHarness(props: {
-    initialValues?: { name?: string }
+    defaultValues?: { name?: string }
     onInvalid?(result: { error: z.ZodError; errors: { name: string | null } }): void
     onRender(form: ReturnType<typeof useSignupForm>): void
     onSubmit(values: { name: string }): void | Promise<void>
-    onValues?(values: { name?: string }): void
+    onValuesChange?(values: { name?: string }): void
   }) {
     const form = useSignupForm({
-      initialValues: props.initialValues,
+      defaultValues: props.defaultValues,
       onInvalid: props.onInvalid,
       onSubmit: props.onSubmit,
-      onValues: props.onValues,
+      onValuesChange: props.onValuesChange,
     })
 
     useEffect(() => {
@@ -63,7 +63,7 @@ function createHarness() {
     })
 
     return (
-      <form onSubmit={form.submit}>
+      <form onSubmit={form.handleSubmit}>
         <input ref={form.refs.name} />
         <button type="submit">Submit</button>
       </form>
@@ -127,13 +127,13 @@ function createHarness() {
   }
 }
 
-test("initialValues hydrate the uncontrolled input and onValues receives raw values", async () => {
-  const onValues = vi.fn()
+test("defaultValues hydrate the uncontrolled input and onValuesChange receives raw values", async () => {
+  const onValuesChange = vi.fn()
   const harness = createHarness()
 
   await harness.render({
-    initialValues: { name: "John" },
-    onValues,
+    defaultValues: { name: "John" },
+    onValuesChange,
     onSubmit() {},
   })
 
@@ -144,8 +144,8 @@ test("initialValues hydrate the uncontrolled input and onValues receives raw val
     harness.input.dispatchEvent(new Event("input", { bubbles: true }))
   })
 
-  expect(onValues).toHaveBeenCalledTimes(1)
-  expect(onValues).toHaveBeenLastCalledWith({ name: "Jane" })
+  expect(onValuesChange).toHaveBeenCalledTimes(1)
+  expect(onValuesChange).toHaveBeenLastCalledWith({ name: "Jane" })
 })
 
 test("submit parses the current values and keeps isSubmitting true until the promise settles", async () => {
@@ -154,7 +154,7 @@ test("submit parses the current values and keeps isSubmitting true until the pro
   const harness = createHarness()
 
   await harness.render({
-    initialValues: { name: "John" },
+    defaultValues: { name: "John" },
     onSubmit,
   })
 
@@ -216,12 +216,12 @@ test("invalid submit exposes keyed errors, reports them, and clears them when th
 })
 
 test("clear resets the uncontrolled input and emits the emptied values", async () => {
-  const onValues = vi.fn()
+  const onValuesChange = vi.fn()
   const harness = createHarness()
 
   await harness.render({
-    initialValues: { name: "John" },
-    onValues,
+    defaultValues: { name: "John" },
+    onValuesChange,
     onSubmit() {},
   })
 
@@ -231,18 +231,18 @@ test("clear resets the uncontrolled input and emits the emptied values", async (
   })
 
   expect(harness.input.value).toBe("")
-  expect(onValues).toHaveBeenCalledTimes(1)
-  expect(onValues).toHaveBeenLastCalledWith({ name: "" })
+  expect(onValuesChange).toHaveBeenCalledTimes(1)
+  expect(onValuesChange).toHaveBeenLastCalledWith({ name: "" })
 })
 
-test("reset restores the latest initialValues and emits the restored values", async () => {
-  const onValues = vi.fn()
+test("reset restores the latest defaultValues and emits the restored values", async () => {
+  const onValuesChange = vi.fn()
   const harness = createHarness()
 
   await harness.render({
-    initialValues: { name: "John" },
+    defaultValues: { name: "John" },
     onSubmit() {},
-    onValues,
+    onValuesChange,
   })
 
   await act(async () => {
@@ -251,7 +251,7 @@ test("reset restores the latest initialValues and emits the restored values", as
   })
 
   await harness.rerender({
-    initialValues: { name: "Jill" },
+    defaultValues: { name: "Jill" },
   })
 
   await act(async () => {
@@ -260,19 +260,19 @@ test("reset restores the latest initialValues and emits the restored values", as
   })
 
   expect(harness.input.value).toBe("Jill")
-  expect(onValues).toHaveBeenLastCalledWith({ name: "Jill" })
+  expect(onValuesChange).toHaveBeenLastCalledWith({ name: "Jill" })
 })
 
-test("new initialValues rehydrate pristine fields but do not overwrite dirty ones", async () => {
+test("new defaultValues rehydrate pristine fields but do not overwrite dirty ones", async () => {
   const harness = createHarness()
 
   await harness.render({
-    initialValues: { name: "John" },
+    defaultValues: { name: "John" },
     onSubmit() {},
   })
 
   await harness.rerender({
-    initialValues: { name: "Jane" },
+    defaultValues: { name: "Jane" },
   })
 
   expect(harness.input.value).toBe("Jane")
@@ -283,7 +283,7 @@ test("new initialValues rehydrate pristine fields but do not overwrite dirty one
   })
 
   await harness.rerender({
-    initialValues: { name: "Jill" },
+    defaultValues: { name: "Jill" },
   })
 
   expect(harness.input.value).toBe("Jack")
