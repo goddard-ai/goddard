@@ -1,0 +1,4 @@
+interface:
+  display_name: "Preact Sigma"
+  short_description: "Route to preact-sigma docs and examples"
+  default_prompt: "Use $preact-sigma as a signpost to the relevant docs and examples under node_modules/preact-sigma/."

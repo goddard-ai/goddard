@@ -1,90 +1,35 @@
 ---
 name: preact-sigma
-description: Expert instructions and guidelines for working with the preact-sigma library.
+description: Find the right preact-sigma docs and examples. Use when code imports `preact-sigma` and you need to jump to the relevant documentation surface under `node_modules/preact-sigma/`.
 ---
 
 # preact-sigma
 
-Expert instructions and guidelines for developing with `preact-sigma`, a class-builder state API built on top of `@preact/signals` and `immer`.
+Treat `node_modules/preact-sigma/` as the package root.
 
-## When to use
+Use this skill as a supplemental coding checklist, not as the source of truth. The docs shipped in
+`node_modules/preact-sigma/` must be enough to use the package without this skill.
 
-Use this skill when developing, refactoring, or reviewing code that leverages `preact-sigma` for state management, particularly when defining or interacting with `SigmaType` instances, computed signals, actions, and queries.
+## Documentation Map
 
-## Instructions
+- Read `node_modules/preact-sigma/README.md` for purpose, installation, and the high-level documentation map.
+- Read `node_modules/preact-sigma/docs/context.md` for concepts, lifecycle, invariants, and API selection.
+- Read `node_modules/preact-sigma/examples/basic-counter.ts` for the quick-start class shape.
+- Read `node_modules/preact-sigma/examples/command-palette.tsx` for an advanced end-to-end example.
+- Read `node_modules/preact-sigma/examples/async-commit.ts`, `node_modules/preact-sigma/examples/observe-and-restore.ts`, and `node_modules/preact-sigma/examples/setup-act.ts` for focused API patterns.
+- Read `node_modules/preact-sigma/dist/index.d.mts` for exact exported signatures and the published API comments.
 
-1. **Understand Core Concepts:**
-   - **sigma type:** The builder returned by `new SigmaType<...>()`. It is also the constructor for sigma-state instances after configuration.
-   - **sigma state:** An instance created from a configured sigma type.
-   - **computed:** Argument-free derived state declared with `.computed({ ... })`.
-   - **query:** A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
-   - **action:** A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
+## Coding Checklist
 
-2. **Follow Type Inference and Architectural Rules:**
-   - Prefer explicit type arguments only on `new SigmaType<TState, TEvents>()`. Let builder methods infer from their inputs (do not pass explicit types to `.defaultState(...)`, `.actions(...)`, etc.).
-   - The `SigmaType` builder is additive. Builder methods mutate the same builder and return it.
+Apply these defaults when writing or changing application code that uses `preact-sigma`:
 
-3. **Respect Draft Boundaries in Actions:**
-   - `emit()` is a draft boundary.
-   - Any action call is a draft boundary unless it is a same-instance sync nested action call. (Cross-instance or async calls are draft boundaries).
-   - `await` inside an async action is a draft boundary.
-   - Call `this.commit()` _only_ when the current action has unpublished draft changes and is about to cross a draft boundary. A synchronous action that doesn't cross a boundary doesn't need it.
-   - Successful publishes deep-freeze draftable public state (if auto-freezing is enabled). Non-plain objects need `[immerable] = true` to participate.
-
-4. **Refer to Extended API Details:**
-   - For full details on API exports, instance shape, events, Preact hooks, advanced utilities, and advanced action rules, see the extended reference: [api-details.md](./api-details.md).
-
-## Example Pattern
-
-```typescript
-import { SigmaType } from "preact-sigma";
-
-type Todo = {
-  id: string;
-  title: string;
-  completed: boolean;
-};
-
-type TodoListState = {
-  draft: string;
-  todos: Todo[];
-};
-
-type TodoListEvents = {
-  added: Todo;
-};
-
-const TodoList = new SigmaType<TodoListState, TodoListEvents>()
-  .defaultState({
-    draft: "",
-    todos: [],
-  })
-  .computed({
-    completedCount() {
-      return this.todos.filter((todo) => todo.completed).length;
-    },
-  })
-  .queries({
-    canAddTodo() {
-      return this.draft.trim().length > 0;
-    },
-  })
-  .actions({
-    setDraft(draft: string) {
-      this.draft = draft;
-    },
-    addTodo() {
-      const todo = {
-        id: crypto.randomUUID(),
-        title: this.draft,
-        completed: false,
-      };
-      this.todos.push(todo);
-      this.draft = "";
-      this.commit(); // Needed if emit() is called, as emit() is a draft boundary
-      this.emit("added", todo);
-    },
-  });
-
-const todoList = new TodoList();
-```
+- Put reactive, persisted, subscribed, or UI-rendered values in top-level state.
+- Use ECMAScript `#private` fields only for ephemeral instance storage that should not persist or invalidate reactive reads by itself.
+- Define state in a named `State` type, pass it to `Sigma<State>` or `SigmaTarget<Events, State>`, then merge `interface Model extends State {}` after the class for direct state property typing.
+- Use getters for argument-free derived reads and `@query` for argument-based reads.
+- Mutate state in ordinary prototype methods; prototype methods are actions by default unless marked with `@query`.
+- Call `this.commit()` before `await`, before an action promise resolves, before `this.emit(...)`, or before invoking another sigma instance's action.
+- Put side effects in `onSetup(...)`, not constructors.
+- Use `this.act(function () { ... })` for setup-owned callbacks that need action semantics.
+- Use `useSigma(...)` for component-owned model instances.
+- Use `preact-sigma/persist` for storage policy instead of putting persistence directly in model classes.
