@@ -1,4 +1,4 @@
-import { SigmaType } from "preact-sigma"
+import { Sigma } from "preact-sigma"
 
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 
@@ -31,57 +31,58 @@ function persistProjects(state: ProjectRegistryShape): void {
 }
 
 /** Sigma state for the app's machine-wide project registry. */
-export const ProjectRegistry = new SigmaType<ProjectRegistryShape>("ProjectRegistry")
-  .defaultState({
-    projectsByPath: {},
-    orderedProjectPaths: [],
-  })
-  .computed({
-    /** Returns the projects in their current list order. */
-    projectList() {
-      return this.orderedProjectPaths
-        .map((projectPath) => this.projectsByPath[projectPath])
-        .filter((project): project is ProjectRecord => Boolean(project))
-    },
-  })
-  .actions({
-    /** Loads the persisted project registry into memory. */
-    loadProjects() {
-      const snapshot = readJsonStorage<ProjectRegistrySnapshot>(PROJECT_REGISTRY_STORAGE_KEY, {
-        projects: [],
-      })
+export class ProjectRegistry extends Sigma<ProjectRegistryShape> {
+  declare projectsByPath: Record<string, ProjectRecord>
+  declare orderedProjectPaths: string[]
 
-      this.projectsByPath = Object.fromEntries(
-        snapshot.projects.map((project) => [project.path, project]),
-      )
-      this.orderedProjectPaths = snapshot.projects.map((project) => project.path)
-    },
+  constructor() {
+    super({
+      projectsByPath: {},
+      orderedProjectPaths: [],
+    })
+  }
 
-    /** Adds or updates one project in the machine-wide registry. */
-    addProject(project: ProjectRecord) {
-      this.projectsByPath[project.path] = project
+  /** Returns the projects in their current list order. */
+  get projectList() {
+    return this.orderedProjectPaths
+      .map((projectPath) => this.projectsByPath[projectPath])
+      .filter((project): project is ProjectRecord => Boolean(project))
+  }
 
-      if (!this.orderedProjectPaths.includes(project.path)) {
-        this.orderedProjectPaths.push(project.path)
-      }
+  /** Loads the persisted project registry into memory. */
+  loadProjects() {
+    const snapshot = readJsonStorage<ProjectRegistrySnapshot>(PROJECT_REGISTRY_STORAGE_KEY, {
+      projects: [],
+    })
 
-      persistProjects(this)
-    },
+    this.projectsByPath = Object.fromEntries(
+      snapshot.projects.map((project) => [project.path, project]),
+    )
+    this.orderedProjectPaths = snapshot.projects.map((project) => project.path)
+  }
 
-    /** Removes one project from the machine-wide workspace scope. */
-    removeProject(path: string) {
-      delete this.projectsByPath[path]
-      this.orderedProjectPaths = this.orderedProjectPaths.filter(
-        (projectPath) => projectPath !== path,
-      )
-      persistProjects(this)
-    },
-  })
+  /** Adds or updates one project in the machine-wide registry. */
+  addProject(project: ProjectRecord) {
+    this.projectsByPath[project.path] = project
+
+    if (!this.orderedProjectPaths.includes(project.path)) {
+      this.orderedProjectPaths.push(project.path)
+    }
+
+    persistProjects(this)
+  }
+
+  /** Removes one project from the machine-wide workspace scope. */
+  removeProject(path: string) {
+    delete this.projectsByPath[path]
+    this.orderedProjectPaths = this.orderedProjectPaths.filter(
+      (projectPath) => projectPath !== path,
+    )
+    persistProjects(this)
+  }
+}
 
 /** Looks up one project by its stable path. */
 export function lookupProject(registry: ProjectRegistry, path: string): ProjectRecord | null {
   return registry.projectsByPath[path] ?? null
 }
-
-/** Runtime instance type for the project registry sigma state. */
-export interface ProjectRegistry extends InstanceType<typeof ProjectRegistry> {}

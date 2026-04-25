@@ -12,12 +12,12 @@ export type TerminalDebugViewProps = Record<string, never>
 
 /** Renders the standalone terminal-debug surface used by the native development menu. */
 export component TerminalDebugView(_props: TerminalDebugViewProps) {
-  const terminal = useSigma(() => new TerminalViewportModel(), [
-    {
+  const terminal = useSigma(
+    () => new TerminalViewportModel({
       minimumCols: 56,
       minimumRows: 14,
-    },
-  ])
+    }),
+  )
   const terminalChunks = useRef<TerminalViewportChunk[]>([])
   const nextChunkId = useRef(0)
   const inputBuffer = useRef("")

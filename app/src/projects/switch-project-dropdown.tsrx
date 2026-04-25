@@ -1,6 +1,5 @@
 import { concat } from "radashi"
 import { Search } from "lucide-react"
-import { useListener } from "preact-sigma"
 import { useEffect, useState } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"

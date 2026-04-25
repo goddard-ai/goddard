@@ -1,4 +1,4 @@
-import { SigmaType } from "preact-sigma"
+import { Sigma } from "preact-sigma"
 
 import {
   applyAppearanceSnapshot,
@@ -22,50 +22,52 @@ function persistAndApplyAppearance(state: AppearanceShape) {
   })
 }
 
-export const Appearance = new SigmaType<AppearanceShape>("Appearance")
-  .defaultState({
-    mode: "system",
-    highContrast: false,
-    systemTheme: "light",
-  })
-  .computed({
-    effectiveTheme() {
-      return this.mode === "system" ? this.systemTheme : this.mode
-    },
-  })
-  .actions({
-    setMode(mode: AppearanceMode) {
-      this.mode = mode
-      persistAndApplyAppearance(this)
-    },
+export class Appearance extends Sigma<AppearanceShape> {
+  declare mode: AppearanceMode
+  declare highContrast: boolean
+  declare systemTheme: AppearanceSnapshot["systemTheme"]
 
-    setHighContrast(highContrast: boolean) {
-      this.highContrast = highContrast
-      persistAndApplyAppearance(this)
-    },
+  constructor(initialSnapshot: AppearanceSnapshot) {
+    super({
+      mode: initialSnapshot.mode,
+      highContrast: initialSnapshot.highContrast,
+      systemTheme: initialSnapshot.systemTheme,
+    })
+  }
 
-    syncSystemTheme(systemTheme: AppearanceSnapshot["systemTheme"]) {
-      this.systemTheme = systemTheme
+  get effectiveTheme() {
+    return this.mode === "system" ? this.systemTheme : this.mode
+  }
 
-      if (this.mode === "system") {
-        applyAppearanceSnapshot({
-          mode: this.mode,
-          highContrast: this.highContrast,
-          systemTheme,
-        })
-      }
-    },
-  })
-  .setup(function (initialSnapshot: AppearanceSnapshot) {
-    this.act(function () {
-      this.mode = initialSnapshot.mode
-      this.highContrast = initialSnapshot.highContrast
-      this.systemTheme = initialSnapshot.systemTheme
+  setMode(mode: AppearanceMode) {
+    this.mode = mode
+    persistAndApplyAppearance(this)
+  }
+
+  setHighContrast(highContrast: boolean) {
+    this.highContrast = highContrast
+    persistAndApplyAppearance(this)
+  }
+
+  syncSystemTheme(systemTheme: AppearanceSnapshot["systemTheme"]) {
+    this.systemTheme = systemTheme
+
+    if (this.mode === "system") {
+      applyAppearanceSnapshot({
+        mode: this.mode,
+        highContrast: this.highContrast,
+        systemTheme,
+      })
+    }
+  }
+
+  onSetup() {
+    applyAppearanceSnapshot({
+      mode: this.mode,
+      highContrast: this.highContrast,
+      systemTheme: this.systemTheme,
     })
 
-    applyAppearanceSnapshot(initialSnapshot)
-
     return []
-  })
-
-export interface Appearance extends InstanceType<typeof Appearance> {}
+  }
+}

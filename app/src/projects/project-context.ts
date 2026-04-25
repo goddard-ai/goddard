@@ -1,4 +1,4 @@
-import { SigmaType } from "preact-sigma"
+import { Sigma } from "preact-sigma"
 
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 import type { ProjectRecord } from "./project-registry.ts"
@@ -137,143 +137,147 @@ export function orderProjectsByRecentActivity(
 }
 
 /** Sigma state for the app-wide active project context and recent-project order. */
-export const ProjectContext = new SigmaType<ProjectContextShape>("ProjectContext")
-  .defaultState({
-    activeProjectPath: null,
-    focusedTabId: null,
-    recentProjectPaths: [],
-    reportedTabProjectsByTabId: {},
-  })
-  .actions({
-    /** Loads persisted project-context state and prunes paths that no longer exist. */
-    hydrate(validProjectPaths: readonly string[]) {
-      const snapshot = readJsonStorage<ProjectContextSnapshot>(PROJECT_CONTEXT_STORAGE_KEY, {
-        activeProjectPath: null,
-        recentProjectPaths: [],
-      })
-      const focusedTabProjectPath =
-        this.focusedTabId === null
-          ? null
-          : (this.reportedTabProjectsByTabId[this.focusedTabId] ?? null)
+export class ProjectContext extends Sigma<ProjectContextShape> {
+  declare activeProjectPath: string | null
+  declare focusedTabId: string | null
+  declare recentProjectPaths: string[]
+  declare reportedTabProjectsByTabId: Record<string, string | null>
 
-      this.activeProjectPath = focusedTabProjectPath ?? snapshot.activeProjectPath
-      this.recentProjectPaths = focusedTabProjectPath
-        ? [
-            focusedTabProjectPath,
-            ...snapshot.recentProjectPaths.filter((path) => path !== focusedTabProjectPath),
-          ]
-        : snapshot.recentProjectPaths
-      this.syncProjects(validProjectPaths)
-    },
+  constructor() {
+    super({
+      activeProjectPath: null,
+      focusedTabId: null,
+      recentProjectPaths: [],
+      reportedTabProjectsByTabId: {},
+    })
+  }
 
-    /** Removes active, recent, and reported paths that no longer exist in the registry. */
-    syncProjects(validProjectPaths: readonly string[]) {
-      const validProjectPathSet = new Set(validProjectPaths)
-      const nextActiveProjectPath =
-        this.activeProjectPath && validProjectPathSet.has(this.activeProjectPath)
-          ? this.activeProjectPath
-          : null
-      const nextRecentProjectPaths = uniqueProjectPaths(
-        this.recentProjectPaths.filter((path) => validProjectPathSet.has(path)),
+  /** Loads persisted project-context state and prunes paths that no longer exist. */
+  hydrate(validProjectPaths: readonly string[]) {
+    const snapshot = readJsonStorage<ProjectContextSnapshot>(PROJECT_CONTEXT_STORAGE_KEY, {
+      activeProjectPath: null,
+      recentProjectPaths: [],
+    })
+    const focusedTabProjectPath =
+      this.focusedTabId === null
+        ? null
+        : (this.reportedTabProjectsByTabId[this.focusedTabId] ?? null)
+
+    this.activeProjectPath = focusedTabProjectPath ?? snapshot.activeProjectPath
+    this.recentProjectPaths = focusedTabProjectPath
+      ? [
+          focusedTabProjectPath,
+          ...snapshot.recentProjectPaths.filter((path) => path !== focusedTabProjectPath),
+        ]
+      : snapshot.recentProjectPaths
+    this.syncProjects(validProjectPaths)
+  }
+
+  /** Removes active, recent, and reported paths that no longer exist in the registry. */
+  syncProjects(validProjectPaths: readonly string[]) {
+    const validProjectPathSet = new Set(validProjectPaths)
+    const nextActiveProjectPath =
+      this.activeProjectPath && validProjectPathSet.has(this.activeProjectPath)
+        ? this.activeProjectPath
+        : null
+    const nextRecentProjectPaths = uniqueProjectPaths(
+      this.recentProjectPaths.filter((path) => validProjectPathSet.has(path)),
+    )
+    const nextReportedTabProjectsByTabId = Object.fromEntries(
+      Object.entries(this.reportedTabProjectsByTabId).filter((entry) => {
+        const reportedPath = entry[1]
+        return reportedPath === null || validProjectPathSet.has(reportedPath)
+      }),
+    )
+
+    if (
+      this.activeProjectPath === nextActiveProjectPath &&
+      this.recentProjectPaths.length === nextRecentProjectPaths.length &&
+      this.recentProjectPaths.every((path, index) => path === nextRecentProjectPaths[index]) &&
+      Object.keys(this.reportedTabProjectsByTabId).length ===
+        Object.keys(nextReportedTabProjectsByTabId).length &&
+      Object.entries(this.reportedTabProjectsByTabId).every(
+        ([tabId, path]) => nextReportedTabProjectsByTabId[tabId] === path,
       )
-      const nextReportedTabProjectsByTabId = Object.fromEntries(
-        Object.entries(this.reportedTabProjectsByTabId).filter((entry) => {
-          const reportedPath = entry[1]
-          return reportedPath === null || validProjectPathSet.has(reportedPath)
-        }),
-      )
+    ) {
+      return
+    }
 
-      if (
-        this.activeProjectPath === nextActiveProjectPath &&
-        this.recentProjectPaths.length === nextRecentProjectPaths.length &&
-        this.recentProjectPaths.every((path, index) => path === nextRecentProjectPaths[index]) &&
-        Object.keys(this.reportedTabProjectsByTabId).length ===
-          Object.keys(nextReportedTabProjectsByTabId).length &&
-        Object.entries(this.reportedTabProjectsByTabId).every(
-          ([tabId, path]) => nextReportedTabProjectsByTabId[tabId] === path,
-        )
-      ) {
-        return
-      }
+    this.activeProjectPath = nextActiveProjectPath
+    this.recentProjectPaths = nextRecentProjectPaths
+    this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
+    persistProjectContext(this)
+  }
 
-      this.activeProjectPath = nextActiveProjectPath
-      this.recentProjectPaths = nextRecentProjectPaths
-      this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
-      persistProjectContext(this)
-    },
+  /** Marks one project as active and moves it to the front of recent-project order. */
+  setActiveProject(path: string | null) {
+    setActiveProjectState(this, path)
+  }
 
-    /** Marks one project as active and moves it to the front of recent-project order. */
-    setActiveProject(path: string | null) {
+  /** Applies the currently focused tab and any synchronous project resolution it already knows. */
+  applyFocusedTabProject(tabId: string, path: string | null) {
+    if (
+      this.focusedTabId === tabId &&
+      this.reportedTabProjectsByTabId[tabId] === path &&
+      (path === null || this.activeProjectPath === path)
+    ) {
+      return
+    }
+
+    this.focusedTabId = tabId
+    this.reportedTabProjectsByTabId[tabId] = path
+
+    if (path) {
       setActiveProjectState(this, path)
-    },
+    }
+  }
 
-    /** Applies the currently focused tab and any synchronous project resolution it already knows. */
-    applyFocusedTabProject(tabId: string, path: string | null) {
-      if (
-        this.focusedTabId === tabId &&
-        this.reportedTabProjectsByTabId[tabId] === path &&
-        (path === null || this.activeProjectPath === path)
-      ) {
-        return
-      }
+  /** Reports one asynchronously resolved project path for a tab that may still be focused. */
+  reportTabProject(tabId: string, path: string | null) {
+    if (
+      this.reportedTabProjectsByTabId[tabId] === path &&
+      (this.focusedTabId !== tabId || path === null || this.activeProjectPath === path)
+    ) {
+      return
+    }
 
-      this.focusedTabId = tabId
-      this.reportedTabProjectsByTabId[tabId] = path
+    this.reportedTabProjectsByTabId[tabId] = path
 
-      if (path) {
-        setActiveProjectState(this, path)
-      }
-    },
+    if (this.focusedTabId === tabId && path) {
+      setActiveProjectState(this, path)
+    }
+  }
 
-    /** Reports one asynchronously resolved project path for a tab that may still be focused. */
-    reportTabProject(tabId: string, path: string | null) {
-      if (
-        this.reportedTabProjectsByTabId[tabId] === path &&
-        (this.focusedTabId !== tabId || path === null || this.activeProjectPath === path)
-      ) {
-        return
-      }
+  /** Clears one tab-scoped reported project after the tab stops being active. */
+  clearTabProject(tabId: string) {
+    delete this.reportedTabProjectsByTabId[tabId]
+  }
 
-      this.reportedTabProjectsByTabId[tabId] = path
+  /** Removes one project path from active, recent, and reported project-context state. */
+  removeProject(path: string) {
+    const nextRecentProjectPaths = this.recentProjectPaths.filter((item) => item !== path)
+    const nextReportedTabProjectsByTabId = Object.fromEntries(
+      Object.entries(this.reportedTabProjectsByTabId).filter((entry) => entry[1] !== path),
+    )
+    const focusedTabProjectPath =
+      this.focusedTabId === null
+        ? null
+        : (nextReportedTabProjectsByTabId[this.focusedTabId] ?? null)
 
-      if (this.focusedTabId === tabId && path) {
-        setActiveProjectState(this, path)
-      }
-    },
+    this.recentProjectPaths = nextRecentProjectPaths
+    this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
 
-    /** Clears one tab-scoped reported project after the tab stops being active. */
-    clearTabProject(tabId: string) {
-      delete this.reportedTabProjectsByTabId[tabId]
-    },
-
-    /** Removes one project path from active, recent, and reported project-context state. */
-    removeProject(path: string) {
-      const nextRecentProjectPaths = this.recentProjectPaths.filter((item) => item !== path)
-      const nextReportedTabProjectsByTabId = Object.fromEntries(
-        Object.entries(this.reportedTabProjectsByTabId).filter((entry) => entry[1] !== path),
-      )
-      const focusedTabProjectPath =
-        this.focusedTabId === null
-          ? null
-          : (nextReportedTabProjectsByTabId[this.focusedTabId] ?? null)
-
-      this.recentProjectPaths = nextRecentProjectPaths
-      this.reportedTabProjectsByTabId = nextReportedTabProjectsByTabId
-
-      if (this.activeProjectPath !== path) {
-        persistProjectContext(this)
-        return
-      }
-
-      if (focusedTabProjectPath) {
-        setActiveProjectState(this, focusedTabProjectPath)
-        return
-      }
-
-      this.activeProjectPath = nextRecentProjectPaths[0] ?? null
+    if (this.activeProjectPath !== path) {
       persistProjectContext(this)
-    },
-  })
+      return
+    }
 
-/** Runtime instance type for the shared project-context state. */
-export interface ProjectContext extends InstanceType<typeof ProjectContext> {}
+    if (focusedTabProjectPath) {
+      setActiveProjectState(this, focusedTabProjectPath)
+      return
+    }
+
+    this.activeProjectPath = nextRecentProjectPaths[0] ?? null
+    persistProjectContext(this)
+  }
+}

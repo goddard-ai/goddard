@@ -1,5 +1,5 @@
 import { Terminal, type ITheme } from "@xterm/headless"
-import { SigmaType, type SigmaRef } from "preact-sigma"
+import { SigmaTarget, type SigmaRef } from "preact-sigma"
 
 const VIEWPORT_PADDING_PX = 18
 const DEFAULT_MINIMUM_COLS = 40
@@ -91,163 +91,174 @@ type TerminalViewportEvents = {
 type TerminalCell = ReturnType<Terminal["buffer"]["active"]["getNullCell"]>
 
 /** Long-lived terminal model that can outlive any single viewport mount. */
-export const TerminalViewportModel = new SigmaType<TerminalViewportShape, TerminalViewportEvents>(
-  "TerminalViewportModel",
-)
-  .defaultState({
-    cols: DEFAULT_MINIMUM_COLS,
-    rows: DEFAULT_MINIMUM_ROWS,
-    viewRows: [],
-    fontFamily: DEFAULT_FONT_FAMILY,
-    fontSize: DEFAULT_FONT_SIZE,
-    lineHeight: DEFAULT_LINE_HEIGHT,
-    letterSpacing: DEFAULT_LETTER_SPACING,
-    theme: defaultTheme,
-    minimumCols: DEFAULT_MINIMUM_COLS,
-    minimumRows: DEFAULT_MINIMUM_ROWS,
-    terminal: null,
-    viewportElement: null,
-    resizeObserver: null,
-    processedChunkCount: 0,
-    writeVersion: 0,
-  })
-  .actions({
-    /** Rebuilds the renderable rows from the current terminal buffer. */
-    refreshSnapshot() {
-      if (!this.terminal) {
-        this.cols = 0
-        this.rows = 0
-        this.viewRows = []
-        return
-      }
+export class TerminalViewportModel extends SigmaTarget<
+  TerminalViewportEvents,
+  TerminalViewportShape
+> {
+  declare cols: number
+  declare rows: number
+  declare viewRows: TerminalViewportRow[]
+  declare fontFamily: string
+  declare fontSize: number
+  declare lineHeight: number
+  declare letterSpacing: number
+  declare theme: Readonly<ITheme>
+  declare minimumCols: number
+  declare minimumRows: number
+  declare terminal: SigmaRef<Terminal> | null
+  declare viewportElement: HTMLDivElement | null
+  declare resizeObserver: ResizeObserver | null
+  declare processedChunkCount: number
+  declare writeVersion: number
 
-      const nextSnapshot = buildViewportSnapshot(this.terminal, this.theme)
-      this.cols = nextSnapshot.cols
-      this.rows = nextSnapshot.rows
-      this.viewRows = nextSnapshot.viewRows
-    },
+  constructor(config: TerminalViewportSetup = {}) {
+    super({
+      cols: DEFAULT_MINIMUM_COLS,
+      rows: DEFAULT_MINIMUM_ROWS,
+      viewRows: [],
+      fontFamily: config.font?.family ?? DEFAULT_FONT_FAMILY,
+      fontSize: config.font?.size ?? DEFAULT_FONT_SIZE,
+      lineHeight: config.font?.lineHeight ?? DEFAULT_LINE_HEIGHT,
+      letterSpacing: config.font?.letterSpacing ?? DEFAULT_LETTER_SPACING,
+      theme: mergeTerminalTheme(config.theme),
+      minimumCols: config.minimumCols ?? DEFAULT_MINIMUM_COLS,
+      minimumRows: config.minimumRows ?? DEFAULT_MINIMUM_ROWS,
+      terminal: null,
+      viewportElement: null,
+      resizeObserver: null,
+      processedChunkCount: 0,
+      writeVersion: 0,
+    })
+  }
 
-    /** Attaches or detaches one DOM viewport without affecting terminal lifetime. */
-    attachViewport(viewportElement: HTMLDivElement | null) {
-      if (this.viewportElement === viewportElement) {
-        return
-      }
+  /** Rebuilds the renderable rows from the current terminal buffer. */
+  refreshSnapshot() {
+    if (!this.terminal) {
+      this.cols = 0
+      this.rows = 0
+      this.viewRows = []
+      return
+    }
 
-      this.resizeObserver?.disconnect()
-      this.resizeObserver = null
-      this.viewportElement = viewportElement
+    const nextSnapshot = buildViewportSnapshot(this.terminal, this.theme)
+    this.cols = nextSnapshot.cols
+    this.rows = nextSnapshot.rows
+    this.viewRows = nextSnapshot.viewRows
+  }
 
-      if (!viewportElement) {
-        return
-      }
+  /** Attaches or detaches one DOM viewport without affecting terminal lifetime. */
+  attachViewport(viewportElement: HTMLDivElement | null) {
+    if (this.viewportElement === viewportElement) {
+      return
+    }
 
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = null
+    this.viewportElement = viewportElement
+
+    if (!viewportElement) {
+      return
+    }
+
+    this.fitViewport()
+
+    const observer = new ResizeObserver(() => {
       this.fitViewport()
+    })
 
-      const observer = new ResizeObserver(() => {
-        this.fitViewport()
-      })
+    observer.observe(viewportElement)
+    this.resizeObserver = observer
+  }
 
-      observer.observe(viewportElement)
-      this.resizeObserver = observer
-    },
+  /** Recomputes terminal dimensions from the current viewport box. */
+  fitViewport() {
+    if (!this.terminal || !this.viewportElement) {
+      return
+    }
 
-    /** Recomputes terminal dimensions from the current viewport box. */
-    fitViewport() {
-      if (!this.terminal || !this.viewportElement) {
-        return
-      }
+    const nextSize = measureTerminalSize(
+      this.viewportElement.clientWidth,
+      this.viewportElement.clientHeight,
+      this.fontFamily,
+      this.fontSize,
+      this.lineHeight,
+      this.letterSpacing,
+      this.minimumCols,
+      this.minimumRows,
+    )
 
-      const nextSize = measureTerminalSize(
-        this.viewportElement.clientWidth,
-        this.viewportElement.clientHeight,
-        this.fontFamily,
-        this.fontSize,
-        this.lineHeight,
-        this.letterSpacing,
-        this.minimumCols,
-        this.minimumRows,
-      )
+    if (nextSize.cols !== this.terminal.cols || nextSize.rows !== this.terminal.rows) {
+      this.terminal.resize(nextSize.cols, nextSize.rows)
+    }
+  }
 
-      if (nextSize.cols !== this.terminal.cols || nextSize.rows !== this.terminal.rows) {
-        this.terminal.resize(nextSize.cols, nextSize.rows)
-      }
-    },
+  /** Streams append-only PTY output chunks into the terminal. */
+  syncChunks(chunks: readonly TerminalViewportChunk[]) {
+    if (!this.terminal) {
+      return
+    }
 
-    /** Streams append-only PTY output chunks into the terminal. */
-    syncChunks(chunks: readonly TerminalViewportChunk[]) {
-      if (!this.terminal) {
-        return
-      }
-
-      if (chunks.length < this.processedChunkCount) {
-        this.processedChunkCount = 0
-        this.writeVersion += 1
-        this.terminal.reset()
-        this.terminal.clear()
-        this.refreshSnapshot()
-      }
-
-      if (chunks.length === this.processedChunkCount) {
-        return
-      }
-
-      const nextVersion = this.writeVersion + 1
-      this.writeVersion = nextVersion
-
-      void syncTerminalChunks(this, chunks, this.processedChunkCount, nextVersion)
-    },
-
-    /** Emits one terminal input event for the owner to forward to its PTY. */
-    forwardInput(data: string) {
-      this.emit("input", { data })
-    },
-
-    /** Emits paste and input events for the owner to forward to its PTY. */
-    forwardPaste(data: string) {
-      this.emit("paste", { data })
-      this.emit("input", { data })
-    },
-
-    /** Emits one focus event for the owner to observe. */
-    notifyFocus() {
-      this.emit("focus")
-    },
-
-    /** Scrolls the visible viewport using one wheel delta. */
-    scrollViewport(deltaY: number, deltaMode: number) {
-      if (!this.terminal) {
-        return
-      }
-
-      const lines =
-        deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? Math.trunc(deltaY)
-          : Math.trunc(deltaY / Math.max(this.fontSize * this.lineHeight, 1))
-
-      if (lines === 0) {
-        return
-      }
-
-      this.terminal.scrollLines(lines)
+    if (chunks.length < this.processedChunkCount) {
+      this.processedChunkCount = 0
+      this.writeVersion += 1
+      this.terminal.reset()
+      this.terminal.clear()
       this.refreshSnapshot()
-    },
+    }
 
-    /** Finalizes one successful async chunk sync on the public model state. */
-    finishChunkSync(chunksLength: number) {
-      this.processedChunkCount = chunksLength
-      this.refreshSnapshot()
-    },
-  })
-  .setup(function (config: TerminalViewportSetup) {
+    if (chunks.length === this.processedChunkCount) {
+      return
+    }
+
+    const nextVersion = this.writeVersion + 1
+    this.writeVersion = nextVersion
+
+    void syncTerminalChunks(this, chunks, this.processedChunkCount, nextVersion)
+  }
+
+  /** Emits one terminal input event for the owner to forward to its PTY. */
+  forwardInput(data: string) {
+    this.emit("input", { data })
+  }
+
+  /** Emits paste and input events for the owner to forward to its PTY. */
+  forwardPaste(data: string) {
+    this.emit("paste", { data })
+    this.emit("input", { data })
+  }
+
+  /** Emits one focus event for the owner to observe. */
+  notifyFocus() {
+    this.emit("focus")
+  }
+
+  /** Scrolls the visible viewport using one wheel delta. */
+  scrollViewport(deltaY: number, deltaMode: number) {
+    if (!this.terminal) {
+      return
+    }
+
+    const lines =
+      deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? Math.trunc(deltaY)
+        : Math.trunc(deltaY / Math.max(this.fontSize * this.lineHeight, 1))
+
+    if (lines === 0) {
+      return
+    }
+
+    this.terminal.scrollLines(lines)
+    this.refreshSnapshot()
+  }
+
+  /** Finalizes one successful async chunk sync on the public model state. */
+  finishChunkSync(chunksLength: number) {
+    this.processedChunkCount = chunksLength
+    this.refreshSnapshot()
+  }
+
+  onSetup() {
     this.act(function () {
-      this.fontFamily = config.font?.family ?? DEFAULT_FONT_FAMILY
-      this.fontSize = config.font?.size ?? DEFAULT_FONT_SIZE
-      this.lineHeight = config.font?.lineHeight ?? DEFAULT_LINE_HEIGHT
-      this.letterSpacing = config.font?.letterSpacing ?? DEFAULT_LETTER_SPACING
-      this.theme = mergeTerminalTheme(config.theme)
-      this.minimumCols = config.minimumCols ?? DEFAULT_MINIMUM_COLS
-      this.minimumRows = config.minimumRows ?? DEFAULT_MINIMUM_ROWS
-
       if (this.terminal) {
         return
       }
@@ -301,10 +312,8 @@ export const TerminalViewportModel = new SigmaType<TerminalViewportShape, Termin
         })
       },
     ]
-  })
-
-/** Runtime instance type for the terminal viewport sigma model. */
-export interface TerminalViewportModel extends InstanceType<typeof TerminalViewportModel> {}
+  }
+}
 
 export function translateKeyboardEvent(
   event: preact.TargetedKeyboardEvent<HTMLDivElement>,

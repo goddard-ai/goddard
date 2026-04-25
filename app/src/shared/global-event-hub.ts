@@ -24,9 +24,25 @@ export type GlobalEventEnvelope<Name extends GlobalEventName = GlobalEventName> 
   }
 }[Name]
 
-export const globalEventHub = new SigmaTarget<GlobalEvents>()
+class GlobalEventHub extends SigmaTarget<GlobalEvents> {
+  dispatch(event: GlobalEventEnvelope) {
+    switch (event.name) {
+      case "appMenu":
+        this.emit("appMenu", event.detail)
+        return
+      case "commandDialogActivated":
+        this.emit("commandDialogActivated", event.detail)
+        return
+      case "debugMenu":
+        this.emit("debugMenu", event.detail)
+        return
+    }
+  }
+}
+
+export const globalEventHub = new GlobalEventHub()
 
 /** Dispatches one typed global event on the singleton hub. */
 export function dispatchGlobalEvent(event: GlobalEventEnvelope) {
-  globalEventHub.emit(event.name, event.detail)
+  globalEventHub.dispatch(event)
 }

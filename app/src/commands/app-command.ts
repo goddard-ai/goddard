@@ -1,10 +1,16 @@
 import type { RunnableInput, ShortcutMatch } from "powerkeys"
-import { SigmaTarget, useListener } from "preact-sigma"
+import { listen, SigmaTarget, useListener } from "preact-sigma"
 import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
 
-const appCommandBus = new SigmaTarget<Record<string, ShortcutMatch | undefined>>()
+class AppCommandBus extends SigmaTarget<Record<string, ShortcutMatch | undefined>> {
+  dispatch(commandId: string, match?: ShortcutMatch) {
+    this.emit(commandId, match)
+  }
+}
+
+const appCommandBus = new AppCommandBus()
 
 type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
@@ -46,7 +52,7 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
       const id = `${namespaceKey as string}.${commandKey as string}`
       return Object.assign(
         function (match?: ShortcutMatch) {
-          appCommandBus.emit(id, match)
+          appCommandBus.dispatch(id, match)
         },
         command,
         { id },
@@ -150,7 +156,7 @@ export const appCommandList = Object.values(AppCommand).flatMap(
 )
 
 export function onAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
-  return appCommandBus.on(command.id, listener)
+  return listen(appCommandBus, command.id, listener)
 }
 
 export function useAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {

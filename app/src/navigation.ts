@@ -1,4 +1,4 @@
-import { SigmaType } from "preact-sigma"
+import { Sigma } from "preact-sigma"
 
 import { readJsonStorage, writeJsonStorage } from "~/support/workspace-storage.ts"
 
@@ -31,41 +31,41 @@ type NavigationShape = {
 }
 
 /** Sigma state for the app shell's primary navigation rail. */
-export const Navigation = new SigmaType<NavigationShape>("Navigation")
-  .defaultState({
-    selectedNavId: "inbox",
-  })
-  .computed({
-    /** Returns the full set of primary navigation items. */
-    items() {
-      return defaultNavigationItems
-    },
+export class Navigation extends Sigma<NavigationShape> {
+  declare selectedNavId: NavigationItemId
 
-    /** Returns the currently selected primary navigation item. */
-    selectedItem() {
-      return this.items.find((item) => item.id === this.selectedNavId) ?? this.items[0]
-    },
-  })
-  .actions({
-    /** Selects one primary workbench view and persists it for the next launch. */
-    selectNavItem(id: NavigationItemId) {
-      this.selectedNavId = id
-      writeJsonStorage(NAVIGATION_STORAGE_KEY, { selectedNavId: id })
-    },
+  constructor() {
+    super({
+      selectedNavId: "inbox",
+    })
+  }
 
-    /** Rehydrates the selected primary view from persisted workspace storage. */
-    hydrateNavigation() {
-      const snapshot = readJsonStorage<{ selectedNavId?: NavigationItemId }>(
-        NAVIGATION_STORAGE_KEY,
-        {},
-      )
-      const selectedNavId = snapshot.selectedNavId
+  /** Returns the full set of primary navigation items. */
+  get items() {
+    return defaultNavigationItems
+  }
 
-      if (selectedNavId && this.items.some((item) => item.id === selectedNavId)) {
-        this.selectedNavId = selectedNavId
-      }
-    },
-  })
+  /** Returns the currently selected primary navigation item. */
+  get selectedItem() {
+    return this.items.find((item) => item.id === this.selectedNavId) ?? this.items[0]
+  }
 
-/** Runtime instance type for the navigation sigma state. */
-export interface Navigation extends InstanceType<typeof Navigation> {}
+  /** Selects one primary workbench view and persists it for the next launch. */
+  selectNavItem(id: NavigationItemId) {
+    this.selectedNavId = id
+    writeJsonStorage(NAVIGATION_STORAGE_KEY, { selectedNavId: id })
+  }
+
+  /** Rehydrates the selected primary view from persisted workspace storage. */
+  hydrateNavigation() {
+    const snapshot = readJsonStorage<{ selectedNavId?: NavigationItemId }>(
+      NAVIGATION_STORAGE_KEY,
+      {},
+    )
+    const selectedNavId = snapshot.selectedNavId
+
+    if (selectedNavId && this.items.some((item) => item.id === selectedNavId)) {
+      this.selectedNavId = selectedNavId
+    }
+  }
+}

@@ -1,11 +1,12 @@
 import { cx } from "@goddard-ai/styled-system/css"
+import type { Protected } from "preact-sigma"
 import { useEffect } from "preact/hooks"
 
 import { translateKeyboardEvent, type TerminalViewportModel } from "./terminal-viewport-model.ts"
 import styles from "./terminal-viewport.style.ts"
 
 export component TerminalViewport(props: {
-  terminal: TerminalViewportModel;
+  terminal: Protected<TerminalViewportModel>;
   class?: string;
   ariaLabel?: string;
 }) {

@@ -1,5 +1,5 @@
 import { createContext } from "preact"
-import { useSigma } from "preact-sigma"
+import { type Protected, useSigma } from "preact-sigma"
 import { useContext, useEffect } from "preact/hooks"
 
 import { ProjectContext } from "~/projects/project-context.ts"
@@ -10,12 +10,12 @@ import { getSystemThemeMediaQuery, type AppearanceSnapshot } from "./appearance/
 import { Navigation } from "./navigation.ts"
 import { WorkbenchTabSet } from "./workbench-tab-set.ts"
 
-const appearanceContext = createContext<Appearance | null>(null)
-const navigationContext = createContext<Navigation | null>(null)
-const projectContextContext = createContext<ProjectContext | null>(null)
-const projectRegistryContext = createContext<ProjectRegistry | null>(null)
+const appearanceContext = createContext<Protected<Appearance> | null>(null)
+const navigationContext = createContext<Protected<Navigation> | null>(null)
+const projectContextContext = createContext<Protected<ProjectContext> | null>(null)
+const projectRegistryContext = createContext<Protected<ProjectRegistry> | null>(null)
 const shortcutRegistryContext = createContext<ShortcutRegistry | null>(null)
-const workbenchTabSetContext = createContext<WorkbenchTabSet | null>(null)
+const workbenchTabSetContext = createContext<Protected<WorkbenchTabSet> | null>(null)
 
 function requireContext<Value>(value: Value | null, name: string): Value {
   if (!value) {
@@ -29,17 +29,16 @@ export component AppStateProvider(props: {
   children: preact.ComponentChildren;
   initialAppearanceSnapshot: AppearanceSnapshot;
 }) {
-  const appearance = useSigma(() => new Appearance(props.initialAppearanceSnapshot), [
-    props.initialAppearanceSnapshot,
-  ])
+  const appearance = useSigma(() => new Appearance(props.initialAppearanceSnapshot), {
+    deps: [props.initialAppearanceSnapshot],
+  })
   const navigation = useSigma(() => new Navigation())
   const projectContext = useSigma(() => new ProjectContext())
   const projectRegistry = useSigma(() => new ProjectRegistry())
   const workbenchTabSet = useSigma(() => new WorkbenchTabSet())
 
   useEffect(() => {
-    const cleanupShortcutRegistry =
-      shortcutRegistry.runtime === null ? shortcutRegistry.setup() : () => {}
+    const cleanupShortcutRegistry = shortcutRegistry.setup()
 
     navigation.hydrateNavigation()
     workbenchTabSet.hydrateTabsFromStore()
