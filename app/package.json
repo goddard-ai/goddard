@@ -43,7 +43,7 @@
     "preact": "11.0.0-beta.1",
     "preact-comark": "0.2.4",
     "preact-in-motion": "^0.2.9",
-    "preact-sigma": "6.0.1",
+    "preact-sigma": "6.1.0",
     "radashi": "^12.7.2",
     "react-virtuoso": "^4.18.3",
     "sharp": "^0.34.5",

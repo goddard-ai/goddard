@@ -4,13 +4,7 @@ import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
 
-class AppCommandBus extends SigmaTarget<Record<string, ShortcutMatch | undefined>> {
-  dispatch(commandId: string, match?: ShortcutMatch) {
-    this.emit(commandId, match)
-  }
-}
-
-const appCommandBus = new AppCommandBus()
+const appCommandBus = new SigmaTarget<Record<string, ShortcutMatch | undefined>>()
 
 type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
@@ -52,7 +46,7 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
       const id = `${namespaceKey as string}.${commandKey as string}`
       return Object.assign(
         function (match?: ShortcutMatch) {
-          appCommandBus.dispatch(id, match)
+          appCommandBus.emit(id, match)
         },
         command,
         { id },

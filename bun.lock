@@ -59,7 +59,7 @@
         "preact": "11.0.0-beta.1",
         "preact-comark": "0.2.4",
         "preact-in-motion": "^0.2.9",
-        "preact-sigma": "6.0.1",
+        "preact-sigma": "6.1.0",
         "radashi": "^12.7.2",
         "react-virtuoso": "^4.18.3",
         "sharp": "^0.34.5",
@@ -2144,7 +2144,7 @@
 
     "preact-in-motion": ["preact-in-motion@0.2.9", "", { "peerDependencies": { "motion": ">=12", "preact": ">=10" } }, "sha512-HRX0DibCW9LGLewfdIPvYnkiONdu2yUTi+EAsNVGQKk4kiOlPMBJgTYp40bTgx1lFLgKMzMOFZTt8nGz0feSfg=="],
 
-    "preact-sigma": ["preact-sigma@6.0.1", "", { "peerDependencies": { "@preact/signals": ">=2", "immer": ">=11", "preact": ">=10" } }, "sha512-dd6iRljxtdDq7pReVgnruxlF0Ep8E0lGtJA5H+1Zw9bbwYlOc8l3tJzC1BbLqMg8fXYOoYa87AeQC1L/dQ+8EQ=="],
+    "preact-sigma": ["preact-sigma@6.1.0", "", { "peerDependencies": { "@preact/signals": ">=2", "immer": ">=11", "preact": ">=10" } }, "sha512-sgvV3rtPP2hxwffSKSJR7i/gJQruUoMDbSfviVTBmMt62a8WiJSIi95u+P69gHiFGvnEx9J6kLK27D/ANsN/iw=="],
 
     "prelude-ls": ["prelude-ls@1.2.1", "", {}, "sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g=="],
 
