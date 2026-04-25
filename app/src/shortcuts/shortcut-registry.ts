@@ -1,6 +1,6 @@
 import { effect } from "@preact/signals"
 import { createShortcuts, type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
-import { Sigma, type SigmaRef } from "preact-sigma"
+import { Sigma } from "preact-sigma"
 
 import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
@@ -25,11 +25,6 @@ type ShortcutRegistryState = {
   loadError: string | null
   writeError: string | null
   isHydrated: boolean
-}
-
-type ShortcutRegistryServices = {
-  runtime: SigmaRef<ShortcutRuntime>
-  bindingSet: SigmaRef<BindingSet>
 }
 
 function getDefaultResolvedBindings() {
@@ -59,10 +54,10 @@ function normalizeWhenClause(whenClause: string | null | undefined) {
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
 export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
-  #runtime: SigmaRef<ShortcutRuntime>
-  #bindingSet: SigmaRef<BindingSet>
+  #runtime: ShortcutRuntime
+  #bindingSet: BindingSet
 
-  constructor(services: ShortcutRegistryServices) {
+  constructor(target: Document | HTMLElement = document) {
     super({
       selectedProfileId: "goddard",
       overrides: {},
@@ -72,8 +67,15 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       isHydrated: false,
     })
 
-    this.#runtime = services.runtime
-    this.#bindingSet = services.bindingSet
+    this.#runtime = createShortcuts({
+      target,
+      editablePolicy: "ignore-editable",
+      getActiveScopes: () => commandContext.activeScopes.peek(),
+      onError: (error, info) => {
+        console.error("Shortcut runtime error.", error, info)
+      },
+    })
+    this.#bindingSet = this.#runtime.createBindingSet()
   }
 
   get runtime() {
@@ -330,16 +332,4 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
 export interface ShortcutRegistry extends ShortcutRegistryState {}
 
 /** Module-scoped shortcut registry singleton shared across the app shell. */
-const runtime = createShortcuts({
-  target: document,
-  editablePolicy: "ignore-editable",
-  getActiveScopes: () => commandContext.activeScopes.peek(),
-  onError: (error, info) => {
-    console.error("Shortcut runtime error.", error, info)
-  },
-})
-
-export const shortcutRegistry = new ShortcutRegistry({
-  runtime,
-  bindingSet: runtime.createBindingSet(),
-})
+export const shortcutRegistry = new ShortcutRegistry()

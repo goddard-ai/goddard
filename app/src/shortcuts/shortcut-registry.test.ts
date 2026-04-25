@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { createShortcuts } from "powerkeys"
 
 import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
@@ -9,18 +8,7 @@ import { ShortcutRegistry } from "./shortcut-registry.ts"
 /** Creates one registry instance with an isolated document-like event boundary. */
 function createTestRegistry() {
   const runtimeDocument = document.implementation.createHTMLDocument("shortcut-registry-test")
-  const runtime = createShortcuts({
-    target: runtimeDocument,
-    editablePolicy: "ignore-editable",
-    getActiveScopes: () => commandContext.activeScopes.peek(),
-    onError: (error, info) => {
-      console.error("Shortcut runtime error.", error, info)
-    },
-  })
-  const registry = new ShortcutRegistry({
-    runtime,
-    bindingSet: runtime.createBindingSet(),
-  })
+  const registry = new ShortcutRegistry(runtimeDocument)
   const cleanup = registry.setup()
   commandContext.activeScopes.value = []
   commandContext.activeTabKind.value = "main"

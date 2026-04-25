@@ -1,5 +1,5 @@
 import { Terminal, type ITheme } from "@xterm/headless"
-import { SigmaTarget, type SigmaRef } from "preact-sigma"
+import { SigmaTarget } from "preact-sigma"
 
 const VIEWPORT_PADDING_PX = 18
 const DEFAULT_MINIMUM_COLS = 40
@@ -90,7 +90,7 @@ export class TerminalViewportModel extends SigmaTarget<
   TerminalViewportEvents,
   TerminalViewportState
 > {
-  #terminal: SigmaRef<Terminal> | null = null
+  #terminal: Terminal | null = null
   #viewportElement: HTMLDivElement | null = null
   #resizeObserver: ResizeObserver | null = null
   #processedChunkCount = 0
