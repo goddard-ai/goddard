@@ -6,6 +6,7 @@ For bootstrap rules and broad app contribution policy, follow `app/AGENTS.md`, `
 
 ## When To Use A Form Model
 
+- Consider `src/lib/use-form.ts` first for flat Zod-backed DOM forms that can stay mostly uncontrolled, especially dialog forms with default values, keyed validation errors, and submit-time parsing.
 - Use one feature-local form model when a form has cross-field derivation, reset semantics, async option loading, or state that is shared across a dialog boundary.
 - Use simpler local state for trivial forms with a few independent inputs and no meaningful derived state.
 - Keep the form model local to the feature unless multiple forms prove they need the same behavior.
