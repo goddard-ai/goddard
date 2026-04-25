@@ -1,6 +1,18 @@
 import { Sigma } from "preact-sigma"
 import { z } from "zod"
 
+import {
+  collectSubmissionValues,
+  detachFieldControl,
+  focusFirstInvalidField,
+  getEmptyFieldValue,
+  getFieldControls,
+  hydrateField,
+  observeControl,
+  readFieldValue,
+  sweepDisconnectedControls,
+  writeFieldValue,
+} from "./dom.ts"
 import type { AnyObjectSchema, FormControl, FormInvalidResult, FormSchema } from "./schema.ts"
 import type { FieldErrorRecord, FormValueRecord } from "./types.ts"
 import {
@@ -8,12 +20,7 @@ import {
   assignRecordValue,
   cloneValueRecord,
   createEmptyErrors,
-  getEmptyFieldValue,
-  getObservedEventName,
-  isFormControl,
-  readFieldValue,
   setDraftFieldValue,
-  writeFieldValue,
 } from "./values.ts"
 
 declare const formManagerSchemaType: unique symbol
@@ -96,7 +103,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
         fieldName,
         nextInitialValueRecord[fieldName],
       )
-      this.#hydrateField(this.draftValues, fieldName)
+      this.#hydrateField(fieldName, this.draftValues)
     }
   }
 
@@ -116,7 +123,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     this.#fieldNameByControl.set(control, fieldName)
     this.#observeControl(control)
 
-    this.#hydrateField(this.draftValues, fieldName)
+    this.#hydrateField(fieldName, this.draftValues)
   }
 
   /** Removes one field control and any listener bookkeeping owned by this form. */
@@ -172,7 +179,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
     this.#dirtyFields.clear()
 
     for (const fieldName of this.#schema.keys) {
-      this.#hydrateField(nextValues, fieldName)
+      this.#hydrateField(fieldName, nextValues)
     }
 
     this.draftValues = nextValues
@@ -198,7 +205,7 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
         errors: errors as FormInvalidResult<T>["errors"],
         error: parsed.error as FormInvalidResult<T>["error"],
       })
-      this.#focusFirstInvalidField(parsed.error, formElement)
+      this.#focusFirstInvalidField(formElement, parsed.error)
       return
     }
 
@@ -215,91 +222,62 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
   }
 
   #collectSubmissionValues(formElement: HTMLFormElement) {
-    const formControls = [...formElement.elements].filter(
-      (control): control is FormControl =>
-        isFormControl(control) && this.#fieldNameByControl.has(control),
+    return collectSubmissionValues(this.#schema.keys, this.#fieldNameByControl, formElement)
+  }
+
+  #focusFirstInvalidField(formElement: HTMLFormElement, error: z.ZodError) {
+    focusFirstInvalidField(
+      error,
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      formElement,
     )
-    const submissionValues: FormValueRecord = {}
-
-    for (const fieldName of this.#schema.keys) {
-      assignRecordValue(
-        submissionValues,
-        fieldName,
-        readFieldValue(formControls.filter((control) => control.name === fieldName)),
-      )
-    }
-
-    return submissionValues
   }
 
-  #focusFirstInvalidField(error: z.ZodError, formElement: HTMLFormElement) {
-    for (const issue of error.issues) {
-      const fieldName = typeof issue.path[0] === "string" ? issue.path[0] : null
-
-      if (!fieldName) {
-        continue
-      }
-
-      const control = this.#getFieldControls(fieldName, formElement)[0]
-
-      if (control) {
-        control.focus()
-        return
-      }
-    }
-  }
-
-  #hydrateField(draftValues: FormValueRecord, fieldName: string) {
-    writeFieldValue(this.#getFieldControls(fieldName), draftValues[fieldName])
+  #hydrateField(fieldName: string, draftValues: FormValueRecord) {
+    hydrateField(
+      draftValues,
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      fieldName,
+    )
   }
 
   #getFieldControls(fieldName: string, formElement?: HTMLFormElement) {
-    this.#sweepDisconnectedControls(fieldName)
-
-    const fieldControls = [...(this.#controlsByField.get(fieldName) ?? [])].filter(
-      (control) => !formElement || formElement.contains(control),
+    return getFieldControls(
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      fieldName,
+      formElement,
     )
-
-    fieldControls.sort(compareControlsByDomOrder)
-    return fieldControls
   }
 
   #observeControl(control: FormControl) {
-    if (this.#cleanupByControl.has(control)) {
-      return
-    }
-
-    const eventName = getObservedEventName(control)
-    const handleControlChange = () => {
-      // Controls can be reattached under another field name without reinstalling listeners.
-      const fieldName = this.#fieldNameByControl.get(control)
-
-      if (fieldName) {
-        this.handleFieldChange(fieldName)
-      }
-    }
-
-    control.addEventListener(eventName, handleControlChange)
-    this.#cleanupByControl.set(control, () => {
-      control.removeEventListener(eventName, handleControlChange)
+    observeControl(this.#fieldNameByControl, this.#cleanupByControl, control, (fieldName) => {
+      this.handleFieldChange(fieldName)
     })
   }
 
   #sweepDisconnectedControls(fieldName: string) {
-    for (const control of this.#controlsByField.get(fieldName) ?? []) {
-      if (control.isConnected) {
-        continue
-      }
-
-      this.#detachFieldControl(fieldName, control)
-    }
+    sweepDisconnectedControls(
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      fieldName,
+    )
   }
 
   #detachFieldControl(fieldName: string, control: FormControl) {
-    this.#controlsByField.get(fieldName)?.delete(control)
-    this.#cleanupByControl.get(control)?.()
-    this.#cleanupByControl.delete(control)
-    this.#fieldNameByControl.delete(control)
+    detachFieldControl(
+      this.#controlsByField,
+      this.#fieldNameByControl,
+      this.#cleanupByControl,
+      fieldName,
+      control,
+    )
   }
 
   #emitValues(nextValues: FormValueRecord) {
@@ -319,22 +297,6 @@ export class FormManager<T extends AnyObjectSchema> extends Sigma<FormManagerSta
 
 export interface FormManager<T extends AnyObjectSchema> extends FormManagerState {
   readonly [formManagerSchemaType]?: T
-}
-
-function compareControlsByDomOrder(leftControl: FormControl, rightControl: FormControl) {
-  if (leftControl === rightControl) {
-    return 0
-  }
-
-  const position = leftControl.compareDocumentPosition(rightControl)
-
-  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
-    return -1
-  }
-  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
-    return 1
-  }
-  return 0
 }
 
 function clearFieldError(errors: FieldErrorRecord, fieldName: string) {

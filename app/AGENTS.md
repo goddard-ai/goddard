@@ -55,6 +55,7 @@
   - Use `~/...` for imports that would otherwise traverse up to `src/` or across feature roots.
   - Use `../...` only when it does not traverse up to `src/` itself. A single `../...` is allowed when it still lands inside a child path such as `src/foo/...`, but do not use `../...` to reach `src/...` broadly.
   - Never use `../../...` or deeper upward traversal imports.
+  - In `src/lib/use-form`, keep complex DOM API logic in `dom.ts`; form state modules should only orchestrate private handles and state changes around those helpers.
 - In UI components, prefer `useListener` from `preact-sigma` over manual `addEventListener` and `removeEventListener` wiring.
 - Avoid `forwardRef` for cross-component coordination in `app/` unless there is no simpler option. Prefer semantic actions through context or `src/shared/global-event-hub.ts`.
 - Prefer the `class` JSX prop over `className`.
