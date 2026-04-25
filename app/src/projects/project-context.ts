@@ -105,7 +105,9 @@ export function orderProjectsByRecentActivity(
 
 /** Sigma state for the app-wide active project context and recent-project order. */
 export class ProjectContext extends Sigma<ProjectContextState> {
+  /** Focus bookkeeping used to decide whether tab-reported projects may drive the active project. */
   #focusedTabId: string | null = null
+  /** Last project reported by each tab; this transient resolution cache is not recent-project state. */
   #reportedTabProjectsByTabId: Record<string, string | null> = {}
 
   constructor() {

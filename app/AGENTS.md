@@ -19,6 +19,7 @@
   - Keep appearance controls inline on the settings detail tab. Do not move them into a separate dialog or modal.
 - State ownership:
   - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
+  - In Sigma classes, add a short human-readable comment to each `#private` field explaining the runtime or bookkeeping it owns and why it stays outside reactive state.
   - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.
   - Do not model simple UI state in `preact-sigma`.
   - For singleton UI components, prefer subscribing to shared Preact context directly instead of threading pass-through JSX props through parent components just to preserve an abstraction boundary.

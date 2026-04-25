@@ -36,7 +36,9 @@ function normalizeWhenClause(whenClause: string | null | undefined) {
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
 export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
+  /** Imperative powerkeys runtime that owns document listeners outside persisted shortcut state. */
   #runtime: ShortcutRuntime
+  /** Mutable binding set installed in the runtime as the projection of the current keymap state. */
   #bindingSet: BindingSet
 
   constructor(target: Document | HTMLElement = document) {

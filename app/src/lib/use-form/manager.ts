@@ -75,8 +75,11 @@ type FormManagerSetup = Omit<FormManagerState, "isSubmitting"> & {
 
 /** Local sigma state for one uncontrolled Zod-backed form instance. */
 export class FormManager extends Sigma<FormManagerState> {
+  /** Zod-backed field contract used for validation and ordering; it is constructor wiring, not form state. */
   #schema: FormSchema<AnyObjectSchema>
+  /** Stable callback holder supplied by the hook so callback churn does not become reactive form state. */
   #callbacks: FormCallbacksRuntime
+  /** Browser control and dirty-field bookkeeping for uncontrolled inputs. */
   #runtime: FormRuntime
 
   constructor(setup: FormManagerSetup) {

@@ -90,10 +90,15 @@ export class TerminalViewportModel extends SigmaTarget<
   TerminalViewportEvents,
   TerminalViewportState
 > {
+  /** Headless xterm instance that owns parser and buffer state behind the rendered row snapshot. */
   #terminal: Terminal | null = null
+  /** Mounted viewport element used for measurement; DOM nodes are not serializable Sigma state. */
   #viewportElement: HTMLDivElement | null = null
+  /** Disposable observer attached to the current viewport element for fit recalculation. */
   #resizeObserver: ResizeObserver | null = null
+  /** Cursor into append-only output chunks already written into the terminal buffer. */
   #processedChunkCount = 0
+  /** Monotonic token used to ignore stale async writes after resets or newer sync passes. */
   #writeVersion = 0
 
   constructor(config: TerminalViewportSetup = {}) {
