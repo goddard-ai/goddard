@@ -5,7 +5,7 @@ import { Composer } from "./composer.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { useQueries } from "~/lib/query.ts"
-import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.tsrx"
+import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { submitSessionPrompt } from "~/sessions/actions.ts"
 
