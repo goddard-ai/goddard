@@ -37,14 +37,14 @@ test("navigation omits projects from the primary workbench items", () => {
   ])
 })
 
-test("navigation persistence ignores removed navigation ids", () => {
+test("navigation persistence restores selected navigation id", () => {
   window.localStorage.clear()
   window.localStorage.setItem(
     NAVIGATION_STORAGE_KEY,
     JSON.stringify({
       version: 1,
       savedAt: 100,
-      value: { selectedNavId: "projects" },
+      value: { selectedNavId: "sessions" },
     }),
   )
 
@@ -54,5 +54,5 @@ test("navigation persistence ignores removed navigation ids", () => {
     highContrast: false,
   })
 
-  expect(appState.navigation.selectedNavId).toBe("inbox")
+  expect(appState.navigation.selectedNavId).toBe("sessions")
 })
