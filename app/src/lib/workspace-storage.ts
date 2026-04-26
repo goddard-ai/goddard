@@ -12,7 +12,7 @@ function isPersistRecord<TStored>(value: unknown): value is PersistRecord<TStore
 }
 
 /** Creates one localStorage-backed JSON store for `preact-sigma/persist` records. */
-export function createWorkspaceStorageStore<TStored = any>(): SyncPersistStore<TStored> {
+export function createWorkspaceStorageStore<TStored>(): SyncPersistStore<TStored> {
   return {
     get(key) {
       try {
