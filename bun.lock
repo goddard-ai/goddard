@@ -71,7 +71,7 @@
         "@pandacss/dev": "^1.10.0",
         "@preact/preset-vite": "^2.10.5",
         "@spiriit/vite-plugin-svg-spritemap": "7.0.0",
-        "@tsrx/typescript-plugin": "^0.3.33",
+        "@tsrx/typescript-plugin": "file:/tmp/tsrx-typescript-plugin-0.3.33.tgz",
         "@tsrx/vite-plugin-preact": "^0.0.8",
         "@types/culori": "^4.0.1",
         "chokidar": "^5.0.0",
@@ -1080,7 +1080,7 @@
 
     "@tsrx/ripple": ["@tsrx/ripple@0.0.15", "", { "dependencies": { "@tsrx/core": "0.0.13", "esrap": "^2.1.0", "is-reference": "^3.0.3", "zimmerframe": "^1.1.2" } }, "sha512-X5FGy5pSLYYBCbbEgbW/mYpW5h0ti2MPVLwSjD8MLWKDXUTih3xzWgq6Pe0wuIoWvaFyGoQ9amudinJ2MJXKZw=="],
 
-    "@tsrx/typescript-plugin": ["@tsrx/typescript-plugin@0.3.33", "", { "dependencies": { "@volar/language-core": "~2.4.28", "@volar/typescript": "~2.4.28" }, "peerDependencies": { "@tsrx/preact": "0.0.8", "@tsrx/react": "0.1.7", "@tsrx/ripple": "0.0.15", "@tsrx/solid": "0.0.13", "typescript": "^5.9.3" }, "optionalPeers": ["@tsrx/preact", "@tsrx/react", "@tsrx/ripple", "@tsrx/solid"] }, "sha512-aP1yewhb4l0xIyzMaevaw3WkR8+3v1EWg3cjWgH5oeGJnQVLeKKIW9T5y+5uj/6NsSUIe2rv2lkqiSr0HmPOAw=="],
+    "@tsrx/typescript-plugin": ["@tsrx/typescript-plugin@/tmp/tsrx-typescript-plugin-0.3.33.tgz", { "dependencies": { "@volar/language-core": "*", "@volar/typescript": "*" }, "peerDependencies": { "@tsrx/preact": "*", "@tsrx/react": "*", "@tsrx/ripple": "*", "@tsrx/solid": "*", "typescript": "*" }, "optionalPeers": ["@tsrx/preact", "@tsrx/react", "@tsrx/ripple", "@tsrx/solid"], "bin": { "tsrx-tsc": "./src/tsc.js" } }, "sha512-Og89WGgYCYeTwVniDlNr34p4a1pQ6RwGjTs2mWkgpQP+7KVPLYCpGj/8+MTVTb7Lrv8Wr22vFrxczY4F87slCw=="],
 
     "@tsrx/vite-plugin-preact": ["@tsrx/vite-plugin-preact@0.0.8", "", { "dependencies": { "@tsrx/preact": "0.0.8" }, "peerDependencies": { "vite": "*" } }, "sha512-8M3+1d4EJ/U3mE2pGfdCuHqdd8GAp3Tcy7zBDxlyR1upM4JvsRcovU8QkGQurgvS2KfZ5GXvbWHukIqSIR1I3Q=="],
 
