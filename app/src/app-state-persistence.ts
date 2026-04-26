@@ -5,9 +5,9 @@ import { useEffect, useMemo } from "preact/hooks"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { desktopHost } from "./desktop-host.ts"
-import { Navigation, type NavigationState } from "./navigation.ts"
-import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
-import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
+import { Navigation } from "./navigation.ts"
+import { ProjectContext } from "./projects/project-context.ts"
+import { ProjectRegistry } from "./projects/project-registry.ts"
 import { createDefaultShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
 import {
   shortcutRegistry,
@@ -15,7 +15,7 @@ import {
   type ShortcutRegistryState,
 } from "./shortcuts/shortcut-registry.ts"
 import { createWorkspaceStorageStore } from "./support/workspace-storage.ts"
-import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
+import { WorkbenchTabSet } from "./workbench-tab-set.ts"
 
 const APPEARANCE_STORAGE_KEY = "goddard.app.appearance.v2"
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v3"
@@ -23,22 +23,6 @@ const PROJECT_CONTEXT_STORAGE_KEY = "goddard.app.project-context.v2"
 const PROJECT_REGISTRY_STORAGE_KEY = "goddard.app.projects.v2"
 const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v4"
 const SHORTCUT_REGISTRY_STORAGE_KEY = "goddard.app.shortcuts.v1"
-
-type AppearanceStoredState = Pick<AppearanceState, "mode" | "highContrast">
-type NavigationStoredState = Pick<NavigationState, "selectedNavId">
-type ProjectContextStoredState = Pick<
-  ProjectContextState,
-  "activeProjectPath" | "recentProjectPaths"
->
-type ProjectRegistryStoredState = Pick<
-  ProjectRegistryState,
-  "projectsByPath" | "orderedProjectPaths"
->
-type ShortcutStoredState = Pick<ShortcutRegistryState, "selectedProfileId" | "overrides">
-type WorkbenchTabSetStoredState = Pick<
-  WorkbenchTabSetState,
-  "tabs" | "orderedTabIds" | "activeTabId" | "recency"
->
 
 /** Context-ready app model bundle produced by the persistence lifecycle hook. */
 export type PersistentAppState = {
@@ -88,27 +72,27 @@ export function createRestoredAppState(initialAppearanceState: AppearanceState) 
 
   restoreSync(appearance, {
     key: APPEARANCE_STORAGE_KEY,
-    store: createWorkspaceStorageStore<AppearanceStoredState>(),
+    store: createWorkspaceStorageStore(),
     pick: ["mode", "highContrast"] as const,
   })
   restoreSync(navigation, {
     key: NAVIGATION_STORAGE_KEY,
-    store: createWorkspaceStorageStore<NavigationStoredState>(),
+    store: createWorkspaceStorageStore(),
     pick: ["selectedNavId"] as const,
   })
   restoreSync(projectContext, {
     key: PROJECT_CONTEXT_STORAGE_KEY,
-    store: createWorkspaceStorageStore<ProjectContextStoredState>(),
+    store: createWorkspaceStorageStore(),
     pick: ["activeProjectPath", "recentProjectPaths"] as const,
   })
   restoreSync(projectRegistry, {
     key: PROJECT_REGISTRY_STORAGE_KEY,
-    store: createWorkspaceStorageStore<ProjectRegistryStoredState>(),
+    store: createWorkspaceStorageStore(),
     pick: ["projectsByPath", "orderedProjectPaths"] as const,
   })
   restoreSync(workbenchTabSet, {
     key: WORKBENCH_TABS_STORAGE_KEY,
-    store: createWorkspaceStorageStore<WorkbenchTabSetStoredState>(),
+    store: createWorkspaceStorageStore(),
     pick: ["tabs", "orderedTabIds", "activeTabId", "recency"] as const,
   })
 
@@ -155,14 +139,14 @@ const shortcutRegistryStore = {
   async delete() {
     await desktopHost.writeShortcutKeymap(createDefaultShortcutKeymapFile())
   },
-} satisfies PersistStore<ShortcutStoredState>
+} satisfies PersistStore<Pick<ShortcutRegistryState, "selectedProfileId" | "overrides">>
 
 /** Reads the persisted appearance state before the first render and applies it to the document. */
 export function getInitialAppearanceState() {
   const appearance = new Appearance(createDefaultAppearanceState())
   restoreSync(appearance, {
     key: APPEARANCE_STORAGE_KEY,
-    store: createWorkspaceStorageStore<AppearanceStoredState>(),
+    store: createWorkspaceStorageStore(),
     pick: ["mode", "highContrast"] as const,
   })
   appearance.applyDocumentAppearance()
@@ -188,27 +172,27 @@ export function usePersistentAppState(initialAppearanceState: AppearanceState) {
     const persistenceHandles = [
       persist(appState.appearance, {
         key: APPEARANCE_STORAGE_KEY,
-        store: createWorkspaceStorageStore<AppearanceStoredState>(),
+        store: createWorkspaceStorageStore(),
         pick: ["mode", "highContrast"] as const,
       }),
       persist(appState.navigation, {
         key: NAVIGATION_STORAGE_KEY,
-        store: createWorkspaceStorageStore<NavigationStoredState>(),
+        store: createWorkspaceStorageStore(),
         pick: ["selectedNavId"] as const,
       }),
       persist(appState.projectContext, {
         key: PROJECT_CONTEXT_STORAGE_KEY,
-        store: createWorkspaceStorageStore<ProjectContextStoredState>(),
+        store: createWorkspaceStorageStore(),
         pick: ["activeProjectPath", "recentProjectPaths"] as const,
       }),
       persist(appState.projectRegistry, {
         key: PROJECT_REGISTRY_STORAGE_KEY,
-        store: createWorkspaceStorageStore<ProjectRegistryStoredState>(),
+        store: createWorkspaceStorageStore(),
         pick: ["projectsByPath", "orderedProjectPaths"] as const,
       }),
       persist(appState.workbenchTabSet, {
         key: WORKBENCH_TABS_STORAGE_KEY,
-        store: createWorkspaceStorageStore<WorkbenchTabSetStoredState>(),
+        store: createWorkspaceStorageStore(),
         pick: ["tabs", "orderedTabIds", "activeTabId", "recency"] as const,
       }),
     ]
