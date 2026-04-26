@@ -30,6 +30,6 @@ Apply these defaults when writing or changing application code that uses `preact
 - Mutate state in ordinary prototype methods; prototype methods are actions by default unless marked with `@query`.
 - Call `this.commit()` before `await`, before an action promise resolves, before `this.emit(...)`, or before invoking another sigma instance's action.
 - Put side effects in `onSetup(...)`, not constructors.
-- Use `this.act(function () { ... })` for setup-owned callbacks that need action semantics.
+- Call actions directly from setup-owned callbacks. Use `this.act(function () { ... })` only for ad hoc public state mutations that are not already inside an action; private field mutations do not need it.
 - Use `useSigma(...)` for component-owned model instances.
 - Use `preact-sigma/persist` for storage policy instead of putting persistence directly in model classes.

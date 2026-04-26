@@ -17,7 +17,7 @@ export function openProjectTab(props: {
     return null
   }
 
-  props.projectContext.setActiveProject(project.path)
+  props.projectContext.activateProject(project.path)
   props.workbenchTabSet.openOrFocusTab({
     id: `project:${encodeURIComponent(project.path)}`,
     kind: "project",

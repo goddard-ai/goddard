@@ -267,9 +267,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       this.#runtime.batchContext(commandContext.whenContext.value)
     })
 
-    this.act(function () {
-      this.rebindRuntime()
-    })
+    this.rebindRuntime()
 
     return [
       () => {

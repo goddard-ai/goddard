@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { createRestoredAppState } from "./app-state-persistence.ts"
+import { createRestoredAppModels } from "./app-state-persistence.ts"
 import { Navigation } from "./navigation.ts"
 
 const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v3"
@@ -49,10 +49,10 @@ test("navigation persistence restores selected navigation id", () => {
   )
 
   ensureMatchMedia()
-  const appState = createRestoredAppState({
+  const appModels = createRestoredAppModels({
     mode: "system",
     highContrast: false,
   })
 
-  expect(appState.navigation.selectedNavId).toBe("sessions")
+  expect(appModels.navigation.selectedNavId).toBe("sessions")
 })

@@ -1,7 +1,7 @@
 import { createContext } from "preact"
 import { useContext } from "preact/hooks"
 
-import { type PersistentAppState, usePersistentAppState } from "./app-state-persistence.ts"
+import { type PersistentAppModels, usePersistentAppModels } from "./app-state-persistence.ts"
 import type { AppearanceState } from "./appearance/appearance.ts"
 
 function requireContext<Value>(value: Value | null, name: string) {
@@ -27,18 +27,18 @@ function createRequiredContext<Value>(name: string): RequiredContext<Value> {
 }
 
 const context = {
-  Appearance: createRequiredContext<PersistentAppState["appearance"]>("appearanceContext"),
-  Navigation: createRequiredContext<PersistentAppState["navigation"]>("navigationContext"),
-  ProjectContext: createRequiredContext<PersistentAppState["projectContext"]>(
+  Appearance: createRequiredContext<PersistentAppModels["appearance"]>("appearanceContext"),
+  Navigation: createRequiredContext<PersistentAppModels["navigation"]>("navigationContext"),
+  ProjectContext: createRequiredContext<PersistentAppModels["projectContext"]>(
     "projectContextContext",
   ),
-  ProjectRegistry: createRequiredContext<PersistentAppState["projectRegistry"]>(
+  ProjectRegistry: createRequiredContext<PersistentAppModels["projectRegistry"]>(
     "projectRegistryContext",
   ),
-  ShortcutRegistry: createRequiredContext<PersistentAppState["shortcutRegistry"]>(
+  ShortcutRegistry: createRequiredContext<PersistentAppModels["shortcutRegistry"]>(
     "shortcutRegistryContext",
   ),
-  WorkbenchTabSet: createRequiredContext<PersistentAppState["workbenchTabSet"]>(
+  WorkbenchTabSet: createRequiredContext<PersistentAppModels["workbenchTabSet"]>(
     "workbenchTabSetContext",
   ),
 }
@@ -47,14 +47,14 @@ export component AppStateProvider(props: {
   children: preact.ComponentChildren;
   initialAppearanceState: AppearanceState;
 }) {
-  const appState = usePersistentAppState(props.initialAppearanceState)
+  const appModels = usePersistentAppModels(props.initialAppearanceState)
 
-  <context.Appearance value={appState.appearance}>
-    <context.Navigation value={appState.navigation}>
-      <context.ProjectContext value={appState.projectContext}>
-        <context.ProjectRegistry value={appState.projectRegistry}>
-          <context.ShortcutRegistry value={appState.shortcutRegistry}>
-            <context.WorkbenchTabSet value={appState.workbenchTabSet}>
+  <context.Appearance value={appModels.appearance}>
+    <context.Navigation value={appModels.navigation}>
+      <context.ProjectContext value={appModels.projectContext}>
+        <context.ProjectRegistry value={appModels.projectRegistry}>
+          <context.ShortcutRegistry value={appModels.shortcutRegistry}>
+            <context.WorkbenchTabSet value={appModels.workbenchTabSet}>
               {props.children}
             </context.WorkbenchTabSet>
           </context.ShortcutRegistry>

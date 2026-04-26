@@ -217,6 +217,13 @@ export class TerminalViewportModel extends SigmaTarget<
     this.emit("focus")
   }
 
+  /** Publishes the latest terminal snapshot and emits the resize event for owner coordination. */
+  notifyResize(nextSize: { cols: number; rows: number }) {
+    this.refreshSnapshot()
+    this.commit()
+    this.emit("resize", { cols: nextSize.cols, rows: nextSize.rows })
+  }
+
   /** Scrolls the visible viewport using one wheel delta. */
   scrollViewport(deltaY: number, deltaMode: number) {
     if (!this.#terminal) {
@@ -243,11 +250,7 @@ export class TerminalViewportModel extends SigmaTarget<
   }
 
   onSetup() {
-    this.act(function () {
-      if (this.#terminal) {
-        return
-      }
-
+    if (!this.#terminal) {
       this.#terminal = new Terminal({
         cols: Math.max(this.minimumCols, 1),
         rows: Math.max(this.minimumRows, 1),
@@ -260,7 +263,7 @@ export class TerminalViewportModel extends SigmaTarget<
       })
 
       this.refreshSnapshot()
-    })
+    }
 
     if (!this.#terminal) {
       return []
@@ -274,27 +277,21 @@ export class TerminalViewportModel extends SigmaTarget<
         this.refreshSnapshot()
       }),
       this.#terminal.onResize((nextSize: { cols: number; rows: number }) => {
-        this.act(function () {
-          this.refreshSnapshot()
-          this.commit()
-          this.emit("resize", { cols: nextSize.cols, rows: nextSize.rows })
-        })
+        this.notifyResize(nextSize)
       }),
       this.#terminal.onTitleChange(() => {
         this.refreshSnapshot()
       }),
       () => {
-        this.act(function () {
-          this.#resizeObserver?.disconnect()
-          this.#resizeObserver = null
+        this.#resizeObserver?.disconnect()
+        this.#resizeObserver = null
 
-          this.#terminal?.dispose()
-          this.#terminal = null
-          this.#viewportElement = null
-          this.#processedChunkCount = 0
-          this.#writeVersion += 1
-          this.refreshSnapshot()
-        })
+        this.#terminal?.dispose()
+        this.#terminal = null
+        this.#viewportElement = null
+        this.#processedChunkCount = 0
+        this.#writeVersion += 1
+        this.refreshSnapshot()
       },
     ]
   }

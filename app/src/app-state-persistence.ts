@@ -24,8 +24,17 @@ const PROJECT_REGISTRY_STORAGE_KEY = "goddard.app.projects.v2"
 const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v4"
 const SHORTCUT_REGISTRY_STORAGE_KEY = "goddard.app.shortcuts.v1"
 
+/** Raw app Sigma model bundle after synchronous state restoration. */
+export type RestoredAppModels = {
+  appearance: Appearance
+  navigation: Navigation
+  projectContext: ProjectContext
+  projectRegistry: ProjectRegistry
+  workbenchTabSet: WorkbenchTabSet
+}
+
 /** Context-ready app model bundle produced by the persistence lifecycle hook. */
-export type PersistentAppState = {
+export type PersistentAppModels = {
   appearance: Protected<Appearance>
   navigation: Protected<Navigation>
   projectContext: Protected<ProjectContext>
@@ -63,7 +72,7 @@ function createDefaultAppearanceState() {
 }
 
 /** Creates the app's singleton Sigma models and restores their persisted state. */
-export function createRestoredAppState(initialAppearanceState: AppearanceState) {
+export function createRestoredAppModels(initialAppearanceState: AppearanceState) {
   const appearance = new Appearance(initialAppearanceState)
   const navigation = new Navigation()
   const projectContext = new ProjectContext()
@@ -99,7 +108,7 @@ export function createRestoredAppState(initialAppearanceState: AppearanceState) 
     projectContext,
     projectRegistry,
     workbenchTabSet,
-  }
+  } satisfies RestoredAppModels
 }
 
 const shortcutRegistryStore = {
@@ -149,38 +158,38 @@ export function getInitialAppearanceState() {
 }
 
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
-export function usePersistentAppState(initialAppearanceState: AppearanceState) {
-  const appState = useMemo(
-    () => createRestoredAppState(initialAppearanceState),
+export function usePersistentAppModels(initialAppearanceState: AppearanceState) {
+  const appModels = useMemo(
+    () => createRestoredAppModels(initialAppearanceState),
     [initialAppearanceState],
   )
-  const appearance = useSigma(() => appState.appearance, {
-    deps: [appState.appearance],
+  const appearance = useSigma(() => appModels.appearance, {
+    deps: [appModels.appearance],
   })
-  const navigation = useSigma(() => appState.navigation, [appState.navigation])
-  const projectContext = useSigma(() => appState.projectContext, [appState.projectContext])
-  const projectRegistry = useSigma(() => appState.projectRegistry, [appState.projectRegistry])
-  const workbenchTabSet = useSigma(() => appState.workbenchTabSet, [appState.workbenchTabSet])
+  const navigation = useSigma(() => appModels.navigation, [appModels.navigation])
+  const projectContext = useSigma(() => appModels.projectContext, [appModels.projectContext])
+  const projectRegistry = useSigma(() => appModels.projectRegistry, [appModels.projectRegistry])
+  const workbenchTabSet = useSigma(() => appModels.workbenchTabSet, [appModels.workbenchTabSet])
 
   useEffect(() => {
     const persistenceHandles = [
-      persist(appState.appearance, {
+      persist(appModels.appearance, {
         key: APPEARANCE_STORAGE_KEY,
         store: createWorkspaceStorageStore<AppearanceState>(),
       }),
-      persist(appState.navigation, {
+      persist(appModels.navigation, {
         key: NAVIGATION_STORAGE_KEY,
         store: createWorkspaceStorageStore<NavigationState>(),
       }),
-      persist(appState.projectContext, {
+      persist(appModels.projectContext, {
         key: PROJECT_CONTEXT_STORAGE_KEY,
         store: createWorkspaceStorageStore<ProjectContextState>(),
       }),
-      persist(appState.projectRegistry, {
+      persist(appModels.projectRegistry, {
         key: PROJECT_REGISTRY_STORAGE_KEY,
         store: createWorkspaceStorageStore<ProjectRegistryState>(),
       }),
-      persist(appState.workbenchTabSet, {
+      persist(appModels.workbenchTabSet, {
         key: WORKBENCH_TABS_STORAGE_KEY,
         store: createWorkspaceStorageStore<WorkbenchTabSetState>(),
       }),
@@ -209,8 +218,8 @@ export function usePersistentAppState(initialAppearanceState: AppearanceState) {
       },
     )
 
-    appState.projectContext.syncProjects(
-      appState.projectRegistry.projectList.map((project) => project.path),
+    appModels.projectContext.syncProjects(
+      appModels.projectRegistry.projectList.map((project) => project.path),
     )
 
     return () => {
@@ -221,7 +230,7 @@ export function usePersistentAppState(initialAppearanceState: AppearanceState) {
       void shortcutPersistence.stop()
       cleanupShortcutRegistry()
     }
-  }, [appState])
+  }, [appModels])
 
   return {
     appearance,
@@ -230,5 +239,5 @@ export function usePersistentAppState(initialAppearanceState: AppearanceState) {
     projectRegistry,
     shortcutRegistry,
     workbenchTabSet,
-  }
+  } satisfies PersistentAppModels
 }

@@ -4,7 +4,10 @@ import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
 
-const appCommandBus = new SigmaTarget<Record<string, ShortcutMatch | undefined>>()
+/** Event map for command invocations; event names are generated app command ids. */
+type AppCommandEvents = Record<string, ShortcutMatch | undefined>
+
+const appCommandBus = new SigmaTarget<AppCommandEvents>()
 
 type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */

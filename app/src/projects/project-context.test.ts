@@ -29,7 +29,7 @@ test("orderProjectsByRecentActivity prioritizes recent projects and preserves re
 test("contextless focused tabs keep the current active project", () => {
   const context = new ProjectContext()
 
-  context.setActiveProject("/repo")
+  context.activateProject("/repo")
   context.applyFocusedTabProject("main", null)
 
   expect(context.activeProjectPath).toBe("/repo")
@@ -39,7 +39,7 @@ test("contextless focused tabs keep the current active project", () => {
 test("late async tab reports do not override the active project after focus has moved", () => {
   const context = new ProjectContext()
 
-  context.setActiveProject("/docs")
+  context.activateProject("/docs")
   context.applyFocusedTabProject("session:1", null)
   context.applyFocusedTabProject("main", null)
   context.reportTabProject("session:1", "/repo")
