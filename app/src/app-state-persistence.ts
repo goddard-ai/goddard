@@ -105,18 +105,40 @@ function createDefaultAppearanceState() {
 }
 
 /** Creates the app's singleton Sigma models and restores their persisted state. */
-function createRestoredAppState(initialAppearanceState: AppearanceState) {
+export function createRestoredAppState(initialAppearanceState: AppearanceState) {
   const appearance = new Appearance(initialAppearanceState)
   const navigation = new Navigation()
   const projectContext = new ProjectContext()
   const projectRegistry = new ProjectRegistry()
   const workbenchTabSet = new WorkbenchTabSet()
 
-  restoreAppearanceState(appearance)
-  restoreNavigationState(navigation)
-  restoreProjectContextState(projectContext)
-  restoreProjectRegistryState(projectRegistry)
-  restoreWorkbenchTabSetState(workbenchTabSet)
+  restoreSync(appearance, {
+    key: APPEARANCE_STORAGE_KEY,
+    store: createWorkspaceStorageStore<AppearanceStoredState>(),
+    codec: appearanceCodec,
+  })
+  restoreSync(navigation, {
+    key: NAVIGATION_STORAGE_KEY,
+    store: createWorkspaceStorageStore<NavigationStoredState>(),
+    codec: navigationCodec,
+  })
+  restoreSync(projectContext, {
+    key: PROJECT_CONTEXT_STORAGE_KEY,
+    store: createWorkspaceStorageStore<Immutable<ProjectContextState>>(),
+    codec: projectContextCodec,
+  })
+  restoreSync(projectRegistry, {
+    key: PROJECT_REGISTRY_STORAGE_KEY,
+    store: createWorkspaceStorageStore<Immutable<ProjectRegistryState>>(),
+    codec: projectRegistryCodec,
+  })
+  restoreSync(workbenchTabSet, {
+    key: WORKBENCH_TABS_STORAGE_KEY,
+    store: createWorkspaceStorageStore<Immutable<WorkbenchTabSetState>>(),
+    codec: workbenchTabSetCodec,
+  })
+
+  appearance.applyDocumentAppearance()
 
   return {
     appearance,
@@ -310,7 +332,12 @@ const shortcutRegistryStore = {
 /** Reads the persisted appearance state before the first render and applies it to the document. */
 export function getInitialAppearanceState() {
   const appearance = new Appearance(createDefaultAppearanceState())
-  restoreAppearanceState(appearance)
+  restoreSync(appearance, {
+    key: APPEARANCE_STORAGE_KEY,
+    store: createWorkspaceStorageStore<AppearanceStoredState>(),
+    codec: appearanceCodec,
+  })
+  appearance.applyDocumentAppearance()
 
   return cloneAppearanceState(appearance)
 }
@@ -331,14 +358,56 @@ export function usePersistentAppState(initialAppearanceState: AppearanceState) {
 
   useEffect(() => {
     const persistenceHandles = [
-      persistAppearanceState(appState.appearance),
-      persistNavigationState(appState.navigation),
-      persistProjectContextState(appState.projectContext),
-      persistProjectRegistryState(appState.projectRegistry),
-      persistWorkbenchTabSetState(appState.workbenchTabSet),
+      persist(appState.appearance, {
+        key: APPEARANCE_STORAGE_KEY,
+        store: createWorkspaceStorageStore<AppearanceStoredState>(),
+        codec: appearanceCodec,
+      }),
+      persist(appState.navigation, {
+        key: NAVIGATION_STORAGE_KEY,
+        store: createWorkspaceStorageStore<NavigationStoredState>(),
+        codec: navigationCodec,
+      }),
+      persist(appState.projectContext, {
+        key: PROJECT_CONTEXT_STORAGE_KEY,
+        store: createWorkspaceStorageStore<Immutable<ProjectContextState>>(),
+        codec: projectContextCodec,
+      }),
+      persist(appState.projectRegistry, {
+        key: PROJECT_REGISTRY_STORAGE_KEY,
+        store: createWorkspaceStorageStore<Immutable<ProjectRegistryState>>(),
+        codec: projectRegistryCodec,
+      }),
+      persist(appState.workbenchTabSet, {
+        key: WORKBENCH_TABS_STORAGE_KEY,
+        store: createWorkspaceStorageStore<Immutable<WorkbenchTabSetState>>(),
+        codec: workbenchTabSetCodec,
+      }),
     ]
-    const shortcutPersistence = hydrateShortcutRegistryState(shortcutRegistry)
+    const shortcutPersistence = hydrate(shortcutRegistry, {
+      key: SHORTCUT_REGISTRY_STORAGE_KEY,
+      store: shortcutRegistryStore,
+      pick: ["selectedProfileId", "overrides"],
+      onWriteError(error) {
+        shortcutPersistenceErrors.value = {
+          ...shortcutPersistenceErrors.value,
+          writeError: `Failed to save shortcut overrides: ${getErrorMessage(error)}`,
+        }
+      },
+    })
     const cleanupShortcutRegistry = shortcutRegistry.setup()
+
+    void shortcutPersistence.restored.then(
+      () => {
+        shortcutRegistry.rebindRuntime()
+      },
+      (error) => {
+        shortcutPersistenceErrors.value = {
+          ...shortcutPersistenceErrors.value,
+          loadError: `Failed to read shortcut keymap: ${getErrorMessage(error)}`,
+        }
+      },
+    )
 
     appState.projectContext.syncProjects(
       appState.projectRegistry.projectList.map((project) => project.path),
@@ -362,126 +431,4 @@ export function usePersistentAppState(initialAppearanceState: AppearanceState) {
     shortcutRegistry,
     workbenchTabSet,
   }
-}
-
-/** Restores persisted appearance state into a new model instance. */
-export function restoreAppearanceState(appearance: Appearance) {
-  const result = restoreSync(appearance, {
-    key: APPEARANCE_STORAGE_KEY,
-    store: createWorkspaceStorageStore<AppearanceStoredState>(),
-    codec: appearanceCodec,
-  })
-
-  appearance.applyDocumentAppearance()
-  return result
-}
-
-/** Persists future committed appearance state changes. */
-export function persistAppearanceState(appearance: Appearance) {
-  return persist(appearance, {
-    key: APPEARANCE_STORAGE_KEY,
-    store: createWorkspaceStorageStore<AppearanceStoredState>(),
-    codec: appearanceCodec,
-  })
-}
-
-/** Restores persisted primary navigation state into a new model instance. */
-export function restoreNavigationState(navigation: Navigation) {
-  return restoreSync(navigation, {
-    key: NAVIGATION_STORAGE_KEY,
-    store: createWorkspaceStorageStore<NavigationStoredState>(),
-    codec: navigationCodec,
-  })
-}
-
-/** Persists future committed primary navigation state changes. */
-export function persistNavigationState(navigation: Navigation) {
-  return persist(navigation, {
-    key: NAVIGATION_STORAGE_KEY,
-    store: createWorkspaceStorageStore<NavigationStoredState>(),
-    codec: navigationCodec,
-  })
-}
-
-/** Restores persisted project context state into a new model instance. */
-export function restoreProjectContextState(projectContext: ProjectContext) {
-  return restoreSync(projectContext, {
-    key: PROJECT_CONTEXT_STORAGE_KEY,
-    store: createWorkspaceStorageStore<Immutable<ProjectContextState>>(),
-    codec: projectContextCodec,
-  })
-}
-
-/** Persists future committed project context state changes. */
-export function persistProjectContextState(projectContext: ProjectContext) {
-  return persist(projectContext, {
-    key: PROJECT_CONTEXT_STORAGE_KEY,
-    store: createWorkspaceStorageStore<Immutable<ProjectContextState>>(),
-    codec: projectContextCodec,
-  })
-}
-
-/** Restores persisted project registry state into a new model instance. */
-export function restoreProjectRegistryState(projectRegistry: ProjectRegistry) {
-  return restoreSync(projectRegistry, {
-    key: PROJECT_REGISTRY_STORAGE_KEY,
-    store: createWorkspaceStorageStore<Immutable<ProjectRegistryState>>(),
-    codec: projectRegistryCodec,
-  })
-}
-
-/** Persists future committed project registry state changes. */
-export function persistProjectRegistryState(projectRegistry: ProjectRegistry) {
-  return persist(projectRegistry, {
-    key: PROJECT_REGISTRY_STORAGE_KEY,
-    store: createWorkspaceStorageStore<Immutable<ProjectRegistryState>>(),
-    codec: projectRegistryCodec,
-  })
-}
-
-/** Restores persisted workbench detail-tab state into a new model instance. */
-export function restoreWorkbenchTabSetState(workbenchTabSet: WorkbenchTabSet) {
-  return restoreSync(workbenchTabSet, {
-    key: WORKBENCH_TABS_STORAGE_KEY,
-    store: createWorkspaceStorageStore<Immutable<WorkbenchTabSetState>>(),
-    codec: workbenchTabSetCodec,
-  })
-}
-
-/** Persists future committed workbench detail-tab state changes. */
-export function persistWorkbenchTabSetState(workbenchTabSet: WorkbenchTabSet) {
-  return persist(workbenchTabSet, {
-    key: WORKBENCH_TABS_STORAGE_KEY,
-    store: createWorkspaceStorageStore<Immutable<WorkbenchTabSetState>>(),
-    codec: workbenchTabSetCodec,
-  })
-}
-
-/** Restores the desktop shortcut keymap and persists future committed shortcut changes. */
-export function hydrateShortcutRegistryState(shortcutRegistry: ShortcutRegistry) {
-  const handle = hydrate(shortcutRegistry, {
-    key: SHORTCUT_REGISTRY_STORAGE_KEY,
-    store: shortcutRegistryStore,
-    pick: ["selectedProfileId", "overrides"],
-    onWriteError(error) {
-      shortcutPersistenceErrors.value = {
-        ...shortcutPersistenceErrors.value,
-        writeError: `Failed to save shortcut overrides: ${getErrorMessage(error)}`,
-      }
-    },
-  })
-
-  void handle.restored.then(
-    () => {
-      shortcutRegistry.rebindRuntime()
-    },
-    (error) => {
-      shortcutPersistenceErrors.value = {
-        ...shortcutPersistenceErrors.value,
-        loadError: `Failed to read shortcut keymap: ${getErrorMessage(error)}`,
-      }
-    },
-  )
-
-  return handle
 }
