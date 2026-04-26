@@ -3,7 +3,9 @@ import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createClient } from "@libsql/client/web"
 
-import { createBackendRouter } from "./api/router.ts"
+import { HttpError } from "./api/control-plane.ts"
+import { createBackendRouter, type CloudSessionHandlerOptions } from "./api/router.ts"
+import { CloudSession } from "./cloud-session.ts"
 import { TursoBackendControlPlane } from "./db/persistence.ts"
 import type { Env } from "./env.ts"
 import { createSseSession } from "./utils.ts"
@@ -24,6 +26,9 @@ const router = createBackendRouter({
   handleUserStream: async (env, githubUsername, _request) => {
     return getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/subscribe")
   },
+  handleCloudSession: async (env, githubUsername, request, options) => {
+    return forwardCloudSessionRequest(env, githubUsername, request, options)
+  },
 })
 
 /** Cloudflare Worker entrypoint for the backend API and user-scoped stream runtime. */
@@ -32,6 +37,7 @@ const worker = {
 } satisfies ExportedHandler<Env>
 
 export default worker
+export { CloudSession }
 
 /** User-scoped Durable Object that owns SSE subscribers for one Goddard user. */
 export class UserStream {
@@ -99,4 +105,41 @@ function getUserStreamStub(env: Env, githubUsername: string) {
   }
 
   return env.USER_STREAM.get(env.USER_STREAM.idFromName(githubUsername))
+}
+
+async function forwardCloudSessionRequest(
+  env: Env,
+  githubUsername: string,
+  request: Request,
+  options: CloudSessionHandlerOptions,
+) {
+  const sourceUrl = new URL(request.url)
+  const targetUrl = new URL(`https://cloud-session.internal${options.pathname}`)
+  targetUrl.search = sourceUrl.search
+  const headers = new Headers(request.headers)
+  headers.set("x-goddard-cloud-session-owner", githubUsername)
+
+  let body: BodyInit | undefined
+  if (options.body !== undefined) {
+    headers.set("content-type", "application/json")
+    body = JSON.stringify(options.body)
+  } else if (request.method !== "GET" && request.method !== "HEAD") {
+    body = await request.arrayBuffer()
+  }
+
+  return await getCloudSessionStub(env, githubUsername, options.sessionId).fetch(
+    new Request(targetUrl.toString(), {
+      method: request.method,
+      headers,
+      body,
+    }),
+  )
+}
+
+function getCloudSessionStub(env: Env, githubUsername: string, sessionId: string) {
+  if (!env.CLOUD_SESSION) {
+    throw new HttpError(500, "CLOUD_SESSION Durable Object binding is not configured")
+  }
+
+  return env.CLOUD_SESSION.get(env.CLOUD_SESSION.idFromName(`${githubUsername}:${sessionId}`))
 }

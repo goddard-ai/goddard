@@ -5,3 +5,15 @@ compatibility_date = "2024-03-01"
 [vars]
 # TURSO_DB_URL = "libsql://..."
 # TURSO_DB_AUTH_TOKEN = "..."
+
+[[durable_objects.bindings]]
+name = "USER_STREAM"
+class_name = "UserStream"
+
+[[durable_objects.bindings]]
+name = "CLOUD_SESSION"
+class_name = "CloudSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserStream", "CloudSession"]

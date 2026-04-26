@@ -113,6 +113,7 @@
       "dependencies": {
         "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/backend-plugin": "workspace:*",
+        "@goddard-ai/cloud-session": "workspace:*",
         "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/remote-repo": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
@@ -365,6 +366,15 @@
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/sdk-plugin": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
+    "features/cloud-session": {
+      "name": "@goddard-ai/cloud-session",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/backend-plugin": "workspace:*",
         "zod": "catalog:",
       },
     },
@@ -849,6 +859,8 @@
     "@goddard-ai/backend": ["@goddard-ai/backend@workspace:core/backend"],
 
     "@goddard-ai/backend-plugin": ["@goddard-ai/backend-plugin@workspace:core/backend-plugin"],
+
+    "@goddard-ai/cloud-session": ["@goddard-ai/cloud-session@workspace:features/cloud-session"],
 
     "@goddard-ai/config": ["@goddard-ai/config@workspace:core/config"],
 

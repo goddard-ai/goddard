@@ -136,6 +136,59 @@ test("createBackendRouter dispatches normalized remote-repo webhook events", asy
   expect(handled).toEqual(["comment"])
 })
 
+test("createBackendRouter delegates cloud session commands to injected handler", async () => {
+  let capturedGithubUsername = ""
+  let capturedPathname = ""
+  let capturedSessionId = ""
+  let capturedBody: unknown
+
+  const controlPlane: BackendControlPlane = {
+    ...stubControlPlane,
+    getSession(token) {
+      expect(token).toBe("tok_1")
+      return { token, githubUsername: "alec", githubUserId: 1 }
+    },
+  }
+
+  const router = createBackendRouter({
+    createControlPlane: () => controlPlane,
+    handleCloudSession: async (_env, githubUsername, _request, options) => {
+      capturedGithubUsername = githubUsername
+      capturedPathname = options.pathname
+      capturedSessionId = options.sessionId
+      capturedBody = options.body
+      return Response.json({ accepted: true, duplicate: false, commandId: "cmd_1" })
+    },
+  })
+
+  const response = await router(
+    createContext(
+      new Request("https://example.test/cloud/sessions/cls_cloud/commands", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tok_1",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          commandId: "cmd_1",
+          type: "prompt",
+          payload: { prompt: "Ship it" },
+        }),
+      }),
+    ) as any,
+  )
+
+  expect(response.status).toBe(200)
+  expect(capturedGithubUsername).toBe("alec")
+  expect(capturedSessionId).toBe("cls_cloud")
+  expect(capturedPathname).toBe("/commands")
+  expect(capturedBody).toEqual({
+    commandId: "cmd_1",
+    type: "prompt",
+    payload: { prompt: "Ship it" },
+  })
+})
+
 test("createBackendRouter serializes HttpError responses", async () => {
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,

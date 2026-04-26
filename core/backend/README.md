@@ -1,8 +1,10 @@
 # `@goddard-ai/backend`
 
-The Goddard Backend is an edge-based service built using Cloudflare Workers, Turso (SQLite at the Edge), and Drizzle ORM. It manages the Goddard platform's persistent state (such as tracking Pi sessions and pull request feedback), streams server-sent events to connected local daemons, and processes webhooks from the Goddard GitHub App.
+The Goddard Backend is an edge-based service built using Cloudflare Workers, Turso (SQLite at the Edge), and Drizzle ORM. It manages the Goddard platform's persistent state (such as tracking Pi sessions and pull request feedback), streams server-sent events to connected local daemons, coordinates cloud-owned agent sessions, and processes webhooks from the Goddard GitHub App.
 
 Feature packages declare backend route fragments through `@goddard-ai/backend-plugin`. Backend server and daemon composition roots compose those route fragments into the HTTP router and daemon backend client instead of maintaining separate hand-written backend client contracts.
+
+Cloud-owned sessions are isolated in the `CloudSession` Durable Object. Each object owns one session's ordered event log, idempotent command ledger, and WebSocket channel to the ACP harness running in the sandbox. Local daemons consume cloud session state by cursor; local-only sessions are not synchronized into the backend.
 
 ## Related Docs
 

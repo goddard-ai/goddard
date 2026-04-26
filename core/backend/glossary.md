@@ -18,6 +18,12 @@
 - `Repo Event Broadcast`
   - The backend act of publishing a repository event to interested local consumers.
   - Why: so one backend-side state change can drive downstream automation promptly.
+- `Cloud Session Coordinator`
+  - The Durable Object instance that owns one cloud session's state, event log, and harness command channel.
+  - Why: so cloud-owned agent state has a single serialization point that local daemons can synchronize from safely.
+- `Harness Channel`
+  - The WebSocket path between a cloud session coordinator and the ACP harness running inside the sandbox.
+  - Why: so daemon commands can be forwarded to the agent process while harness updates are recorded into the coordinator log.
 - `GitHub App Installation`
   - The repository-level authority the backend uses to act on GitHub resources.
   - Why: so pull request creation and replies happen under explicit app-managed permissions rather than user tokens.

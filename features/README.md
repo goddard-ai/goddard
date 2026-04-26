@@ -57,6 +57,11 @@ handlers, and SDK auth namespace construction. Backend storage, GitHub device
 flow persistence, daemon token persistence, and HTTP/router substrate remain in
 core packages.
 
+`features/cloud-session` owns cloud-session schemas and backend route contracts
+for backend-coordinated sandbox agent sessions. Cloudflare Worker composition,
+Durable Object bindings, and backend deployment substrate remain in core
+packages.
+
 `features/inbox` owns inbox IPC, SDK namespace construction, inbox manager
 logic, inbox metadata resolution, and inbox item state transitions. Daemon
 persistence remains core substrate.
