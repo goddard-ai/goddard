@@ -230,11 +230,6 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
   }
 }
 
-/** Returns the current system color-scheme choice observed by the browser runtime. */
-export function readSystemThemeName(): BuiltInThemeName {
-  return window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY).matches ? "dark" : "light"
-}
-
 /** Returns the CSS media query used to follow the operating system color scheme. */
 export function getSystemThemeMediaQuery() {
   return SYSTEM_COLOR_SCHEME_MEDIA_QUERY
@@ -254,21 +249,5 @@ export function buildAppearanceDocumentState(
       "data-contrast": snapshot.highContrast ? "high" : "normal",
     },
     variables: deriveThemeVariables(themeName, snapshot.highContrast),
-  }
-}
-
-/** Applies the resolved appearance payload to the root document element in place. */
-export function applyAppearanceSnapshot(snapshot: AppearanceSnapshot) {
-  const root = document.documentElement
-  const documentState = buildAppearanceDocumentState(snapshot)
-
-  for (const [name, value] of Object.entries(documentState.attributes)) {
-    root.setAttribute(name, value)
-  }
-
-  root.style.colorScheme = documentState.themeName
-
-  for (const [name, value] of Object.entries(documentState.variables)) {
-    root.style.setProperty(name, value)
   }
 }

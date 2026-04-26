@@ -2,8 +2,8 @@ import { signal } from "@preact/signals"
 import { Sigma } from "preact-sigma"
 
 import {
-  applyAppearanceSnapshot,
-  readSystemThemeName,
+  buildAppearanceDocumentState,
+  getSystemThemeMediaQuery,
   type AppearanceMode,
   type BuiltInThemeName,
 } from "./theme.ts"
@@ -16,7 +16,9 @@ export type AppearanceState = {
 
 export class Appearance extends Sigma<AppearanceState> {
   /** Tracks the browser's color-scheme outside persisted state because it is runtime-derived. */
-  #systemTheme = signal(readSystemThemeName())
+  #systemTheme = signal<BuiltInThemeName>(
+    window.matchMedia(getSystemThemeMediaQuery()).matches ? "dark" : "light",
+  )
 
   constructor(initialState: AppearanceState) {
     super({
@@ -63,11 +65,22 @@ export class Appearance extends Sigma<AppearanceState> {
   }
 
   #applyAppearance() {
-    applyAppearanceSnapshot({
+    const root = document.documentElement
+    const documentState = buildAppearanceDocumentState({
       mode: this.mode,
       highContrast: this.highContrast,
       systemTheme: this.#systemTheme.value,
     })
+
+    for (const [name, value] of Object.entries(documentState.attributes)) {
+      root.setAttribute(name, value)
+    }
+
+    root.style.colorScheme = documentState.themeName
+
+    for (const [name, value] of Object.entries(documentState.variables)) {
+      root.style.setProperty(name, value)
+    }
   }
 }
 
