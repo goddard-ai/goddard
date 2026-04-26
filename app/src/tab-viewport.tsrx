@@ -24,11 +24,11 @@ function requireContext<Value>(value: Value | null, name: string): Value {
 /** Waits for document fonts before trusting Pretext measurements as final. */
 function useFontsReady(): boolean {
   const [fontsReady, setFontsReady] = useState(
-    typeof document === "undefined" || !("fonts" in document) || document.fonts.status === "loaded",
+    !("fonts" in document) || document.fonts.status === "loaded",
   )
 
   useEffect(() => {
-    if (fontsReady || typeof document === "undefined" || !("fonts" in document)) {
+    if (fontsReady || !("fonts" in document)) {
       return
     }
 

@@ -15,10 +15,6 @@ function isPersistRecord<TStored>(value: unknown): value is PersistRecord<TStore
 export function createWorkspaceStorageStore<TStored>(): SyncPersistStore<TStored> {
   return {
     get(key) {
-      if (typeof window === "undefined") {
-        return undefined
-      }
-
       try {
         const rawValue = window.localStorage.getItem(key)
         const parsed = rawValue ? (JSON.parse(rawValue) as unknown) : undefined
@@ -30,18 +26,10 @@ export function createWorkspaceStorageStore<TStored>(): SyncPersistStore<TStored
     },
 
     set(key, record) {
-      if (typeof window === "undefined") {
-        return
-      }
-
       window.localStorage.setItem(key, JSON.stringify(record))
     },
 
     delete(key) {
-      if (typeof window === "undefined") {
-        return
-      }
-
       window.localStorage.removeItem(key)
     },
   }

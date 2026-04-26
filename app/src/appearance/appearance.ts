@@ -9,14 +9,10 @@ import {
 
 const SYSTEM_COLOR_SCHEME_MEDIA_QUERY = "(prefers-color-scheme: dark)"
 
-/** Reads the observed system theme with a browserless fallback for tests and early bootstrap. */
+/** Reads the observed system theme from the app webview runtime. */
 function readSystemThemeName(mediaQuery?: MediaQueryList): BuiltInThemeName {
   if (mediaQuery) {
     return mediaQuery.matches ? "dark" : "light"
-  }
-
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return "light"
   }
 
   return window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY).matches ? "dark" : "light"
@@ -60,10 +56,6 @@ export class Appearance extends Sigma<AppearanceState> {
 
   onSetup() {
     this.#applyAppearance()
-
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return []
-    }
 
     const mediaQuery = window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY)
     const syncSystemTheme = () => {
