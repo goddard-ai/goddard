@@ -7,7 +7,7 @@ declare module "*.svg?raw" {
   export default content
 }
 
-/** Gives non-TSRX modules typed access to app context hooks until tsgo resolves `.tsrx` modules. */
+/** Gives non-TSRX modules typed access to app context hooks until TypeScript resolves `.tsrx` modules. */
 declare module "~/app-state-context.tsrx" {
   import type { Protected } from "preact-sigma"
   import type { Appearance, AppearanceState } from "./appearance/appearance.ts"
