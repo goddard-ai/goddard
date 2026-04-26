@@ -1,12 +1,26 @@
 import { signal } from "@preact/signals"
-import { Sigma } from "preact-sigma"
+import { listen, Sigma } from "preact-sigma"
 
 import {
   buildAppearanceDocumentState,
-  getSystemThemeMediaQuery,
   type AppearanceMode,
   type BuiltInThemeName,
 } from "./theme.ts"
+
+const SYSTEM_COLOR_SCHEME_MEDIA_QUERY = "(prefers-color-scheme: dark)"
+
+/** Reads the observed system theme with a browserless fallback for tests and early bootstrap. */
+function readSystemThemeName(mediaQuery?: MediaQueryList): BuiltInThemeName {
+  if (mediaQuery) {
+    return mediaQuery.matches ? "dark" : "light"
+  }
+
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return "light"
+  }
+
+  return window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY).matches ? "dark" : "light"
+}
 
 /** Public state for the app shell's appearance model. */
 export type AppearanceState = {
@@ -16,9 +30,7 @@ export type AppearanceState = {
 
 export class Appearance extends Sigma<AppearanceState> {
   /** Tracks the browser's color-scheme outside persisted state because it is runtime-derived. */
-  #systemTheme = signal<BuiltInThemeName>(
-    window.matchMedia(getSystemThemeMediaQuery()).matches ? "dark" : "light",
-  )
+  #systemTheme = signal(readSystemThemeName())
 
   constructor(initialState: AppearanceState) {
     super({
@@ -41,18 +53,6 @@ export class Appearance extends Sigma<AppearanceState> {
     this.#applyAppearance()
   }
 
-  syncSystemTheme(systemTheme: BuiltInThemeName) {
-    if (this.#systemTheme.value === systemTheme) {
-      return
-    }
-
-    this.#systemTheme.value = systemTheme
-
-    if (this.mode === "system") {
-      this.#applyAppearance()
-    }
-  }
-
   /** Applies the current appearance preferences to the document without changing persisted state. */
   applyDocumentAppearance() {
     this.#applyAppearance()
@@ -61,7 +61,28 @@ export class Appearance extends Sigma<AppearanceState> {
   onSetup() {
     this.#applyAppearance()
 
-    return []
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return []
+    }
+
+    const mediaQuery = window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY)
+    const syncSystemTheme = () => {
+      const systemTheme = readSystemThemeName(mediaQuery)
+
+      if (this.#systemTheme.value === systemTheme) {
+        return
+      }
+
+      this.#systemTheme.value = systemTheme
+
+      if (this.mode === "system") {
+        this.#applyAppearance()
+      }
+    }
+
+    syncSystemTheme()
+
+    return [listen(mediaQuery, "change", syncSystemTheme)]
   }
 
   #applyAppearance() {

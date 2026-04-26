@@ -16,7 +16,6 @@ import {
   restoreWorkbenchTabSetState,
 } from "./app-state-persistence.ts"
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
-import { getSystemThemeMediaQuery } from "./appearance/theme.ts"
 import { Navigation } from "./navigation.ts"
 import { ProjectContext } from "./projects/project-context.ts"
 import { ProjectRegistry } from "./projects/project-registry.ts"
@@ -130,23 +129,7 @@ export component AppStateProvider(props: {
       void shortcutPersistence.stop()
     }
 
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return () => {
-        stopPersistence()
-        cleanupShortcutRegistry()
-      }
-    }
-
-    const mediaQuery = window.matchMedia(getSystemThemeMediaQuery())
-    const syncSystemTheme = () => {
-      appearance.syncSystemTheme(mediaQuery.matches ? "dark" : "light")
-    }
-
-    syncSystemTheme()
-    mediaQuery.addEventListener("change", syncSystemTheme)
-
     return () => {
-      mediaQuery.removeEventListener("change", syncSystemTheme)
       stopPersistence()
       cleanupShortcutRegistry()
     }

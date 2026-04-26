@@ -9,8 +9,6 @@ import {
   wcagContrast,
 } from "culori/fn"
 
-const SYSTEM_COLOR_SCHEME_MEDIA_QUERY = "(prefers-color-scheme: dark)"
-
 useMode(modeRgb)
 useMode(modeOklch)
 useMode(modeLrgb)
@@ -228,11 +226,6 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
     "--theme-color-transcript-user-code-bg": serializeColor(transcriptUserCodeBg),
     "--theme-color-transcript-user-code-border": serializeColor(transcriptUserCodeBorder),
   }
-}
-
-/** Returns the CSS media query used to follow the operating system color scheme. */
-export function getSystemThemeMediaQuery() {
-  return SYSTEM_COLOR_SCHEME_MEDIA_QUERY
 }
 
 /** Builds one resolved document-theme payload from the current appearance snapshot. */
