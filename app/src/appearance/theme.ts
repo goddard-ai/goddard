@@ -23,7 +23,7 @@ export type AppearanceMode = "system" | "light" | "dark"
 /** One resolved built-in theme name after system preference fallback is applied. */
 export type BuiltInThemeName = "light" | "dark"
 
-/** Persisted appearance preferences plus the currently observed system theme. */
+/** Appearance preferences plus a caller-supplied system theme for document derivation. */
 export type AppearanceSnapshot = {
   mode: AppearanceMode
   highContrast: boolean
@@ -231,7 +231,7 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
 }
 
 /** Returns the current system color-scheme choice observed by the browser runtime. */
-export function readSystemThemeName() {
+export function readSystemThemeName(): BuiltInThemeName {
   return window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY).matches ? "dark" : "light"
 }
 

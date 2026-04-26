@@ -1,25 +1,32 @@
+import { signal } from "@preact/signals"
 import { Sigma } from "preact-sigma"
 
-import { applyAppearanceSnapshot, type AppearanceMode, type AppearanceSnapshot } from "./theme.ts"
+import {
+  applyAppearanceSnapshot,
+  readSystemThemeName,
+  type AppearanceMode,
+  type BuiltInThemeName,
+} from "./theme.ts"
 
 /** Public state for the app shell's appearance model. */
 export type AppearanceState = {
   mode: AppearanceMode
   highContrast: boolean
-  systemTheme: AppearanceSnapshot["systemTheme"]
 }
 
 export class Appearance extends Sigma<AppearanceState> {
-  constructor(initialSnapshot: AppearanceSnapshot) {
+  /** Tracks the browser's color-scheme outside persisted state because it is runtime-derived. */
+  #systemTheme = signal(readSystemThemeName())
+
+  constructor(initialState: AppearanceState) {
     super({
-      mode: initialSnapshot.mode,
-      highContrast: initialSnapshot.highContrast,
-      systemTheme: initialSnapshot.systemTheme,
+      mode: initialState.mode,
+      highContrast: initialState.highContrast,
     })
   }
 
   get effectiveTheme() {
-    return this.mode === "system" ? this.systemTheme : this.mode
+    return this.mode === "system" ? this.#systemTheme.value : this.mode
   }
 
   setMode(mode: AppearanceMode) {
@@ -32,24 +39,25 @@ export class Appearance extends Sigma<AppearanceState> {
     this.#applyAppearance()
   }
 
-  syncSystemTheme(systemTheme: AppearanceSnapshot["systemTheme"]) {
-    this.systemTheme = systemTheme
+  syncSystemTheme(systemTheme: BuiltInThemeName) {
+    if (this.#systemTheme.value === systemTheme) {
+      return
+    }
+
+    this.#systemTheme.value = systemTheme
 
     if (this.mode === "system") {
-      applyAppearanceSnapshot({
-        mode: this.mode,
-        highContrast: this.highContrast,
-        systemTheme,
-      })
+      this.#applyAppearance()
     }
   }
 
+  /** Applies the current appearance preferences to the document without changing persisted state. */
+  applyDocumentAppearance() {
+    this.#applyAppearance()
+  }
+
   onSetup() {
-    applyAppearanceSnapshot({
-      mode: this.mode,
-      highContrast: this.highContrast,
-      systemTheme: this.systemTheme,
-    })
+    this.#applyAppearance()
 
     return []
   }
@@ -58,7 +66,7 @@ export class Appearance extends Sigma<AppearanceState> {
     applyAppearanceSnapshot({
       mode: this.mode,
       highContrast: this.highContrast,
-      systemTheme: this.systemTheme,
+      systemTheme: this.#systemTheme.value,
     })
   }
 }

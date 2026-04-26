@@ -9,12 +9,7 @@ import {
 } from "preact-sigma/persist"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
-import {
-  applyAppearanceSnapshot,
-  isAppearanceMode,
-  readSystemThemeName,
-  type AppearanceSnapshot,
-} from "./appearance/theme.ts"
+import { isAppearanceMode } from "./appearance/theme.ts"
 import { desktopHost } from "./desktop-host.ts"
 import { isNavigationItemId, Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
@@ -80,20 +75,18 @@ function isStoredWorkbenchTab(tab: unknown): tab is WorkbenchDetailTab & {
   )
 }
 
-function cloneAppearanceSnapshot(state: AppearanceState) {
+function cloneAppearanceState(state: AppearanceState) {
   return {
     mode: state.mode,
     highContrast: state.highContrast,
-    systemTheme: state.systemTheme,
   }
 }
 
-function createDefaultAppearanceSnapshot() {
+function createDefaultAppearanceState() {
   return {
     mode: "system",
     highContrast: false,
-    systemTheme: readSystemThemeName(),
-  } satisfies AppearanceSnapshot
+  } satisfies AppearanceState
 }
 
 const appearanceCodec = {
@@ -277,13 +270,11 @@ const shortcutRegistryStore = {
 } satisfies PersistStore<ShortcutStoredState>
 
 /** Reads the persisted appearance state before the first render and applies it to the document. */
-export function getInitialAppearanceSnapshot() {
-  const appearance = new Appearance(createDefaultAppearanceSnapshot())
+export function getInitialAppearanceState() {
+  const appearance = new Appearance(createDefaultAppearanceState())
   restoreAppearanceState(appearance)
-  const snapshot = cloneAppearanceSnapshot(appearance)
 
-  applyAppearanceSnapshot(snapshot)
-  return snapshot
+  return cloneAppearanceState(appearance)
 }
 
 /** Restores persisted appearance state into a new model instance. */
@@ -294,7 +285,7 @@ export function restoreAppearanceState(appearance: Appearance) {
     codec: appearanceCodec,
   })
 
-  applyAppearanceSnapshot(cloneAppearanceSnapshot(appearance))
+  appearance.applyDocumentAppearance()
   return result
 }
 

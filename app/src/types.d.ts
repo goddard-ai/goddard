@@ -10,8 +10,7 @@ declare module "*.svg?raw" {
 /** Gives non-TSRX modules typed access to app context hooks until tsgo resolves `.tsrx` modules. */
 declare module "~/app-state-context.tsrx" {
   import type { Protected } from "preact-sigma"
-  import type { Appearance } from "./appearance/appearance.ts"
-  import type { AppearanceSnapshot } from "./appearance/theme.ts"
+  import type { Appearance, AppearanceState } from "./appearance/appearance.ts"
   import type { Navigation } from "./navigation.ts"
   import type { ProjectContext } from "./projects/project-context.ts"
   import type { ProjectRegistry } from "./projects/project-registry.ts"
@@ -20,7 +19,7 @@ declare module "~/app-state-context.tsrx" {
 
   export function AppStateProvider(props: {
     children: preact.ComponentChildren
-    initialAppearanceSnapshot: AppearanceSnapshot
+    initialAppearanceState: AppearanceState
   }): preact.JSX.Element
   export function useAppearance(): Protected<Appearance>
   export function useNavigation(): Protected<Navigation>

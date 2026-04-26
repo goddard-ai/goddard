@@ -15,8 +15,8 @@ import {
   restoreProjectRegistryState,
   restoreWorkbenchTabSetState,
 } from "./app-state-persistence.ts"
-import { Appearance } from "./appearance/appearance.ts"
-import { getSystemThemeMediaQuery, type AppearanceSnapshot } from "./appearance/theme.ts"
+import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
+import { getSystemThemeMediaQuery } from "./appearance/theme.ts"
 import { Navigation } from "./navigation.ts"
 import { ProjectContext } from "./projects/project-context.ts"
 import { ProjectRegistry } from "./projects/project-registry.ts"
@@ -64,7 +64,7 @@ function requireRef<Value>(value: Value | null, name: string) {
 
 export component AppStateProvider(props: {
   children: preact.ComponentChildren;
-  initialAppearanceSnapshot: AppearanceSnapshot;
+  initialAppearanceState: AppearanceState;
 }) {
   const appearanceRef = useRef<Appearance | null>(null)
   const navigationRef = useRef<Navigation | null>(null)
@@ -73,12 +73,12 @@ export component AppStateProvider(props: {
   const workbenchTabSetRef = useRef<WorkbenchTabSet | null>(null)
 
   const appearance = useSigma(() => {
-    const instance = new Appearance(props.initialAppearanceSnapshot)
+    const instance = new Appearance(props.initialAppearanceState)
     restoreAppearanceState(instance)
     appearanceRef.current = instance
     return instance
   }, {
-    deps: [props.initialAppearanceSnapshot],
+    deps: [props.initialAppearanceState],
   })
   const navigation = useSigma(() => {
     const instance = new Navigation()
