@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "preact/hooks"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { desktopHost } from "./desktop-host.ts"
+import { createWorkspaceStorageStore } from "./lib/workspace-storage.ts"
 import { Navigation } from "./navigation.ts"
 import { ProjectContext } from "./projects/project-context.ts"
 import { ProjectRegistry } from "./projects/project-registry.ts"
@@ -14,7 +15,6 @@ import {
   type ShortcutRegistry,
   type ShortcutRegistryState,
 } from "./shortcuts/shortcut-registry.ts"
-import { createWorkspaceStorageStore } from "./support/workspace-storage.ts"
 import { WorkbenchTabSet } from "./workbench-tab-set.ts"
 
 const APPEARANCE_STORAGE_KEY = "goddard.app.appearance.v2"

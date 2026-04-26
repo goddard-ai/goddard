@@ -1,4 +1,4 @@
-import { svgIconSymbolIds } from "~/support/svg-icon-data.ts"
+import { svgIconSymbolIds } from "./svg-icon-data.ts"
 
 /** Identifiers for SVG assets generated from SVG files under `src/icons`. */
 export type SvgIconName = keyof typeof svgIconSymbolIds
