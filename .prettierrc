@@ -11,11 +11,15 @@
   "overrides": [
     {
       "files": ["*.ts", "*.tsx"],
-      "options": { "parser": "oxc-ts" }
+      "options": {
+        "parser": "oxc-ts"
+      }
     },
     {
       "files": ["*.js", "*.jsx", "*.mjs", "*.cjs"],
-      "options": { "parser": "oxc" }
+      "options": {
+        "parser": "oxc"
+      }
     }
   ],
   "importOrder": [

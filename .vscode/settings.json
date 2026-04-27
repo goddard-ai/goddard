@@ -23,6 +23,9 @@
   "[jsonc]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
+  "[ripple]": {
+    "editor.defaultFormatter": "ripple-ts.ripple-ts-vscode-plugin"
+  },
   "files.readonlyInclude": {
     "core/schema/src/acp-adapters.ts": true
   },
