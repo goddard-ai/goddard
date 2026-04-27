@@ -373,7 +373,7 @@ export component SessionInputPlugins(props: {
   <HistoryPlugin />
   <OnChangePlugin
     ignoreSelectionChange={true}
-    onInput={(editorState) => {
+    onChange={(editorState) => {
       props.onPromptBlocksChange(serializeComposerEditorState(editorState))
     }}
   />
