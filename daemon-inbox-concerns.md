@@ -98,8 +98,10 @@ Because this is a single field, the model cannot represent combinations like "sa
 My recommended v1 rule is:
 
 - daemon attention wins and sets `unread`
-- implicit user replies only move `unread` or `read` session rows to `replied`
-- implicit user replies do not overwrite `saved`, `archived`, or `completed`
+- implicit user replies move any existing non-archived session row to `replied`
+- implicit user replies intentionally overwrite `saved` because the work is relevant again
+- implicit user replies intentionally overwrite `completed` because the work is not done
+- implicit user replies do not overwrite `archived`
 - explicit user filing actions can set `saved` or `archived`
 - `completed` is only set through entity-aware lifecycle paths
 

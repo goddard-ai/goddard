@@ -59,7 +59,7 @@ Completion is not a generic inbox filing action. It is applied through entity-aw
 
 Daemon attention events are reopen events. They set the row back to `unread` even if the row was `read`, `replied`, `saved`, `archived`, or `completed`. A completed row receiving new daemon attention should be rare; if it happens, surfacing the new attention is safer than silently preserving completion.
 
-User reply handling is separate from completion. When the daemon observes a user message sent to a session, it should mark that session's inbox row `replied` if the row is currently `unread` or `read`. It should not silently overwrite `saved`, `archived`, or `completed`; those states require an explicit user action or a new daemon attention event.
+User reply handling is separate from completion. When the daemon observes a user message sent to a session, it should mark that session's existing inbox row `replied` unless the row is `archived`. This intentionally overwrites `saved` because the reply makes the work relevant now, and overwrites `completed` because the reply means the session work is not done. Archived rows remain archived because archiving is an explicit hide action.
 
 ## Scope
 
@@ -197,7 +197,7 @@ Tasks:
   - updating one inbox item
   - bulk-updating inbox items
   - touching or refreshing one inbox row from daemon-owned events
-  - marking a session row `replied` after a user reply when the current status is `unread` or `read`
+  - marking an existing non-archived session row `replied` after a user reply
   - marking a session row `completed` through an explicit session-completion path
   - updating latest session preview fields from resolved turn metadata
   - loading pull request entities by tagged id
@@ -236,7 +236,7 @@ Acceptance criteria:
 - Bulk updates apply one shared timestamp across all affected rows.
 - Missing ids are reported, not silently dropped and not auto-created.
 - Session inbox row refreshes atomically update reason, status, latest scope, latest headline, latest turn id, and `updatedAt`.
-- Session reply updates mark only `unread` or `read` session rows as `replied`.
+- Session reply updates mark existing non-archived session rows as `replied`.
 - Completion is not accepted as a generic synonym for "handled" or "replied."
 
 ### 4. Session Lifecycle Integration
@@ -270,9 +270,11 @@ Tasks:
 - Keep per-session turn-entity activity as session-lifecycle state inside the daemon, not in the CLI.
 - Reuse the same session-manager path for one-shot turn-ended handling so the daemon does not split that logic across unrelated codepaths.
 - Wire user replies through the inbox manager:
-  - when `sessionSend` accepts a user message, mark the session inbox row `replied` if it exists and is currently `unread` or `read`
+  - when `sessionSend` accepts a user message, mark the session inbox row `replied` if it exists and is not `archived`
   - do not mark a session `completed` because the user replied
-  - do not overwrite `saved`, `archived`, or `completed` from the implicit reply path
+  - overwrite `saved` because the reply makes the work relevant now
+  - overwrite `completed` because the reply means the session work is not done
+  - do not overwrite `archived` because archiving is an explicit hide action
 - Implement session completion as an explicit entity-aware operation:
   - mark the session inbox row `completed`
   - update `updatedAt`
@@ -463,8 +465,9 @@ This order keeps public types ahead of daemon code, and daemon code ahead of SDK
 - `inboxBulkUpdate` reports missing ids without creating rows
 - `inboxBulkUpdate` uses the same entity-aware status validation as single-item updates
 - new inbox rows default to `priority = "normal"`
-- user reply to a session marks an existing `unread` or `read` session inbox row as `replied`
-- user reply to a session does not overwrite `saved`, `archived`, or `completed`
+- user reply to a session marks an existing non-archived session inbox row as `replied`
+- user reply to a session overwrites `saved` and `completed`
+- user reply to a session does not overwrite `archived`
 - user reply to a session does not mark the session inbox row `completed`
 - explicit session completion marks the session inbox row `completed` without shutting down the session
 - terminal session reporting stores resolved scope/headline on the completed turn
