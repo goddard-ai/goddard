@@ -24,7 +24,7 @@
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[ripple]": {
-    "editor.defaultFormatter": "ripple-ts.ripple-ts-vscode-plugin"
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "files.readonlyInclude": {
     "core/schema/src/acp-adapters.ts": true
