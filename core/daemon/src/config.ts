@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
 import { DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
@@ -48,7 +48,7 @@ export function prependAgentBinToPath(
 
   return {
     ...env,
-    PATH: existingPath ? `${agentBinDir}:${existingPath}` : agentBinDir,
+    PATH: existingPath ? `${agentBinDir}${delimiter}${existingPath}` : agentBinDir,
   }
 }
 
