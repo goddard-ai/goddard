@@ -2,7 +2,12 @@
 import { randomUUID } from "node:crypto"
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
-import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonSession,
+  InboxHeadline,
+  InboxScope,
+  SessionHistoryTurn,
+} from "@goddard-ai/schema/daemon"
 
 /** Stable request id used to identify one persisted prompt turn. */
 export type SessionTurnPromptRequestId = string | number
@@ -14,8 +19,11 @@ export type ActiveTurnBuffer<TDraftId extends string = string> = {
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
   messages: acp.AnyMessage[]
+  inboxScope?: InboxScope | null
+  inboxHeadline?: InboxHeadline | null
   flushTimer: ReturnType<typeof setTimeout> | null
   draftId: TDraftId | null
+  touchedAttentionEntity?: boolean
 }
 
 /** Durable draft payload written into `sessionTurnDrafts`. */
@@ -39,6 +47,8 @@ export type CompletedSessionTurnInput = {
   completedAt: string | null
   completionKind: "result" | "error" | null
   stopReason: DaemonSession["stopReason"]
+  inboxScope?: InboxScope | null
+  inboxHeadline?: InboxHeadline | null
   messages: acp.AnyMessage[]
 }
 
@@ -59,6 +69,8 @@ type SessionTurnDraftRecord = {
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
   messages: acp.AnyMessage[]
+  inboxScope?: InboxScope | null
+  inboxHeadline?: InboxHeadline | null
 }
 
 /** Launch-time initial prompt details needed to persist one completed turn. */
@@ -209,6 +221,8 @@ function toSessionHistoryTurn(record: PersistableSessionTurn) {
     completedAt: record.completedAt,
     completionKind: record.completionKind,
     stopReason: record.stopReason,
+    inboxScope: record.inboxScope ?? null,
+    inboxHeadline: record.inboxHeadline ?? null,
     messages: [...record.messages],
   } satisfies SessionHistoryTurn
 }
@@ -225,6 +239,8 @@ export function toSessionHistoryTurnFromDraft(record: SessionTurnDraftRecord) {
     completedAt: null,
     completionKind: null,
     stopReason: null,
+    inboxScope: record.inboxScope ?? null,
+    inboxHeadline: record.inboxHeadline ?? null,
   })
 }
 
@@ -240,6 +256,8 @@ export function toSessionHistoryTurnFromActiveTurn<TDraftId extends string>(
     completedAt: null,
     completionKind: null,
     stopReason: null,
+    inboxScope: record.inboxScope ?? null,
+    inboxHeadline: record.inboxHeadline ?? null,
     messages: [...record.messages],
   })
 }
@@ -272,6 +290,8 @@ export function toCompletedTurnInput(sessionId: DaemonSessionId, turn: SessionHi
     completedAt: turn.completedAt,
     completionKind: turn.completionKind,
     stopReason: turn.stopReason,
+    inboxScope: turn.inboxScope ?? null,
+    inboxHeadline: turn.inboxHeadline ?? null,
     messages: [...turn.messages],
   } satisfies CompletedSessionTurnInput
 }
@@ -339,6 +359,8 @@ export function createInitializedHistoryTurn(params: {
     completedAt: params.initialized.initialPromptCompletedAt,
     completionKind: "result",
     stopReason: params.initialized.stopReason,
+    inboxScope: null,
+    inboxHeadline: null,
     messages: coalesceSessionHistoryMessages(params.initialized.history),
   } satisfies SessionHistoryTurn
 }

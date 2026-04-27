@@ -10,6 +10,7 @@ function createUnsupportedHandler(name: string) {
 export const daemonIpcTestHandlers = new Proxy(
   {},
   {
+    // The schema-typed proxy keeps app test stubs aligned when daemon IPC methods change.
     get: (_target, key) => createUnsupportedHandler(String(key)),
   },
 ) as Handlers<typeof daemonIpcSchema>

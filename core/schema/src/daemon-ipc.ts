@@ -6,6 +6,14 @@ import { DaemonSessionIdParams } from "./common/params.ts"
 import { ListAdaptersRequest, type ListAdaptersResponse } from "./daemon-adapters.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
+  BulkUpdateInboxItemsRequest,
+  ListInboxRequest,
+  UpdateInboxItemRequest,
+  type BulkUpdateInboxItemsResponse,
+  type ListInboxResponse,
+  type UpdateInboxItemResponse,
+} from "./daemon/inbox.ts"
+import {
   GetLoopRequest,
   ShutdownLoopRequest,
   StartLoopRequest,
@@ -15,18 +23,24 @@ import {
   type StartLoopResponse,
 } from "./daemon/loops.ts"
 import {
+  GetPullRequestRequest,
   ReplyPrRequest,
   SubmitPrRequest,
+  type GetPullRequestResponse,
   type ReplyPrResponse,
   type SubmitPrResponse,
 } from "./daemon/pull-requests.ts"
 import {
   CancelSessionRequest,
+  CompleteSessionRequest,
   CreateSessionRequest,
+  DeclareSessionInitiativeRequest,
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   ListSessionsRequest,
   MountSessionWorktreeSyncRequest as MountSessionWorktreeSyncRequestSchema,
+  ReportSessionBlockerRequest,
+  ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
@@ -37,6 +51,7 @@ import {
   SyncSessionWorktreeRequest as SyncSessionWorktreeRequestSchema,
   UnmountSessionWorktreeSyncRequest as UnmountSessionWorktreeSyncRequestSchema,
   type CancelSessionResponse,
+  type CompleteSessionResponse,
   type CreateSessionResponse,
   type GetSessionChangesResponse,
   type GetSessionDiagnosticsResponse,
@@ -46,6 +61,7 @@ import {
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
   type MutateSessionWorktreeResponse,
+  type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
   type ShutdownSessionResponse,
@@ -103,6 +119,10 @@ export const daemonIpcSchema = {
         token: z.string(),
       }),
       response: $type<SubmitPrResponse>(),
+    },
+    prGet: {
+      payload: GetPullRequestRequest,
+      response: $type<GetPullRequestResponse>(),
     },
     prReply: {
       payload: ReplyPrRequest.extend({
@@ -186,9 +206,37 @@ export const daemonIpcSchema = {
       payload: SendSessionMessageRequest,
       response: $type<{ accepted: true }>(),
     },
+    sessionComplete: {
+      payload: CompleteSessionRequest,
+      response: $type<CompleteSessionResponse>(),
+    },
+    sessionDeclareInitiative: {
+      payload: DeclareSessionInitiativeRequest,
+      response: $type<ReportSessionResponse>(),
+    },
+    sessionReportBlocker: {
+      payload: ReportSessionBlockerRequest,
+      response: $type<ReportSessionResponse>(),
+    },
+    sessionReportTurnEnded: {
+      payload: ReportSessionTurnEndedRequest,
+      response: $type<ReportSessionResponse>(),
+    },
     sessionResolveToken: {
       payload: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
+    },
+    inboxList: {
+      payload: ListInboxRequest,
+      response: $type<ListInboxResponse>(),
+    },
+    inboxUpdate: {
+      payload: UpdateInboxItemRequest,
+      response: $type<UpdateInboxItemResponse>(),
+    },
+    inboxBulkUpdate: {
+      payload: BulkUpdateInboxItemsRequest,
+      response: $type<BulkUpdateInboxItemsResponse>(),
     },
     actionRun: {
       payload: RunNamedActionRequest,

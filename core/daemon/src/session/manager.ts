@@ -32,6 +32,8 @@ import type {
   GetSessionHistoryResponse,
   GetSessionWorkforceResponse,
   GetSessionWorktreeResponse,
+  InboxHeadline,
+  InboxScope,
   InitialPromptOption,
   ListSessionsRequest,
   ListSessionsResponse,
@@ -44,6 +46,7 @@ import type {
   SessionConnection,
   SessionDraftSuggestionsRequest,
   SessionHistoryTurn,
+  SessionInboxMetadataInput,
   SessionLaunchBranch,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
@@ -57,6 +60,8 @@ import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
 import type { ConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath } from "../config.ts"
 import { SessionContext } from "../context.ts"
+import type { InboxManager } from "../inbox/manager.ts"
+import { resolveInboxMetadata } from "../inbox/metadata.ts"
 import { createChunkPreview, createLogger, createPayloadPreview } from "../logging.ts"
 import {
   type SessionConnectionMode,
@@ -774,6 +779,18 @@ export type SessionManager = {
   syncWorktree: (id: SessionId) => Promise<MutateSessionWorktreeResponse>
   unmountWorktreeSync: (id: SessionId) => Promise<MutateSessionWorktreeResponse>
   getWorkforce: (id: SessionId) => Promise<GetSessionWorkforceResponse>
+  declareInitiative: (id: SessionId, title: string) => Promise<DaemonSession>
+  reportBlocker: (
+    id: SessionId,
+    reason: string,
+    metadata?: SessionInboxMetadataInput,
+  ) => Promise<DaemonSession>
+  reportTurnEnded: (id: SessionId, metadata?: SessionInboxMetadataInput) => Promise<DaemonSession>
+  recordTurnAttentionActivity: (
+    id: SessionId,
+    metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string },
+  ) => Promise<{ scope: InboxScope; headline: InboxHeadline; turnId: string | null }>
+  completeSession: (id: SessionId) => Promise<ReturnType<InboxManager["completeSession"]>>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
   cancelSessionTurn: (id: SessionId) => Promise<CancelSessionResponse>
   steerSession: (
@@ -1467,7 +1484,8 @@ function createSessionRecordUpdate(params: {
     availableCommands: params.availableCommands,
     errorMessage: null,
     blockedReason: null,
-    initiative: null,
+    initiative: params.existingSession?.initiative ?? null,
+    inboxScope: params.existingSession?.inboxScope ?? null,
     lastAgentMessage: null,
   }
 }
@@ -1626,7 +1644,6 @@ function toAbortedQueuedPrompt(entry: {
   }
 }
 
-/** Creates the daemon session manager and owns reconciliation of live session processes. */
 /** Resolves or rejects one pending prompt when its agent response frame arrives. */
 function settlePendingPrompt(active: ActiveSession, message: acp.AnyMessage): void {
   if ("id" in message === false || message.id == null) {
@@ -1701,6 +1718,7 @@ export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
   publish: (id: SessionId, message: acp.AnyMessage) => void
+  inboxManager: InboxManager
   configManager: ConfigManager
   registryService: ACPRegistryService
   idleSessionShutdownTimeoutMs?: number
@@ -1747,6 +1765,78 @@ export function createSessionManager(input: {
         resolvedLogger,
       )
     }
+  }
+
+  function requireSessionDocument(id: SessionId) {
+    const record = db.sessions.get(id) ?? null
+    if (!record) {
+      throw new IpcClientError(`Unknown session: ${id}`)
+    }
+
+    return record
+  }
+
+  function resolveCurrentTurnId(id: SessionId) {
+    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
+    if (activeTurn) {
+      return activeTurn.turnId
+    }
+
+    return (
+      db.sessionTurns.first({
+        where: { sessionId: id },
+        orderBy: {
+          sessionId: "asc",
+          sequence: "desc",
+        },
+      })?.turnId ?? null
+    )
+  }
+
+  function applyInboxMetadataToCurrentTurn(
+    id: SessionId,
+    metadata: { scope: InboxScope; headline: InboxHeadline },
+  ) {
+    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
+    if (activeTurn) {
+      activeTurn.inboxScope = metadata.scope
+      activeTurn.inboxHeadline = metadata.headline
+      return
+    }
+
+    const latestTurn =
+      db.sessionTurns.first({
+        where: { sessionId: id },
+        orderBy: {
+          sessionId: "asc",
+          sequence: "desc",
+        },
+      }) ?? null
+    if (latestTurn) {
+      db.sessionTurns.update(latestTurn.id, {
+        inboxScope: metadata.scope,
+        inboxHeadline: metadata.headline,
+      })
+    }
+  }
+
+  function resolveAndPersistInboxMetadata(input: {
+    session: SessionDoc
+    metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string }
+    blockedReason?: string | null
+  }) {
+    const resolved = resolveInboxMetadata({
+      session: {
+        ...input.session,
+        blockedReason: input.blockedReason ?? input.session.blockedReason,
+      },
+      scope: input.metadata?.scope,
+      headline: input.metadata?.headline,
+      fallbackHeadline: input.metadata?.fallbackHeadline,
+    })
+    updateSession(input.session.id, { inboxScope: resolved.scope })
+    applyInboxMetadataToCurrentTurn(input.session.id, resolved)
+    return resolved
   }
 
   function clearTurnDraftFlushTimer(activeTurn: ActiveTurnBuffer | null) {
@@ -1897,6 +1987,8 @@ export function createSessionManager(input: {
       completedAt: new Date().toISOString(),
       completionKind,
       stopReason,
+      inboxScope: activeTurn.inboxScope ?? null,
+      inboxHeadline: activeTurn.inboxHeadline ?? null,
       messages: [...activeTurn.messages],
     }
 
@@ -2772,8 +2864,11 @@ export function createSessionManager(input: {
       promptRequestId: nextPrompt.requestId,
       startedAt: new Date().toISOString(),
       messages: [],
+      inboxScope: null,
+      inboxHeadline: null,
       flushTimer: null,
       draftId: null,
+      touchedAttentionEntity: false,
     }
     active.activeTurn = activeTurn
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
@@ -3948,6 +4043,106 @@ export function createSessionManager(input: {
     }
   }
 
+  async function declareInitiative(id: SessionId, title: string) {
+    await ready
+    requireSessionDocument(id)
+    updateSession(id, {
+      status: "active",
+      initiative: title,
+      blockedReason: null,
+    })
+
+    return getSession(id)
+  }
+
+  async function reportBlocker(
+    id: SessionId,
+    reason: string,
+    metadata: SessionInboxMetadataInput = {},
+  ) {
+    await ready
+    const session = requireSessionDocument(id)
+    const resolved = resolveAndPersistInboxMetadata({
+      session,
+      metadata: {
+        ...metadata,
+        fallbackHeadline: reason,
+      },
+      blockedReason: reason,
+    })
+    updateSession(id, {
+      status: "blocked",
+      blockedReason: reason,
+    })
+    input.inboxManager.touchInboxItem({
+      entityId: id,
+      reason: "session.blocked",
+      scope: resolved.scope,
+      headline: resolved.headline,
+      turnId: resolveCurrentTurnId(id),
+    })
+
+    return getSession(id)
+  }
+
+  async function reportTurnEnded(id: SessionId, metadata: SessionInboxMetadataInput = {}) {
+    await ready
+    const session = requireSessionDocument(id)
+    const resolved = resolveAndPersistInboxMetadata({
+      session,
+      metadata: {
+        ...metadata,
+        fallbackHeadline: session.lastAgentMessage ?? session.initiative ?? session.title,
+      },
+    })
+    updateSession(id, {
+      status: "done",
+      initiative: null,
+      blockedReason: null,
+    })
+
+    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
+    if (activeTurn?.touchedAttentionEntity !== true) {
+      input.inboxManager.touchInboxItem({
+        entityId: id,
+        reason: "session.turn_ended",
+        scope: resolved.scope,
+        headline: resolved.headline,
+        turnId: resolveCurrentTurnId(id),
+      })
+    }
+
+    return getSession(id)
+  }
+
+  async function recordTurnAttentionActivity(
+    id: SessionId,
+    metadata: SessionInboxMetadataInput & { fallbackHeadline?: string } = {},
+  ) {
+    await ready
+    const session = requireSessionDocument(id)
+    const resolved = resolveAndPersistInboxMetadata({
+      session,
+      metadata,
+    })
+    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
+    if (activeTurn) {
+      activeTurn.touchedAttentionEntity = true
+    }
+
+    return {
+      scope: resolved.scope,
+      headline: resolved.headline,
+      turnId: resolveCurrentTurnId(id),
+    }
+  }
+
+  async function completeSession(id: SessionId) {
+    await ready
+    requireSessionDocument(id)
+    return input.inboxManager.completeSession(id)
+  }
+
   async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
     await ready
     const active = activeSessions.get(id)
@@ -3970,6 +4165,7 @@ export function createSessionManager(input: {
         prompt: [...message.params.prompt],
         source: "client",
       })
+      input.inboxManager.markSessionReplied(id)
       refreshIdleShutdownState(active.id, "prompt_enqueued")
       emitDiagnostic(active.id, "session_prompt_enqueued", {
         requestId: message.id,
@@ -4187,6 +4383,11 @@ export function createSessionManager(input: {
     syncWorktree,
     unmountWorktreeSync,
     getWorkforce,
+    declareInitiative,
+    reportBlocker,
+    reportTurnEnded,
+    recordTurnAttentionActivity,
+    completeSession,
     sendMessage,
     cancelSessionTurn,
     steerSession,

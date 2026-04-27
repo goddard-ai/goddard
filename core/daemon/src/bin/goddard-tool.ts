@@ -2,10 +2,8 @@
 import * as fs from "node:fs/promises"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
 import { DaemonSessionId } from "@goddard-ai/schema/common/params"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import { command, option, run, string, subcommands } from "cmd-ts"
-
-import { db } from "../persistence/store.ts"
+import type { DaemonSession, SessionInboxMetadataInput } from "@goddard-ai/schema/daemon"
+import { command, option, optional, run, string, subcommands } from "cmd-ts"
 
 async function requireSessionId(): Promise<DaemonSession["id"]> {
   const { client } = createDaemonIpcClientFromEnv()
@@ -20,80 +18,95 @@ function requireSessionToken(): string {
 }
 
 export async function declareInitiative(sessionId: DaemonSession["id"], title: string) {
-  const record = db.sessions.get(sessionId)
-  if (!record) {
-    throw new Error(`Unknown session: ${sessionId}`)
-  }
-
-  db.sessions.update(sessionId, {
-    status: "active",
-    initiative: title,
-    blockedReason: null,
-  })
-}
-
-export async function reportBlocker(sessionId: DaemonSession["id"], reason: string) {
-  const record = db.sessions.get(sessionId)
-  if (!record) {
-    throw new Error(`Unknown session: ${sessionId}`)
-  }
-
-  db.sessions.update(sessionId, {
-    status: "blocked",
-    blockedReason: reason,
-  })
-}
-
-export async function reportCompleted(sessionId: DaemonSession["id"]) {
-  const record = db.sessions.get(sessionId)
-  if (!record) {
-    throw new Error(`Unknown session: ${sessionId}`)
-  }
-
-  db.sessions.update(sessionId, {
-    status: "done",
-    initiative: null,
-    blockedReason: null,
-  })
-}
-
-export async function submitPr(sessionId: DaemonSession["id"], title: string, body: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  const pr = await client.send("prSubmit", {
+  await client.send("sessionDeclareInitiative", { id: sessionId, title })
+}
+
+export async function reportBlocker(
+  sessionId: DaemonSession["id"],
+  reason: string,
+  metadata: SessionInboxMetadataInput = {},
+) {
+  const { client } = createDaemonIpcClientFromEnv()
+  await client.send("sessionReportBlocker", { id: sessionId, reason, ...metadata })
+}
+
+export async function reportTurnEnded(
+  sessionId: DaemonSession["id"],
+  metadata: SessionInboxMetadataInput = {},
+) {
+  const { client } = createDaemonIpcClientFromEnv()
+  await client.send("sessionReportTurnEnded", { id: sessionId, ...metadata })
+}
+
+export async function submitPr(
+  title: string,
+  body: string,
+  metadata: SessionInboxMetadataInput = {},
+) {
+  const { client } = createDaemonIpcClientFromEnv()
+  await client.send("prSubmit", {
     token: requireSessionToken(),
     cwd: process.cwd(),
     title,
     body,
-  })
-
-  const record = db.sessions.get(sessionId)
-  if (!record) {
-    throw new Error(`Unknown session: ${sessionId}`)
-  }
-
-  db.sessions.update(sessionId, {
-    status: "done",
-    lastAgentMessage: `PR Submitted: ${title}\n${pr.url}\n\n${body}`,
+    ...metadata,
   })
 }
 
-export async function replyPr(sessionId: DaemonSession["id"], message: string) {
+export async function replyPr(message: string, metadata: SessionInboxMetadataInput = {}) {
   const { client } = createDaemonIpcClientFromEnv()
   await client.send("prReply", {
     token: requireSessionToken(),
     cwd: process.cwd(),
     message,
+    ...metadata,
   })
+}
 
-  const record = db.sessions.get(sessionId)
-  if (!record) {
-    throw new Error(`Unknown session: ${sessionId}`)
+function metadataOptions() {
+  return {
+    scope: option({
+      type: optional(string),
+      long: "scope",
+      description: "Short inbox scope for this turn.",
+    }),
+    headline: option({
+      type: optional(string),
+      long: "headline",
+      description: "Short inbox headline for this turn.",
+    }),
+    metadataJson: option({
+      type: optional(string),
+      long: "json",
+      description: "JSON inbox metadata object with optional scope and headline.",
+    }),
+  }
+}
+
+function resolveMetadataInput(args: {
+  scope?: string
+  headline?: string
+  metadataJson?: string
+}): SessionInboxMetadataInput {
+  let parsed: SessionInboxMetadataInput = {}
+  if (args.metadataJson) {
+    const value = JSON.parse(args.metadataJson) as unknown
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error("--json must be an object")
+    }
+
+    const record = value as Record<string, unknown>
+    parsed = {
+      scope: typeof record.scope === "string" ? record.scope : undefined,
+      headline: typeof record.headline === "string" ? record.headline : undefined,
+    }
   }
 
-  db.sessions.update(sessionId, {
-    status: "done",
-    lastAgentMessage: `PR Reply: ${message}`,
-  })
+  return {
+    scope: args.scope ?? parsed.scope,
+    headline: args.headline ?? parsed.headline,
+  }
 }
 
 export async function main(argv: string[]) {
@@ -125,21 +138,24 @@ export async function main(argv: string[]) {
             long: "reason-file",
             description: "The file containing the reason for the blocker.",
           }),
+          ...metadataOptions(),
         },
         handler: async (args) => {
           const reason = await fs.readFile(args.reasonFile, "utf-8")
-          await reportBlocker(await requireSessionId(), reason)
+          await reportBlocker(await requireSessionId(), reason, resolveMetadataInput(args))
           console.log(`Blocker reported from file: ${args.reasonFile}`)
         },
       }),
 
-      "report-completed": command({
-        name: "report-completed",
-        description: "Report that the current initiative or task is completed.",
-        args: {},
-        handler: async () => {
-          await reportCompleted(await requireSessionId())
-          console.log("Work reported as completed.")
+      "end-turn": command({
+        name: "end-turn",
+        description: "Report that the current turn has ended.",
+        args: {
+          ...metadataOptions(),
+        },
+        handler: async (args) => {
+          await reportTurnEnded(await requireSessionId(), resolveMetadataInput(args))
+          console.log("Turn ended.")
         },
       }),
 
@@ -157,10 +173,11 @@ export async function main(argv: string[]) {
             long: "body-file",
             description: "The file containing the body of the PR.",
           }),
+          ...metadataOptions(),
         },
         handler: async (args) => {
           const body = await fs.readFile(args.bodyFile, "utf-8")
-          await submitPr(await requireSessionId(), args.title, body)
+          await submitPr(args.title, body, resolveMetadataInput(args))
           console.log(`PR submitted with title: ${args.title}`)
         },
       }),
@@ -174,10 +191,11 @@ export async function main(argv: string[]) {
             long: "message-file",
             description: "The file containing the reply message.",
           }),
+          ...metadataOptions(),
         },
         handler: async (args) => {
           const message = await fs.readFile(args.messageFile, "utf-8")
-          await replyPr(await requireSessionId(), message)
+          await replyPr(message, resolveMetadataInput(args))
           console.log(`PR replied from file: ${args.messageFile}`)
         },
       }),

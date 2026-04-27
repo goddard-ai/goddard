@@ -15,6 +15,9 @@
 - `Session Manager`
   - The daemon subsystem that owns session lifecycle operations.
   - Why: so creation, connection, message forwarding, shutdown, and session reconciliation are coordinated in one place.
+- `Inbox Manager`
+  - The daemon subsystem that owns local inbox row listing, workflow updates, and attention refreshes.
+  - Why: so every inbox status transition follows one set of daemon-owned write rules.
 - `Live Session Runtime`
   - The in-memory execution state for a session that is still actively running.
   - Why: because some session behavior only makes sense while the daemon still owns live execution.

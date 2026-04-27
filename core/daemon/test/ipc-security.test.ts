@@ -203,6 +203,30 @@ test("daemon submit request enforces trusted repo context and records created PR
       cwd: repoDir,
     },
   ])
+  const pullRequest = db.pullRequests.first({
+    where: {
+      host: "github",
+      owner: "trusted",
+      repo: "widgets",
+      prNumber: 42,
+    },
+  })
+  expect(db.inboxItems.first({ where: { entityId: pullRequest!.id } })).toMatchObject({
+    entityId: pullRequest!.id,
+    reason: "pull_request.created",
+    status: "unread",
+    priority: "normal",
+    scope: "Session",
+    headline: "Ship daemon security",
+  })
+  await expect(client.send("prGet", { id: pullRequest!.id })).resolves.toMatchObject({
+    pullRequest: {
+      id: pullRequest!.id,
+      owner: "trusted",
+      repo: "widgets",
+      prNumber: 42,
+    },
+  })
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
   const responded = logs.find((entry) => entry.event === "ipc.response_sent")
@@ -283,6 +307,59 @@ test("daemon reply request records pull request checkout locations", async () =>
       cwd: repoDir,
     },
   ])
+  const pullRequest = db.pullRequests.first({
+    where: {
+      host: "github",
+      owner: "trusted",
+      repo: "widgets",
+      prNumber: 12,
+    },
+  })
+  expect(db.inboxItems.first({ where: { entityId: pullRequest!.id } })).toMatchObject({
+    entityId: pullRequest!.id,
+    reason: "pull_request.updated",
+    status: "unread",
+    priority: "normal",
+    scope: "Session",
+    headline: "PR reply posted",
+  })
+})
+
+test("daemon session reporting creates and updates session inbox rows", async () => {
+  await useTempHome()
+  const daemon = await startServer({ useExistingHome: true })
+  seedAuthorizedSession({
+    sessionId: "ses_inbox",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await client.send("sessionReportBlocker", {
+    id: "ses_inbox",
+    reason: "Need product decision",
+    scope: "Checkout flow",
+    headline: "Decision blocks final step",
+  })
+
+  const blockedItem = db.inboxItems.first({ where: { entityId: "ses_inbox" } })
+  expect(blockedItem).toMatchObject({
+    entityId: "ses_inbox",
+    reason: "session.blocked",
+    status: "unread",
+    scope: "Checkout flow",
+    headline: "Decision blocks final step",
+  })
+
+  await client.send("inboxUpdate", {
+    entityId: "ses_inbox",
+    status: "read",
+  })
+  expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
+  await client.send("sessionComplete", { id: "ses_inbox" })
+  expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
 })
 
 test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {
@@ -457,6 +534,7 @@ async function seedWorkforceSession(input: {
     errorMessage: null,
     blockedReason: null,
     initiative: null,
+    inboxScope: null,
     lastAgentMessage: null,
     repository: null,
     prNumber: null,
@@ -502,6 +580,7 @@ function seedAuthorizedSession(input: {
     errorMessage: null,
     blockedReason: null,
     initiative: null,
+    inboxScope: null,
     lastAgentMessage: null,
     repository: null,
     prNumber: null,

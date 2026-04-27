@@ -21,3 +21,6 @@
 - `Loop Runtime`
   - One daemon-managed repeated agent execution cycle addressed through SDK loop methods.
   - Why: so loop lifecycle remains part of the shared daemon IPC surface instead of Node-only helpers.
+- `Inbox Surface`
+  - The SDK namespace that mirrors daemon inbox list and mutation IPC methods.
+  - Why: so non-app hosts can inspect and update local human-attention state through the same shared daemon contract.

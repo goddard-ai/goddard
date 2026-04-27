@@ -3,20 +3,26 @@ import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
 import type {
+  BulkUpdateInboxItemsRequest,
   CancelSessionRequest,
   CancelWorkforceRequest,
   CreateSessionRequest,
   CreateWorkforceRequest,
+  DeclareSessionInitiativeRequest,
   DiscoverWorkforceCandidatesRequest,
   GetLoopRequest,
+  GetPullRequestRequest,
   GetSessionChangesRequest,
   GetSessionHistoryRequest,
   GetWorkforceRequest,
   InitializeWorkforceRequest,
   ListAdaptersRequest,
+  ListInboxRequest,
   ListSessionsRequest,
   MountSessionWorktreeSyncRequest,
   ReplyPrRequest,
+  ReportSessionBlockerRequest,
+  ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
   RespondWorkforceRequest,
   RunNamedActionRequest,
@@ -35,6 +41,7 @@ import type {
   SyncSessionWorktreeRequest,
   TruncateWorkforceRequest,
   UnmountSessionWorktreeSyncRequest,
+  UpdateInboxItemRequest,
   UpdateWorkforceRequest,
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
@@ -99,8 +106,25 @@ function createPrNamespace(client: DaemonIpcClient) {
     /** Submits one pull request through the daemon PR contract. */
     submit: async (input: SubmitPrRequest & { token: string }) => client.send("prSubmit", input),
 
+    /** Fetches one daemon-managed pull request by tagged id. */
+    get: async (input: GetPullRequestRequest) => client.send("prGet", input),
+
     /** Posts one pull request reply through the daemon PR contract. */
     reply: async (input: ReplyPrRequest & { token: string }) => client.send("prReply", input),
+  }
+}
+
+/** Builds the inbox namespace with one thin method per daemon inbox IPC action. */
+function createInboxNamespace(client: DaemonIpcClient) {
+  return {
+    /** Lists daemon-local inbox rows using daemon ordering and filtering. */
+    list: async (input: ListInboxRequest = {}) => client.send("inboxList", input),
+
+    /** Updates one daemon-local inbox row by entity id. */
+    update: async (input: UpdateInboxItemRequest) => client.send("inboxUpdate", input),
+
+    /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
+    bulkUpdate: async (input: BulkUpdateInboxItemsRequest) => client.send("inboxBulkUpdate", input),
   }
 }
 
@@ -163,6 +187,22 @@ function createSessionNamespace(client: DaemonIpcClient) {
 
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
     shutdown: async (input: DaemonSessionIdParams) => client.send("sessionShutdown", input),
+
+    /** Marks one session inbox row completed without shutting down the session. */
+    complete: async (input: DaemonSessionIdParams) => client.send("sessionComplete", input),
+
+    /** Records the current session initiative without creating an inbox row. */
+    declareInitiative: async (input: DeclareSessionInitiativeRequest) =>
+      client.send("sessionDeclareInitiative", input),
+
+    /** Reports a session blocker and marks the session inbox row unread. */
+    reportBlocker: async (input: ReportSessionBlockerRequest) =>
+      client.send("sessionReportBlocker", input),
+
+    /** Reports an end-of-turn session update when no other entity claimed attention. */
+    reportTurnEnded: async (input: ReportSessionTurnEndedRequest) =>
+      client.send("sessionReportTurnEnded", input),
+
     /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
     cancel: async (input: CancelSessionRequest) => client.send("sessionCancel", input),
     /** Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary. */
@@ -291,6 +331,10 @@ export class GoddardSdk {
 
   get pr() {
     return defineCachedNamespace(this, "pr", createPrNamespace(this.#client))
+  }
+
+  get inbox() {
+    return defineCachedNamespace(this, "inbox", createInboxNamespace(this.#client))
   }
 
   get session() {

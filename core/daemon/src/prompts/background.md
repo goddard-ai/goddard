@@ -5,7 +5,7 @@ AVAILABLE COMMANDS:
 
 1. ${declare_initiative}
 2. ${report_blocker}
-3. `goddard submit-pr --title "<title>" --body-file <path/to/body.txt>`
+3. `goddard submit-pr --title "<title>" --body-file <path/to/body.txt> --headline "<short PR update>" --scope "<short work area>"`
    - Use this when you have fulfilled the requirements of your task.
    - CRITICAL: You must `git add`, `git commit`, and `git push` your changes to your working branch BEFORE running this command.
 

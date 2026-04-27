@@ -12,6 +12,7 @@ import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
+import { createInboxManager } from "../inbox/manager.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager, type LoopManager } from "../loop/index.ts"
 import { db } from "../persistence/store.ts"
@@ -53,6 +54,7 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
 
   const registryService = createACPRegistryService()
+  const inboxManager = createInboxManager()
 
   let sessionManager!: SessionManager
   let loopManager!: LoopManager
@@ -97,18 +99,15 @@ export async function startDaemonServer(
   }
 
   async function recordPullRequest(record: Parameters<typeof db.pullRequests.create>[0]) {
-    const existingRecord =
-      db.pullRequests.first({
-        where: {
-          host: record.host,
-          owner: record.owner,
-          repo: record.repo,
-          prNumber: record.prNumber,
-        },
-      }) ?? null
-    return existingRecord
-      ? db.pullRequests.put(existingRecord.id, record)
-      : db.pullRequests.create(record)
+    return db.pullRequests.putByUnique(
+      {
+        host: record.host,
+        owner: record.owner,
+        repo: record.repo,
+        prNumber: record.prNumber,
+      },
+      record,
+    )
   }
 
   function requireIpcRequestContext() {
@@ -241,14 +240,37 @@ export async function startDaemonServer(
         repo: session.repo,
       })
       await addAllowedPrToSession(session.sessionId, pr.number)
-      await recordPullRequest({
+      const pullRequest = await recordPullRequest({
         host: "github",
         owner: session.owner,
         repo: session.repo,
         prNumber: pr.number,
         cwd: payload.cwd,
       })
+      const metadata = await sessionManager.recordTurnAttentionActivity(session.sessionId, {
+        scope: payload.scope,
+        headline: payload.headline,
+        fallbackHeadline: resolvedInput.title,
+      })
+      inboxManager.touchInboxItem({
+        entityId: pullRequest.id,
+        reason: "pull_request.created",
+        scope: metadata.scope,
+        headline: metadata.headline,
+        turnId: metadata.turnId,
+      })
+      db.sessions.update(session.sessionId, {
+        status: "done",
+        lastAgentMessage: `PR Submitted: ${resolvedInput.title}\n${pr.url}\n\n${
+          resolvedInput.body ?? ""
+        }`,
+      })
       return { number: pr.number, url: pr.url }
+    },
+    prGet: async ({ id }) => {
+      return {
+        pullRequest: inboxManager.getPullRequest(id),
+      }
     },
     prReply: async (payload) => {
       const session = await getSessionByToken(payload.token)
@@ -276,12 +298,28 @@ export async function startDaemonServer(
         owner: session.owner,
         repo: session.repo,
       })
-      await recordPullRequest({
+      const pullRequest = await recordPullRequest({
         host: "github",
         owner: session.owner,
         repo: session.repo,
         prNumber: resolvedInput.prNumber,
         cwd: payload.cwd,
+      })
+      const metadata = await sessionManager.recordTurnAttentionActivity(session.sessionId, {
+        scope: payload.scope,
+        headline: payload.headline,
+        fallbackHeadline: "PR reply posted",
+      })
+      inboxManager.touchInboxItem({
+        entityId: pullRequest.id,
+        reason: "pull_request.updated",
+        scope: metadata.scope,
+        headline: metadata.headline,
+        turnId: metadata.turnId,
+      })
+      db.sessions.update(session.sessionId, {
+        status: "done",
+        lastAgentMessage: `PR Reply: ${payload.message}`,
       })
       return response
     },
@@ -355,6 +393,26 @@ export async function startDaemonServer(
       await sessionManager.sendMessage(id, message as acp.AnyMessage)
       return { accepted: true as const }
     },
+    sessionComplete: async ({ id }) => {
+      return {
+        item: await sessionManager.completeSession(id),
+      }
+    },
+    sessionDeclareInitiative: async ({ id, title }) => {
+      return {
+        session: await sessionManager.declareInitiative(id, title),
+      }
+    },
+    sessionReportBlocker: async ({ id, reason, scope, headline }) => {
+      return {
+        session: await sessionManager.reportBlocker(id, reason, { scope, headline }),
+      }
+    },
+    sessionReportTurnEnded: async ({ id, scope, headline }) => {
+      return {
+        session: await sessionManager.reportTurnEnded(id, { scope, headline }),
+      }
+    },
     sessionResolveToken: async ({ token }) => {
       const id = await sessionManager.resolveSessionIdByToken(token)
       const context = requireIpcRequestContext()
@@ -363,6 +421,9 @@ export async function startDaemonServer(
         id,
       }
     },
+    inboxList: async (payload) => inboxManager.listInboxItems(payload),
+    inboxUpdate: async (payload) => inboxManager.updateInboxItem(payload),
+    inboxBulkUpdate: async (payload) => inboxManager.bulkUpdateInboxItems(payload),
     actionRun: async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionManager.newSession({
@@ -593,6 +654,7 @@ export async function startDaemonServer(
     agentBinDir: runtime.agentBinDir,
     configManager,
     registryService,
+    inboxManager,
     idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
     publish(id, message) {
       ipcServer.publish("sessionMessage", { id, message })

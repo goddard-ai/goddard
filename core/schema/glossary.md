@@ -24,6 +24,12 @@
 - `Session Metadata`
   - Structured context attached to a daemon session.
   - Why: so auxiliary work context such as workforce ownership can travel with the session without being embedded in prompt text.
+- `Inbox Item`
+  - The daemon-local current attention row for one daemon-owned entity such as a session or pull request.
+  - Why: so clients can list and update human-attention state without using external service identifiers.
+- `Inbox Entity ID`
+  - A tagged daemon id that identifies the entity owning one inbox row.
+  - Why: so inbox rows can point at sessions and pull requests through Goddard-generated ids instead of ambiguous external ids.
 - `Repo Event`
   - A backend-originated description of a meaningful repository change.
   - Why: so the backend and daemon can communicate about pull-request-related activity using a stable shared contract.

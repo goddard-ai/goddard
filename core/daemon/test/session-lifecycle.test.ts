@@ -591,6 +591,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     errorMessage: null,
     blockedReason: null,
     initiative: null,
+    inboxScope: null,
     lastAgentMessage: null,
     repository: null,
     prNumber: null,
@@ -614,6 +615,8 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     completedAt: "2026-04-14T00:00:01.000Z",
     completionKind: "result",
     stopReason: "end_turn",
+    inboxScope: null,
+    inboxHeadline: null,
     messages: [
       {
         jsonrpc: "2.0",
@@ -672,6 +675,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     errorMessage: null,
     blockedReason: null,
     initiative: null,
+    inboxScope: null,
     lastAgentMessage: null,
     repository: null,
     prNumber: null,
@@ -1579,6 +1583,7 @@ test("sessionComposerSuggestions reads `/` commands from the latest ACP history 
     errorMessage: null,
     blockedReason: null,
     initiative: null,
+    inboxScope: null,
     lastAgentMessage: null,
     repository: null,
     prNumber: null,

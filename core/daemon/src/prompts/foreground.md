@@ -5,7 +5,7 @@ AVAILABLE COMMANDS:
 
 1. ${declare_initiative}
 2. ${report_blocker}
-3. `goddard report-completed`
-   - Use this ONLY when you have fully completed the current initiative's objectives.
+3. `goddard end-turn --headline "<short turn-specific update>" --scope "<short work area>"`
+   - Use this when the current turn has reached a meaningful stopping point.
 
 ${global_rules}

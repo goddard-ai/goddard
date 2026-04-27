@@ -2,6 +2,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import {
+  DaemonInboxItem,
   DaemonPullRequest,
   DaemonSession,
   DaemonSessionDiagnostics,
@@ -62,12 +63,24 @@ const schema = {
 
   workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
 
-  pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi("host_owner_repo_prNumber", {
-    host: "asc",
-    owner: "asc",
-    repo: "asc",
-    prNumber: "asc",
-  }),
+  pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
+    "host_owner_repo_prNumber",
+    {
+      host: "asc",
+      owner: "asc",
+      repo: "asc",
+      prNumber: "asc",
+    },
+    { unique: true },
+  ),
+
+  inboxItems: kind("inb", DaemonInboxItem)
+    .index("entityId", { type: "text", unique: true })
+    .index("status")
+    .multi("updatedAt_id", {
+      updatedAt: "desc",
+      id: "desc",
+    }),
 }
 
 function createStore(options: StoreConnectionOptions) {
