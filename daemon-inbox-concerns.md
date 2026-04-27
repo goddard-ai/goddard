@@ -69,19 +69,7 @@ Cases to cover:
 - one path tries to create while another path has just created
 - a conflict occurs after some related session or pull-request state has changed
 
-The storage shape can protect the invariant, but the manager still has to define which event wins and how `reason`, `status`, `priority`, `scope`, `headline`, and `updatedAt` are resolved.
-
-My recommendation is to make the rules boring and explicit:
-
-- all daemon attention goes through one `touchInboxItem(...)` helper
-- unique-create conflicts refetch the row and apply the same update path
-- daemon attention always reopens the row to `unread`
-- daemon attention preserves priority unless it provides an explicit override
-- latest daemon attention wins for `reason`, preview metadata, `turnId`, and `updatedAt`
-- user updates win only when they happen later in store order
-- bulk updates dedupe ids and apply one shared timestamp
-
-This is not complicated, but it needs direct tests. Otherwise the code will look correct until two event paths race.
+The storage shape can protect the invariant, and the implementation plan now centralizes the intended conflict behavior in Write Semantics. The remaining risk is that a future write path bypasses the inbox manager or that tests miss the create-conflict retry path.
 
 ## 6. One `status` field is carrying three different concepts
 
@@ -93,17 +81,7 @@ The remaining awkwardness is that `status` now mixes:
 - filing state: `saved`, `archived`
 - lifecycle state: `completed`
 
-Because this is a single field, the model cannot represent combinations like "saved and replied" or "archived but completed." That may be fine for v1, but the implementation needs clear precedence rules.
-
-My recommended v1 rule is:
-
-- daemon attention wins and sets `unread`
-- implicit user replies move any existing non-archived session row to `replied`
-- implicit user replies intentionally overwrite `saved` because the work is relevant again
-- implicit user replies intentionally overwrite `completed` because the work is not done
-- implicit user replies do not overwrite `archived`
-- explicit user filing actions can set `saved` or `archived`
-- `completed` is only set through entity-aware lifecycle paths
+Because this is a single field, the model cannot represent combinations like "saved and replied" or "archived but completed." The implementation plan now defines precedence rules, but that does not remove the modeling tradeoff.
 
 If product later needs independent filing and attention state, `saved`/`archived` probably need to move out of `status`.
 

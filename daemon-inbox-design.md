@@ -21,17 +21,10 @@ These decisions are settled and should not be revisited during implementation:
 - Inbox entities are `session` and `pull_request` in v1.
 - The inbox stores current attention state, not append-only notification history.
 - Inbox rows are keyed by `InboxEntityId`, not synthetic `type/id` links.
-- New daemon-generated attention creates or refreshes rows as:
-  - `status = "unread"`
-  - `priority = "normal"` for new rows
-  - existing `priority` preserved on later attention unless the daemon explicitly overrides it
 - Inbox item statuses are `unread`, `read`, `replied`, `completed`, `saved`, and `archived`.
 - Inbox item priorities are `normal` and `low`.
-- Bulk updates apply one shared `updatedAt` timestamp to every affected row.
-- `replied` means the related session has received a user reply and does not need attention until a later daemon attention event.
-- `completed` is entity-specific and must not mean "has been replied to":
-  - a completed session is one the user explicitly completes
-  - a completed pull request is one the daemon knows has been merged or closed
+- Status transition rules are defined once in Status Semantics.
+- Inbox write ordering and conflict behavior are defined once in Write Semantics.
 - Session turn inbox metadata is hidden state, not a user-visible chat message.
 - Session turn metadata has a sticky `scope` and a required `headline`.
 - `scope` is stored as sticky session metadata and reused until the agent supplies a new non-empty value.
@@ -60,6 +53,32 @@ Completion is not a generic inbox filing action. It is applied through entity-aw
 Daemon attention events are reopen events. They set the row back to `unread` even if the row was `read`, `replied`, `saved`, `archived`, or `completed`. A completed row receiving new daemon attention should be rare; if it happens, surfacing the new attention is safer than silently preserving completion.
 
 User reply handling is separate from completion. When the daemon observes a user message sent to a session, it should mark that session's existing inbox row `replied` unless the row is `archived`. This intentionally overwrites `saved` because the reply makes the work relevant now, and overwrites `completed` because the reply means the session work is not done. Archived rows remain archived because archiving is an explicit hide action.
+
+## Write Semantics
+
+All inbox writes must go through the daemon inbox manager. Other daemon modules may request inbox changes, but they should not mutate inbox rows directly.
+
+Daemon attention writes use `touchInboxItem(...)`:
+
+- compute one event timestamp
+- update the existing row by `entityId` when present
+- create the row when missing
+- refetch and update when create hits the unique `entityId` constraint
+- set `status = "unread"`
+- set `priority = "normal"` only for new rows unless the daemon explicitly provides a priority override
+- preserve existing priority on later attention when no override exists
+- let the latest daemon attention win for `reason`, preview metadata, `turnId`, and `updatedAt`
+
+User workflow writes use the same manager:
+
+- single-item and bulk updates share validation for mutable fields
+- bulk updates dedupe ids, reject empty requests, reject no-op mutations, and apply one shared `updatedAt`
+- missing ids are reported without creating rows
+- session replies mark an existing non-archived session row `replied`; they do not create an inbox row
+- session completion marks an existing session row `completed` through the explicit session-completion path
+- pull-request completion is allowed only from observed merged or closed PR lifecycle state
+
+When daemon attention and user workflow writes race, store order decides the winner. A daemon attention write ordered after a user write reopens the row to `unread`; a user write ordered after daemon attention applies the requested user state.
 
 ## Scope
 
@@ -197,46 +216,21 @@ Tasks:
   - updating one inbox item
   - bulk-updating inbox items
   - touching or refreshing one inbox row from daemon-owned events
-  - marking an existing non-archived session row `replied` after a user reply
-  - marking a session row `completed` through an explicit session-completion path
   - updating latest session preview fields from resolved turn metadata
   - loading pull request entities by tagged id
 - Keep inbox write semantics centralized in this module instead of duplicating them across IPC handlers.
-- Implement all daemon attention writes through a single `touchInboxItem(...)` path:
-  - compute one event timestamp
-  - try to update the existing row by `entityId`
-  - create the row when no existing row is found
-  - if create hits the unique `entityId` constraint, refetch and update the existing row
-  - set `status = "unread"`
-  - set `priority = "normal"` only for new rows unless an explicit daemon priority override exists
-  - preserve existing priority on later attention when no override exists
-  - use latest daemon attention values for `reason`, preview metadata, `turnId`, and `updatedAt`
+- Implement `touchInboxItem(...)` and user workflow mutations according to Write Semantics.
 - Implement inbox row creation through the Kindstore unique `entityId` constraint so races cannot create duplicate rows.
-- Implement entity-aware status validation:
-  - `read`, `replied`, `saved`, and `archived` are ordinary inbox workflow states
-  - `completed` must route through an entity-specific policy and must not be used to mean "the user replied"
-  - session completion is allowed through the explicit session-completion path
-  - pull-request completion is allowed only when the daemon has observed the PR as merged or closed
-- Implement bulk update semantics exactly once:
-  - dedupe requested ids
-  - reject empty `entityIds`
-  - reject requests with no mutable fields
-  - compute one mutation timestamp
-  - apply that same `updatedAt` to every affected row
-  - return `missingEntityIds` without creating rows
-  - apply the same entity-aware status validation as single-item updates
+- Keep entity-aware status validation in the manager so generic inbox updates do not redefine completion semantics.
 
 Acceptance criteria:
 
-- Single-item and bulk-item updates share the same validation rules for mutable fields.
+- All inbox writes follow Write Semantics.
 - Repeated or concurrent attention for the same entity cannot create duplicate inbox rows.
 - Unique-conflict races retry by refetching the row and applying the same deterministic touch semantics.
-- Later daemon attention wins for attention-owned fields and reopens the row to `unread`.
-- User updates win only when they are ordered after daemon attention by the store.
 - Bulk updates apply one shared timestamp across all affected rows.
 - Missing ids are reported, not silently dropped and not auto-created.
 - Session inbox row refreshes atomically update reason, status, latest scope, latest headline, latest turn id, and `updatedAt`.
-- Session reply updates mark existing non-archived session rows as `replied`.
 - Completion is not accepted as a generic synonym for "handled" or "replied."
 
 ### 4. Session Lifecycle Integration
@@ -269,16 +263,7 @@ Tasks:
 - Remove direct `db.sessions` mutation from `goddard-tool`.
 - Keep per-session turn-entity activity as session-lifecycle state inside the daemon, not in the CLI.
 - Reuse the same session-manager path for one-shot turn-ended handling so the daemon does not split that logic across unrelated codepaths.
-- Wire user replies through the inbox manager:
-  - when `sessionSend` accepts a user message, mark the session inbox row `replied` if it exists and is not `archived`
-  - do not mark a session `completed` because the user replied
-  - overwrite `saved` because the reply makes the work relevant now
-  - overwrite `completed` because the reply means the session work is not done
-  - do not overwrite `archived` because archiving is an explicit hide action
-- Implement session completion as an explicit entity-aware operation:
-  - mark the session inbox row `completed`
-  - update `updatedAt`
-  - do not terminate, delete, or archive the session
+- Wire `sessionSend` user replies and explicit session completion through the inbox manager according to Write Semantics.
 - Resolve session inbox metadata at turn end:
   - validate the supplied headline
   - use supplied scope when present
@@ -297,8 +282,7 @@ Acceptance criteria:
 - Every terminal session report produces a resolved headline.
 - Scope remains stable across turns when the agent omits it.
 - A new valid scope updates the sticky session scope for later turns.
-- User replies move active session inbox attention to `replied`, not `completed`.
-- Explicit session completion is separate from reply handling and does not affect session runtime state.
+- User replies and explicit session completion follow the status transitions defined in Status Semantics.
 
 ### 5. Pull Request Integration
 
@@ -324,12 +308,7 @@ Tasks:
   - resolve and store session turn inbox metadata from the supplied PR terminal metadata or fallback data
   - touch the corresponding inbox row with `pull_request.updated`
   - mark the current session turn as having touched another attention entity
-- Do not treat `prReply` as PR completion. A replied-to PR may still be open and still be a concern.
-- Add PR completion handling only where the daemon has observed authoritative PR lifecycle state:
-  - merged PRs set the PR inbox row to `completed`
-  - closed PRs set the PR inbox row to `completed`
-  - open PRs remain governed by normal attention events and user workflow status
-  - if this implementation does not add a provider-state refresh path, leave automatic PR completion deferred rather than guessing from replies or comments
+- Apply PR completion only from observed PR lifecycle state. If this implementation does not add a provider-state refresh path, leave automatic PR completion deferred.
 
 Acceptance criteria:
 
@@ -337,7 +316,6 @@ Acceptance criteria:
 - Pull request activity resets the inbox row to `status = "unread"`.
 - Existing priority is preserved unless explicitly overridden by daemon logic.
 - PR terminal flows still preserve session turn scope/headline metadata even when session inbox attention is suppressed in favor of the PR row.
-- PR reply does not mark the PR inbox row `completed`.
 - PR completion is derived from observed merged or closed state, not from reply activity.
 
 ### 6. Metadata Validation And Fallback
@@ -453,10 +431,9 @@ This order keeps public types ahead of daemon code, and daemon code ahead of SDK
 
 - creating attention for a new entity creates one inbox row
 - later daemon attention reuses the same row, resets `status` to `unread`, and preserves `priority`
-- repeated attention for the same entity cannot create duplicate inbox rows
-- create-vs-create races resolve to one row by refetching after unique `entityId` conflicts
-- daemon attention after `read`, `replied`, `saved`, `archived`, or `completed` reopens the row to `unread`
 - daemon attention preserves existing priority unless a daemon override is explicitly provided
+- repeated attention and create-vs-create races cannot create duplicate rows
+- daemon attention reopens every prior status to `unread`
 - inbox list defaults to unread-only behavior
 - inbox list pagination orders by `updatedAt desc, id desc`
 - `inboxUpdate` is idempotent
@@ -465,10 +442,7 @@ This order keeps public types ahead of daemon code, and daemon code ahead of SDK
 - `inboxBulkUpdate` reports missing ids without creating rows
 - `inboxBulkUpdate` uses the same entity-aware status validation as single-item updates
 - new inbox rows default to `priority = "normal"`
-- user reply to a session marks an existing non-archived session inbox row as `replied`
-- user reply to a session overwrites `saved` and `completed`
-- user reply to a session does not overwrite `archived`
-- user reply to a session does not mark the session inbox row `completed`
+- session reply status transitions match Status Semantics
 - explicit session completion marks the session inbox row `completed` without shutting down the session
 - terminal session reporting stores resolved scope/headline on the completed turn
 - session inbox rows expose the latest scope/headline preview
@@ -481,8 +455,7 @@ This order keeps public types ahead of daemon code, and daemon code ahead of SDK
 - one-shot completion follows the same suppression rule
 - `prSubmit` creates unread pull-request attention
 - `prReply` refreshes unread pull-request attention on the existing pull-request entity
-- `prReply` does not mark the PR inbox row `completed`
-- observed PR merged or closed state marks the PR inbox row `completed` if PR lifecycle refresh is implemented in this phase
+- PR completion status transitions match Status Semantics if PR lifecycle refresh is implemented in this phase
 
 ### SDK tests
 
@@ -503,10 +476,8 @@ The feature is ready when all of the following are true:
 - terminal session commands accept structured `scope` and `headline` metadata
 - completed session turns preserve resolved inbox metadata
 - session inbox rows expose latest scope/headline preview fields
-- user replies mark active session inbox rows as `replied`, not `completed`
-- explicit session completion is the only session path that marks a session inbox row `completed`
+- status transitions follow Status Semantics
 - PR submit and reply both emit inbox attention
-- PR reply does not mark a PR inbox row `completed`
 - SDK exposes the new inbox and PR methods
 - automated tests cover single-item update, bulk update, deterministic touch conflict handling, status transitions, turn metadata, fallback behavior, and turn-suppression behavior
 - the canonical `spec/` documentation has been updated to match the implemented behavior
