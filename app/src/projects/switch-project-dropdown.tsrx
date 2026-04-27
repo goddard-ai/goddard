@@ -34,7 +34,6 @@ export component SwitchProjectDropdown() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
-  let triggerElement: HTMLButtonElement | null = null
 
   const [isOpen, setIsOpen] = useState(false)
 
@@ -67,7 +66,6 @@ export component SwitchProjectDropdown() {
   })
 
   <button
-    {ref triggerElement}
     aria-expanded={isOpen ? "true" : "false"}
     aria-haspopup="dialog"
     aria-label="Switch project"
@@ -92,7 +90,7 @@ export component SwitchProjectDropdown() {
     return
   }
 
-  let inputElement: HTMLInputElement | null = null
+  let inputElement: HTMLInputElement | undefined
 
   const [search, setSearch] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)

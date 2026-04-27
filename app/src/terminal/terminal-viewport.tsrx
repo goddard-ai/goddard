@@ -10,17 +10,9 @@ export component TerminalViewport(props: {
   class?: string;
   ariaLabel?: string;
 }) {
-  let viewportElement: HTMLDivElement | null = null
-
-  useEffect(() => {
-    props.terminal.attachViewport(viewportElement)
-    return () => {
-      props.terminal.attachViewport(null)
-    }
-  }, [props.terminal])
-
   <div class={cx(styles.frame, props.class)}>
     <div
+      {ref props.terminal.attachViewport}
       aria-label={props.ariaLabel ?? "Terminal viewport"}
       class={styles.viewport}
       onFocus={() => {
@@ -50,7 +42,6 @@ export component TerminalViewport(props: {
         event.preventDefault()
         props.terminal.scrollViewport(event.deltaY, event.deltaMode)
       }}
-      {ref viewportElement}
       role="region"
       style={{
         backgroundColor: props.terminal.theme.background,
