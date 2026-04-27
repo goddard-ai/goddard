@@ -16,10 +16,10 @@ startQueryWindowReactivationRefetch()
 window.__goddardDesktop = desktopHost
 
 render(
-  <tsx>
+  <>
     <AppStateProvider initialAppearanceState={initialAppearanceState}>
       <AppShell />
     </AppStateProvider>
-  </tsx>,
+  </>,
   document.getElementById("root")!,
 )

@@ -79,11 +79,11 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
           </div>
           <Command.List
             class={styles.list}
-            empty={<tsx>
+            empty={<>
               <div class={styles.empty}>
                 {"No matching commands."}
               </div>
-            </tsx>}
+            </>}
             children={(item, state) => {
               const Icon = item.icon
               const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
@@ -92,7 +92,7 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                   ? shortcutBinding
                   : shortcutBinding?.combo ?? shortcutBinding?.sequence
 
-              return <tsx>
+              return <>
                 <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
                   gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
                 }}>
@@ -110,7 +110,7 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                       </span>
                     : null}
                 </div>
-              </tsx>
+              </>
             }}
           />
         </Command.Root>

@@ -75,7 +75,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
     <div class={styles.field}>
       <GoodTooltip
         ariaLabel={props.label}
-        content={<tsx>
+        content={<>
           <span class={styles.tooltipContent}>
             <span>
               {props.label}
@@ -84,7 +84,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               {shortcutLabel}
             </span>
           </span>
-        </tsx>}
+        </>}
       >
         <span class={styles.tooltipTrigger}>
           <Popover.Trigger asChild>

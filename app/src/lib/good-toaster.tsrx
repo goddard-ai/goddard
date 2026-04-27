@@ -15,7 +15,7 @@ export const appToaster = createToaster(
 export component GoodToaster() {
   <Portal>
     <Toaster toaster={appToaster} class={styles.group}>
-      {(toast) => <tsx>
+      {(toast) => <>
         <Toast.Root key={toast.id} class={styles.root}>
           <span aria-hidden="true" class={styles.accent} />
           <div class={styles.body}>
@@ -31,7 +31,7 @@ export component GoodToaster() {
             <X size={15} strokeWidth={2.2} />
           </Toast.CloseTrigger>
         </Toast.Root>
-      </tsx>}
+      </>}
     </Toaster>
   </Portal>
 }

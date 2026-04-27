@@ -223,13 +223,13 @@ export component AppShellChrome() {
         <div class={styles.actionGroup}>
           <ActionButton
             ariaLabel="Propose task"
-            icon={<tsx><InlineSvgIcon icon="what-next" size="17px 12px" /></tsx>}
+            icon={<><InlineSvgIcon icon="what-next" size="17px 12px" /></>}
             onAction={AppCommand.navigation.openProposeTaskDialog}
           />
           <span class={styles.actionDivider} />
           <ActionButton
             ariaLabel="New session"
-            icon={<tsx><InlineSvgIcon icon="new-session" size="16px 16px" /></tsx>}
+            icon={<><InlineSvgIcon icon="new-session" size="16px 16px" /></>}
             onAction={AppCommand.navigation.openNewSessionDialog}
           />
         </div>

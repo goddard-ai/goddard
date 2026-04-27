@@ -88,11 +88,11 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
 
   if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
     {props.loadingFallback ??
-      <tsx>
+      <>
         <div class={styles.loading}>
           {"Preparing paragraph layout..."}
         </div>
-      </tsx>}
+      </>}
     return
   }
 
