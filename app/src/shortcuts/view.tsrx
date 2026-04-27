@@ -28,24 +28,26 @@ function getExactShortcutSearch(searchText: string) {
   return trimmedSearch.slice(1, -1).trim().toLowerCase()
 }
 
+type CaptureState = {
+  commandId: AppCommandId;
+  label: string;
+  mode: "add" | "change";
+  bindingIndex: number | null;
+  currentExpression: string | null;
+  whenClause: string | null;
+}
+
 component KeyboardShortcutsView(props: { class?: string }) {
+  let searchInputElement: HTMLInputElement | undefined
+
   const shortcutRegistry = useShortcutRegistry()
   const persistenceErrors = shortcutPersistenceErrors.value
-  let searchInputElement: HTMLInputElement | null = null
   const searchRecordingSessionRef = useRef<RecordingSession | null>(null)
   const [searchText, setSearchText] = useState("")
   const [isRecordingSearchEnabled, setIsRecordingSearchEnabled] = useState(false)
   const [editingWhenRowKey, setEditingWhenRowKey] = useState<string | null>(null)
-  const [captureState, setCaptureState] = useState<
-    {
-      commandId: AppCommandId;
-      label: string;
-      mode: "add" | "change";
-      bindingIndex: number | null;
-      currentExpression: string | null;
-      whenClause: string | null;
-    } | null
-  >(null)
+  const [captureState, setCaptureState] = useState<CaptureState | null>(null)
+
   const captureDialog = useDialog(
     {
       open: captureState !== null,

@@ -48,8 +48,9 @@ export component SessionInput(props: {
   helperText?: string;
   submitLabel?: string;
 }) {
-  let formElement: HTMLFormElement | null = null
+  let formElement: HTMLFormElement | undefined
   let menuElement: HTMLDivElement | null = null
+
   const editorRef = useRef<LexicalEditor | null>(null)
   const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
   const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>([])

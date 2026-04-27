@@ -48,8 +48,9 @@ function getInitialTopMostItemIndex<Item>(
 
 /** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
 export component MessageList<Item>(props: MessageListProps<Item>) {
-  const viewport = useTabViewport()
   let virtuosoHandle: VirtuosoHandle | null = null
+
+  const viewport = useTabViewport()
   const scrollCacheKey = props.scrollCacheKey
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
