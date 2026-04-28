@@ -20,10 +20,14 @@ import {
   sprintIndexPath,
   sprintStatePath,
 } from "./state"
+import {
+  clearTransientConflict,
+  readTransientConflict,
+  writeTransientConflict,
+} from "./transient-conflict"
 import type {
   SprintActiveStash,
   SprintBranchState,
-  SprintConflictState,
   SprintContext,
   SprintDiagnostic,
   SprintMutationReport,
@@ -929,41 +933,6 @@ async function writeConflictStateWhenSafe(
     `Stopped on conflict while running ${commandName} on ${branch}.`,
   )
   return conflictState
-}
-
-async function readTransientConflict(rootDir: string, sprint: string) {
-  try {
-    return JSON.parse(
-      await fs.readFile(await transientConflictPath(rootDir, sprint), "utf-8"),
-    ) as SprintConflictState
-  } catch (error) {
-    if (isMissingFileError(error) || error instanceof SyntaxError) {
-      return null
-    }
-    throw error
-  }
-}
-
-async function writeTransientConflict(
-  rootDir: string,
-  sprint: string,
-  conflict: SprintConflictState | null,
-) {
-  if (!conflict) {
-    return
-  }
-
-  const markerPath = await transientConflictPath(rootDir, sprint)
-  await fs.mkdir(path.dirname(markerPath), { recursive: true })
-  await fs.writeFile(markerPath, `${JSON.stringify(conflict, null, 2)}\n`)
-}
-
-async function clearTransientConflict(rootDir: string, sprint: string) {
-  await fs.rm(await transientConflictPath(rootDir, sprint), { force: true })
-}
-
-async function transientConflictPath(rootDir: string, sprint: string) {
-  return resolveGitPath(rootDir, `sprint-branch/${sprint}.conflict.json`)
 }
 
 function makeConflictState(

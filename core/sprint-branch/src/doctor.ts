@@ -3,11 +3,23 @@ import path from "node:path"
 
 import { branchExists, getGitOperations, getStashRefs } from "./git"
 import { buildStatusReport } from "./status"
-import type { SprintBranchState, SprintDiagnostic, SprintStatusReport } from "./types"
+import { readTransientConflict } from "./transient-conflict"
+import type {
+  SprintBranchState,
+  SprintConflictState,
+  SprintDiagnostic,
+  SprintStatusReport,
+} from "./types"
 
 const generatedBlockStart = "<!-- sprint-branch-state:start -->"
 const generatedBlockEnd = "<!-- sprint-branch-state:end -->"
 const taskStemPattern = /^\d{3}-[a-z0-9][a-z0-9-]*$/
+
+/** Extra recovery context that doctor needs beyond canonical sprint JSON. */
+type DoctorContext = {
+  transientConflict: SprintConflictState | null
+  gitOperations: Array<{ name: string; path: string }>
+}
 
 /** Builds the deeper consistency report for sprint-branch doctor. */
 export async function buildDoctorReport(input: { cwd: string; sprint?: string }) {
@@ -16,14 +28,27 @@ export async function buildDoctorReport(input: { cwd: string; sprint?: string })
     return { context, report, diagnostics }
   }
 
+  const doctorContext = {
+    transientConflict: await readTransientConflict(report.rootDir, report.state.sprint),
+    gitOperations: await getGitOperations(report.rootDir),
+  } satisfies DoctorContext
   const doctorDiagnostics = dedupeDiagnostics([
-    ...report.diagnostics,
-    ...(await runDoctorChecks(report)),
+    ...filterStatusDiagnostics(report, doctorContext),
+    ...(await runDoctorChecks(report, doctorContext)),
   ])
   const doctorReport: SprintStatusReport = {
     ...report,
     ok: !doctorDiagnostics.some((diagnostic) => diagnostic.severity === "error"),
     diagnostics: doctorDiagnostics,
+    blocked: {
+      ...report.blocked,
+      conflict: report.blocked.conflict || Boolean(doctorContext.transientConflict),
+      reasons: dedupeStrings([
+        ...report.blocked.reasons,
+        ...(doctorContext.transientConflict ? ["transition retry pending"] : []),
+      ]),
+      nextSafeCommand: resolveDoctorNextSafeCommand(report, doctorContext),
+    },
   }
 
   return {
@@ -54,20 +79,38 @@ export function formatDoctorReport(report: SprintStatusReport) {
   return lines.join("\n")
 }
 
-async function runDoctorChecks(report: SprintStatusReport) {
+async function runDoctorChecks(report: SprintStatusReport, context: DoctorContext) {
   const diagnostics: SprintDiagnostic[] = []
 
   diagnostics.push(...(await checkBaseBranches(report)))
-  diagnostics.push(...checkBranchDrift(report))
+  diagnostics.push(...checkBranchDrift(report, context))
   diagnostics.push(...checkTaskAssignments(report))
   diagnostics.push(...(await checkTaskQueue(report)))
   diagnostics.push(...(await checkStashes(report)))
-  diagnostics.push(...(await checkGitOperationState(report)))
+  diagnostics.push(...(await checkGitOperationState(report, context)))
   diagnostics.push(...(await checkGeneratedIndexBlock(report)))
   diagnostics.push(...(await checkHandoff(report)))
   diagnostics.push(...checkCurrentBranch(report))
 
   return diagnostics
+}
+
+function filterStatusDiagnostics(report: SprintStatusReport, context: DoctorContext) {
+  return report.diagnostics.filter((diagnostic) => {
+    if (isFinalizeRetryPending(context) && diagnostic.code === "review_not_based_on_approved") {
+      return false
+    }
+
+    if (
+      context.transientConflict &&
+      context.gitOperations.length > 0 &&
+      ["next_not_based_on_review", "review_not_based_on_approved"].includes(diagnostic.code)
+    ) {
+      return false
+    }
+
+    return true
+  })
 }
 
 async function checkBaseBranches(report: SprintStatusReport) {
@@ -101,14 +144,20 @@ async function checkBaseBranches(report: SprintStatusReport) {
   return diagnostics
 }
 
-function checkBranchDrift(report: SprintStatusReport) {
+function checkBranchDrift(report: SprintStatusReport, context: DoctorContext) {
   const diagnostics: SprintDiagnostic[] = []
   const { state } = report
   const approvedHead = report.branches.approved.head
   const reviewHead = report.branches.review.head
   const nextHead = report.branches.next.head
 
-  if (!state.tasks.review && approvedHead && reviewHead && approvedHead !== reviewHead) {
+  if (
+    !state.tasks.review &&
+    approvedHead &&
+    reviewHead &&
+    approvedHead !== reviewHead &&
+    !isFinalizeRetryPending(context)
+  ) {
     diagnostics.push({
       severity: "error",
       code: "review_branch_has_unrecorded_work",
@@ -294,11 +343,12 @@ async function checkStashes(report: SprintStatusReport) {
   return diagnostics
 }
 
-async function checkGitOperationState(report: SprintStatusReport) {
+async function checkGitOperationState(report: SprintStatusReport, context: DoctorContext) {
   const diagnostics: SprintDiagnostic[] = []
-  const operations = await getGitOperations(report.rootDir)
+  const operations = context.gitOperations
+  const conflict = report.state.conflict ?? context.transientConflict
 
-  if (operations.length > 0 && !report.state.conflict) {
+  if (operations.length > 0 && !conflict) {
     diagnostics.push({
       severity: "error",
       code: "git_operation_without_conflict_state",
@@ -306,26 +356,46 @@ async function checkGitOperationState(report: SprintStatusReport) {
       suggestion: "Resolve or abort the Git operation before running sprint-branch transitions.",
     })
   }
-  if (operations.length === 0 && report.state.conflict) {
+  if (operations.length > 0 && conflict) {
+    diagnostics.push({
+      severity: "error",
+      code: "git_operation_in_progress",
+      message: `Git has an in-progress ${operations.map((operation) => operation.name).join(", ")} operation for ${conflict.command ?? "an unknown sprint command"}.`,
+      suggestion: `Resolve or abort the Git operation, then run ${retryCommandForConflict(conflict)}.`,
+    })
+  }
+  if (
+    operations.length === 0 &&
+    report.state.conflict &&
+    !isResumeStashConflictPending(report, report.state.conflict)
+  ) {
     diagnostics.push({
       severity: "error",
       code: "conflict_state_without_git_operation",
       message: `Sprint state records a ${report.state.conflict.command ?? "unknown"} conflict, but Git has no matching operation in progress.`,
     })
   }
-  if (report.state.conflict?.branch) {
-    if (!(await branchExists(report.rootDir, report.state.conflict.branch))) {
+  if (operations.length === 0 && isTransitionRetryPending(report, context)) {
+    diagnostics.push({
+      severity: "error",
+      code: "transition_retry_pending",
+      message: `${conflict?.command ?? "A sprint command"} stopped after Git work completed but before sprint state was finalized.`,
+      suggestion: retryCommandForConflict(conflict),
+    })
+  }
+  if (conflict?.branch) {
+    if (!(await branchExists(report.rootDir, conflict.branch))) {
       diagnostics.push({
         severity: "error",
         code: "conflict_branch_missing",
-        message: `Conflict branch ${report.state.conflict.branch} no longer exists.`,
+        message: `Conflict branch ${conflict.branch} no longer exists.`,
       })
     }
-    if (report.currentBranch && report.currentBranch !== report.state.conflict.branch) {
+    if (report.currentBranch && report.currentBranch !== conflict.branch) {
       diagnostics.push({
         severity: "warning",
         code: "current_branch_not_conflict_branch",
-        message: `Conflict is recorded on ${report.state.conflict.branch}, but current branch is ${report.currentBranch}.`,
+        message: `Conflict is recorded on ${conflict.branch}, but current branch is ${report.currentBranch}.`,
       })
     }
   }
@@ -447,6 +517,56 @@ function checkCurrentBranch(report: SprintStatusReport) {
   return []
 }
 
+function resolveDoctorNextSafeCommand(report: SprintStatusReport, context: DoctorContext) {
+  const conflict = report.state.conflict ?? context.transientConflict
+  if (conflict) {
+    return retryCommandForConflict(conflict)
+  }
+
+  return report.blocked.nextSafeCommand
+}
+
+function retryCommandForConflict(conflict: SprintConflictState | null) {
+  if (
+    conflict?.command === "approve" ||
+    conflict?.command === "resume" ||
+    conflict?.command === "finalize"
+  ) {
+    return `sprint-branch ${conflict.command} --dry-run`
+  }
+
+  return "sprint-branch doctor"
+}
+
+function isTransitionRetryPending(report: SprintStatusReport, context: DoctorContext) {
+  return (
+    Boolean(context.transientConflict) ||
+    Boolean(report.state.conflict && isResumeStashConflictPending(report, report.state.conflict))
+  )
+}
+
+function isFinalizeRetryPending(context: DoctorContext) {
+  return context.transientConflict?.command === "finalize"
+}
+
+function isResumeStashConflictPending(
+  report: SprintStatusReport,
+  conflict: SprintConflictState | null,
+) {
+  return (
+    conflict?.command === "resume" &&
+    conflict.branch === report.state.branches.next &&
+    report.currentBranch === report.state.branches.next &&
+    !report.workingTree.clean &&
+    report.state.activeStashes.some(
+      (stash) =>
+        stash.reason === "feedback" &&
+        stash.sourceBranch === report.state.branches.next &&
+        stash.task === report.state.tasks.next,
+    )
+  )
+}
+
 function taskAssignments(state: SprintBranchState): Array<[string, string | null]> {
   return [
     ["tasks.review", state.tasks.review],
@@ -520,6 +640,10 @@ function dedupeDiagnostics(diagnostics: SprintDiagnostic[]) {
     unique.push(diagnostic)
   }
   return unique
+}
+
+function dedupeStrings(values: string[]) {
+  return [...new Set(values)]
 }
 
 async function pathExists(pathname: string) {

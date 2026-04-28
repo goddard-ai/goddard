@@ -136,7 +136,7 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
       severity: "error",
       code: "next_not_based_on_review",
       message: `${parsed.state.branches.next} does not descend from ${parsed.state.branches.review}.`,
-      suggestion: "Run sprint-branch resume --dry-run after mutating commands are implemented.",
+      suggestion: "Run sprint-branch resume --dry-run before continuing work-ahead changes.",
     })
   }
 

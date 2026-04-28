@@ -137,6 +137,108 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("git_operation_without_conflict_state")
   })
 
+  // Transactional commands keep tracked sprint files untouched while Git owns a
+  // rebase. Doctor should recognize the Git-private marker as known recovery
+  // state instead of claiming the sprint JSON forgot about the operation.
+  test("recognizes transient conflict metadata during an active rebase", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await commitAll(repo, "add review conflict")
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await commitAll(repo, "add next conflict")
+
+    expect((await runCli(repo, ["approve", "--json"])).exitCode).toBe(1)
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+    const codes = diagnosticCodes(doctor)
+
+    expect(result.exitCode).toBe(1)
+    expect(codes).toContain("git_operation_in_progress")
+    expect(codes).not.toContain("git_operation_without_conflict_state")
+    expect(doctor.nextSafeCommand).toBe("sprint-branch approve --dry-run")
+  })
+
+  // After the human or agent finishes Git's final rebase, review is expected to
+  // differ from approved until finalize is rerun. Doctor should point at the
+  // pending retry instead of reporting anonymous review work.
+  test("recognizes finalize retry state after final rebase is resolved", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: ["010-task-name"],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await commitAll(repo, "add review conflict")
+    await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
+    await git(repo, ["checkout", "main"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "main\n")
+    await commitAll(repo, "add main conflict")
+    expect((await runCli(repo, ["finalize", "--json"])).exitCode).toBe(1)
+    await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
+    await git(repo, ["add", "conflict.txt"])
+    await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+    const codes = diagnosticCodes(doctor)
+
+    expect(result.exitCode).toBe(1)
+    expect(codes).toContain("transition_retry_pending")
+    expect(codes).not.toContain("review_not_based_on_approved")
+    expect(codes).not.toContain("review_branch_has_unrecorded_work")
+    expect(doctor.nextSafeCommand).toBe("sprint-branch finalize --dry-run")
+  })
+
+  // A stash-apply conflict does not leave Git with a rebase or merge operation
+  // to continue. The recorded resume conflict is still valid while the worktree
+  // carries the applied stash resolution and the stash remains recorded.
+  test("recognizes resume stash-apply conflicts without a git operation", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "work.txt"), "base\n")
+    await commitAll(repo, "add shared work file")
+    await git(repo, ["checkout", "sprint/example/next"])
+    await git(repo, ["rebase", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "work.txt"), "stashed\n")
+    expect((await runCli(repo, ["feedback"])).exitCode).toBe(0)
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "work.txt"), "review\n")
+    await commitAll(repo, "change work during feedback")
+    expect((await runCli(repo, ["resume", "--json"])).exitCode).toBe(1)
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+    const codes = diagnosticCodes(doctor)
+
+    expect(result.exitCode).toBe(1)
+    expect(codes).toContain("transition_retry_pending")
+    expect(codes).not.toContain("conflict_state_without_git_operation")
+    expect(doctor.nextSafeCommand).toBe("sprint-branch resume --dry-run")
+  })
+
   // The JSON file is canonical, but the index is what humans and future agents read first.
   // This warning catches stale generated summaries without treating markdown as source of truth.
   test("reports generated index block disagreements with JSON state", async () => {
@@ -238,6 +340,7 @@ describe("sprint-branch doctor", () => {
 
 type DoctorOutput = {
   ok: boolean
+  nextSafeCommand?: string
   diagnostics: Array<{ code: string }>
 }
 
