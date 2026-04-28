@@ -186,6 +186,13 @@
         "@tauri-apps/api",
       ],
     },
+    "core/review-sync": {
+      "name": "@goddard-ai/review-sync",
+      "version": "0.1.0",
+      "bin": {
+        "review-sync": "./dist/cli.mjs",
+      },
+    },
     "core/schema": {
       "name": "@goddard-ai/schema",
       "version": "0.1.0",
@@ -526,6 +533,8 @@
     "@goddard-ai/ipc": ["@goddard-ai/ipc@workspace:core/ipc"],
 
     "@goddard-ai/paths": ["@goddard-ai/paths@workspace:core/paths"],
+
+    "@goddard-ai/review-sync": ["@goddard-ai/review-sync@workspace:core/review-sync"],
 
     "@goddard-ai/schema": ["@goddard-ai/schema@workspace:core/schema"],
 
