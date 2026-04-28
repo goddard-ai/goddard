@@ -41,6 +41,8 @@ describe("sprint-branch resume", () => {
     expect((await readState(repo, "example")).activeStashes).toEqual([])
   })
 
+  // Resume is the command most likely to hit a real Git conflict after review feedback.
+  // Persisting conflict state lets the next agent know which sprint transition stopped midway.
   test("records conflict state when rebase stops", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -69,6 +71,8 @@ describe("sprint-branch resume", () => {
     expect(state.conflict?.branch).toBe("sprint/example/next")
   })
 
+  // Resume may rebase and apply a saved stash, both of which assume a clean target.
+  // Refusing early prevents Git from mixing old local edits with resumed work-ahead changes.
   test("refuses to resume with a dirty worktree", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -92,6 +96,8 @@ describe("sprint-branch resume", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // A recorded next task without the next branch means the canonical state and Git refs diverged.
+  // Resume must stop before it accidentally continues on review or recreates history incorrectly.
   test("refuses when a recorded next task has no next branch", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -110,6 +116,8 @@ describe("sprint-branch resume", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Resume is also the safe "return me to work" command when no work-ahead exists.
+  // In that state the only valid continuation point is the review branch.
   test("checks out review when no next task is recorded", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",

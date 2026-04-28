@@ -27,6 +27,8 @@ describe("sprint-branch diff", () => {
     expect(result.stdout.trim()).toBe("git diff sprint/example/approved...sprint/example/review")
   })
 
+  // Diff can either print the safe command or execute it for machine-readable inspection.
+  // This verifies execution still compares review against approved, not the current branch.
   test("runs a name-only review diff against the approved branch", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -44,6 +46,8 @@ describe("sprint-branch diff", () => {
     expect(result.stdout.trim()).toBe("feature.txt")
   })
 
+  // The three-dot review diff only has the intended meaning when review descends from approved.
+  // If that ancestry is broken, showing a diff could hide that branch recovery is needed first.
   test("refuses when review no longer descends from approved", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",

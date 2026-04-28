@@ -32,6 +32,8 @@ describe("sprint-branch finalize", () => {
     expect((await readState(repo, "example")).baseBranch).toBe("main")
   })
 
+  // Finalize prepares the one branch a human will merge.
+  // Any recorded review, next, or finished-unreviewed task means that branch is not final yet.
   test("refuses to finalize while unreviewed work is recorded", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -50,6 +52,8 @@ describe("sprint-branch finalize", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Even if state says there is no next task, the next branch can still contain stray commits.
+  // Finalize refuses so unreviewed work-ahead content cannot be left behind or silently ignored.
   test("refuses when an unrecorded next branch still differs from review", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -73,6 +77,8 @@ describe("sprint-branch finalize", () => {
     expect(await currentBranch(repo)).toBe("sprint/example/next")
   })
 
+  // The final rebase is intentionally the last Git rewrite before human merge.
+  // If it conflicts, handoff state must point future recovery at the review branch.
   test("records conflict state when final rebase stops", async () => {
     const repo = await createSprintRepo("example", {
       review: null,

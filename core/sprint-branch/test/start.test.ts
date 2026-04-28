@@ -46,6 +46,8 @@ describe("sprint-branch start", () => {
     expect((await readState(repo, "example")).tasks.next).toBe("020-task-name")
   })
 
+  // Starting a task may reset and check out a sprint branch, so planning must be side-effect free.
+  // This catches accidental state writes from the command path used for agent preflight checks.
   test("dry-run leaves review unassigned and branches unmoved", async () => {
     const repo = await createSprintRepo("example", {
       review: null,
@@ -66,6 +68,8 @@ describe("sprint-branch start", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Sprint branches encode task order, not just task identity.
+  // Skipping the oldest task would make review stop representing the next human boundary.
   test("refuses to skip the next planned task", async () => {
     const repo = await createSprintRepo("example", {
       review: null,
@@ -84,6 +88,8 @@ describe("sprint-branch start", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // The workflow deliberately has only two rolling work slots: review and next.
+  // A third active task would require the agent to invent branch roles the CLI cannot validate.
   test("refuses a third active task when review and next are occupied", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -109,6 +115,8 @@ describe("sprint-branch start", () => {
     })
   })
 
+  // Branch resets and checkouts are only safe when no unrelated local edits can be stranded.
+  // This keeps start from turning a routine transition into manual recovery.
   test("refuses to move sprint branches with a dirty worktree", async () => {
     const repo = await createSprintRepo("example", {
       review: null,

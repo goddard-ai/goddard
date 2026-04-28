@@ -31,6 +31,8 @@ describe("sprint-branch init", () => {
     expect((await readState(repo, "example")).tasks.review).toBeNull()
   })
 
+  // Dry-run is the agent's chance to inspect branch-moving commands before they happen.
+  // The important contract is that even state-file creation is deferred until real execution.
   test("dry-run reports scaffold operations without creating branches or state", async () => {
     const repo = await createBaseRepo("example")
 
@@ -57,6 +59,8 @@ describe("sprint-branch init", () => {
     expect(await pathExists(path.join(repo, "sprints", "example", sprintStateFileName))).toBe(false)
   })
 
+  // A bare sprint/<name> branch collides with the namespace used for role branches.
+  // Refusing it prevents Git ref layout problems before any scaffold branch is created.
   test("refuses an existing bare sprint namespace branch", async () => {
     const repo = await createBaseRepo("example")
     await git(repo, ["branch", "sprint/example", "main"])

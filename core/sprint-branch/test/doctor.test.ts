@@ -15,6 +15,8 @@ import {
 describe("sprint-branch doctor", () => {
   afterEach(cleanupTestRepos)
 
+  // A next task in JSON means there should be resumable work on the next branch.
+  // Doctor should catch the missing ref before resume has to guess what happened.
   test("reports missing next branch when next has a recorded task", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -34,6 +36,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("next_branch_missing")
   })
 
+  // Review commits without a recorded task break the one-task-per-review invariant.
+  // Doctor surfaces that hidden work so it is not approved or finalized anonymously.
   test("reports unrecorded review branch work when no review task is assigned", async () => {
     const repo = await createSprintRepo("example", {
       review: null,
@@ -52,6 +56,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("review_branch_has_unrecorded_work")
   })
 
+  // Task role bugs are subtle because the branches may still exist and be well-formed.
+  // Doctor checks the logical queue so one task cannot occupy multiple workflow states.
   test("reports duplicate task assignments and task order drift", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -73,6 +79,8 @@ describe("sprint-branch doctor", () => {
     expect(codes).toContain("review_task_out_of_order")
   })
 
+  // Sprint stashes are only safe to reapply when JSON records their branch and task.
+  // Unrecorded matching stashes are recovery clues, not inputs resume should trust blindly.
   test("reports unrecorded sprint-branch stashes", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -100,6 +108,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("unrecorded_sprint_stash")
   })
 
+  // Git can be left mid-rebase even if the sprint state was never updated.
+  // Doctor must detect the repository-level operation so agents do not start a new transition.
   test("reports git operations that are not reflected in sprint state", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -127,6 +137,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("git_operation_without_conflict_state")
   })
 
+  // The JSON file is canonical, but the index is what humans and future agents read first.
+  // This warning catches stale generated summaries without treating markdown as source of truth.
   test("reports generated index block disagreements with JSON state", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -160,6 +172,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("index_generated_block_value_mismatch")
   })
 
+  // Conflict metadata should match a real paused Git operation.
+  // Stale conflict state would keep all mutating commands blocked after recovery is complete.
   test("reports stale conflict state when Git has no operation in progress", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -184,6 +198,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("conflict_state_without_git_operation")
   })
 
+  // Finalize depends on the recorded base branch still existing.
+  // Doctor checks it early so recovery can choose an explicit base before rebasing review.
   test("reports a missing recorded base branch", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -201,6 +217,8 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("base_branch_missing")
   })
 
+  // Branches under sprint/<name>/ look authoritative even when the CLI did not create them.
+  // Flagging the current unrecorded branch prevents agents from doing workflow work there.
   test("reports current sprint namespace branches not recorded in state", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",

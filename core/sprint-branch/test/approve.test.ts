@@ -41,6 +41,8 @@ describe("sprint-branch approve", () => {
     )
   })
 
+  // Approval rolls the review window forward when work-ahead exists.
+  // The next task becomes the new review task so humans still see one review branch.
   test("promotes next work onto review", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -73,6 +75,8 @@ describe("sprint-branch approve", () => {
     )
   })
 
+  // Approval is the point where unreviewed work enters the protected approved branch.
+  // The verification flag makes the agent explicitly acknowledge that normal checks already ran.
   test("refuses approval without verification", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -94,6 +98,8 @@ describe("sprint-branch approve", () => {
     expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
   })
 
+  // Agents should be able to preview approval mechanics before they have completed verification.
+  // The preview must not move approved or rewrite the task mapping.
   test("dry-run approval does not require verification or move branches", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -117,6 +123,8 @@ describe("sprint-branch approve", () => {
     expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
   })
 
+  // A fast-forward failure happens before review work is actually approved.
+  // The state must remain pre-approval while still recording where recovery needs to begin.
   test("records conflict state when fast-forward approval fails", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",

@@ -43,6 +43,8 @@ describe("sprint-branch feedback", () => {
     expect(await stashList(repo)).toContain("sprint-branch:example:020-task-name:feedback")
   })
 
+  // Feedback is allowed to interrupt work-ahead, not arbitrary dirty work.
+  // Stashing from review or main could hide changes that belong in the review response itself.
   test("refuses dirty work outside the recorded next branch", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -68,6 +70,8 @@ describe("sprint-branch feedback", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Git's default stash does not include untracked files.
+  // The explicit flag makes the agent acknowledge that scratch files are part of the interruption.
   test("refuses untracked next work without include-untracked", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -93,6 +97,8 @@ describe("sprint-branch feedback", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Tracked edits are safe to stash with Git's default behavior.
+  // This prevents the untracked-file guard from becoming a blanket requirement for all feedback.
   test("stashes tracked next work without include-untracked", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -123,6 +129,8 @@ describe("sprint-branch feedback", () => {
     expect(await stashList(repo)).toContain("sprint-branch:example:020-task-name:feedback")
   })
 
+  // A next-branch stash is only resumable if it is tied to the recorded next task.
+  // Without that mapping, resume cannot verify that the stash belongs to this sprint transition.
   test("refuses next branch feedback when no next task is recorded", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -148,6 +156,8 @@ describe("sprint-branch feedback", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Feedback performs two risky operations: stashing and switching back to review.
+  // Dry-run must expose both operations without creating a stash or changing branch state.
   test("dry-run reports the stash and checkout without mutating state", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -178,6 +188,8 @@ describe("sprint-branch feedback", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
+  // Feedback may be requested even when the next branch has no local edits.
+  // The command should still move the agent to review without inventing a stash record.
   test("checks out review without stashing when next is clean", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -200,6 +212,8 @@ describe("sprint-branch feedback", () => {
     expect(state.activeStashes).toEqual([])
   })
 
+  // Multiple interruptions can be active if a prior stash was not resumed yet.
+  // Appending preserves recovery metadata instead of replacing the older stash reference.
   test("appends new feedback stashes to existing active stash records", async () => {
     const repo = await createSprintRepo(
       "example",

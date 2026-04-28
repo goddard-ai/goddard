@@ -59,6 +59,8 @@ describe("sprint-branch status", () => {
     expect(status.inferredFrom).toContain("current branch")
   })
 
+  // Approved is supposed to contain only work that humans have already accepted.
+  // Dirty edits there are especially dangerous because they bypass review branch boundaries.
   test("reports dirty work on the approved branch as unsafe", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
@@ -82,6 +84,8 @@ describe("sprint-branch status", () => {
     expect(diagnosticCodes(status)).toContain("dirty_approved_worktree")
   })
 
+  // Branch state is canonical, but task files are the human-readable recovery surface.
+  // Missing files should not block read-only status, but they must be visible to the agent.
   test("warns when a recorded task file is missing", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
