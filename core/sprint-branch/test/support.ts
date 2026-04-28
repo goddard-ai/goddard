@@ -1,0 +1,175 @@
+import * as fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+
+import { getExpectedBranches, sprintStateFileName, type SprintBranchState } from "../src"
+
+const cliPath = path.join(import.meta.dir, "..", "src", "main.ts")
+const tempRepos: string[] = []
+
+export type SprintTestTasks = {
+  review: string | null
+  next: string | null
+  approved: string[]
+  finishedUnreviewed: string[]
+}
+
+export async function cleanupTestRepos() {
+  await Promise.all(
+    tempRepos.splice(0).map((repo) => fs.rm(repo, { recursive: true, force: true })),
+  )
+}
+
+export async function createBaseRepo(sprint: string) {
+  const repo = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-branch-"))
+  tempRepos.push(repo)
+
+  await git(repo, ["init"])
+  await git(repo, ["checkout", "-b", "main"])
+  await fs.writeFile(path.join(repo, "README.md"), "# Test\n")
+  await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
+  await fs.writeFile(path.join(repo, "sprints", sprint, "010-task-name.md"), "# Task 010\n")
+  await fs.writeFile(path.join(repo, "sprints", sprint, "020-task-name.md"), "# Task 020\n")
+  await commitAll(repo, "init")
+
+  return repo
+}
+
+export async function createSprintRepo(
+  sprint: string,
+  tasks: SprintTestTasks,
+  options: { createNextBranch?: boolean } = {},
+) {
+  const repo = await createBaseRepo(sprint)
+
+  await writeSprintState(repo, sprint, tasks)
+  await writeIndex(repo, sprint, [tasks.review, tasks.next, ...tasks.approved].filter(Boolean))
+  await commitAll(repo, "add sprint state")
+  await git(repo, ["branch", `sprint/${sprint}/approved`])
+  await git(repo, ["branch", `sprint/${sprint}/review`])
+  if (options.createNextBranch) {
+    await git(repo, ["branch", `sprint/${sprint}/next`, `sprint/${sprint}/review`])
+  }
+
+  return repo
+}
+
+export async function readState(repo: string, sprint: string) {
+  return JSON.parse(
+    await fs.readFile(path.join(repo, "sprints", sprint, sprintStateFileName), "utf-8"),
+  ) as SprintBranchState
+}
+
+export async function runCli(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn([process.execPath, cliPath, ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+    },
+  })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
+  ])
+
+  return { stdout, stderr, exitCode }
+}
+
+export async function git(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
+  ])
+
+  if (exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed\n${stdout}\n${stderr}`)
+  }
+
+  return stdout
+}
+
+export async function commitAll(repo: string, message: string) {
+  await git(repo, ["add", "."])
+  await git(repo, [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "--allow-empty",
+    "-m",
+    message,
+  ])
+}
+
+export async function branchExists(repo: string, branch: string) {
+  const subprocess = Bun.spawn(
+    ["git", "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`],
+    {
+      cwd: repo,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  return (await subprocess.exited) === 0
+}
+
+export async function currentBranch(repo: string) {
+  return (await git(repo, ["branch", "--show-current"])).trim()
+}
+
+export async function branchHead(repo: string, branch: string) {
+  return (await git(repo, ["rev-parse", branch])).trim()
+}
+
+export async function stashList(repo: string) {
+  return git(repo, ["stash", "list"])
+}
+
+async function writeSprintState(repo: string, sprint: string, tasks: SprintTestTasks) {
+  const branches = getExpectedBranches(sprint)
+  await fs.writeFile(
+    path.join(repo, "sprints", sprint, sprintStateFileName),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        sprint,
+        baseBranch: "main",
+        branches,
+        tasks,
+        activeStashes: [],
+        lock: null,
+        conflict: null,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+}
+
+async function writeIndex(repo: string, sprint: string, tasks: Array<string | null>) {
+  const branches = getExpectedBranches(sprint)
+  await fs.writeFile(
+    path.join(repo, "sprints", sprint, "000-index.md"),
+    [
+      `# Sprint ${sprint}`,
+      "",
+      `Review branch: ${branches.review}`,
+      `Approved branch: ${branches.approved}`,
+      `Next branch: ${branches.next}`,
+      "",
+      ...tasks.filter(Boolean).map((task) => `Task: ${task}`),
+      "",
+    ].join("\n"),
+  )
+}
