@@ -24,6 +24,7 @@ The desktop app is the primary human-facing interface to the Goddard runtime. It
 
 ## Core Capabilities
 - **Session Steering**: Initiate, monitor, and provide real-time feedback to AI agents executing tasks.
+- **Human Attention Inbox**: Triage daemon-managed sessions and pull requests that currently need review, response, or explicit completion.
 - **Pull Request Review**: Triage, review, and correlate AI-generated pull requests directly with their originating sessions.
 - **Specification Management**: Browse and refine repository specifications to align human intent with AI execution.
 - **Task & Roadmap Prioritization**: View and manage the queue of upcoming work and long-term proposals.
@@ -32,6 +33,7 @@ The desktop app is the primary human-facing interface to the Goddard runtime. It
 ## Behavior Model
 - **Centralized Context**: Provides a single pane of glass for all repository-specific AI operations.
 - **Real-Time Visibility**: Exposes real-time state of active sessions, tasks, and proposals.
+- **Attention Triage**: Surfaces daemon-owned inbox state without creating a separate app-owned source of truth.
 - **Interactive Steering**: Allows humans to seamlessly monitor, review, and adjust AI execution without dropping context.
 
 ## State Machines
@@ -43,6 +45,7 @@ All screens consume normalized, real-time domain records with stable identities:
 - Repository
 - Session
 - Pull request
+- Inbox item
 - Message/activity event
 - Task
 - Roadmap proposal
