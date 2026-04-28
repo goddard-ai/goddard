@@ -183,6 +183,39 @@ describe("sprint-branch doctor", () => {
     expect(result.exitCode).toBe(1)
     expect(diagnosticCodes(doctor)).toContain("conflict_state_without_git_operation")
   })
+
+  test("reports a missing recorded base branch", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await git(repo, ["branch", "-D", "main"])
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(doctor)).toContain("base_branch_missing")
+  })
+
+  test("reports current sprint namespace branches not recorded in state", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "-b", "sprint/example/experimental"])
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(doctor)).toContain("current_unrecorded_sprint_branch")
+  })
 })
 
 type DoctorOutput = {

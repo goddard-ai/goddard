@@ -14,6 +14,21 @@ export type SprintTestTasks = {
   finishedUnreviewed: string[]
 }
 
+export type DiagnosticOutput = {
+  diagnostics: Array<{ code: string }>
+}
+
+export type MutationOutput = DiagnosticOutput & {
+  ok: boolean
+  dryRun: boolean
+  executed: boolean
+  gitOperations: string[]
+}
+
+export function diagnosticCodes(output: DiagnosticOutput) {
+  return output.diagnostics.map((diagnostic) => diagnostic.code)
+}
+
 export async function cleanupTestRepos() {
   await Promise.all(
     tempRepos.splice(0).map((repo) => fs.rm(repo, { recursive: true, force: true })),

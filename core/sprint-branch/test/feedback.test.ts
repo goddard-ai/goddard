@@ -7,11 +7,13 @@ import {
   commitAll,
   createSprintRepo,
   currentBranch,
+  diagnosticCodes,
   git,
   readState,
   runCli,
   stashList,
   writeState,
+  type MutationOutput,
 } from "./support"
 
 describe("sprint-branch feedback", () => {
@@ -243,14 +245,3 @@ describe("sprint-branch feedback", () => {
     })
   })
 })
-
-type MutationOutput = {
-  dryRun: boolean
-  executed: boolean
-  gitOperations: string[]
-  diagnostics: Array<{ code: string }>
-}
-
-function diagnosticCodes(output: MutationOutput) {
-  return output.diagnostics.map((diagnostic) => diagnostic.code)
-}

@@ -7,9 +7,11 @@ import {
   commitAll,
   createSprintRepo,
   currentBranch,
+  diagnosticCodes,
   git,
   readState,
   runCli,
+  type MutationOutput,
 } from "./support"
 
 describe("sprint-branch resume", () => {
@@ -65,5 +67,61 @@ describe("sprint-branch resume", () => {
     expect(report.ok).toBe(false)
     expect(state.conflict?.command).toBe("resume")
     expect(state.conflict?.branch).toBe("sprint/example/next")
+  })
+
+  test("refuses to resume with a dirty worktree", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty\n")
+    const beforeState = await readState(repo, "example")
+
+    const result = await runCli(repo, ["resume", "--json"])
+    const resume = JSON.parse(result.stdout) as MutationOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(resume)).toContain("dirty_worktree")
+    expect(await currentBranch(repo)).toBe("main")
+    expect(await readState(repo, "example")).toEqual(beforeState)
+  })
+
+  test("refuses when a recorded next task has no next branch", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: "020-task-name",
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    const beforeState = await readState(repo, "example")
+
+    const result = await runCli(repo, ["resume", "--json"])
+    const resume = JSON.parse(result.stdout) as MutationOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(resume)).toContain("next_branch_missing")
+    expect(await currentBranch(repo)).toBe("main")
+    expect(await readState(repo, "example")).toEqual(beforeState)
+  })
+
+  test("checks out review when no next task is recorded", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+
+    const result = await runCli(repo, ["resume", "--json"])
+
+    expect(result.exitCode).toBe(0)
+    expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect((await readState(repo, "example")).activeStashes).toEqual([])
   })
 })

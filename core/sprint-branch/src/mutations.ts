@@ -512,15 +512,21 @@ export async function runApprove(input: MutationInput & { verified: boolean; pol
   }
 
   return withSprintLock(context, state, "approve", async () => {
+    let conflictBranch = state.branches.approved
+    let stateForConflict = state
     try {
       await runGit(context.rootDir, ["checkout", state.branches.approved])
       await runGit(context.rootDir, ["merge", "--ff-only", state.branches.review])
+      stateForConflict = nextState
       if (state.tasks.next) {
+        conflictBranch = state.branches.next
         await runGit(context.rootDir, ["checkout", state.branches.next])
         await runGit(context.rootDir, ["rebase", state.branches.approved])
+        conflictBranch = state.branches.review
         await moveRecordedBranch(context.rootDir, state, state.branches.review, state.branches.next)
         await runGit(context.rootDir, ["checkout", state.branches.review])
       } else {
+        conflictBranch = state.branches.review
         await moveRecordedBranch(
           context.rootDir,
           state,
@@ -536,9 +542,9 @@ export async function runApprove(input: MutationInput & { verified: boolean; pol
       if (error instanceof GitCommandError) {
         const conflictState = await writeConflictState(
           context.rootDir,
-          nextState,
+          stateForConflict,
           "approve",
-          state.tasks.next ? state.branches.next : state.branches.approved,
+          conflictBranch,
           error,
         )
         return conflictReport(plan, conflictState, error)

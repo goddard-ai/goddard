@@ -8,9 +8,11 @@ import {
   commitAll,
   createSprintRepo,
   currentBranch,
+  diagnosticCodes,
   git,
   readState,
   runCli,
+  type MutationOutput,
 } from "./support"
 
 describe("sprint-branch approve", () => {
@@ -69,5 +71,75 @@ describe("sprint-branch approve", () => {
     expect(await branchHead(repo, "sprint/example/review")).toBe(
       await branchHead(repo, "sprint/example/next"),
     )
+  })
+
+  test("refuses approval without verification", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
+    await commitAll(repo, "add reviewed work")
+    const approvedHead = await branchHead(repo, "sprint/example/approved")
+
+    const result = await runCli(repo, ["approve", "--json"])
+    const approve = JSON.parse(result.stdout) as MutationOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(approve)).toContain("approval_not_verified")
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedHead)
+    expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
+  })
+
+  test("dry-run approval does not require verification or move branches", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
+    await commitAll(repo, "add reviewed work")
+    const approvedHead = await branchHead(repo, "sprint/example/approved")
+
+    const result = await runCli(repo, ["approve", "--dry-run", "--json"])
+    const approve = JSON.parse(result.stdout) as MutationOutput
+
+    expect(result.exitCode).toBe(0)
+    expect(approve.dryRun).toBe(true)
+    expect(approve.executed).toBe(false)
+    expect(approve.gitOperations).toContain("git merge --ff-only sprint/example/review")
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedHead)
+    expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
+  })
+
+  test("records conflict state when fast-forward approval fails", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/approved"])
+    await fs.writeFile(path.join(repo, "approved.txt"), "approved-only\n")
+    await commitAll(repo, "diverge approved")
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "review.txt"), "reviewed\n")
+    await commitAll(repo, "add reviewed work")
+
+    const result = await runCli(repo, ["approve", "--verified", "--json"])
+    const approve = JSON.parse(result.stdout) as MutationOutput
+    const state = await readState(repo, "example")
+
+    expect(result.exitCode).toBe(1)
+    expect(approve.ok).toBe(false)
+    expect(state.conflict?.command).toBe("approve")
+    expect(state.conflict?.branch).toBe("sprint/example/approved")
+    expect(state.tasks.review).toBe("010-task-name")
+    expect(state.tasks.approved).toEqual([])
   })
 })
