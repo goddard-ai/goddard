@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "preact/hooks"
+import { useEffect, useMemo, useRef } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
 
 import { useTabViewport } from "~/tab-viewport.tsrx"
@@ -48,7 +48,7 @@ function getInitialTopMostItemIndex<Item>(
 
 /** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
 export component MessageList<Item>(props: MessageListProps<Item>) {
-  let virtuosoHandle: VirtuosoHandle | null = null
+  const virtuosoHandleRef = useRef<VirtuosoHandle | null>(null)
 
   const viewport = useTabViewport()
   const scrollCacheKey = props.scrollCacheKey
@@ -68,7 +68,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
         return
       }
 
-      virtuosoHandle?.getState((state) => {
+      virtuosoHandleRef.current?.getState((state) => {
         messageListStateCache.set(scrollCacheKey, state)
       })
     }
@@ -97,7 +97,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   }
 
   <Virtuoso
-    {ref virtuosoHandle}
+    {ref virtuosoHandleRef}
     alignToBottom={effectiveInitialScroll === "bottom"}
     computeItemKey={(index, item) => props.getItemKey?.(item, index) ?? index}
     customScrollParent={viewport.viewportRef.current}

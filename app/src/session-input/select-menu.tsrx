@@ -37,9 +37,7 @@ export type SessionInputSelectProps = {
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
 export component SessionInputSelect(props: SessionInputSelectProps) {
-  let triggerElement: HTMLButtonElement | null = null
-
-  // These reach into a subcomponent so they need to be refs.
+  const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
   const menuContainerRef = useRef<HTMLDivElement>(null)
 
@@ -53,7 +51,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   <Popover.Root
     autoFocus={true}
     closeOnInteractOutside={true}
-    finalFocusEl={() => triggerElement}
+    finalFocusEl={() => triggerElementRef.current}
     immediate={true}
     initialFocusEl={() => isFilterable ? filterInputRef.current : menuContainerRef.current}
     lazyMount={true}
@@ -61,7 +59,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
     open={isMenuOpen}
     positioning={{
       fitViewport: true,
-      getAnchorElement: () => triggerElement,
+      getAnchorElement: () => triggerElementRef.current,
       gutter: 8,
       placement: "bottom-start",
       sameWidth: true,
@@ -89,7 +87,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         <span class={styles.tooltipTrigger}>
           <Popover.Trigger asChild>
             <button
-              {ref triggerElement}
+              {ref triggerElementRef}
               aria-expanded={isMenuOpen}
               aria-haspopup="menu"
               aria-label={ariaLabel}

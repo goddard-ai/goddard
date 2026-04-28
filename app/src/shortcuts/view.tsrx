@@ -38,10 +38,9 @@ type CaptureState = {
 }
 
 component KeyboardShortcutsView(props: { class?: string }) {
-  let searchInputElement: HTMLInputElement | undefined
-
   const shortcutRegistry = useShortcutRegistry()
   const persistenceErrors = shortcutPersistenceErrors.value
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const searchRecordingSessionRef = useRef<RecordingSession | null>(null)
   const [searchText, setSearchText] = useState("")
   const [isRecordingSearchEnabled, setIsRecordingSearchEnabled] = useState(false)
@@ -93,6 +92,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
     }
 
     let isDisposed = false
+    const searchInputElement = searchInputRef.current
     searchInputElement?.focus()
 
     function beginRecording() {
@@ -234,7 +234,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
       <span class={styles.srOnly}>{"Search shortcuts"}</span>
       <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
       <input
-        {ref searchInputElement}
+        {ref searchInputRef}
         class={styles.searchInput}
         placeholder={isRecordingSearchEnabled
           ? "Type a key binding"
@@ -266,7 +266,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
             return
           }
 
-          searchInputElement?.focus()
+          searchInputRef.current?.focus()
           setIsRecordingSearchEnabled(true)
         }}
       >
@@ -404,7 +404,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                               stopSearchRecording()
                               setIsRecordingSearchEnabled(false)
                               setSearchText(formatShortcutSearch(row.shortcut))
-                              searchInputElement?.focus()
+                              searchInputRef.current?.focus()
                             }}
                           >
                             {"Show commands with same shortcut"}

@@ -48,9 +48,8 @@ export component SessionInput(props: {
   helperText?: string;
   submitLabel?: string;
 }) {
-  let formElement: HTMLFormElement | undefined
-  let menuElement: HTMLDivElement | null = null
-
+  const formElementRef = useRef<HTMLFormElement>(null)
+  const menuElementRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
   const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
   const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>([])
@@ -296,7 +295,7 @@ export component SessionInput(props: {
       return
     }
 
-    if (menuElement?.contains(target) || formElement?.contains(target)) {
+    if (menuElementRef.current?.contains(target) || formElementRef.current?.contains(target)) {
       return
     }
 
@@ -312,7 +311,7 @@ export component SessionInput(props: {
   })
 
   <form
-    {ref formElement}
+    {ref formElementRef}
     class={classes.form}
     onSubmit={(event) => {
       event.preventDefault()
@@ -346,7 +345,7 @@ export component SessionInput(props: {
       {isLoadingSuggestions}
       {menu}
       menuRef={(element) => {
-        menuElement = element
+        menuElementRef.current = element
       }}
       {selectedIndex}
       {suggestions}

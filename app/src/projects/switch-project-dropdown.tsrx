@@ -1,7 +1,7 @@
 import * as fuzzysort from "fuzzysort2"
 import { concat } from "radashi"
 import { Search } from "lucide-react"
-import { useEffect, useMemo, useState } from "preact/hooks"
+import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -129,7 +129,7 @@ export component SwitchProjectDropdown() {
     return
   }
 
-  let inputElement: HTMLInputElement | undefined
+  const inputElementRef = useRef<HTMLInputElement>(null)
 
   const highlightedItemIndex =
     items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
@@ -173,6 +173,8 @@ export component SwitchProjectDropdown() {
 
   useEffect(() => {
     queueMicrotask(() => {
+      const inputElement = inputElementRef.current
+
       if (!inputElement) {
         return
       }
@@ -188,7 +190,7 @@ export component SwitchProjectDropdown() {
       <span class={styles.srOnly}>{"Search projects"}</span>
       <Search aria-hidden={true} size={16} strokeWidth={2.1} />
       <input
-        {ref inputElement}
+        {ref inputElementRef}
         class={styles.searchInput}
         placeholder="Search projects"
         value={search}
