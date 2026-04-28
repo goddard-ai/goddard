@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { command, flag, option, optional, run, string, subcommands } from "cmd-ts"
 
+import { buildDoctorReport, formatDoctorReport } from "./doctor"
 import { GitCommandError, runGit } from "./git"
 import {
   formatMutationReport,
@@ -13,7 +14,7 @@ import {
   SprintMutationError,
 } from "./mutations"
 import { SprintInferenceError } from "./state"
-import { buildStatusReport, formatDoctorReport, formatStatusReport } from "./status"
+import { buildStatusReport, formatStatusReport } from "./status"
 import type { SprintMutationReport, SprintStatusReport } from "./types"
 
 function sprintOption() {
@@ -140,7 +141,7 @@ export async function main(argv: string[]) {
         description: "Detect and explain inconsistent sprint branch state",
         args: commonReadArgs,
         handler: async ({ sprint, json }) => {
-          const { report, diagnostics } = await buildStatusReport({ cwd: process.cwd(), sprint })
+          const { report, diagnostics } = await buildDoctorReport({ cwd: process.cwd(), sprint })
           if (!report) {
             writeOutput(
               json,

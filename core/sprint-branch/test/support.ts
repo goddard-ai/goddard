@@ -60,6 +60,13 @@ export async function readState(repo: string, sprint: string) {
   ) as SprintBranchState
 }
 
+export async function writeState(repo: string, sprint: string, state: SprintBranchState) {
+  await fs.writeFile(
+    path.join(repo, "sprints", sprint, sprintStateFileName),
+    `${JSON.stringify(state, null, 2)}\n`,
+  )
+}
+
 export async function runCli(cwd: string, args: string[]) {
   const subprocess = Bun.spawn([process.execPath, cliPath, ...args], {
     cwd,

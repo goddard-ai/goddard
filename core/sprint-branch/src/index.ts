@@ -1,3 +1,4 @@
+export { buildDoctorReport, formatDoctorReport } from "./doctor"
 export { GitCommandError, runGit } from "./git"
 export {
   formatMutationReport,
@@ -19,7 +20,7 @@ export {
   sprintStateFileName,
   validateSprintName,
 } from "./state"
-export { buildStatusReport, formatDoctorReport, formatStatusReport } from "./status"
+export { buildStatusReport, formatStatusReport } from "./status"
 export type {
   SprintActiveStash,
   SprintBranchNames,

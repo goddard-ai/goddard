@@ -1,6 +1,16 @@
+import * as fs from "node:fs/promises"
+import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { cleanupTestRepos, createSprintRepo, runCli } from "./support"
+import {
+  cleanupTestRepos,
+  commitAll,
+  createSprintRepo,
+  git,
+  readState,
+  runCli,
+  writeState,
+} from "./support"
 
 describe("sprint-branch doctor", () => {
   afterEach(cleanupTestRepos)
@@ -21,6 +31,178 @@ describe("sprint-branch doctor", () => {
 
     expect(result.exitCode).toBe(1)
     expect(doctor.ok).toBe(false)
-    expect(doctor.diagnostics.map((diagnostic) => diagnostic.code)).toContain("next_branch_missing")
+    expect(diagnosticCodes(doctor)).toContain("next_branch_missing")
+  })
+
+  test("reports unrecorded review branch work when no review task is assigned", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "unrecorded.txt"), "review work\n")
+    await commitAll(repo, "add unrecorded review work")
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(doctor)).toContain("review_branch_has_unrecorded_work")
+  })
+
+  test("reports duplicate task assignments and task order drift", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "020-task-name",
+        next: "010-task-name",
+        approved: [],
+        finishedUnreviewed: ["010-task-name"],
+      },
+      { createNextBranch: true },
+    )
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+    const codes = diagnosticCodes(doctor)
+
+    expect(result.exitCode).toBe(1)
+    expect(codes).toContain("task_assigned_multiple_roles")
+    expect(codes).toContain("review_task_out_of_order")
+  })
+
+  test("reports unrecorded sprint-branch stashes", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
+    await git(repo, [
+      "stash",
+      "push",
+      "--include-untracked",
+      "-m",
+      "sprint-branch:example:020-task-name:feedback",
+    ])
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(diagnosticCodes(doctor)).toContain("unrecorded_sprint_stash")
+  })
+
+  test("reports git operations that are not reflected in sprint state", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await commitAll(repo, "add next conflict")
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await commitAll(repo, "add review conflict")
+    await gitAllowFailure(repo, ["checkout", "sprint/example/next"])
+    await gitAllowFailure(repo, ["rebase", "sprint/example/review"])
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(doctor)).toContain("git_operation_without_conflict_state")
+  })
+
+  test("reports generated index block disagreements with JSON state", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await fs.writeFile(
+      path.join(repo, "sprints", "example", "000-index.md"),
+      [
+        "<!-- sprint-branch-state:start -->",
+        "## Sprint Branch State",
+        "",
+        "- Sprint: example",
+        "- Base branch: main",
+        "- Review branch: sprint/example/review",
+        "- Approved branch: sprint/example/approved",
+        "- Next branch: sprint/example/next",
+        "- Review task: 020-task-name",
+        "- Next task: none",
+        "- Approved tasks: none",
+        "- Finished unreviewed: none",
+        "<!-- sprint-branch-state:end -->",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(diagnosticCodes(doctor)).toContain("index_generated_block_value_mismatch")
+  })
+
+  test("reports stale conflict state when Git has no operation in progress", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    const state = await readState(repo, "example")
+    await writeState(repo, "example", {
+      ...state,
+      conflict: {
+        command: "resume",
+        branch: "sprint/example/review",
+        message: "stale conflict",
+      },
+    })
+
+    const result = await runCli(repo, ["doctor", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(doctor)).toContain("conflict_state_without_git_operation")
   })
 })
+
+type DoctorOutput = {
+  ok: boolean
+  diagnostics: Array<{ code: string }>
+}
+
+function diagnosticCodes(doctor: DoctorOutput) {
+  return doctor.diagnostics.map((diagnostic) => diagnostic.code)
+}
+
+async function gitAllowFailure(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  await Promise.all([
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
+  ])
+}

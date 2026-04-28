@@ -268,27 +268,6 @@ export function formatStatusReport(report: SprintStatusReport) {
   return lines.join("\n")
 }
 
-/** Formats doctor diagnostics with a concise recovery suggestion. */
-export function formatDoctorReport(report: SprintStatusReport) {
-  if (report.diagnostics.length === 0) {
-    return [
-      `No sprint branch issues found for ${report.sprint}.`,
-      `Next safe command: ${report.blocked.nextSafeCommand ?? "sprint-branch status"}`,
-    ].join("\n")
-  }
-
-  const lines = [`Sprint branch issues for ${report.sprint}:`]
-  for (const diagnostic of report.diagnostics) {
-    lines.push(`  [${diagnostic.severity}] ${diagnostic.code}: ${diagnostic.message}`)
-    if (diagnostic.suggestion) {
-      lines.push(`    suggestion: ${diagnostic.suggestion}`)
-    }
-  }
-
-  lines.push(`Next safe command: ${report.blocked.nextSafeCommand ?? "manual recovery required"}`)
-  return lines.join("\n")
-}
-
 async function inspectBranch(rootDir: string, name: string) {
   const exists = await branchExists(rootDir, name)
   return {
