@@ -2,9 +2,19 @@
 import { command, flag, option, optional, run, string, subcommands } from "cmd-ts"
 
 import { GitCommandError, runGit } from "./git"
+import {
+  formatMutationReport,
+  runApprove,
+  runFeedback,
+  runFinalize,
+  runInit,
+  runResume,
+  runStart,
+  SprintMutationError,
+} from "./mutations"
 import { SprintInferenceError } from "./state"
 import { buildStatusReport, formatDoctorReport, formatStatusReport } from "./status"
-import type { SprintStatusReport } from "./types"
+import type { SprintMutationReport, SprintStatusReport } from "./types"
 
 function sprintOption() {
   return option({
@@ -171,7 +181,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          writeNotImplemented("init", args)
+          await writeMutation(args.json, runInit({ cwd: process.cwd(), ...args }))
         },
       }),
       start: command({
@@ -186,15 +196,21 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          writeNotImplemented("start", args)
+          await writeMutation(args.json, runStart({ cwd: process.cwd(), ...args }))
         },
       }),
       feedback: command({
         name: "feedback",
         description: "Prepare for human feedback on the review branch",
-        args: commonMutationArgs,
+        args: {
+          ...commonMutationArgs,
+          includeUntracked: flag({
+            long: "include-untracked",
+            description: "Include untracked files when stashing interrupted next-branch work",
+          }),
+        },
         handler: async (args) => {
-          writeNotImplemented("feedback", args)
+          await writeMutation(args.json, runFeedback({ cwd: process.cwd(), ...args }))
         },
       }),
       resume: command({
@@ -202,15 +218,27 @@ export async function main(argv: string[]) {
         description: "Return to interrupted or dependent work after feedback changes",
         args: commonMutationArgs,
         handler: async (args) => {
-          writeNotImplemented("resume", args)
+          await writeMutation(args.json, runResume({ cwd: process.cwd(), ...args }))
         },
       }),
       approve: command({
         name: "approve",
         description: "Promote reviewed work into the approved branch",
-        args: commonMutationArgs,
+        args: {
+          ...commonMutationArgs,
+          verified: flag({
+            long: "verified",
+            description: "Assert that the agent's normal checks passed before approval",
+          }),
+          policy: option({
+            type: string,
+            long: "policy",
+            defaultValue: () => "ff-only",
+            description: "Integration policy; currently only ff-only is supported",
+          }),
+        },
         handler: async (args) => {
-          writeNotImplemented("approve", args)
+          await writeMutation(args.json, runApprove({ cwd: process.cwd(), ...args }))
         },
       }),
       finalize: command({
@@ -225,7 +253,7 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          writeNotImplemented("finalize", args)
+          await writeMutation(args.json, runFinalize({ cwd: process.cwd(), ...args }))
         },
       }),
     },
@@ -262,18 +290,6 @@ function validateDiffState(report: SprintStatusReport) {
   return diagnostics
 }
 
-function writeNotImplemented(commandName: string, args: { json: boolean; dryRun: boolean }) {
-  const payload = {
-    ok: false,
-    command: commandName,
-    implemented: false,
-    dryRun: args.dryRun,
-    message: `${commandName} is reserved but not implemented in Phase 1.`,
-  }
-  writeOutput(args.json, payload, payload.message)
-  process.exitCode = 1
-}
-
 function writeOutput(json: boolean, value: unknown, text: string) {
   if (json) {
     console.log(JSON.stringify(value, null, 2))
@@ -282,6 +298,23 @@ function writeOutput(json: boolean, value: unknown, text: string) {
 
   if (text.length > 0) {
     console.log(text)
+  }
+}
+
+async function writeMutation(json: boolean, promise: Promise<SprintMutationReport>) {
+  try {
+    const report = await promise
+    writeOutput(json, report, formatMutationReport(report))
+    if (!report.ok) {
+      process.exitCode = 1
+    }
+  } catch (error) {
+    if (error instanceof SprintMutationError) {
+      writeOutput(json, error.report, formatMutationReport(error.report))
+      process.exitCode = 1
+      return
+    }
+    throw error
   }
 }
 

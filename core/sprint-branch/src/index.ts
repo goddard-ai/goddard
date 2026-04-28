@@ -1,5 +1,14 @@
 export { GitCommandError, runGit } from "./git"
 export {
+  formatMutationReport,
+  runApprove,
+  runFeedback,
+  runFinalize,
+  runInit,
+  runResume,
+  runStart,
+} from "./mutations"
+export {
   findSprintStateFiles,
   getExpectedBranches,
   inferSprintContext,
@@ -21,6 +30,8 @@ export type {
   SprintContext,
   SprintDiagnostic,
   SprintIndexStatus,
+  SprintLockState,
+  SprintMutationReport,
   SprintStatusReport,
   SprintTaskState,
   SprintWorkingTreeStatus,

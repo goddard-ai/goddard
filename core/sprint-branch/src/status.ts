@@ -1,7 +1,14 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { branchExists, getBranchHead, getStashRefs, getWorkingTreeStatus, isAncestor } from "./git"
+import {
+  branchExists,
+  getBranchHead,
+  getStashRefs,
+  getWorkingTreeStatus,
+  isAncestor,
+  resolveGitPath,
+} from "./git"
 import { inferSprintContext, readSprintStateFile, sprintIndexPath } from "./state"
 import type {
   SprintBranchRole,
@@ -33,6 +40,7 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
       message: `${context.stateRelativePath} records sprint ${parsed.state.sprint}, but inference selected ${context.sprint}.`,
     })
   }
+  const lockFilePath = await resolveGitPath(context.rootDir, `sprint-branch/${context.sprint}.lock`)
 
   const branches = {
     review: await inspectBranch(context.rootDir, parsed.state.branches.review),
@@ -44,6 +52,14 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
   const stashRefs = await getStashRefs(context.rootDir)
   const missingTaskFiles = await findMissingTaskFiles(context.rootDir, parsed.state)
 
+  if (await pathExists(lockFilePath)) {
+    diagnostics.push({
+      severity: "error",
+      code: "lock_file_exists",
+      message: `Lock file ${path.relative(context.rootDir, lockFilePath)} exists.`,
+      suggestion: "Confirm no sprint-branch command is running before removing the lock.",
+    })
+  }
   for (const warning of index.warnings) {
     diagnostics.push({
       severity: "warning",
@@ -414,4 +430,16 @@ function isMissingFileError(error: unknown) {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   )
+}
+
+async function pathExists(pathname: string) {
+  try {
+    await fs.access(pathname)
+    return true
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
+  }
 }

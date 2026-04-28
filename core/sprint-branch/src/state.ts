@@ -110,7 +110,7 @@ export function parseSprintState(value: unknown) {
   const branches = parseBranches(record.branches, diagnostics)
   const tasks = parseTasks(record.tasks, diagnostics)
   const activeStashes = parseActiveStashes(record.activeStashes, diagnostics)
-  const lock = "lock" in record ? record.lock : null
+  const lock = parseLock(record.lock, diagnostics)
   const conflict =
     record.conflict === null || isRecord(record.conflict)
       ? (record.conflict as SprintBranchState["conflict"] | null)
@@ -456,6 +456,37 @@ function parseActiveStashes(value: unknown, diagnostics: SprintDiagnostic[]) {
   }
 
   return stashes
+}
+
+function parseLock(value: unknown, diagnostics: SprintDiagnostic[]) {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!isRecord(value)) {
+    diagnostics.push({
+      severity: "error",
+      code: "invalid_lock",
+      message: "lock must be null or an object.",
+    })
+    return null
+  }
+
+  const command = readString(value.command, "lock.command", diagnostics)
+  const createdAt = readString(value.createdAt, "lock.createdAt", diagnostics)
+  const pid = typeof value.pid === "number" ? value.pid : null
+
+  if (pid === null) {
+    diagnostics.push({
+      severity: "error",
+      code: "invalid_lock_pid",
+      message: "lock.pid must be a number.",
+    })
+  }
+  if (!command || !createdAt || pid === null) {
+    return null
+  }
+
+  return { command, createdAt, pid }
 }
 
 function readString(value: unknown, field: string, diagnostics: SprintDiagnostic[]) {

@@ -21,6 +21,13 @@ export type SprintActiveStash = {
   message?: string
 }
 
+/** Lock metadata written while one mutating command owns sprint branch state. */
+export type SprintLockState = {
+  command: string
+  createdAt: string
+  pid: number
+}
+
 /** Conflict metadata recorded when a sprint branch transition stops early. */
 export type SprintConflictState = {
   command?: string
@@ -37,7 +44,7 @@ export type SprintBranchState = {
   branches: SprintBranchNames
   tasks: SprintTaskState
   activeStashes: SprintActiveStash[]
-  lock: unknown | null
+  lock: SprintLockState | null
   conflict: SprintConflictState | null
 }
 
@@ -106,4 +113,21 @@ export type SprintStatusReport = {
     nextSafeCommand?: string
   }
   diagnostics: SprintDiagnostic[]
+}
+
+/** Dry-run or execution report returned by mutating sprint commands. */
+export type SprintMutationReport = {
+  ok: boolean
+  command: string
+  dryRun: boolean
+  executed: boolean
+  sprint: string
+  currentBranch: string | null
+  summary: string
+  requiresCleanWorkingTree: boolean
+  gitOperations: string[]
+  sprintFiles: string[]
+  conflictHandling: string
+  diagnostics: SprintDiagnostic[]
+  state: SprintBranchState | null
 }

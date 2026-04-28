@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import path from "node:path"
 import { promisify } from "node:util"
 
 const execFileAsync = promisify(execFile)
@@ -59,6 +60,12 @@ export async function gitSucceeds(cwd: string, args: string[]) {
 /** Resolves the root directory of the Git repository containing the start directory. */
 export async function resolveRepositoryRoot(startDir: string) {
   return (await runGit(startDir, ["rev-parse", "--show-toplevel"])).trim()
+}
+
+/** Resolves a repository-local path inside Git's private metadata directory. */
+export async function resolveGitPath(rootDir: string, gitPath: string) {
+  const resolved = (await runGit(rootDir, ["rev-parse", "--git-path", gitPath])).trim()
+  return path.isAbsolute(resolved) ? resolved : path.join(rootDir, resolved)
 }
 
 /** Resolves the current branch, returning null for detached HEAD. */
