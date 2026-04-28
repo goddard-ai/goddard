@@ -2,7 +2,7 @@
 import { command, flag, option, optional, run, string, subcommands } from "cmd-ts"
 
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
-import { GitCommandError } from "./git"
+import { GitCommandError, runGit } from "./git"
 import {
   formatMutationReport,
   runApprove,
@@ -82,7 +82,7 @@ export async function main(argv: string[]) {
       }),
       diff: command({
         name: "diff",
-        description: "Print the sprint review diff command",
+        description: "Run the sprint review diff",
         args: {
           ...commonReadArgs,
           nameOnly: flag({
@@ -123,7 +123,8 @@ export async function main(argv: string[]) {
             return
           }
 
-          writeOutput(json, { ok: true, command: commandLine, args }, commandLine)
+          const output = await runGit(report.rootDir, args)
+          writeOutput(json, { ok: true, command: commandLine, args, output }, output.trimEnd())
         },
       }),
       doctor: command({
