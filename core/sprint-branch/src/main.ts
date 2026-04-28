@@ -4,6 +4,7 @@ import { command, flag, option, optional, positional, run, string, subcommands }
 import { formatCheckoutReport, runCheckout } from "./checkout"
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
 import { GitCommandError, runGit } from "./git"
+import { formatHumanCommandReport, runCleanup, runLand } from "./landing"
 import {
   formatMutationReport,
   runApprove,
@@ -181,6 +182,68 @@ export async function main(argv: string[]) {
             json,
           })
           writeOutput(json, report, formatCheckoutReport(report))
+          if (!report.ok) {
+            process.exitCode = 1
+          }
+        },
+      }),
+      land: command({
+        name: "land",
+        description: "Fast-forward a target branch to finalized sprint review work",
+        args: {
+          target: positional({
+            type: string,
+            displayName: "target",
+            description: "Target branch to fast-forward, such as main",
+          }),
+          name: positional({
+            type: optional(string),
+            displayName: "name",
+            description: "Sprint name to land",
+          }),
+          dryRun: dryRunFlag(),
+          json: jsonFlag(),
+        },
+        handler: async ({ target, name, dryRun, json }) => {
+          const report = await runLand({
+            cwd: process.cwd(),
+            target,
+            sprint: name,
+            dryRun,
+            json,
+          })
+          writeOutput(json, report, formatHumanCommandReport(report))
+          if (!report.ok) {
+            process.exitCode = 1
+          }
+        },
+      }),
+      cleanup: command({
+        name: "cleanup",
+        description: "Delete landed sprint branches and clean review worktrees",
+        args: {
+          target: positional({
+            type: string,
+            displayName: "target",
+            description: "Target branch that must contain the finalized review commit",
+          }),
+          name: positional({
+            type: optional(string),
+            displayName: "name",
+            description: "Sprint name to clean up",
+          }),
+          dryRun: dryRunFlag(),
+          json: jsonFlag(),
+        },
+        handler: async ({ target, name, dryRun, json }) => {
+          const report = await runCleanup({
+            cwd: process.cwd(),
+            target,
+            sprint: name,
+            dryRun,
+            json,
+          })
+          writeOutput(json, report, formatHumanCommandReport(report))
           if (!report.ok) {
             process.exitCode = 1
           }
