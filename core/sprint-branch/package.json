@@ -1,0 +1,31 @@
+{
+  "name": "@goddard-ai/sprint-branch",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "sprint-branch": "./dist/main.mjs"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "bun": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "dev": "bun run ./src/main.ts",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test --dots"
+  },
+  "dependencies": {
+    "cmd-ts": "^0.15.0"
+  }
+}

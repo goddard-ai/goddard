@@ -210,6 +210,16 @@
         "@goddard-ai/daemon": "workspace:^",
       },
     },
+    "core/sprint-branch": {
+      "name": "@goddard-ai/sprint-branch",
+      "version": "0.1.0",
+      "bin": {
+        "sprint-branch": "./dist/main.mjs",
+      },
+      "dependencies": {
+        "cmd-ts": "^0.15.0",
+      },
+    },
     "core/worktree-plugin": {
       "name": "@goddard-ai/worktree-plugin",
       "version": "0.1.0",
@@ -519,6 +529,8 @@
     "@goddard-ai/schema": ["@goddard-ai/schema@workspace:core/schema"],
 
     "@goddard-ai/sdk": ["@goddard-ai/sdk@workspace:core/sdk"],
+
+    "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
 
