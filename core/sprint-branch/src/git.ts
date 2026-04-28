@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import * as fs from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 
@@ -126,5 +127,45 @@ export async function getStashRefs(rootDir: string) {
         const [ref, message = ""] = line.split("\0")
         return [ref, message] as const
       }),
+  )
+}
+
+/** Detects Git sequencer operations that need manual completion before retrying a command. */
+export async function getGitOperations(rootDir: string) {
+  const operationPaths = [
+    ["rebase", "rebase-merge"],
+    ["rebase", "rebase-apply"],
+    ["merge", "MERGE_HEAD"],
+    ["cherry-pick", "CHERRY_PICK_HEAD"],
+    ["revert", "REVERT_HEAD"],
+    ["bisect", "BISECT_LOG"],
+  ]
+  const operations: Array<{ name: string; path: string }> = []
+
+  for (const [name, gitPath] of operationPaths) {
+    const resolvedPath = await resolveGitPath(rootDir, gitPath)
+    if (await pathExists(resolvedPath)) {
+      operations.push({ name, path: resolvedPath })
+    }
+  }
+
+  return operations
+}
+
+async function pathExists(targetPath: string) {
+  try {
+    await fs.access(targetPath)
+    return true
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
+  }
+}
+
+function isMissingFileError(error: unknown) {
+  return (
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
   )
 }

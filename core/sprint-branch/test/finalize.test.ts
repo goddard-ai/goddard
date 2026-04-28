@@ -93,8 +93,8 @@ describe("sprint-branch finalize", () => {
   })
 
   // The final rebase is intentionally the last Git rewrite before human merge.
-  // If it conflicts, handoff state must point future recovery at the review branch.
-  test("records conflict state when final rebase stops", async () => {
+  // If it conflicts, sprint files must stay unchanged so Git can continue cleanly.
+  test("keeps sprint state unchanged when final rebase stops", async () => {
     const repo = await createSprintRepo("example", {
       review: null,
       next: null,
@@ -118,7 +118,43 @@ describe("sprint-branch finalize", () => {
 
     expect(result.exitCode).toBe(1)
     expect(finalize.ok).toBe(false)
-    expect(state.conflict?.command).toBe("finalize")
-    expect(state.conflict?.branch).toBe("sprint/example/review")
+    expect(state.conflict).toBeNull()
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(
+      await branchHead(repo, "sprint/example/review"),
+    )
+  })
+
+  // Finalize may stop after Git has started rebasing the review branch, but before
+  // approved has moved. Once the agent finishes the rebase, rerunning finalize
+  // should only complete the approved-ref update and clear the recorded conflict.
+  test("retries finalize after final rebase conflict is resolved", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: ["010-task-name"],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await commitAll(repo, "add review conflict")
+    await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
+    await git(repo, ["checkout", "main"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "main\n")
+    await commitAll(repo, "add main conflict")
+
+    expect((await runCli(repo, ["finalize", "--json"])).exitCode).toBe(1)
+    await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
+    await git(repo, ["add", "conflict.txt"])
+    await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
+
+    const result = await runCli(repo, ["finalize", "--json"])
+    const state = await readState(repo, "example")
+
+    expect(result.exitCode).toBe(0)
+    expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect(state.conflict).toBeNull()
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(
+      await branchHead(repo, "sprint/example/review"),
+    )
   })
 })

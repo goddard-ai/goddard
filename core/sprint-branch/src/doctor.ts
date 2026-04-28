@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { branchExists, getStashRefs, resolveGitPath } from "./git"
+import { branchExists, getGitOperations, getStashRefs } from "./git"
 import { buildStatusReport } from "./status"
 import type { SprintBranchState, SprintDiagnostic, SprintStatusReport } from "./types"
 
@@ -495,27 +495,6 @@ function groupByPrefix(tasks: Array<{ stem: string }>) {
     prefixes.set(match[1], [...(prefixes.get(match[1]) ?? []), task])
   }
   return [...prefixes.entries()]
-}
-
-async function getGitOperations(rootDir: string) {
-  const operationPaths = [
-    ["rebase", "rebase-merge"],
-    ["rebase", "rebase-apply"],
-    ["merge", "MERGE_HEAD"],
-    ["cherry-pick", "CHERRY_PICK_HEAD"],
-    ["revert", "REVERT_HEAD"],
-    ["bisect", "BISECT_LOG"],
-  ]
-  const operations: Array<{ name: string; path: string }> = []
-
-  for (const [name, gitPath] of operationPaths) {
-    const resolvedPath = await resolveGitPath(rootDir, gitPath)
-    if (await pathExists(resolvedPath)) {
-      operations.push({ name, path: resolvedPath })
-    }
-  }
-
-  return operations
 }
 
 function parseGeneratedIndexValues(block: string) {

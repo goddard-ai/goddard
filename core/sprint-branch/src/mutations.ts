@@ -5,6 +5,7 @@ import {
   branchExists,
   getBranchHead,
   getCurrentBranch,
+  getGitOperations,
   getStashRefs,
   getWorkingTreeStatus,
   GitCommandError,
@@ -22,6 +23,7 @@ import {
 import type {
   SprintActiveStash,
   SprintBranchState,
+  SprintConflictState,
   SprintContext,
   SprintDiagnostic,
   SprintMutationReport,
@@ -312,14 +314,24 @@ export async function runFeedback(input: MutationInput) {
 
 /** Rebases dependent next work after feedback and reapplies a matching recorded stash. */
 export async function runResume(input: MutationInput) {
-  const { context, state, diagnostics } = await readCommandState(input, "resume")
+  const { context, state, diagnostics } = await readCommandState(input, "resume", {
+    allowOwnConflictRetry: true,
+  })
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const nextState = cloneState(state)
   const gitOperations: string[] = []
   const matchingStash = findMatchingStash(state)
+  const retryingResume = isRetryingCommand(state, "resume")
+  const resolvingStashApplyConflict =
+    retryingResume &&
+    Boolean(state.tasks.next) &&
+    Boolean(matchingStash) &&
+    context.currentBranch === state.branches.next &&
+    !workingTree.clean &&
+    !hasUnmergedEntries(workingTree.entries)
   let targetBranch = state.tasks.next ? state.branches.next : state.branches.review
 
-  if (!workingTree.clean) {
+  if (!workingTree.clean && !resolvingStashApplyConflict) {
     diagnostics.push({
       severity: "error",
       code: "dirty_worktree",
@@ -333,8 +345,13 @@ export async function runResume(input: MutationInput) {
       message: `Next branch ${state.branches.next} does not exist.`,
     })
   }
+  if (retryingResume && !resolvingStashApplyConflict) {
+    await pushActiveGitOperationDiagnostics(context.rootDir, diagnostics)
+  }
 
-  if (state.tasks.next) {
+  if (resolvingStashApplyConflict) {
+    gitOperations.push("clear recorded feedback stash after resolved stash-apply conflict")
+  } else if (state.tasks.next) {
     gitOperations.push(`git checkout ${state.branches.next}`)
     if (!(await isAncestor(context.rootDir, state.branches.review, state.branches.next))) {
       gitOperations.push(`git rebase ${state.branches.review}`)
@@ -352,13 +369,15 @@ export async function runResume(input: MutationInput) {
     context,
     state: nextState,
     summary: state.tasks.next
-      ? `Resume ${state.tasks.next} on next.`
+      ? resolvingStashApplyConflict
+        ? `Finish resume for ${state.tasks.next} after resolved stash conflict.`
+        : `Resume ${state.tasks.next} on next.`
       : "No next task is recorded; return to review.",
-    requiresCleanWorkingTree: true,
+    requiresCleanWorkingTree: !resolvingStashApplyConflict,
     gitOperations,
     sprintFiles: sprintFilesForState(context.rootDir, nextState),
     conflictHandling:
-      "Rebase or stash-apply conflicts stop immediately, record conflict state, and leave resolution to the agent.",
+      "State remains pre-resume until rebase and stash application finish. Retry resume after resolving any recorded conflict.",
     diagnostics,
   })
 
@@ -368,6 +387,20 @@ export async function runResume(input: MutationInput) {
 
   return withSprintLock(context, state, "resume", async () => {
     try {
+      if (resolvingStashApplyConflict) {
+        nextState.activeStashes = matchingStash
+          ? nextState.activeStashes.filter(
+              (stash) =>
+                stash.ref !== matchingStash.ref ||
+                stash.sourceBranch !== matchingStash.sourceBranch ||
+                stash.task !== matchingStash.task,
+            )
+          : nextState.activeStashes
+        nextState.conflict = null
+        await writeSprintFiles(context.rootDir, nextState, "resume", plan.summary)
+        return { ...plan, state: nextState, executed: true }
+      }
+
       await runGit(context.rootDir, ["checkout", targetBranch])
       if (
         state.tasks.next &&
@@ -389,9 +422,9 @@ export async function runResume(input: MutationInput) {
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {
-        const conflictState = await writeConflictState(
+        const conflictState = await writeConflictStateWhenSafe(
           context.rootDir,
-          nextState,
+          state,
           "resume",
           targetBranch,
           error,
@@ -405,10 +438,16 @@ export async function runResume(input: MutationInput) {
 
 /** Promotes the review branch into approved and rolls existing next work onto review. */
 export async function runApprove(input: MutationInput) {
-  const { context, state, diagnostics } = await readCommandState(input, "approve")
+  const { context, state, diagnostics } = await readCommandState(input, "approve", {
+    allowOwnConflictRetry: true,
+  })
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const nextState = cloneState(state)
   const gitOperations: string[] = []
+  const retryingApprove = isRetryingCommand(state, "approve")
+  const nextNeedsRebase =
+    Boolean(state.tasks.next) &&
+    !(await isAncestor(context.rootDir, state.branches.review, state.branches.next))
 
   if (!workingTree.clean) {
     diagnostics.push({
@@ -424,19 +463,25 @@ export async function runApprove(input: MutationInput) {
       message: "No review task is recorded for approval.",
     })
   }
-
-  gitOperations.push(
-    `git checkout ${state.branches.approved}`,
-    `git merge --ff-only ${state.branches.review}`,
-  )
+  if (
+    state.tasks.review &&
+    !(await isAncestor(context.rootDir, state.branches.approved, state.branches.review))
+  ) {
+    diagnostics.push({
+      severity: "error",
+      code: "review_not_based_on_approved",
+      message: `${state.branches.review} does not descend from ${state.branches.approved}.`,
+    })
+  }
+  if (retryingApprove) {
+    await pushActiveGitOperationDiagnostics(context.rootDir, diagnostics)
+  }
 
   if (state.tasks.next) {
-    gitOperations.push(
-      `git checkout ${state.branches.next}`,
-      `git rebase ${state.branches.approved}`,
-      moveBranchOperation(state.branches.review, state.branches.next, state.branches.next),
-      `git checkout ${state.branches.review}`,
-    )
+    gitOperations.push(`git checkout ${state.branches.next}`)
+    if (nextNeedsRebase) {
+      gitOperations.push(`git rebase ${state.branches.review}`)
+    }
     nextState.tasks.approved = [...nextState.tasks.approved, state.tasks.review].filter(
       (task): task is string => Boolean(task),
     )
@@ -445,6 +490,18 @@ export async function runApprove(input: MutationInput) {
     )
     nextState.tasks.review = state.tasks.next
     nextState.tasks.next = null
+  }
+
+  gitOperations.push(
+    `git checkout ${state.branches.approved}`,
+    `git merge --ff-only ${state.branches.review}`,
+  )
+
+  if (state.tasks.next) {
+    gitOperations.push(
+      moveBranchOperation(state.branches.review, state.branches.next, state.branches.approved),
+      `git checkout ${state.branches.review}`,
+    )
   } else {
     gitOperations.push(
       moveBranchOperation(state.branches.review, state.branches.approved, state.branches.approved),
@@ -470,7 +527,7 @@ export async function runApprove(input: MutationInput) {
     gitOperations,
     sprintFiles: sprintFilesForState(context.rootDir, nextState),
     conflictHandling:
-      "Fast-forward failures stop without changing state. Rebase conflicts record conflict state and leave resolution to the agent.",
+      "Validation and next rebasing happen before approved is moved. Retry approve after resolving any recorded Git conflict.",
     diagnostics,
   })
 
@@ -480,20 +537,23 @@ export async function runApprove(input: MutationInput) {
 
   return withSprintLock(context, state, "approve", async () => {
     let conflictBranch = state.branches.approved
-    let stateForConflict = state
     try {
-      await runGit(context.rootDir, ["checkout", state.branches.approved])
-      await runGit(context.rootDir, ["merge", "--ff-only", state.branches.review])
-      stateForConflict = nextState
       if (state.tasks.next) {
         conflictBranch = state.branches.next
         await runGit(context.rootDir, ["checkout", state.branches.next])
-        await runGit(context.rootDir, ["rebase", state.branches.approved])
-        conflictBranch = state.branches.review
+        if (!(await isAncestor(context.rootDir, state.branches.review, state.branches.next))) {
+          await runGit(context.rootDir, ["rebase", state.branches.review])
+        }
+      }
+
+      conflictBranch = state.branches.approved
+      await runGit(context.rootDir, ["checkout", state.branches.approved])
+      await runGit(context.rootDir, ["merge", "--ff-only", state.branches.review])
+
+      if (state.tasks.next) {
         await moveRecordedBranch(context.rootDir, state, state.branches.review, state.branches.next)
         await runGit(context.rootDir, ["checkout", state.branches.review])
       } else {
-        conflictBranch = state.branches.review
         await moveRecordedBranch(
           context.rootDir,
           state,
@@ -507,9 +567,9 @@ export async function runApprove(input: MutationInput) {
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {
-        const conflictState = await writeConflictState(
+        const conflictState = await writeConflictStateWhenSafe(
           context.rootDir,
-          stateForConflict,
+          state,
           "approve",
           conflictBranch,
           error,
@@ -523,10 +583,21 @@ export async function runApprove(input: MutationInput) {
 
 /** Rebases the completed review branch onto base for the final human merge. */
 export async function runFinalize(input: MutationInput & { overrideBase?: string }) {
-  const { context, state, diagnostics } = await readCommandState(input, "finalize")
+  const { context, state, diagnostics } = await readCommandState(input, "finalize", {
+    allowOwnConflictRetry: true,
+  })
   const workingTree = await getWorkingTreeStatus(context.rootDir)
+  const transientConflict = await readTransientConflict(context.rootDir, state.sprint)
   const nextState = cloneState(state)
-  const baseBranch = input.overrideBase ?? state.baseBranch
+  const retryingFinalize =
+    isRetryingCommand(state, "finalize") || transientConflict?.command === "finalize"
+  const conflictBaseBranch =
+    retryingFinalize && typeof state.conflict?.baseBranch === "string"
+      ? state.conflict.baseBranch
+      : retryingFinalize && typeof transientConflict?.baseBranch === "string"
+        ? transientConflict.baseBranch
+        : undefined
+  const baseBranch = input.overrideBase ?? conflictBaseBranch ?? state.baseBranch
   const reviewHead = await getBranchHead(context.rootDir, state.branches.review)
   const approvedHead = await getBranchHead(context.rootDir, state.branches.approved)
   const nextHead = await getBranchHead(context.rootDir, state.branches.next)
@@ -545,7 +616,7 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       message: "finalize requires no review task, no next task, and no finished unreviewed tasks.",
     })
   }
-  if (reviewHead && approvedHead && reviewHead !== approvedHead) {
+  if (reviewHead && approvedHead && reviewHead !== approvedHead && !retryingFinalize) {
     diagnostics.push({
       severity: "error",
       code: "review_approved_mismatch",
@@ -566,6 +637,9 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       message: `Base branch ${baseBranch} does not exist.`,
     })
   }
+  if (retryingFinalize) {
+    await pushActiveGitOperationDiagnostics(context.rootDir, diagnostics)
+  }
 
   nextState.baseBranch = baseBranch
   const plan = makePlan({
@@ -581,7 +655,7 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
     ],
     sprintFiles: sprintFilesForState(context.rootDir, nextState),
     conflictHandling:
-      "Rebase conflicts record conflict state and leave the review branch checked out for manual resolution.",
+      "State remains pre-finalize until the final rebase and approved ref update both succeed. Retry finalize after resolving any recorded conflict.",
     diagnostics,
   })
 
@@ -604,12 +678,13 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {
-        const conflictState = await writeConflictState(
+        const conflictState = await writeConflictStateWhenSafe(
           context.rootDir,
-          nextState,
+          state,
           "finalize",
           state.branches.review,
           error,
+          { baseBranch },
         )
         return conflictReport(plan, conflictState, error)
       }
@@ -649,7 +724,11 @@ export function formatMutationReport(report: SprintMutationReport) {
   return lines.join("\n")
 }
 
-async function readCommandState(input: MutationInput, commandName: string) {
+async function readCommandState(
+  input: MutationInput,
+  commandName: string,
+  options: { allowOwnConflictRetry?: boolean } = {},
+) {
   const context = await inferSprintContext(input)
   const parsed = await readSprintStateFile(context.statePath)
   const diagnostics = [...parsed.diagnostics]
@@ -671,12 +750,22 @@ async function readCommandState(input: MutationInput, commandName: string) {
       state: null,
     })
   }
-  if (parsed.state.conflict) {
+  if (
+    parsed.state.conflict &&
+    !(options.allowOwnConflictRetry && parsed.state.conflict.command === commandName)
+  ) {
     diagnostics.push({
       severity: "error",
       code: "conflict_recorded",
       message: `State records an unresolved ${parsed.state.conflict.command ?? "unknown"} conflict.`,
       suggestion: "Resolve the Git conflict and inspect sprint-branch doctor before continuing.",
+    })
+  } else if (parsed.state.conflict) {
+    diagnostics.push({
+      severity: "warning",
+      code: "retrying_recorded_conflict",
+      message: `Retrying ${commandName} after a recorded conflict.`,
+      suggestion: "Finish any active Git operation before retrying the command.",
     })
   }
   if (parsed.state.lock) {
@@ -767,11 +856,7 @@ async function withSprintLock(
     await handle.writeFile(`${JSON.stringify(lock, null, 2)}\n`)
     await handle.close()
     handle = null
-    const report = await run()
-    if (report.state) {
-      await writeSprintStateAtomic(context.statePath, { ...report.state, lock: null })
-    }
-    return report
+    return await run()
   } catch (error) {
     if (isAlreadyExistsError(error)) {
       return {
@@ -819,24 +904,24 @@ async function writeSprintFiles(
   })
   await upsertIndexMirror(rootDir, state)
   await appendHandoff(rootDir, state, commandName, note)
+  await clearTransientConflict(rootDir, state.sprint)
 }
 
-async function writeConflictState(
+async function writeConflictStateWhenSafe(
   rootDir: string,
   state: SprintBranchState,
   commandName: string,
   branch: string,
   error: GitCommandError,
+  metadata: Record<string, unknown> = {},
 ) {
-  const conflictState = {
-    ...state,
-    lock: null,
-    conflict: {
-      command: commandName,
-      branch,
-      message: error.stderr || error.message,
-    },
+  const conflictState = makeConflictState(state, commandName, branch, error, metadata)
+  const operations = await getGitOperations(rootDir)
+  if (operations.length > 0) {
+    await writeTransientConflict(rootDir, state.sprint, conflictState.conflict)
+    return conflictState
   }
+
   await writeSprintFiles(
     rootDir,
     conflictState,
@@ -844,6 +929,60 @@ async function writeConflictState(
     `Stopped on conflict while running ${commandName} on ${branch}.`,
   )
   return conflictState
+}
+
+async function readTransientConflict(rootDir: string, sprint: string) {
+  try {
+    return JSON.parse(
+      await fs.readFile(await transientConflictPath(rootDir, sprint), "utf-8"),
+    ) as SprintConflictState
+  } catch (error) {
+    if (isMissingFileError(error) || error instanceof SyntaxError) {
+      return null
+    }
+    throw error
+  }
+}
+
+async function writeTransientConflict(
+  rootDir: string,
+  sprint: string,
+  conflict: SprintConflictState | null,
+) {
+  if (!conflict) {
+    return
+  }
+
+  const markerPath = await transientConflictPath(rootDir, sprint)
+  await fs.mkdir(path.dirname(markerPath), { recursive: true })
+  await fs.writeFile(markerPath, `${JSON.stringify(conflict, null, 2)}\n`)
+}
+
+async function clearTransientConflict(rootDir: string, sprint: string) {
+  await fs.rm(await transientConflictPath(rootDir, sprint), { force: true })
+}
+
+async function transientConflictPath(rootDir: string, sprint: string) {
+  return resolveGitPath(rootDir, `sprint-branch/${sprint}.conflict.json`)
+}
+
+function makeConflictState(
+  state: SprintBranchState,
+  commandName: string,
+  branch: string,
+  error: GitCommandError,
+  metadata: Record<string, unknown>,
+) {
+  return {
+    ...state,
+    lock: null,
+    conflict: {
+      command: commandName,
+      branch,
+      message: error.stderr || error.message,
+      ...metadata,
+    },
+  }
 }
 
 function conflictReport(
@@ -1012,6 +1151,28 @@ function noPlannedTaskDiagnostic(task: string) {
     code: "no_planned_task",
     message: `${task} is not available because no unassigned sprint tasks remain.`,
   }
+}
+
+async function pushActiveGitOperationDiagnostics(rootDir: string, diagnostics: SprintDiagnostic[]) {
+  const operations = await getGitOperations(rootDir)
+  for (const operation of operations) {
+    diagnostics.push({
+      severity: "error",
+      code: "git_operation_in_progress",
+      message: `Git ${operation.name} operation is still in progress.`,
+      suggestion: "Resolve it with Git before retrying the sprint-branch command.",
+    })
+  }
+}
+
+function isRetryingCommand(state: SprintBranchState, commandName: string) {
+  return state.conflict?.command === commandName
+}
+
+function hasUnmergedEntries(entries: string[]) {
+  return entries.some((entry) =>
+    ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(entry.slice(0, 2)),
+  )
 }
 
 async function moveRecordedBranch(

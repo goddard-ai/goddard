@@ -8,6 +8,7 @@ import {
   commitAll,
   createSprintRepo,
   currentBranch,
+  diagnosticCodes,
   git,
   readState,
   runCli,
@@ -100,8 +101,8 @@ describe("sprint-branch approve", () => {
   })
 
   // A fast-forward failure happens before review work is actually approved.
-  // The state must remain pre-approval while still recording where recovery needs to begin.
-  test("records conflict state when fast-forward approval fails", async () => {
+  // The command can detect that shape before moving refs or writing conflict state.
+  test("refuses when review cannot fast-forward into approved", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
@@ -114,6 +115,8 @@ describe("sprint-branch approve", () => {
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "review.txt"), "reviewed\n")
     await commitAll(repo, "add reviewed work")
+    const beforeState = await readState(repo, "example")
+    const approvedHead = await branchHead(repo, "sprint/example/approved")
 
     const result = await runCli(repo, ["approve", "--json"])
     const approve = JSON.parse(result.stdout) as MutationOutput
@@ -121,9 +124,60 @@ describe("sprint-branch approve", () => {
 
     expect(result.exitCode).toBe(1)
     expect(approve.ok).toBe(false)
-    expect(state.conflict?.command).toBe("approve")
-    expect(state.conflict?.branch).toBe("sprint/example/approved")
-    expect(state.tasks.review).toBe("010-task-name")
-    expect(state.tasks.approved).toEqual([])
+    expect(diagnosticCodes(approve)).toContain("review_not_based_on_approved")
+    expect(state).toEqual(beforeState)
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedHead)
+  })
+
+  // Approval must not mark review as approved before the dependent next rebase succeeds.
+  // After the agent resolves the Git rebase, rerunning approve should finish the same transition.
+  test("retries approval after next rebase conflict is resolved", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    const approvedHead = await branchHead(repo, "sprint/example/approved")
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await commitAll(repo, "add review conflict")
+    const reviewedHead = await branchHead(repo, "sprint/example/review")
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await commitAll(repo, "add next conflict")
+
+    const first = await runCli(repo, ["approve", "--json"])
+    const failedApprove = JSON.parse(first.stdout) as MutationOutput
+    const stateAfterConflict = await readState(repo, "example")
+
+    expect(first.exitCode).toBe(1)
+    expect(failedApprove.ok).toBe(false)
+    expect(stateAfterConflict.conflict).toBeNull()
+    expect(stateAfterConflict.tasks.review).toBe("010-task-name")
+    expect(stateAfterConflict.tasks.next).toBe("020-task-name")
+    expect(stateAfterConflict.tasks.approved).toEqual([])
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedHead)
+
+    await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
+    await git(repo, ["add", "conflict.txt"])
+    await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
+
+    const second = await runCli(repo, ["approve", "--json"])
+    const approvedState = await readState(repo, "example")
+
+    expect(second.exitCode).toBe(0)
+    expect(approvedState.conflict).toBeNull()
+    expect(approvedState.tasks.review).toBe("020-task-name")
+    expect(approvedState.tasks.next).toBeNull()
+    expect(approvedState.tasks.approved).toEqual(["010-task-name"])
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(reviewedHead)
+    expect(await branchHead(repo, "sprint/example/review")).toBe(
+      await branchHead(repo, "sprint/example/next"),
+    )
   })
 })

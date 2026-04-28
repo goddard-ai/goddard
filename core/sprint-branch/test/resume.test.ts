@@ -42,8 +42,8 @@ describe("sprint-branch resume", () => {
   })
 
   // Resume is the command most likely to hit a real Git conflict after review feedback.
-  // Persisting conflict state lets the next agent know which sprint transition stopped midway.
-  test("records conflict state when rebase stops", async () => {
+  // While Git is mid-rebase, tracked sprint files must stay untouched so rebase --continue works.
+  test("keeps sprint state unchanged when rebase stops", async () => {
     const repo = await createSprintRepo(
       "example",
       {
@@ -67,8 +67,89 @@ describe("sprint-branch resume", () => {
     const report = JSON.parse(result.stdout) as { ok: boolean }
     const state = await readState(repo, "example")
     expect(report.ok).toBe(false)
-    expect(state.conflict?.command).toBe("resume")
-    expect(state.conflict?.branch).toBe("sprint/example/next")
+    expect(state.conflict).toBeNull()
+    expect(state.tasks.review).toBe("010-task-name")
+    expect(state.tasks.next).toBe("020-task-name")
+  })
+
+  // Resume is retryable after a manual rebase resolution because sprint state
+  // still describes the original next task until the command completes successfully.
+  test("retries resume after rebase conflict is resolved", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await commitAll(repo, "add next conflict")
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await commitAll(repo, "add review conflict")
+
+    expect((await runCli(repo, ["resume", "--json"])).exitCode).toBe(1)
+    await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
+    await git(repo, ["add", "conflict.txt"])
+    await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
+
+    const result = await runCli(repo, ["resume", "--json"])
+    const state = await readState(repo, "example")
+
+    expect(result.exitCode).toBe(0)
+    expect(await currentBranch(repo)).toBe("sprint/example/next")
+    expect(state.conflict).toBeNull()
+    expect(state.tasks.next).toBe("020-task-name")
+  })
+
+  // Stash application conflicts are different from rebase conflicts: Git has no
+  // follow-up "continue" command, and a successful resume intentionally leaves
+  // the restored work dirty. Rerunning resume after conflicts are resolved should
+  // only clear the recorded stash instead of applying it again.
+  test("finishes resume after a stash-apply conflict is resolved", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "work.txt"), "base\n")
+    await commitAll(repo, "add shared work file")
+    await git(repo, ["checkout", "sprint/example/next"])
+    await git(repo, ["rebase", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "work.txt"), "stashed\n")
+    expect((await runCli(repo, ["feedback"])).exitCode).toBe(0)
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "work.txt"), "review\n")
+    await commitAll(repo, "change work during feedback")
+
+    const first = await runCli(repo, ["resume", "--json"])
+    const conflictState = await readState(repo, "example")
+
+    expect(first.exitCode).toBe(1)
+    expect(conflictState.conflict?.command).toBe("resume")
+    expect(conflictState.activeStashes).toHaveLength(1)
+
+    await fs.writeFile(path.join(repo, "work.txt"), "resolved\n")
+    await git(repo, ["add", "work.txt"])
+
+    const second = await runCli(repo, ["resume", "--json"])
+    const state = await readState(repo, "example")
+
+    expect(second.exitCode).toBe(0)
+    expect(await currentBranch(repo)).toBe("sprint/example/next")
+    expect(await fs.readFile(path.join(repo, "work.txt"), "utf-8")).toBe("resolved\n")
+    expect(state.conflict).toBeNull()
+    expect(state.activeStashes).toEqual([])
   })
 
   // Resume may rebase and apply a saved stash, both of which assume a clean target.
