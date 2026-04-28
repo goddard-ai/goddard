@@ -217,6 +217,7 @@
         "sprint-branch": "./dist/main.mjs",
       },
       "dependencies": {
+        "@clack/prompts": "^0.11.0",
         "cmd-ts": "^0.15.0",
       },
     },

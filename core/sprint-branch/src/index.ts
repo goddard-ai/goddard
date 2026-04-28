@@ -1,3 +1,4 @@
+export { formatCheckoutReport, runCheckout } from "./checkout"
 export { buildDoctorReport, formatDoctorReport } from "./doctor"
 export { GitCommandError, runGit } from "./git"
 export {

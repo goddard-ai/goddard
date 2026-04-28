@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { command, flag, option, optional, run, string, subcommands } from "cmd-ts"
+import { command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
 
+import { formatCheckoutReport, runCheckout } from "./checkout"
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
 import { GitCommandError, runGit } from "./git"
 import {
@@ -155,6 +156,31 @@ export async function main(argv: string[]) {
             },
             formatDoctorReport(report),
           )
+          if (!report.ok) {
+            process.exitCode = 1
+          }
+        },
+      }),
+      checkout: command({
+        name: "checkout",
+        description: "Check out a sprint review snapshot in detached HEAD",
+        args: {
+          name: positional({
+            type: optional(string),
+            displayName: "name",
+            description: "Sprint name to review",
+          }),
+          dryRun: dryRunFlag(),
+          json: jsonFlag(),
+        },
+        handler: async ({ name, dryRun, json }) => {
+          const report = await runCheckout({
+            cwd: process.cwd(),
+            sprint: name,
+            dryRun,
+            json,
+          })
+          writeOutput(json, report, formatCheckoutReport(report))
           if (!report.ok) {
             process.exitCode = 1
           }
