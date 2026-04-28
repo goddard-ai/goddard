@@ -7,7 +7,7 @@ import { command, option, optional, run, string, subcommands } from "cmd-ts"
 
 async function requireSessionId(): Promise<DaemonSession["id"]> {
   const { client } = createDaemonIpcClientFromEnv()
-  const result = await client.send("sessionResolveToken", {
+  const result = await client.send("session.resolveToken", {
     token: requireSessionToken(),
   })
   return DaemonSessionId.parse(result.id)
@@ -19,7 +19,7 @@ function requireSessionToken(): string {
 
 export async function declareInitiative(sessionId: DaemonSession["id"], title: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  await client.send("sessionDeclareInitiative", { id: sessionId, title })
+  await client.send("session.declareInitiative", { id: sessionId, title })
 }
 
 export async function reportBlocker(
@@ -28,7 +28,7 @@ export async function reportBlocker(
   metadata: SessionInboxMetadataInput = {},
 ) {
   const { client } = createDaemonIpcClientFromEnv()
-  await client.send("sessionReportBlocker", { id: sessionId, reason, ...metadata })
+  await client.send("session.reportBlocker", { id: sessionId, reason, ...metadata })
 }
 
 export async function reportTurnEnded(
@@ -36,7 +36,7 @@ export async function reportTurnEnded(
   metadata: SessionInboxMetadataInput = {},
 ) {
   const { client } = createDaemonIpcClientFromEnv()
-  await client.send("sessionReportTurnEnded", { id: sessionId, ...metadata })
+  await client.send("session.reportTurnEnded", { id: sessionId, ...metadata })
 }
 
 export async function submitPr(
@@ -45,7 +45,7 @@ export async function submitPr(
   metadata: SessionInboxMetadataInput = {},
 ) {
   const { client } = createDaemonIpcClientFromEnv()
-  await client.send("prSubmit", {
+  await client.send("pr.submit", {
     token: requireSessionToken(),
     cwd: process.cwd(),
     title,
@@ -56,7 +56,7 @@ export async function submitPr(
 
 export async function replyPr(message: string, metadata: SessionInboxMetadataInput = {}) {
   const { client } = createDaemonIpcClientFromEnv()
-  await client.send("prReply", {
+  await client.send("pr.reply", {
     token: requireSessionToken(),
     cwd: process.cwd(),
     message,

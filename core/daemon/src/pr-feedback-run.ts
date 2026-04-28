@@ -74,7 +74,7 @@ export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<num
       ? (await input.configManager.getRootConfig(projectDir)).config
       : undefined
     const client = createDaemonIpcClient({ daemonUrl: input.daemonUrl })
-    await client.send("sessionCreate", {
+    await client.send("session.create", {
       agent: await resolveDefaultAgent(rootConfig),
       cwd: projectDir,
       worktree: { enabled: true },

@@ -719,7 +719,7 @@ async function isDaemonHealthy(port: number) {
     const client = createDaemonIpcClient({
       daemonUrl: createDaemonUrl(port),
     })
-    const response = await client.send("health")
+    const response = await client.send("daemon.health")
     return response.ok === true
   } catch {
     return false

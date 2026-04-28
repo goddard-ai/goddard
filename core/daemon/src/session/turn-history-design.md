@@ -6,7 +6,7 @@ The daemon currently persists one `sessionMessages` record per session, with one
 
 - every new message rewrites the full session history blob
 - storage cost grows with total session age rather than the active turn
-- `sessionHistory` returns the entire transcript at once
+- `session.history` returns the entire transcript at once
 - the app has to reconstruct turn boundaries client-side from a flat transport log
 
 This design replaces per-session message blobs with per-turn persistence. Completed turns are stored as immutable records. The active turn is held in memory and mirrored into one mutable draft record. History reads return paged turns instead of one flattened ACP array.
@@ -14,7 +14,7 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 ## Context
 
 - The daemon already serializes prompt dispatch so one session has at most one active prompt turn at a time.
-- The live `sessionMessage` subscription remains the real-time streaming surface. This design does not change the live stream contract.
+- The live `session.message` subscription remains the real-time streaming surface. This design does not change the live stream contract.
 - The app transcript and planned turn summary UI already think in prompt-turn units rather than one flat message log.
 - The daemon currently derives slash-command suggestions from `available_commands_update` messages found in session history. If history stops being a raw audit log, that state must move elsewhere.
 - ACP `loadSession` is optional. The installed ACP SDK documents that agents with `loadSession` should restore session context and stream conversation history back via notifications.
@@ -29,11 +29,11 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 - Coalesce high-frequency streamed agent text chunks in memory before persistence.
 - Bound crash loss for the active turn to at most the most recent unflushed draft window, not the entire turn.
 - Preserve enough ACP fidelity inside each turn record for transcript rendering, debugging, and turn-summary derivation.
-- Keep live streaming behavior unchanged for `sessionMessage` subscribers.
+- Keep live streaming behavior unchanged for `session.message` subscribers.
 
 ## Non-Goals
 
-- Preserve the current `sessionHistory` response shape.
+- Preserve the current `session.history` response shape.
 - Persist every streamed chunk as its own durable record.
 - Maintain a full raw ACP audit log for messages that never became part of a prompt turn.
 - Guarantee zero-loss durability for every individual streamed chunk.
@@ -46,7 +46,7 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 - One live session may have queued prompts, but only one prompt is ever actively executing at a time.
 - Prompt request ids are required for raw queued ACP prompts today, so a persisted turn can safely key itself to one prompt request id.
 - A turn boundary is defined by the lifecycle of one dispatched `session/prompt` request, not by visible assistant text.
-- `session/cancel` and `sessionSteer` may produce late tool updates before the cancelled prompt response arrives. Those late updates still belong to the cancelled turn.
+- `session/cancel` and `session.steer` may produce late tool updates before the cancelled prompt response arrives. Those late updates still belong to the cancelled turn.
 
 ## Terminology
 
@@ -250,7 +250,7 @@ The daemon coalesces consecutive `agent_message_chunk` updates with `content.typ
 
 Coalescing is applied before draft writes and before completed-turn persistence:
 
-- the live `sessionMessage` subscription still emits each raw chunk
+- the live `session.message` subscription still emits each raw chunk
 - the durable draft stores the coalesced form
 - persisted completed turns store the coalesced form
 
@@ -338,7 +338,7 @@ For agents that support ACP `loadSession`, a future resume flow may reconcile re
 
 ### Read Path
 
-1. Client requests `sessionHistory({ id, cursor?, limit? })`.
+1. Client requests `session.history({ id, cursor?, limit? })`.
 2. Daemon loads the requested persisted `sessionTurns` page.
 3. If this is the latest page and a live `activeTurn` exists, daemon appends that in-memory turn to the response.
 4. Otherwise, if this is the latest page and a durable draft exists, daemon appends the draft to the response.
@@ -397,7 +397,7 @@ Required invariants:
 - the latest history page appends the newest in-progress turn at most once
 - at most one draft exists per session
 - a completed turn wins over a stale same-turn draft
-- active-turn coalescing never changes the live `sessionMessage` stream
+- active-turn coalescing never changes the live `session.message` stream
 
 Required tests:
 
@@ -424,7 +424,7 @@ Observability:
 Land the change in one daemon/API slice:
 
 1. add `sessionTurns`, `sessionTurnDrafts`, and active-turn buffering
-2. switch `sessionHistory` IPC and SDK types to paged turns
+2. switch `session.history` IPC and SDK types to paged turns
 3. move slash-command suggestions off raw history scanning and onto `session.availableCommands`
 4. update app history loading to page by turn
 
@@ -436,7 +436,7 @@ Because the repository is pre-alpha, the daemon does not migrate legacy `session
 
 - Should `AgentSession` keep a convenience helper that flattens one page of turns back into `acp.AnyMessage[]`, or is explicit caller flattening clearer?
 - Should the first cut also coalesce `agent_thought_chunk` and `user_message_chunk`, or should it stay limited to `agent_message_chunk` until a concrete need appears?
-- Should the daemon expose draft-specific diagnostics or metadata in `sessionHistory`, or is the `completedAt: null` shape sufficient for clients?
+- Should the daemon expose draft-specific diagnostics or metadata in `session.history`, or is the `completedAt: null` shape sufficient for clients?
 
 ## Ambiguities And Blockers
 

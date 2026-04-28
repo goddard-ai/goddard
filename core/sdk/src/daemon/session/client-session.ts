@@ -39,12 +39,12 @@ export class AgentSession {
 
   /** Cancels any currently pending agent work. */
   async cancel() {
-    return this.daemonClient.send("sessionCancel", { id: this.sessionId })
+    return this.daemonClient.send("session.cancel", { id: this.sessionId })
   }
 
   /** Cancels the active turn and replaces it with one new prompt once the daemon observes a safe boundary. */
   async steer(userPrompt: string | acp.ContentBlock[]) {
-    return this.daemonClient.send("sessionSteer", {
+    return this.daemonClient.send("session.steer", {
       id: this.sessionId,
       prompt: typeof userPrompt === "string" ? userPrompt : [...userPrompt],
     })
@@ -62,7 +62,7 @@ export class AgentSession {
   async getHistoryPage(
     input: Omit<GetSessionHistoryRequest, "id"> = {},
   ): Promise<GetSessionHistoryResponse> {
-    return this.daemonClient.send("sessionHistory", {
+    return this.daemonClient.send("session.history", {
       id: this.sessionId,
       ...input,
     })
@@ -71,6 +71,6 @@ export class AgentSession {
   /** Shuts down the connected agent session on the daemon. */
   async stop() {
     await this.closeStream()
-    await this.daemonClient.send("sessionShutdown", { id: this.sessionId }).catch(() => {})
+    await this.daemonClient.send("session.shutdown", { id: this.sessionId }).catch(() => {})
   }
 }

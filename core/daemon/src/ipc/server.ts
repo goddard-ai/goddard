@@ -181,20 +181,20 @@ export async function startDaemonServer(
   }
 
   const requestHandlers = {
-    health: async () => ({ ok: true }),
-    authDeviceStart: async (payload) => client.auth.startDeviceFlow(payload),
-    authDeviceComplete: async (payload) => {
+    "daemon.health": async () => ({ ok: true }),
+    "auth.device.start": async (payload) => client.auth.startDeviceFlow(payload),
+    "auth.device.complete": async (payload) => {
       const session = await client.auth.completeDeviceFlow(payload)
       db.metadata.set("authToken", session.token)
       return session
     },
-    authWhoami: async () => client.auth.whoami(),
-    authLogout: async () => {
+    "auth.whoami": async () => client.auth.whoami(),
+    "auth.logout": async () => {
       await client.auth.logout()
       db.metadata.delete("authToken")
       return { success: true as const }
     },
-    adapterList: async ({ cwd }) => {
+    "adapter.list": async ({ cwd }) => {
       const [registrySnapshot, resolvedConfig] = await Promise.all([
         registryService.listAdapters(),
         cwd ? configManager.getRootConfig(cwd).then((snapshot) => snapshot.config) : undefined,
@@ -215,7 +215,7 @@ export async function startDaemonServer(
             : null,
       }
     },
-    prSubmit: async (payload) => {
+    "pr.submit": async (payload) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new IpcClientError("Invalid session token")
@@ -267,12 +267,12 @@ export async function startDaemonServer(
       })
       return { number: pr.number, url: pr.url }
     },
-    prGet: async ({ id }) => {
+    "pr.get": async ({ id }) => {
       return {
         pullRequest: inboxManager.getPullRequest(id),
       }
     },
-    prReply: async (payload) => {
+    "pr.reply": async (payload) => {
       const session = await getSessionByToken(payload.token)
       if (!session) {
         throw new IpcClientError("Invalid session token")
@@ -323,7 +323,7 @@ export async function startDaemonServer(
       })
       return response
     },
-    sessionCreate: async (payload) => {
+    "session.create": async (payload) => {
       const response = {
         session: await sessionManager.newSession({ request: payload }),
       }
@@ -331,89 +331,89 @@ export async function startDaemonServer(
       context.setSessionId(response.session.id)
       return response
     },
-    sessionList: async (payload) => {
+    "session.list": async (payload) => {
       return sessionManager.listSessions(payload)
     },
-    sessionGet: async ({ id }) => {
+    "session.get": async ({ id }) => {
       return {
         session: await sessionManager.getSession(id),
       }
     },
-    sessionConnect: async ({ id }) => {
+    "session.connect": async ({ id }) => {
       return {
         session: await sessionManager.connectSession(id),
       }
     },
-    sessionHistory: async (params) => {
+    "session.history": async (params) => {
       return sessionManager.getHistory(params)
     },
-    sessionChanges: async ({ id }) => {
+    "session.changes": async ({ id }) => {
       return sessionManager.getChanges(id)
     },
-    sessionComposerSuggestions: async (payload) => {
+    "session.composerSuggestions": async (payload) => {
       return sessionManager.getComposerSuggestions(payload)
     },
-    sessionDraftSuggestions: async (payload) => {
+    "session.draftSuggestions": async (payload) => {
       return sessionManager.getDraftSuggestions(payload)
     },
-    sessionLaunchPreview: async (payload) => {
+    "session.launchPreview": async (payload) => {
       return sessionManager.getLaunchPreview(payload)
     },
-    sessionDiagnostics: async ({ id }) => {
+    "session.diagnostics": async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },
-    sessionWorktree: async ({ id }) => {
+    "session.worktree.get": async ({ id }) => {
       return sessionManager.getWorktree(id)
     },
-    sessionWorktreeSyncMount: async ({ id }) => {
+    "session.worktreeSync.mount": async ({ id }) => {
       return sessionManager.mountWorktreeSync(id)
     },
-    sessionWorktreeSync: async ({ id }) => {
+    "session.worktreeSync.run": async ({ id }) => {
       return sessionManager.syncWorktree(id)
     },
-    sessionWorktreeSyncUnmount: async ({ id }) => {
+    "session.worktreeSync.unmount": async ({ id }) => {
       return sessionManager.unmountWorktreeSync(id)
     },
-    sessionWorkforce: async ({ id }) => {
+    "session.workforce.get": async ({ id }) => {
       return sessionManager.getWorkforce(id)
     },
-    sessionShutdown: async ({ id }) => {
+    "session.shutdown": async ({ id }) => {
       return {
         id,
         success: await sessionManager.shutdownSession(id),
       }
     },
-    sessionCancel: async ({ id }) => {
+    "session.cancel": async ({ id }) => {
       return sessionManager.cancelSessionTurn(id)
     },
-    sessionSteer: async ({ id, prompt }) => {
+    "session.steer": async ({ id, prompt }) => {
       return sessionManager.steerSession(id, prompt)
     },
-    sessionSend: async ({ id, message }) => {
+    "session.send": async ({ id, message }) => {
       await sessionManager.sendMessage(id, message as acp.AnyMessage)
       return { accepted: true as const }
     },
-    sessionComplete: async ({ id }) => {
+    "session.complete": async ({ id }) => {
       return {
         item: await sessionManager.completeSession(id),
       }
     },
-    sessionDeclareInitiative: async ({ id, title }) => {
+    "session.declareInitiative": async ({ id, title }) => {
       return {
         session: await sessionManager.declareInitiative(id, title),
       }
     },
-    sessionReportBlocker: async ({ id, reason, scope, headline }) => {
+    "session.reportBlocker": async ({ id, reason, scope, headline }) => {
       return {
         session: await sessionManager.reportBlocker(id, reason, { scope, headline }),
       }
     },
-    sessionReportTurnEnded: async ({ id, scope, headline }) => {
+    "session.reportTurnEnded": async ({ id, scope, headline }) => {
       return {
         session: await sessionManager.reportTurnEnded(id, { scope, headline }),
       }
     },
-    sessionResolveToken: async ({ token }) => {
+    "session.resolveToken": async ({ token }) => {
       const id = await sessionManager.resolveSessionIdByToken(token)
       const context = requireIpcRequestContext()
       context.setSessionId(id)
@@ -421,10 +421,10 @@ export async function startDaemonServer(
         id,
       }
     },
-    inboxList: async (payload) => inboxManager.listInboxItems(payload),
-    inboxUpdate: async (payload) => inboxManager.updateInboxItem(payload),
-    inboxBulkUpdate: async (payload) => inboxManager.bulkUpdateInboxItems(payload),
-    actionRun: async (payload) => {
+    "inbox.list": async (payload) => inboxManager.listInboxItems(payload),
+    "inbox.update": async (payload) => inboxManager.updateInboxItem(payload),
+    "inbox.bulkUpdate": async (payload) => inboxManager.bulkUpdateInboxItems(payload),
+    "action.run": async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionManager.newSession({
         request: buildNamedActionSessionParams(action, payload.cwd, {
@@ -442,34 +442,34 @@ export async function startDaemonServer(
       context.setSessionId(session.id)
       return { session }
     },
-    loopStart: async (payload) => {
+    "loop.start": async (payload) => {
       return {
         loop: await loopManager.startLoop(payload),
       }
     },
-    loopGet: async ({ rootDir, loopName }) => {
+    "loop.get": async ({ rootDir, loopName }) => {
       return {
         loop: await loopManager.getLoop(rootDir, loopName),
       }
     },
-    loopList: async () => {
+    "loop.list": async () => {
       return {
         loops: await loopManager.listLoops(),
       }
     },
-    loopShutdown: async ({ rootDir, loopName }) => {
+    "loop.shutdown": async ({ rootDir, loopName }) => {
       return {
         rootDir,
         loopName,
         success: await loopManager.shutdownLoop(rootDir, loopName),
       }
     },
-    workforceStart: async ({ rootDir }) => {
+    "workforce.start": async ({ rootDir }) => {
       return {
         workforce: await workforceManager.startWorkforce(rootDir),
       }
     },
-    workforceDiscoverCandidates: async ({ rootDir }) => {
+    "workforce.discoverCandidates": async ({ rootDir }) => {
       // Canonicalize the repo root inside the daemon so SDK and CLI callers cannot drift.
       const repositoryRoot = await resolveRepositoryRoot(rootDir)
       return {
@@ -477,30 +477,30 @@ export async function startDaemonServer(
         candidates: await discoverWorkforceInitCandidates(repositoryRoot),
       }
     },
-    workforceInitialize: async ({ rootDir, packageDirs }) => {
+    "workforce.initialize": async ({ rootDir, packageDirs }) => {
       // Re-resolve here for the same reason as discovery: the daemon owns the canonical root.
       const repositoryRoot = await resolveRepositoryRoot(rootDir)
       return {
         initialized: await initializeWorkforce(repositoryRoot, packageDirs),
       }
     },
-    workforceGet: async ({ rootDir }) => {
+    "workforce.get": async ({ rootDir }) => {
       return {
         workforce: await workforceManager.getWorkforce(rootDir),
       }
     },
-    workforceList: async () => {
+    "workforce.list": async () => {
       return {
         workforces: await workforceManager.listWorkforces(),
       }
     },
-    workforceShutdown: async ({ rootDir }) => {
+    "workforce.shutdown": async ({ rootDir }) => {
       return {
         rootDir,
         success: await workforceManager.shutdownWorkforce(rootDir),
       }
     },
-    workforceRequest: async (payload) => {
+    "workforce.request": async (payload) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -513,7 +513,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceUpdate: async (payload) => {
+    "workforce.update": async (payload) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -525,7 +525,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceCancel: async (payload) => {
+    "workforce.cancel": async (payload) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -537,7 +537,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceTruncate: async (payload) => {
+    "workforce.truncate": async (payload) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -549,7 +549,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceRespond: async (payload) => {
+    "workforce.respond": async (payload) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -561,7 +561,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    workforceSuspend: async (payload) => {
+    "workforce.suspend": async (payload) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -616,7 +616,7 @@ export async function startDaemonServer(
       })
     },
     beforeSubscribe: async ({ name, filter }) => {
-      if (name === "workforceEvent") {
+      if (name === "workforce.event") {
         const request = filter as SubscribeWorkforceEventsRequest | undefined
         if (!request) {
           throw new IpcClientError("Missing workforce event filter")
@@ -628,7 +628,7 @@ export async function startDaemonServer(
       }
     },
     afterSubscribe: async ({ name, filter }) => {
-      if (name === "sessionMessage") {
+      if (name === "session.message") {
         const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
         if (typeof sessionId === "string") {
           await sessionManager.sessionSubscriberConnected(sessionId)
@@ -636,7 +636,7 @@ export async function startDaemonServer(
       }
     },
     afterUnsubscribe: async ({ name, filter }) => {
-      if (name === "sessionMessage") {
+      if (name === "session.message") {
         const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
         if (typeof sessionId === "string") {
           await sessionManager.sessionSubscriberDisconnected(sessionId)
@@ -657,7 +657,7 @@ export async function startDaemonServer(
     inboxManager,
     idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
     publish(id, message) {
-      ipcServer.publish("sessionMessage", { id, message })
+      ipcServer.publish("session.message", { id, message })
     },
   })
 
@@ -671,7 +671,7 @@ export async function startDaemonServer(
   workforceManager = createWorkforceManager({
     sessionManager,
     publishEvent(payload) {
-      ipcServer.publish("workforceEvent", payload)
+      ipcServer.publish("workforce.event", payload)
     },
   })
   logger.log("ipc.server_listening", {

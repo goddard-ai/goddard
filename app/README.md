@@ -21,11 +21,11 @@ Unless stated otherwise, commands below are run from `./app`.
 ## Embedded Daemon Runtime
 
 - Outside development, the desktop host ensures the app-managed daemon runtime is installed and healthy before it opens the main window.
-- During development, the Bun host waits for the separately watched daemon to answer IPC health checks before it opens the main window.
+- During development, the Bun host waits for the separately watched daemon to answer IPC `daemon.health` checks before it opens the main window.
 - During development, the workspace `bun run dev` flow starts `core/daemon` in watch mode, then launches Vite plus `electrobun dev --watch`.
 - Browser-only changes stay in the Vite HMR loop, Bun host changes relaunch the desktop host, and daemon changes restart the watched daemon without rebuilding embedded app resources.
 - Packaged builds still rerun `preBuild`, rebuild the standalone daemon payload, re-stage the bundled `serviceman` files, and copy the result into Electrobun resources.
-- On launch, the host installs or updates the runtime under `~/.goddard/desktop-runtime`, registers the user-scoped service, waits for the daemon health check to pass, and only then opens the app window.
+- On launch, the host installs or updates the runtime under `~/.goddard/desktop-runtime`, registers the user-scoped service, waits for the `daemon.health` check to pass, and only then opens the app window.
 - If the installed runtime hash already matches and the daemon is healthy, startup reuses the existing install without restarting it.
 - In the Electrobun `dev` channel, the bundled daemon defaults to `http://127.0.0.1:8787` unless `GODDARD_BASE_URL` is set.
 

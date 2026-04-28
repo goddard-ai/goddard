@@ -93,224 +93,224 @@ import {
 /** IPC contract map shared by the daemon client and server. */
 export const daemonIpcSchema = {
   requests: {
-    health: {
+    "daemon.health": {
       response: $type<{ ok: boolean }>(),
     },
-    authDeviceStart: {
+    "auth.device.start": {
       payload: DeviceFlowStart,
       response: $type<DeviceFlowSession>(),
     },
-    authDeviceComplete: {
+    "auth.device.complete": {
       payload: DeviceFlowComplete,
       response: $type<AuthSession>(),
     },
-    authWhoami: {
+    "auth.whoami": {
       response: $type<AuthSession>(),
     },
-    authLogout: {
+    "auth.logout": {
       response: $type<{ success: true }>(),
     },
-    adapterList: {
+    "adapter.list": {
       payload: ListAdaptersRequest,
       response: $type<ListAdaptersResponse>(),
     },
-    prSubmit: {
+    "pr.submit": {
       payload: SubmitPrRequest.extend({
         token: z.string(),
       }),
       response: $type<SubmitPrResponse>(),
     },
-    prGet: {
+    "pr.get": {
       payload: GetPullRequestRequest,
       response: $type<GetPullRequestResponse>(),
     },
-    prReply: {
+    "pr.reply": {
       payload: ReplyPrRequest.extend({
         token: z.string(),
       }),
       response: $type<ReplyPrResponse>(),
     },
-    sessionCreate: {
+    "session.create": {
       payload: CreateSessionRequest,
       response: $type<CreateSessionResponse>(),
     },
-    sessionList: {
+    "session.list": {
       payload: ListSessionsRequest,
       response: $type<ListSessionsResponse>(),
     },
-    sessionGet: {
+    "session.get": {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionResponse>(),
     },
-    sessionConnect: {
+    "session.connect": {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionResponse>(),
     },
-    sessionHistory: {
+    "session.history": {
       payload: GetSessionHistoryRequestSchema,
       response: $type<GetSessionHistoryResponse>(),
     },
-    sessionChanges: {
+    "session.changes": {
       payload: GetSessionChangesRequestSchema,
       response: $type<GetSessionChangesResponse>(),
     },
-    sessionComposerSuggestions: {
+    "session.composerSuggestions": {
       payload: SessionComposerSuggestionsRequest,
       response: $type<SessionComposerSuggestionsResponse>(),
     },
-    sessionDraftSuggestions: {
+    "session.draftSuggestions": {
       payload: SessionDraftSuggestionsRequest,
       response: $type<SessionComposerSuggestionsResponse>(),
     },
-    sessionLaunchPreview: {
+    "session.launchPreview": {
       payload: SessionLaunchPreviewRequest,
       response: $type<SessionLaunchPreviewResponse>(),
     },
-    sessionDiagnostics: {
+    "session.diagnostics": {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionDiagnosticsResponse>(),
     },
-    sessionWorktree: {
+    "session.worktree.get": {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionWorktreeResponse>(),
     },
-    sessionWorktreeSyncMount: {
+    "session.worktreeSync.mount": {
       payload: MountSessionWorktreeSyncRequestSchema,
       response: $type<MutateSessionWorktreeResponse>(),
     },
-    sessionWorktreeSync: {
+    "session.worktreeSync.run": {
       payload: SyncSessionWorktreeRequestSchema,
       response: $type<MutateSessionWorktreeResponse>(),
     },
-    sessionWorktreeSyncUnmount: {
+    "session.worktreeSync.unmount": {
       payload: UnmountSessionWorktreeSyncRequestSchema,
       response: $type<MutateSessionWorktreeResponse>(),
     },
-    sessionWorkforce: {
+    "session.workforce.get": {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionWorkforceResponse>(),
     },
-    sessionShutdown: {
+    "session.shutdown": {
       payload: DaemonSessionIdParams,
       response: $type<ShutdownSessionResponse>(),
     },
-    sessionCancel: {
+    "session.cancel": {
       payload: CancelSessionRequest,
       response: $type<CancelSessionResponse>(),
     },
-    sessionSteer: {
+    "session.steer": {
       payload: SteerSessionRequest,
       response: $type<SteerSessionResponse>(),
     },
-    sessionSend: {
+    "session.send": {
       payload: SendSessionMessageRequest,
       response: $type<{ accepted: true }>(),
     },
-    sessionComplete: {
+    "session.complete": {
       payload: CompleteSessionRequest,
       response: $type<CompleteSessionResponse>(),
     },
-    sessionDeclareInitiative: {
+    "session.declareInitiative": {
       payload: DeclareSessionInitiativeRequest,
       response: $type<ReportSessionResponse>(),
     },
-    sessionReportBlocker: {
+    "session.reportBlocker": {
       payload: ReportSessionBlockerRequest,
       response: $type<ReportSessionResponse>(),
     },
-    sessionReportTurnEnded: {
+    "session.reportTurnEnded": {
       payload: ReportSessionTurnEndedRequest,
       response: $type<ReportSessionResponse>(),
     },
-    sessionResolveToken: {
+    "session.resolveToken": {
       payload: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
     },
-    inboxList: {
+    "inbox.list": {
       payload: ListInboxRequest,
       response: $type<ListInboxResponse>(),
     },
-    inboxUpdate: {
+    "inbox.update": {
       payload: UpdateInboxItemRequest,
       response: $type<UpdateInboxItemResponse>(),
     },
-    inboxBulkUpdate: {
+    "inbox.bulkUpdate": {
       payload: BulkUpdateInboxItemsRequest,
       response: $type<BulkUpdateInboxItemsResponse>(),
     },
-    actionRun: {
+    "action.run": {
       payload: RunNamedActionRequest,
       response: $type<CreateSessionResponse>(),
     },
-    loopStart: {
+    "loop.start": {
       payload: StartLoopRequest,
       response: $type<StartLoopResponse>(),
     },
-    loopGet: {
+    "loop.get": {
       payload: GetLoopRequest,
       response: $type<GetLoopResponse>(),
     },
-    loopList: {
+    "loop.list": {
       response: $type<ListLoopsResponse>(),
     },
-    loopShutdown: {
+    "loop.shutdown": {
       payload: ShutdownLoopRequest,
       response: $type<ShutdownLoopResponse>(),
     },
-    workforceStart: {
+    "workforce.start": {
       payload: StartWorkforceRequest,
       response: $type<StartWorkforceResponse>(),
     },
-    workforceDiscoverCandidates: {
+    "workforce.discoverCandidates": {
       payload: DiscoverWorkforceCandidatesRequest,
       response: $type<DiscoverWorkforceCandidatesResponse>(),
     },
-    workforceInitialize: {
+    "workforce.initialize": {
       payload: InitializeWorkforceRequest,
       response: $type<InitializeWorkforceResponse>(),
     },
-    workforceGet: {
+    "workforce.get": {
       payload: GetWorkforceRequest,
       response: $type<GetWorkforceResponse>(),
     },
-    workforceList: {
+    "workforce.list": {
       response: $type<ListWorkforcesResponse>(),
     },
-    workforceShutdown: {
+    "workforce.shutdown": {
       payload: ShutdownWorkforceRequest,
       response: $type<ShutdownWorkforceResponse>(),
     },
-    workforceRequest: {
+    "workforce.request": {
       payload: CreateWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     },
-    workforceUpdate: {
+    "workforce.update": {
       payload: UpdateWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     },
-    workforceCancel: {
+    "workforce.cancel": {
       payload: CancelWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     },
-    workforceTruncate: {
+    "workforce.truncate": {
       payload: TruncateWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     },
-    workforceRespond: {
+    "workforce.respond": {
       payload: RespondWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     },
-    workforceSuspend: {
+    "workforce.suspend": {
       payload: SuspendWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     },
   },
   streams: {
-    sessionMessage: {
+    "session.message": {
       payload: $type<SessionMessageEvent>(),
       filter: DaemonSessionIdParams,
     },
-    workforceEvent: {
+    "workforce.event": {
       payload: $type<WorkforceEventEnvelope>(),
       filter: SubscribeWorkforceEventsRequest,
     },

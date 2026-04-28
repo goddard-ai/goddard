@@ -286,7 +286,7 @@ async function waitForDaemonReady(daemonUrl: string, timeoutMs = 15_000) {
 /** Sends a daemon health check request and returns whether the daemon answered successfully. */
 async function pingDaemon(daemonUrl: string) {
   const client = createDaemonIpcClient({ daemonUrl })
-  const response = await client.send("health")
+  const response = await client.send("daemon.health")
   return response.ok === true
 }
 

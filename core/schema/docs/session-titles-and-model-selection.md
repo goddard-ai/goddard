@@ -25,7 +25,7 @@ This feature is separate from the session agent's own model selection:
 
 ## Goals
 
-- Return a non-empty durable session title from the initial `sessionCreate` response.
+- Return a non-empty durable session title from the initial `session.create` response.
 - Show a deterministic fallback title immediately.
 - Allow users to configure a preferred provider and model for title generation independently from the session agent model.
 - Generate a better title asynchronously when title-generation config is present and usable.
@@ -295,7 +295,7 @@ No new session-level `model` field is required for this feature.
 - Session list rows and chat headers should always display `session.title`.
 - If `titleState === "pending"`, the host may show a subtle loading affordance while continuing to display the fallback title.
 - If `titleState === "fallback"`, the host should treat the current title as final unless a later refresh indicates otherwise.
-- Hosts that care about fast pending-to-generated transitions should refresh `sessionGet` or `sessionList` while `titleState === "pending"`.
+- Hosts that care about fast pending-to-generated transitions should refresh `session.get` or `session.list` while `titleState === "pending"`.
 - A future settings surface should edit `sessionTitles.generator`, not `session.model`, when configuring title generation.
 
 ## Behavioral Semantics
@@ -307,10 +307,10 @@ No new session-level `model` field is required for this feature.
 3. Derive the initial fallback title when `initialPrompt` text is available.
 4. Create and initialize the real daemon session normally.
 5. Persist the session record with `title` and `titleState`.
-6. Return `sessionCreate`.
+6. Return `session.create`.
 7. If `titleState === "pending"`, start the background title-generation task.
 
-The background step must not delay `sessionCreate`.
+The background step must not delay `session.create`.
 
 ### Sessions Without an Initial Prompt
 
@@ -344,7 +344,7 @@ When the first user prompt is later accepted:
 
 ### Fresh Session with Initial Prompt and Configured Generator
 
-1. Host calls `sessionCreate`.
+1. Host calls `session.create`.
 2. Daemon resolves `sessionTitles.generator`.
 3. Daemon derives the fallback title.
 4. Daemon creates the real daemon session.
@@ -358,7 +358,7 @@ When the first user prompt is later accepted:
 
 ### Fresh Session with Initial Prompt and No Generator Config
 
-1. Host calls `sessionCreate`.
+1. Host calls `session.create`.
 2. Daemon derives the fallback title.
 3. Daemon creates the real daemon session.
 4. Daemon persists `title` and `titleState = "fallback"`.
@@ -367,7 +367,7 @@ When the first user prompt is later accepted:
 
 ### Session Created Without an Initial Prompt
 
-1. Host calls `sessionCreate` without `initialPrompt`.
+1. Host calls `session.create` without `initialPrompt`.
 2. Daemon persists `title = "New session"` and `titleState = "placeholder"`.
 3. Later, the first user prompt is accepted.
 4. Daemon derives the fallback title.

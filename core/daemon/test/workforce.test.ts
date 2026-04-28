@@ -74,7 +74,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const discovered = await client.send("workforceDiscoverCandidates", {
+  const discovered = await client.send("workforce.discoverCandidates", {
     rootDir: packageDir,
   })
   const normalizedRootDir = await normalizeWorkforceRootDir(repoDir)
@@ -85,7 +85,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
     "packages/ui",
   ])
 
-  const initialized = await client.send("workforceInitialize", {
+  const initialized = await client.send("workforce.initialize", {
     rootDir: packageDir,
     packageDirs: discovered.candidates.map((candidate) => candidate.rootDir),
   })
@@ -144,7 +144,7 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
   const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
 
   await expect(
-    client.subscribe({ name: "workforceEvent", filter: { rootDir } }, () => {}),
+    client.subscribe({ name: "workforce.event", filter: { rootDir } }, () => {}),
   ).rejects.toThrow(`No workforce is running for ${normalizedRootDir}`)
 })
 

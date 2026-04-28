@@ -33,7 +33,7 @@ function optionalSessionToken(): string | undefined {
 
 export async function workforceRequest(targetAgentId: string, input: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  return client.send("workforceRequest", {
+  return client.send("workforce.request", {
     rootDir: requireWorkforceRootDir(),
     targetAgentId,
     input,
@@ -43,7 +43,7 @@ export async function workforceRequest(targetAgentId: string, input: string) {
 
 export async function workforceUpdate(requestId: string, input: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  return client.send("workforceUpdate", {
+  return client.send("workforce.update", {
     rootDir: requireWorkforceRootDir(),
     requestId,
     input,
@@ -53,7 +53,7 @@ export async function workforceUpdate(requestId: string, input: string) {
 
 export async function workforceCancel(requestId: string, reason?: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  return client.send("workforceCancel", {
+  return client.send("workforce.cancel", {
     rootDir: requireWorkforceRootDir(),
     requestId,
     reason,
@@ -63,7 +63,7 @@ export async function workforceCancel(requestId: string, reason?: string) {
 
 export async function workforceTruncate(agentId?: string, reason?: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  return client.send("workforceTruncate", {
+  return client.send("workforce.truncate", {
     rootDir: requireWorkforceRootDir(),
     agentId,
     reason,
@@ -73,7 +73,7 @@ export async function workforceTruncate(agentId?: string, reason?: string) {
 
 export async function workforceRespond(output: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  return client.send("workforceRespond", {
+  return client.send("workforce.respond", {
     rootDir: requireWorkforceRootDir(),
     output,
     token: requireSessionToken(),
@@ -82,7 +82,7 @@ export async function workforceRespond(output: string) {
 
 export async function workforceSuspend(reason: string) {
   const { client } = createDaemonIpcClientFromEnv()
-  return client.send("workforceSuspend", {
+  return client.send("workforce.suspend", {
     rootDir: requireWorkforceRootDir(),
     reason,
     token: requireSessionToken(),

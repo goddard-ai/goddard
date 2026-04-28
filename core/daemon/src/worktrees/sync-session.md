@@ -337,7 +337,7 @@ const SessionWorktree = z.strictObject({
 })
 ```
 
-`sessionWorktree` stays the read endpoint, but `SessionManager.getWorktree()` now merges persisted `db.worktrees` metadata with live sync-session state from the Git metadata file when present.
+`session.worktree.get` stays the read endpoint, but `SessionManager.getWorktree()` now merges persisted `db.worktrees` metadata with live sync-session state from the Git metadata file when present.
 
 ### New daemon control routes and IPC actions
 
@@ -381,7 +381,7 @@ Sync can be mounted either during session creation or later for one already-prov
 3. If one exists and it is not the same session id:
    - stop that session's auto-sync runtime when it is live
    - unmount it with the normal unmount path while still holding the repo lock
-   - clear its live sync state so later `sessionWorktree` reads report an ordinary session worktree again
+   - clear its live sync state so later `session.worktree.get` reads report an ordinary session worktree again
    - continue without surfacing an error to the caller that requested the newer mount
 4. Verify both directories still belong to the same Git common dir.
 5. Read:
@@ -537,9 +537,9 @@ Mounted sync sessions must not leave the primary checkout detached indefinitely 
 
 Daemon behavior:
 
-- `sessionShutdown()` first attempts `unmount()`
+- `session.shutdown` first attempts `unmount()`
 - if unmount succeeds, session shutdown proceeds normally
-- if unmount fails, `sessionShutdown()` returns `success: false` and records one diagnostic event
+- if unmount fails, `session.shutdown` returns `success: false` and records one diagnostic event
 - startup reconciliation attempts best-effort unmount for any persisted session whose sync metadata file still exists but whose live daemon session is gone
 - if reconciliation unmount fails, the daemon records diagnostics and marks the session record with an error message describing the manual recovery requirement
 
@@ -549,7 +549,7 @@ This differs from ordinary session-worktree cleanup. The worktree directory stil
 
 ### Create or mount path
 
-1. SDK or another daemon client calls `sessionCreate()` with `worktree.enabled: true` and optionally `worktree.sync.enabled: true`, or later calls `session.mountWorktreeSync({ id })`.
+1. SDK or another daemon client calls `session.create` with `worktree.enabled: true` and optionally `worktree.sync.enabled: true`, or later calls `session.mountWorktreeSync({ id })`.
 2. `SessionManager.resolveLaunchWorktree()` asks `createWorktree()` for one session worktree when needed.
 3. `createWorktree()` persists the static worktree identity through `db.worktrees`.
 4. The daemon constructs `WorktreeSyncSessionHost` with:
@@ -688,15 +688,15 @@ Tradeoff:
 
 ### `core/daemon` session-manager tests
 
-- `sessionCreate()` with `worktree.sync.enabled` provisions one session worktree, mounts sync state, and starts the auto-sync scheduler
+- `session.create` with `worktree.sync.enabled` provisions one session worktree, mounts sync state, and starts the auto-sync scheduler
 - `session.mountWorktreeSync()` mounts sync for one existing linked session worktree
 - `session.mountWorktreeSync()` on a second session against the same primary checkout stops the older scheduler and clears the older session's live sync state
 - debounced watcher events coalesce into one sync cycle
 - watcher degradation records diagnostics and leaves manual sync available
-- `sessionWorktree` returns live sync state
+- `session.worktree.get` returns live sync state
 - `session.syncWorktree()` forces one immediate sync cycle
 - `session.unmountWorktree()` restores the primary checkout and clears live sync state
-- `sessionShutdown()` auto-unmounts before completing
+- `session.shutdown` auto-unmounts before completing
 - reconciliation attempts best-effort unmount for abandoned mounted sessions
 
 ### Rollout and diagnostics

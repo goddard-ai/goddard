@@ -44,7 +44,7 @@ test("daemon submit request requires a valid session token", async () => {
 
   const { logs } = await captureLogs(async () => {
     await expect(
-      client.send("prSubmit", {
+      client.send("pr.submit", {
         token: "",
         cwd: process.cwd(),
         title: "Ship daemon security",
@@ -57,7 +57,7 @@ test("daemon submit request requires a valid session token", async () => {
   const failed = logs.find((entry) => entry.event === "ipc.request_failed")
   const receivedIpcRequest = received?.ipcRequest as Record<string, unknown> | undefined
   const failedIpcRequest = failed?.ipcRequest as Record<string, unknown> | undefined
-  expect(received?.requestName).toBe("prSubmit")
+  expect(received?.requestName).toBe("pr.submit")
   expect(received?.payload).toEqual({
     token: "[REDACTED]",
     cwd: process.cwd(),
@@ -65,7 +65,7 @@ test("daemon submit request requires a valid session token", async () => {
     body: "Done.",
   })
   expect(receivedIpcRequest?.opId).toBe(failedIpcRequest?.opId)
-  expect(failed?.requestName).toBe("prSubmit")
+  expect(failed?.requestName).toBe("pr.submit")
 })
 
 test("daemon hides unexpected handler crashes from IPC clients", async () => {
@@ -98,7 +98,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
     await expect(
-      client.send("prSubmit", {
+      client.send("pr.submit", {
         token: "tok_session",
         cwd: repoDir,
         title: "Ship daemon security",
@@ -108,7 +108,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
   })
 
   const failed = logs.find((entry) => entry.event === "ipc.request_failed")
-  expect(failed?.requestName).toBe("prSubmit")
+  expect(failed?.requestName).toBe("pr.submit")
   expect(failed?.errorMessage).toBe("github exploded")
 })
 
@@ -167,7 +167,7 @@ test("daemon submit request enforces trusted repo context and records created PR
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
-    await client.send("prSubmit", {
+    await client.send("pr.submit", {
       token: "tok_session",
       cwd: repoDir,
       title: "Ship daemon security",
@@ -219,7 +219,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     scope: "Session",
     headline: "Ship daemon security",
   })
-  await expect(client.send("prGet", { id: pullRequest!.id })).resolves.toMatchObject({
+  await expect(client.send("pr.get", { id: pullRequest!.id })).resolves.toMatchObject({
     pullRequest: {
       id: pullRequest!.id,
       owner: "trusted",
@@ -232,8 +232,8 @@ test("daemon submit request enforces trusted repo context and records created PR
   const responded = logs.find((entry) => entry.event === "ipc.response_sent")
   const receivedIpcRequest = received?.ipcRequest as Record<string, unknown> | undefined
   const respondedIpcRequest = responded?.ipcRequest as Record<string, unknown> | undefined
-  expect(received?.requestName).toBe("prSubmit")
-  expect(responded?.requestName).toBe("prSubmit")
+  expect(received?.requestName).toBe("pr.submit")
+  expect(responded?.requestName).toBe("pr.submit")
   expect(receivedIpcRequest?.opId).toBe(respondedIpcRequest?.opId)
   expect(receivedIpcRequest?.sessionId).toBeNull()
   expect(respondedIpcRequest?.sessionId).toBe("ses_42")
@@ -258,7 +258,7 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("prReply", {
+    client.send("pr.reply", {
       token: "tok_session",
       cwd: repoDir,
       message: "Updated per review",
@@ -284,7 +284,7 @@ test("daemon reply request records pull request checkout locations", async () =>
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("prReply", {
+  await client.send("pr.reply", {
     token: "tok_session",
     cwd: repoDir,
     message: "Updated per review",
@@ -337,7 +337,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("sessionReportBlocker", {
+  await client.send("session.reportBlocker", {
     id: "ses_inbox",
     reason: "Need product decision",
     scope: "Checkout flow",
@@ -353,12 +353,12 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     headline: "Decision blocks final step",
   })
 
-  await client.send("inboxUpdate", {
+  await client.send("inbox.update", {
     entityId: "ses_inbox",
     status: "read",
   })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
-  await client.send("sessionComplete", { id: "ses_inbox" })
+  await client.send("session.complete", { id: "ses_inbox" })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
 })
 
@@ -381,7 +381,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforceRequest", {
+    client.send("workforce.request", {
       rootDir: otherRootDir,
       targetAgentId: "root",
       input: "Ship it.",
@@ -409,7 +409,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforceRespond", {
+    client.send("workforce.respond", {
       rootDir: otherRootDir,
       output: "done",
       token,
@@ -435,7 +435,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforceRequest", {
+    client.send("workforce.request", {
       rootDir,
       targetAgentId: "root",
       input: "Ship it.",

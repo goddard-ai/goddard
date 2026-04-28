@@ -137,14 +137,14 @@ Tasks:
 - Add a durable store shape for inbox rows in `core/schema/src/daemon/store.ts`.
 - Export the new schema types through `core/schema/src/daemon.ts`.
 - Extend `daemonIpcSchema` with:
-  - `prGet`
-  - `inboxList`
-  - `inboxUpdate`
-  - `inboxBulkUpdate`
-  - `sessionComplete`
-  - `sessionDeclareInitiative`
-  - `sessionReportBlocker`
-  - `sessionReportTurnEnded`
+  - `pr.get`
+  - `inbox.list`
+  - `inbox.update`
+  - `inbox.bulkUpdate`
+  - `session.complete`
+  - `session.declareInitiative`
+  - `session.reportBlocker`
+  - `session.reportTurnEnded`
 - Add structured inbox metadata fields to terminal agent request payloads:
   - `scope?: InboxScope`
   - `headline: InboxHeadline`
@@ -263,7 +263,7 @@ Tasks:
 - Remove direct `db.sessions` mutation from `goddard-tool`.
 - Keep per-session turn-entity activity as session-lifecycle state inside the daemon, not in the CLI.
 - Reuse the same session-manager path for one-shot turn-ended handling so the daemon does not split that logic across unrelated codepaths.
-- Wire `sessionSend` user replies and explicit session completion through the inbox manager according to Write Semantics.
+- Wire `session.send` user replies and explicit session completion through the inbox manager according to Write Semantics.
 - Resolve session inbox metadata at turn end:
   - validate the supplied headline
   - use supplied scope when present
@@ -296,14 +296,14 @@ Files to update:
 
 Tasks:
 
-- Add `prGet` to fetch one stored daemon pull request by tagged id.
-- After `prSubmit` succeeds:
+- Add `pr.get` to fetch one stored daemon pull request by tagged id.
+- After `pr.submit` succeeds:
   - update session PR permissions
   - create or update the local `pullRequests` row
   - resolve and store session turn inbox metadata from the supplied PR terminal metadata or fallback data
   - touch the corresponding inbox row with `pull_request.created`
   - mark the current session turn as having touched another attention entity
-- After `prReply` succeeds:
+- After `pr.reply` succeeds:
   - update the local `pullRequests` row
   - resolve and store session turn inbox metadata from the supplied PR terminal metadata or fallback data
   - touch the corresponding inbox row with `pull_request.updated`
@@ -436,11 +436,11 @@ This order keeps public types ahead of daemon code, and daemon code ahead of SDK
 - daemon attention reopens every prior status to `unread`
 - inbox list defaults to unread-only behavior
 - inbox list pagination orders by `updatedAt desc, id desc`
-- `inboxUpdate` is idempotent
-- `inboxBulkUpdate` is idempotent for repeated identical requests
-- `inboxBulkUpdate` applies one shared `updatedAt` to all affected rows
-- `inboxBulkUpdate` reports missing ids without creating rows
-- `inboxBulkUpdate` uses the same entity-aware status validation as single-item updates
+- `inbox.update` is idempotent
+- `inbox.bulkUpdate` is idempotent for repeated identical requests
+- `inbox.bulkUpdate` applies one shared `updatedAt` to all affected rows
+- `inbox.bulkUpdate` reports missing ids without creating rows
+- `inbox.bulkUpdate` uses the same entity-aware status validation as single-item updates
 - new inbox rows default to `priority = "normal"`
 - session reply status transitions match Status Semantics
 - explicit session completion marks the session inbox row `completed` without shutting down the session
@@ -453,8 +453,8 @@ This order keeps public types ahead of daemon code, and daemon code ahead of SDK
 - declare-initiative leaves existing inbox rows untouched
 - turn-ended reporting emits `session.turn_ended` only when no other attention entity was touched
 - one-shot completion follows the same suppression rule
-- `prSubmit` creates unread pull-request attention
-- `prReply` refreshes unread pull-request attention on the existing pull-request entity
+- `pr.submit` creates unread pull-request attention
+- `pr.reply` refreshes unread pull-request attention on the existing pull-request entity
 - PR completion status transitions match Status Semantics if PR lifecycle refresh is implemented in this phase
 
 ### SDK tests

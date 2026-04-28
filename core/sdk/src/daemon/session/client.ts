@@ -10,7 +10,7 @@ function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
   return "sessionId" in params === false && params.oneShot === true
 }
 
-/** Turns a writable ACP transport into daemon `sessionSend` requests. */
+/** Turns a writable ACP transport into daemon `session.send` requests. */
 function createMessageInputTransport(
   client: DaemonIpcClient,
   id: DaemonSession["id"],
@@ -34,7 +34,7 @@ function createMessageInputTransport(
         return
       }
 
-      await client.send("sessionSend", {
+      await client.send("session.send", {
         id,
         message: JSON.parse(trimmed),
       })
@@ -57,7 +57,7 @@ async function flushMessageBuffer(
       continue
     }
 
-    await client.send("sessionSend", {
+    await client.send("session.send", {
       id,
       message: JSON.parse(trimmed),
     })
@@ -93,7 +93,7 @@ async function createMessageOutputTransport(
   let closed = false
 
   const unsubscribe = await client.subscribe(
-    { name: "sessionMessage", filter: { id } },
+    { name: "session.message", filter: { id } },
     ({ message }) => {
       if (
         closed ||
@@ -171,8 +171,8 @@ export async function runSession(
 ): Promise<AgentSession | null> {
   const connectedSession =
     "sessionId" in params && params.sessionId !== undefined
-      ? await client.send("sessionConnect", { id: params.sessionId })
-      : await client.send("sessionCreate", {
+      ? await client.send("session.connect", { id: params.sessionId })
+      : await client.send("session.create", {
           agent: params.agent,
           cwd: params.cwd,
           worktree: params.worktree,

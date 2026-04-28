@@ -23,7 +23,7 @@ function createSdkWithClient() {
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
-  test("adapter.list forwards to adapterList", async () => {
+  test("adapter.list forwards to adapter.list", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
@@ -44,10 +44,10 @@ describe("@goddard-ai/sdk session namespace", () => {
       lastError: null,
     })
 
-    expect(send).toHaveBeenCalledWith("adapterList", { cwd: "/tmp/project" })
+    expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
   })
 
-  test("session.changes forwards to sessionChanges", async () => {
+  test("session.changes forwards to session.changes", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
@@ -66,12 +66,12 @@ describe("@goddard-ai/sdk session namespace", () => {
       hasChanges: true,
     })
 
-    expect(send).toHaveBeenCalledWith("sessionChanges", {
+    expect(send).toHaveBeenCalledWith("session.changes", {
       id: "ses_1",
     })
   })
 
-  test("session.send forwards ACP messages to sessionSend", async () => {
+  test("session.send forwards ACP messages to session.send", async () => {
     const { sdk, send } = createSdkWithClient()
     const message: acp.AnyMessage = {
       jsonrpc: "2.0",
@@ -89,13 +89,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       accepted: true,
     })
 
-    expect(send).toHaveBeenCalledWith("sessionSend", {
+    expect(send).toHaveBeenCalledWith("session.send", {
       id: "ses_1",
       message,
     })
   })
 
-  test("session.cancel forwards daemon-owned turn cancellation to sessionCancel", async () => {
+  test("session.cancel forwards daemon-owned turn cancellation to session.cancel", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
@@ -120,12 +120,12 @@ describe("@goddard-ai/sdk session namespace", () => {
       ],
     })
 
-    expect(send).toHaveBeenCalledWith("sessionCancel", {
+    expect(send).toHaveBeenCalledWith("session.cancel", {
       id: "ses_daemon-session-1",
     })
   })
 
-  test("session.steer forwards one replacement prompt to sessionSteer", async () => {
+  test("session.steer forwards one replacement prompt to session.steer", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
@@ -145,7 +145,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       response: { stopReason: "end_turn" },
     })
 
-    expect(send).toHaveBeenCalledWith("sessionSteer", {
+    expect(send).toHaveBeenCalledWith("session.steer", {
       id: "ses_daemon-session-1",
       prompt: "Review only the failing tests.",
     })
@@ -201,13 +201,13 @@ describe("@goddard-ai/sdk session namespace", () => {
     await sdk.session.syncWorktree({ id: "ses_1" })
     await sdk.session.unmountWorktree({ id: "ses_1" })
 
-    expect(send).toHaveBeenNthCalledWith(1, "sessionWorktreeSyncMount", {
+    expect(send).toHaveBeenNthCalledWith(1, "session.worktreeSync.mount", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(2, "sessionWorktreeSync", {
+    expect(send).toHaveBeenNthCalledWith(2, "session.worktreeSync.run", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(3, "sessionWorktreeSyncUnmount", {
+    expect(send).toHaveBeenNthCalledWith(3, "session.worktreeSync.unmount", {
       id: "ses_1",
     })
   })
@@ -223,7 +223,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         handler: Parameters<GoddardClient["subscribe"]>[1],
       ) => {
         expect(target).toEqual({
-          name: "sessionMessage",
+          name: "session.message",
           filter: { id: "ses_1" },
         })
         handler({
@@ -241,7 +241,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
 
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "sessionMessage", filter: { id: "ses_1" } },
+      { name: "session.message", filter: { id: "ses_1" } },
       expect.any(Function),
     )
     expect(onMessage).toHaveBeenCalledTimes(1)
@@ -286,7 +286,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       ],
     })
 
-    expect(send).toHaveBeenCalledWith("sessionComposerSuggestions", {
+    expect(send).toHaveBeenCalledWith("session.composerSuggestions", {
       id: "ses_1",
       trigger: "at",
       query: "index",
@@ -328,7 +328,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       ],
     })
 
-    expect(send).toHaveBeenCalledWith("sessionDraftSuggestions", {
+    expect(send).toHaveBeenCalledWith("session.draftSuggestions", {
       cwd: "/repo",
       trigger: "dollar",
       query: "check",
@@ -397,7 +397,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       ],
     })
 
-    expect(send).toHaveBeenCalledWith("sessionLaunchPreview", {
+    expect(send).toHaveBeenCalledWith("session.launchPreview", {
       agent: "pi-acp",
       cwd: "/repo",
     })
@@ -576,7 +576,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(session).toBeInstanceOf(AgentSession)
     await session!.stop()
 
-    expect(send).toHaveBeenNthCalledWith(1, "sessionCreate", {
+    expect(send).toHaveBeenNthCalledWith(1, "session.create", {
       agent: "pi-acp",
       cwd: "/tmp/project",
       worktree: undefined,
@@ -597,10 +597,10 @@ describe("@goddard-ai/sdk session namespace", () => {
       oneShot: undefined,
     })
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "sessionMessage", filter: { id: "ses_1" } },
+      { name: "session.message", filter: { id: "ses_1" } },
       expect.any(Function),
     )
-    expect(send).toHaveBeenNthCalledWith(2, "sessionShutdown", { id: "ses_1" })
+    expect(send).toHaveBeenNthCalledWith(2, "session.shutdown", { id: "ses_1" })
   })
 
   test("session.run lets the daemon resolve the default agent when none is provided", async () => {
@@ -624,7 +624,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(session).toBeInstanceOf(AgentSession)
     await session!.stop()
 
-    expect(send).toHaveBeenNthCalledWith(1, "sessionCreate", {
+    expect(send).toHaveBeenNthCalledWith(1, "session.create", {
       agent: undefined,
       cwd: "/tmp/project",
       worktree: undefined,
@@ -652,7 +652,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         handler: Parameters<GoddardClient["subscribe"]>[1],
       ) => {
         expect(target).toEqual({
-          name: "workforceEvent",
+          name: "workforce.event",
           filter: { rootDir: "/repo" },
         })
         handler({
@@ -675,7 +675,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
 
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "workforceEvent", filter: { rootDir: "/repo" } },
+      { name: "workforce.event", filter: { rootDir: "/repo" } },
       expect.any(Function),
     )
     expect(onEvent).toHaveBeenCalledTimes(1)
@@ -736,7 +736,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       abortedQueue: [],
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("sessionCancel", {
+    expect(daemonSend).toHaveBeenCalledWith("session.cancel", {
       id: "ses_daemon-session-1",
     })
   })
@@ -763,7 +763,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       response: { stopReason: "end_turn" },
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("sessionSteer", {
+    expect(daemonSend).toHaveBeenCalledWith("session.steer", {
       id: "ses_daemon-session-1",
       prompt: "Focus on the lint failure.",
     })

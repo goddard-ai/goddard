@@ -148,7 +148,7 @@ test("config manager promotes valid root config edits and preserves the last goo
 })
 
 test(
-  "actionRun picks up updated root-config agent defaults without restarting the daemon",
+  "action.run picks up updated root-config agent defaults without restarting the daemon",
   async () => {
     await useTempHome()
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-action-reload-repo-"))
@@ -173,7 +173,7 @@ test(
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-    const firstRun = await client.send("actionRun", {
+    const firstRun = await client.send("action.run", {
       actionName: "review",
       cwd: repoDir,
     })
@@ -195,14 +195,14 @@ test(
       return typeof agent === "object" && agent?.name === "Node Agent B"
     })
 
-    const secondRun = await client.send("actionRun", {
+    const secondRun = await client.send("action.run", {
       actionName: "review",
       cwd: repoDir,
     })
     expect(secondRun.session.agentName).toBe("Node Agent B")
 
-    await client.send("sessionShutdown", { id: firstRun.session.id })
-    await client.send("sessionShutdown", { id: secondRun.session.id })
+    await client.send("session.shutdown", { id: firstRun.session.id })
+    await client.send("session.shutdown", { id: secondRun.session.id })
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
 )
@@ -270,7 +270,7 @@ test(
     for (const sessionId of [...firstSessionIds, secondSession?.id].filter(
       (value) => value != null,
     )) {
-      await client.send("sessionShutdown", { id: sessionId })
+      await client.send("session.shutdown", { id: sessionId })
     }
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,

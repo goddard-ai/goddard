@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 
 import { GoddardSdk } from "../src/index.ts"
 
-test("session.prompt forwards a structured ACP prompt message through sessionSend", async () => {
+test("session.prompt forwards a structured ACP prompt message through session.send", async () => {
   const calls: Array<{ name: string; payload: unknown }> = []
   const sdk = new GoddardSdk({
     client: {
@@ -27,7 +27,7 @@ test("session.prompt forwards a structured ACP prompt message through sessionSen
   })
 
   expect(calls).toHaveLength(1)
-  expect(calls[0]?.name).toBe("sessionSend")
+  expect(calls[0]?.name).toBe("session.send")
   expect(calls[0]?.payload).toMatchObject({
     id: "ses_daemon-session-1",
     message: {
