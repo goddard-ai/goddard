@@ -33,6 +33,7 @@
   - In non-trivial components, group top-level expressions in this order when practical: consumed context/services/refs, local UI state, derived render model, local semantic actions, bridge hooks/subscriptions, then JSX.
   - Prefer derived render values over sync effects when the next value can be computed during render.
   - Separate logical groups with blank lines.
+  - TSRX allows Preact hooks anywhere in the component render scope, including after early returns, inside `if`/`for` blocks, and inside JSX children. Keep hook calls near their natural use site instead of hoisting them solely for React-style hook ordering.
   - When a dialog component accepts `dialog: UseDialogReturn`, treat it as content rendered under a parent `Dialog.RootProvider`; do not nest `Dialog.Root` inside that component.
   - Keep custom Preact hooks for state management local to the component that uses them.
   - Do not extract single-use state hooks into shared modules.
