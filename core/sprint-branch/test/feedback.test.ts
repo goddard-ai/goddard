@@ -33,7 +33,7 @@ describe("sprint-branch feedback", () => {
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
 
-    const result = await runCli(repo, ["feedback", "--include-untracked", "--json"])
+    const result = await runCli(repo, ["feedback", "--json"])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
@@ -60,7 +60,7 @@ describe("sprint-branch feedback", () => {
     await fs.writeFile(path.join(repo, "scratch.txt"), "review work\n")
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["feedback", "--include-untracked", "--json"])
+    const result = await runCli(repo, ["feedback", "--json"])
     const feedback = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -70,9 +70,9 @@ describe("sprint-branch feedback", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
-  // Git's default stash does not include untracked files.
-  // The explicit flag makes the agent acknowledge that scratch files are part of the interruption.
-  test("refuses untracked next work without include-untracked", async () => {
+  // Git's default stash does not include untracked files, but interrupted work-ahead often does.
+  // Feedback includes untracked files by default so scratch files are not left behind on next.
+  test("stashes untracked next work by default", async () => {
     const repo = await createSprintRepo(
       "example",
       {
@@ -85,21 +85,18 @@ describe("sprint-branch feedback", () => {
     )
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
-    const beforeState = await readState(repo, "example")
-
     const result = await runCli(repo, ["feedback", "--json"])
-    const feedback = JSON.parse(result.stdout) as MutationOutput
+    const state = await readState(repo, "example")
 
-    expect(result.exitCode).toBe(1)
-    expect(diagnosticCodes(feedback)).toContain("untracked_work_requires_flag")
-    expect(await currentBranch(repo)).toBe("sprint/example/next")
-    expect(await stashList(repo)).toBe("")
-    expect(await readState(repo, "example")).toEqual(beforeState)
+    expect(result.exitCode).toBe(0)
+    expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect(state.activeStashes).toHaveLength(1)
+    expect(await stashList(repo)).toContain("sprint-branch:example:020-task-name:feedback")
   })
 
-  // Tracked edits are safe to stash with Git's default behavior.
-  // This prevents the untracked-file guard from becoming a blanket requirement for all feedback.
-  test("stashes tracked next work without include-untracked", async () => {
+  // The include-untracked default should not be limited to untracked-only interruptions.
+  // Tracked edits still need the same recorded stash metadata for resume.
+  test("stashes tracked next work with the default feedback stash", async () => {
     const repo = await createSprintRepo(
       "example",
       {
@@ -173,7 +170,7 @@ describe("sprint-branch feedback", () => {
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["feedback", "--include-untracked", "--dry-run", "--json"])
+    const result = await runCli(repo, ["feedback", "--dry-run", "--json"])
     const feedback = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(0)

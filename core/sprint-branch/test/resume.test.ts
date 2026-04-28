@@ -30,7 +30,7 @@ describe("sprint-branch resume", () => {
     )
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
-    expect((await runCli(repo, ["feedback", "--include-untracked"])).exitCode).toBe(0)
+    expect((await runCli(repo, ["feedback"])).exitCode).toBe(0)
     await commitAll(repo, "record feedback transition")
 
     const result = await runCli(repo, ["resume", "--json"])

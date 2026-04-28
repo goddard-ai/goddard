@@ -193,13 +193,7 @@ export async function main(argv: string[]) {
       feedback: command({
         name: "feedback",
         description: "Prepare for human feedback on the review branch",
-        args: {
-          ...commonMutationArgs,
-          includeUntracked: flag({
-            long: "include-untracked",
-            description: "Include untracked files when stashing interrupted next-branch work",
-          }),
-        },
+        args: commonMutationArgs,
         handler: async (args) => {
           await writeMutation(args.json, runFeedback({ cwd: process.cwd(), ...args }))
         },

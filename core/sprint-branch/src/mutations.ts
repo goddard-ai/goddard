@@ -237,7 +237,7 @@ export async function runStart(input: MutationInput & { task: string }) {
 }
 
 /** Stashes interrupted next-branch work when needed and checks out the review branch. */
-export async function runFeedback(input: MutationInput & { includeUntracked: boolean }) {
+export async function runFeedback(input: MutationInput) {
   const { context, state, diagnostics } = await readCommandState(input, "feedback")
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const nextState = cloneState(state)
@@ -252,17 +252,6 @@ export async function runFeedback(input: MutationInput & { includeUntracked: boo
       message: "feedback can only stash dirty work from the recorded next branch.",
     })
   }
-  if (
-    onNext &&
-    !input.includeUntracked &&
-    workingTree.entries.some((entry) => entry.startsWith("?? "))
-  ) {
-    diagnostics.push({
-      severity: "error",
-      code: "untracked_work_requires_flag",
-      message: "feedback found untracked next-branch work; pass --include-untracked to stash it.",
-    })
-  }
   if (onNext && !state.tasks.next) {
     diagnostics.push({
       severity: "error",
@@ -272,9 +261,7 @@ export async function runFeedback(input: MutationInput & { includeUntracked: boo
   }
 
   if (onNext && !workingTree.clean) {
-    gitOperations.push(
-      `git stash push ${input.includeUntracked ? "--include-untracked " : ""}-m ${JSON.stringify(message)}`,
-    )
+    gitOperations.push(`git stash push --include-untracked -m ${JSON.stringify(message)}`)
   }
   gitOperations.push(`git checkout ${state.branches.review}`)
 
@@ -298,13 +285,7 @@ export async function runFeedback(input: MutationInput & { includeUntracked: boo
   return withSprintLock(context, state, "feedback", async () => {
     let recordedStash: SprintActiveStash | null = null
     if (onNext && !workingTree.clean) {
-      await runGit(context.rootDir, [
-        "stash",
-        "push",
-        ...(input.includeUntracked ? ["--include-untracked"] : []),
-        "-m",
-        message,
-      ])
+      await runGit(context.rootDir, ["stash", "push", "--include-untracked", "-m", message])
       const latest = await getLatestStash(context.rootDir)
       recordedStash = {
         ref: latest?.ref,
