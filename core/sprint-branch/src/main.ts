@@ -2,7 +2,7 @@
 import { command, flag, option, optional, run, string, subcommands } from "cmd-ts"
 
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
-import { GitCommandError, runGit } from "./git"
+import { GitCommandError } from "./git"
 import {
   formatMutationReport,
   runApprove,
@@ -82,13 +82,9 @@ export async function main(argv: string[]) {
       }),
       diff: command({
         name: "diff",
-        description: "Print or run the sprint review diff command",
+        description: "Print the sprint review diff command",
         args: {
           ...commonReadArgs,
-          runDiff: flag({
-            long: "run",
-            description: "Run git diff instead of only printing the command",
-          }),
           nameOnly: flag({
             long: "name-only",
             description: "Use git diff --name-only",
@@ -98,7 +94,7 @@ export async function main(argv: string[]) {
             description: "Use git diff --stat",
           }),
         },
-        handler: async ({ sprint, json, runDiff, nameOnly, stat }) => {
+        handler: async ({ sprint, json, nameOnly, stat }) => {
           const { report, diagnostics } = await buildStatusReport({ cwd: process.cwd(), sprint })
           if (!report) {
             writeOutput(json, { ok: false, diagnostics }, "Invalid sprint branch state.")
@@ -127,13 +123,7 @@ export async function main(argv: string[]) {
             return
           }
 
-          if (!runDiff) {
-            writeOutput(json, { ok: true, command: commandLine, args }, commandLine)
-            return
-          }
-
-          const output = await runGit(report.rootDir, args)
-          writeOutput(json, { ok: true, command: commandLine, args, output }, output.trimEnd())
+          writeOutput(json, { ok: true, command: commandLine, args }, commandLine)
         },
       }),
       doctor: command({
@@ -225,19 +215,7 @@ export async function main(argv: string[]) {
       approve: command({
         name: "approve",
         description: "Promote reviewed work into the approved branch",
-        args: {
-          ...commonMutationArgs,
-          verified: flag({
-            long: "verified",
-            description: "Assert that the agent's normal checks passed before approval",
-          }),
-          policy: option({
-            type: string,
-            long: "policy",
-            defaultValue: () => "ff-only",
-            description: "Integration policy; currently only ff-only is supported",
-          }),
-        },
+        args: commonMutationArgs,
         handler: async (args) => {
           await writeMutation(args.json, runApprove({ cwd: process.cwd(), ...args }))
         },
@@ -247,9 +225,9 @@ export async function main(argv: string[]) {
         description: "Prepare the completed review branch for the human's final merge",
         args: {
           ...commonMutationArgs,
-          base: option({
+          overrideBase: option({
             type: optional(string),
-            long: "base",
+            long: "override-base",
             description: "Explicit base branch override for recovery",
           }),
         },

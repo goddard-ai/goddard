@@ -27,23 +27,22 @@ describe("sprint-branch diff", () => {
     expect(result.stdout.trim()).toBe("git diff sprint/example/approved...sprint/example/review")
   })
 
-  // Diff can either print the safe command or execute it for machine-readable inspection.
-  // This verifies execution still compares review against approved, not the current branch.
-  test("runs a name-only review diff against the approved branch", async () => {
+  // Diff can add safe Git diff display modes while still only printing the command.
+  // This keeps the CLI from becoming a general Git diff wrapper.
+  test("prints a name-only review diff command", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
       approved: [],
       finishedUnreviewed: [],
     })
-    await git(repo, ["checkout", "sprint/example/review"])
-    await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
-    await commitAll(repo, "add reviewed work")
 
-    const result = await runCli(repo, ["diff", "--run", "--name-only"])
+    const result = await runCli(repo, ["diff", "--name-only"])
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout.trim()).toBe("feature.txt")
+    expect(result.stdout.trim()).toBe(
+      "git diff --name-only sprint/example/approved...sprint/example/review",
+    )
   })
 
   // The three-dot review diff only has the intended meaning when review descends from approved.

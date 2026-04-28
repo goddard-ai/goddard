@@ -32,6 +32,21 @@ describe("sprint-branch finalize", () => {
     expect((await readState(repo, "example")).baseBranch).toBe("main")
   })
 
+  test("uses an explicit override base for recovery", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: ["010-task-name"],
+      finishedUnreviewed: [],
+    })
+    await git(repo, ["branch", "release", "main"])
+
+    const result = await runCli(repo, ["finalize", "--override-base", "release", "--json"])
+
+    expect(result.exitCode).toBe(0)
+    expect((await readState(repo, "example")).baseBranch).toBe("release")
+  })
+
   // Finalize prepares the one branch a human will merge.
   // Any recorded review, next, or finished-unreviewed task means that branch is not final yet.
   test("refuses to finalize while unreviewed work is recorded", async () => {

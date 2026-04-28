@@ -80,7 +80,7 @@ async function checkBaseBranches(report: SprintStatusReport) {
       code: "base_branch_missing",
       message: `Base branch ${state.baseBranch} does not exist.`,
       suggestion:
-        "Use sprint-branch finalize --base <branch> only after confirming the intended base.",
+        "Use sprint-branch finalize --override-base <branch> only after confirming the intended base.",
     })
   }
   if (Object.values(state.branches).includes(state.baseBranch)) {

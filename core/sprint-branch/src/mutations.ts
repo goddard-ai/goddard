@@ -423,26 +423,12 @@ export async function runResume(input: MutationInput) {
 }
 
 /** Promotes the review branch into approved and rolls existing next work onto review. */
-export async function runApprove(input: MutationInput & { verified: boolean; policy: string }) {
+export async function runApprove(input: MutationInput) {
   const { context, state, diagnostics } = await readCommandState(input, "approve")
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const nextState = cloneState(state)
   const gitOperations: string[] = []
 
-  if (input.policy !== "ff-only") {
-    diagnostics.push({
-      severity: "error",
-      code: "unsupported_integration_policy",
-      message: `Unsupported approve policy ${input.policy}. Only ff-only is implemented.`,
-    })
-  }
-  if (!input.verified && !input.dryRun) {
-    diagnostics.push({
-      severity: "error",
-      code: "approval_not_verified",
-      message: "approve requires --verified after the agent's normal checks have passed.",
-    })
-  }
   if (!workingTree.clean) {
     diagnostics.push({
       severity: "error",
@@ -555,11 +541,11 @@ export async function runApprove(input: MutationInput & { verified: boolean; pol
 }
 
 /** Rebases the completed review branch onto base for the final human merge. */
-export async function runFinalize(input: MutationInput & { base?: string }) {
+export async function runFinalize(input: MutationInput & { overrideBase?: string }) {
   const { context, state, diagnostics } = await readCommandState(input, "finalize")
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const nextState = cloneState(state)
-  const baseBranch = input.base ?? state.baseBranch
+  const baseBranch = input.overrideBase ?? state.baseBranch
   const reviewHead = await getBranchHead(context.rootDir, state.branches.review)
   const approvedHead = await getBranchHead(context.rootDir, state.branches.approved)
   const nextHead = await getBranchHead(context.rootDir, state.branches.next)

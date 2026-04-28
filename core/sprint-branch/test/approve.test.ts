@@ -8,7 +8,6 @@ import {
   commitAll,
   createSprintRepo,
   currentBranch,
-  diagnosticCodes,
   git,
   readState,
   runCli,
@@ -29,7 +28,7 @@ describe("sprint-branch approve", () => {
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
     await commitAll(repo, "add reviewed work")
 
-    const result = await runCli(repo, ["approve", "--verified", "--json"])
+    const result = await runCli(repo, ["approve", "--json"])
 
     expect(result.exitCode).toBe(0)
     const state = await readState(repo, "example")
@@ -63,7 +62,7 @@ describe("sprint-branch approve", () => {
     await commitAll(repo, "add next work")
     await git(repo, ["checkout", "sprint/example/review"])
 
-    const result = await runCli(repo, ["approve", "--verified", "--json"])
+    const result = await runCli(repo, ["approve", "--json"])
 
     expect(result.exitCode).toBe(0)
     const state = await readState(repo, "example")
@@ -75,32 +74,9 @@ describe("sprint-branch approve", () => {
     )
   })
 
-  // Approval is the point where unreviewed work enters the protected approved branch.
-  // The verification flag makes the agent explicitly acknowledge that normal checks already ran.
-  test("refuses approval without verification", async () => {
-    const repo = await createSprintRepo("example", {
-      review: "010-task-name",
-      next: null,
-      approved: [],
-      finishedUnreviewed: [],
-    })
-    await git(repo, ["checkout", "sprint/example/review"])
-    await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
-    await commitAll(repo, "add reviewed work")
-    const approvedHead = await branchHead(repo, "sprint/example/approved")
-
-    const result = await runCli(repo, ["approve", "--json"])
-    const approve = JSON.parse(result.stdout) as MutationOutput
-
-    expect(result.exitCode).toBe(1)
-    expect(diagnosticCodes(approve)).toContain("approval_not_verified")
-    expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedHead)
-    expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
-  })
-
-  // Agents should be able to preview approval mechanics before they have completed verification.
+  // Agents should be able to preview approval mechanics before moving protected branches.
   // The preview must not move approved or rewrite the task mapping.
-  test("dry-run approval does not require verification or move branches", async () => {
+  test("dry-run approval does not move branches", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
@@ -139,7 +115,7 @@ describe("sprint-branch approve", () => {
     await fs.writeFile(path.join(repo, "review.txt"), "reviewed\n")
     await commitAll(repo, "add reviewed work")
 
-    const result = await runCli(repo, ["approve", "--verified", "--json"])
+    const result = await runCli(repo, ["approve", "--json"])
     const approve = JSON.parse(result.stdout) as MutationOutput
     const state = await readState(repo, "example")
 
