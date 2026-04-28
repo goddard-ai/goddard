@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { resolveGitPath } from "./git"
+import { resolveGitPath } from "./git/repository"
 import type { SprintConflictState } from "./types"
 
 /** Reads conflict metadata kept outside tracked sprint files while Git owns the worktree. */

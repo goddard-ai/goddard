@@ -1,22 +1,13 @@
 import path from "node:path"
 import { isCancel, select } from "@clack/prompts"
 
-import {
-  branchExists,
-  getBranchHead,
-  getCurrentBranch,
-  getWorkingTreeStatus,
-  GitCommandError,
-  resolveRepositoryRoot,
-  runGit,
-} from "./git"
-import {
-  findSprintStateFiles,
-  parseSprintBranchName,
-  readSprintStateFile,
-  sprintStatePath,
-  validateSprintName,
-} from "./state"
+import { GitCommandError, runGit } from "./git/command"
+import { branchExists, getBranchHead } from "./git/refs"
+import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
+import { getWorkingTreeStatus } from "./git/worktree"
+import { parseSprintBranchName, validateSprintName } from "./state/branches"
+import { findSprintStateFiles, readSprintStateFile } from "./state/io"
+import { sprintStatePath } from "./state/paths"
 import type { SprintBranchState, SprintDiagnostic } from "./types"
 
 /** Inputs needed to resolve and optionally run a detached review checkout. */

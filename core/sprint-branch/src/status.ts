@@ -1,15 +1,13 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import {
-  branchExists,
-  getBranchHead,
-  getStashRefs,
-  getWorkingTreeStatus,
-  isAncestor,
-  resolveGitPath,
-} from "./git"
-import { inferSprintContext, readSprintStateFile, sprintIndexPath } from "./state"
+import { branchExists, getBranchHead, isAncestor } from "./git/refs"
+import { resolveGitPath } from "./git/repository"
+import { getStashRefs } from "./git/stash"
+import { getWorkingTreeStatus } from "./git/worktree"
+import { inferSprintContext } from "./state/inference"
+import { readSprintStateFile } from "./state/io"
+import { sprintIndexPath } from "./state/paths"
 import type {
   SprintBranchRole,
   SprintBranchState,

@@ -1,6 +1,6 @@
 export { formatCheckoutReport, runCheckout } from "./checkout"
 export { buildDoctorReport, formatDoctorReport } from "./doctor"
-export { GitCommandError, runGit } from "./git"
+export { GitCommandError, runGit } from "./git/command"
 export { formatHumanCommandReport, runCleanup, runLand } from "./landing"
 export {
   formatMutationReport,
@@ -11,17 +11,18 @@ export {
   runResume,
   runStart,
 } from "./mutations"
+export { getExpectedBranches, parseSprintBranchName, validateSprintName } from "./state/branches"
+export { SprintInferenceError, inferSprintContext } from "./state/inference"
+export { findSprintStateFiles, readSprintStateFile } from "./state/io"
 export {
-  findSprintStateFiles,
-  getExpectedBranches,
-  inferSprintContext,
-  parseSprintBranchName,
-  parseSprintState,
-  readSprintStateFile,
+  sprintHandoffFileName,
+  sprintHandoffPath,
   sprintIndexFileName,
+  sprintIndexPath,
   sprintStateFileName,
-  validateSprintName,
-} from "./state"
+  sprintStatePath,
+} from "./state/paths"
+export { parseSprintState } from "./state/schema"
 export { buildStatusReport, formatStatusReport } from "./status"
 export type {
   SprintActiveStash,

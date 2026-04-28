@@ -3,7 +3,7 @@ import { command, flag, option, optional, positional, run, string, subcommands }
 
 import { formatCheckoutReport, runCheckout } from "./checkout"
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
-import { GitCommandError, runGit } from "./git"
+import { GitCommandError, runGit } from "./git/command"
 import { formatHumanCommandReport, runCleanup, runLand } from "./landing"
 import {
   formatMutationReport,
@@ -15,7 +15,7 @@ import {
   runStart,
   SprintMutationError,
 } from "./mutations"
-import { SprintInferenceError } from "./state"
+import { SprintInferenceError } from "./state/inference"
 import { buildStatusReport, formatStatusReport } from "./status"
 import type { SprintMutationReport, SprintStatusReport } from "./types"
 

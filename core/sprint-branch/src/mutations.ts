@@ -1,60 +1,44 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
+import { GitCommandError, runGit } from "./git/command"
+import { branchExists, getBranchHead, isAncestor } from "./git/refs"
+import { getStashRefs } from "./git/stash"
+import { getWorkingTreeStatus } from "./git/worktree"
+import { getExpectedBranches } from "./state/branches"
+import { inferSprintContext } from "./state/inference"
+import { readTransientConflict } from "./transient-conflict"
+import type { SprintActiveStash, SprintBranchState, SprintDiagnostic } from "./types"
+import { moveBranchOperation, moveRecordedBranch } from "./workflow/branch-movement"
+import { readCommandState } from "./workflow/command-state"
 import {
-  branchExists,
-  getBranchHead,
-  getCurrentBranch,
-  getGitOperations,
-  getStashRefs,
-  getWorkingTreeStatus,
-  GitCommandError,
-  isAncestor,
-  resolveGitPath,
-  runGit,
-} from "./git"
+  conflictReport,
+  hasUnmergedEntries,
+  isRetryingCommand,
+  pushActiveGitOperationDiagnostics,
+  writeConflictStateWhenSafe,
+} from "./workflow/conflicts"
+import { withSprintLock } from "./workflow/lock"
 import {
-  getExpectedBranches,
-  inferSprintContext,
-  readSprintStateFile,
-  sprintIndexPath,
-  sprintStatePath,
-} from "./state"
+  formatMutationReport,
+  makePlan,
+  SprintMutationError,
+  withDryRun,
+  type MutationInput,
+} from "./workflow/report"
+import { sprintFilesForState, writeSprintFiles } from "./workflow/sprint-files"
 import {
-  clearTransientConflict,
-  readTransientConflict,
-  writeTransientConflict,
-} from "./transient-conflict"
-import type {
-  SprintActiveStash,
-  SprintBranchState,
-  SprintContext,
-  SprintDiagnostic,
-  SprintMutationReport,
-  SprintTaskState,
-} from "./types"
+  cloneState,
+  emptyTasks,
+  findMatchingStash,
+  nextTaskDiagnostic,
+  noPlannedTaskDiagnostic,
+  normalizeTaskName,
+  resolveNextPlannedTask,
+  taskFileExists,
+} from "./workflow/tasks"
 
-const handoffFileName = "001-handoff.md"
-const stateBlockStart = "<!-- sprint-branch-state:start -->"
-const stateBlockEnd = "<!-- sprint-branch-state:end -->"
-
-type MutationInput = {
-  cwd: string
-  sprint?: string
-  dryRun: boolean
-}
-
-type MutationPlan = {
-  command: string
-  context: SprintContext
-  state: SprintBranchState
-  summary: string
-  requiresCleanWorkingTree: boolean
-  gitOperations: string[]
-  sprintFiles: string[]
-  conflictHandling: string
-  diagnostics: SprintDiagnostic[]
-}
+export { formatMutationReport, SprintMutationError }
 
 /** Initializes canonical sprint branch state and the review/approved branch scaffold. */
 export async function runInit(input: MutationInput & { base: string }) {
@@ -697,486 +681,6 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
   })
 }
 
-/** Formats a mutation report for human-oriented CLI output. */
-export function formatMutationReport(report: SprintMutationReport) {
-  const lines = [
-    `${report.dryRun ? "Dry run" : report.executed ? "Executed" : "Planned"}: ${report.command}`,
-    `Sprint: ${report.sprint}`,
-    `Current branch: ${report.currentBranch ?? "detached HEAD"}`,
-    `Summary: ${report.summary}`,
-    `Working tree must be clean: ${report.requiresCleanWorkingTree ? "yes" : "no"}`,
-    "",
-    "Git operations:",
-    ...formatList(report.gitOperations),
-    "",
-    "Sprint files:",
-    ...formatList(report.sprintFiles),
-    "",
-    `Conflict handling: ${report.conflictHandling}`,
-  ]
-
-  if (report.diagnostics.length > 0) {
-    lines.push("", "Diagnostics:")
-    for (const diagnostic of report.diagnostics) {
-      lines.push(`  [${diagnostic.severity}] ${diagnostic.code}: ${diagnostic.message}`)
-      if (diagnostic.suggestion) {
-        lines.push(`    suggestion: ${diagnostic.suggestion}`)
-      }
-    }
-  }
-
-  return lines.join("\n")
-}
-
-async function readCommandState(
-  input: MutationInput,
-  commandName: string,
-  options: { allowOwnConflictRetry?: boolean } = {},
-) {
-  const context = await inferSprintContext(input)
-  const parsed = await readSprintStateFile(context.statePath)
-  const diagnostics = [...parsed.diagnostics]
-
-  if (!parsed.state) {
-    throw new SprintMutationError({
-      ok: false,
-      command: commandName,
-      dryRun: input.dryRun,
-      executed: false,
-      sprint: context.sprint,
-      currentBranch: context.currentBranch,
-      summary: "Sprint state is invalid.",
-      requiresCleanWorkingTree: true,
-      gitOperations: [],
-      sprintFiles: [context.stateRelativePath],
-      conflictHandling: "Fix the JSON state before running mutating commands.",
-      diagnostics,
-      state: null,
-    })
-  }
-  if (
-    parsed.state.conflict &&
-    !(options.allowOwnConflictRetry && parsed.state.conflict.command === commandName)
-  ) {
-    diagnostics.push({
-      severity: "error",
-      code: "conflict_recorded",
-      message: `State records an unresolved ${parsed.state.conflict.command ?? "unknown"} conflict.`,
-      suggestion: "Resolve the Git conflict and inspect sprint-branch doctor before continuing.",
-    })
-  } else if (parsed.state.conflict) {
-    diagnostics.push({
-      severity: "warning",
-      code: "retrying_recorded_conflict",
-      message: `Retrying ${commandName} after a recorded conflict.`,
-      suggestion: "Finish any active Git operation before retrying the command.",
-    })
-  }
-  if (parsed.state.lock) {
-    diagnostics.push({
-      severity: "error",
-      code: "state_lock_recorded",
-      message: `State records an active ${parsed.state.lock.command} lock.`,
-      suggestion: "Run sprint-branch doctor before retrying the command.",
-    })
-  }
-  if (!(await branchExists(context.rootDir, parsed.state.branches.approved))) {
-    diagnostics.push({
-      severity: "error",
-      code: "approved_branch_missing",
-      message: `Approved branch ${parsed.state.branches.approved} does not exist.`,
-    })
-  }
-  if (!(await branchExists(context.rootDir, parsed.state.branches.review))) {
-    diagnostics.push({
-      severity: "error",
-      code: "review_branch_missing",
-      message: `Review branch ${parsed.state.branches.review} does not exist.`,
-    })
-  }
-  if (
-    parsed.state.tasks.next &&
-    !(await branchExists(context.rootDir, parsed.state.branches.next))
-  ) {
-    diagnostics.push({
-      severity: "error",
-      code: "next_branch_missing",
-      message: `Next branch ${parsed.state.branches.next} does not exist.`,
-    })
-  }
-
-  return { context, state: parsed.state, diagnostics }
-}
-
-export class SprintMutationError extends Error {
-  report: SprintMutationReport
-
-  constructor(report: SprintMutationReport) {
-    super(report.summary)
-    this.name = "SprintMutationError"
-    this.report = report
-  }
-}
-
-function makePlan(input: Omit<MutationPlan, "diagnostics"> & { diagnostics: SprintDiagnostic[] }) {
-  return {
-    ok: !input.diagnostics.some((diagnostic) => diagnostic.severity === "error"),
-    command: input.command,
-    dryRun: false,
-    executed: false,
-    sprint: input.state.sprint,
-    currentBranch: input.context.currentBranch,
-    summary: input.summary,
-    requiresCleanWorkingTree: input.requiresCleanWorkingTree,
-    gitOperations: input.gitOperations,
-    sprintFiles: input.sprintFiles,
-    conflictHandling: input.conflictHandling,
-    diagnostics: input.diagnostics,
-    state: input.state,
-  } satisfies SprintMutationReport
-}
-
-function withDryRun(report: SprintMutationReport, dryRun: boolean) {
-  return dryRun ? { ...report, dryRun } : report
-}
-
-async function withSprintLock(
-  context: SprintContext,
-  state: SprintBranchState,
-  commandName: string,
-  run: () => Promise<SprintMutationReport>,
-) {
-  const lockPath = await resolveGitPath(context.rootDir, `sprint-branch/${context.sprint}.lock`)
-  const lock = {
-    command: commandName,
-    createdAt: new Date().toISOString(),
-    pid: process.pid,
-  }
-  let handle: fs.FileHandle | null = null
-
-  try {
-    await fs.mkdir(path.dirname(lockPath), { recursive: true })
-    handle = await fs.open(lockPath, "wx")
-    await handle.writeFile(`${JSON.stringify(lock, null, 2)}\n`)
-    await handle.close()
-    handle = null
-    return await run()
-  } catch (error) {
-    if (isAlreadyExistsError(error)) {
-      return {
-        ok: false,
-        command: commandName,
-        dryRun: false,
-        executed: false,
-        sprint: state.sprint,
-        currentBranch: context.currentBranch,
-        summary: `Sprint ${state.sprint} is locked by another branch operation.`,
-        requiresCleanWorkingTree: true,
-        gitOperations: [],
-        sprintFiles: [path.relative(context.rootDir, lockPath)],
-        conflictHandling:
-          "Remove the lock only after confirming no sprint-branch command is running.",
-        diagnostics: [
-          {
-            severity: "error",
-            code: "lock_exists",
-            message: `Lock file ${path.relative(context.rootDir, lockPath)} already exists.`,
-          },
-        ],
-        state,
-      } satisfies SprintMutationReport
-    }
-    throw error
-  } finally {
-    if (handle) {
-      await handle.close()
-    }
-    await fs.rm(lockPath, { force: true })
-  }
-}
-
-async function writeSprintFiles(
-  rootDir: string,
-  state: SprintBranchState,
-  commandName: string,
-  note: string,
-) {
-  await fs.mkdir(path.join(rootDir, "sprints", state.sprint), { recursive: true })
-  await writeSprintStateAtomic(sprintStatePath(rootDir, state.sprint), {
-    ...state,
-    lock: null,
-  })
-  await upsertIndexMirror(rootDir, state)
-  await appendHandoff(rootDir, state, commandName, note)
-  await clearTransientConflict(rootDir, state.sprint)
-}
-
-async function writeConflictStateWhenSafe(
-  rootDir: string,
-  state: SprintBranchState,
-  commandName: string,
-  branch: string,
-  error: GitCommandError,
-  metadata: Record<string, unknown> = {},
-) {
-  const conflictState = makeConflictState(state, commandName, branch, error, metadata)
-  const operations = await getGitOperations(rootDir)
-  if (operations.length > 0) {
-    await writeTransientConflict(rootDir, state.sprint, conflictState.conflict)
-    return conflictState
-  }
-
-  await writeSprintFiles(
-    rootDir,
-    conflictState,
-    commandName,
-    `Stopped on conflict while running ${commandName} on ${branch}.`,
-  )
-  return conflictState
-}
-
-function makeConflictState(
-  state: SprintBranchState,
-  commandName: string,
-  branch: string,
-  error: GitCommandError,
-  metadata: Record<string, unknown>,
-) {
-  return {
-    ...state,
-    lock: null,
-    conflict: {
-      command: commandName,
-      branch,
-      message: error.stderr || error.message,
-      ...metadata,
-    },
-  }
-}
-
-function conflictReport(
-  plan: SprintMutationReport,
-  state: SprintBranchState,
-  error: GitCommandError,
-) {
-  return {
-    ...plan,
-    ok: false,
-    executed: true,
-    state,
-    diagnostics: [
-      ...plan.diagnostics,
-      {
-        severity: "error" as const,
-        code: "git_operation_failed",
-        message: error.stderr || error.message,
-      },
-    ],
-  }
-}
-
-async function writeSprintStateAtomic(statePath: string, state: SprintBranchState) {
-  await fs.mkdir(path.dirname(statePath), { recursive: true })
-  const tempPath = `${statePath}.${process.pid}.${Date.now()}.tmp`
-  await fs.writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`)
-  await fs.rename(tempPath, statePath)
-}
-
-async function upsertIndexMirror(rootDir: string, state: SprintBranchState) {
-  const indexPath = sprintIndexPath(rootDir, state.sprint)
-  const block = renderIndexBlock(state)
-  let existing = ""
-
-  try {
-    existing = await fs.readFile(indexPath, "utf-8")
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
-    }
-  }
-
-  let nextText = ""
-  const start = existing.indexOf(stateBlockStart)
-  const end = existing.indexOf(stateBlockEnd)
-
-  if (start !== -1 && end !== -1 && end > start) {
-    nextText = `${existing.slice(0, start)}${block}${existing.slice(end + stateBlockEnd.length)}`
-  } else if (existing.trim().length > 0) {
-    nextText = `${block}\n\n${existing}`
-  } else {
-    nextText = `# Sprint ${state.sprint}\n\n${block}\n`
-  }
-
-  await fs.writeFile(indexPath, ensureTrailingNewline(nextText))
-}
-
-async function appendHandoff(
-  rootDir: string,
-  state: SprintBranchState,
-  commandName: string,
-  note: string,
-) {
-  const handoffPath = path.join(rootDir, "sprints", state.sprint, handoffFileName)
-  const header = (await pathExists(handoffPath)) ? "" : `# Sprint ${state.sprint} Handoff\n\n`
-  const entry = [
-    `## ${new Date().toISOString()} sprint-branch ${commandName}`,
-    "",
-    `- ${note}`,
-    `- Review: ${state.branches.review} (${state.tasks.review ?? "no task"})`,
-    `- Next: ${state.branches.next} (${state.tasks.next ?? "no task"})`,
-    `- Approved: ${state.tasks.approved.length ? state.tasks.approved.join(", ") : "none"}`,
-    "",
-  ].join("\n")
-
-  await fs.appendFile(handoffPath, `${header}${entry}`)
-}
-
-function renderIndexBlock(state: SprintBranchState) {
-  return [
-    stateBlockStart,
-    "## Sprint Branch State",
-    "",
-    `- Sprint: ${state.sprint}`,
-    `- Base branch: ${state.baseBranch}`,
-    `- Review branch: ${state.branches.review}`,
-    `- Approved branch: ${state.branches.approved}`,
-    `- Next branch: ${state.branches.next}`,
-    `- Review task: ${state.tasks.review ?? "none"}`,
-    `- Next task: ${state.tasks.next ?? "none"}`,
-    `- Approved tasks: ${state.tasks.approved.length ? state.tasks.approved.join(", ") : "none"}`,
-    `- Finished unreviewed: ${
-      state.tasks.finishedUnreviewed.length ? state.tasks.finishedUnreviewed.join(", ") : "none"
-    }`,
-    `- Active stashes: ${
-      state.activeStashes.length
-        ? state.activeStashes.map((stash) => stash.ref ?? stash.message ?? "unknown").join(", ")
-        : "none"
-    }`,
-    `- Blocked: ${state.conflict ? `conflict in ${state.conflict.command ?? "unknown"}` : "no"}`,
-    `- Next safe command: ${nextSafeCommandForState(state)}`,
-    stateBlockEnd,
-  ].join("\n")
-}
-
-function nextSafeCommandForState(state: SprintBranchState) {
-  if (state.conflict) {
-    return "sprint-branch doctor"
-  }
-  if (state.tasks.review) {
-    return "sprint-branch approve --dry-run"
-  }
-  if (state.tasks.next) {
-    return "sprint-branch resume --dry-run"
-  }
-  return "sprint-branch start --task <task-file> --dry-run"
-}
-
-async function resolveNextPlannedTask(rootDir: string, state: SprintBranchState) {
-  const tasks = await listTaskStems(rootDir, state.sprint)
-  const assigned = new Set([
-    ...state.tasks.approved,
-    ...state.tasks.finishedUnreviewed,
-    state.tasks.review,
-    state.tasks.next,
-  ])
-  return tasks.find((task) => !assigned.has(task)) ?? null
-}
-
-async function listTaskStems(rootDir: string, sprint: string) {
-  const sprintDir = path.join(rootDir, "sprints", sprint)
-  const entries = await fs.readdir(sprintDir, { withFileTypes: true })
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) => name.endsWith(".md"))
-    .filter((name) => name !== "000-index.md" && name !== handoffFileName)
-    .map((name) => name.slice(0, -".md".length))
-    .sort()
-}
-
-async function taskFileExists(rootDir: string, sprint: string, task: string) {
-  return pathExists(path.join(rootDir, "sprints", sprint, `${task}.md`))
-}
-
-function normalizeTaskName(task: string) {
-  const normalized = task.endsWith(".md") ? task.slice(0, -".md".length) : task
-  if (normalized.includes("/") || normalized.includes("\\") || normalized.length === 0) {
-    throw new Error("Task must be a task file stem inside the sprint folder.")
-  }
-  return normalized
-}
-
-function nextTaskDiagnostic(task: string, plannedTask: string) {
-  return {
-    severity: "error" as const,
-    code: "task_out_of_order",
-    message: `${task} is not the next planned task; expected ${plannedTask}.`,
-  }
-}
-
-function noPlannedTaskDiagnostic(task: string) {
-  return {
-    severity: "error" as const,
-    code: "no_planned_task",
-    message: `${task} is not available because no unassigned sprint tasks remain.`,
-  }
-}
-
-async function pushActiveGitOperationDiagnostics(rootDir: string, diagnostics: SprintDiagnostic[]) {
-  const operations = await getGitOperations(rootDir)
-  for (const operation of operations) {
-    diagnostics.push({
-      severity: "error",
-      code: "git_operation_in_progress",
-      message: `Git ${operation.name} operation is still in progress.`,
-      suggestion: "Resolve it with Git before retrying the sprint-branch command.",
-    })
-  }
-}
-
-function isRetryingCommand(state: SprintBranchState, commandName: string) {
-  return state.conflict?.command === commandName
-}
-
-function hasUnmergedEntries(entries: string[]) {
-  return entries.some((entry) =>
-    ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(entry.slice(0, 2)),
-  )
-}
-
-async function moveRecordedBranch(
-  rootDir: string,
-  state: SprintBranchState,
-  branch: string,
-  target: string,
-) {
-  if (!Object.values(state.branches).includes(branch)) {
-    throw new Error(`Refusing to move unrecorded branch ${branch}.`)
-  }
-
-  if ((await getCurrentBranch(rootDir)) === branch) {
-    await runGit(rootDir, ["reset", "--hard", target])
-    return
-  }
-
-  await runGit(rootDir, ["branch", "--force", branch, target])
-}
-
-function moveBranchOperation(branch: string, target: string, currentBranch: string | null) {
-  return currentBranch === branch
-    ? `git reset --hard ${target}`
-    : `git branch --force ${branch} ${target}`
-}
-
-function findMatchingStash(state: SprintBranchState) {
-  return state.activeStashes.find(
-    (stash) =>
-      stash.sourceBranch === state.branches.next &&
-      stash.task === state.tasks.next &&
-      stash.reason === "feedback",
-  )
-}
-
 async function getLatestStash(rootDir: string) {
   const stashes = await getStashRefs(rootDir)
   const [first] = stashes.entries()
@@ -1205,38 +709,6 @@ async function pushIfBranchExists(
   }
 }
 
-function emptyTasks(): SprintTaskState {
-  return {
-    review: null,
-    next: null,
-    approved: [],
-    finishedUnreviewed: [],
-  }
-}
-
-function cloneState(state: SprintBranchState): SprintBranchState {
-  return JSON.parse(JSON.stringify(state)) as SprintBranchState
-}
-
-function sprintFilesForState(rootDir: string, state: SprintBranchState) {
-  return [
-    path.relative(rootDir, sprintStatePath(rootDir, state.sprint)),
-    path.relative(rootDir, sprintIndexPath(rootDir, state.sprint)),
-    path.join("sprints", state.sprint, handoffFileName),
-  ]
-}
-
-function formatList(values: string[]) {
-  if (values.length === 0) {
-    return ["  none"]
-  }
-  return values.map((value) => `  - ${value}`)
-}
-
-function ensureTrailingNewline(value: string) {
-  return value.endsWith("\n") ? value : `${value}\n`
-}
-
 async function pathExists(pathname: string) {
   try {
     await fs.access(pathname)
@@ -1255,14 +727,5 @@ function isMissingFileError(error: unknown) {
     error !== null &&
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
-  )
-}
-
-function isAlreadyExistsError(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "EEXIST"
   )
 }
