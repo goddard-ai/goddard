@@ -104,6 +104,23 @@ test("cli start requires an agent branch when non-interactive", async () => {
   expect(result.stderr).toContain("start requires an agent branch")
 })
 
+test("cli watch accepts an agent branch from the review worktree", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+
+  const result = await runProcessUntilOutput(
+    fixture.reviewDir,
+    "bun",
+    [cliPath, "watch", "codex/review-sync-test", "--interval-ms", "10"],
+    "Watching review sync",
+  )
+
+  expect(result.stdout).toContain("Started review sync")
+  expect(result.stdout).toContain("Watching review sync")
+  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+})
+
 test("sync mirrors agent uncommitted changes through the review branch", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
@@ -199,6 +216,25 @@ test("pause blocks sync mutations until resume", async () => {
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 
+test("watch starts a session from an agent branch before syncing", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  const { results, stopped } = await runWatchUntilNextSync(
+    fixture.reviewDir,
+    async () => {
+      await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
+    },
+    "codex/review-sync-test",
+  )
+
+  expect(stopped.status).toBe("ok")
+  expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(true)
+  expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
+  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+})
+
 test("watch syncs when the review worktree changes", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
@@ -225,12 +261,17 @@ test("watch syncs when the agent worktree changes", async () => {
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
 })
 
-async function runWatchUntilNextSync(cwd: string, mutate: () => Promise<void>) {
+async function runWatchUntilNextSync(
+  cwd: string,
+  mutate: () => Promise<void>,
+  agentBranch?: string,
+) {
   const controller = new AbortController()
   const started = createDeferred<void>()
   const results: ReviewSyncResult[] = []
   const watch = watchReviewSession({
     cwd,
+    agentBranch,
     intervalMs: 10,
     signal: controller.signal,
     onResult: (result) => {
@@ -339,6 +380,62 @@ async function runProcess(cwd: string, command: string, args: string[]) {
     })
     child.on("error", rejectPromise)
     child.on("close", (status) => {
+      resolvePromise({
+        status: status ?? 1,
+        stdout,
+        stderr,
+      })
+    })
+  })
+}
+
+async function runProcessUntilOutput(
+  cwd: string,
+  command: string,
+  args: string[],
+  expectedOutput: string,
+) {
+  return await new Promise<{
+    status: number
+    stdout: string
+    stderr: string
+  }>((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+
+    let matched = false
+    let stdout = ""
+    let stderr = ""
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL")
+      rejectPromise(new Error(`Timed out waiting for ${expectedOutput}`))
+    }, 5000)
+    const stopWhenMatched = () => {
+      if (!matched && `${stdout}\n${stderr}`.includes(expectedOutput)) {
+        matched = true
+        child.kill("SIGTERM")
+      }
+    }
+
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk
+      stopWhenMatched()
+    })
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk
+      stopWhenMatched()
+    })
+    child.on("error", rejectPromise)
+    child.on("close", (status) => {
+      clearTimeout(timeout)
+      if (!matched) {
+        rejectPromise(new Error(`Process exited before printing ${expectedOutput}: ${stderr}`))
+        return
+      }
       resolvePromise({
         status: status ?? 1,
         stdout,

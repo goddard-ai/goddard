@@ -101,11 +101,17 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
 
 /** Performs the start workflow after CLI parsing and command-level error handling. */
 async function startReviewSyncOperation(agentBranch: string, context: RuntimeContext) {
+  const { result } = await startReviewSyncOperationWithSession(agentBranch, context)
+  return result
+}
+
+/** Performs the start workflow and keeps the loaded session for command composition. */
+async function startReviewSyncOperationWithSession(agentBranch: string, context: RuntimeContext) {
   const session = await createSessionForStart(agentBranch, context)
   await prepareReviewBranchForStart(session, context)
   const syncResult = await syncSession(session, context)
 
-  return createReviewSyncResult({
+  const result = createReviewSyncResult({
     exitCode: 0,
     command: "start",
     status: syncResult.status === "rejected-human-patch" ? "rejected-human-patch" : "ok",
@@ -118,6 +124,7 @@ async function startReviewSyncOperation(agentBranch: string, context: RuntimeCon
         ? `Started review sync for ${session.agentBranch} as ${session.reviewBranch}; human patch was rejected and saved to ${syncResult.rejectedPatchPath}.`
         : `Started review sync for ${session.agentBranch} as ${session.reviewBranch}.`,
   })
+  return { session, result }
 }
 
 /** Performs the sync workflow after CLI parsing and command-level error handling. */
@@ -248,8 +255,12 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
 /** Performs the watch workflow after CLI parsing and command-level error handling. */
 async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
   const intervalMs = normalizeWatchIntervalMs(input.intervalMs)
-  const session = await inferSession(context)
+  const { session, startResult } = await resolveSessionForWatch(input, context)
   let fingerprint = await createWatchFingerprint(session, context)
+
+  if (startResult) {
+    await input.onResult?.(startResult)
+  }
 
   await input.onResult?.(
     createReviewSyncResult({
@@ -368,6 +379,11 @@ function createReviewSyncCommand(cwd: string) {
         name: "watch",
         description: "Continuously sync when the agent or review worktree changes",
         args: {
+          agentBranch: positional({
+            type: optional(string),
+            displayName: "agent-branch",
+            description: "Agent branch checked out in another worktree",
+          }),
           intervalMs: option({
             type: numberType,
             long: "interval-ms",
@@ -376,11 +392,12 @@ function createReviewSyncCommand(cwd: string) {
             defaultValueIsSerializable: true,
           }),
         },
-        handler: async ({ intervalMs }) => {
+        handler: async ({ agentBranch, intervalMs }) => {
           const abort = createProcessAbortSignal()
           try {
             return await watchReviewSession({
               cwd,
+              agentBranch,
               intervalMs,
               signal: abort.signal,
               onResult: writeResult,
@@ -392,6 +409,22 @@ function createReviewSyncCommand(cwd: string) {
       }),
     },
   })
+}
+
+/** Resolves an existing watch session or creates it from start-compatible input. */
+async function resolveSessionForWatch(input: WatchReviewSyncInput, context: RuntimeContext) {
+  if (input.agentBranch) {
+    const { session, result } = await startReviewSyncOperationWithSession(
+      input.agentBranch,
+      context,
+    )
+    return { session, startResult: result }
+  }
+
+  return {
+    session: await inferSession(context),
+    startResult: null,
+  }
 }
 
 /** Selects an eligible checked-out agent branch when start runs interactively. */

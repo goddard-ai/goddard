@@ -36,6 +36,7 @@ export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
 
 /** Inputs for watching a review-sync session until the caller aborts it. */
 export type WatchReviewSyncInput = ReviewSyncWorktreeInput & {
+  agentBranch?: string
   intervalMs?: number
   signal?: AbortSignal
   onResult?: (result: ReviewSyncResult) => void | Promise<void>
