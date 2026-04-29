@@ -3,6 +3,7 @@
  */
 
 export const ACPAdapterNames = [
+  "agoragentic-acp",
   "amp-acp",
   "auggie",
   "autohand",
@@ -10,10 +11,13 @@ export const ACPAdapterNames = [
   "cline",
   "codebuddy-code",
   "codex-acp",
+  "cortex-code",
   "corust-agent",
   "crow-cli",
   "cursor",
   "deepagents",
+  "dimcode",
+  "dirac",
   "factory-droid",
   "fast-agent",
   "gemini",
@@ -27,9 +31,11 @@ export const ACPAdapterNames = [
   "nova",
   "opencode",
   "pi-acp",
+  "poolside",
   "qoder",
   "qwen-code",
   "stakpak",
+  "vtcode",
 ] as const
 
 export type ACPAdapterName = (typeof ACPAdapterNames)[number] | (string & {})
