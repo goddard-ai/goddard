@@ -7,14 +7,6 @@ export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error
 /** Last-sync statuses stored in durable session state. */
 export type LastSyncStatus = "synced" | "rejected-human-patch" | "paused" | "error"
 
-/** Parsed command shapes used by command dispatch. */
-export type ParsedCommand =
-  | { command: "start"; reviewWorktree: string }
-  | { command: "sync" }
-  | { command: "status"; json: boolean }
-  | { command: "pause" }
-  | { command: "resume" }
-
 /** Minimal writable stream surface accepted by embedded callers. */
 export type WritableStreamLike = {
   write(chunk: string | Uint8Array): unknown

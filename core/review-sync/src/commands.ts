@@ -1,8 +1,8 @@
-/** CLI-compatible review-sync command parsing and dispatch. */
+/** CLI-compatible review-sync command runner. */
 import { join } from "node:path"
 import { command, flag, option, runSafely, string, subcommands } from "cmd-ts"
 
-import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
+import { createErrorResult, createReviewSyncResult } from "./errors.ts"
 import { resolveRef } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { createRuntimeContext, writeResult } from "./runtime.ts"
@@ -15,40 +15,24 @@ import {
   writeSessionState,
 } from "./state.ts"
 import { syncSession } from "./sync.ts"
-import type { ParsedCommand, ReviewSyncEnv, RuntimeContext } from "./types.ts"
+import type { ReviewSyncCommand, ReviewSyncEnv, ReviewSyncResult, RuntimeContext } from "./types.ts"
 
 /**
  * Runs one review-sync command using the same command names and arguments as the CLI.
  */
 export async function runReviewSync(argv: string[], env: ReviewSyncEnv = {}) {
-  const command = parseCommandName(argv)
   const context = createRuntimeContext(env)
 
   try {
-    const parsed = await parseCommand(argv)
-    const result = await executeCommand(parsed, context)
+    const parsed = await runSafely(createReviewSyncCommand(context), argv)
+    const result =
+      parsed._tag === "error" ? createCmdTsResult(parsed.error) : await parsed.value.value
     writeResult(context, result)
     return result
   } catch (error) {
-    const result = createErrorResult(command, error)
+    const result = createErrorResult("status", error)
     writeResult(context, result)
     return result
-  }
-}
-
-/** Dispatches one parsed command to the bounded operation that owns its mutations. */
-async function executeCommand(parsed: ParsedCommand, context: RuntimeContext) {
-  switch (parsed.command) {
-    case "start":
-      return await startReviewSync(parsed.reviewWorktree, context)
-    case "sync":
-      return await syncReviewSession(context)
-    case "status":
-      return await statusReviewSession(parsed.json, context)
-    case "pause":
-      return await pauseReviewSession(context)
-    case "resume":
-      return await resumeReviewSession(context)
   }
 }
 
@@ -198,93 +182,76 @@ async function resumeReviewSession(context: RuntimeContext) {
   })
 }
 
-/** Parses CLI arguments into one supported review-sync command. */
-async function parseCommand(argv: string[]) {
-  const result = await runSafely(reviewSyncCommand, argv)
-  if (result._tag === "error") {
-    throw new UserError(
-      result.error.config.message,
-      result.error.config.exitCode === 0 ? "ok" : "error",
-      result.error.config.exitCode,
-    )
+/** Preserves command-specific structured errors while letting cmd-ts route subcommands. */
+async function runCommandSafely(
+  command: ReviewSyncCommand,
+  operation: () => Promise<ReviewSyncResult>,
+) {
+  try {
+    return await operation()
+  } catch (error) {
+    return createErrorResult(command, error)
   }
-
-  return result.value.value
 }
 
-/** Extracts a best-effort command name for structured error results. */
-function parseCommandName(argv: string[]) {
-  const command = argv[0]
-  return command === "start" ||
-    command === "sync" ||
-    command === "status" ||
-    command === "pause" ||
-    command === "resume"
-    ? command
-    : "status"
+/** Converts cmd-ts parse/help exits into the public structured result shape. */
+function createCmdTsResult(error: { config: { exitCode: number; message: string } }) {
+  return createReviewSyncResult({
+    exitCode: error.config.exitCode,
+    command: "status",
+    status: error.config.exitCode === 0 ? "ok" : "error",
+    message: error.config.message,
+  })
 }
 
-const reviewSyncCommand = subcommands({
-  name: "review-sync",
-  description: "Synchronize an agent-owned branch with a disposable human review branch",
-  cmds: {
-    start: command({
-      name: "start",
-      description: "Create or reuse a review branch and run the initial sync",
-      args: {
-        reviewWorktree: option({
-          type: string,
-          long: "review-worktree",
-          description: "Path to the local worktree where the human review branch is checked out",
-        }),
-      },
-      handler: ({ reviewWorktree }) =>
-        ({
-          command: "start",
-          reviewWorktree,
-        }) satisfies ParsedCommand,
-    }),
-    sync: command({
-      name: "sync",
-      description: "Apply clean human edits to the agent worktree and refresh the review branch",
-      args: {},
-      handler: () =>
-        ({
-          command: "sync",
-        }) satisfies ParsedCommand,
-    }),
-    status: command({
-      name: "status",
-      description: "Show review-sync session state without mutating Git",
-      args: {
-        json: flag({
-          long: "json",
-          description: "Print status as JSON for machine consumers",
-        }),
-      },
-      handler: ({ json }) =>
-        ({
-          command: "status",
-          json,
-        }) satisfies ParsedCommand,
-    }),
-    pause: command({
-      name: "pause",
-      description: "Pause future sync mutations for the inferred session",
-      args: {},
-      handler: () =>
-        ({
-          command: "pause",
-        }) satisfies ParsedCommand,
-    }),
-    resume: command({
-      name: "resume",
-      description: "Resume sync mutations without running an immediate sync",
-      args: {},
-      handler: () =>
-        ({
-          command: "resume",
-        }) satisfies ParsedCommand,
-    }),
-  },
-})
+/** Builds the command tree with handlers that execute the bounded operations directly. */
+function createReviewSyncCommand(context: RuntimeContext) {
+  return subcommands({
+    name: "review-sync",
+    description: "Synchronize an agent-owned branch with a disposable human review branch",
+    cmds: {
+      start: command({
+        name: "start",
+        description: "Create or reuse a review branch and run the initial sync",
+        args: {
+          reviewWorktree: option({
+            type: string,
+            long: "review-worktree",
+            description: "Path to the local worktree where the human review branch is checked out",
+          }),
+        },
+        handler: ({ reviewWorktree }) =>
+          runCommandSafely("start", () => startReviewSync(reviewWorktree, context)),
+      }),
+      sync: command({
+        name: "sync",
+        description: "Apply clean human edits to the agent worktree and refresh the review branch",
+        args: {},
+        handler: () => runCommandSafely("sync", () => syncReviewSession(context)),
+      }),
+      status: command({
+        name: "status",
+        description: "Show review-sync session state without mutating Git",
+        args: {
+          json: flag({
+            long: "json",
+            description: "Print status as JSON for machine consumers",
+          }),
+        },
+        handler: ({ json }) => runCommandSafely("status", () => statusReviewSession(json, context)),
+      }),
+      pause: command({
+        name: "pause",
+        description: "Pause future sync mutations for the inferred session",
+        args: {},
+        handler: () => runCommandSafely("pause", () => pauseReviewSession(context)),
+      }),
+      resume: command({
+        name: "resume",
+        description: "Resume sync mutations without running an immediate sync",
+        args: {},
+        handler: () => runCommandSafely("resume", () => resumeReviewSession(context)),
+      }),
+    },
+  })
+}
