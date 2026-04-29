@@ -1,12 +1,3 @@
-#!/usr/bin/env bun
-import { dirname, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+#!/usr/bin/env node
 
-const entrypoint = resolve(dirname(fileURLToPath(import.meta.url)), "../src/cli.ts")
-const child = Bun.spawn([process.execPath, entrypoint, ...process.argv.slice(2)], {
-  stdin: "inherit",
-  stdout: "inherit",
-  stderr: "inherit",
-})
-
-process.exitCode = await child.exited
+import "../dist/cli.mjs"

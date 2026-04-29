@@ -381,8 +381,11 @@ async function writeMutation(json: boolean, promise: Promise<SprintMutationRepor
   }
 }
 
-if (import.meta.main) {
-  main(process.argv.slice(2)).catch((error) => {
+/** Runs the CLI and prints top-level diagnostics for command failures. */
+export async function runCli(argv: string[]) {
+  try {
+    await main(argv)
+  } catch (error) {
     if (error instanceof SprintInferenceError) {
       console.error(error.message)
       for (const diagnostic of error.diagnostics) {
@@ -402,5 +405,9 @@ if (import.meta.main) {
 
     console.error(error instanceof Error ? error.message : String(error))
     process.exit(1)
-  })
+  }
+}
+
+if (import.meta.main) {
+  await runCli(process.argv.slice(2))
 }
