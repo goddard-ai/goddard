@@ -38,3 +38,6 @@
 
 - Initialized sprint files from the confirmed plan.
 - Initialized sprint-branch state with base ref `codex/assess-session-chat-readiness`, which pointed at confirmed base commit `dafe4793`.
+- Started `010-pass-workbench-tab-payloads` on review. Sprint initialization commit was applied onto review because the helper initialized branches before the sprint docs commit existed on the base branch.
+- Finished `010-pass-workbench-tab-payloads` on review. Verification: `bun run typecheck` and `bun run test` from `app/` both passed.
+- Applied review feedback: `SessionChangesView` now requires `sessionId` again because its valid render path always comes from `openSessionChanges`.

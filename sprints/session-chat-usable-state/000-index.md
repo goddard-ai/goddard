@@ -1,6 +1,6 @@
 # Sprint: Session Chat Usable State
 
-Status: planned
+Status: in-progress
 
 ## Objective
 
@@ -25,4 +25,3 @@ Current HEAD `dafe4793`; branch from this commit unless a different base is spec
 ## Review Flow
 
 Review one task-sized change at a time. The executor may continue at most one task ahead while review is pending, but should pause after `040-support-electrobun-session-subscriptions` and `080-render-turn-stop-and-permission-rows` because those have the highest lifecycle and protocol risk.
-

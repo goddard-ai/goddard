@@ -10,11 +10,23 @@ import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-p
 import { goddardSdk } from "~/sdk.ts"
 import { submitSessionPrompt } from "~/sessions/mutations.ts"
 
-export component SessionChatView(props: { sessionId: string }) {
-  const sessionId = props.sessionId as DaemonSession["id"]
+export component SessionChatView(props: { sessionId?: string | null }) {
+  if (!props.sessionId) {
+    <main class={styles.root}>
+      <div class={styles.stateMessage}>
+        {"Session chat could not be opened because its tab payload is missing a session id."}
+      </div>
+    </main>
+    return
+  }
+
+  <ConnectedSessionChatView sessionId={props.sessionId as DaemonSession["id"]} />
+}
+
+component ConnectedSessionChatView(props: { sessionId: DaemonSession["id"] }) {
   const [history, { session }] = useQueries([
-    [goddardSdk.session.history, [{ id: sessionId }]],
-    [goddardSdk.session.get, [{ id: sessionId }]],
+    [goddardSdk.session.history, [{ id: props.sessionId }]],
+    [goddardSdk.session.get, [{ id: props.sessionId }]],
   ])
   const chat = useSigma(() => new SessionChat({ session, turns: history.turns }), [
     session,

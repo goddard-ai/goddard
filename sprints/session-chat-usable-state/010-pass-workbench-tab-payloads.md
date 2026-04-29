@@ -1,6 +1,6 @@
 # 010-pass-workbench-tab-payloads
 
-Status: planned
+Status: finished-unreviewed
 
 ## Title
 
@@ -33,9 +33,13 @@ None.
 
 ## Implementation Notes
 
-Pending.
+- Started on `sprint/session-chat-usable-state/review`.
+- `AppShellWorkbenchContent` now spreads active detail-tab payloads into the registered tab component.
+- `SessionChatView` renders a small missing-session-id state before mounting the connected data-loading view.
+- `SessionChangesView` keeps `sessionId` as a required prop; the valid render path always opens it from a session row with a concrete session id.
+- Review feedback removed an over-defensive missing-payload fallback from `SessionChangesView`.
 
 ## Verification Evidence
 
-Pending.
-
+- `bun run typecheck` in `app/` passed.
+- `bun run test` in `app/` passed: 36 tests, 82 assertions.

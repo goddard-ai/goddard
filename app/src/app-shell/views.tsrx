@@ -97,7 +97,8 @@ component WorkbenchTabPanel() {
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
-  const activeTabPayload = activeTab.payload as Record<string, unknown>
+  const activeTabPayload =
+    typeof activeTab.payload === "object" && activeTab.payload !== null ? activeTab.payload : {}
 
   <ActiveTabComponent {...activeTabPayload} />
 }
