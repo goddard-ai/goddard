@@ -21,6 +21,7 @@
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
+    "smoke": "bun ./scripts/smoke-happy-path.ts",
     "test": "bun test --dots"
   },
   "dependencies": {

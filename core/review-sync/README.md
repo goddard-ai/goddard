@@ -47,6 +47,19 @@ available for argv-compatible wrappers and uses the current process working
 directory. Internal Git helpers, state readers, lock handling, and snapshot
 builders are intentionally not exported.
 
+## Smoke Test
+
+Run the happy-path smoke test manually with:
+
+```bash
+bun run --cwd core/review-sync smoke
+```
+
+The smoke test creates a temporary Git repository with agent and review
+worktrees, starts review sync, applies a clean human edit back to the agent
+worktree, verifies the review refresh, and removes the temp repository on
+success.
+
 ## State
 
 Durable state lives under the repository's Git common directory:
