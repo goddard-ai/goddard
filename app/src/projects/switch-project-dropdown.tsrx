@@ -28,7 +28,7 @@ export component SwitchProjectDropdown() {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const [itemElements] = useState((): Record<string, HTMLButtonElement | null> => ({}))
+  const [itemElements] = useState<Record<string, HTMLButtonElement | null>>({})
 
   const projects = orderProjectsByRecentActivity(
     projectRegistry.projectList,
@@ -76,7 +76,8 @@ export component SwitchProjectDropdown() {
       return projectItems
     }
 
-    return [{ id: "open-folder", kind: "open-folder" }, ...projectItems]
+    const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
+    return [openFolderItem, ...projectItems]
   }, [filteredProjects, search])
 
   async function openFolderFromSwitcher() {
