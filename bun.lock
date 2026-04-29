@@ -73,7 +73,7 @@
         "@pandacss/dev": "^1.10.0",
         "@preact/preset-vite": "^2.10.5",
         "@spiriit/vite-plugin-svg-spritemap": "7.0.0",
-        "@tsrx/bun-plugin-preact": "file:/tmp/tsrx-bun-plugin-preact-0.0.10.tgz",
+        "@tsrx/bun-plugin-preact": "^0.0.13",
         "@tsrx/vite-plugin-preact": "^0.0.14",
         "@types/culori": "^4.0.1",
         "chokidar": "^5.0.0",
@@ -1119,7 +1119,7 @@
 
     "@ts-morph/common": ["@ts-morph/common@0.29.0", "", { "dependencies": { "minimatch": "^10.0.1", "path-browserify": "^1.0.1", "tinyglobby": "^0.2.14" } }, "sha512-35oUmphHbJvQ/+UTwFNme/t2p3FoKiGJ5auTjjpNTop2dyREspirjMy82PLSC1pnDJ8ah1GU98hwpVt64YXQsg=="],
 
-    "@tsrx/bun-plugin-preact": ["@tsrx/bun-plugin-preact@/tmp/tsrx-bun-plugin-preact-0.0.10.tgz", { "dependencies": { "@tsrx/preact": "0.0.10" }, "peerDependencies": { "bun": "^1.0.0", "preact": ">=10" } }, "sha512-aqt0GQiQ5gZ1eycya18F8tFOZzGvb2bVk7yAbMi3HI26DBg6MKU+7bcI/WfOd0HMuNs/c2IvrmJn1D9voE5ZRg=="],
+    "@tsrx/bun-plugin-preact": ["@tsrx/bun-plugin-preact@0.0.13", "", { "dependencies": { "@tsrx/preact": "0.0.14" }, "peerDependencies": { "bun": "^1.0.0", "preact": ">=10" } }, "sha512-n70XtiWwxmLYqSmgbsOHTKzYTr5KP68Udp3rSwmt1OdHhFy6U6w1BL55AuFhnTTx1zzRjkyy+R1RF074jEAB9Q=="],
 
     "@tsrx/core": ["@tsrx/core@0.0.19", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5", "@noble/hashes": "^2.2.0", "@sveltejs/acorn-typescript": "^1.0.9", "@types/estree": "^1.0.8", "@types/estree-jsx": "^1.0.5", "acorn": "^8.15.0", "esrap": "^2.1.0", "is-reference": "^3.0.3", "magic-string": "^0.30.18", "zimmerframe": "^1.1.2" } }, "sha512-d+F/ZrGCryfO1ByS4RWw6QkTpbi5S29cztf6aXW4z43jhynughAM7j/c2T8i5n6tK2FzmN86Usj2VdIYFYbtFw=="],
 
@@ -2613,8 +2613,6 @@
 
     "@rolldown/binding-wasm32-wasi/@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
-    "@tsrx/bun-plugin-preact/@tsrx/preact": ["@tsrx/preact@0.0.10", "", { "dependencies": { "@tsrx/core": "0.0.15", "esrap": "^2.1.0", "zimmerframe": "^1.1.2" }, "peerDependencies": { "preact": ">=10" } }, "sha512-fH+SL81tULICuvcIoD87bCW7/k6ConfYka5LJd0Wq9l8pkylIQFnVzVmo3Dfq+SGQkjHWBIcnik69dhc4NJQOA=="],
-
     "@tsrx/eslint-parser/@tsrx/ripple": ["@tsrx/ripple@0.0.16", "", { "dependencies": { "@tsrx/core": "0.0.14", "esrap": "^2.1.0", "is-reference": "^3.0.3", "zimmerframe": "^1.1.2" } }, "sha512-vKEinN6nteJtGkA6iRmKe/iEnaWoBeyVziGWKo1rU2/ZrSS4amMEwlhg1ZoXn7uToOqfMxH6ZPtyrgX6JWlNyw=="],
 
     "@vue/compiler-core/entities": ["entities@4.5.0", "", {}, "sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw=="],
@@ -2796,8 +2794,6 @@
     "@pandacss/plugin-lightningcss/lightningcss/lightningcss-win32-x64-msvc": ["lightningcss-win32-x64-msvc@1.31.1", "", { "os": "win32", "cpu": "x64" }, "sha512-I9aiFrbd7oYHwlnQDqr1Roz+fTz61oDDJX7n9tYF9FJymH1cIN1DtKw3iYt6b8WZgEjoNwVSncwF4wx/ZedMhw=="],
 
     "@prefresh/vite/@rollup/pluginutils/picomatch": ["picomatch@2.3.2", "", {}, "sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA=="],
-
-    "@tsrx/bun-plugin-preact/@tsrx/preact/@tsrx/core": ["@tsrx/core@0.0.15", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5", "@noble/hashes": "^2.2.0", "@sveltejs/acorn-typescript": "^1.0.9", "@types/estree": "^1.0.8", "@types/estree-jsx": "^1.0.5", "acorn": "^8.15.0", "esrap": "^2.1.0", "is-reference": "^3.0.3", "magic-string": "^0.30.18", "zimmerframe": "^1.1.2" } }, "sha512-KaKEXZGKgsuxS5x4pRlwtXDcmEKqN1531X1a9JUZgGCpPyoG4Fhm6uyR3ZrVmgRimg0P9eM6ub+FfXbRrrb8Dg=="],
 
     "@tsrx/eslint-parser/@tsrx/ripple/@tsrx/core": ["@tsrx/core@0.0.14", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5", "@noble/hashes": "^2.2.0", "@sveltejs/acorn-typescript": "^1.0.9", "@types/estree": "^1.0.8", "@types/estree-jsx": "^1.0.5", "acorn": "^8.15.0", "esrap": "^2.1.0", "is-reference": "^3.0.3", "magic-string": "^0.30.18", "zimmerframe": "^1.1.2" } }, "sha512-YCt0WqQ6VMUzED8DmqglFP/kkSZGiiNAxACmiKBtdobbWM76PDw6LS2QoKiSJHbE+20lgUM/MZJrEm5uDT3aDg=="],
 
