@@ -14,6 +14,7 @@ export type {
   ReviewSyncCommand,
   ReviewSyncResult,
   ReviewSyncStatus,
+  ReviewSyncStatusData,
   ReviewSyncWorktreeInput,
   StartReviewSyncInput,
   StatusReviewSyncInput,

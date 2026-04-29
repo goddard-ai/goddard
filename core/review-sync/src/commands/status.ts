@@ -7,7 +7,7 @@ import { resolveRef } from "../git.ts"
 import { createRuntimeContext } from "../runtime.ts"
 import { inferSession } from "../session.ts"
 import { countPatchFiles, resolveSessionDir } from "../state.ts"
-import type { StatusReviewSyncInput } from "../types.ts"
+import type { ReviewSyncStatusData, StatusReviewSyncInput } from "../types.ts"
 
 /** Returns session state, patch counts, and refs without mutating Git or durable state. */
 export async function statusReviewSession(input: StatusReviewSyncInput) {
@@ -30,6 +30,10 @@ export async function statusReviewSession(input: StatusReviewSyncInput) {
     agentBranch: session.agentBranch,
     reviewBranch: session.reviewBranch,
     paused: session.paused,
+    refs: {
+      agentSnapshot: session.refs.agentSnapshot,
+      renderedSnapshot: session.refs.renderedSnapshot,
+    },
     agentSnapshot,
     renderedSnapshot,
     lastSync: session.lastSync,
@@ -37,7 +41,7 @@ export async function statusReviewSession(input: StatusReviewSyncInput) {
       accepted: acceptedCount,
       rejected: rejectedCount,
     },
-  }
+  } satisfies ReviewSyncStatusData
   const message = json
     ? JSON.stringify(payload, null, 2)
     : [
@@ -59,6 +63,7 @@ export async function statusReviewSession(input: StatusReviewSyncInput) {
     status: session.paused ? "paused" : "ok",
     sessionId: session.sessionId,
     reviewBranch: session.reviewBranch,
+    data: payload,
     message,
   })
 }

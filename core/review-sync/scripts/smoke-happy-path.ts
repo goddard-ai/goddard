@@ -208,17 +208,10 @@ async function assertPatchCounts(
   // leave the accepted/rejected patch inventory unchanged.
   const status = await statusReviewSession({
     cwd: fixture.agentDir,
-    json: true,
   })
   assert.equal(status.status, "ok", "status command")
-  const statusPayload = JSON.parse(status.message) as {
-    patchCounts?: {
-      accepted?: number
-      rejected?: number
-    }
-  }
-  assert.equal(statusPayload.patchCounts?.accepted, expected.accepted, "accepted patch count")
-  assert.equal(statusPayload.patchCounts?.rejected, expected.rejected, "rejected patch count")
+  assert.equal(status.data?.patchCounts.accepted, expected.accepted, "accepted patch count")
+  assert.equal(status.data?.patchCounts.rejected, expected.rejected, "rejected patch count")
 }
 
 async function writeText(path: string, content: string) {

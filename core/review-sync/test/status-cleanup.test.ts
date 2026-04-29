@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
@@ -18,6 +18,43 @@ import {
 } from "./support.ts"
 
 afterEach(cleanupReviewSyncFixtures)
+
+test("status exposes structured data for TypeScript callers", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  const result = await statusReviewSession({
+    cwd: fixture.agentDir,
+    json: true,
+  })
+
+  expect(result.status).toBe("ok")
+  expect(result.data).toBeDefined()
+  const data = result.data!
+  expect(data.sessionId.startsWith("sha256-")).toBe(true)
+  expect(data.agentWorktree).toBe(await realpath(fixture.agentDir))
+  expect(data.reviewWorktree).toBe(await realpath(fixture.reviewDir))
+  expect(data.agentBranch).toBe("codex/review-sync-test")
+  expect(data.reviewBranch).toBe("review-sync/codex/review-sync-test")
+  expect(data.paused).toBe(false)
+  expect(data.refs.agentSnapshot).toContain("refs/review-sync/")
+  expect(data.refs.renderedSnapshot).toContain("refs/review-sync/")
+  expect(data.agentSnapshot).toBeTruthy()
+  expect(data.renderedSnapshot).toBeTruthy()
+  expect(data.agentSnapshot!).toMatch(/^[0-9a-f]{40}$/)
+  expect(data.renderedSnapshot!).toMatch(/^[0-9a-f]{40}$/)
+  expect(data.lastSync).toEqual({
+    status: "synced",
+    acceptedPatch: null,
+    rejectedPatch: null,
+  })
+  expect(data.patchCounts).toEqual({
+    accepted: 0,
+    rejected: 0,
+  })
+  expect(JSON.parse(result.message)).toEqual(result.data)
+})
 
 test("status explains recovery when multiple sessions match the worktree", async () => {
   const fixture = await createStartedFixture({

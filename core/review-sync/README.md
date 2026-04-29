@@ -93,6 +93,11 @@ The package exports command-level functions for TypeScript callers:
 current process working directory. Internal Git helpers, state readers, lock
 handling, and snapshot builders are intentionally not exported.
 
+`statusReviewSession` returns structured session state on `result.data`, including
+the branch pair, worktree paths, snapshot refs, resolved snapshot commits, last
+sync state, and accepted/rejected patch counts. The `message` field remains
+CLI-oriented text or JSON depending on the `json` option.
+
 ## Smoke Test
 
 Run the happy-path smoke test manually with:

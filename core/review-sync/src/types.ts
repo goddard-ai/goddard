@@ -17,6 +17,31 @@ export type WatchSyncReadyReason = "start" | "sync" | "branch-ref-refresh"
 /** Last-sync statuses stored in durable session state. */
 export type LastSyncStatus = "synced" | "rejected-human-patch" | "paused" | "error"
 
+/** Structured status payload returned by statusReviewSession for TypeScript callers. */
+export type ReviewSyncStatusData = {
+  sessionId: string
+  agentWorktree: string
+  reviewWorktree: string
+  agentBranch: string
+  reviewBranch: string
+  paused: boolean
+  refs: {
+    agentSnapshot: string
+    renderedSnapshot: string
+  }
+  agentSnapshot: string | null
+  renderedSnapshot: string | null
+  lastSync: {
+    status: LastSyncStatus
+    acceptedPatch: string | null
+    rejectedPatch: string | null
+  }
+  patchCounts: {
+    accepted: number
+    rejected: number
+  }
+}
+
 /** Structured command result returned by successful operations and CLI-safe handlers. */
 export type ReviewSyncResult = {
   exitCode: number
@@ -27,6 +52,7 @@ export type ReviewSyncResult = {
   acceptedPatchPath?: string
   rejectedPatchPath?: string
   verbose?: boolean
+  data?: ReviewSyncStatusData
   message: string
 }
 
