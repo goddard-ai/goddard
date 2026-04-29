@@ -10,9 +10,9 @@ import {
   XCircle,
 } from "lucide-react"
 
-import { useActions } from "~/lib/actions-provider.tsx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import { SessionsPageActions } from "./actions.ts"
+import { useMutations } from "~/lib/mutations-provider.tsx"
+import { SessionsPageMutations } from "./actions.ts"
 import styles from "./list-row.style.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./presentation.ts"
 
@@ -111,7 +111,7 @@ export component ListRow(props: {
   const StatusIcon = status.icon
   const sessionTitle = getSessionDisplayTitle(props.session)
 
-  const { openSession, openSessionChanges } = useActions(SessionsPageActions)
+  const { openSession, openSessionChanges } = useMutations(SessionsPageMutations)
 
   <div
     class={styles.row}

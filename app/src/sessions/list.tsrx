@@ -1,7 +1,5 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 
-import { useActions } from "~/lib/actions-provider.tsx"
-import { SessionsPageActions } from "./actions.ts"
 import { ListRow } from "./list-row.tsrx"
 import styles from "./list.style.ts"
 

@@ -1,7 +1,7 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { useState } from "preact/hooks"
 
-import { SessionsPageActions } from "./actions.ts"
+import { SessionsPageMutations } from "./actions.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { findNearestProjectPath } from "~/projects/project-context.ts"
@@ -68,7 +68,12 @@ component SessionsPage() {
     )
   }
 
-  <SessionsPageActions {openSession} {openSessionChanges}>
+  <SessionsPageMutations
+    mutations={{
+      openSession,
+      openSessionChanges,
+    }}
+  >
     <div class={styles.root}>
       const [searchQuery, setSearchQuery] = useState("")
 
@@ -84,7 +89,7 @@ component SessionsPage() {
         <SessionsList {searchQuery} sessions={visibleSessions} />
       </div>
     </div>
-  </SessionsPageActions>
+  </SessionsPageMutations>
 }
 
 export default SessionsPage
