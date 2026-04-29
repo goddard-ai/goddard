@@ -15,6 +15,14 @@ This file should stay shorter than the former `app/best-practices.md`. Keep only
 - Normalize shared records by durable ids or refs, then derive ordered lists, filters, and view models from that normalized state.
 - Expose semantic actions such as `openOrFocusTab` or `submitLaunch` rather than generic setters that leak internal state shape.
 
+## Contextual Mutations
+
+- Use `createMutationsProvider` from `src/lib/mutations-provider.tsx` when a feature surface owns semantic UI or data mutations that deeper descendants need to invoke.
+- Put feature-surface providers in the feature's `mutations.ts` module, name them after the owner such as `SessionsPageMutations`, mount them at the owning surface, and consume them with `useMutations(...)` in rows, cards, or other descendants.
+- Reach for contextual mutations when prop threading would make presentational descendants carry parent-owned callbacks like `openSession`, `removeProject`, or `openProjectTab` through intermediate components.
+- Keep ordinary props for generic controls, one-level same-file callbacks, input/select/dialog plumbing, and tiny local interactions where context would hide the data flow.
+- Do not use contextual mutation providers as replacements for Sigma model methods, SDK/cache write helpers, or the Goddard `Action` product concept. Keep prompt-driven Actions terminology separate from app-local contextual mutations.
+
 ## Hooks And Async Work
 
 - Avoid `useMemo` and `useCallback` by default. Use them only for known hot paths or real identity-sensitive APIs.
