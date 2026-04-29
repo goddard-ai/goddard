@@ -7,6 +7,8 @@
       "devDependencies": {
         "@clack/prompts": "^0.11.0",
         "@cloudflare/workers-types": "^4.20260425.1",
+        "@goddard-ai/review-sync": "workspace:*",
+        "@goddard-ai/sprint-branch": "workspace:*",
         "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
         "@prettier/plugin-oxc": "^0.1.4",
         "@tsrx/eslint-plugin": "^0.3.39",
