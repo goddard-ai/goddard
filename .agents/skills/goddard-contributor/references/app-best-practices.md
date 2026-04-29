@@ -21,7 +21,7 @@ This file should stay shorter than the former `app/best-practices.md`. Keep only
 - Put feature-surface providers in the feature's `mutations.ts` module, name them after the owner such as `SessionsPageMutations`, mount them at the owning surface, and consume them with `useMutations(...)` in rows, cards, or other descendants.
 - Reach for contextual mutations when prop threading would make presentational descendants carry parent-owned callbacks like `openSession`, `removeProject`, or `openProjectTab` through intermediate components.
 - Keep ordinary props for generic controls, one-level same-file callbacks, input/select/dialog plumbing, and tiny local interactions where context would hide the data flow.
-- Do not use contextual mutation providers as replacements for Sigma model methods, SDK/cache write helpers, or the Goddard `Action` product concept. Keep prompt-driven Actions terminology separate from app-local contextual mutations.
+- Do not use contextual mutation providers as replacements for Sigma model methods or SDK/cache write helpers.
 
 ## Hooks And Async Work
 
