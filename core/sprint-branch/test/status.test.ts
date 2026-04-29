@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
+import { getExpectedBranches, type SprintBranchState } from "../src"
 import {
   cleanupTestRepos,
   commitAll,
@@ -9,6 +10,7 @@ import {
   diagnosticCodes,
   git,
   runCli,
+  writeState,
 } from "./support"
 
 describe("sprint-branch status", () => {
@@ -59,6 +61,26 @@ describe("sprint-branch status", () => {
     expect(status.inferredFrom).toContain("current branch")
   })
 
+  // Git-private metadata can be visible from any linked worktree, so "one state file"
+  // is an inference rule and "multiple state files" must be an explicit refusal.
+  test("refuses to infer from multiple Git metadata state files", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    })
+    await writeState(repo, "other", sprintState("other"))
+
+    const result = await runCli(repo, ["status", "--json"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toContain("Multiple sprint state files exist")
+    expect(result.stderr).toContain("sprint-branch status --sprint example")
+    expect(result.stderr).toContain("sprint-branch status --sprint other")
+  })
+
   // Approved is supposed to contain only work that humans have already accepted.
   // Dirty edits there are especially dangerous because they bypass review branch boundaries.
   test("reports dirty work on the approved branch as unsafe", async () => {
@@ -107,3 +129,22 @@ describe("sprint-branch status", () => {
     expect(diagnosticCodes(status)).toContain("task_file_missing")
   })
 })
+
+/** Builds minimal canonical state for a test-only sprint. */
+function sprintState(sprint: string): SprintBranchState {
+  return {
+    schemaVersion: 1,
+    sprint,
+    baseBranch: "main",
+    branches: getExpectedBranches(sprint),
+    tasks: {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: [],
+    },
+    activeStashes: [],
+    lock: null,
+    conflict: null,
+  }
+}

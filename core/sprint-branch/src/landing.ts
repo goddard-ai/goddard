@@ -7,6 +7,7 @@ import { confirmHumanAction } from "./landing/confirmation"
 import { formatHumanCommandReport, handleHumanGitError } from "./landing/report"
 import { candidatesForOutput, resolveSprintCandidate } from "./landing/selection"
 import type {
+  AssociatedWorktree,
   CleanupInput,
   LandInput,
   SprintCleanupReport,
@@ -15,7 +16,7 @@ import type {
 import { pushCleanupDiagnostics, pushLandingDiagnostics } from "./landing/validation"
 import { associatedWorktrees, cleanupBranches } from "./landing/worktrees"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
-import type { SprintDiagnostic } from "./types"
+import type { SprintBranchState, SprintDiagnostic } from "./types"
 
 export { formatHumanCommandReport } from "./landing/report"
 export type { SprintCleanupReport, SprintLandReport } from "./landing/types"
@@ -131,15 +132,25 @@ export async function runCleanup(input: CleanupInput) {
   }
 
   try {
-    for (const worktree of worktreesToRemove) {
-      await runGit(rootDir, ["worktree", "remove", worktree.path])
-    }
-    for (const branch of branchesToDelete) {
-      await runGit(rootDir, ["branch", "-d", branch])
-    }
-    await fs.rm(await sprintStatePath(rootDir, state.sprint), { force: true })
+    await executeCleanupOperations(rootDir, state, branchesToDelete, worktreesToRemove)
     return { ...report, executed: true } satisfies SprintCleanupReport
   } catch (error) {
     return handleHumanGitError(report, error)
   }
+}
+
+/** Executes already-confirmed cleanup of sprint refs, worktrees, and Git-private state. */
+export async function executeCleanupOperations(
+  rootDir: string,
+  state: SprintBranchState,
+  branchesToDelete: string[],
+  worktreesToRemove: AssociatedWorktree[],
+) {
+  for (const worktree of worktreesToRemove) {
+    await runGit(rootDir, ["worktree", "remove", worktree.path])
+  }
+  for (const branch of branchesToDelete) {
+    await runGit(rootDir, ["branch", "-d", branch])
+  }
+  await fs.rm(await sprintStatePath(rootDir, state.sprint), { force: true })
 }

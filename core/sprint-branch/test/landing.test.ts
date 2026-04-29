@@ -3,7 +3,9 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
+import { executeCleanupOperations } from "../src/landing"
 import {
+  branchExists,
   branchHead,
   cleanupTestRepos,
   commitAll,
@@ -13,6 +15,7 @@ import {
   git,
   readState,
   runCli,
+  stateFileExists,
   writeState,
 } from "./support"
 
@@ -151,6 +154,35 @@ describe("sprint-branch human landing commands", () => {
     expect(worktreePaths).toContain(await fs.realpath(snapshot))
     expect(cleanup.gitOperations).toContain("git branch -d sprint/example/review")
     expect(cleanup.stateFilesToRemove).toEqual([".git/sprint-branch/example/state.json"])
+  })
+
+  // The interactive cleanup command confirms with a human before calling this operation.
+  // Testing the confirmed operation directly keeps the prompt policy intact while still
+  // proving cleanup removes the Git-private state file along with sprint refs.
+  test("removes sprint state when confirmed cleanup executes", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: ["010-task-name"],
+        finishedUnreviewed: [],
+      },
+      { createNextBranch: true },
+    )
+    const state = await readState(repo, "example")
+
+    await executeCleanupOperations(
+      repo,
+      state,
+      ["sprint/example/review", "sprint/example/approved", "sprint/example/next"],
+      [],
+    )
+
+    expect(await stateFileExists(repo, "example")).toBe(false)
+    expect(await branchExists(repo, "sprint/example/review")).toBe(false)
+    expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
+    expect(await branchExists(repo, "sprint/example/next")).toBe(false)
   })
 
   // Cleanup is destructive, so target containment is the key proof that deleting

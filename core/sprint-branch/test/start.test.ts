@@ -11,6 +11,7 @@ import {
   diagnosticCodes,
   readState,
   runCli,
+  workingTreePorcelain,
   type MutationOutput,
 } from "./support"
 
@@ -28,6 +29,7 @@ describe("sprint-branch start", () => {
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect(await workingTreePorcelain(repo)).toBe("")
     expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
   })
 
@@ -43,6 +45,7 @@ describe("sprint-branch start", () => {
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/next")
     expect(await branchExists(repo, "sprint/example/next")).toBe(true)
+    expect(await workingTreePorcelain(repo)).toBe("")
     expect((await readState(repo, "example")).tasks.next).toBe("020-task-name")
   })
 

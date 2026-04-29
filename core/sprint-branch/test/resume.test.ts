@@ -11,6 +11,7 @@ import {
   git,
   readState,
   runCli,
+  workingTreePorcelain,
   type MutationOutput,
 } from "./support"
 
@@ -102,6 +103,7 @@ describe("sprint-branch resume", () => {
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/next")
+    expect(await workingTreePorcelain(repo)).toBe("")
     expect(state.conflict).toBeNull()
     expect(state.tasks.next).toBe("020-task-name")
   })
@@ -211,6 +213,7 @@ describe("sprint-branch resume", () => {
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect(await workingTreePorcelain(repo)).toBe("")
     expect((await readState(repo, "example")).activeStashes).toEqual([])
   })
 })

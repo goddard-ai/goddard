@@ -12,6 +12,7 @@ import {
   git,
   readState,
   runCli,
+  workingTreePorcelain,
   type MutationOutput,
 } from "./support"
 
@@ -34,6 +35,7 @@ describe("sprint-branch approve", () => {
     expect(result.exitCode).toBe(0)
     const state = await readState(repo, "example")
     expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect(await workingTreePorcelain(repo)).toBe("")
     expect(state.tasks.review).toBeNull()
     expect(state.tasks.approved).toEqual(["010-task-name"])
     expect(await branchHead(repo, "sprint/example/review")).toBe(
@@ -67,6 +69,7 @@ describe("sprint-branch approve", () => {
 
     expect(result.exitCode).toBe(0)
     const state = await readState(repo, "example")
+    expect(await workingTreePorcelain(repo)).toBe("")
     expect(state.tasks.review).toBe("020-task-name")
     expect(state.tasks.next).toBeNull()
     expect(state.tasks.approved).toEqual(["010-task-name"])

@@ -51,6 +51,14 @@ export async function createBaseRepo(sprint: string) {
   return repo
 }
 
+export async function createLinkedWorktree(repo: string, ref = "main") {
+  const worktree = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-branch-worktree-"))
+  tempRepos.push(worktree)
+  await fs.rm(worktree, { recursive: true, force: true })
+  await git(repo, ["worktree", "add", "--detach", worktree, ref])
+  return worktree
+}
+
 export async function createSprintRepo(
   sprint: string,
   tasks: SprintTestTasks,
@@ -89,6 +97,10 @@ export async function writeState(repo: string, sprint: string, state: SprintBran
 
 export async function stateFileExists(repo: string, sprint: string) {
   return pathExists(await sprintStatePath(repo, sprint))
+}
+
+export async function workingTreePorcelain(repo: string) {
+  return git(repo, ["status", "--porcelain"])
 }
 
 export async function runCli(cwd: string, args: string[]) {
