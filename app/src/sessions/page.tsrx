@@ -1,7 +1,7 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { useState } from "preact/hooks"
 
-import { SessionsPageMutations } from "./actions.ts"
+import { SessionsPageMutations } from "./mutations.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { findNearestProjectPath } from "~/projects/project-context.ts"

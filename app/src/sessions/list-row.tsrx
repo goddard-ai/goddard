@@ -12,7 +12,7 @@ import {
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
-import { SessionsPageMutations } from "./actions.ts"
+import { SessionsPageMutations } from "./mutations.ts"
 import styles from "./list-row.style.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./presentation.ts"
 

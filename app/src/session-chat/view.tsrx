@@ -7,7 +7,7 @@ import styles from "./view.style.ts"
 import { useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { submitSessionPrompt } from "~/sessions/actions.ts"
+import { submitSessionPrompt } from "~/sessions/mutations.ts"
 
 export component SessionChatView(props: { sessionId: string }) {
   const sessionId = props.sessionId as DaemonSession["id"]

@@ -1,10 +1,17 @@
 import type { Protected } from "preact-sigma"
 
 import { browseForProject } from "~/desktop-host.ts"
+import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import type { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import type { ProjectContext } from "./project-context.ts"
 import { deriveProjectName } from "./project-name.ts"
 import type { ProjectRecord, ProjectRegistry } from "./project-registry.ts"
+
+export const ProjectsPageMutations = createMutationsProvider<{
+  openProjectTab: (projectPath: ProjectRecord["path"]) => void
+  removeProject: (projectPath: ProjectRecord["path"]) => void
+  selectProject: (projectPath: ProjectRecord["path"]) => void
+}>("ProjectsPageMutations")
 
 /** Opens one project-backed workbench tab and marks that project active. */
 export function openProjectTab(props: {

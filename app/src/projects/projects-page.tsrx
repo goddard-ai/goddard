@@ -8,7 +8,8 @@ import { useEffect } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { DialogPortal } from "~/lib/dialog-portal.tsrx"
-import { openProjectTab } from "./actions.ts"
+import { useMutations } from "~/lib/mutations-provider.tsx"
+import { openProjectTab, ProjectsPageMutations } from "./mutations.ts"
 import { deriveProjectName } from "./project-name.ts"
 import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
@@ -49,74 +50,76 @@ export component ProjectsPage() {
     )
   }
 
-  <Dialog.RootProvider value={addProjectDialog} lazyMount unmountOnExit>
-    <div class={styles.root}>
-      <section class={styles.panel}>
-        <header class={styles.sectionHeader}>
-          <div class={styles.sectionCopy}>
-            <h1 class={styles.title}>{"Projects"}</h1>
-            <p class={styles.body}>
-              {"Keep an explicit set of local roots available to the workbench."}
-            </p>
-          </div>
-          <Dialog.Trigger asChild>
-            <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
-              <Plus size={16} strokeWidth={2.2} />
-              {" Add project"}
-            </button>
-          </Dialog.Trigger>
-        </header>
-        if (projects.length === 0) {
-          <div class={styles.empty}>
-            <div class={styles.emptyCopy}>
-              <h2 class={styles.title}>{"No projects yet"}</h2>
+  <ProjectsPageMutations
+    mutations={{
+      openProjectTab: openProjectInTab,
+      removeProject,
+      selectProject,
+    }}
+  >
+    <Dialog.RootProvider value={addProjectDialog} lazyMount unmountOnExit>
+      <div class={styles.root}>
+        <section class={styles.panel}>
+          <header class={styles.sectionHeader}>
+            <div class={styles.sectionCopy}>
+              <h1 class={styles.title}>{"Projects"}</h1>
               <p class={styles.body}>
-                {"Add a local directory to establish the app's explicit working set."}
+                {"Keep an explicit set of local roots available to the workbench."}
               </p>
-              <div>
-                <Dialog.Trigger asChild>
-                  <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
-                    <Plus size={16} strokeWidth={2.2} />
-                    {"Add project"}
-                  </button>
-                </Dialog.Trigger>
+            </div>
+            <Dialog.Trigger asChild>
+              <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+                <Plus size={16} strokeWidth={2.2} />
+                {" Add project"}
+              </button>
+            </Dialog.Trigger>
+          </header>
+          if (projects.length === 0) {
+            <div class={styles.empty}>
+              <div class={styles.emptyCopy}>
+                <h2 class={styles.title}>{"No projects yet"}</h2>
+                <p class={styles.body}>
+                  {"Add a local directory to establish the app's explicit working set."}
+                </p>
+                <div>
+                  <Dialog.Trigger asChild>
+                    <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
+                      <Plus size={16} strokeWidth={2.2} />
+                      {"Add project"}
+                    </button>
+                  </Dialog.Trigger>
+                </div>
               </div>
             </div>
-          </div>
-        } else {
-          <ProjectList
-            onOpenProjectTab={openProjectInTab}
-            onRemove={removeProject}
-            onSelect={selectProject}
-            {projects}
-            selectedProjectPath={resolvedSelectedProjectPath}
-          />
-        }
-      </section>
-      <aside class={styles.panel}>
-        <div class={styles.asideBody}>
-          <div class={styles.intro}>
-            <h2 class={styles.subheading}>{"Project details"}</h2>
-            <p class={styles.body}>
-              {selectedProject
-                ? "Selected project metadata for the current workspace."
-                : "Select a project to inspect its configured path and display name."}
-            </p>
-          </div>
-          if (selectedProject) {
-            <h3 class={styles.selectedTitle}>
-              {selectedProject.name}
-            </h3>
-            <div class={styles.cardList}>
-              <InfoCard label="Path" value={selectedProject.path} />
-              <InfoCard label="Display name" value={selectedProject.name} />
-            </div>
+          } else {
+            <ProjectList {projects} selectedProjectPath={resolvedSelectedProjectPath} />
           }
-        </div>
-      </aside>
-      <AddProjectDialog dialog={addProjectDialog} {selectedProjectPath} />
-    </div>
-  </Dialog.RootProvider>
+        </section>
+        <aside class={styles.panel}>
+          <div class={styles.asideBody}>
+            <div class={styles.intro}>
+              <h2 class={styles.subheading}>{"Project details"}</h2>
+              <p class={styles.body}>
+                {selectedProject
+                  ? "Selected project metadata for the current workspace."
+                  : "Select a project to inspect its configured path and display name."}
+              </p>
+            </div>
+            if (selectedProject) {
+              <h3 class={styles.selectedTitle}>
+                {selectedProject.name}
+              </h3>
+              <div class={styles.cardList}>
+                <InfoCard label="Path" value={selectedProject.path} />
+                <InfoCard label="Display name" value={selectedProject.name} />
+              </div>
+            }
+          </div>
+        </aside>
+        <AddProjectDialog dialog={addProjectDialog} {selectedProjectPath} />
+      </div>
+    </Dialog.RootProvider>
+  </ProjectsPageMutations>
 }
 
 export default ProjectsPage
@@ -125,20 +128,11 @@ export default ProjectsPage
 component ProjectList(props: {
   projects: readonly ProjectRecord[];
   selectedProjectPath: string | null;
-  onSelect: (id: string) => void;
-  onRemove: (id: string) => void;
-  onOpenProjectTab: (id: string) => void;
 }) {
   <ul class={styles.list}>
     for (const project of props.projects) {
       <li key={project.path}>
-        <ProjectListRow
-          isSelected={props.selectedProjectPath === project.path}
-          onOpenProjectTab={props.onOpenProjectTab}
-          onRemove={props.onRemove}
-          onSelect={props.onSelect}
-          {project}
-        />
+        <ProjectListRow isSelected={props.selectedProjectPath === project.path} {project} />
       </li>
     }
   </ul>
@@ -148,10 +142,9 @@ component ProjectList(props: {
 component ProjectListRow(props: {
   project: ProjectRecord;
   isSelected: boolean;
-  onSelect: (id: string) => void;
-  onRemove: (id: string) => void;
-  onOpenProjectTab: (id: string) => void;
 }) {
+  const { openProjectTab, removeProject, selectProject } = useMutations(ProjectsPageMutations)
+
   <article
     class={styles.row}
     style={{
@@ -163,7 +156,7 @@ component ProjectListRow(props: {
       class={styles.rowButton}
       type="button"
       onClick={() => {
-        props.onSelect(props.project.path)
+        selectProject(props.project.path)
       }}
     >
       <div class={styles.rowHeader}>
@@ -184,7 +177,7 @@ component ProjectListRow(props: {
         type="button"
         onClick={(event) => {
           event.stopPropagation()
-          props.onOpenProjectTab(props.project.path)
+          openProjectTab(props.project.path)
         }}
       >
         <ArrowUpRight size={15} strokeWidth={2.2} />
@@ -195,7 +188,7 @@ component ProjectListRow(props: {
         type="button"
         onClick={(event) => {
           event.stopPropagation()
-          props.onRemove(props.project.path)
+          removeProject(props.project.path)
         }}
       >
         <Trash2 size={15} strokeWidth={2.1} />
