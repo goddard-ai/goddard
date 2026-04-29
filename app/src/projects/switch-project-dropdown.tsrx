@@ -1,5 +1,4 @@
 import * as fuzzysort from "fuzzysort2"
-import { concat } from "radashi"
 import { Search } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
@@ -64,19 +63,21 @@ export component SwitchProjectDropdown() {
       { threshold: 0 },
     ).items.map((item) => item.value.project)
   }, [projects, search, searchableProjects])
-  const items: SwitchProjectItem[] = useMemo(
-    () => concat(
-      isEmptyQuery(search) ? { id: "open-folder", kind: "open-folder" } : undefined,
-      filteredProjects.map(
-        (project) => ({
-          id: project.path,
-          kind: "project" as const,
-          project,
-        }),
-      ),
-    ),
-    [filteredProjects, search],
-  )
+  const items: SwitchProjectItem[] = useMemo(() => {
+    const projectItems: SwitchProjectItem[] = filteredProjects.map(
+      (project) => ({
+        id: project.path,
+        kind: "project",
+        project,
+      }),
+    )
+
+    if (!isEmptyQuery(search)) {
+      return projectItems
+    }
+
+    return [{ id: "open-folder", kind: "open-folder" }, ...projectItems]
+  }, [filteredProjects, search])
 
   async function openFolderFromSwitcher() {
     setIsOpen(false)

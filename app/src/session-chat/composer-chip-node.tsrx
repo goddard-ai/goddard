@@ -14,6 +14,7 @@ import { BookOpen, Command, File, Folder } from "lucide-react"
 import type { JSX } from "preact"
 
 import styles from "./composer-chip-node.style.ts"
+import type { ComposerChipDecoratorNodeConstructor } from "./composer-chip-node-types.ts"
 
 const CHIP_DATA_ATTRIBUTE = "data-goddard-composer-chip"
 
@@ -113,6 +114,8 @@ function importComposerChipFromElement(element: HTMLElement) {
   }
 }
 
+const ComposerChipDecoratorNode = DecoratorNode as ComposerChipDecoratorNodeConstructor
+
 /** Renders the shared icon used by one visible composer chip. */
 component ChipIcon(props: { chip: ComposerChipData }) {
   if (props.chip.kind === "folder") {
@@ -146,7 +149,7 @@ component ComposerChipView(props: { chip: ComposerChipData }) {
 }
 
 /** Inline Lexical decorator node that stores one atomic composer chip. */
-export class ComposerChipNode extends DecoratorNode {
+export class ComposerChipNode extends ComposerChipDecoratorNode {
   __chip: ComposerChipData
 
   static getType() {
@@ -239,6 +242,6 @@ export function $createComposerChipNode(chip: ComposerChipData) {
 }
 
 /** Checks whether one Lexical node is implemented by the session composer chip class. */
-export function $isComposerChipNode(node: LexicalNode | null | undefined): boolean {
+export function $isComposerChipNode(node: LexicalNode | null | undefined) {
   return node instanceof ComposerChipNode
 }

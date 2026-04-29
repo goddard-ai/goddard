@@ -16,6 +16,7 @@ import {
   $createComposerChipNode,
   $isComposerChipNode,
   type ComposerChipData,
+  type ComposerChipNode,
 } from "./composer-chip-node.tsrx"
 
 type ComposerPromptBlock = Exclude<SessionPromptRequest["prompt"], string>[number]
@@ -68,9 +69,11 @@ function mergeTextBlocks(blocks: ComposerPromptBlock[]) {
 /** Appends one lexical node subtree into the ordered composer content part list. */
 function appendNodeParts(node: LexicalNode, parts: ComposerContentPart[]) {
   if ($isComposerChipNode(node)) {
+    const chipNode = node as ComposerChipNode
+
     parts.push({
       type: "chip",
-      chip: node.getChip(),
+      chip: chipNode.getChip(),
     })
     return
   }

@@ -1,3 +1,5 @@
+import type { Protected } from "preact-sigma"
+
 import { browseForProject } from "~/desktop-host.ts"
 import type { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import type { ProjectContext } from "./project-context.ts"
@@ -6,10 +8,10 @@ import type { ProjectRecord, ProjectRegistry } from "./project-registry.ts"
 
 /** Opens one project-backed workbench tab and marks that project active. */
 export function openProjectTab(props: {
-  projectContext: ProjectContext
+  projectContext: Protected<ProjectContext>
   projectPath: string
-  projectRegistry: ProjectRegistry
-  workbenchTabSet: WorkbenchTabSet
+  projectRegistry: Protected<ProjectRegistry>
+  workbenchTabSet: Protected<WorkbenchTabSet>
 }) {
   const project = props.projectRegistry.projectsByPath[props.projectPath] ?? null
 
@@ -30,9 +32,9 @@ export function openProjectTab(props: {
 
 /** Resolves one filesystem selection into a tracked project and opens its tab. */
 export async function openProjectFromFilesystem(props: {
-  projectContext: ProjectContext
-  projectRegistry: ProjectRegistry
-  workbenchTabSet: WorkbenchTabSet
+  projectContext: Protected<ProjectContext>
+  projectRegistry: Protected<ProjectRegistry>
+  workbenchTabSet: Protected<WorkbenchTabSet>
 }) {
   const selectedPath = await browseForProject()
 

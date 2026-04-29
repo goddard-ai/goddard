@@ -68,12 +68,7 @@ component SessionsPage() {
     )
   }
 
-  <SessionsPageActions
-    actions={{
-      openSession,
-      openSessionChanges,
-    }}
-  >
+  <SessionsPageActions {openSession} {openSessionChanges}>
     <div class={styles.root}>
       const [searchQuery, setSearchQuery] = useState("")
 

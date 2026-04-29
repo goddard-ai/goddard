@@ -85,8 +85,9 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
               </div>
             </>}
             children={(item, state) => {
-              const Icon = item.icon
-              const shortcutBinding = shortcutRegistry.resolvedBindings[item.id]?.[0]
+              const command = item as AppCommand
+              const Icon = command.icon
+              const shortcutBinding = shortcutRegistry.resolvedBindings[command.id]?.[0]
               const shortcut =
                 typeof shortcutBinding === "string"
                   ? shortcutBinding
@@ -102,7 +103,7 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                       }} />
                     : null}
                   <span class={styles.itemLabel}>
-                    {item.label}
+                    {command.label}
                   </span>
                   {shortcut
                     ? <span class={styles.shortcut}>

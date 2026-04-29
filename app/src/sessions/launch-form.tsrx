@@ -108,7 +108,7 @@ export component SessionLaunchForm(props: {
       <div class={selectorStyles.adapterCard}>
         <p class={styles.adapterMeta}>
           <span class={styles.mutedMeta}>
-            Adapter
+            {"Adapter"}
             {" · "}
           </span>
           <span>
