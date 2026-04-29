@@ -24,7 +24,7 @@ export async function readCommandState(
       summary: "Sprint state is invalid.",
       requiresCleanWorkingTree: true,
       gitOperations: [],
-      sprintFiles: [context.stateRelativePath],
+      stateFiles: [context.stateRelativePath],
       conflictHandling: "Fix the JSON state before running mutating commands.",
       diagnostics,
       state: null,

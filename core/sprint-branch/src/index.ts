@@ -15,12 +15,11 @@ export { getExpectedBranches, parseSprintBranchName, validateSprintName } from "
 export { SprintInferenceError, inferSprintContext } from "./state/inference"
 export { findSprintStateFiles, readSprintStateFile } from "./state/io"
 export {
-  sprintHandoffFileName,
-  sprintHandoffPath,
-  sprintIndexFileName,
-  sprintIndexPath,
+  sprintStateDisplayPath,
   sprintStateFileName,
+  sprintStateGitPath,
   sprintStatePath,
+  sprintStateRoot,
 } from "./state/paths"
 export { parseSprintState } from "./state/schema"
 export { buildStatusReport, formatStatusReport } from "./status"
@@ -33,7 +32,6 @@ export type {
   SprintConflictState,
   SprintContext,
   SprintDiagnostic,
-  SprintIndexStatus,
   SprintLockState,
   SprintMutationReport,
   SprintStatusReport,

@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { resolveGitPath } from "../git/repository"
+import { resolveGitCommonPath } from "../git/repository"
 import type { SprintBranchState, SprintContext, SprintMutationReport } from "../types"
 
 /** Runs one mutating command under a Git-private sprint lock file. */
@@ -11,7 +11,11 @@ export async function withSprintLock(
   commandName: string,
   run: () => Promise<SprintMutationReport>,
 ) {
-  const lockPath = await resolveGitPath(context.rootDir, `sprint-branch/${context.sprint}.lock`)
+  const lockDisplayPath = path.join(".git", "sprint-branch", `${context.sprint}.lock`)
+  const lockPath = await resolveGitCommonPath(
+    context.rootDir,
+    `sprint-branch/${context.sprint}.lock`,
+  )
   const lock = {
     command: commandName,
     createdAt: new Date().toISOString(),
@@ -38,14 +42,14 @@ export async function withSprintLock(
         summary: `Sprint ${state.sprint} is locked by another branch operation.`,
         requiresCleanWorkingTree: true,
         gitOperations: [],
-        sprintFiles: [path.relative(context.rootDir, lockPath)],
+        stateFiles: [lockDisplayPath],
         conflictHandling:
           "Remove the lock only after confirming no sprint-branch command is running.",
         diagnostics: [
           {
             severity: "error",
             code: "lock_exists",
-            message: `Lock file ${path.relative(context.rootDir, lockPath)} already exists.`,
+            message: `Lock file ${lockDisplayPath} already exists.`,
           },
         ],
         state,

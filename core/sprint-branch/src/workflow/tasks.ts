@@ -1,7 +1,6 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { sprintHandoffFileName } from "../state/paths"
 import type { SprintBranchState, SprintTaskState } from "../types"
 
 /** Resolves the next unassigned task file stem from sprint task queue order. */
@@ -80,7 +79,7 @@ async function listTaskStems(rootDir: string, sprint: string) {
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
     .filter((name) => name.endsWith(".md"))
-    .filter((name) => name !== "000-index.md" && name !== sprintHandoffFileName)
+    .filter((name) => name !== "000-index.md" && name !== "001-handoff.md")
     .map((name) => name.slice(0, -".md".length))
     .sort()
 }

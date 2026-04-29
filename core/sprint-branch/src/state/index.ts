@@ -2,11 +2,10 @@ export { getExpectedBranches, parseSprintBranchName, validateSprintName } from "
 export { SprintInferenceError, inferSprintContext } from "./inference"
 export { findSprintStateFiles, readSprintStateFile } from "./io"
 export {
-  sprintHandoffFileName,
-  sprintHandoffPath,
-  sprintIndexFileName,
-  sprintIndexPath,
+  sprintStateDisplayPath,
   sprintStateFileName,
+  sprintStateGitPath,
   sprintStatePath,
+  sprintStateRoot,
 } from "./paths"
 export { parseSprintState } from "./schema"

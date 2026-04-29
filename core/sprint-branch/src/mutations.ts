@@ -26,11 +26,7 @@ import {
   withDryRun,
   type MutationInput,
 } from "./workflow/report"
-import {
-  onlySprintBookkeepingChanged,
-  sprintFilesForState,
-  writeSprintFiles,
-} from "./workflow/sprint-files"
+import { stateFilesForState, writeSprintState } from "./workflow/state-files"
 import {
   cloneState,
   emptyTasks,
@@ -109,7 +105,7 @@ export async function runInit(input: MutationInput & { base: string }) {
       `git branch ${branches.approved} ${input.base}`,
       `git branch ${branches.review} ${branches.approved}`,
     ],
-    sprintFiles: sprintFilesForState(context.rootDir, state),
+    stateFiles: stateFilesForState(state),
     conflictHandling: "No rebase is performed. Existing branches or state files stop the command.",
     diagnostics,
   })
@@ -121,7 +117,7 @@ export async function runInit(input: MutationInput & { base: string }) {
   return withSprintLock(context, state, "init", async () => {
     await runGit(context.rootDir, ["branch", branches.approved, input.base])
     await runGit(context.rootDir, ["branch", branches.review, branches.approved])
-    await writeSprintFiles(context.rootDir, state, "init", `Initialized sprint from ${input.base}.`)
+    await writeSprintState(context.rootDir, state)
     return { ...plan, executed: true }
   })
 }
@@ -203,7 +199,7 @@ export async function runStart(input: MutationInput & { task: string }) {
     summary,
     requiresCleanWorkingTree: true,
     gitOperations,
-    sprintFiles: sprintFilesForState(context.rootDir, nextState),
+    stateFiles: stateFilesForState(nextState),
     conflictHandling:
       "No rebase is performed. Branch movement stops before files are updated on failure.",
     diagnostics,
@@ -225,7 +221,7 @@ export async function runStart(input: MutationInput & { task: string }) {
       await moveRecordedBranch(context.rootDir, state, state.branches.next, state.branches.review)
     }
     await runGit(context.rootDir, ["checkout", targetBranch])
-    await writeSprintFiles(context.rootDir, nextState, "start", summary)
+    await writeSprintState(context.rootDir, nextState)
     return { ...plan, executed: true }
   })
 }
@@ -266,7 +262,7 @@ export async function runFeedback(input: MutationInput) {
     summary: "Prepare the review branch for human feedback.",
     requiresCleanWorkingTree: false,
     gitOperations,
-    sprintFiles: sprintFilesForState(context.rootDir, nextState),
+    stateFiles: stateFilesForState(nextState),
     conflictHandling:
       "Stash failures leave the working tree unchanged. Checkout failures stop before state updates.",
     diagnostics,
@@ -292,14 +288,7 @@ export async function runFeedback(input: MutationInput) {
     }
 
     await runGit(context.rootDir, ["checkout", state.branches.review])
-    await writeSprintFiles(
-      context.rootDir,
-      nextState,
-      "feedback",
-      recordedStash
-        ? `Stashed ${state.tasks.next} from next and checked out review.`
-        : "Checked out review for feedback.",
-    )
+    await writeSprintState(context.rootDir, nextState)
     return { ...plan, state: nextState, executed: true }
   })
 }
@@ -367,7 +356,7 @@ export async function runResume(input: MutationInput) {
       : "No next task is recorded; return to review.",
     requiresCleanWorkingTree: !resolvingStashApplyConflict,
     gitOperations,
-    sprintFiles: sprintFilesForState(context.rootDir, nextState),
+    stateFiles: stateFilesForState(nextState),
     conflictHandling:
       "State remains pre-resume until rebase and stash application finish. Retry resume after resolving any recorded conflict.",
     diagnostics,
@@ -389,7 +378,7 @@ export async function runResume(input: MutationInput) {
             )
           : nextState.activeStashes
         nextState.conflict = null
-        await writeSprintFiles(context.rootDir, nextState, "resume", plan.summary)
+        await writeSprintState(context.rootDir, nextState)
         return { ...plan, state: nextState, executed: true }
       }
 
@@ -410,7 +399,7 @@ export async function runResume(input: MutationInput) {
         )
       }
       nextState.conflict = null
-      await writeSprintFiles(context.rootDir, nextState, "resume", plan.summary)
+      await writeSprintState(context.rootDir, nextState)
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {
@@ -517,7 +506,7 @@ export async function runApprove(input: MutationInput) {
       : "Approve the current review task.",
     requiresCleanWorkingTree: true,
     gitOperations,
-    sprintFiles: sprintFilesForState(context.rootDir, nextState),
+    stateFiles: stateFilesForState(nextState),
     conflictHandling:
       "Validation and next rebasing happen before approved is moved. Retry approve after resolving any recorded Git conflict.",
     diagnostics,
@@ -555,7 +544,7 @@ export async function runApprove(input: MutationInput) {
         await runGit(context.rootDir, ["checkout", state.branches.review])
       }
       nextState.conflict = null
-      await writeSprintFiles(context.rootDir, nextState, "approve", plan.summary)
+      await writeSprintState(context.rootDir, nextState)
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {
@@ -608,41 +597,14 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       message: "finalize requires no review task, no next task, and no finished unreviewed tasks.",
     })
   }
-  const reviewOnlyHasBookkeepingChanges =
-    reviewHead &&
-    approvedHead &&
-    reviewHead !== approvedHead &&
-    (await onlySprintBookkeepingChanged(
-      context.rootDir,
-      state.sprint,
-      state.branches.approved,
-      state.branches.review,
-    ))
-  const nextOnlyHasBookkeepingChanges =
-    nextHead &&
-    reviewHead &&
-    nextHead !== reviewHead &&
-    (await onlySprintBookkeepingChanged(
-      context.rootDir,
-      state.sprint,
-      state.branches.next,
-      state.branches.review,
-    ))
-
-  if (
-    reviewHead &&
-    approvedHead &&
-    reviewHead !== approvedHead &&
-    !retryingFinalize &&
-    !reviewOnlyHasBookkeepingChanges
-  ) {
+  if (reviewHead && approvedHead && reviewHead !== approvedHead && !retryingFinalize) {
     diagnostics.push({
       severity: "error",
       code: "review_approved_mismatch",
       message: `${state.branches.review} and ${state.branches.approved} do not point at the same approved content.`,
     })
   }
-  if (nextHead && reviewHead && nextHead !== reviewHead && !nextOnlyHasBookkeepingChanges) {
+  if (nextHead && reviewHead && nextHead !== reviewHead) {
     diagnostics.push({
       severity: "error",
       code: "active_next_branch_exists",
@@ -672,7 +634,7 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       `git rebase ${baseBranch}`,
       moveBranchOperation(state.branches.approved, state.branches.review, state.branches.review),
     ],
-    sprintFiles: sprintFilesForState(context.rootDir, nextState),
+    stateFiles: stateFilesForState(nextState),
     conflictHandling:
       "State remains pre-finalize until the final rebase and approved ref update both succeed. Retry finalize after resolving any recorded conflict.",
     diagnostics,
@@ -693,7 +655,7 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
         state.branches.review,
       )
       nextState.conflict = null
-      await writeSprintFiles(context.rootDir, nextState, "finalize", plan.summary)
+      await writeSprintState(context.rootDir, nextState)
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {

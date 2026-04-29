@@ -4,7 +4,7 @@ import { getCurrentBranch, resolveRepositoryRoot } from "../git/repository"
 import type { SprintContext, SprintDiagnostic } from "../types"
 import { parseSprintBranchName, validateSprintName } from "./branches"
 import { findSprintStateFiles, readSprintStateFile } from "./io"
-import { sprintStatePath } from "./paths"
+import { sprintStateDisplayPath, sprintStatePath } from "./paths"
 
 /** Error raised when the current sprint cannot be inferred safely. */
 export class SprintInferenceError extends Error {
@@ -24,13 +24,13 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
 
   if (input.sprint) {
     assertValidSprintName(input.sprint)
-    return buildContext(rootDir, input.sprint, currentBranch, "explicit --sprint")
+    return await buildContext(rootDir, input.sprint, currentBranch, "explicit --sprint")
   }
 
   if (currentBranch) {
     const parsedBranch = parseSprintBranchName(currentBranch)
     if (parsedBranch) {
-      return buildContext(
+      return await buildContext(
         rootDir,
         parsedBranch.sprint,
         currentBranch,
@@ -41,7 +41,7 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
 
   const pathSprint = inferSprintFromPath(rootDir, input.cwd)
   if (pathSprint) {
-    return buildContext(
+    return await buildContext(
       rootDir,
       pathSprint,
       currentBranch,
@@ -53,7 +53,7 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
   if (currentBranch) {
     const matchingStates = await statesReferencingBranch(rootDir, stateFiles, currentBranch)
     if (matchingStates.length === 1) {
-      return buildContext(
+      return await buildContext(
         rootDir,
         matchingStates[0].sprint,
         currentBranch,
@@ -75,7 +75,7 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
 
   if (stateFiles.length === 1) {
     const sprint = path.basename(path.dirname(stateFiles[0]))
-    return buildContext(rootDir, sprint, currentBranch, "only sprint state file")
+    return await buildContext(rootDir, sprint, currentBranch, "only sprint state file")
   }
 
   if (stateFiles.length > 1) {
@@ -86,7 +86,7 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
         return {
           severity: "error",
           code: "ambiguous_sprint_state",
-          message: path.relative(rootDir, statePath),
+          message: statePathForDisplay(rootDir, statePath),
           suggestion: `sprint-branch status --sprint ${sprint}`,
         }
       }),
@@ -100,7 +100,7 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
         severity: "error",
         code: "missing_sprint_state",
         message:
-          "Looked for a sprint branch name, a sprints/<name> working directory, and sprints/*/.sprint-branch-state.json.",
+          "Looked for a sprint branch name, a sprints/<name> working directory, and Git metadata sprint-branch/*/state.json.",
       },
     ],
   )
@@ -113,22 +113,22 @@ function assertValidSprintName(sprint: string) {
   }
 }
 
-function buildContext(
+async function buildContext(
   rootDir: string,
   sprint: string,
   currentBranch: string | null,
   inferredFrom: string,
-): SprintContext {
+) {
   assertValidSprintName(sprint)
-  const statePath = sprintStatePath(rootDir, sprint)
+  const statePath = await sprintStatePath(rootDir, sprint)
   return {
     rootDir,
     sprint,
     statePath,
-    stateRelativePath: path.relative(rootDir, statePath),
+    stateRelativePath: sprintStateDisplayPath(sprint),
     currentBranch,
     inferredFrom,
-  }
+  } satisfies SprintContext
 }
 
 function inferSprintFromPath(rootDir: string, cwd: string) {
@@ -153,7 +153,7 @@ async function statesReferencingBranch(rootDir: string, stateFiles: string[], br
       if (Object.values(parsed.state.branches).includes(branch)) {
         matches.push({
           sprint: parsed.state.sprint,
-          relativePath: path.relative(rootDir, statePath),
+          relativePath: statePathForDisplay(rootDir, statePath),
         })
       }
     } catch {
@@ -162,4 +162,13 @@ async function statesReferencingBranch(rootDir: string, stateFiles: string[], br
   }
 
   return matches
+}
+
+function statePathForDisplay(rootDir: string, statePath: string) {
+  const parts = statePath.split(path.sep)
+  const rootIndex = parts.lastIndexOf("sprint-branch")
+  if (rootIndex !== -1) {
+    return path.join(".git", ...parts.slice(rootIndex))
+  }
+  return path.relative(rootDir, statePath)
 }

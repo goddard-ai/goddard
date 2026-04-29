@@ -36,7 +36,7 @@ export type SprintConflictState = {
   [key: string]: unknown
 }
 
-/** Canonical machine-readable state stored in .sprint-branch-state.json. */
+/** Canonical machine-readable state stored in Git metadata outside the working tree. */
 export type SprintBranchState = {
   schemaVersion: 1
   sprint: string
@@ -79,15 +79,6 @@ export type SprintWorkingTreeStatus = {
   entries: string[]
 }
 
-/** Human-readable index mirror inspection result. */
-export type SprintIndexStatus = {
-  path: string
-  relativePath: string
-  exists: boolean
-  diverged: boolean
-  warnings: string[]
-}
-
 /** Full status payload returned by sprint-branch status and reused by doctor. */
 export type SprintStatusReport = {
   ok: boolean
@@ -104,7 +95,6 @@ export type SprintStatusReport = {
     nextDescendsFromReview: boolean | null
   }
   workingTree: SprintWorkingTreeStatus
-  index: SprintIndexStatus
   blocked: {
     review: boolean
     conflict: boolean
@@ -126,7 +116,7 @@ export type SprintMutationReport = {
   summary: string
   requiresCleanWorkingTree: boolean
   gitOperations: string[]
-  sprintFiles: string[]
+  stateFiles: string[]
   conflictHandling: string
   diagnostics: SprintDiagnostic[]
   state: SprintBranchState | null

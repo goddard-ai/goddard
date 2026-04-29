@@ -23,6 +23,9 @@ export function formatHumanCommandReport(report: SprintLandReport | SprintCleanu
       "",
       "Worktrees to remove:",
       ...formatList(report.worktreesToRemove.map((worktree) => worktree.path)),
+      "",
+      "State files to remove:",
+      ...formatList(report.stateFilesToRemove),
     )
   }
 

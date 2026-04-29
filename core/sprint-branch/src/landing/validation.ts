@@ -3,7 +3,6 @@ import { getCurrentBranch } from "../git/repository"
 import { getWorkingTreeStatus } from "../git/worktree"
 import { parseSprintBranchName } from "../state/branches"
 import type { SprintBranchState, SprintDiagnostic } from "../types"
-import { onlySprintBookkeepingChanged } from "../workflow/sprint-files"
 import type { CleanupInput, HumanCommandInput, LandInput } from "./types"
 
 /** Adds diagnostics for the finalized-state requirements specific to land. */
@@ -129,26 +128,6 @@ async function pushSharedFinalizedDiagnostics(
 
   const approvedCommit = await getBranchHead(rootDir, state.branches.approved)
   const nextCommit = await getBranchHead(rootDir, state.branches.next)
-  const reviewOnlyHasBookkeepingChanges =
-    reviewCommit &&
-    approvedCommit &&
-    reviewCommit !== approvedCommit &&
-    (await onlySprintBookkeepingChanged(
-      rootDir,
-      state.sprint,
-      state.branches.approved,
-      state.branches.review,
-    ))
-  const nextOnlyHasBookkeepingChanges =
-    nextCommit &&
-    reviewCommit &&
-    nextCommit !== reviewCommit &&
-    (await onlySprintBookkeepingChanged(
-      rootDir,
-      state.sprint,
-      state.branches.next,
-      state.branches.review,
-    ))
 
   if (state.conflict) {
     diagnostics.push({
@@ -186,19 +165,14 @@ async function pushSharedFinalizedDiagnostics(
       message: `Approved branch ${state.branches.approved} does not exist.`,
     })
   }
-  if (
-    reviewCommit &&
-    approvedCommit &&
-    reviewCommit !== approvedCommit &&
-    !reviewOnlyHasBookkeepingChanges
-  ) {
+  if (reviewCommit && approvedCommit && reviewCommit !== approvedCommit) {
     diagnostics.push({
       severity: "error",
       code: "review_approved_mismatch",
       message: `${state.branches.review} and ${state.branches.approved} do not point at the same finalized content.`,
     })
   }
-  if (nextCommit && reviewCommit && nextCommit !== reviewCommit && !nextOnlyHasBookkeepingChanges) {
+  if (nextCommit && reviewCommit && nextCommit !== reviewCommit) {
     diagnostics.push({
       severity: "error",
       code: "active_next_branch_exists",

@@ -137,7 +137,7 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("git_operation_without_conflict_state")
   })
 
-  // Transactional commands keep tracked sprint files untouched while Git owns a
+  // Transactional commands keep canonical sprint state untouched while Git owns a
   // rebase. Doctor should recognize the Git-private marker as known recovery
   // state instead of claiming the sprint JSON forgot about the operation.
   test("recognizes transient conflict metadata during an active rebase", async () => {
@@ -237,41 +237,6 @@ describe("sprint-branch doctor", () => {
     expect(codes).toContain("transition_retry_pending")
     expect(codes).not.toContain("conflict_state_without_git_operation")
     expect(doctor.nextSafeCommand).toBe("sprint-branch resume --dry-run")
-  })
-
-  // The JSON file is canonical, but the index is what humans and future agents read first.
-  // This warning catches stale generated summaries without treating markdown as source of truth.
-  test("reports generated index block disagreements with JSON state", async () => {
-    const repo = await createSprintRepo("example", {
-      review: "010-task-name",
-      next: null,
-      approved: [],
-      finishedUnreviewed: [],
-    })
-    await fs.writeFile(
-      path.join(repo, "sprints", "example", "000-index.md"),
-      [
-        "<!-- sprint-branch-state:start -->",
-        "## Sprint Branch State",
-        "",
-        "- Sprint: example",
-        "- Base branch: main",
-        "- Review branch: sprint/example/review",
-        "- Approved branch: sprint/example/approved",
-        "- Next branch: sprint/example/next",
-        "- Review task: 020-task-name",
-        "- Next task: none",
-        "- Approved tasks: none",
-        "- Finished unreviewed: none",
-        "<!-- sprint-branch-state:end -->",
-        "",
-      ].join("\n"),
-    )
-
-    const result = await runCli(repo, ["doctor", "--json"])
-    const doctor = JSON.parse(result.stdout) as DoctorOutput
-
-    expect(diagnosticCodes(doctor)).toContain("index_generated_block_value_mismatch")
   })
 
   // Conflict metadata should match a real paused Git operation.

@@ -4,7 +4,7 @@ import path from "node:path"
 import { resolveGitPath } from "./git/repository"
 import type { SprintConflictState } from "./types"
 
-/** Reads conflict metadata kept outside tracked sprint files while Git owns the worktree. */
+/** Reads worktree-local conflict metadata while Git owns the worktree. */
 export async function readTransientConflict(rootDir: string, sprint: string) {
   try {
     return JSON.parse(
@@ -18,7 +18,7 @@ export async function readTransientConflict(rootDir: string, sprint: string) {
   }
 }
 
-/** Writes conflict metadata under .git so tracked sprint files stay untouched mid-rebase. */
+/** Writes conflict metadata under .git so canonical state is not advanced mid-rebase. */
 export async function writeTransientConflict(
   rootDir: string,
   sprint: string,

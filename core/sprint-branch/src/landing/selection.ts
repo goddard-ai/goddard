@@ -3,7 +3,7 @@ import { isCancel, select } from "@clack/prompts"
 
 import { parseSprintBranchName, validateSprintName } from "../state/branches"
 import { findSprintStateFiles, readSprintStateFile } from "../state/io"
-import { sprintStatePath } from "../state/paths"
+import { sprintStateDisplayPath, sprintStatePath } from "../state/paths"
 import type { SprintDiagnostic } from "../types"
 import type { HumanCommandInput, SprintCandidate } from "./types"
 
@@ -27,7 +27,7 @@ export async function resolveSprintCandidate(
     diagnostics.push({
       severity: "error",
       code: "missing_sprint_state",
-      message: "No sprints/*/.sprint-branch-state.json files were found.",
+      message: "No Git metadata sprint-branch/*/state.json files were found.",
     })
     return null
   }
@@ -84,7 +84,7 @@ async function readExplicitCandidate(
     return null
   }
 
-  const statePath = sprintStatePath(rootDir, sprint)
+  const statePath = await sprintStatePath(rootDir, sprint)
   try {
     const parsed = await readSprintStateFile(statePath)
     diagnostics.push(...parsed.diagnostics)
@@ -94,7 +94,7 @@ async function readExplicitCandidate(
       diagnostics.push({
         severity: "error",
         code: "missing_sprint_state",
-        message: `Sprint state sprints/${sprint}/.sprint-branch-state.json does not exist.`,
+        message: `Sprint state ${sprintStateDisplayPath(sprint)} does not exist.`,
       })
       return null
     }
@@ -145,10 +145,19 @@ function candidateFromState(
 ): SprintCandidate {
   return {
     sprint: state.sprint,
-    stateRelativePath: path.relative(rootDir, statePath),
+    stateRelativePath: statePathForDisplay(rootDir, statePath),
     reviewBranch: state.branches.review,
     state,
   }
+}
+
+function statePathForDisplay(rootDir: string, statePath: string) {
+  const parts = statePath.split(path.sep)
+  const rootIndex = parts.lastIndexOf("sprint-branch")
+  if (rootIndex !== -1) {
+    return path.join(".git", ...parts.slice(rootIndex))
+  }
+  return path.relative(rootDir, statePath)
 }
 
 function inferSprintFromPath(rootDir: string, cwd: string) {

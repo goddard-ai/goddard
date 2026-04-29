@@ -73,4 +73,5 @@ export type SprintCleanupReport = HumanCommandReport & {
   command: "cleanup"
   branchesToDelete: string[]
   worktreesToRemove: AssociatedWorktree[]
+  stateFilesToRemove: string[]
 }

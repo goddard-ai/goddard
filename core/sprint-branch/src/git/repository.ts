@@ -14,6 +14,13 @@ export async function resolveGitPath(rootDir: string, gitPath: string) {
   return path.isAbsolute(resolved) ? resolved : path.join(rootDir, resolved)
 }
 
+/** Resolves a path inside Git's common metadata directory shared by linked worktrees. */
+export async function resolveGitCommonPath(rootDir: string, gitPath: string) {
+  const resolved = (await runGit(rootDir, ["rev-parse", "--git-common-dir"])).trim()
+  const commonDir = path.isAbsolute(resolved) ? resolved : path.join(rootDir, resolved)
+  return path.join(commonDir, gitPath)
+}
+
 /** Resolves the current branch, returning null for detached HEAD. */
 export async function getCurrentBranch(rootDir: string) {
   try {

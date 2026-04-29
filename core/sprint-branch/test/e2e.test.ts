@@ -3,11 +3,11 @@ import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import {
+  branchHead,
   cleanupTestRepos,
   commitAll,
   createSprintRepo,
   currentBranch,
-  git,
   readState,
   runCli,
 } from "./support"
@@ -40,7 +40,7 @@ describe("sprint-branch three-task happy path", () => {
 
   // This is a cross-command contract test rather than another edge-case test.
   // It catches drift where each command passes in isolation, but their combined
-  // state/branch handoff no longer supports a complete sprint.
+  // branch and state transitions no longer support a complete sprint.
   test("runs rolling starts, approvals, finalize, and landing dry-run", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -57,18 +57,14 @@ describe("sprint-branch three-task happy path", () => {
     await startAndCommitTask(repo, "020-task-name", "two")
 
     await runJson<JsonCommandOutput>(repo, ["approve", "--json"])
-    await commitAll(repo, "record approval 010")
 
     await startAndCommitTask(repo, "030-task-name", "three")
 
     await runJson<JsonCommandOutput>(repo, ["approve", "--json"])
-    await commitAll(repo, "record approval 020")
 
     await runJson<JsonCommandOutput>(repo, ["approve", "--json"])
-    await commitAll(repo, "record approval 030")
 
     await runJson<JsonCommandOutput>(repo, ["finalize", "--json"])
-    await commitAll(repo, "record sprint finalize")
 
     const status = await runJson<StatusOutput>(repo, ["status", "--json"])
     const doctor = await runJson<DoctorOutput>(repo, ["doctor", "--json"])
@@ -92,19 +88,12 @@ describe("sprint-branch three-task happy path", () => {
     expect(doctor.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([])
     expect(land.ok).toBe(true)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
-    expect(await changedFiles(repo, "sprint/example/approved", "sprint/example/review")).toEqual(
-      expect.arrayContaining(["sprints/example/001-handoff.md"]),
+    expect(await branchHead(repo, "sprint/example/approved")).toBe(
+      await branchHead(repo, "sprint/example/review"),
     )
-    expect(
-      (await changedFiles(repo, "sprint/example/approved", "sprint/example/review")).every((file) =>
-        file.startsWith("sprints/example/"),
-      ),
-    ).toBe(true)
-    expect(
-      (await changedFiles(repo, "sprint/example/next", "sprint/example/review")).every((file) =>
-        file.startsWith("sprints/example/"),
-      ),
-    ).toBe(true)
+    expect(await branchHead(repo, "sprint/example/next")).toBe(
+      await branchHead(repo, "sprint/example/review"),
+    )
     expect((await readState(repo, "example")).tasks.approved).toEqual([
       "010-task-name",
       "020-task-name",
@@ -137,8 +126,4 @@ async function runJson<T extends JsonCommandOutput>(repo: string, args: string[]
   const output = JSON.parse(result.stdout) as T
   expect(output.ok).toBe(true)
   return output
-}
-
-async function changedFiles(repo: string, leftRef: string, rightRef: string) {
-  return (await git(repo, ["diff", "--name-only", leftRef, rightRef])).split("\n").filter(Boolean)
 }

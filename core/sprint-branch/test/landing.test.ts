@@ -29,6 +29,7 @@ type HumanCommandOutput = {
   diagnostics: Array<{ code: string }>
   branchesToDelete?: string[]
   worktreesToRemove?: Array<{ path: string }>
+  stateFilesToRemove?: string[]
 }
 
 const extraPaths: string[] = []
@@ -149,6 +150,7 @@ describe("sprint-branch human landing commands", () => {
     )
     expect(worktreePaths).toContain(await fs.realpath(snapshot))
     expect(cleanup.gitOperations).toContain("git branch -d sprint/example/review")
+    expect(cleanup.stateFilesToRemove).toEqual([".git/sprint-branch/example/state.json"])
   })
 
   // Cleanup is destructive, so target containment is the key proof that deleting

@@ -42,7 +42,7 @@ describe("sprint-branch resume", () => {
   })
 
   // Resume is the command most likely to hit a real Git conflict after review feedback.
-  // While Git is mid-rebase, tracked sprint files must stay untouched so rebase --continue works.
+  // While Git is mid-rebase, canonical sprint state must stay untouched so rebase --continue works.
   test("keeps sprint state unchanged when rebase stops", async () => {
     const repo = await createSprintRepo(
       "example",

@@ -1,8 +1,5 @@
-import * as fs from "node:fs/promises"
-import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { sprintStateFileName } from "../src"
 import {
   branchExists,
   cleanupTestRepos,
@@ -11,6 +8,7 @@ import {
   git,
   readState,
   runCli,
+  stateFileExists,
   type MutationOutput,
 } from "./support"
 
@@ -28,6 +26,7 @@ describe("sprint-branch init", () => {
     expect(await branchExists(repo, "sprint/example/approved")).toBe(true)
     expect(await branchExists(repo, "sprint/example/review")).toBe(true)
     expect(await branchExists(repo, "sprint/example/next")).toBe(false)
+    expect(await git(repo, ["status", "--porcelain"])).toBe("")
     expect((await readState(repo, "example")).tasks.review).toBeNull()
   })
 
@@ -56,7 +55,7 @@ describe("sprint-branch init", () => {
     ])
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
     expect(await branchExists(repo, "sprint/example/review")).toBe(false)
-    expect(await pathExists(path.join(repo, "sprints", "example", sprintStateFileName))).toBe(false)
+    expect(await stateFileExists(repo, "example")).toBe(false)
   })
 
   // A bare sprint/<name> branch collides with the namespace used for role branches.
@@ -71,23 +70,6 @@ describe("sprint-branch init", () => {
     expect(result.exitCode).toBe(1)
     expect(diagnosticCodes(init)).toContain("bare_sprint_branch_exists")
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
-    expect(await pathExists(path.join(repo, "sprints", "example", sprintStateFileName))).toBe(false)
+    expect(await stateFileExists(repo, "example")).toBe(false)
   })
 })
-
-async function pathExists(pathname: string) {
-  try {
-    await fs.access(pathname)
-    return true
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code?: unknown }).code === "ENOENT"
-    ) {
-      return false
-    }
-    throw error
-  }
-}

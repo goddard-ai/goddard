@@ -93,7 +93,7 @@ describe("sprint-branch finalize", () => {
   })
 
   // The final rebase is intentionally the last Git rewrite before human merge.
-  // If it conflicts, sprint files must stay unchanged so Git can continue cleanly.
+  // If it conflicts, canonical sprint state must stay unchanged so Git can continue cleanly.
   test("keeps sprint state unchanged when final rebase stops", async () => {
     const repo = await createSprintRepo("example", {
       review: null,

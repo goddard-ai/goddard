@@ -1,7 +1,8 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { sprintStateFileName } from "./paths"
+import { resolveGitCommonPath } from "../git/repository"
+import { sprintStateFileName, sprintStateRoot } from "./paths"
 import { parseSprintState } from "./schema"
 
 /** Reads and validates one sprint branch state file. */
@@ -10,14 +11,14 @@ export async function readSprintStateFile(statePath: string) {
   return parseSprintState(JSON.parse(text) as unknown)
 }
 
-/** Finds sprint branch state files immediately under sprints/<name>. */
+/** Finds sprint branch state files in Git metadata. */
 export async function findSprintStateFiles(rootDir: string) {
-  const sprintsDir = path.join(rootDir, "sprints")
+  const stateRoot = await resolveGitCommonPath(rootDir, sprintStateRoot)
   try {
-    const entries = await fs.readdir(sprintsDir, { withFileTypes: true })
+    const entries = await fs.readdir(stateRoot, { withFileTypes: true })
     const statePaths = entries
       .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(sprintsDir, entry.name, sprintStateFileName))
+      .map((entry) => path.join(stateRoot, entry.name, sprintStateFileName))
 
     const existing = await Promise.all(
       statePaths.map(async (statePath) => ({

@@ -1,20 +1,21 @@
 import path from "node:path"
 
-export const sprintStateFileName = ".sprint-branch-state.json"
-export const sprintIndexFileName = "000-index.md"
-export const sprintHandoffFileName = "001-handoff.md"
+import { resolveGitCommonPath } from "../git/repository"
 
-/** Returns the canonical state path for the inferred sprint context. */
-export function sprintStatePath(rootDir: string, sprint: string) {
-  return path.join(rootDir, "sprints", sprint, sprintStateFileName)
+export const sprintStateFileName = "state.json"
+export const sprintStateRoot = "sprint-branch"
+
+/** Returns the logical Git metadata path for the canonical sprint state file. */
+export function sprintStateGitPath(sprint: string) {
+  return path.join(sprintStateRoot, sprint, sprintStateFileName)
 }
 
-/** Returns the canonical index mirror path for the inferred sprint context. */
-export function sprintIndexPath(rootDir: string, sprint: string) {
-  return path.join(rootDir, "sprints", sprint, sprintIndexFileName)
+/** Returns the canonical state path in Git metadata shared by linked worktrees. */
+export async function sprintStatePath(rootDir: string, sprint: string) {
+  return resolveGitCommonPath(rootDir, sprintStateGitPath(sprint))
 }
 
-/** Returns the canonical handoff log path for the inferred sprint context. */
-export function sprintHandoffPath(rootDir: string, sprint: string) {
-  return path.join(rootDir, "sprints", sprint, sprintHandoffFileName)
+/** Returns a stable display path for state stored outside the working tree. */
+export function sprintStateDisplayPath(sprint: string) {
+  return path.join(".git", sprintStateGitPath(sprint))
 }

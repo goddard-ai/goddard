@@ -2,7 +2,7 @@ import { GitCommandError } from "../git/command"
 import { getGitOperations } from "../git/repository"
 import { writeTransientConflict } from "../transient-conflict"
 import type { SprintBranchState, SprintDiagnostic, SprintMutationReport } from "../types"
-import { writeSprintFiles } from "./sprint-files"
+import { writeSprintState } from "./state-files"
 
 /** Writes conflict metadata in the safest location for the current Git operation state. */
 export async function writeConflictStateWhenSafe(
@@ -20,12 +20,7 @@ export async function writeConflictStateWhenSafe(
     return conflictState
   }
 
-  await writeSprintFiles(
-    rootDir,
-    conflictState,
-    commandName,
-    `Stopped on conflict while running ${commandName} on ${branch}.`,
-  )
+  await writeSprintState(rootDir, conflictState)
   return conflictState
 }
 

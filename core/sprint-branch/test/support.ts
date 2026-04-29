@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { getExpectedBranches, sprintStateFileName, type SprintBranchState } from "../src"
+import { getExpectedBranches, sprintStatePath, type SprintBranchState } from "../src"
 
 const cliPath = path.join(import.meta.dir, "..", "src", "main.ts")
 const tempRepos: string[] = []
@@ -66,8 +66,6 @@ export async function createSprintRepo(
   }
 
   await writeSprintState(repo, sprint, tasks)
-  await writeIndex(repo, sprint, [tasks.review, tasks.next, ...tasks.approved].filter(Boolean))
-  await commitAll(repo, "add sprint state")
   await git(repo, ["branch", `sprint/${sprint}/approved`])
   await git(repo, ["branch", `sprint/${sprint}/review`])
   if (options.createNextBranch) {
@@ -79,15 +77,18 @@ export async function createSprintRepo(
 
 export async function readState(repo: string, sprint: string) {
   return JSON.parse(
-    await fs.readFile(path.join(repo, "sprints", sprint, sprintStateFileName), "utf-8"),
+    await fs.readFile(await sprintStatePath(repo, sprint), "utf-8"),
   ) as SprintBranchState
 }
 
 export async function writeState(repo: string, sprint: string, state: SprintBranchState) {
-  await fs.writeFile(
-    path.join(repo, "sprints", sprint, sprintStateFileName),
-    `${JSON.stringify(state, null, 2)}\n`,
-  )
+  const statePath = await sprintStatePath(repo, sprint)
+  await fs.mkdir(path.dirname(statePath), { recursive: true })
+  await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`)
+}
+
+export async function stateFileExists(repo: string, sprint: string) {
+  return pathExists(await sprintStatePath(repo, sprint))
 }
 
 export async function runCli(cwd: string, args: string[]) {
@@ -168,8 +169,10 @@ export async function stashList(repo: string) {
 
 async function writeSprintState(repo: string, sprint: string, tasks: SprintTestTasks) {
   const branches = getExpectedBranches(sprint)
+  const statePath = await sprintStatePath(repo, sprint)
+  await fs.mkdir(path.dirname(statePath), { recursive: true })
   await fs.writeFile(
-    path.join(repo, "sprints", sprint, sprintStateFileName),
+    statePath,
     `${JSON.stringify(
       {
         schemaVersion: 1,
@@ -187,19 +190,19 @@ async function writeSprintState(repo: string, sprint: string, tasks: SprintTestT
   )
 }
 
-async function writeIndex(repo: string, sprint: string, tasks: Array<string | null>) {
-  const branches = getExpectedBranches(sprint)
-  await fs.writeFile(
-    path.join(repo, "sprints", sprint, "000-index.md"),
-    [
-      `# Sprint ${sprint}`,
-      "",
-      `Review branch: ${branches.review}`,
-      `Approved branch: ${branches.approved}`,
-      `Next branch: ${branches.next}`,
-      "",
-      ...tasks.filter(Boolean).map((task) => `Task: ${task}`),
-      "",
-    ].join("\n"),
-  )
+async function pathExists(pathname: string) {
+  try {
+    await fs.access(pathname)
+    return true
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT"
+    ) {
+      return false
+    }
+    throw error
+  }
 }

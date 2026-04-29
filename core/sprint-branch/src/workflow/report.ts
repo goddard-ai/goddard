@@ -20,7 +20,7 @@ export type MutationPlan = {
   summary: string
   requiresCleanWorkingTree: boolean
   gitOperations: string[]
-  sprintFiles: string[]
+  stateFiles: string[]
   conflictHandling: string
   diagnostics: SprintDiagnostic[]
 }
@@ -50,7 +50,7 @@ export function makePlan(
     summary: input.summary,
     requiresCleanWorkingTree: input.requiresCleanWorkingTree,
     gitOperations: input.gitOperations,
-    sprintFiles: input.sprintFiles,
+    stateFiles: input.stateFiles,
     conflictHandling: input.conflictHandling,
     diagnostics: input.diagnostics,
     state: input.state,
@@ -74,8 +74,8 @@ export function formatMutationReport(report: SprintMutationReport) {
     "Git operations:",
     ...formatList(report.gitOperations),
     "",
-    "Sprint files:",
-    ...formatList(report.sprintFiles),
+    "State files:",
+    ...formatList(report.stateFiles),
     "",
     `Conflict handling: ${report.conflictHandling}`,
   ]

@@ -1,3 +1,5 @@
+import * as fs from "node:fs/promises"
+
 import { runGit } from "./git/command"
 import { getBranchHead } from "./git/refs"
 import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
@@ -12,6 +14,7 @@ import type {
 } from "./landing/types"
 import { pushCleanupDiagnostics, pushLandingDiagnostics } from "./landing/validation"
 import { associatedWorktrees, cleanupBranches } from "./landing/worktrees"
+import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
 import type { SprintDiagnostic } from "./types"
 
 export { formatHumanCommandReport } from "./landing/report"
@@ -79,6 +82,7 @@ export async function runCleanup(input: CleanupInput) {
   const reviewCommit = reviewBranch ? await getBranchHead(rootDir, reviewBranch) : null
   const targetCommit = await getBranchHead(rootDir, input.target)
   const branchesToDelete = state ? await cleanupBranches(rootDir, state) : []
+  const stateFileToRemove = state ? sprintStateDisplayPath(state.sprint) : null
   const worktreesToRemove = state
     ? await associatedWorktrees(rootDir, state, reviewCommit, branchesToDelete, diagnostics)
     : []
@@ -112,6 +116,7 @@ export async function runCleanup(input: CleanupInput) {
     candidates: candidate ? [] : await candidatesForOutput(rootDir),
     branchesToDelete,
     worktreesToRemove,
+    stateFilesToRemove: stateFileToRemove ? [stateFileToRemove] : [],
   } satisfies SprintCleanupReport
 
   if (input.dryRun || !report.ok || !state) {
@@ -132,6 +137,7 @@ export async function runCleanup(input: CleanupInput) {
     for (const branch of branchesToDelete) {
       await runGit(rootDir, ["branch", "-d", branch])
     }
+    await fs.rm(await sprintStatePath(rootDir, state.sprint), { force: true })
     return { ...report, executed: true } satisfies SprintCleanupReport
   } catch (error) {
     return handleHumanGitError(report, error)

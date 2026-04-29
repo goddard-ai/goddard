@@ -9,11 +9,8 @@ import type {
   SprintDiagnostic,
   SprintStatusReport,
 } from "../types"
-import { onlySprintBookkeepingChanged } from "../workflow/sprint-files"
 import type { DoctorContext } from "./types"
 
-const generatedBlockStart = "<!-- sprint-branch-state:start -->"
-const generatedBlockEnd = "<!-- sprint-branch-state:end -->"
 const taskStemPattern = /^\d{3}-[a-z0-9][a-z0-9-]*$/
 
 /** Runs the doctor-only consistency checks on top of the status report. */
@@ -26,8 +23,6 @@ export async function runDoctorChecks(report: SprintStatusReport, context: Docto
   diagnostics.push(...(await checkTaskQueue(report)))
   diagnostics.push(...(await checkStashes(report)))
   diagnostics.push(...(await checkGitOperationState(report, context)))
-  diagnostics.push(...(await checkGeneratedIndexBlock(report)))
-  diagnostics.push(...(await checkHandoff(report)))
   diagnostics.push(...checkCurrentBranch(report))
 
   return diagnostics
@@ -119,34 +114,13 @@ async function checkBranchDrift(report: SprintStatusReport, context: DoctorConte
   const approvedHead = report.branches.approved.head
   const reviewHead = report.branches.review.head
   const nextHead = report.branches.next.head
-  const reviewOnlyHasBookkeepingChanges =
-    approvedHead &&
-    reviewHead &&
-    approvedHead !== reviewHead &&
-    (await onlySprintBookkeepingChanged(
-      report.rootDir,
-      state.sprint,
-      state.branches.approved,
-      state.branches.review,
-    ))
-  const nextOnlyHasBookkeepingChanges =
-    nextHead &&
-    reviewHead &&
-    nextHead !== reviewHead &&
-    (await onlySprintBookkeepingChanged(
-      report.rootDir,
-      state.sprint,
-      state.branches.next,
-      state.branches.review,
-    ))
 
   if (
     !state.tasks.review &&
     approvedHead &&
     reviewHead &&
     approvedHead !== reviewHead &&
-    !isFinalizeRetryPending(context) &&
-    !reviewOnlyHasBookkeepingChanges
+    !isFinalizeRetryPending(context)
   ) {
     diagnostics.push({
       severity: "error",
@@ -163,13 +137,7 @@ async function checkBranchDrift(report: SprintStatusReport, context: DoctorConte
       message: `Review task ${state.tasks.review} is recorded, but review and approved point at the same commit.`,
     })
   }
-  if (
-    !state.tasks.next &&
-    nextHead &&
-    reviewHead &&
-    nextHead !== reviewHead &&
-    !nextOnlyHasBookkeepingChanges
-  ) {
+  if (!state.tasks.next && nextHead && reviewHead && nextHead !== reviewHead) {
     diagnostics.push({
       severity: "error",
       code: "next_branch_has_unrecorded_work",
@@ -399,85 +367,6 @@ async function checkGitOperationState(report: SprintStatusReport, context: Docto
   return diagnostics
 }
 
-async function checkGeneratedIndexBlock(report: SprintStatusReport) {
-  const diagnostics: SprintDiagnostic[] = []
-  let text = ""
-
-  try {
-    text = await fs.readFile(report.index.path, "utf-8")
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return diagnostics
-    }
-    throw error
-  }
-
-  const start = text.indexOf(generatedBlockStart)
-  const end = text.indexOf(generatedBlockEnd)
-  if (start === -1 && end === -1) {
-    return diagnostics
-  }
-  if (start === -1 || end === -1 || end < start) {
-    diagnostics.push({
-      severity: "warning",
-      code: "index_generated_block_malformed",
-      message: `${report.index.relativePath} has an incomplete generated sprint-branch state block.`,
-    })
-    return diagnostics
-  }
-
-  const values = parseGeneratedIndexValues(text.slice(start, end))
-  const expected = new Map([
-    ["Sprint", report.state.sprint],
-    ["Base branch", report.state.baseBranch],
-    ["Review branch", report.state.branches.review],
-    ["Approved branch", report.state.branches.approved],
-    ["Next branch", report.state.branches.next],
-    ["Review task", report.state.tasks.review ?? "none"],
-    ["Next task", report.state.tasks.next ?? "none"],
-    [
-      "Approved tasks",
-      report.state.tasks.approved.length ? report.state.tasks.approved.join(", ") : "none",
-    ],
-    [
-      "Finished unreviewed",
-      report.state.tasks.finishedUnreviewed.length
-        ? report.state.tasks.finishedUnreviewed.join(", ")
-        : "none",
-    ],
-  ])
-
-  for (const [key, expectedValue] of expected) {
-    const actual = values.get(key)
-    if (actual !== undefined && actual !== expectedValue) {
-      diagnostics.push({
-        severity: "warning",
-        code: "index_generated_block_value_mismatch",
-        message: `${report.index.relativePath} records "${key}: ${actual}", but JSON state has "${expectedValue}".`,
-        suggestion:
-          "Run a mutating sprint-branch command only after confirming the JSON state is correct.",
-      })
-    }
-  }
-
-  return diagnostics
-}
-
-async function checkHandoff(report: SprintStatusReport) {
-  const handoffPath = path.join(report.rootDir, "sprints", report.state.sprint, "001-handoff.md")
-  if (await pathExists(handoffPath)) {
-    return []
-  }
-
-  return [
-    {
-      severity: "warning" as const,
-      code: "handoff_missing",
-      message: `Handoff file ${path.relative(report.rootDir, handoffPath)} does not exist.`,
-    },
-  ]
-}
-
 function checkCurrentBranch(report: SprintStatusReport) {
   if (!report.currentBranch) {
     return [
@@ -602,29 +491,6 @@ function groupByPrefix(tasks: Array<{ stem: string }>) {
     prefixes.set(match[1], [...(prefixes.get(match[1]) ?? []), task])
   }
   return [...prefixes.entries()]
-}
-
-function parseGeneratedIndexValues(block: string) {
-  const values = new Map<string, string>()
-  for (const line of block.split("\n")) {
-    const match = line.match(/^- ([^:]+): (.*)$/)
-    if (match) {
-      values.set(match[1], match[2])
-    }
-  }
-  return values
-}
-
-async function pathExists(pathname: string) {
-  try {
-    await fs.access(pathname)
-    return true
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return false
-    }
-    throw error
-  }
 }
 
 function isMissingFileError(error: unknown) {

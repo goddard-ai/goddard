@@ -2,19 +2,12 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 
 import { branchExists, getBranchHead, isAncestor } from "./git/refs"
-import { resolveGitPath } from "./git/repository"
+import { resolveGitCommonPath } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
 import { inferSprintContext } from "./state/inference"
 import { readSprintStateFile } from "./state/io"
-import { sprintIndexPath } from "./state/paths"
-import type {
-  SprintBranchRole,
-  SprintBranchState,
-  SprintIndexStatus,
-  SprintStatusReport,
-} from "./types"
-import { onlySprintBookkeepingChanged } from "./workflow/sprint-files"
+import type { SprintBranchRole, SprintBranchState, SprintStatusReport } from "./types"
 
 const sprintRoles: SprintBranchRole[] = ["review", "approved", "next"]
 
@@ -39,7 +32,10 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
       message: `${context.stateRelativePath} records sprint ${parsed.state.sprint}, but inference selected ${context.sprint}.`,
     })
   }
-  const lockFilePath = await resolveGitPath(context.rootDir, `sprint-branch/${context.sprint}.lock`)
+  const lockFilePath = await resolveGitCommonPath(
+    context.rootDir,
+    `sprint-branch/${context.sprint}.lock`,
+  )
 
   const branches = {
     review: await inspectBranch(context.rootDir, parsed.state.branches.review),
@@ -47,7 +43,6 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
     next: await inspectBranch(context.rootDir, parsed.state.branches.next),
   }
   const workingTree = await getWorkingTreeStatus(context.rootDir)
-  const index = await inspectIndexMirror(context.rootDir, parsed.state)
   const stashRefs = await getStashRefs(context.rootDir)
   const missingTaskFiles = await findMissingTaskFiles(context.rootDir, parsed.state)
 
@@ -55,16 +50,8 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
     diagnostics.push({
       severity: "error",
       code: "lock_file_exists",
-      message: `Lock file ${path.relative(context.rootDir, lockFilePath)} exists.`,
+      message: `Lock file ${path.join(".git", "sprint-branch", `${context.sprint}.lock`)} exists.`,
       suggestion: "Confirm no sprint-branch command is running before removing the lock.",
-    })
-  }
-  for (const warning of index.warnings) {
-    diagnostics.push({
-      severity: "warning",
-      code: "index_mirror_diverged",
-      message: warning,
-      suggestion: "Run sprint-branch doctor before mutating sprint branches.",
     })
   }
 
@@ -121,16 +108,6 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
     branches.next.exists && branches.review.exists
       ? await isAncestor(context.rootDir, parsed.state.branches.review, parsed.state.branches.next)
       : null
-  const nextOnlyHasBookkeepingChanges =
-    nextDescendsFromReview === false &&
-    !parsed.state.tasks.next &&
-    (await onlySprintBookkeepingChanged(
-      context.rootDir,
-      parsed.state.sprint,
-      parsed.state.branches.next,
-      parsed.state.branches.review,
-    ))
-
   if (reviewDescendsFromApproved === false) {
     diagnostics.push({
       severity: "error",
@@ -139,7 +116,7 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
       suggestion: "Manual recovery is required before sprint-branch can safely continue.",
     })
   }
-  if (nextDescendsFromReview === false && !nextOnlyHasBookkeepingChanges) {
+  if (nextDescendsFromReview === false) {
     diagnostics.push({
       severity: "error",
       code: "next_not_based_on_review",
@@ -187,7 +164,6 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
       nextDescendsFromReview,
     },
     workingTree,
-    index,
     blocked: {
       review: Boolean(parsed.state.tasks.review),
       conflict: parsed.state.conflict !== null,
@@ -255,7 +231,6 @@ export function formatStatusReport(report: SprintStatusReport) {
 
   lines.push(
     "",
-    `Index mirror: ${report.index.exists ? report.index.relativePath : "missing"}`,
     `Blocked: ${report.blocked.reasons.length ? report.blocked.reasons.join("; ") : "no"}`,
   )
 
@@ -283,55 +258,6 @@ async function inspectBranch(rootDir: string, name: string) {
     exists,
     head: exists ? await getBranchHead(rootDir, name) : null,
   }
-}
-
-async function inspectIndexMirror(rootDir: string, state: SprintBranchState) {
-  const indexPath = sprintIndexPath(rootDir, state.sprint)
-  const relativePath = path.relative(rootDir, indexPath)
-  const warnings: string[] = []
-  let text = ""
-
-  try {
-    text = await fs.readFile(indexPath, "utf-8")
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return {
-        path: indexPath,
-        relativePath,
-        exists: false,
-        diverged: true,
-        warnings: [`Index mirror ${relativePath} does not exist.`],
-      } satisfies SprintIndexStatus
-    }
-    throw error
-  }
-
-  for (const role of sprintRoles) {
-    if (!text.includes(state.branches[role])) {
-      warnings.push(
-        `Index mirror ${relativePath} does not mention ${role} branch ${state.branches[role]}.`,
-      )
-    }
-  }
-
-  for (const task of [
-    state.tasks.review,
-    state.tasks.next,
-    ...state.tasks.approved,
-    ...state.tasks.finishedUnreviewed,
-  ]) {
-    if (task && !text.includes(task)) {
-      warnings.push(`Index mirror ${relativePath} does not mention task ${task}.`)
-    }
-  }
-
-  return {
-    path: indexPath,
-    relativePath,
-    exists: true,
-    diverged: warnings.length > 0,
-    warnings,
-  } satisfies SprintIndexStatus
 }
 
 async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
