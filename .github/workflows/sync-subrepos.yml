@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Monorepo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # REQUIRED: git-subrepo needs the full git history to calculate splits
           fetch-depth: 0
