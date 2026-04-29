@@ -14,6 +14,7 @@ import type {
   SprintIndexStatus,
   SprintStatusReport,
 } from "./types"
+import { onlySprintBookkeepingChanged } from "./workflow/sprint-files"
 
 const sprintRoles: SprintBranchRole[] = ["review", "approved", "next"]
 
@@ -120,6 +121,15 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
     branches.next.exists && branches.review.exists
       ? await isAncestor(context.rootDir, parsed.state.branches.review, parsed.state.branches.next)
       : null
+  const nextOnlyHasBookkeepingChanges =
+    nextDescendsFromReview === false &&
+    !parsed.state.tasks.next &&
+    (await onlySprintBookkeepingChanged(
+      context.rootDir,
+      parsed.state.sprint,
+      parsed.state.branches.next,
+      parsed.state.branches.review,
+    ))
 
   if (reviewDescendsFromApproved === false) {
     diagnostics.push({
@@ -129,7 +139,7 @@ export async function buildStatusReport(input: { cwd: string; sprint?: string })
       suggestion: "Manual recovery is required before sprint-branch can safely continue.",
     })
   }
-  if (nextDescendsFromReview === false) {
+  if (nextDescendsFromReview === false && !nextOnlyHasBookkeepingChanges) {
     diagnostics.push({
       severity: "error",
       code: "next_not_based_on_review",

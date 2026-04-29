@@ -9,6 +9,7 @@ import type {
   SprintDiagnostic,
   SprintStatusReport,
 } from "../types"
+import { onlySprintBookkeepingChanged } from "../workflow/sprint-files"
 import type { DoctorContext } from "./types"
 
 const generatedBlockStart = "<!-- sprint-branch-state:start -->"
@@ -20,7 +21,7 @@ export async function runDoctorChecks(report: SprintStatusReport, context: Docto
   const diagnostics: SprintDiagnostic[] = []
 
   diagnostics.push(...(await checkBaseBranches(report)))
-  diagnostics.push(...checkBranchDrift(report, context))
+  diagnostics.push(...(await checkBranchDrift(report, context)))
   diagnostics.push(...checkTaskAssignments(report))
   diagnostics.push(...(await checkTaskQueue(report)))
   diagnostics.push(...(await checkStashes(report)))
@@ -112,19 +113,40 @@ async function checkBaseBranches(report: SprintStatusReport) {
   return diagnostics
 }
 
-function checkBranchDrift(report: SprintStatusReport, context: DoctorContext) {
+async function checkBranchDrift(report: SprintStatusReport, context: DoctorContext) {
   const diagnostics: SprintDiagnostic[] = []
   const { state } = report
   const approvedHead = report.branches.approved.head
   const reviewHead = report.branches.review.head
   const nextHead = report.branches.next.head
+  const reviewOnlyHasBookkeepingChanges =
+    approvedHead &&
+    reviewHead &&
+    approvedHead !== reviewHead &&
+    (await onlySprintBookkeepingChanged(
+      report.rootDir,
+      state.sprint,
+      state.branches.approved,
+      state.branches.review,
+    ))
+  const nextOnlyHasBookkeepingChanges =
+    nextHead &&
+    reviewHead &&
+    nextHead !== reviewHead &&
+    (await onlySprintBookkeepingChanged(
+      report.rootDir,
+      state.sprint,
+      state.branches.next,
+      state.branches.review,
+    ))
 
   if (
     !state.tasks.review &&
     approvedHead &&
     reviewHead &&
     approvedHead !== reviewHead &&
-    !isFinalizeRetryPending(context)
+    !isFinalizeRetryPending(context) &&
+    !reviewOnlyHasBookkeepingChanges
   ) {
     diagnostics.push({
       severity: "error",
@@ -141,7 +163,13 @@ function checkBranchDrift(report: SprintStatusReport, context: DoctorContext) {
       message: `Review task ${state.tasks.review} is recorded, but review and approved point at the same commit.`,
     })
   }
-  if (!state.tasks.next && nextHead && reviewHead && nextHead !== reviewHead) {
+  if (
+    !state.tasks.next &&
+    nextHead &&
+    reviewHead &&
+    nextHead !== reviewHead &&
+    !nextOnlyHasBookkeepingChanges
+  ) {
     diagnostics.push({
       severity: "error",
       code: "next_branch_has_unrecorded_work",

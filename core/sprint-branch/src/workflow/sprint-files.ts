@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
+import { runGit } from "../git/command"
 import {
   sprintHandoffFileName,
   sprintHandoffPath,
@@ -37,6 +38,25 @@ export function sprintFilesForState(rootDir: string, state: SprintBranchState) {
     path.relative(rootDir, sprintIndexPath(rootDir, state.sprint)),
     path.join("sprints", state.sprint, sprintHandoffFileName),
   ]
+}
+
+/** Checks whether two refs differ only by sprint bookkeeping files. */
+export async function onlySprintBookkeepingChanged(
+  rootDir: string,
+  sprint: string,
+  leftRef: string,
+  rightRef: string,
+) {
+  const bookkeepingPaths = new Set([
+    path.join("sprints", sprint, ".sprint-branch-state.json"),
+    path.join("sprints", sprint, "000-index.md"),
+    path.join("sprints", sprint, sprintHandoffFileName),
+  ])
+  const changedPaths = (await runGit(rootDir, ["diff", "--name-only", leftRef, rightRef]))
+    .split("\n")
+    .filter(Boolean)
+
+  return changedPaths.every((changedPath) => bookkeepingPaths.has(changedPath))
 }
 
 async function writeSprintStateAtomic(statePath: string, state: SprintBranchState) {

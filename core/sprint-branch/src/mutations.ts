@@ -26,7 +26,11 @@ import {
   withDryRun,
   type MutationInput,
 } from "./workflow/report"
-import { sprintFilesForState, writeSprintFiles } from "./workflow/sprint-files"
+import {
+  onlySprintBookkeepingChanged,
+  sprintFilesForState,
+  writeSprintFiles,
+} from "./workflow/sprint-files"
 import {
   cloneState,
   emptyTasks,
@@ -604,14 +608,41 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       message: "finalize requires no review task, no next task, and no finished unreviewed tasks.",
     })
   }
-  if (reviewHead && approvedHead && reviewHead !== approvedHead && !retryingFinalize) {
+  const reviewOnlyHasBookkeepingChanges =
+    reviewHead &&
+    approvedHead &&
+    reviewHead !== approvedHead &&
+    (await onlySprintBookkeepingChanged(
+      context.rootDir,
+      state.sprint,
+      state.branches.approved,
+      state.branches.review,
+    ))
+  const nextOnlyHasBookkeepingChanges =
+    nextHead &&
+    reviewHead &&
+    nextHead !== reviewHead &&
+    (await onlySprintBookkeepingChanged(
+      context.rootDir,
+      state.sprint,
+      state.branches.next,
+      state.branches.review,
+    ))
+
+  if (
+    reviewHead &&
+    approvedHead &&
+    reviewHead !== approvedHead &&
+    !retryingFinalize &&
+    !reviewOnlyHasBookkeepingChanges
+  ) {
     diagnostics.push({
       severity: "error",
       code: "review_approved_mismatch",
       message: `${state.branches.review} and ${state.branches.approved} do not point at the same approved content.`,
     })
   }
-  if (nextHead && reviewHead && nextHead !== reviewHead) {
+  if (nextHead && reviewHead && nextHead !== reviewHead && !nextOnlyHasBookkeepingChanges) {
     diagnostics.push({
       severity: "error",
       code: "active_next_branch_exists",

@@ -43,8 +43,9 @@ export async function createBaseRepo(sprint: string) {
   await git(repo, ["checkout", "-b", "main"])
   await fs.writeFile(path.join(repo, "README.md"), "# Test\n")
   await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
-  await fs.writeFile(path.join(repo, "sprints", sprint, "010-task-name.md"), "# Task 010\n")
-  await fs.writeFile(path.join(repo, "sprints", sprint, "020-task-name.md"), "# Task 020\n")
+  for (const task of ["010-task-name", "020-task-name"]) {
+    await fs.writeFile(path.join(repo, "sprints", sprint, `${task}.md`), `# ${task}\n`)
+  }
   await commitAll(repo, "init")
 
   return repo
@@ -53,9 +54,16 @@ export async function createBaseRepo(sprint: string) {
 export async function createSprintRepo(
   sprint: string,
   tasks: SprintTestTasks,
-  options: { createNextBranch?: boolean } = {},
+  options: { createNextBranch?: boolean; extraTaskStems?: string[] } = {},
 ) {
   const repo = await createBaseRepo(sprint)
+
+  for (const task of options.extraTaskStems ?? []) {
+    await fs.writeFile(path.join(repo, "sprints", sprint, `${task}.md`), `# ${task}\n`)
+  }
+  if (options.extraTaskStems?.length) {
+    await commitAll(repo, "add extra sprint tasks")
+  }
 
   await writeSprintState(repo, sprint, tasks)
   await writeIndex(repo, sprint, [tasks.review, tasks.next, ...tasks.approved].filter(Boolean))
