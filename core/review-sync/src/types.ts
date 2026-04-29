@@ -26,7 +26,7 @@ export type ReviewSyncWorktreeInput = {
 
 /** Inputs for creating or reusing a review-sync session. */
 export type StartReviewSyncInput = ReviewSyncWorktreeInput & {
-  reviewWorktree: string
+  agentBranch: string
 }
 
 /** Inputs for reading review-sync session state. */

@@ -1,12 +1,28 @@
 /** CLI-compatible review-sync command runner. */
 import { join } from "node:path"
-import { command, flag, number as numberType, option, runSafely, string, subcommands } from "cmd-ts"
+import { cancel, isCancel, select } from "@clack/prompts"
+import {
+  command,
+  flag,
+  number as numberType,
+  option,
+  optional,
+  positional,
+  runSafely,
+  string,
+  subcommands,
+} from "cmd-ts"
 
-import { createErrorResult, createReviewSyncResult } from "./errors.ts"
+import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
 import { git, resolveRef } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { createRuntimeContext, writeResult } from "./runtime.ts"
-import { createSessionForStart, inferSession, prepareReviewBranchForStart } from "./session.ts"
+import {
+  createSessionForStart,
+  inferSession,
+  listAgentWorktreeChoicesForStart,
+  prepareReviewBranchForStart,
+} from "./session.ts"
 import { createSnapshotTree } from "./snapshot.ts"
 import {
   appendEvent,
@@ -44,7 +60,7 @@ export async function runReviewSync(argv: string[]) {
 /** Creates or reuses one durable review-sync session and runs the first refresh. */
 export async function startReviewSync(input: StartReviewSyncInput) {
   return await runCommandSafely("start", () =>
-    startReviewSyncOperation(input.reviewWorktree, createRuntimeContext(input.cwd)),
+    startReviewSyncOperation(input.agentBranch, createRuntimeContext(input.cwd)),
   )
 }
 
@@ -84,8 +100,8 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
 }
 
 /** Performs the start workflow after CLI parsing and command-level error handling. */
-async function startReviewSyncOperation(reviewWorktreeInput: string, context: RuntimeContext) {
-  const session = await createSessionForStart(reviewWorktreeInput, context)
+async function startReviewSyncOperation(agentBranch: string, context: RuntimeContext) {
+  const session = await createSessionForStart(agentBranch, context)
   await prepareReviewBranchForStart(session, context)
   const syncResult = await syncSession(session, context)
 
@@ -306,13 +322,18 @@ function createReviewSyncCommand(cwd: string) {
         name: "start",
         description: "Create or reuse a review branch and run the initial sync",
         args: {
-          reviewWorktree: option({
-            type: string,
-            long: "review-worktree",
-            description: "Path to the local worktree where the human review branch is checked out",
+          agentBranch: positional({
+            type: optional(string),
+            displayName: "agent-branch",
+            description: "Agent branch checked out in another worktree",
           }),
         },
-        handler: ({ reviewWorktree }) => startReviewSync({ cwd, reviewWorktree }),
+        handler: async ({ agentBranch }) => {
+          const context = createRuntimeContext(cwd)
+          return await runCommandSafely("start", async () =>
+            startReviewSyncOperation(agentBranch ?? (await promptForAgentBranch(context)), context),
+          )
+        },
       }),
       sync: command({
         name: "sync",
@@ -371,6 +392,31 @@ function createReviewSyncCommand(cwd: string) {
       }),
     },
   })
+}
+
+/** Selects an eligible checked-out agent branch when start runs interactively. */
+async function promptForAgentBranch(context: RuntimeContext) {
+  const choices = await listAgentWorktreeChoicesForStart(context)
+  if (choices.length === 0) {
+    throw new UserError("No eligible agent worktrees are checked out for this repository.")
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new UserError("start requires an agent branch when running non-interactively.")
+  }
+
+  const selected = await select({
+    message: "Pick an agent branch",
+    options: choices.map((choice) => ({
+      value: choice.branch,
+      label: choice.branch,
+      hint: choice.path,
+    })),
+  })
+  if (isCancel(selected)) {
+    cancel("Canceled.")
+    throw new UserError("Start canceled.", "error", 130)
+  }
+  return selected
 }
 
 /** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */

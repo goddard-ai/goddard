@@ -1,5 +1,5 @@
 /** Session start, inference, and validation helpers. */
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 
 import { UserError } from "./errors.ts"
 import {
@@ -9,6 +9,7 @@ import {
   git,
   isInsideOrEqual,
   isWorktreeClean,
+  listGitWorktrees,
   normalizePath,
   pathExists,
   resolveCurrentBranch,
@@ -33,25 +34,28 @@ import {
   type SessionState,
 } from "./types.ts"
 
-/** Resolves, validates, and creates or loads one start-command session. */
-export async function createSessionForStart(reviewWorktreeInput: string, context: RuntimeContext) {
-  const agentWorktree = await resolveRequiredRepoRoot(context.cwd, context)
-  await assertSupportedGitState(agentWorktree, context)
+/** Candidate agent branch already checked out in a sibling worktree. */
+export type AgentWorktreeChoice = {
+  branch: string
+  path: string
+}
 
-  const agentBranch = await resolveCurrentBranch(agentWorktree, context)
+/** Resolves, validates, and creates or loads one start-command session. */
+export async function createSessionForStart(agentBranchInput: string, context: RuntimeContext) {
+  const agentBranch = agentBranchInput.trim()
   if (!agentBranch) {
-    throw new UserError("start must run from an attached agent branch, not detached HEAD.")
+    throw new UserError("start requires an agent branch.")
   }
+
+  const reviewWorktree = await resolveRequiredRepoRoot(context.cwd, context)
+  await assertSupportedGitState(reviewWorktree, context)
 
   if (agentBranch.endsWith(reviewBranchSuffix)) {
     throw new UserError(`Agent branch ${agentBranch} already ends with ${reviewBranchSuffix}.`)
   }
 
-  const reviewWorktree = await resolveRequiredRepoRoot(
-    resolve(context.cwd, reviewWorktreeInput),
-    context,
-  )
-  await assertSupportedGitState(reviewWorktree, context)
+  const agentWorktree = await resolveAgentWorktreeForStart(agentBranch, reviewWorktree, context)
+  await assertSupportedGitState(agentWorktree, context)
 
   const [agentCommonDir, reviewCommonDir] = await Promise.all([
     resolveRequiredGitCommonDir(agentWorktree, context),
@@ -82,6 +86,34 @@ export async function createSessionForStart(reviewWorktreeInput: string, context
     agentBranch,
     reviewBranch,
   })
+}
+
+/** Lists branches that can be used as agent worktrees for start from the current cwd. */
+export async function listAgentWorktreeChoicesForStart(context: RuntimeContext) {
+  const reviewWorktree = await resolveRequiredRepoRoot(context.cwd, context)
+  return await listAgentWorktreeChoices(reviewWorktree, context)
+}
+
+/** Lists eligible agent worktrees outside the review worktree. */
+async function listAgentWorktreeChoices(reviewWorktree: string, context: RuntimeContext) {
+  const worktrees = await listGitWorktrees(reviewWorktree, context)
+  const choices: AgentWorktreeChoice[] = []
+
+  for (const worktree of worktrees) {
+    if (
+      !worktree.branch ||
+      worktree.path === reviewWorktree ||
+      worktree.branch.endsWith(reviewBranchSuffix)
+    ) {
+      continue
+    }
+    choices.push({
+      branch: worktree.branch,
+      path: worktree.path,
+    })
+  }
+
+  return choices.sort((left, right) => left.branch.localeCompare(right.branch))
 }
 
 /** Ensures the review branch exists and is checked out before any session sync can run. */
@@ -119,6 +151,20 @@ export async function prepareReviewBranchForStart(session: SessionState, context
   await git(session.reviewWorktree, ["checkout", session.reviewBranch], context, {
     stdin: "ignore",
   })
+}
+
+/** Resolves the checked-out worktree that owns the requested agent branch. */
+async function resolveAgentWorktreeForStart(
+  agentBranch: string,
+  reviewWorktree: string,
+  context: RuntimeContext,
+) {
+  const choices = await listAgentWorktreeChoices(reviewWorktree, context)
+  const match = choices.find((choice) => choice.branch === agentBranch)
+  if (!match) {
+    throw new UserError(`Agent branch ${agentBranch} is not checked out in another worktree.`)
+  }
+  return match.path
 }
 
 /** Infers the review-sync session from the current worktree path or checked-out branch. */

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, expect, test } from "bun:test"
 
 import {
@@ -21,6 +22,7 @@ type ReviewSyncFixture = {
 }
 
 const cleanup: string[] = []
+const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -34,8 +36,8 @@ test("start derives and checks out the review branch", async () => {
   })
 
   const result = await startReviewSync({
-    cwd: fixture.agentDir,
-    reviewWorktree: fixture.reviewDir,
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
   })
 
   expect(result.status).toBe("ok")
@@ -50,13 +52,56 @@ test("start refuses agent branches that already look like review branches", asyn
   await runGit(fixture.agentDir, ["checkout", "-B", "codex/already--review"])
 
   const result = await startReviewSync({
-    cwd: fixture.agentDir,
-    reviewWorktree: fixture.reviewDir,
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/already--review",
   })
 
   expect(result.status).toBe("error")
   expect(result.exitCode).toBe(1)
   expect(result.message).toContain("already ends with --review")
+})
+
+test("start refuses branches not checked out in another worktree", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.agentDir, ["checkout", "-B", "codex/other-agent"])
+
+  const result = await startReviewSync({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+  })
+
+  expect(result.status).toBe("error")
+  expect(result.exitCode).toBe(1)
+  expect(result.message).toContain("is not checked out in another worktree")
+})
+
+test("cli start accepts an agent branch from the review worktree", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+
+  const result = await runProcess(fixture.reviewDir, "bun", [
+    cliPath,
+    "start",
+    "codex/review-sync-test",
+  ])
+
+  expect(result.status).toBe(0)
+  expect(result.stdout).toContain("Started review sync")
+  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+})
+
+test("cli start requires an agent branch when non-interactive", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+
+  const result = await runProcess(fixture.reviewDir, "bun", [cliPath, "start"])
+
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("start requires an agent branch")
 })
 
 test("sync mirrors agent uncommitted changes through the review branch", async () => {
@@ -208,8 +253,8 @@ async function runWatchUntilNextSync(cwd: string, mutate: () => Promise<void>) {
 async function createStartedFixture(files: Record<string, string>) {
   const fixture = await createFixture(files)
   const result = await startReviewSync({
-    cwd: fixture.agentDir,
-    reviewWorktree: fixture.reviewDir,
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
   })
   expect(result.status).toBe("ok")
   return fixture
@@ -262,12 +307,22 @@ function createDeferred<T>() {
 }
 
 async function runGit(cwd: string, args: string[]) {
+  const result = await runProcess(cwd, "git", args)
+  if (result.status !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} failed in ${cwd}: ${result.stderr.trim() || result.stdout.trim()}`,
+    )
+  }
+  return result
+}
+
+async function runProcess(cwd: string, command: string, args: string[]) {
   return await new Promise<{
     status: number
     stdout: string
     stderr: string
   }>((resolvePromise, rejectPromise) => {
-    const child = spawn("git", args, {
+    const child = spawn(command, args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -284,22 +339,11 @@ async function runGit(cwd: string, args: string[]) {
     })
     child.on("error", rejectPromise)
     child.on("close", (status) => {
-      const result = {
+      resolvePromise({
         status: status ?? 1,
         stdout,
         stderr,
-      }
-      if (result.status !== 0) {
-        rejectPromise(
-          new Error(
-            `git ${args.join(" ")} failed in ${cwd}: ${
-              result.stderr.trim() || result.stdout.trim()
-            }`,
-          ),
-        )
-        return
-      }
-      resolvePromise(result)
+      })
     })
   })
 }

@@ -24,8 +24,8 @@ try {
   // TECHNICAL NOTE: Reusing the session catches bugs where patch state, rendered
   // snapshot refs, or repeated syncs break a later sync.
   const start = await startReviewSync({
-    cwd: fixture.agentDir,
-    reviewWorktree: fixture.reviewDir,
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-smoke",
   })
   assert.equal(start.status, "ok", "start status")
   assert.equal(start.reviewBranch, "codex/review-sync-smoke--review", "review branch")

@@ -16,7 +16,8 @@ daemon session worktree.
 ## CLI
 
 ```bash
-review-sync start --review-worktree <path>
+review-sync start <agent-branch>
+review-sync start
 review-sync sync
 review-sync status
 review-sync status --json
@@ -26,9 +27,12 @@ review-sync watch
 review-sync watch --interval-ms 500
 ```
 
-`start` runs from the agent worktree. The other commands may run from either the
-agent worktree or the review worktree. `watch` polls both worktrees and runs
-`sync` when either worktree's branch, `HEAD`, or snapshot tree changes.
+`start` runs from the review worktree. It resolves `<agent-branch>` to the
+matching branch already checked out in another worktree. When no branch is
+provided in an interactive terminal, `start` prompts for one of the eligible
+checked-out agent branches. The other commands may run from either the agent
+worktree or the review worktree. `watch` polls both worktrees and runs `sync`
+when either worktree's branch, `HEAD`, or snapshot tree changes.
 
 ## API
 
@@ -36,8 +40,8 @@ agent worktree or the review worktree. `watch` polls both worktrees and runs
 import { startReviewSync, syncReviewSession } from "@goddard-ai/review-sync"
 
 await startReviewSync({
-  cwd: "/repo-agent",
-  reviewWorktree: "/repo-main",
+  cwd: "/repo-review",
+  agentBranch: "codex/my-agent-branch",
 })
 
 await syncReviewSession({ cwd: "/repo-agent" })

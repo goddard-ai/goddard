@@ -192,7 +192,7 @@ export function isProcessAlive(pid: number) {
 }
 
 /** Parses Git's porcelain worktree list into path and branch records. */
-async function listGitWorktrees(cwd: string, context: RuntimeContext) {
+export async function listGitWorktrees(cwd: string, context: RuntimeContext) {
   const result = await git(cwd, ["worktree", "list", "--porcelain"], context)
   const worktrees: WorktreeInfo[] = []
   let current: Partial<WorktreeInfo> = {}
