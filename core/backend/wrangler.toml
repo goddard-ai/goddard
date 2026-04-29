@@ -6,6 +6,10 @@ compatibility_date = "2024-03-01"
 # TURSO_DB_URL = "libsql://..."
 # TURSO_DB_AUTH_TOKEN = "..."
 
+[alias]
+"@goddard-ai/schema/backend" = "../schema/src/backend.ts"
+"@goddard-ai/schema/backend/routes" = "../schema/src/backend/routes.ts"
+
 [[durable_objects.bindings]]
 name = "USER_STREAM"
 class_name = "UserStream"

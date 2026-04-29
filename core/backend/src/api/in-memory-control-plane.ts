@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto"
 import type {
   AuthSession,
   DeviceFlowComplete,
@@ -16,7 +15,7 @@ import {
 import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
-import { hashToInteger, toPublicSession } from "../utils.ts"
+import { hashToInteger, randomHex, toPublicSession } from "../utils.ts"
 import {
   assertRepo,
   HttpError,
@@ -50,8 +49,8 @@ export class InMemoryBackendControlPlane
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
     const githubUsername = input.githubUsername?.trim() || "developer"
-    const deviceCode = `dev_${randomBytes(32).toString("hex")}`
-    const userCode = randomBytes(4).toString("hex").toUpperCase()
+    const deviceCode = `dev_${randomHex(32)}`
+    const userCode = randomHex(4).toUpperCase()
     const createdAt = Date.now()
 
     this.#deviceSessions.set(deviceCode, {
@@ -87,7 +86,7 @@ export class InMemoryBackendControlPlane
 
     const expiresAt = Date.now() + AUTH_SESSION_TTL_MS
     const session: SessionRecord = {
-      token: `tok_${randomBytes(32).toString("hex")}`,
+      token: `tok_${randomHex(32)}`,
       githubUsername,
       githubUserId: hashToInteger(githubUsername),
       expiresAt,

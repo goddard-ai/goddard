@@ -12,6 +12,13 @@ export function hashToInteger(value: string): number {
   return Math.abs(hash) + 1000
 }
 
+/** Generates a Web Crypto-compatible random hex string for ids and auth tokens. */
+export function randomHex(byteLength: number) {
+  const bytes = new Uint8Array(byteLength)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
 export function toPublicSession(session: SessionRecord): AuthSession {
   return {
     token: session.token,

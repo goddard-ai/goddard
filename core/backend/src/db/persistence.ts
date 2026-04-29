@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto"
 import type {
   AuthSession,
   DeviceFlowComplete,
@@ -23,7 +22,7 @@ import {
   type BackendControlPlane,
 } from "../api/control-plane.ts"
 import type { Env } from "../env.ts"
-import { hashToInteger } from "../utils.ts"
+import { hashToInteger, randomHex } from "../utils.ts"
 import * as schema from "./schema.ts"
 
 /** Turso-backed backend control plane used by the real backend worker. */
@@ -37,8 +36,8 @@ export class TursoBackendControlPlane
   }
 
   async startDeviceFlow(_input: DeviceFlowStart = {}): Promise<DeviceFlowSession> {
-    const deviceCode = `dev_${randomBytes(32).toString("hex")}`
-    const userCode = randomBytes(4).toString("hex").toUpperCase()
+    const deviceCode = `dev_${randomHex(32)}`
+    const userCode = randomHex(4).toUpperCase()
     const expiresIn = 900
 
     // In a real production app, we would store this in Turso or KV.
@@ -58,7 +57,7 @@ export class TursoBackendControlPlane
       throw new HttpError(400, "githubUsername is required")
     }
 
-    const token = `tok_${randomBytes(32).toString("hex")}`
+    const token = `tok_${randomHex(32)}`
     const githubUserId = hashToInteger(githubUsername)
     const expiresAt = Date.now() + 1000 * 60 * 60 * 24
 

@@ -1,6 +1,7 @@
 dist
 node_modules
 .turbo
+**/.wrangler/
 /research
 /roadmap
 /website

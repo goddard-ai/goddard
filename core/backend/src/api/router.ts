@@ -292,6 +292,7 @@ function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
     GITHUB_APP_PRIVATE_KEY: ctx.env("GITHUB_APP_PRIVATE_KEY"),
     USER_STREAM: ctx.env("USER_STREAM"),
     CLOUD_SESSION: ctx.env("CLOUD_SESSION"),
+    GODDARD_BACKEND_TEST_MODE: ctx.env("GODDARD_BACKEND_TEST_MODE"),
   }
 }
 

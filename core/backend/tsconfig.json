@@ -1,14 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["bun", "node", "@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"]
+    "types": ["bun", "node", "@cloudflare/workers-types"]
   },
-  "include": [
-    "src/**/*.ts",
-    "test/**/*.ts",
-    "bin/**/*.ts",
-    "alchemy.run.ts",
-    "drizzle.config.ts",
-    "vitest.config.ts"
-  ]
+  "include": ["src/**/*.ts", "test/**/*.ts", "bin/**/*.ts", "alchemy.run.ts", "drizzle.config.ts"]
 }

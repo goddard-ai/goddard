@@ -31,9 +31,18 @@ const router = createBackendRouter({
   },
 })
 
+const handleRouterFetch = adapter(router)
+
 /** Cloudflare Worker entrypoint for the backend API and user-scoped stream runtime. */
 const worker = {
-  fetch: adapter(router),
+  async fetch(request, env, context) {
+    const testResponse = await handleTestRequest(request, env)
+    if (testResponse) {
+      return testResponse
+    }
+
+    return handleRouterFetch(request, env, context)
+  },
 } satisfies ExportedHandler<Env>
 
 export default worker
@@ -142,4 +151,61 @@ function getCloudSessionStub(env: Env, githubUsername: string, sessionId: string
   }
 
   return env.CLOUD_SESSION.get(env.CLOUD_SESSION.idFromName(`${githubUsername}:${sessionId}`))
+}
+
+async function handleTestRequest(request: Request, env: Env) {
+  const url = new URL(request.url)
+  if (!url.pathname.startsWith("/__test/")) {
+    return null
+  }
+
+  if (env.GODDARD_BACKEND_TEST_MODE !== "1") {
+    return new Response("Not found", { status: 404 })
+  }
+
+  if (url.pathname === "/__test/health") {
+    return new Response(null, { status: 204 })
+  }
+
+  const match = /^\/__test\/cloud\/sessions\/([^/]+)\/([^/]+)$/.exec(url.pathname)
+  if (!match) {
+    return new Response("Not found", { status: 404 })
+  }
+
+  const sessionId = decodeURIComponent(match[1])
+  const action = match[2]
+  if (action === "create" && request.method === "POST") {
+    const input = await readOptionalJson(request)
+    return await forwardCloudSessionRequest(env, "__test__", request, {
+      sessionId,
+      pathname: "/create",
+      body: { ...input, sessionId },
+    })
+  }
+  if (action === "sync" && request.method === "GET") {
+    return await forwardCloudSessionRequest(env, "__test__", request, {
+      sessionId,
+      pathname: "/sync",
+    })
+  }
+  if (action === "commands" && request.method === "POST") {
+    return await forwardCloudSessionRequest(env, "__test__", request, {
+      sessionId,
+      pathname: "/commands",
+      body: await readOptionalJson(request),
+    })
+  }
+  if (action === "harness" && request.method === "GET") {
+    return await forwardCloudSessionRequest(env, "__test__", request, {
+      sessionId,
+      pathname: "/harness",
+    })
+  }
+
+  return new Response("Not found", { status: 404 })
+}
+
+async function readOptionalJson(request: Request) {
+  const text = await request.text()
+  return text.trim() ? JSON.parse(text) : {}
 }

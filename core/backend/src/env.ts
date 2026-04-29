@@ -17,4 +17,5 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY?: string
   USER_STREAM?: DurableObjectNamespaceBinding
   CLOUD_SESSION?: DurableObjectNamespaceBinding
+  GODDARD_BACKEND_TEST_MODE?: string
 }
