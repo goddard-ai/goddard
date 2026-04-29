@@ -57,7 +57,7 @@ jobs:
         run: bun --cwd app run build:stable
 
       - name: Upload platform artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-artifacts-${{ matrix.runs_on }}
           path: app/artifacts/*
