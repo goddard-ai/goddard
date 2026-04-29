@@ -1,5 +1,6 @@
 /** CLI-compatible review-sync command parsing and dispatch. */
 import { join } from "node:path"
+import { command, flag, option, runSafely, string, subcommands } from "cmd-ts"
 
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
 import { resolveRef } from "./git.ts"
@@ -24,7 +25,7 @@ export async function runReviewSync(argv: string[], env: ReviewSyncEnv = {}) {
   const context = createRuntimeContext(env)
 
   try {
-    const parsed = parseCommand(argv)
+    const parsed = await parseCommand(argv)
     const result = await executeCommand(parsed, context)
     writeResult(context, result)
     return result
@@ -198,45 +199,17 @@ async function resumeReviewSession(context: RuntimeContext) {
 }
 
 /** Parses CLI arguments into one supported review-sync command. */
-function parseCommand(argv: string[]) {
-  const [command, ...rest] = argv
-  switch (command) {
-    case "start": {
-      const reviewWorktreeIndex = rest.indexOf("--review-worktree")
-      if (reviewWorktreeIndex === -1 || !rest[reviewWorktreeIndex + 1]) {
-        throw new UserError("Usage: review-sync start --review-worktree <path>")
-      }
-      if (rest.length !== 2) {
-        throw new UserError("Usage: review-sync start --review-worktree <path>")
-      }
-      return {
-        command: "start",
-        reviewWorktree: rest[reviewWorktreeIndex + 1]!,
-      } satisfies ParsedCommand
-    }
-    case "sync":
-      if (rest.length > 0) {
-        throw new UserError("Usage: review-sync sync")
-      }
-      return { command: "sync" } satisfies ParsedCommand
-    case "status":
-      if (rest.some((arg) => arg !== "--json")) {
-        throw new UserError("Usage: review-sync status [--json]")
-      }
-      return { command: "status", json: rest.includes("--json") } satisfies ParsedCommand
-    case "pause":
-      if (rest.length > 0) {
-        throw new UserError("Usage: review-sync pause")
-      }
-      return { command: "pause" } satisfies ParsedCommand
-    case "resume":
-      if (rest.length > 0) {
-        throw new UserError("Usage: review-sync resume")
-      }
-      return { command: "resume" } satisfies ParsedCommand
-    default:
-      throw new UserError("Usage: review-sync <start|sync|status|pause|resume> [command options]")
+async function parseCommand(argv: string[]) {
+  const result = await runSafely(reviewSyncCommand, argv)
+  if (result._tag === "error") {
+    throw new UserError(
+      result.error.config.message,
+      result.error.config.exitCode === 0 ? "ok" : "error",
+      result.error.config.exitCode,
+    )
   }
+
+  return result.value.value
 }
 
 /** Extracts a best-effort command name for structured error results. */
@@ -250,3 +223,68 @@ function parseCommandName(argv: string[]) {
     ? command
     : "status"
 }
+
+const reviewSyncCommand = subcommands({
+  name: "review-sync",
+  description: "Synchronize an agent-owned branch with a disposable human review branch",
+  cmds: {
+    start: command({
+      name: "start",
+      description: "Create or reuse a review branch and run the initial sync",
+      args: {
+        reviewWorktree: option({
+          type: string,
+          long: "review-worktree",
+          description: "Path to the local worktree where the human review branch is checked out",
+        }),
+      },
+      handler: ({ reviewWorktree }) =>
+        ({
+          command: "start",
+          reviewWorktree,
+        }) satisfies ParsedCommand,
+    }),
+    sync: command({
+      name: "sync",
+      description: "Apply clean human edits to the agent worktree and refresh the review branch",
+      args: {},
+      handler: () =>
+        ({
+          command: "sync",
+        }) satisfies ParsedCommand,
+    }),
+    status: command({
+      name: "status",
+      description: "Show review-sync session state without mutating Git",
+      args: {
+        json: flag({
+          long: "json",
+          description: "Print status as JSON for machine consumers",
+        }),
+      },
+      handler: ({ json }) =>
+        ({
+          command: "status",
+          json,
+        }) satisfies ParsedCommand,
+    }),
+    pause: command({
+      name: "pause",
+      description: "Pause future sync mutations for the inferred session",
+      args: {},
+      handler: () =>
+        ({
+          command: "pause",
+        }) satisfies ParsedCommand,
+    }),
+    resume: command({
+      name: "resume",
+      description: "Resume sync mutations without running an immediate sync",
+      args: {},
+      handler: () =>
+        ({
+          command: "resume",
+        }) satisfies ParsedCommand,
+    }),
+  },
+})

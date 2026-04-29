@@ -22,5 +22,8 @@
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
     "test": "bun test --dots"
+  },
+  "dependencies": {
+    "cmd-ts": "^0.15.0"
   }
 }

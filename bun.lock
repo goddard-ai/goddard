@@ -192,6 +192,9 @@
       "bin": {
         "review-sync": "./dist/cli.mjs",
       },
+      "dependencies": {
+        "cmd-ts": "^0.15.0",
+      },
     },
     "core/schema": {
       "name": "@goddard-ai/schema",
