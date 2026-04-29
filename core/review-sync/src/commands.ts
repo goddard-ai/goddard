@@ -1,6 +1,6 @@
 /** CLI-compatible review-sync command runner. */
 import { join } from "node:path"
-import { cancel, isCancel, select } from "@clack/prompts"
+import { autocomplete, cancel, isCancel } from "@clack/prompts"
 import {
   command,
   flag,
@@ -404,8 +404,9 @@ async function promptForAgentBranch(context: RuntimeContext) {
     throw new UserError("start requires an agent branch when running non-interactively.")
   }
 
-  const selected = await select({
+  const selected = await autocomplete({
     message: "Pick an agent branch",
+    placeholder: "Type to filter branches...",
     options: choices.map((choice) => ({
       value: choice.branch,
       label: choice.branch,
