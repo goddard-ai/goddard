@@ -15,7 +15,14 @@ import {
   writeSessionState,
 } from "./state.ts"
 import { syncSession } from "./sync.ts"
-import type { ReviewSyncCommand, ReviewSyncResult, RuntimeContext } from "./types.ts"
+import type {
+  ReviewSyncCommand,
+  ReviewSyncResult,
+  ReviewSyncWorktreeInput,
+  RuntimeContext,
+  StartReviewSyncInput,
+  StatusReviewSyncInput,
+} from "./types.ts"
 
 /**
  * Runs one review-sync command using the same command names and process context as the CLI.
@@ -30,35 +37,35 @@ export async function runReviewSync(argv: string[]) {
 }
 
 /** Creates or reuses one durable review-sync session and runs the first refresh. */
-export async function startReviewSync(input: { cwd: string; reviewWorktree: string }) {
+export async function startReviewSync(input: StartReviewSyncInput) {
   return await runCommandSafely("start", () =>
     startReviewSyncOperation(input.reviewWorktree, createRuntimeContext(input.cwd)),
   )
 }
 
 /** Runs one sync operation for the session inferred from the current worktree. */
-export async function syncReviewSession(input: { cwd: string }) {
+export async function syncReviewSession(input: ReviewSyncWorktreeInput) {
   return await runCommandSafely("sync", () =>
     syncReviewSessionOperation(createRuntimeContext(input.cwd)),
   )
 }
 
 /** Returns session state, patch counts, and refs without mutating Git or durable state. */
-export async function statusReviewSession(input: { cwd: string; json?: boolean }) {
+export async function statusReviewSession(input: StatusReviewSyncInput) {
   return await runCommandSafely("status", () =>
     statusReviewSessionOperation(input.json ?? false, createRuntimeContext(input.cwd)),
   )
 }
 
 /** Marks the inferred session paused so later sync commands refuse to mutate it. */
-export async function pauseReviewSession(input: { cwd: string }) {
+export async function pauseReviewSession(input: ReviewSyncWorktreeInput) {
   return await runCommandSafely("pause", () =>
     pauseReviewSessionOperation(createRuntimeContext(input.cwd)),
   )
 }
 
 /** Clears the paused flag without running an implicit sync. */
-export async function resumeReviewSession(input: { cwd: string }) {
+export async function resumeReviewSession(input: ReviewSyncWorktreeInput) {
   return await runCommandSafely("resume", () =>
     resumeReviewSessionOperation(createRuntimeContext(input.cwd)),
   )

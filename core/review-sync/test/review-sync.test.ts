@@ -10,7 +10,7 @@ import {
   resumeReviewSession,
   startReviewSync,
   syncReviewSession,
-} from "../src/commands.ts"
+} from "../src/index.ts"
 
 type ReviewSyncFixture = {
   rootDir: string

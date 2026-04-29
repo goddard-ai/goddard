@@ -19,6 +19,21 @@ export type ReviewSyncResult = {
   message: string
 }
 
+/** Worktree location shared by commands that infer their active session. */
+export type ReviewSyncWorktreeInput = {
+  cwd: string
+}
+
+/** Inputs for creating or reusing a review-sync session. */
+export type StartReviewSyncInput = ReviewSyncWorktreeInput & {
+  reviewWorktree: string
+}
+
+/** Inputs for reading review-sync session state. */
+export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
+  json?: boolean
+}
+
 /** Normalized runtime context passed through internal operations. */
 export type RuntimeContext = {
   cwd: string

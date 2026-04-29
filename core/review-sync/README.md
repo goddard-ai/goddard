@@ -30,15 +30,22 @@ agent worktree or the review worktree.
 ## API
 
 ```ts
-import { runReviewSync } from "@goddard-ai/review-sync"
+import { startReviewSync, syncReviewSession } from "@goddard-ai/review-sync"
 
-await runReviewSync(["sync"])
+await startReviewSync({
+  cwd: "/repo-agent",
+  reviewWorktree: "/repo-main",
+})
+
+await syncReviewSession({ cwd: "/repo-agent" })
 ```
 
-The public JavaScript entrypoint is `runReviewSync`; it uses the current process
-working directory and returns a structured result without writing CLI output.
-Internal Git helpers, state readers, lock handling, and snapshot builders are
-intentionally not exported.
+The package exports command-level functions for TypeScript callers:
+`startReviewSync`, `syncReviewSession`, `statusReviewSession`,
+`pauseReviewSession`, and `resumeReviewSession`. `runReviewSync(argv)` remains
+available for argv-compatible wrappers and uses the current process working
+directory. Internal Git helpers, state readers, lock handling, and snapshot
+builders are intentionally not exported.
 
 ## State
 
