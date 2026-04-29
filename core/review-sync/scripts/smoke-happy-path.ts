@@ -19,6 +19,10 @@ try {
   const fixture = await createFixture()
   rootDir = fixture.rootDir
 
+  // Start once and keep the same review-sync session for every scenario below.
+  // This is intentionally not a set of isolated fixtures: the smoke test should
+  // catch regressions where accepted review patches, refreshed rendered
+  // snapshots, or repeated syncs corrupt later sync behavior.
   const start = await startReviewSync({
     cwd: fixture.agentDir,
     reviewWorktree: fixture.reviewDir,
@@ -31,6 +35,10 @@ try {
     "review worktree branch",
   )
 
+  // Review-side tracked edits are the core feedback path. The review worktree
+  // changes a file that existed in the rendered snapshot, sync captures the diff
+  // from that rendered baseline, applies it into the agent worktree, then
+  // refreshes the review worktree from the new agent snapshot.
   await runSmokeStep("review tracked file edit", async () => {
     await writeText(join(fixture.reviewDir, "shared.txt"), "review tracked edit\n")
     const sync = await syncReviewSession({
@@ -45,6 +53,9 @@ try {
     await assertPatchCounts(fixture, { accepted: 1, rejected: 0 })
   })
 
+  // Review-side untracked files must be treated as human edits, not ignored as
+  // mirror-only state. This protects the snapshotter contract that non-ignored
+  // untracked files are included in review snapshots and accepted patches.
   await runSmokeStep("review untracked file add", async () => {
     await writeText(join(fixture.reviewDir, "review-only.txt"), "review untracked add\n")
     const sync = await syncReviewSession({
@@ -59,6 +70,10 @@ try {
     await assertPatchCounts(fixture, { accepted: 2, rejected: 0 })
   })
 
+  // A human may commit inside the disposable review branch before syncing. The
+  // package does not preserve that independent review history; it converts the
+  // resulting worktree state into a patch for the agent, then resets the review
+  // branch back to the agent snapshot.
   await runSmokeStep("review committed change", async () => {
     await writeText(join(fixture.reviewDir, "shared.txt"), "review committed edit\n")
     await runGit(fixture.reviewDir, ["add", "shared.txt"])
@@ -75,6 +90,10 @@ try {
     await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
   })
 
+  // Agent-side tracked edits exercise the mirror refresh path without a human
+  // patch. The accepted patch count must not change because the agent worktree
+  // is canonical and its local edits are rendered directly into the review
+  // branch snapshot.
   await runSmokeStep("agent tracked file edit", async () => {
     await writeText(join(fixture.agentDir, "shared.txt"), "agent tracked edit\n")
     const sync = await syncReviewSession({
@@ -88,6 +107,9 @@ try {
     await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
   })
 
+  // Agent-side untracked files must also appear in the review worktree. This
+  // proves the agent snapshot path includes non-ignored untracked files, instead
+  // of only committed or tracked content from the agent branch.
   await runSmokeStep("agent untracked file add", async () => {
     await writeText(join(fixture.agentDir, "agent-only.txt"), "agent untracked add\n")
     const sync = await syncReviewSession({
@@ -101,6 +123,10 @@ try {
     await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
   })
 
+  // Agent commits should mirror just like uncommitted agent edits. This guards
+  // the branch/reset path: the review branch should end at the latest agent
+  // snapshot regardless of whether the agent change is committed or only present
+  // in the working tree.
   await runSmokeStep("agent committed change", async () => {
     await writeText(join(fixture.agentDir, "shared.txt"), "agent committed edit\n")
     await runGit(fixture.agentDir, ["add", "shared.txt"])
@@ -116,6 +142,9 @@ try {
     await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
   })
 
+  // Only clean up after every assertion passes. On failure, the catch block
+  // prints the temp root so a maintainer can inspect the Git refs, patch files,
+  // worktree contents, and durable state that caused the smoke failure.
   await rm(fixture.rootDir, { recursive: true, force: true })
   rootDir = null
   console.log("review-sync smoke happy path passed")
@@ -137,6 +166,10 @@ async function createFixture() {
   const agentDir = join(rootDir, "agent")
   const reviewDir = join(rootDir, "review")
 
+  // Create a real repository and a real secondary worktree. The smoke test is
+  // meant to validate Git behavior at the integration boundary, including branch
+  // checkout rules and worktree branch exclusivity, so synthetic filesystem
+  // fixtures would miss the failures this script is meant to catch.
   await mkdir(agentDir, { recursive: true })
   await runGit(agentDir, ["init", "-b", "main"])
   await runGit(agentDir, ["config", "user.email", "smoke@example.com"])
@@ -165,6 +198,10 @@ async function assertPatchCounts(
     rejected: number
   },
 ) {
+  // Patch counts are part of the behavioral contract here. Review-originated
+  // changes should create accepted patch files, while agent-originated changes
+  // should only refresh the rendered snapshot and leave the accepted/rejected
+  // patch inventory unchanged.
   const status = await statusReviewSession({
     cwd: fixture.agentDir,
     json: true,
