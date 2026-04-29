@@ -1,3 +1,4 @@
+import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
@@ -22,9 +23,9 @@ try {
     cwd: fixture.agentDir,
     reviewWorktree: fixture.reviewDir,
   })
-  assertEqual(start.status, "ok", "start status")
-  assertEqual(start.reviewBranch, "codex/review-sync-smoke--review", "review branch")
-  assertEqual(
+  assert.equal(start.status, "ok", "start status")
+  assert.equal(start.reviewBranch, "codex/review-sync-smoke--review", "review branch")
+  assert.equal(
     await currentBranch(fixture.reviewDir),
     "codex/review-sync-smoke--review",
     "review worktree branch",
@@ -34,15 +35,15 @@ try {
   const sync = await syncReviewSession({
     cwd: fixture.reviewDir,
   })
-  assertEqual(sync.status, "ok", "sync status")
-  assertTruthy(sync.acceptedPatchPath, "accepted patch path")
-  assertTruthy(existsSync(sync.acceptedPatchPath!), "accepted patch file exists")
-  assertEqual(
+  assert.equal(sync.status, "ok", "sync status")
+  assert.ok(sync.acceptedPatchPath, "accepted patch path")
+  assert.ok(existsSync(sync.acceptedPatchPath), "accepted patch file exists")
+  assert.equal(
     await readFile(join(fixture.agentDir, "shared.txt"), "utf-8"),
     "human edit\n",
     "agent file content",
   )
-  assertEqual(
+  assert.equal(
     await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8"),
     "human edit\n",
     "review file content",
@@ -52,15 +53,15 @@ try {
     cwd: fixture.agentDir,
     json: true,
   })
-  assertEqual(status.status, "ok", "status command")
+  assert.equal(status.status, "ok", "status command")
   const statusPayload = JSON.parse(status.message) as {
     patchCounts?: {
       accepted?: number
       rejected?: number
     }
   }
-  assertEqual(statusPayload.patchCounts?.accepted, 1, "accepted patch count")
-  assertEqual(statusPayload.patchCounts?.rejected, 0, "rejected patch count")
+  assert.equal(statusPayload.patchCounts?.accepted, 1, "accepted patch count")
+  assert.equal(statusPayload.patchCounts?.rejected, 0, "rejected patch count")
 
   await rm(fixture.rootDir, { recursive: true, force: true })
   rootDir = null
@@ -102,18 +103,6 @@ async function writeText(path: string, content: string) {
 
 async function currentBranch(cwd: string) {
   return (await runGit(cwd, ["symbolic-ref", "--short", "HEAD"])).stdout.trim()
-}
-
-function assertEqual(actual: unknown, expected: unknown, label: string) {
-  if (actual !== expected) {
-    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-  }
-}
-
-function assertTruthy(value: unknown, label: string) {
-  if (!value) {
-    throw new Error(`${label}: expected truthy value`)
-  }
 }
 
 async function runGit(cwd: string, args: string[]) {
