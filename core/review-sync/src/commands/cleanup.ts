@@ -1,7 +1,7 @@
 /** Cleanup command implementation for review-sync. */
 import { command, flag } from "cmd-ts"
 
-import { createReviewSyncResult } from "../errors.ts"
+import { createReviewSyncResult, UserError } from "../errors.ts"
 import {
   git,
   isInsideOrEqual,
@@ -11,8 +11,14 @@ import {
 } from "../git.ts"
 import { withSessionLock } from "../lock.ts"
 import { createRuntimeContext } from "../runtime.ts"
+import { inferSession } from "../session.ts"
 import { deleteSessionState, listSessions } from "../state.ts"
-import type { CleanupReviewSyncInput, RuntimeContext, SessionState } from "../types.ts"
+import type {
+  CleanupReviewSyncInput,
+  ReviewSyncWorktreeInput,
+  RuntimeContext,
+  SessionState,
+} from "../types.ts"
 
 /** Removes saved session state records that match the current worktree root. */
 export async function cleanupReviewSessions(input: CleanupReviewSyncInput) {
@@ -41,6 +47,50 @@ export async function cleanupReviewSessions(input: CleanupReviewSyncInput) {
       matchedCount: ordered.length,
     }),
   })
+}
+
+/** Stops one inferred session and removes its private review-sync ownership state. */
+export async function stopReviewSession(input: ReviewSyncWorktreeInput) {
+  const context = createRuntimeContext(input.cwd)
+  const session = await inferSessionForStop(context)
+  if (!session) {
+    return createReviewSyncResult({
+      exitCode: 0,
+      command: "stop",
+      status: "ok",
+      message: "No matching review-sync session remains; already stopped.",
+    })
+  }
+
+  const resolvedDirectory = await resolveRequiredRepoRoot(context.cwd, context)
+  await deleteSavedSession(session, resolvedDirectory, context)
+
+  return createReviewSyncResult({
+    exitCode: 0,
+    command: "stop",
+    status: "ok",
+    sessionId: session.sessionId,
+    reviewBranch: session.reviewBranch,
+    message: `Stopped review sync for ${session.reviewBranch}.`,
+  })
+}
+
+/** Treats a missing inferred session as an idempotent stop retry. */
+async function inferSessionForStop(context: RuntimeContext) {
+  try {
+    return await inferSession(context)
+  } catch (error) {
+    if (
+      error instanceof UserError &&
+      error.message === "No review-sync session matches the current worktree."
+    ) {
+      const { sessions } = await listSessionsForResolvedDirectory(context)
+      if (sessions.length === 0) {
+        return null
+      }
+    }
+    throw error
+  }
 }
 
 /** Lists saved sessions whose recorded agent or review worktree is the current worktree root. */

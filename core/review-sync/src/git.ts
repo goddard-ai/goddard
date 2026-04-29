@@ -108,6 +108,13 @@ export async function updateRef(
   await git(cwd, ["update-ref", refName, oid], context)
 }
 
+/** Deletes one hidden ref, allowing retry after a previous cleanup removed it. */
+export async function deleteRef(cwd: string, refName: string, context: RuntimeContext) {
+  await git(cwd, ["update-ref", "-d", refName], context, {
+    allowFailure: true,
+  })
+}
+
 /** Ensures a review branch is not checked out outside the configured review worktree. */
 export async function assertReviewBranchNotCheckedOutElsewhere(input: {
   cwd: string

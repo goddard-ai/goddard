@@ -2,7 +2,12 @@ import { mkdir, readdir, readFile, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { cleanupReviewSessions, startReviewSync, statusReviewSession } from "../src/index.ts"
+import {
+  cleanupReviewSessions,
+  startReviewSync,
+  statusReviewSession,
+  stopReviewSession,
+} from "../src/index.ts"
 import {
   captureReviewSyncError,
   cleanupReviewSyncFixtures,
@@ -205,4 +210,39 @@ test("cli cleanup -A removes every session for the resolved worktree", async () 
   expect(
     await refExists(fixture.reviewDir, `refs/review-sync/${second.sessionId}/agent-snapshot`),
   ).toBe(false)
+})
+
+test("stop cleans session ownership from either worktree and allows a fresh start", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const beforeStop = await statusReviewSession({
+    cwd: fixture.agentDir,
+  })
+  expect(beforeStop.data).toBeDefined()
+  const refs = beforeStop.data!.refs
+
+  const stoppedFromReview = await stopReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  expect(stoppedFromReview.status).toBe("ok")
+  expect(await refExists(fixture.agentDir, refs.agentSnapshot)).toBe(false)
+  expect(await refExists(fixture.agentDir, refs.renderedSnapshot)).toBe(false)
+
+  const stoppedAgain = await stopReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  expect(stoppedAgain.status).toBe("ok")
+  expect(stoppedAgain.message).toContain("already stopped")
+
+  const restarted = await startReviewSync({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+  })
+  expect(restarted.status).toBe("ok")
+
+  const stoppedFromAgent = await stopReviewSession({
+    cwd: fixture.agentDir,
+  })
+  expect(stoppedFromAgent.status).toBe("ok")
 })

@@ -6,6 +6,7 @@ export {
   runReviewSync,
   startReviewSync,
   statusReviewSession,
+  stopReviewSession,
   syncReviewSession,
   watchReviewSession,
 } from "./commands.ts"

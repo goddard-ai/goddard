@@ -1,7 +1,11 @@
 /** CLI-compatible review-sync command runner. */
 import { parse, runSafely, subcommands } from "cmd-ts"
 
-import { cleanupReviewSessions, createCleanupCommand } from "./commands/cleanup.ts"
+import {
+  cleanupReviewSessions,
+  createCleanupCommand,
+  stopReviewSession,
+} from "./commands/cleanup.ts"
 import { createPauseCommand, pauseReviewSession } from "./commands/pause.ts"
 import { createResumeCommand, resumeReviewSession } from "./commands/resume.ts"
 import { createStartCommand, startReviewSync } from "./commands/start.ts"
@@ -17,6 +21,7 @@ export {
   resumeReviewSession,
   startReviewSync,
   statusReviewSession,
+  stopReviewSession,
   syncReviewSession,
   watchReviewSession,
 }

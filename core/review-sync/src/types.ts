@@ -1,4 +1,4 @@
-/** Review-sync command names supported by the CLI and programmatic entrypoint. */
+/** Review-sync command names reported by CLI and TypeScript command functions. */
 export type ReviewSyncCommand =
   | "start"
   | "sync"
@@ -7,6 +7,7 @@ export type ReviewSyncCommand =
   | "resume"
   | "cleanup"
   | "watch"
+  | "stop"
 
 /** Stable top-level status values returned to callers. */
 export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error"

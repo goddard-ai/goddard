@@ -87,8 +87,8 @@ await syncReviewSession({ cwd: "/repo-agent" })
 
 The package exports command-level functions for TypeScript callers:
 `startReviewSync`, `syncReviewSession`, `statusReviewSession`,
-`pauseReviewSession`, `resumeReviewSession`, `cleanupReviewSessions`, and
-`watchReviewSession`.
+`pauseReviewSession`, `resumeReviewSession`, `cleanupReviewSessions`,
+`stopReviewSession`, and `watchReviewSession`.
 `runReviewSync(argv)` remains available for argv-compatible wrappers and uses the
 current process working directory. Internal Git helpers, state readers, lock
 handling, and snapshot builders are intentionally not exported.
@@ -97,6 +97,10 @@ handling, and snapshot builders are intentionally not exported.
 the branch pair, worktree paths, snapshot refs, resolved snapshot commits, last
 sync state, and accepted/rejected patch counts. The `message` field remains
 CLI-oriented text or JSON depending on the `json` option.
+
+`stopReviewSession` is a TypeScript API for host lifecycle cleanup. It infers the
+session from either worktree, removes that session's hidden refs and private
+state directory, and treats an already-stopped session as a successful no-op.
 
 ## Smoke Test
 

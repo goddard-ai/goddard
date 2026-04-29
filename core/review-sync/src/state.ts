@@ -145,6 +145,14 @@ export async function countPatchFiles(patchDir: string) {
   }
 }
 
+/** Removes one session's durable state directory after session-owned refs are gone. */
+export async function removeSessionDir(session: SessionState) {
+  await rm(resolveSessionDir(session.repoCommonDir, session.sessionId), {
+    recursive: true,
+    force: true,
+  })
+}
+
 /** Returns the directory containing every session for one repository common dir. */
 export function resolveSessionsRoot(commonDir: string) {
   return join(commonDir, "review-sync", "sessions")
