@@ -7,12 +7,8 @@ import { join } from "node:path"
 import { git } from "./git.ts"
 import type { RuntimeContext } from "./types.ts"
 
-/** Captures tracked, modified, deleted, and untracked non-ignored files into one commit. */
-export async function createSnapshotCommit(input: {
-  cwd: string
-  label: string
-  context: RuntimeContext
-}) {
+/** Captures tracked, modified, deleted, and untracked non-ignored files into one tree. */
+export async function createSnapshotTree(input: { cwd: string; context: RuntimeContext }) {
   const scratchDir = await mkdtemp(join(tmpdir(), `review-sync-${process.pid}-`))
   const indexPath = join(
     scratchDir,
@@ -31,24 +27,33 @@ export async function createSnapshotCommit(input: {
         env: { GIT_INDEX_FILE: indexPath },
       })
     ).stdout.trim()
-    const commit = await git(
-      input.cwd,
-      ["commit-tree", tree, "-p", "HEAD", "-m", `review-sync:${input.label}`],
-      input.context,
-      {
-        env: {
-          GIT_INDEX_FILE: indexPath,
-          GIT_AUTHOR_NAME: "Review Sync",
-          GIT_AUTHOR_EMAIL: "review-sync@local",
-          GIT_COMMITTER_NAME: "Review Sync",
-          GIT_COMMITTER_EMAIL: "review-sync@local",
-        },
-      },
-    )
-    return commit.stdout.trim()
+    return tree
   } finally {
     await rm(scratchDir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+/** Captures tracked, modified, deleted, and untracked non-ignored files into one commit. */
+export async function createSnapshotCommit(input: {
+  cwd: string
+  label: string
+  context: RuntimeContext
+}) {
+  const tree = await createSnapshotTree(input)
+  const commit = await git(
+    input.cwd,
+    ["commit-tree", tree, "-p", "HEAD", "-m", `review-sync:${input.label}`],
+    input.context,
+    {
+      env: {
+        GIT_AUTHOR_NAME: "Review Sync",
+        GIT_AUTHOR_EMAIL: "review-sync@local",
+        GIT_COMMITTER_NAME: "Review Sync",
+        GIT_COMMITTER_EMAIL: "review-sync@local",
+      },
+    },
+  )
+  return commit.stdout.trim()
 }
 
 /** Computes a binary Git diff between two snapshot commits. */

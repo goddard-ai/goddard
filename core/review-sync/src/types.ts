@@ -1,5 +1,5 @@
 /** Review-sync command names supported by the CLI and programmatic entrypoint. */
-export type ReviewSyncCommand = "start" | "sync" | "status" | "pause" | "resume"
+export type ReviewSyncCommand = "start" | "sync" | "status" | "pause" | "resume" | "watch"
 
 /** Stable top-level status values returned to callers. */
 export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error"
@@ -32,6 +32,13 @@ export type StartReviewSyncInput = ReviewSyncWorktreeInput & {
 /** Inputs for reading review-sync session state. */
 export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
   json?: boolean
+}
+
+/** Inputs for watching a review-sync session until the caller aborts it. */
+export type WatchReviewSyncInput = ReviewSyncWorktreeInput & {
+  intervalMs?: number
+  signal?: AbortSignal
+  onResult?: (result: ReviewSyncResult) => void | Promise<void>
 }
 
 /** Normalized runtime context passed through internal operations. */

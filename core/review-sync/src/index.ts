@@ -6,6 +6,7 @@ export {
   startReviewSync,
   statusReviewSession,
   syncReviewSession,
+  watchReviewSession,
 } from "./commands.ts"
 export type {
   ReviewSyncCommand,
@@ -14,4 +15,5 @@ export type {
   ReviewSyncWorktreeInput,
   StartReviewSyncInput,
   StatusReviewSyncInput,
+  WatchReviewSyncInput,
 } from "./types.ts"

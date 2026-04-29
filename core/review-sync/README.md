@@ -22,10 +22,13 @@ review-sync status
 review-sync status --json
 review-sync pause
 review-sync resume
+review-sync watch
+review-sync watch --interval-ms 500
 ```
 
 `start` runs from the agent worktree. The other commands may run from either the
-agent worktree or the review worktree.
+agent worktree or the review worktree. `watch` polls both worktrees and runs
+`sync` when either worktree's branch, `HEAD`, or snapshot tree changes.
 
 ## API
 
@@ -42,10 +45,10 @@ await syncReviewSession({ cwd: "/repo-agent" })
 
 The package exports command-level functions for TypeScript callers:
 `startReviewSync`, `syncReviewSession`, `statusReviewSession`,
-`pauseReviewSession`, and `resumeReviewSession`. `runReviewSync(argv)` remains
-available for argv-compatible wrappers and uses the current process working
-directory. Internal Git helpers, state readers, lock handling, and snapshot
-builders are intentionally not exported.
+`pauseReviewSession`, `resumeReviewSession`, and `watchReviewSession`.
+`runReviewSync(argv)` remains available for argv-compatible wrappers and uses the
+current process working directory. Internal Git helpers, state readers, lock
+handling, and snapshot builders are intentionally not exported.
 
 ## Smoke Test
 

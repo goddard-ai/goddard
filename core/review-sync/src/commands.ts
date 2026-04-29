@@ -1,12 +1,13 @@
 /** CLI-compatible review-sync command runner. */
 import { join } from "node:path"
-import { command, flag, option, runSafely, string, subcommands } from "cmd-ts"
+import { command, flag, number as numberType, option, runSafely, string, subcommands } from "cmd-ts"
 
 import { createErrorResult, createReviewSyncResult } from "./errors.ts"
-import { resolveRef } from "./git.ts"
+import { git, resolveRef } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
-import { createRuntimeContext } from "./runtime.ts"
+import { createRuntimeContext, writeResult } from "./runtime.ts"
 import { createSessionForStart, inferSession, prepareReviewBranchForStart } from "./session.ts"
+import { createSnapshotTree } from "./snapshot.ts"
 import {
   appendEvent,
   countPatchFiles,
@@ -22,7 +23,11 @@ import type {
   RuntimeContext,
   StartReviewSyncInput,
   StatusReviewSyncInput,
+  WatchReviewSyncInput,
 } from "./types.ts"
+
+const defaultWatchIntervalMs = 1000
+const minimumWatchIntervalMs = 10
 
 /**
  * Runs one review-sync command using the same command names and process context as the CLI.
@@ -68,6 +73,13 @@ export async function pauseReviewSession(input: ReviewSyncWorktreeInput) {
 export async function resumeReviewSession(input: ReviewSyncWorktreeInput) {
   return await runCommandSafely("resume", () =>
     resumeReviewSessionOperation(createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Watches both worktrees and runs sync when either snapshot changes. */
+export async function watchReviewSession(input: WatchReviewSyncInput) {
+  return await runCommandSafely("watch", () =>
+    watchReviewSessionOperation(input, createRuntimeContext(input.cwd)),
   )
 }
 
@@ -217,6 +229,51 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
   })
 }
 
+/** Performs the watch workflow after CLI parsing and command-level error handling. */
+async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
+  const intervalMs = normalizeWatchIntervalMs(input.intervalMs)
+  const session = await inferSession(context)
+  let fingerprint = await createWatchFingerprint(session, context)
+
+  await input.onResult?.(
+    createReviewSyncResult({
+      exitCode: 0,
+      command: "watch",
+      status: session.paused ? "paused" : "ok",
+      sessionId: session.sessionId,
+      reviewBranch: session.reviewBranch,
+      message: `Watching review sync for ${session.agentBranch} -> ${session.reviewBranch}.`,
+    }),
+  )
+
+  while (!isAbortSignalAborted(input.signal)) {
+    await waitForWatchInterval(intervalMs, input.signal)
+    if (isAbortSignalAborted(input.signal)) {
+      break
+    }
+
+    const latest = await readSessionState(session)
+    const nextFingerprint = await createWatchFingerprint(latest, context)
+    if (nextFingerprint === fingerprint) {
+      continue
+    }
+
+    const result = await runCommandSafely("sync", () => syncReviewSessionOperation(context))
+    await input.onResult?.(result)
+    fingerprint = await createWatchFingerprint(await readSessionState(session), context)
+  }
+
+  const latest = await readSessionState(session)
+  return createReviewSyncResult({
+    exitCode: getWatchExitCode(input.signal),
+    command: "watch",
+    status: latest.paused ? "paused" : "ok",
+    sessionId: latest.sessionId,
+    reviewBranch: latest.reviewBranch,
+    message: `Stopped watching review sync for ${latest.reviewBranch}.`,
+  })
+}
+
 /** Preserves command-specific structured errors while letting cmd-ts route subcommands. */
 async function runCommandSafely(
   command: ReviewSyncCommand,
@@ -286,6 +343,124 @@ function createReviewSyncCommand(cwd: string) {
         args: {},
         handler: () => resumeReviewSession({ cwd }),
       }),
+      watch: command({
+        name: "watch",
+        description: "Continuously sync when the agent or review worktree changes",
+        args: {
+          intervalMs: option({
+            type: numberType,
+            long: "interval-ms",
+            description: "Polling interval in milliseconds",
+            defaultValue: () => defaultWatchIntervalMs,
+            defaultValueIsSerializable: true,
+          }),
+        },
+        handler: async ({ intervalMs }) => {
+          const abort = createProcessAbortSignal()
+          try {
+            return await watchReviewSession({
+              cwd,
+              intervalMs,
+              signal: abort.signal,
+              onResult: writeResult,
+            })
+          } finally {
+            abort.cleanup()
+          }
+        },
+      }),
     },
   })
+}
+
+/** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */
+async function createWatchFingerprint(
+  session: { agentWorktree: string; reviewWorktree: string },
+  context: RuntimeContext,
+) {
+  const [agent, review] = await Promise.all([
+    createWorktreeFingerprint(session.agentWorktree, context),
+    createWorktreeFingerprint(session.reviewWorktree, context),
+  ])
+  return JSON.stringify({ agent, review })
+}
+
+/** Captures the branch, HEAD, and snapshot tree for one worktree. */
+async function createWorktreeFingerprint(cwd: string, context: RuntimeContext) {
+  const [branch, head, tree] = await Promise.all([
+    git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
+      allowFailure: true,
+    }),
+    git(cwd, ["rev-parse", "HEAD"], context),
+    createSnapshotTree({
+      cwd,
+      context,
+    }),
+  ])
+
+  return {
+    branch: branch.status === 0 ? branch.stdout.trim() : null,
+    head: head.stdout.trim(),
+    tree,
+  }
+}
+
+/** Validates the caller-supplied polling interval before starting a long-lived watch. */
+function normalizeWatchIntervalMs(intervalMs: number | undefined) {
+  const normalized = intervalMs ?? defaultWatchIntervalMs
+  if (!Number.isFinite(normalized) || normalized < minimumWatchIntervalMs) {
+    throw new Error(`watch interval must be at least ${minimumWatchIntervalMs}ms.`)
+  }
+  return Math.trunc(normalized)
+}
+
+/** Waits for one polling interval, resolving early when the caller aborts the watch. */
+function waitForWatchInterval(intervalMs: number, signal: AbortSignal | undefined) {
+  if (isAbortSignalAborted(signal)) {
+    return Promise.resolve()
+  }
+
+  return new Promise<void>((resolvePromise) => {
+    let timeout: ReturnType<typeof setTimeout>
+    const done = () => {
+      clearTimeout(timeout)
+      signal?.removeEventListener("abort", done)
+      resolvePromise()
+    }
+    timeout = setTimeout(done, intervalMs)
+    signal?.addEventListener("abort", done, { once: true })
+  })
+}
+
+/** Checks an abort signal without causing TypeScript to over-narrow loop state. */
+function isAbortSignalAborted(signal: AbortSignal | undefined) {
+  return signal?.aborted === true
+}
+
+/** Translates process termination signals into conventional command exit codes. */
+function getWatchExitCode(signal: AbortSignal | undefined) {
+  if (signal?.reason === "SIGINT") {
+    return 130
+  }
+  if (signal?.reason === "SIGTERM") {
+    return 143
+  }
+  return 0
+}
+
+/** Creates an abort signal that lets the CLI clean up when interrupted. */
+function createProcessAbortSignal() {
+  const controller = new AbortController()
+  const abortForSigint = () => controller.abort("SIGINT")
+  const abortForSigterm = () => controller.abort("SIGTERM")
+  process.once("SIGINT", abortForSigint)
+  process.once("SIGTERM", abortForSigterm)
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      process.off("SIGINT", abortForSigint)
+      process.off("SIGTERM", abortForSigterm)
+    },
+  }
 }

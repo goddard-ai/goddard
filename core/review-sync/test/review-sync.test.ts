@@ -10,6 +10,8 @@ import {
   resumeReviewSession,
   startReviewSync,
   syncReviewSession,
+  watchReviewSession,
+  type ReviewSyncResult,
 } from "../src/index.ts"
 
 type ReviewSyncFixture = {
@@ -152,6 +154,57 @@ test("pause blocks sync mutations until resume", async () => {
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 
+test("watch syncs when the review worktree changes", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
+    await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
+  })
+
+  expect(stopped.status).toBe("ok")
+  expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+})
+
+test("watch syncs when the agent worktree changes", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
+    await writeText(join(fixture.agentDir, "shared.txt"), "agent edit\n")
+  })
+
+  expect(stopped.status).toBe("ok")
+  expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
+})
+
+async function runWatchUntilNextSync(cwd: string, mutate: () => Promise<void>) {
+  const controller = new AbortController()
+  const started = createDeferred<void>()
+  const results: ReviewSyncResult[] = []
+  const watch = watchReviewSession({
+    cwd,
+    intervalMs: 10,
+    signal: controller.signal,
+    onResult: (result) => {
+      results.push(result)
+      if (result.command === "watch") {
+        started.resolve()
+      }
+      if (result.command === "sync" && result.status === "ok") {
+        controller.abort()
+      }
+    },
+  })
+
+  await started.promise
+  await mutate()
+  const stopped = await watch
+  return { results, stopped }
+}
+
 async function createStartedFixture(files: Record<string, string>) {
   const fixture = await createFixture(files)
   const result = await startReviewSync({
@@ -196,6 +249,16 @@ async function writeText(path: string, content: string) {
 
 async function currentBranch(cwd: string) {
   return (await runGit(cwd, ["symbolic-ref", "--short", "HEAD"])).stdout.trim()
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 async function runGit(cwd: string, args: string[]) {
