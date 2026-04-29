@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "review-sync": "./dist/cli.mjs"
+    "review-sync": "./bin/review-sync"
   },
   "exports": {
     ".": {

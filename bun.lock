@@ -190,7 +190,7 @@
       "name": "@goddard-ai/review-sync",
       "version": "0.1.0",
       "bin": {
-        "review-sync": "./dist/cli.mjs",
+        "review-sync": "./bin/review-sync",
       },
       "dependencies": {
         "cmd-ts": "^0.15.0",
@@ -224,7 +224,7 @@
       "name": "@goddard-ai/sprint-branch",
       "version": "0.1.0",
       "bin": {
-        "sprint-branch": "./dist/main.mjs",
+        "sprint-branch": "./bin/sprint-branch",
       },
       "dependencies": {
         "@clack/prompts": "^0.11.0",
