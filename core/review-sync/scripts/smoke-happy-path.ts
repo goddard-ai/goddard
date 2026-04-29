@@ -31,37 +31,90 @@ try {
     "review worktree branch",
   )
 
-  await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
-  const sync = await syncReviewSession({
-    cwd: fixture.reviewDir,
-  })
-  assert.equal(sync.status, "ok", "sync status")
-  assert.ok(sync.acceptedPatchPath, "accepted patch path")
-  assert.ok(existsSync(sync.acceptedPatchPath), "accepted patch file exists")
-  assert.equal(
-    await readFile(join(fixture.agentDir, "shared.txt"), "utf-8"),
-    "human edit\n",
-    "agent file content",
-  )
-  assert.equal(
-    await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8"),
-    "human edit\n",
-    "review file content",
-  )
+  await runSmokeStep("review tracked file edit", async () => {
+    await writeText(join(fixture.reviewDir, "shared.txt"), "review tracked edit\n")
+    const sync = await syncReviewSession({
+      cwd: fixture.reviewDir,
+    })
 
-  const status = await statusReviewSession({
-    cwd: fixture.agentDir,
-    json: true,
+    assert.equal(sync.status, "ok", "sync status")
+    assert.ok(sync.acceptedPatchPath, "accepted patch path")
+    assert.ok(existsSync(sync.acceptedPatchPath), "accepted patch file exists")
+    await assertFileContent(fixture.agentDir, "shared.txt", "review tracked edit\n")
+    await assertFileContent(fixture.reviewDir, "shared.txt", "review tracked edit\n")
+    await assertPatchCounts(fixture, { accepted: 1, rejected: 0 })
   })
-  assert.equal(status.status, "ok", "status command")
-  const statusPayload = JSON.parse(status.message) as {
-    patchCounts?: {
-      accepted?: number
-      rejected?: number
-    }
-  }
-  assert.equal(statusPayload.patchCounts?.accepted, 1, "accepted patch count")
-  assert.equal(statusPayload.patchCounts?.rejected, 0, "rejected patch count")
+
+  await runSmokeStep("review untracked file add", async () => {
+    await writeText(join(fixture.reviewDir, "review-only.txt"), "review untracked add\n")
+    const sync = await syncReviewSession({
+      cwd: fixture.reviewDir,
+    })
+
+    assert.equal(sync.status, "ok", "sync status")
+    assert.ok(sync.acceptedPatchPath, "accepted patch path")
+    assert.ok(existsSync(sync.acceptedPatchPath), "accepted patch file exists")
+    await assertFileContent(fixture.agentDir, "review-only.txt", "review untracked add\n")
+    await assertFileContent(fixture.reviewDir, "review-only.txt", "review untracked add\n")
+    await assertPatchCounts(fixture, { accepted: 2, rejected: 0 })
+  })
+
+  await runSmokeStep("review committed change", async () => {
+    await writeText(join(fixture.reviewDir, "shared.txt"), "review committed edit\n")
+    await runGit(fixture.reviewDir, ["add", "shared.txt"])
+    await runGit(fixture.reviewDir, ["commit", "-m", "review edit"])
+    const sync = await syncReviewSession({
+      cwd: fixture.reviewDir,
+    })
+
+    assert.equal(sync.status, "ok", "sync status")
+    assert.ok(sync.acceptedPatchPath, "accepted patch path")
+    assert.ok(existsSync(sync.acceptedPatchPath), "accepted patch file exists")
+    await assertFileContent(fixture.agentDir, "shared.txt", "review committed edit\n")
+    await assertFileContent(fixture.reviewDir, "shared.txt", "review committed edit\n")
+    await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
+  })
+
+  await runSmokeStep("agent tracked file edit", async () => {
+    await writeText(join(fixture.agentDir, "shared.txt"), "agent tracked edit\n")
+    const sync = await syncReviewSession({
+      cwd: fixture.agentDir,
+    })
+
+    assert.equal(sync.status, "ok", "sync status")
+    assert.equal(sync.acceptedPatchPath, undefined, "accepted patch path")
+    await assertFileContent(fixture.agentDir, "shared.txt", "agent tracked edit\n")
+    await assertFileContent(fixture.reviewDir, "shared.txt", "agent tracked edit\n")
+    await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
+  })
+
+  await runSmokeStep("agent untracked file add", async () => {
+    await writeText(join(fixture.agentDir, "agent-only.txt"), "agent untracked add\n")
+    const sync = await syncReviewSession({
+      cwd: fixture.agentDir,
+    })
+
+    assert.equal(sync.status, "ok", "sync status")
+    assert.equal(sync.acceptedPatchPath, undefined, "accepted patch path")
+    await assertFileContent(fixture.agentDir, "agent-only.txt", "agent untracked add\n")
+    await assertFileContent(fixture.reviewDir, "agent-only.txt", "agent untracked add\n")
+    await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
+  })
+
+  await runSmokeStep("agent committed change", async () => {
+    await writeText(join(fixture.agentDir, "shared.txt"), "agent committed edit\n")
+    await runGit(fixture.agentDir, ["add", "shared.txt"])
+    await runGit(fixture.agentDir, ["commit", "-m", "agent edit"])
+    const sync = await syncReviewSession({
+      cwd: fixture.agentDir,
+    })
+
+    assert.equal(sync.status, "ok", "sync status")
+    assert.equal(sync.acceptedPatchPath, undefined, "accepted patch path")
+    await assertFileContent(fixture.agentDir, "shared.txt", "agent committed edit\n")
+    await assertFileContent(fixture.reviewDir, "shared.txt", "agent committed edit\n")
+    await assertPatchCounts(fixture, { accepted: 3, rejected: 0 })
+  })
 
   await rm(fixture.rootDir, { recursive: true, force: true })
   rootDir = null
@@ -72,6 +125,11 @@ try {
     console.error(`smoke fixture preserved at ${rootDir}`)
   }
   process.exitCode = 1
+}
+
+async function runSmokeStep(name: string, run: () => Promise<void>) {
+  await run()
+  console.log(`passed: ${name}`)
 }
 
 async function createFixture() {
@@ -94,6 +152,32 @@ async function createFixture() {
     agentDir,
     reviewDir,
   } satisfies SmokeFixture
+}
+
+async function assertFileContent(cwd: string, path: string, expected: string) {
+  assert.equal(await readFile(join(cwd, path), "utf-8"), expected, `${path} content in ${cwd}`)
+}
+
+async function assertPatchCounts(
+  fixture: SmokeFixture,
+  expected: {
+    accepted: number
+    rejected: number
+  },
+) {
+  const status = await statusReviewSession({
+    cwd: fixture.agentDir,
+    json: true,
+  })
+  assert.equal(status.status, "ok", "status command")
+  const statusPayload = JSON.parse(status.message) as {
+    patchCounts?: {
+      accepted?: number
+      rejected?: number
+    }
+  }
+  assert.equal(statusPayload.patchCounts?.accepted, expected.accepted, "accepted patch count")
+  assert.equal(statusPayload.patchCounts?.rejected, expected.rejected, "rejected patch count")
 }
 
 async function writeText(path: string, content: string) {
