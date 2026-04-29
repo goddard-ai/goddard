@@ -1,18 +1,15 @@
 /** Runtime context and output helpers for CLI-compatible command execution. */
-import type { ReviewSyncEnv, ReviewSyncResult, RuntimeContext } from "./types.ts"
+import type { ReviewSyncResult, RuntimeContext } from "./types.ts"
 
-/** Normalizes optional runtime hooks to concrete values. */
-export function createRuntimeContext(env: ReviewSyncEnv) {
+/** Normalizes the command cwd into the context passed through internal operations. */
+export function createRuntimeContext(cwd: string) {
   return {
-    cwd: env.cwd ?? process.cwd(),
-    stdout: env.stdout,
-    stderr: env.stderr,
-    env: env.env ?? process.env,
+    cwd,
   } satisfies RuntimeContext
 }
 
 /** Writes command output to stdout for successful states and stderr for hard errors. */
-export function writeResult(context: RuntimeContext, result: ReviewSyncResult) {
-  const target = result.status === "error" ? context.stderr : context.stdout
-  target?.write(`${result.message}\n`)
+export function writeResult(result: ReviewSyncResult) {
+  const target = result.status === "error" ? process.stderr : process.stdout
+  target.write(`${result.message}\n`)
 }

@@ -10,7 +10,7 @@ import type { RuntimeContext, SessionState } from "./types.ts"
 
 /** Coordinates one complete patch-acceptance and review-refresh cycle. */
 export async function syncSession(session: SessionState, context: RuntimeContext) {
-  return await withSessionLock(session, context, async () => {
+  return await withSessionLock(session, async () => {
     const latest = await readSessionState(session)
     if (latest.paused) {
       await appendEvent(latest, {

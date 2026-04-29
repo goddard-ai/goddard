@@ -5,7 +5,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { runReviewSync } from "../src/index.ts"
+import {
+  pauseReviewSession,
+  resumeReviewSession,
+  startReviewSync,
+  syncReviewSession,
+} from "../src/commands.ts"
 
 type ReviewSyncFixture = {
   rootDir: string
@@ -26,9 +31,9 @@ test("start derives and checks out the review branch", async () => {
     "shared.txt": "base\n",
   })
 
-  const result = await runReviewSync(["start", "--review-worktree", fixture.reviewDir], {
+  const result = await startReviewSync({
     cwd: fixture.agentDir,
-    env: process.env,
+    reviewWorktree: fixture.reviewDir,
   })
 
   expect(result.status).toBe("ok")
@@ -42,9 +47,9 @@ test("start refuses agent branches that already look like review branches", asyn
   })
   await runGit(fixture.agentDir, ["checkout", "-B", "codex/already--review"])
 
-  const result = await runReviewSync(["start", "--review-worktree", fixture.reviewDir], {
+  const result = await startReviewSync({
     cwd: fixture.agentDir,
-    env: process.env,
+    reviewWorktree: fixture.reviewDir,
   })
 
   expect(result.status).toBe("error")
@@ -58,9 +63,8 @@ test("sync mirrors agent uncommitted changes through the review branch", async (
   })
 
   await writeText(join(fixture.agentDir, "shared.txt"), "agent edit\n")
-  const result = await runReviewSync(["sync"], {
+  const result = await syncReviewSession({
     cwd: fixture.agentDir,
-    env: process.env,
   })
 
   expect(result.status).toBe("ok")
@@ -73,9 +77,8 @@ test("sync applies clean human edits back to the agent worktree", async () => {
   })
 
   await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
-  const result = await runReviewSync(["sync"], {
+  const result = await syncReviewSession({
     cwd: fixture.reviewDir,
-    env: process.env,
   })
 
   expect(result.status).toBe("ok")
@@ -92,9 +95,8 @@ test("sync preserves rejected human patches and refreshes review from the agent"
 
   await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
   await writeText(join(fixture.agentDir, "shared.txt"), "agent edit\n")
-  const result = await runReviewSync(["sync"], {
+  const result = await syncReviewSession({
     cwd: fixture.reviewDir,
-    env: process.env,
   })
 
   expect(result.status).toBe("rejected-human-patch")
@@ -112,9 +114,8 @@ test("sync includes untracked non-ignored files and excludes ignored files", asy
 
   await writeText(join(fixture.reviewDir, "new-file.txt"), "include me\n")
   await writeText(join(fixture.reviewDir, "ignored.txt"), "do not include\n")
-  const result = await runReviewSync(["sync"], {
+  const result = await syncReviewSession({
     cwd: fixture.reviewDir,
-    env: process.env,
   })
 
   expect(result.status).toBe("ok")
@@ -127,29 +128,25 @@ test("pause blocks sync mutations until resume", async () => {
     "shared.txt": "base\n",
   })
 
-  const pause = await runReviewSync(["pause"], {
+  const pause = await pauseReviewSession({
     cwd: fixture.agentDir,
-    env: process.env,
   })
   expect(pause.status).toBe("paused")
 
   await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
-  const pausedSync = await runReviewSync(["sync"], {
+  const pausedSync = await syncReviewSession({
     cwd: fixture.reviewDir,
-    env: process.env,
   })
   expect(pausedSync.status).toBe("paused")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("base\n")
 
-  const resume = await runReviewSync(["resume"], {
+  const resume = await resumeReviewSession({
     cwd: fixture.agentDir,
-    env: process.env,
   })
   expect(resume.status).toBe("ok")
 
-  const synced = await runReviewSync(["sync"], {
+  const synced = await syncReviewSession({
     cwd: fixture.reviewDir,
-    env: process.env,
   })
   expect(synced.status).toBe("ok")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
@@ -157,9 +154,9 @@ test("pause blocks sync mutations until resume", async () => {
 
 async function createStartedFixture(files: Record<string, string>) {
   const fixture = await createFixture(files)
-  const result = await runReviewSync(["start", "--review-worktree", fixture.reviewDir], {
+  const result = await startReviewSync({
     cwd: fixture.agentDir,
-    env: process.env,
+    reviewWorktree: fixture.reviewDir,
   })
   expect(result.status).toBe("ok")
   return fixture

@@ -6,14 +6,10 @@ import { join, resolve } from "node:path"
 import { UserError } from "./errors.ts"
 import { isNodeErrorWithCode, isProcessAlive } from "./git.ts"
 import { resolveSessionDir } from "./state.ts"
-import { lockStaleAfterMs, type RuntimeContext, type SessionState } from "./types.ts"
+import { lockStaleAfterMs, type SessionState } from "./types.ts"
 
 /** Acquires the session lock for one mutating operation and releases it on completion. */
-export async function withSessionLock<T>(
-  session: SessionState,
-  _context: RuntimeContext,
-  work: () => Promise<T>,
-) {
+export async function withSessionLock<T>(session: SessionState, work: () => Promise<T>) {
   const lockDir = join(resolveSessionDir(session.repoCommonDir, session.sessionId), "lock")
   const release = await acquireLock(lockDir)
   try {

@@ -5,7 +5,7 @@ import { command, flag, option, runSafely, string, subcommands } from "cmd-ts"
 import { createErrorResult, createReviewSyncResult } from "./errors.ts"
 import { resolveRef } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
-import { createRuntimeContext, writeResult } from "./runtime.ts"
+import { createRuntimeContext } from "./runtime.ts"
 import { createSessionForStart, inferSession, prepareReviewBranchForStart } from "./session.ts"
 import {
   appendEvent,
@@ -15,29 +15,57 @@ import {
   writeSessionState,
 } from "./state.ts"
 import { syncSession } from "./sync.ts"
-import type { ReviewSyncCommand, ReviewSyncEnv, ReviewSyncResult, RuntimeContext } from "./types.ts"
+import type { ReviewSyncCommand, ReviewSyncResult, RuntimeContext } from "./types.ts"
 
 /**
- * Runs one review-sync command using the same command names and arguments as the CLI.
+ * Runs one review-sync command using the same command names and process context as the CLI.
  */
-export async function runReviewSync(argv: string[], env: ReviewSyncEnv = {}) {
-  const context = createRuntimeContext(env)
-
+export async function runReviewSync(argv: string[]) {
   try {
-    const parsed = await runSafely(createReviewSyncCommand(context), argv)
-    const result =
-      parsed._tag === "error" ? createCmdTsResult(parsed.error) : await parsed.value.value
-    writeResult(context, result)
-    return result
+    const parsed = await runSafely(createReviewSyncCommand(process.cwd()), argv)
+    return parsed._tag === "error" ? createCmdTsResult(parsed.error) : await parsed.value.value
   } catch (error) {
-    const result = createErrorResult("status", error)
-    writeResult(context, result)
-    return result
+    return createErrorResult("status", error)
   }
 }
 
 /** Creates or reuses one durable review-sync session and runs the first refresh. */
-async function startReviewSync(reviewWorktreeInput: string, context: RuntimeContext) {
+export async function startReviewSync(input: { cwd: string; reviewWorktree: string }) {
+  return await runCommandSafely("start", () =>
+    startReviewSyncOperation(input.reviewWorktree, createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Runs one sync operation for the session inferred from the current worktree. */
+export async function syncReviewSession(input: { cwd: string }) {
+  return await runCommandSafely("sync", () =>
+    syncReviewSessionOperation(createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Returns session state, patch counts, and refs without mutating Git or durable state. */
+export async function statusReviewSession(input: { cwd: string; json?: boolean }) {
+  return await runCommandSafely("status", () =>
+    statusReviewSessionOperation(input.json ?? false, createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Marks the inferred session paused so later sync commands refuse to mutate it. */
+export async function pauseReviewSession(input: { cwd: string }) {
+  return await runCommandSafely("pause", () =>
+    pauseReviewSessionOperation(createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Clears the paused flag without running an implicit sync. */
+export async function resumeReviewSession(input: { cwd: string }) {
+  return await runCommandSafely("resume", () =>
+    resumeReviewSessionOperation(createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Performs the start workflow after CLI parsing and command-level error handling. */
+async function startReviewSyncOperation(reviewWorktreeInput: string, context: RuntimeContext) {
   const session = await createSessionForStart(reviewWorktreeInput, context)
   await prepareReviewBranchForStart(session, context)
   const syncResult = await syncSession(session, context)
@@ -57,8 +85,8 @@ async function startReviewSync(reviewWorktreeInput: string, context: RuntimeCont
   })
 }
 
-/** Runs one sync operation for the session inferred from the current worktree. */
-async function syncReviewSession(context: RuntimeContext) {
+/** Performs the sync workflow after CLI parsing and command-level error handling. */
+async function syncReviewSessionOperation(context: RuntimeContext) {
   const session = await inferSession(context)
   const syncResult = await syncSession(session, context)
 
@@ -77,8 +105,8 @@ async function syncReviewSession(context: RuntimeContext) {
   })
 }
 
-/** Returns session state, patch counts, and refs without mutating Git or durable state. */
-async function statusReviewSession(json: boolean, context: RuntimeContext) {
+/** Performs the status workflow after CLI parsing and command-level error handling. */
+async function statusReviewSessionOperation(json: boolean, context: RuntimeContext) {
   const session = await inferSession(context)
   const sessionDir = resolveSessionDir(session.repoCommonDir, session.sessionId)
   const acceptedCount = await countPatchFiles(join(sessionDir, "patches", "accepted"))
@@ -129,10 +157,10 @@ async function statusReviewSession(json: boolean, context: RuntimeContext) {
   })
 }
 
-/** Marks the inferred session paused so later sync commands refuse to mutate it. */
-async function pauseReviewSession(context: RuntimeContext) {
+/** Performs the pause workflow after CLI parsing and command-level error handling. */
+async function pauseReviewSessionOperation(context: RuntimeContext) {
   const session = await inferSession(context)
-  return await withSessionLock(session, context, async () => {
+  return await withSessionLock(session, async () => {
     const latest = await readSessionState(session)
     latest.paused = true
     latest.updatedAt = new Date().toISOString()
@@ -158,10 +186,10 @@ async function pauseReviewSession(context: RuntimeContext) {
   })
 }
 
-/** Clears the paused flag without running an implicit sync. */
-async function resumeReviewSession(context: RuntimeContext) {
+/** Performs the resume workflow after CLI parsing and command-level error handling. */
+async function resumeReviewSessionOperation(context: RuntimeContext) {
   const session = await inferSession(context)
-  return await withSessionLock(session, context, async () => {
+  return await withSessionLock(session, async () => {
     const latest = await readSessionState(session)
     latest.paused = false
     latest.updatedAt = new Date().toISOString()
@@ -205,7 +233,7 @@ function createCmdTsResult(error: { config: { exitCode: number; message: string 
 }
 
 /** Builds the command tree with handlers that execute the bounded operations directly. */
-function createReviewSyncCommand(context: RuntimeContext) {
+function createReviewSyncCommand(cwd: string) {
   return subcommands({
     name: "review-sync",
     description: "Synchronize an agent-owned branch with a disposable human review branch",
@@ -220,14 +248,13 @@ function createReviewSyncCommand(context: RuntimeContext) {
             description: "Path to the local worktree where the human review branch is checked out",
           }),
         },
-        handler: ({ reviewWorktree }) =>
-          runCommandSafely("start", () => startReviewSync(reviewWorktree, context)),
+        handler: ({ reviewWorktree }) => startReviewSync({ cwd, reviewWorktree }),
       }),
       sync: command({
         name: "sync",
         description: "Apply clean human edits to the agent worktree and refresh the review branch",
         args: {},
-        handler: () => runCommandSafely("sync", () => syncReviewSession(context)),
+        handler: () => syncReviewSession({ cwd }),
       }),
       status: command({
         name: "status",
@@ -238,19 +265,19 @@ function createReviewSyncCommand(context: RuntimeContext) {
             description: "Print status as JSON for machine consumers",
           }),
         },
-        handler: ({ json }) => runCommandSafely("status", () => statusReviewSession(json, context)),
+        handler: ({ json }) => statusReviewSession({ cwd, json }),
       }),
       pause: command({
         name: "pause",
         description: "Pause future sync mutations for the inferred session",
         args: {},
-        handler: () => runCommandSafely("pause", () => pauseReviewSession(context)),
+        handler: () => pauseReviewSession({ cwd }),
       }),
       resume: command({
         name: "resume",
         description: "Resume sync mutations without running an immediate sync",
         args: {},
-        handler: () => runCommandSafely("resume", () => resumeReviewSession(context)),
+        handler: () => resumeReviewSession({ cwd }),
       }),
     },
   })

@@ -11,7 +11,7 @@ import type { CommandResult, RuntimeContext, WorktreeInfo } from "./types.ts"
 export async function git(
   cwd: string,
   args: string[],
-  context: RuntimeContext,
+  _context: RuntimeContext,
   options: {
     allowFailure?: boolean
     stdin?: string | "ignore"
@@ -22,7 +22,7 @@ export async function git(
     cwd,
     stdin: options.stdin,
     env: {
-      ...context.env,
+      ...process.env,
       ...options.env,
     },
   })

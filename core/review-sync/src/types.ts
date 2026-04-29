@@ -7,19 +7,6 @@ export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error
 /** Last-sync statuses stored in durable session state. */
 export type LastSyncStatus = "synced" | "rejected-human-patch" | "paused" | "error"
 
-/** Minimal writable stream surface accepted by embedded callers. */
-export type WritableStreamLike = {
-  write(chunk: string | Uint8Array): unknown
-}
-
-/** Runtime hooks accepted by the CLI-compatible programmatic entrypoint. */
-export type ReviewSyncEnv = {
-  cwd?: string
-  stdout?: WritableStreamLike
-  stderr?: WritableStreamLike
-  env?: Record<string, string | undefined>
-}
-
 /** Structured command result returned by both CLI and embedded callers. */
 export type ReviewSyncResult = {
   exitCode: number
@@ -35,9 +22,6 @@ export type ReviewSyncResult = {
 /** Normalized runtime context passed through internal operations. */
 export type RuntimeContext = {
   cwd: string
-  stdout?: WritableStreamLike
-  stderr?: WritableStreamLike
-  env: Record<string, string | undefined>
 }
 
 /** Durable session state stored under the Git common directory. */

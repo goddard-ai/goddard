@@ -32,11 +32,13 @@ agent worktree or the review worktree.
 ```ts
 import { runReviewSync } from "@goddard-ai/review-sync"
 
-await runReviewSync(["sync"], { cwd: "/repo-agent" })
+await runReviewSync(["sync"])
 ```
 
-The only public JavaScript entrypoint is `runReviewSync`. Internal Git helpers,
-state readers, lock handling, and snapshot builders are intentionally not exported.
+The public JavaScript entrypoint is `runReviewSync`; it uses the current process
+working directory and returns a structured result without writing CLI output.
+Internal Git helpers, state readers, lock handling, and snapshot builders are
+intentionally not exported.
 
 ## State
 
