@@ -27,7 +27,9 @@
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test --dots"
+    "test": "bun run test:unit && bun run test:workers",
+    "test:unit": "bun test --dots test/*.test.ts",
+    "test:workers": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@goddard-ai/auth": "workspace:*",
@@ -45,8 +47,10 @@
     "rouzer": "catalog:"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.15.1",
     "@cloudflare/workers-types": "^4.20260425.1",
     "alchemy": "^0.90.1",
+    "vitest": "^4.1.0",
     "wrangler": "^4.71.0"
   }
 }

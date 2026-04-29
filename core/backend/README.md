@@ -6,6 +6,8 @@ Feature packages declare backend route fragments through `@goddard-ai/backend-pl
 
 Cloud-owned sessions are isolated in the `CloudSession` Durable Object. Each object owns one session's ordered event log, idempotent command ledger, and WebSocket channel to the ACP harness running in the sandbox. Local daemons consume cloud session state by cursor; local-only sessions are not synchronized into the backend.
 
+`bun run test` runs both Bun unit tests and Workers-runtime tests. Use `bun run test:workers` to exercise the Cloudflare Durable Object binding locally through `@cloudflare/vitest-pool-workers` without deploying.
+
 ## Related Docs
 
 - [Backend Glossary](./glossary.md)
