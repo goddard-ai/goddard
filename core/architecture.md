@@ -47,7 +47,7 @@ Design rule: daemon control capabilities live here first.
 
 Boundary:
 - Must keep privileged OS and daemon access behind the trusted desktop host boundary.
-- Embedded browser surfaces must not bypass that boundary for direct daemon access unless a browser-safe daemon contract exists.
+- Embedded browser surfaces must not bypass that boundary for direct daemon access.
 - Must not fork platform behavior away from SDK contracts.
 
 ### Background Runtime

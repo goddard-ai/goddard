@@ -57,7 +57,7 @@ All screens consume normalized, real-time domain records with stable identities:
 ## Cross-Cutting Constraints
 - Must remain lightweight.
 - Frontend-Heavy Architecture: The application should keep domain behavior in the visual workspace and route privileged local integrations through a minimal trusted desktop host boundary.
-- Trusted Host Boundary: Embedded browser surfaces must access privileged local capabilities through the trusted desktop host. They must not connect directly to daemon IPC unless a future browser-safe daemon contract explicitly defines origin, authentication, and lifecycle guarantees.
+- Trusted Host Boundary: Embedded browser surfaces must access privileged local capabilities through the trusted desktop host. They must not connect directly to daemon IPC.
 - Lazy Authentication: The application must function in a degraded or local-only mode until an external service (like GitHub) is explicitly requested.
 - Must handle streaming updates gracefully for high-churn views.
 
