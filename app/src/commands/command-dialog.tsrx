@@ -31,12 +31,7 @@ export component CommandDialog(props: CommandDialogProps) {
         props.dialogProps?.onOpenChange?.(details)
 
         if (details.open) {
-          globalEventHub.dispatch(
-            {
-              name: "commandDialogActivated",
-              detail: { dialogId },
-            },
-          )
+          globalEventHub.emit("commandDialogActivated", { dialogId })
         }
       },
       persistentElements: concat(

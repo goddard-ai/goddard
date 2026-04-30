@@ -34,7 +34,9 @@ const rpc = Electroview.defineRPC<AppDesktopRpc>({
   handlers: {
     requests: {},
     messages: {
-      dispatchGlobalEvent,
+      dispatchGlobalEvent(event) {
+        globalEventHub.emit(event.name, event.detail)
+      },
     },
   },
 });
