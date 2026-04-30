@@ -27,6 +27,14 @@ export type ReviewSyncWorktreeInput = {
 /** Inputs for creating or reusing a review-sync session. */
 export type StartReviewSyncInput = ReviewSyncWorktreeInput & {
   agentBranch: string
+  checkoutWaitIntervalMs?: number
+  signal?: AbortSignal
+}
+
+/** Inputs for running one sync operation for an inferred review-sync session. */
+export type SyncReviewSessionInput = ReviewSyncWorktreeInput & {
+  checkoutWaitIntervalMs?: number
+  signal?: AbortSignal
 }
 
 /** Inputs for reading review-sync session state. */
@@ -37,6 +45,7 @@ export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
 /** Inputs for watching a review-sync session until the caller aborts it. */
 export type WatchReviewSyncInput = ReviewSyncWorktreeInput & {
   agentBranch?: string
+  checkoutWaitIntervalMs?: number
   signal?: AbortSignal
   onResult?: (result: ReviewSyncResult) => void | Promise<void>
 }

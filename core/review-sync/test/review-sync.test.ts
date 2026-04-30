@@ -152,6 +152,41 @@ test("sync applies clean human edits back to the agent worktree", async () => {
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 
+test("sync waits for the expected agent checkout before mutating worktrees", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
+  await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => {
+    controller.abort("test timeout")
+  }, 5000)
+  let settled = false
+  const sync = syncReviewSession({
+    cwd: fixture.reviewDir,
+    checkoutWaitIntervalMs: 10,
+    signal: controller.signal,
+  }).finally(() => {
+    clearTimeout(timeout)
+    settled = true
+  })
+
+  await sleep(50)
+  expect(settled).toBe(false)
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("base\n")
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+
+  await runGit(fixture.agentDir, ["checkout", "codex/review-sync-test"])
+  const result = await sync
+
+  expect(result.status).toBe("ok")
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+})
+
 test("sync preserves rejected human patches and refreshes review from the agent", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
@@ -364,6 +399,12 @@ async function writeText(path: string, content: string) {
 
 async function currentBranch(cwd: string) {
   return (await runGit(cwd, ["symbolic-ref", "--short", "HEAD"])).stdout.trim()
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 function createDeferred<T>() {

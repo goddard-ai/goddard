@@ -15,5 +15,6 @@ export type {
   ReviewSyncWorktreeInput,
   StartReviewSyncInput,
   StatusReviewSyncInput,
+  SyncReviewSessionInput,
   WatchReviewSyncInput,
 } from "./types.ts"

@@ -5,10 +5,11 @@ import { autocomplete, cancel, isCancel } from "@clack/prompts"
 import { command, flag, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
-import { git, pathExists, resolveRef, resolveRequiredGitDir } from "./git.ts"
+import { git, pathExists, resolveCurrentBranch, resolveRef, resolveRequiredGitDir } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { createRuntimeContext, writeResult } from "./runtime.ts"
 import {
+  AgentWorktreeCheckoutMismatchError,
   createSessionForStart,
   inferSession,
   listAgentWorktreeChoicesForStart,
@@ -28,12 +29,22 @@ import type {
   ReviewSyncResult,
   ReviewSyncWorktreeInput,
   RuntimeContext,
+  SessionState,
   StartReviewSyncInput,
   StatusReviewSyncInput,
+  SyncReviewSessionInput,
   WatchReviewSyncInput,
 } from "./types.ts"
 
 const watchDebounceMs = 100
+const defaultCheckoutWaitIntervalMs = 1000
+const minimumCheckoutWaitIntervalMs = 10
+
+/** Retry knobs used while waiting for a temporary agent checkout to resolve. */
+type SyncOperationOptions = {
+  checkoutWaitIntervalMs?: number
+  signal?: AbortSignal
+}
 
 /**
  * Runs one review-sync command using the same command names and process context as the CLI.
@@ -50,14 +61,20 @@ export async function runReviewSync(argv: string[]) {
 /** Creates or reuses one durable review-sync session and runs the first refresh. */
 export async function startReviewSync(input: StartReviewSyncInput) {
   return await runCommandSafely("start", () =>
-    startReviewSyncOperation(input.agentBranch, createRuntimeContext(input.cwd)),
+    startReviewSyncOperation(input.agentBranch, createRuntimeContext(input.cwd), {
+      checkoutWaitIntervalMs: input.checkoutWaitIntervalMs,
+      signal: input.signal,
+    }),
   )
 }
 
 /** Runs one sync operation for the session inferred from the current worktree. */
-export async function syncReviewSession(input: ReviewSyncWorktreeInput) {
+export async function syncReviewSession(input: SyncReviewSessionInput) {
   return await runCommandSafely("sync", () =>
-    syncReviewSessionOperation(createRuntimeContext(input.cwd)),
+    syncReviewSessionOperation(createRuntimeContext(input.cwd), {
+      checkoutWaitIntervalMs: input.checkoutWaitIntervalMs,
+      signal: input.signal,
+    }),
   )
 }
 
@@ -90,16 +107,27 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
 }
 
 /** Performs the start workflow after CLI parsing and command-level error handling. */
-async function startReviewSyncOperation(agentBranch: string, context: RuntimeContext) {
-  const { result } = await startReviewSyncOperationWithSession(agentBranch, context)
+async function startReviewSyncOperation(
+  agentBranch: string,
+  context: RuntimeContext,
+  options: SyncOperationOptions = {},
+) {
+  const { result } = await startReviewSyncOperationWithSession(agentBranch, context, options)
   return result
 }
 
 /** Performs the start workflow and keeps the loaded session for command composition. */
-async function startReviewSyncOperationWithSession(agentBranch: string, context: RuntimeContext) {
+async function startReviewSyncOperationWithSession(
+  agentBranch: string,
+  context: RuntimeContext,
+  options: SyncOperationOptions = {},
+) {
   const session = await createSessionForStart(agentBranch, context)
   await prepareReviewBranchForStart(session, context)
-  const syncResult = await syncSession(session, context)
+  const syncResult = await syncSessionWhenAgentCheckoutReady(session, context, {
+    intervalMs: normalizeCheckoutWaitIntervalMs(options.checkoutWaitIntervalMs),
+    signal: options.signal,
+  })
 
   const result = createReviewSyncResult({
     exitCode: 0,
@@ -118,9 +146,15 @@ async function startReviewSyncOperationWithSession(agentBranch: string, context:
 }
 
 /** Performs the sync workflow after CLI parsing and command-level error handling. */
-async function syncReviewSessionOperation(context: RuntimeContext) {
+async function syncReviewSessionOperation(
+  context: RuntimeContext,
+  options: SyncOperationOptions = {},
+) {
   const session = await inferSession(context)
-  const syncResult = await syncSession(session, context)
+  const syncResult = await syncSessionWhenAgentCheckoutReady(session, context, {
+    intervalMs: normalizeCheckoutWaitIntervalMs(options.checkoutWaitIntervalMs),
+    signal: options.signal,
+  })
 
   return createReviewSyncResult({
     exitCode: 0,
@@ -276,8 +310,16 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
         continue
       }
 
-      const result = await runCommandSafely("sync", () => syncReviewSessionOperation(context))
+      const result = await runCommandSafely("sync", () =>
+        syncReviewSessionOperation(context, {
+          checkoutWaitIntervalMs: input.checkoutWaitIntervalMs,
+          signal: input.signal,
+        }),
+      )
       await input.onResult?.(result)
+      if (isAbortSignalAborted(input.signal)) {
+        break
+      }
       fingerprint = await createWatchFingerprint(await readSessionState(session), context)
     }
   } finally {
@@ -403,6 +445,10 @@ async function resolveSessionForWatch(input: WatchReviewSyncInput, context: Runt
     const { session, result } = await startReviewSyncOperationWithSession(
       input.agentBranch,
       context,
+      {
+        checkoutWaitIntervalMs: input.checkoutWaitIntervalMs,
+        signal: input.signal,
+      },
     )
     return { session, startResult: result }
   }
@@ -437,6 +483,60 @@ async function promptForAgentBranch(context: RuntimeContext) {
     throw new UserError("Start canceled.", "error", 130)
   }
   return selected
+}
+
+/** Retries sync after the agent temporarily checks out a different branch. */
+async function syncSessionWhenAgentCheckoutReady(
+  session: SessionState,
+  context: RuntimeContext,
+  options: {
+    intervalMs: number
+    signal?: AbortSignal
+  },
+) {
+  while (true) {
+    if (isAbortSignalAborted(options.signal)) {
+      throw createCheckoutWaitAbortedError(session, options.signal)
+    }
+
+    try {
+      return await syncSession(session, context)
+    } catch (error) {
+      if (!(error instanceof AgentWorktreeCheckoutMismatchError)) {
+        throw error
+      }
+      await waitForExpectedAgentCheckout(error, context, options)
+    }
+  }
+}
+
+/** Polls the agent worktree until the recorded session branch is checked out again. */
+async function waitForExpectedAgentCheckout(
+  mismatch: AgentWorktreeCheckoutMismatchError,
+  context: RuntimeContext,
+  options: {
+    intervalMs: number
+    signal?: AbortSignal
+  },
+) {
+  while (true) {
+    if (isAbortSignalAborted(options.signal)) {
+      throw createCheckoutWaitAbortedError(
+        {
+          agentWorktree: mismatch.worktree,
+          agentBranch: mismatch.expectedBranch,
+        },
+        options.signal,
+      )
+    }
+
+    const branch = await resolveCurrentBranch(mismatch.worktree, context)
+    if (branch === mismatch.expectedBranch) {
+      return
+    }
+
+    await waitForCheckoutRetryInterval(options.intervalMs, options.signal)
+  }
 }
 
 /** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */
@@ -658,9 +758,48 @@ async function waitForWatchQuietPeriod(events: WatchEventQueue, signal: AbortSig
   return false
 }
 
+/** Validates the polling interval used while waiting for the expected agent checkout. */
+function normalizeCheckoutWaitIntervalMs(intervalMs: number | undefined) {
+  const normalized = intervalMs ?? defaultCheckoutWaitIntervalMs
+  if (!Number.isFinite(normalized) || normalized < minimumCheckoutWaitIntervalMs) {
+    throw new Error(`checkout wait interval must be at least ${minimumCheckoutWaitIntervalMs}ms.`)
+  }
+  return Math.trunc(normalized)
+}
+
+/** Waits between checkout checks, resolving early when the caller aborts. */
+function waitForCheckoutRetryInterval(intervalMs: number, signal: AbortSignal | undefined) {
+  if (isAbortSignalAborted(signal)) {
+    return Promise.resolve()
+  }
+
+  return new Promise<void>((resolvePromise) => {
+    let timeout: ReturnType<typeof setTimeout>
+    const done = () => {
+      clearTimeout(timeout)
+      signal?.removeEventListener("abort", done)
+      resolvePromise()
+    }
+    timeout = setTimeout(done, intervalMs)
+    signal?.addEventListener("abort", done, { once: true })
+  })
+}
+
 /** Checks an abort signal without causing TypeScript to over-narrow loop state. */
 function isAbortSignalAborted(signal: AbortSignal | undefined) {
   return signal?.aborted === true
+}
+
+/** Creates a user-facing error when checkout waiting is interrupted. */
+function createCheckoutWaitAbortedError(
+  session: { agentWorktree: string; agentBranch: string },
+  signal: AbortSignal | undefined,
+) {
+  return new UserError(
+    `Stopped waiting for agent worktree ${session.agentWorktree} to return to ${session.agentBranch}.`,
+    "error",
+    getWatchExitCode(signal),
+  )
 }
 
 /** Translates process termination signals into conventional command exit codes. */

@@ -40,6 +40,22 @@ export type AgentWorktreeChoice = {
   path: string
 }
 
+/** Signals a temporary agent checkout mismatch that callers can wait through. */
+export class AgentWorktreeCheckoutMismatchError extends UserError {
+  readonly worktree
+  readonly expectedBranch
+  readonly actualBranch
+
+  constructor(input: { worktree: string; expectedBranch: string; actualBranch: string | null }) {
+    super(
+      `Agent worktree ${input.worktree} must be on ${input.expectedBranch}; currently ${input.actualBranch ?? "detached HEAD"}.`,
+    )
+    this.worktree = input.worktree
+    this.expectedBranch = input.expectedBranch
+    this.actualBranch = input.actualBranch
+  }
+}
+
 /** Resolves, validates, and creates or loads one start-command session. */
 export async function createSessionForStart(agentBranchInput: string, context: RuntimeContext) {
   const agentBranch = agentBranchInput.trim()
@@ -203,9 +219,11 @@ export async function validateSessionWorktrees(session: SessionState, context: R
 
   const agentBranch = await resolveCurrentBranch(session.agentWorktree, context)
   if (agentBranch !== session.agentBranch) {
-    throw new UserError(
-      `Agent worktree must be on ${session.agentBranch}; currently ${agentBranch ?? "detached HEAD"}.`,
-    )
+    throw new AgentWorktreeCheckoutMismatchError({
+      worktree: session.agentWorktree,
+      expectedBranch: session.agentBranch,
+      actualBranch: agentBranch,
+    })
   }
 
   const reviewBranch = await resolveCurrentBranch(session.reviewWorktree, context)
