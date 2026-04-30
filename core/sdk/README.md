@@ -8,10 +8,10 @@
 
 ## Package Surfaces
 
-| Import | Owns | Does not own |
-| --- | --- | --- |
-| `@goddard-ai/sdk` | Browser-safe daemon IPC methods exposed through one SDK instance | Host-specific daemon URL defaults and TCP transport setup |
-| `@goddard-ai/sdk/node` | The same SDK surface with Node daemon-client injection | Local config loading or extra Node-only wrapper methods |
+| Import                 | Owns                                                             | Does not own                                              |
+| ---------------------- | ---------------------------------------------------------------- | --------------------------------------------------------- |
+| `@goddard-ai/sdk`      | Browser-safe daemon IPC methods exposed through one SDK instance | Host-specific daemon URL defaults and TCP transport setup |
+| `@goddard-ai/sdk/node` | The same SDK surface with Node daemon-client injection           | Local config loading or extra Node-only wrapper methods   |
 
 ## Relationship To `daemon-client`
 
