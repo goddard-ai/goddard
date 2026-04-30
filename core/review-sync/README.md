@@ -25,15 +25,15 @@ review-sync pause
 review-sync resume
 review-sync watch <agent-branch>
 review-sync watch
-review-sync watch --interval-ms 500
 ```
 
 `start` runs from the review worktree. It resolves `<agent-branch>` to the
 matching branch already checked out in another worktree. When no branch is
 provided in an interactive terminal, `start` opens a filterable prompt for one
 of the eligible checked-out agent branches. The other commands may run from
-either the agent worktree or the review worktree. `watch` polls both worktrees
-and runs `sync` when either worktree's branch, `HEAD`, or snapshot tree changes.
+either the agent worktree or the review worktree. `watch` monitors both worktrees
+and their Git metadata, then runs `sync` when either worktree's branch, `HEAD`,
+or snapshot tree changes.
 Passing `<agent-branch>` to `watch` starts or reuses the review-sync session
 before watching, so a separate `start` command is not required.
 

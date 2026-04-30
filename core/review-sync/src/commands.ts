@@ -1,20 +1,11 @@
 /** CLI-compatible review-sync command runner. */
+import { watch, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { autocomplete, cancel, isCancel } from "@clack/prompts"
-import {
-  command,
-  flag,
-  number as numberType,
-  option,
-  optional,
-  positional,
-  runSafely,
-  string,
-  subcommands,
-} from "cmd-ts"
+import { command, flag, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
-import { git, resolveRef } from "./git.ts"
+import { git, pathExists, resolveRef, resolveRequiredGitDir } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { createRuntimeContext, writeResult } from "./runtime.ts"
 import {
@@ -42,8 +33,7 @@ import type {
   WatchReviewSyncInput,
 } from "./types.ts"
 
-const defaultWatchIntervalMs = 1000
-const minimumWatchIntervalMs = 10
+const watchDebounceMs = 100
 
 /**
  * Runs one review-sync command using the same command names and process context as the CLI.
@@ -254,40 +244,44 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
 
 /** Performs the watch workflow after CLI parsing and command-level error handling. */
 async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
-  const intervalMs = normalizeWatchIntervalMs(input.intervalMs)
   const { session, startResult } = await resolveSessionForWatch(input, context)
   let fingerprint = await createWatchFingerprint(session, context)
+  const events = createWatchEventQueue(input.signal)
+  const watchers = await createReviewSyncWatchers(session, context, events)
 
-  if (startResult) {
-    await input.onResult?.(startResult)
-  }
-
-  await input.onResult?.(
-    createReviewSyncResult({
-      exitCode: 0,
-      command: "watch",
-      status: session.paused ? "paused" : "ok",
-      sessionId: session.sessionId,
-      reviewBranch: session.reviewBranch,
-      message: `Watching review sync for ${session.agentBranch} -> ${session.reviewBranch}.`,
-    }),
-  )
-
-  while (!isAbortSignalAborted(input.signal)) {
-    await waitForWatchInterval(intervalMs, input.signal)
-    if (isAbortSignalAborted(input.signal)) {
-      break
+  try {
+    if (startResult) {
+      await input.onResult?.(startResult)
     }
 
-    const latest = await readSessionState(session)
-    const nextFingerprint = await createWatchFingerprint(latest, context)
-    if (nextFingerprint === fingerprint) {
-      continue
-    }
+    await input.onResult?.(
+      createReviewSyncResult({
+        exitCode: 0,
+        command: "watch",
+        status: session.paused ? "paused" : "ok",
+        sessionId: session.sessionId,
+        reviewBranch: session.reviewBranch,
+        message: `Watching review sync for ${session.agentBranch} -> ${session.reviewBranch}.`,
+      }),
+    )
 
-    const result = await runCommandSafely("sync", () => syncReviewSessionOperation(context))
-    await input.onResult?.(result)
-    fingerprint = await createWatchFingerprint(await readSessionState(session), context)
+    while (await events.waitForEvent()) {
+      if (!(await waitForWatchQuietPeriod(events, input.signal))) {
+        break
+      }
+
+      const latest = await readSessionState(session)
+      const nextFingerprint = await createWatchFingerprint(latest, context)
+      if (nextFingerprint === fingerprint) {
+        continue
+      }
+
+      const result = await runCommandSafely("sync", () => syncReviewSessionOperation(context))
+      await input.onResult?.(result)
+      fingerprint = await createWatchFingerprint(await readSessionState(session), context)
+    }
+  } finally {
+    closeReviewSyncWatchers(watchers)
   }
 
   const latest = await readSessionState(session)
@@ -384,21 +378,13 @@ function createReviewSyncCommand(cwd: string) {
             displayName: "agent-branch",
             description: "Agent branch checked out in another worktree",
           }),
-          intervalMs: option({
-            type: numberType,
-            long: "interval-ms",
-            description: "Polling interval in milliseconds",
-            defaultValue: () => defaultWatchIntervalMs,
-            defaultValueIsSerializable: true,
-          }),
         },
-        handler: async ({ agentBranch, intervalMs }) => {
+        handler: async ({ agentBranch }) => {
           const abort = createProcessAbortSignal()
           try {
             return await watchReviewSession({
               cwd,
               agentBranch,
-              intervalMs,
               signal: abort.signal,
               onResult: writeResult,
             })
@@ -485,31 +471,191 @@ async function createWorktreeFingerprint(cwd: string, context: RuntimeContext) {
   }
 }
 
-/** Validates the caller-supplied polling interval before starting a long-lived watch. */
-function normalizeWatchIntervalMs(intervalMs: number | undefined) {
-  const normalized = intervalMs ?? defaultWatchIntervalMs
-  if (!Number.isFinite(normalized) || normalized < minimumWatchIntervalMs) {
-    throw new Error(`watch interval must be at least ${minimumWatchIntervalMs}ms.`)
+/** Creates event watchers for worktree contents, checked-out HEADs, and branch refs. */
+async function createReviewSyncWatchers(
+  session: {
+    agentWorktree: string
+    reviewWorktree: string
+    repoCommonDir: string
+  },
+  context: RuntimeContext,
+  events: WatchEventQueue,
+) {
+  const [agentGitDir, reviewGitDir] = await Promise.all([
+    resolveRequiredGitDir(session.agentWorktree, context),
+    resolveRequiredGitDir(session.reviewWorktree, context),
+  ])
+  const targets = await resolveExistingWatchTargets([
+    {
+      path: session.agentWorktree,
+      recursive: true,
+      source: "worktree",
+    },
+    {
+      path: session.reviewWorktree,
+      recursive: true,
+      source: "worktree",
+    },
+    {
+      path: agentGitDir,
+      recursive: false,
+      source: "git",
+    },
+    {
+      path: reviewGitDir,
+      recursive: false,
+      source: "git",
+    },
+    {
+      path: session.repoCommonDir,
+      recursive: false,
+      source: "git",
+    },
+    {
+      path: join(session.repoCommonDir, "refs"),
+      recursive: true,
+      source: "git",
+    },
+  ])
+
+  const watchers: FSWatcher[] = []
+  try {
+    for (const target of targets) {
+      const watcher = watch(
+        target.path,
+        { recursive: target.recursive },
+        (_eventType, filename) => {
+          if (shouldIgnoreWatchEvent(target.source, filename)) {
+            return
+          }
+          events.notify()
+        },
+      )
+      watcher.on("error", events.fail)
+      watchers.push(watcher)
+    }
+  } catch (error) {
+    closeReviewSyncWatchers(watchers)
+    throw error
   }
-  return Math.trunc(normalized)
+
+  return watchers
 }
 
-/** Waits for one polling interval, resolving early when the caller aborts the watch. */
-function waitForWatchInterval(intervalMs: number, signal: AbortSignal | undefined) {
-  if (isAbortSignalAborted(signal)) {
-    return Promise.resolve()
+/** Keeps one watcher per existing path so duplicate Git dirs do not duplicate events. */
+async function resolveExistingWatchTargets(
+  targets: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }>,
+) {
+  const seen = new Set<string>()
+  const existing: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }> = []
+
+  for (const target of targets) {
+    if (seen.has(target.path) || !(await pathExists(target.path))) {
+      continue
+    }
+
+    seen.add(target.path)
+    existing.push(target)
   }
 
-  return new Promise<void>((resolvePromise) => {
-    let timeout: ReturnType<typeof setTimeout>
-    const done = () => {
-      clearTimeout(timeout)
-      signal?.removeEventListener("abort", done)
-      resolvePromise()
+  return existing
+}
+
+/** Avoids routing duplicate Git metadata events from the main worktree content watcher. */
+function shouldIgnoreWatchEvent(source: "worktree" | "git", filename: string | Buffer | null) {
+  if (source !== "worktree" || filename === null) {
+    return false
+  }
+
+  const path = filename.toString()
+  return path === ".git" || path.startsWith(".git/") || path.startsWith(".git\\")
+}
+
+/** Stops all filesystem watchers associated with one watch command. */
+function closeReviewSyncWatchers(watchers: FSWatcher[]) {
+  for (const watcher of watchers) {
+    watcher.close()
+  }
+}
+
+/** Creates a small event queue that can also wake on aborts or watcher errors. */
+function createWatchEventQueue(signal: AbortSignal | undefined) {
+  let pending = false
+  let failure: unknown
+  const waiters = new Set<(value: boolean) => void>()
+
+  const flushWaiters = (value: boolean) => {
+    for (const waiter of waiters) {
+      waiter(value)
     }
-    timeout = setTimeout(done, intervalMs)
-    signal?.addEventListener("abort", done, { once: true })
-  })
+    waiters.clear()
+  }
+
+  const waitForEvent = () => waitForEventOrTimeout(null)
+  const waitForEventOrTimeout = (timeoutMs: number | null) => {
+    if (failure) {
+      throw failure
+    }
+    if (pending) {
+      pending = false
+      return Promise.resolve(true)
+    }
+    if (isAbortSignalAborted(signal)) {
+      return Promise.resolve(false)
+    }
+
+    return new Promise<boolean>((resolvePromise, rejectPromise) => {
+      let timeout: ReturnType<typeof setTimeout> | null = null
+      const done = (value: boolean) => {
+        if (timeout) {
+          clearTimeout(timeout)
+        }
+        waiters.delete(done)
+        signal?.removeEventListener("abort", abort)
+
+        if (failure) {
+          rejectPromise(failure)
+          return
+        }
+        resolvePromise(value)
+      }
+      const abort = () => done(false)
+
+      waiters.add(done)
+      signal?.addEventListener("abort", abort, { once: true })
+
+      if (timeoutMs !== null) {
+        timeout = setTimeout(() => done(false), timeoutMs)
+      }
+    })
+  }
+
+  return {
+    notify: () => {
+      pending = true
+      flushWaiters(true)
+    },
+    fail: (error: unknown) => {
+      failure = error
+      flushWaiters(false)
+    },
+    waitForEvent,
+    waitForEventOrTimeout,
+  }
+}
+
+type WatchEventQueue = ReturnType<typeof createWatchEventQueue>
+
+/** Waits until filesystem events have been quiet long enough for Git to settle. */
+async function waitForWatchQuietPeriod(events: WatchEventQueue, signal: AbortSignal | undefined) {
+  while (!isAbortSignalAborted(signal)) {
+    const changed = await events.waitForEventOrTimeout(watchDebounceMs)
+    if (!changed) {
+      return true
+    }
+  }
+
+  return false
 }
 
 /** Checks an abort signal without causing TypeScript to over-narrow loop state. */

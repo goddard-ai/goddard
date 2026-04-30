@@ -112,7 +112,7 @@ test("cli watch accepts an agent branch from the review worktree", async () => {
   const result = await runProcessUntilOutput(
     fixture.reviewDir,
     "bun",
-    [cliPath, "watch", "codex/review-sync-test", "--interval-ms", "10"],
+    [cliPath, "watch", "codex/review-sync-test"],
     "Watching review sync",
   )
 
@@ -261,22 +261,37 @@ test("watch syncs when the agent worktree changes", async () => {
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
 })
 
+test("watch syncs when the agent branch HEAD changes", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
+    await runGit(fixture.agentDir, ["commit", "--allow-empty", "-m", "empty"])
+  })
+
+  expect(stopped.status).toBe("ok")
+  expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
+})
+
 async function runWatchUntilNextSync(
   cwd: string,
   mutate: () => Promise<void>,
   agentBranch?: string,
 ) {
   const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
   const started = createDeferred<void>()
+  let startedResolved = false
   const results: ReviewSyncResult[] = []
   const watch = watchReviewSession({
     cwd,
     agentBranch,
-    intervalMs: 10,
     signal: controller.signal,
     onResult: (result) => {
       results.push(result)
       if (result.command === "watch") {
+        startedResolved = true
         started.resolve()
       }
       if (result.command === "sync" && result.status === "ok") {
@@ -285,10 +300,24 @@ async function runWatchUntilNextSync(
     },
   })
 
-  await started.promise
-  await mutate()
-  const stopped = await watch
-  return { results, stopped }
+  try {
+    await Promise.race([
+      started.promise,
+      watch.then((result) => {
+        if (!startedResolved) {
+          throw new Error(`watch stopped before starting: ${result.message}`)
+        }
+      }),
+    ])
+    await mutate()
+    const stopped = await watch
+    if (controller.signal.reason === timeoutReason) {
+      throw new Error("watch timed out before observing a sync result")
+    }
+    return { results, stopped }
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function createStartedFixture(files: Record<string, string>) {
