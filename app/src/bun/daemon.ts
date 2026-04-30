@@ -74,11 +74,10 @@ async function removeDaemonSubscription(subscriptionId: string) {
     return false
   }
 
+  subscription.unsubscribe()
   daemonStreamSubscriptions.delete(subscriptionId)
   removeDaemonSubscriptionOwner(subscription.webviewId, subscriptionId)
-  await Promise.resolve(subscription.unsubscribe()).catch((error) => {
-    console.error(`Failed to close daemon stream subscription ${subscriptionId}.`, error)
-  })
+
   return true
 }
 
