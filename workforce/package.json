@@ -15,8 +15,8 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
-    "@clack/prompts": "^1.3.0",
+    "@clack/prompts": "catalog:",
     "@goddard-ai/sdk": "workspace:^",
-    "cmd-ts": "^0.15.0"
+    "cmd-ts": "catalog:"
   }
 }

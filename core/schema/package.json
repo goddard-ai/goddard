@@ -25,10 +25,10 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.19.0",
+    "@agentclientprotocol/sdk": "catalog:",
     "@goddard-ai/ipc": "workspace:^",
-    "ai-sdk-json-schema": "^0.3.0",
-    "rouzer": "^2.0.0",
-    "zod": "^4.3.6"
+    "ai-sdk-json-schema": "catalog:",
+    "rouzer": "catalog:",
+    "zod": "catalog:"
   }
 }
