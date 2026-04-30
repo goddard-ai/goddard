@@ -3,36 +3,40 @@
 ## Sprint Inputs
 
 - Sprint name: `session-chat-usable-state`
-- Objective: Make session chat usable for daily development by fixing session tab opening, preserving failed-send drafts, adding live daemon streaming state, exposing lifecycle controls, rendering daily-use ACP lifecycle rows, and supporting older history pages.
-- Base branch assumption: current HEAD `dafe4793`; branch from this commit unless a different base is specified.
+- Objective: Make session chat usable for daily development by enforcing typed session tab payloads, adding clear load and send behavior, consuming existing daemon stream subscriptions through chat state, exposing useful session status and actions, rendering daily-use ACP transcript rows, and supporting older history pages.
+- Base branch assumption: use `main`. Current `main` includes `d7e87aa4b`, which already provides the generic daemon stream subscription bridge.
 
 ## Ordered Tasks
 
-1. `010-pass-workbench-tab-payloads` - Pass detail-tab payloads into tab components
+1. `010-require-session-tab-payloads` - Require session tab payloads at the type level
 2. `020-add-session-chat-load-states` - Add recoverable session chat loading, empty, and error states
 3. `030-preserve-composer-draft-on-send-failure` - Make session prompt sends draft-safe
-4. `040-support-electrobun-session-subscriptions` - Add app bridge support for daemon `sessionMessage` subscriptions
-5. `050-add-session-chat-state` - Introduce `SessionChatState` for history, live messages, sends, and connection status
-6. `060-wire-session-chat-view-to-state` - Move `SessionChatView` onto `SessionChatState`
-7. `070-add-session-chat-header-controls` - Add the session chat header and lifecycle actions
-8. `080-render-turn-stop-and-permission-rows` - Render daily-use ACP lifecycle rows
-9. `090-page-older-session-history` - Load older session history pages
+4. `050-add-session-chat-state` - Introduce `SessionChatState` for history, live messages, sends, and connection status
+5. `060-wire-session-chat-view-to-state` - Move `SessionChatView` onto `SessionChatState`
+6. `070-render-session-chat-header-status` - Render session chat header status
+7. `080-add-session-chat-header-actions` - Add session chat header actions
+8. `090-render-turn-stop-rows` - Render ACP turn stop rows
+9. `100-render-permission-request-rows` - Render ACP permission request rows
+10. `110-render-plan-update-rows` - Render ACP plan update rows
+11. `120-page-older-session-history` - Load older session history pages
 
 ## Sequencing Constraints
 
-- Payload wiring comes first because all chat work depends on a valid session id.
+- Typed payload enforcement comes first because all chat work depends on a valid session id.
 - Draft-safe send behavior comes before live state so state integration does not preserve unsafe composer semantics.
-- Subscription bridge must land before live chat state.
-- Header controls depend on state-owned lifecycle actions.
-- ACP lifecycle rows depend on live/history normalization being centralized.
+- The standalone subscription bridge task was removed because `d7e87aa4b` already provides the generic daemon stream bridge.
+- `050-add-session-chat-state` consumes the existing bridge for session chat and must be reviewed before UI wiring depends on its API.
+- Header actions depend on reviewed header status semantics.
+- Permission request rows are security-sensitive; pause work-ahead until reviewed.
 - Older history paging waits until row identity and state ownership are stable.
 
 ## Known Risks
 
-- Confirm detached HEAD `dafe4793` as the base.
+- Existing sprint branch-management state still references the previous plan and base. Reinitialization from `main` may require manual sprint-branch recovery because the old state and sprint branches already exist.
+- The current review branch contains prior `010-pass-workbench-tab-payloads` work that should be reconciled into the new `010-require-session-tab-payloads` task rather than preserved as a component-level missing-payload fallback.
 - Preserve the app-owned Virtuoso/Comark transcript path unless instructed otherwise.
-- Do not pull full action catalog, PR review, terminal replay, or browser preview work into this sprint.
-- Keep tasks independently reviewable and pause for close review after subscription bridge and ACP lifecycle row tasks.
+- Do not pull full action catalog, PR review, terminal replay, browser preview, or agent-thought visibility work into this sprint.
+- Keep tasks independently reviewable and pause for close review after state ownership and permission request tasks.
 
 ## Activity Log
 
@@ -41,3 +45,5 @@
 - Started `010-pass-workbench-tab-payloads` on review. Sprint initialization commit was applied onto review because the helper initialized branches before the sprint docs commit existed on the base branch.
 - Finished `010-pass-workbench-tab-payloads` on review. Verification: `bun run typecheck` and `bun run test` from `app/` both passed.
 - Applied review feedback: `SessionChangesView` now requires `sessionId` again because its valid render path always comes from `openSessionChanges`.
+- Redid the task queue after rebasing onto a branch that includes `d7e87aa4b`; the generic subscription bridge is no longer a sprint task.
+- `sprint-branch init --base main --dry-run` was blocked because old sprint state and `review`/`approved` branches already exist.

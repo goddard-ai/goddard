@@ -28,6 +28,14 @@ Prevent users from losing prompt drafts when a session prompt send fails.
 - Users see a visible send failure state or toast.
 - Duplicate sends are blocked while a send is in flight.
 
+## Review Checkpoint
+
+Confirm the send lifecycle and draft preservation semantics.
+
+## Work-Ahead Safety
+
+Safe to work one task ahead on chat state because send semantics become an input contract for state integration.
+
 ## Constraints And Risks
 
 - Draft-safe semantics must be preserved when later chat state is introduced.
@@ -40,4 +48,3 @@ Pending.
 ## Verification Evidence
 
 Pending.
-

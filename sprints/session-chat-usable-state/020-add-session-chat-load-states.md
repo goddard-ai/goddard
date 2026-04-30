@@ -18,13 +18,21 @@ Make session chat render clear, recoverable states for initial load, empty histo
 
 ## Dependencies
 
-- `010-pass-workbench-tab-payloads`
+- `010-require-session-tab-payloads`
 
 ## Acceptance Criteria
 
 - Initial session and history loads have a visible loading state.
 - Missing session, daemon failure, or history failure renders a clear retry/reopen path.
 - Empty history renders a usable composer instead of an ambiguous blank transcript.
+
+## Review Checkpoint
+
+Confirm the user-visible semantics for loading, empty, missing-session, and failed-load states.
+
+## Work-Ahead Safety
+
+Safe to work one task ahead on send-failure handling because composer send semantics are independent of load-state presentation.
 
 ## Constraints And Risks
 
@@ -38,4 +46,3 @@ Pending.
 ## Verification Evidence
 
 Pending.
-

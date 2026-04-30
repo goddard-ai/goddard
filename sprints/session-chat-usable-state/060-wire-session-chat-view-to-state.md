@@ -28,6 +28,14 @@ Make `SessionChatView` presentational over state-owned history, live updates, se
 - Live agent chunks and tool updates appear without manual query invalidation or another prompt.
 - Tab/project context reporting still works.
 
+## Review Checkpoint
+
+Confirm the first vertical slice of state-backed chat behavior.
+
+## Work-Ahead Safety
+
+Safe to work one task ahead on header status after `050-add-session-chat-state` is approved because header status consumes the same reviewed state contract.
+
 ## Constraints And Risks
 
 - Keep the view mostly presentational.
@@ -40,4 +48,3 @@ Pending.
 ## Verification Evidence
 
 Pending.
-

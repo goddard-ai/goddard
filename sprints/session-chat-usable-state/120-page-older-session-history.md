@@ -1,4 +1,4 @@
-# 090-page-older-session-history
+# 120-page-older-session-history
 
 Status: planned
 
@@ -13,22 +13,33 @@ Make long session transcripts usable by loading older history pages on demand wh
 ## Scope
 
 - Use `nextCursor` and `hasMore` from session history.
-- Load older turns when scrolling near the top.
-- Avoid duplicate page loads.
+- Load older turns when scrolling near the top or when the user requests older history.
+- Avoid duplicate page loads and duplicate rows.
 - Preserve visible scroll position when older rows are prepended.
 
 ## Dependencies
 
 - `050-add-session-chat-state`
 - `060-wire-session-chat-view-to-state`
-- `080-render-turn-stop-and-permission-rows`
+- `090-render-turn-stop-rows`
+- `100-render-permission-request-rows`
+- `110-render-plan-update-rows`
 
 ## Acceptance Criteria
 
-- Transcript exposes `hasOlderMessages` and loads older turns with `nextCursor`.
-- Scrolling near the top can request older history without duplicate pages.
+- Transcript exposes older-history availability and can request older turns with `nextCursor`.
+- Older history loads do not duplicate pages or rows.
 - Prepending older rows preserves the user's visible scroll position.
+- Loading and error states for older history are visible.
 - Long sessions remain usable after reopening the tab.
+
+## Review Checkpoint
+
+Confirm history paging behavior and scroll ergonomics.
+
+## Work-Ahead Safety
+
+Final queue item; no work-ahead needed.
 
 ## Constraints And Risks
 
@@ -42,4 +53,3 @@ Pending.
 ## Verification Evidence
 
 Pending.
-
