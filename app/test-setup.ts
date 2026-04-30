@@ -1,7 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
+import tsrxPlugin from "@tsrx/bun-plugin-preact"
 import { afterEach } from "bun:test"
-
-import tsrxPlugin from "./plugins/tsrx-bun-plugin.ts"
 
 Bun.plugin(tsrxPlugin())
 
