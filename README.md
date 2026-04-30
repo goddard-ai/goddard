@@ -4,7 +4,7 @@
 
 Goddard unifies local repository workflows with GitHub operations and extends that bridge to autonomous AI execution.
 
-> Goddard provides a framework-agnostic TypeScript daemon control-plane SDK, a Cloudflare-powered real-time backend, and a Tauri desktop workspace so developers and agents can control local automation and act from shared local context.
+> Goddard provides a framework-agnostic TypeScript daemon control-plane SDK, a Cloudflare-powered real-time backend, and a trusted desktop workspace so developers and agents can control local automation and act from shared local context.
 
 ## The Problem
 

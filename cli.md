@@ -19,7 +19,7 @@ We believe that preserving a small operator CLI surface for initialization, insp
 - Reimplementing platform behavior outside the shared SDK and daemon authority model
 
 ## Decision Memory
-The broad interactive CLI was removed when product focus narrowed to an SDK-first platform plus a Tauri desktop workspace. A narrow daemon-backed operational CLI remains valuable for automation bring-up, inspection, and control.
+The broad interactive CLI was removed when product focus narrowed to an SDK-first platform plus a desktop workspace. A narrow daemon-backed operational CLI remains valuable for automation bring-up, inspection, and control.
 
 ## Encapsulated Sub-Specs
 

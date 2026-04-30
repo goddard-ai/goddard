@@ -7,7 +7,7 @@
 | Real-time broadcast | Server-Sent Events (SSE) / Cloudflare Workers |
 | Database | Turso (SQLite at the Edge) + Drizzle ORM |
 | Authentication | GitHub OAuth Device Flow |
-| Desktop application | Tauri + web frontend |
+| Desktop application | Trusted desktop host + web frontend |
 | Package management | `pnpm` Workspaces |
 | Distribution | `git-subrepo` to standalone repositories |
 
@@ -15,7 +15,7 @@
 - **Control Plane** — worker-hosted authority for sessions, managed pull request state, and user-scoped event fan-out.
 - **GitHub Integration** — delegated GitHub identity and webhook-facing integration behavior.
 - **SDK** — framework-agnostic daemon control-plane client for programmatic and embedded hosts.
-- **Desktop Workspace** — Tauri desktop app and primary human-facing surface.
+- **Desktop Workspace** — desktop app and primary human-facing surface.
 - **Background Runtime** — supervised local automation host for unattended execution, including daemon-managed runtimes where appropriate.
 - **Operational CLI** — thin terminal control surface for initializing or controlling daemon-backed local automation without becoming a parallel primary UX.
 
@@ -46,7 +46,8 @@ Design rule: daemon control capabilities live here first.
 - Host or supervise local background automation when unattended execution is enabled.
 
 Boundary:
-- Must remain Tauri-first and rely on official plugins for OS integrations.
+- Must keep privileged OS and daemon access behind the trusted desktop host boundary.
+- Embedded browser surfaces must not bypass that boundary for direct daemon access unless a browser-safe daemon contract exists.
 - Must not fork platform behavior away from SDK contracts.
 
 ### Background Runtime
@@ -66,7 +67,7 @@ Boundary:
 - Must not create a parallel platform contract outside the SDK and daemon authority model.
 
 ## Deployment Model
-The control plane runs on Cloudflare Workers. The primary human-facing local runtime is the Tauri desktop workspace. Unattended automation may be hosted by the desktop workspace or by another supervised local process when needed, with daemon-managed local runtimes available for supported automation domains.
+The control plane runs on Cloudflare Workers. The primary human-facing local runtime is the desktop workspace. Unattended automation may be hosted by the desktop workspace or by another supervised local process when needed, with daemon-managed local runtimes available for supported automation domains.
 
 Production prerequisites:
 - Turso database.
