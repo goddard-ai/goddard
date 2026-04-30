@@ -55,8 +55,9 @@ All screens consume normalized, real-time domain records with stable identities:
 - User workspace preferences (filters, recents)
 
 ## Cross-Cutting Constraints
-- Must remain lightweight (Tauri-first footprint expectations).
-- Frontend-Heavy Architecture: The application must rely strictly on official Tauri plugins for OS interactions to maintain a zero-custom-Rust host layer.
+- Must remain lightweight.
+- Frontend-Heavy Architecture: The application should keep domain behavior in the visual workspace and route privileged local integrations through a minimal trusted desktop host boundary.
+- Trusted Host Boundary: Embedded browser surfaces must access privileged local capabilities through the trusted desktop host. They must not connect directly to daemon IPC unless a future browser-safe daemon contract explicitly defines origin, authentication, and lifecycle guarantees.
 - Lazy Authentication: The application must function in a degraded or local-only mode until an external service (like GitHub) is explicitly requested.
 - Must handle streaming updates gracefully for high-churn views.
 
