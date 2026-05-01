@@ -6,7 +6,7 @@ finished-unreviewed
 
 ## Objective
 
-Prove the daemon can safely own PTYs with `bun-pty` before websocket and app work depend on it.
+Prove the daemon can safely own PTYs with `bun-pty` before daemon terminal streams and app work depend on it.
 
 ## Scope
 
@@ -31,12 +31,12 @@ The human is reviewing whether daemon PTY ownership is technically viable and wo
 
 ## Work-Ahead Safety
 
-One task ahead is not safe. If daemon PTY viability or packaging behavior changes, websocket and app work would likely need rework.
+One task ahead is not safe. If daemon PTY viability or packaging behavior changes, terminal stream and app work would likely need rework.
 
 ## Implementation Notes
 
 - Added `bun-pty` as a daemon package dependency.
-- Added a daemon terminal manager that owns one connection-local set of PTYs, supports create/input/resize/restart/close frames, and closes all runtimes deterministically.
+- Added a daemon terminal manager that owns one connection-local set of PTYs, supports create/input/resize/restart/close requests, and closes all runtimes deterministically.
 - Added a `goddard-daemon terminal-check --json` diagnostic path that exercises daemon PTY spawn, write, resize, and close.
 - Extended the standalone build test so the compiled daemon binary runs `terminal-check`, verifying native PTY packaging in the actual daemon artifact.
 
@@ -48,3 +48,8 @@ One task ahead is not safe. If daemon PTY viability or packaging behavior change
 - `bun run --cwd core/daemon lint` passed with 0 errors and one existing warning in `test/daemon.test.ts`.
 - `bun test core/daemon/test/standalone-build.test.ts`
 - `bun run --cwd core/daemon test`
+
+## Feedback Notes
+
+- Rebased after the terminal contract changed from websockets to HTTP requests plus daemon streams.
+- Updated the daemon terminal manager to scope events and requests with a terminal `connectionId`.

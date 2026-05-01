@@ -19,15 +19,17 @@ export type TerminalRuntimeCheckResult = {
 export async function runTerminalRuntimeCheck() {
   const events: TerminalDaemonEvent[] = []
   const manager = new DaemonTerminalManager({
+    connectionId: "terminal-runtime-check-connection",
     onEvent: (event) => {
       events.push(event)
     },
   })
+  const connectionId = "terminal-runtime-check-connection"
   const instanceId = "terminal-runtime-check"
 
   try {
     manager.create({
-      type: "terminal.create",
+      connectionId,
       instanceId,
       options: {
         command: resolveCheckShell(),
@@ -38,7 +40,7 @@ export async function runTerminalRuntimeCheck() {
       },
     })
     manager.resize({
-      type: "terminal.resize",
+      connectionId,
       instanceId,
       dimensions: {
         cols: 100,
@@ -46,14 +48,14 @@ export async function runTerminalRuntimeCheck() {
       },
     })
     manager.write({
-      type: "terminal.input",
+      connectionId,
       instanceId,
       data: buildMarkerCommand(),
     })
 
     await waitFor(() => collectOutput(events).includes(MARKER), DEFAULT_TIMEOUT_MS)
     manager.close({
-      type: "terminal.close",
+      connectionId,
       instanceId,
     })
 

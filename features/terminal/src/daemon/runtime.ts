@@ -1,7 +1,7 @@
 /** Daemon-owned terminal runtime wrappers around `bun-pty`. */
 import type {
-  TerminalClientFrame,
   TerminalCloseRequest,
+  TerminalConnectionId,
   TerminalCreateRequest,
   TerminalDaemonEvent,
   TerminalDimensions,
@@ -21,30 +21,40 @@ const DEFAULT_TERMINAL_DIMENSIONS = {
   rows: 24,
 }
 
-/** Options used to connect the daemon terminal manager to its eventual websocket owner. */
+/** Options used to connect the daemon terminal manager to its owning terminal event stream. */
 export type DaemonTerminalManagerOptions = {
+  connectionId: TerminalConnectionId
   onEvent?: (event: TerminalDaemonEvent) => void
 }
 
-/** Error raised when a terminal control frame cannot be applied to daemon runtime state. */
+/** Error raised when a terminal control request cannot be applied to daemon runtime state. */
 export class DaemonTerminalError extends Error {
   readonly code: TerminalErrorCode
+  readonly connectionId: TerminalConnectionId | undefined
   readonly instanceId: TerminalInstanceId | undefined
 
-  constructor(code: TerminalErrorCode, message: string, instanceId?: TerminalInstanceId) {
+  constructor(
+    code: TerminalErrorCode,
+    message: string,
+    connectionId?: TerminalConnectionId,
+    instanceId?: TerminalInstanceId,
+  ) {
     super(message)
     this.name = "DaemonTerminalError"
     this.code = code
+    this.connectionId = connectionId
     this.instanceId = instanceId
   }
 }
 
-/** Daemon-side owner for the PTYs created by one terminal websocket connection. */
+/** Daemon-side owner for the PTYs created by one terminal stream connection. */
 export class DaemonTerminalManager {
   readonly #runtimes = new Map<TerminalInstanceId, DaemonTerminalRuntime>()
+  readonly #connectionId: TerminalConnectionId
   readonly #onEvent: (event: TerminalDaemonEvent) => void
 
-  constructor(options: DaemonTerminalManagerOptions = {}) {
+  constructor(options: DaemonTerminalManagerOptions) {
+    this.#connectionId = options.connectionId
     this.#onEvent = options.onEvent ?? (() => {})
   }
 
@@ -53,15 +63,18 @@ export class DaemonTerminalManager {
   }
 
   create(request: TerminalCreateRequest) {
+    this.#assertConnection(request.connectionId)
     if (this.#runtimes.has(request.instanceId)) {
       throw new DaemonTerminalError(
         "duplicate-instance",
         `Terminal instance ${request.instanceId} already exists on this connection.`,
+        this.#connectionId,
         request.instanceId,
       )
     }
 
     const runtime = new DaemonTerminalRuntime(
+      this.#connectionId,
       request.instanceId,
       request.options ?? {},
       (event) => {
@@ -74,50 +87,40 @@ export class DaemonTerminalManager {
     this.#runtimes.set(request.instanceId, runtime)
     this.#onEvent({
       type: "terminal.created",
+      connectionId: this.#connectionId,
       terminal: runtime.metadata,
     })
     return runtime.metadata
   }
 
   write(request: TerminalInputRequest) {
+    this.#assertConnection(request.connectionId)
     this.#getRuntime(request.instanceId).write(request.data)
   }
 
   resize(request: TerminalResizeRequest) {
+    this.#assertConnection(request.connectionId)
     this.#getRuntime(request.instanceId).resize(request.dimensions)
   }
 
   restart(request: TerminalRestartRequest) {
+    this.#assertConnection(request.connectionId)
     const existing = this.#getRuntime(request.instanceId)
     const options = request.options ?? existing.options
     existing.close()
     this.#runtimes.delete(request.instanceId)
     return this.create({
-      type: "terminal.create",
+      connectionId: this.#connectionId,
       instanceId: request.instanceId,
       options,
     })
   }
 
   close(request: TerminalCloseRequest) {
+    this.#assertConnection(request.connectionId)
     const runtime = this.#getRuntime(request.instanceId)
     runtime.close()
     this.#runtimes.delete(request.instanceId)
-  }
-
-  handle(frame: TerminalClientFrame) {
-    switch (frame.type) {
-      case "terminal.create":
-        return this.create(frame)
-      case "terminal.input":
-        return this.write(frame)
-      case "terminal.resize":
-        return this.resize(frame)
-      case "terminal.restart":
-        return this.restart(frame)
-      case "terminal.close":
-        return this.close(frame)
-    }
   }
 
   closeAll() {
@@ -134,15 +137,27 @@ export class DaemonTerminalManager {
       throw new DaemonTerminalError(
         "unknown-instance",
         `Terminal instance ${instanceId} does not exist on this connection.`,
+        this.#connectionId,
         instanceId,
       )
     }
     return runtime
   }
+
+  #assertConnection(connectionId: TerminalConnectionId) {
+    if (connectionId !== this.#connectionId) {
+      throw new DaemonTerminalError(
+        "unknown-connection",
+        `Terminal connection ${connectionId} is not owned by this manager.`,
+        connectionId,
+      )
+    }
+  }
 }
 
 /** Runtime wrapper for one live `bun-pty` instance. */
 class DaemonTerminalRuntime {
+  readonly connectionId: TerminalConnectionId
   readonly instanceId: TerminalInstanceId
   readonly options: TerminalSpawnOptions
   readonly #pty: IPty
@@ -154,10 +169,12 @@ class DaemonTerminalRuntime {
   #closed = false
 
   constructor(
+    connectionId: TerminalConnectionId,
     instanceId: TerminalInstanceId,
     options: TerminalSpawnOptions,
     onEvent: (event: TerminalDaemonEvent) => void,
   ) {
+    this.connectionId = connectionId
     this.instanceId = instanceId
     this.options = options
     this.#onEvent = onEvent
@@ -173,6 +190,7 @@ class DaemonTerminalRuntime {
         if (data.length > 0) {
           this.#onEvent({
             type: "terminal.output",
+            connectionId: this.connectionId,
             instanceId: this.instanceId,
             data,
           })
@@ -223,6 +241,7 @@ class DaemonTerminalRuntime {
     this.#signal = event.signal === undefined ? null : String(event.signal)
     this.#onEvent({
       type: "terminal.exit",
+      connectionId: this.connectionId,
       instanceId: this.instanceId,
       exitCode: this.#exitCode,
       signal: this.#signal,
@@ -231,9 +250,10 @@ class DaemonTerminalRuntime {
   }
 
   #disposeSubscriptions() {
-    while (this.#subscriptions.length > 0) {
-      this.#subscriptions.pop()?.dispose()
+    for (const subscription of this.#subscriptions) {
+      subscription.dispose()
     }
+    this.#subscriptions.length = 0
   }
 }
 

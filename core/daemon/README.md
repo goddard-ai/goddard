@@ -135,9 +135,9 @@ daemon includes that package as a feature contribution so PTY ownership stays
 inside the daemon process without making terminal code part of the daemon
 substrate.
 
-Terminal instances are in-memory and scoped to one terminal connection; closing
-that connection should call `closeAll()` so no PTY outlives its owning app
-connection.
+Terminal instances are in-memory and scoped to one terminal stream connection;
+closing that connection should call `closeAll()` so no PTY outlives its owning
+app connection.
 
 Use the diagnostic command to validate native PTY loading, spawn, write, resize, and close behavior in the daemon runtime:
 
