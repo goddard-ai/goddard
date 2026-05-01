@@ -31,10 +31,10 @@ describe("sprint-branch resume", () => {
     )
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
-    expect((await runCli(repo, ["feedback"])).exitCode).toBe(0)
+    expect((await runCli(repo, ["feedback", "--sprint", "example"])).exitCode).toBe(0)
     await commitAll(repo, "record feedback transition")
 
-    const result = await runCli(repo, ["resume", "--json"])
+    const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/next")
@@ -62,7 +62,7 @@ describe("sprint-branch resume", () => {
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
     await commitAll(repo, "add review conflict")
 
-    const result = await runCli(repo, ["resume", "--json"])
+    const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(1)
     const report = JSON.parse(result.stdout) as { ok: boolean }
@@ -93,12 +93,12 @@ describe("sprint-branch resume", () => {
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
     await commitAll(repo, "add review conflict")
 
-    expect((await runCli(repo, ["resume", "--json"])).exitCode).toBe(1)
+    expect((await runCli(repo, ["resume", "--sprint", "example", "--json"])).exitCode).toBe(1)
     await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
     await git(repo, ["add", "conflict.txt"])
     await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
 
-    const result = await runCli(repo, ["resume", "--json"])
+    const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])
     const state = await readState(repo, "example")
 
     expect(result.exitCode).toBe(0)
@@ -129,12 +129,12 @@ describe("sprint-branch resume", () => {
     await git(repo, ["checkout", "sprint/example/next"])
     await git(repo, ["rebase", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "work.txt"), "stashed\n")
-    expect((await runCli(repo, ["feedback"])).exitCode).toBe(0)
+    expect((await runCli(repo, ["feedback", "--sprint", "example"])).exitCode).toBe(0)
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "work.txt"), "review\n")
     await commitAll(repo, "change work during feedback")
 
-    const first = await runCli(repo, ["resume", "--json"])
+    const first = await runCli(repo, ["resume", "--sprint", "example", "--json"])
     const conflictState = await readState(repo, "example")
 
     expect(first.exitCode).toBe(1)
@@ -144,7 +144,7 @@ describe("sprint-branch resume", () => {
     await fs.writeFile(path.join(repo, "work.txt"), "resolved\n")
     await git(repo, ["add", "work.txt"])
 
-    const second = await runCli(repo, ["resume", "--json"])
+    const second = await runCli(repo, ["resume", "--sprint", "example", "--json"])
     const state = await readState(repo, "example")
 
     expect(second.exitCode).toBe(0)
@@ -170,7 +170,7 @@ describe("sprint-branch resume", () => {
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty\n")
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["resume", "--json"])
+    const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])
     const resume = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -190,7 +190,7 @@ describe("sprint-branch resume", () => {
     })
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["resume", "--json"])
+    const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])
     const resume = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -209,7 +209,7 @@ describe("sprint-branch resume", () => {
       finishedUnreviewed: [],
     })
 
-    const result = await runCli(repo, ["resume", "--json"])
+    const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")

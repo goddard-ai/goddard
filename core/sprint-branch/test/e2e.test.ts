@@ -56,18 +56,18 @@ describe("sprint-branch three-task happy path", () => {
     await startAndCommitTask(repo, "010-task-name", "one")
     await startAndCommitTask(repo, "020-task-name", "two")
 
-    await runJson<JsonCommandOutput>(repo, ["approve", "--json"])
+    await runJson<JsonCommandOutput>(repo, ["approve", "--sprint", "example", "--json"])
 
     await startAndCommitTask(repo, "030-task-name", "three")
 
-    await runJson<JsonCommandOutput>(repo, ["approve", "--json"])
+    await runJson<JsonCommandOutput>(repo, ["approve", "--sprint", "example", "--json"])
 
-    await runJson<JsonCommandOutput>(repo, ["approve", "--json"])
+    await runJson<JsonCommandOutput>(repo, ["approve", "--sprint", "example", "--json"])
 
-    await runJson<JsonCommandOutput>(repo, ["finalize", "--json"])
+    await runJson<JsonCommandOutput>(repo, ["finalize", "--sprint", "example", "--json"])
 
-    const status = await runJson<StatusOutput>(repo, ["status", "--json"])
-    const doctor = await runJson<DoctorOutput>(repo, ["doctor", "--json"])
+    const status = await runJson<StatusOutput>(repo, ["status", "--sprint", "example", "--json"])
+    const doctor = await runJson<DoctorOutput>(repo, ["doctor", "--sprint", "example", "--json"])
     const land = await runJson<JsonCommandOutput>(repo, [
       "land",
       "main",
@@ -103,7 +103,7 @@ describe("sprint-branch three-task happy path", () => {
 })
 
 async function startAndCommitTask(repo: string, task: string, content: string) {
-  await runJson<JsonCommandOutput>(repo, ["start", "--task", task, "--json"])
+  await runJson<JsonCommandOutput>(repo, ["start", "--sprint", "example", "--task", task, "--json"])
   await fs.writeFile(path.join(repo, `${task}.txt`), `${content}\n`)
   await commitAll(repo, `complete ${task}`)
 }

@@ -25,7 +25,7 @@ describe("sprint-branch doctor", () => {
       finishedUnreviewed: [],
     })
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as {
       ok: boolean
       diagnostics: Array<{ code: string }>
@@ -49,7 +49,7 @@ describe("sprint-branch doctor", () => {
     await fs.writeFile(path.join(repo, "unrecorded.txt"), "review work\n")
     await commitAll(repo, "add unrecorded review work")
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
 
     expect(result.exitCode).toBe(1)
@@ -70,7 +70,7 @@ describe("sprint-branch doctor", () => {
       { createNextBranch: true },
     )
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
     const codes = diagnosticCodes(doctor)
 
@@ -102,7 +102,7 @@ describe("sprint-branch doctor", () => {
       "sprint-branch:example:020-task-name:feedback",
     ])
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
 
     expect(diagnosticCodes(doctor)).toContain("unrecorded_sprint_stash")
@@ -130,7 +130,7 @@ describe("sprint-branch doctor", () => {
     await gitAllowFailure(repo, ["checkout", "sprint/example/next"])
     await gitAllowFailure(repo, ["rebase", "sprint/example/review"])
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
 
     expect(result.exitCode).toBe(1)
@@ -158,9 +158,9 @@ describe("sprint-branch doctor", () => {
     await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
     await commitAll(repo, "add next conflict")
 
-    expect((await runCli(repo, ["approve", "--json"])).exitCode).toBe(1)
+    expect((await runCli(repo, ["approve", "--sprint", "example", "--json"])).exitCode).toBe(1)
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
     const codes = diagnosticCodes(doctor)
 
@@ -187,12 +187,12 @@ describe("sprint-branch doctor", () => {
     await git(repo, ["checkout", "main"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "main\n")
     await commitAll(repo, "add main conflict")
-    expect((await runCli(repo, ["finalize", "--json"])).exitCode).toBe(1)
+    expect((await runCli(repo, ["finalize", "--sprint", "example", "--json"])).exitCode).toBe(1)
     await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
     await git(repo, ["add", "conflict.txt"])
     await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
     const codes = diagnosticCodes(doctor)
 
@@ -223,13 +223,13 @@ describe("sprint-branch doctor", () => {
     await git(repo, ["checkout", "sprint/example/next"])
     await git(repo, ["rebase", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "work.txt"), "stashed\n")
-    expect((await runCli(repo, ["feedback"])).exitCode).toBe(0)
+    expect((await runCli(repo, ["feedback", "--sprint", "example"])).exitCode).toBe(0)
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "work.txt"), "review\n")
     await commitAll(repo, "change work during feedback")
-    expect((await runCli(repo, ["resume", "--json"])).exitCode).toBe(1)
+    expect((await runCli(repo, ["resume", "--sprint", "example", "--json"])).exitCode).toBe(1)
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
     const codes = diagnosticCodes(doctor)
 
@@ -258,7 +258,7 @@ describe("sprint-branch doctor", () => {
       },
     })
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
 
     expect(result.exitCode).toBe(1)
@@ -277,7 +277,7 @@ describe("sprint-branch doctor", () => {
     await git(repo, ["checkout", "sprint/example/review"])
     await git(repo, ["branch", "-D", "main"])
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
 
     expect(result.exitCode).toBe(1)
@@ -295,7 +295,7 @@ describe("sprint-branch doctor", () => {
     })
     await git(repo, ["checkout", "-b", "sprint/example/experimental"])
 
-    const result = await runCli(repo, ["doctor", "--json"])
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
     const doctor = JSON.parse(result.stdout) as DoctorOutput
 
     expect(result.exitCode).toBe(1)

@@ -63,7 +63,11 @@ export async function main(argv: string[]) {
         description: "Inspect sprint branch state without changing anything",
         args: commonReadArgs,
         handler: async ({ sprint, json }) => {
-          const { report, diagnostics } = await buildStatusReport({ cwd: process.cwd(), sprint })
+          const { report, diagnostics } = await buildStatusReport({
+            cwd: process.cwd(),
+            sprint,
+            interactive: !json,
+          })
           if (!report) {
             writeOutput(
               json,
@@ -97,7 +101,11 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async ({ sprint, json, nameOnly, stat }) => {
-          const { report, diagnostics } = await buildStatusReport({ cwd: process.cwd(), sprint })
+          const { report, diagnostics } = await buildStatusReport({
+            cwd: process.cwd(),
+            sprint,
+            interactive: !json,
+          })
           if (!report) {
             writeOutput(json, { ok: false, diagnostics }, "Invalid sprint branch state.")
             process.exitCode = 1
@@ -134,7 +142,11 @@ export async function main(argv: string[]) {
         description: "Detect and explain inconsistent sprint branch state",
         args: commonReadArgs,
         handler: async ({ sprint, json }) => {
-          const { report, diagnostics } = await buildDoctorReport({ cwd: process.cwd(), sprint })
+          const { report, diagnostics } = await buildDoctorReport({
+            cwd: process.cwd(),
+            sprint,
+            interactive: !json,
+          })
           if (!report) {
             writeOutput(
               json,
@@ -262,7 +274,10 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          await writeMutation(args.json, runInit({ cwd: process.cwd(), ...args }))
+          await writeMutation(
+            args.json,
+            runInit({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
         },
       }),
       start: command({
@@ -277,7 +292,10 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          await writeMutation(args.json, runStart({ cwd: process.cwd(), ...args }))
+          await writeMutation(
+            args.json,
+            runStart({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
         },
       }),
       feedback: command({
@@ -285,7 +303,10 @@ export async function main(argv: string[]) {
         description: "Prepare for human feedback on the review branch",
         args: commonMutationArgs,
         handler: async (args) => {
-          await writeMutation(args.json, runFeedback({ cwd: process.cwd(), ...args }))
+          await writeMutation(
+            args.json,
+            runFeedback({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
         },
       }),
       resume: command({
@@ -293,7 +314,10 @@ export async function main(argv: string[]) {
         description: "Return to interrupted or dependent work after feedback changes",
         args: commonMutationArgs,
         handler: async (args) => {
-          await writeMutation(args.json, runResume({ cwd: process.cwd(), ...args }))
+          await writeMutation(
+            args.json,
+            runResume({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
         },
       }),
       approve: command({
@@ -301,7 +325,10 @@ export async function main(argv: string[]) {
         description: "Promote reviewed work into the approved branch",
         args: commonMutationArgs,
         handler: async (args) => {
-          await writeMutation(args.json, runApprove({ cwd: process.cwd(), ...args }))
+          await writeMutation(
+            args.json,
+            runApprove({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
         },
       }),
       finalize: command({
@@ -316,7 +343,10 @@ export async function main(argv: string[]) {
           }),
         },
         handler: async (args) => {
-          await writeMutation(args.json, runFinalize({ cwd: process.cwd(), ...args }))
+          await writeMutation(
+            args.json,
+            runFinalize({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
         },
       }),
     },

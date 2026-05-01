@@ -1,5 +1,5 @@
 import path from "node:path"
-import { isCancel, select } from "@clack/prompts"
+import { autocomplete, isCancel } from "@clack/prompts"
 
 import { parseSprintBranchName, validateSprintName } from "../state/branches"
 import { findSprintStateFiles, readSprintStateFile } from "../state/io"
@@ -31,20 +31,19 @@ export async function resolveSprintCandidate(
     })
     return null
   }
-  if (candidates.length === 1) {
-    return candidates[0]
-  }
   if (input.json || !process.stdin.isTTY || !process.stdout.isTTY) {
     diagnostics.push({
       severity: "error",
-      code: "ambiguous_sprint",
-      message: "Multiple sprints are available. Pass the sprint name as an argument.",
+      code: "sprint_selection_required",
+      message:
+        "No sprint could be inferred from a sprint branch or sprints/<name>. Pass the sprint name as an argument.",
     })
     return null
   }
 
-  const selected = await select({
+  const selected = await autocomplete({
     message: "Select sprint",
+    placeholder: "Type to filter sprints...",
     options: candidates.map((candidate) => ({
       value: candidate.sprint,
       label: candidate.sprint,

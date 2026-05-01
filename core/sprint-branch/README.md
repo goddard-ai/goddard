@@ -4,6 +4,8 @@
 
 The package stores sprint branch-management state in Git metadata at `.git/sprint-branch/<name>/state.json`, outside the working tree and outside review diffs. The `sprints/<name>/` folder remains for human-authored task files.
 
+Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name>/<role>` branch, or a working directory under `sprints/<name>`. When that strong context is missing, interactive terminals select from existing sprint state with autocomplete; non-interactive callers must pass the sprint name.
+
 `sprint-branch checkout [name]` is the human review command: it checks out the sprint review branch as a detached snapshot so the live review branch remains agent-owned.
 
 `sprint-branch land <target> [name]` and `sprint-branch cleanup <target> [name]` are human-only landing commands. Actual landing and cleanup require an interactive terminal confirmation; use `--dry-run` to inspect them non-interactively. Cleanup removes landed sprint branches, associated review worktrees, and the Git-private sprint state file.

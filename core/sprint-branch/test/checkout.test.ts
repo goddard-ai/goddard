@@ -60,7 +60,7 @@ describe("sprint-branch checkout", () => {
     expect(await readState(repo, "example")).toEqual(beforeState)
   })
 
-  test("infers the only available sprint when no name is passed", async () => {
+  test("refuses non-interactive checkout without a strong sprint context", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
@@ -71,14 +71,16 @@ describe("sprint-branch checkout", () => {
     const result = await runCli(repo, ["checkout", "--json"])
     const checkout = JSON.parse(result.stdout) as CheckoutOutput
 
-    expect(result.exitCode).toBe(0)
-    expect(checkout.sprint).toBe("example")
-    expect((await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("HEAD")
+    expect(result.exitCode).toBe(1)
+    expect(checkout.ok).toBe(false)
+    expect(diagnosticCodes(checkout)).toContain("sprint_selection_required")
+    expect(checkout.candidates.map((candidate) => candidate.sprint)).toEqual(["example"])
+    expect(await currentBranch(repo)).toBe("main")
   })
 
-  // In the primary human clone, an ambiguous checkout must not guess which sprint
-  // to review. Non-interactive callers get a candidate list and can retry by name.
-  test("refuses ambiguous non-interactive checkout without a sprint name", async () => {
+  // In the primary human clone, checkout must not guess which sprint to review.
+  // Non-interactive callers get a candidate list and can retry by name.
+  test("reports all candidates for non-interactive checkout without a sprint name", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
@@ -92,7 +94,7 @@ describe("sprint-branch checkout", () => {
 
     expect(result.exitCode).toBe(1)
     expect(checkout.ok).toBe(false)
-    expect(diagnosticCodes(checkout)).toContain("ambiguous_sprint_checkout")
+    expect(diagnosticCodes(checkout)).toContain("sprint_selection_required")
     expect(checkout.candidates.map((candidate) => candidate.sprint)).toEqual(["example", "other"])
     expect(await currentBranch(repo)).toBe("main")
   })

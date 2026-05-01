@@ -7,12 +7,13 @@ import {
 } from "./doctor/checks"
 import type { DoctorContext } from "./doctor/types"
 import { getGitOperations } from "./git/repository"
+import type { SprintInferenceInput } from "./state/inference"
 import { buildStatusReport } from "./status"
 import { readTransientConflict } from "./transient-conflict"
 import type { SprintStatusReport } from "./types"
 
 /** Builds the deeper consistency report for sprint-branch doctor. */
-export async function buildDoctorReport(input: { cwd: string; sprint?: string }) {
+export async function buildDoctorReport(input: SprintInferenceInput) {
   const { context, report, diagnostics } = await buildStatusReport(input)
   if (!report) {
     return { context, report, diagnostics }

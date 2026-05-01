@@ -30,7 +30,7 @@ describe("sprint-branch approve", () => {
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
     await commitAll(repo, "add reviewed work")
 
-    const result = await runCli(repo, ["approve", "--json"])
+    const result = await runCli(repo, ["approve", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(0)
     const state = await readState(repo, "example")
@@ -65,7 +65,7 @@ describe("sprint-branch approve", () => {
     await commitAll(repo, "add next work")
     await git(repo, ["checkout", "sprint/example/review"])
 
-    const result = await runCli(repo, ["approve", "--json"])
+    const result = await runCli(repo, ["approve", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(0)
     const state = await readState(repo, "example")
@@ -92,7 +92,7 @@ describe("sprint-branch approve", () => {
     await commitAll(repo, "add reviewed work")
     const approvedHead = await branchHead(repo, "sprint/example/approved")
 
-    const result = await runCli(repo, ["approve", "--dry-run", "--json"])
+    const result = await runCli(repo, ["approve", "--sprint", "example", "--dry-run", "--json"])
     const approve = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(0)
@@ -121,7 +121,7 @@ describe("sprint-branch approve", () => {
     const beforeState = await readState(repo, "example")
     const approvedHead = await branchHead(repo, "sprint/example/approved")
 
-    const result = await runCli(repo, ["approve", "--json"])
+    const result = await runCli(repo, ["approve", "--sprint", "example", "--json"])
     const approve = JSON.parse(result.stdout) as MutationOutput
     const state = await readState(repo, "example")
 
@@ -154,7 +154,7 @@ describe("sprint-branch approve", () => {
     await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
     await commitAll(repo, "add next conflict")
 
-    const first = await runCli(repo, ["approve", "--json"])
+    const first = await runCli(repo, ["approve", "--sprint", "example", "--json"])
     const failedApprove = JSON.parse(first.stdout) as MutationOutput
     const stateAfterConflict = await readState(repo, "example")
 
@@ -170,7 +170,7 @@ describe("sprint-branch approve", () => {
     await git(repo, ["add", "conflict.txt"])
     await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
 
-    const second = await runCli(repo, ["approve", "--json"])
+    const second = await runCli(repo, ["approve", "--sprint", "example", "--json"])
     const approvedState = await readState(repo, "example")
 
     expect(second.exitCode).toBe(0)

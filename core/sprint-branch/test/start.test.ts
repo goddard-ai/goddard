@@ -25,7 +25,14 @@ describe("sprint-branch start", () => {
       approved: [],
       finishedUnreviewed: [],
     })
-    const result = await runCli(repo, ["start", "--task", "010-task-name", "--json"])
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "010-task-name",
+      "--json",
+    ])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
@@ -40,7 +47,14 @@ describe("sprint-branch start", () => {
       approved: [],
       finishedUnreviewed: [],
     })
-    const result = await runCli(repo, ["start", "--task", "020-task-name", "--json"])
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "020-task-name",
+      "--json",
+    ])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/next")
@@ -60,7 +74,15 @@ describe("sprint-branch start", () => {
     })
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["start", "--task", "010-task-name", "--dry-run", "--json"])
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "010-task-name",
+      "--dry-run",
+      "--json",
+    ])
     const start = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(0)
@@ -82,7 +104,14 @@ describe("sprint-branch start", () => {
     })
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["start", "--task", "020-task-name", "--json"])
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "020-task-name",
+      "--json",
+    ])
     const start = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -107,7 +136,14 @@ describe("sprint-branch start", () => {
     await fs.writeFile(path.join(repo, "sprints", "example", "030-task-name.md"), "# Task 030\n")
     await commitAll(repo, "add third task")
 
-    const result = await runCli(repo, ["start", "--task", "030-task-name", "--json"])
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "030-task-name",
+      "--json",
+    ])
     const start = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -129,7 +165,14 @@ describe("sprint-branch start", () => {
     })
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty\n")
 
-    const result = await runCli(repo, ["start", "--task", "010-task-name", "--json"])
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "010-task-name",
+      "--json",
+    ])
     const start = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)

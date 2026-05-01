@@ -26,7 +26,7 @@ describe("sprint-branch finalize", () => {
       approved: ["010-task-name"],
       finishedUnreviewed: [],
     })
-    const result = await runCli(repo, ["finalize", "--json"])
+    const result = await runCli(repo, ["finalize", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
@@ -43,7 +43,14 @@ describe("sprint-branch finalize", () => {
     })
     await git(repo, ["branch", "release", "main"])
 
-    const result = await runCli(repo, ["finalize", "--override-base", "release", "--json"])
+    const result = await runCli(repo, [
+      "finalize",
+      "--sprint",
+      "example",
+      "--override-base",
+      "release",
+      "--json",
+    ])
 
     expect(result.exitCode).toBe(0)
     expect((await readState(repo, "example")).baseBranch).toBe("release")
@@ -60,7 +67,7 @@ describe("sprint-branch finalize", () => {
     })
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["finalize", "--json"])
+    const result = await runCli(repo, ["finalize", "--sprint", "example", "--json"])
     const finalize = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -86,7 +93,7 @@ describe("sprint-branch finalize", () => {
     await fs.writeFile(path.join(repo, "next.txt"), "ahead\n")
     await commitAll(repo, "add next work")
 
-    const result = await runCli(repo, ["finalize", "--json"])
+    const result = await runCli(repo, ["finalize", "--sprint", "example", "--json"])
     const finalize = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -114,7 +121,7 @@ describe("sprint-branch finalize", () => {
       await branchHead(repo, "sprint/example/approved"),
     )
 
-    const result = await runCli(repo, ["finalize", "--json"])
+    const result = await runCli(repo, ["finalize", "--sprint", "example", "--json"])
     const finalize = JSON.parse(result.stdout) as MutationOutput
     const state = await readState(repo, "example")
 
@@ -144,12 +151,12 @@ describe("sprint-branch finalize", () => {
     await fs.writeFile(path.join(repo, "conflict.txt"), "main\n")
     await commitAll(repo, "add main conflict")
 
-    expect((await runCli(repo, ["finalize", "--json"])).exitCode).toBe(1)
+    expect((await runCli(repo, ["finalize", "--sprint", "example", "--json"])).exitCode).toBe(1)
     await fs.writeFile(path.join(repo, "conflict.txt"), "resolved\n")
     await git(repo, ["add", "conflict.txt"])
     await git(repo, ["-c", "core.editor=true", "rebase", "--continue"])
 
-    const result = await runCli(repo, ["finalize", "--json"])
+    const result = await runCli(repo, ["finalize", "--sprint", "example", "--json"])
     const state = await readState(repo, "example")
 
     expect(result.exitCode).toBe(0)

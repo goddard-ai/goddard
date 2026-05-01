@@ -16,14 +16,14 @@ import {
 describe("sprint-branch status", () => {
   afterEach(cleanupTestRepos)
 
-  test("prints JSON status for the inferred sprint", async () => {
+  test("prints JSON status for a sprint inferred from the task directory", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
       approved: [],
       finishedUnreviewed: [],
     })
-    const result = await runCli(repo, ["status", "--json"])
+    const result = await runCli(path.join(repo, "sprints", "example"), ["status", "--json"])
 
     expect(result.exitCode).toBe(0)
     const status = JSON.parse(result.stdout) as {
@@ -61,9 +61,9 @@ describe("sprint-branch status", () => {
     expect(status.inferredFrom).toContain("current branch")
   })
 
-  // Git-private metadata can be visible from any linked worktree, so "one state file"
-  // is an inference rule and "multiple state files" must be an explicit refusal.
-  test("refuses to infer from multiple Git metadata state files", async () => {
+  // Git-private metadata is only a selection source for an interactive human.
+  // Non-interactive callers must provide a strong context instead of guessing.
+  test("refuses non-interactive inference from Git metadata state files", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
@@ -76,9 +76,9 @@ describe("sprint-branch status", () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toBe("")
-    expect(result.stderr).toContain("Multiple sprint state files exist")
-    expect(result.stderr).toContain("sprint-branch status --sprint example")
-    expect(result.stderr).toContain("sprint-branch status --sprint other")
+    expect(result.stderr).toContain("No sprint selected")
+    expect(result.stderr).toContain("--sprint example")
+    expect(result.stderr).toContain("--sprint other")
   })
 
   // Approved is supposed to contain only work that humans have already accepted.
@@ -93,7 +93,7 @@ describe("sprint-branch status", () => {
     await git(repo, ["checkout", "sprint/example/approved"])
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty approved\n")
 
-    const result = await runCli(repo, ["status", "--json"])
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
     const status = JSON.parse(result.stdout) as {
       ok: boolean
       diagnostics: Array<{ code: string }>
@@ -118,7 +118,7 @@ describe("sprint-branch status", () => {
     await fs.rm(path.join(repo, "sprints", "example", "010-task-name.md"))
     await commitAll(repo, "remove recorded task file")
 
-    const result = await runCli(repo, ["status", "--json"])
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
     const status = JSON.parse(result.stdout) as {
       ok: boolean
       diagnostics: Array<{ code: string }>

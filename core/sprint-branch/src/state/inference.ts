@@ -1,9 +1,10 @@
 import path from "node:path"
+import { autocomplete, isCancel } from "@clack/prompts"
 
 import { getCurrentBranch, resolveRepositoryRoot } from "../git/repository"
 import type { SprintContext, SprintDiagnostic } from "../types"
 import { parseSprintBranchName, validateSprintName } from "./branches"
-import { findSprintStateFiles, readSprintStateFile } from "./io"
+import { findSprintStateFiles } from "./io"
 import { sprintStateDisplayPath, sprintStatePath } from "./paths"
 
 /** Error raised when the current sprint cannot be inferred safely. */
@@ -17,8 +18,15 @@ export class SprintInferenceError extends Error {
   }
 }
 
-/** Infers the active sprint using the ordered rules from the workflow plan. */
-export async function inferSprintContext(input: { cwd: string; sprint?: string }) {
+/** Inputs that allow commands to infer or interactively select the active sprint. */
+export type SprintInferenceInput = {
+  cwd: string
+  sprint?: string
+  interactive?: boolean
+}
+
+/** Infers the active sprint from explicit input or strong local context. */
+export async function inferSprintContext(input: SprintInferenceInput) {
   const rootDir = await resolveRepositoryRoot(input.cwd)
   const currentBranch = await getCurrentBranch(rootDir)
 
@@ -49,58 +57,59 @@ export async function inferSprintContext(input: { cwd: string; sprint?: string }
     )
   }
 
-  const stateFiles = await findSprintStateFiles(rootDir)
-  if (currentBranch) {
-    const matchingStates = await statesReferencingBranch(rootDir, stateFiles, currentBranch)
-    if (matchingStates.length === 1) {
-      return await buildContext(
-        rootDir,
-        matchingStates[0].sprint,
-        currentBranch,
-        `${matchingStates[0].relativePath} references ${currentBranch}`,
-      )
-    }
-    if (matchingStates.length > 1) {
-      throw new SprintInferenceError(
-        `Multiple sprint state files reference ${currentBranch}. Pass --sprint <name>.`,
-        matchingStates.map((match) => ({
-          severity: "error",
-          code: "ambiguous_sprint_state",
-          message: `${match.relativePath} references ${currentBranch}.`,
-          suggestion: `sprint-branch status --sprint ${match.sprint}`,
+  const candidates = sprintCandidatesForSelection(rootDir, await findSprintStateFiles(rootDir))
+  if (candidates.length > 0) {
+    if (canPromptForSprint(input)) {
+      const selected = await autocomplete({
+        message: "Select sprint",
+        placeholder: "Type to filter sprints...",
+        options: candidates.map((candidate) => ({
+          value: candidate.sprint,
+          label: candidate.sprint,
+          hint: candidate.relativePath,
         })),
-      )
+      })
+
+      if (isCancel(selected)) {
+        throw new SprintInferenceError("Sprint selection cancelled.", [
+          {
+            severity: "error",
+            code: "sprint_selection_cancelled",
+            message: "Sprint selection cancelled.",
+          },
+        ])
+      }
+
+      return await buildContext(rootDir, selected, currentBranch, "interactive sprint selection")
     }
-  }
 
-  if (stateFiles.length === 1) {
-    const sprint = path.basename(path.dirname(stateFiles[0]))
-    return await buildContext(rootDir, sprint, currentBranch, "only sprint state file")
-  }
-
-  if (stateFiles.length > 1) {
     throw new SprintInferenceError(
-      "Multiple sprint state files exist. Pass --sprint <name>.",
-      stateFiles.map((statePath) => {
-        const sprint = path.basename(path.dirname(statePath))
-        return {
+      "No sprint selected. Pass --sprint <name> or run from a sprint branch or sprints/<name>.",
+      [
+        {
           severity: "error",
-          code: "ambiguous_sprint_state",
-          message: statePathForDisplay(rootDir, statePath),
-          suggestion: `sprint-branch status --sprint ${sprint}`,
-        }
-      }),
+          code: "sprint_selection_required",
+          message: "No sprint could be inferred from --sprint, a sprint branch, or sprints/<name>.",
+          suggestion: "Pass --sprint <name>.",
+        },
+        ...candidates.map((candidate) => ({
+          severity: "info" as const,
+          code: "available_sprint_state",
+          message: candidate.relativePath,
+          suggestion: `--sprint ${candidate.sprint}`,
+        })),
+      ],
     )
   }
 
   throw new SprintInferenceError(
-    "Unable to infer the current sprint from branch, path, branch references, or state files.",
+    "Unable to infer the current sprint from --sprint, a sprint branch, or sprints/<name>.",
     [
       {
         severity: "error",
         code: "missing_sprint_state",
         message:
-          "Looked for a sprint branch name, a sprints/<name> working directory, and Git metadata sprint-branch/*/state.json.",
+          "Looked for explicit --sprint, a sprint branch name, a sprints/<name> working directory, and Git metadata sprint-branch/*/state.json.",
       },
     ],
   )
@@ -141,27 +150,17 @@ function inferSprintFromPath(rootDir: string, cwd: string) {
   return sprint || null
 }
 
-async function statesReferencingBranch(rootDir: string, stateFiles: string[], branch: string) {
-  const matches: Array<{ sprint: string; relativePath: string }> = []
+function sprintCandidatesForSelection(rootDir: string, stateFiles: string[]) {
+  return stateFiles
+    .map((statePath) => ({
+      sprint: path.basename(path.dirname(statePath)),
+      relativePath: statePathForDisplay(rootDir, statePath),
+    }))
+    .sort((left, right) => left.sprint.localeCompare(right.sprint))
+}
 
-  for (const statePath of stateFiles) {
-    try {
-      const parsed = await readSprintStateFile(statePath)
-      if (!parsed.state) {
-        continue
-      }
-      if (Object.values(parsed.state.branches).includes(branch)) {
-        matches.push({
-          sprint: parsed.state.sprint,
-          relativePath: statePathForDisplay(rootDir, statePath),
-        })
-      }
-    } catch {
-      continue
-    }
-  }
-
-  return matches
+function canPromptForSprint(input: SprintInferenceInput) {
+  return input.interactive !== false && Boolean(process.stdin.isTTY && process.stdout.isTTY)
 }
 
 function statePathForDisplay(rootDir: string, statePath: string) {

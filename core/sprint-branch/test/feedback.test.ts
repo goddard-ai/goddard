@@ -34,7 +34,7 @@ describe("sprint-branch feedback", () => {
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
 
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/review")
@@ -62,7 +62,7 @@ describe("sprint-branch feedback", () => {
     await fs.writeFile(path.join(repo, "scratch.txt"), "review work\n")
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
     const feedback = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -87,7 +87,7 @@ describe("sprint-branch feedback", () => {
     )
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
     const state = await readState(repo, "example")
 
     expect(result.exitCode).toBe(0)
@@ -112,7 +112,7 @@ describe("sprint-branch feedback", () => {
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ntracked interruption\n")
 
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
     const state = await readState(repo, "example")
 
     expect(result.exitCode).toBe(0)
@@ -145,7 +145,7 @@ describe("sprint-branch feedback", () => {
     await fs.writeFile(path.join(repo, "README.md"), "# Test\norphan next work\n")
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
     const feedback = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(1)
@@ -172,7 +172,7 @@ describe("sprint-branch feedback", () => {
     await fs.writeFile(path.join(repo, "scratch.txt"), "interrupted\n")
     const beforeState = await readState(repo, "example")
 
-    const result = await runCli(repo, ["feedback", "--dry-run", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--dry-run", "--json"])
     const feedback = JSON.parse(result.stdout) as MutationOutput
 
     expect(result.exitCode).toBe(0)
@@ -202,7 +202,7 @@ describe("sprint-branch feedback", () => {
     )
     await git(repo, ["checkout", "sprint/example/next"])
 
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
     const state = await readState(repo, "example")
 
     expect(result.exitCode).toBe(0)
@@ -243,7 +243,7 @@ describe("sprint-branch feedback", () => {
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ntracked interruption\n")
 
-    const result = await runCli(repo, ["feedback", "--json"])
+    const result = await runCli(repo, ["feedback", "--sprint", "example", "--json"])
     const nextState = await readState(repo, "example")
 
     expect(result.exitCode).toBe(0)

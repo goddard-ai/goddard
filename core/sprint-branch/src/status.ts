@@ -5,14 +5,14 @@ import { branchExists, getBranchHead, isAncestor } from "./git/refs"
 import { resolveGitCommonPath } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
-import { inferSprintContext } from "./state/inference"
+import { inferSprintContext, type SprintInferenceInput } from "./state/inference"
 import { readSprintStateFile } from "./state/io"
 import type { SprintBranchRole, SprintBranchState, SprintStatusReport } from "./types"
 
 const sprintRoles: SprintBranchRole[] = ["review", "approved", "next"]
 
 /** Builds the read-only sprint branch status report used by status, diff, and doctor. */
-export async function buildStatusReport(input: { cwd: string; sprint?: string }) {
+export async function buildStatusReport(input: SprintInferenceInput) {
   const context = await inferSprintContext(input)
   const parsed = await readSprintStateFile(context.statePath)
   const diagnostics = [...parsed.diagnostics]

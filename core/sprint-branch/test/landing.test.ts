@@ -30,6 +30,7 @@ type HumanCommandOutput = {
   reviewCommit: string | null
   gitOperations: string[]
   diagnostics: Array<{ code: string }>
+  candidates: Array<{ sprint: string; reviewBranch: string }>
   branchesToDelete?: string[]
   worktreesToRemove?: Array<{ path: string }>
   stateFilesToRemove?: string[]
@@ -63,6 +64,18 @@ describe("sprint-branch human landing commands", () => {
       "git merge --ff-only sprint/example/review",
     ])
     expect(await branchHead(repo, "main")).toBe(mainHead)
+  })
+
+  test("refuses non-interactive land without a strong sprint context", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+
+    const result = await runCli(repo, ["land", "main", "--dry-run", "--json"])
+    const land = JSON.parse(result.stdout) as HumanCommandOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(land.ok).toBe(false)
+    expect(diagnosticCodes(land)).toContain("sprint_selection_required")
+    expect(land.candidates.map((candidate) => candidate.sprint)).toEqual(["example"])
   })
 
   // Landing changes the branch humans ultimately merge from, so it must never be

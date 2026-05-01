@@ -1,5 +1,5 @@
 import path from "node:path"
-import { isCancel, select } from "@clack/prompts"
+import { autocomplete, isCancel } from "@clack/prompts"
 
 import { GitCommandError, runGit } from "./git/command"
 import { branchExists, getBranchHead } from "./git/refs"
@@ -182,21 +182,20 @@ async function resolveCheckoutTarget(
     })
     return null
   }
-  if (candidates.length === 1) {
-    return candidates[0]
-  }
   if (input.json || !process.stdin.isTTY || !process.stdout.isTTY) {
     diagnostics.push({
       severity: "error",
-      code: "ambiguous_sprint_checkout",
-      message: "Multiple sprints are available. Pass the sprint name as an argument.",
+      code: "sprint_selection_required",
+      message:
+        "No sprint could be inferred from a sprint branch or sprints/<name>. Pass the sprint name as an argument.",
       suggestion: "sprint-branch checkout <name>",
     })
     return null
   }
 
-  const selected = await select({
+  const selected = await autocomplete({
     message: "Select sprint review snapshot",
+    placeholder: "Type to filter sprints...",
     options: candidates.map((candidate) => ({
       value: candidate.sprint,
       label: candidate.sprint,

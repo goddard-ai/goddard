@@ -9,6 +9,7 @@ import type {
 export type MutationInput = {
   cwd: string
   sprint?: string
+  interactive?: boolean
   dryRun: boolean
 }
 

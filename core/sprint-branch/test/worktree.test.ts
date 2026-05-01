@@ -44,7 +44,7 @@ describe("sprint-branch linked worktree state", () => {
     expect(await workingTreePorcelain(repo)).toBe("")
     expect(await workingTreePorcelain(agentWorktree)).toBe("")
 
-    const statusResult = await runCli(repo, ["status", "--json"])
+    const statusResult = await runCli(repo, ["status", "--sprint", "example", "--json"])
     const status = JSON.parse(statusResult.stdout) as JsonOutput
 
     expect(statusResult.exitCode).toBe(0)
