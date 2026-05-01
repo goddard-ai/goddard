@@ -10,6 +10,8 @@ Commands use the shared sprint selection behavior documented in [docs/sprint-sel
 
 Each sprint state records `lastActedAt`, the time `sprint-branch` last acted on that sprint. `sprint-branch list` reports sprints by last activity, and `sprint-branch list -l` reports only the latest acted-upon sprint.
 
+Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name>/<role>` branch, or a working directory under `sprints/<name>`. When that strong context is missing, interactive terminals select from existing sprint state with autocomplete; non-interactive callers must pass the sprint name.
+
 `sprint-branch checkout [name]` is the human review command: it checks out the sprint review branch as a detached snapshot so the live review branch remains agent-owned.
 
 `sprint-branch park [--sprint <name>]` hides a sprint from default active-sprint selection without deleting branches or Git-private state. `sprint-branch unpark [--sprint <name>]` makes it active again. Use `sprint-branch list --all` to include parked sprints.
