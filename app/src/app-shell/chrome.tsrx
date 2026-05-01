@@ -6,6 +6,7 @@ import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
+import { closeTopmostModal } from "~/lib/modal-stack.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
@@ -141,6 +142,10 @@ export component AppShellChrome() {
   }
 
   useAppCommand(AppCommand.workbench.closeActiveTab, () => {
+    if (closeTopmostModal()) {
+      return
+    }
+
     if (workbenchTabSet.activeTabId !== WORKBENCH_PRIMARY_TAB.id) {
       workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
     }

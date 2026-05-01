@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "preact/hooks"
 import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandList } from "~/commands/app-command.ts"
+import { useModalStackEntry } from "~/lib/modal-stack.ts"
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
@@ -54,6 +55,16 @@ component KeyboardShortcutsView(props: { class?: string }) {
         if (!details.open) {
           setCaptureState(null)
         }
+      },
+    },
+  )
+
+  useModalStackEntry(
+    {
+      id: "keyboard-shortcuts:capture",
+      open: captureDialog.open,
+      close() {
+        captureDialog.setOpen(false)
       },
     },
   )

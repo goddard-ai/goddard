@@ -8,6 +8,7 @@ import { useEffect } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
 import { DialogPortal } from "~/lib/dialog-portal.tsrx"
+import { useModalStackEntry } from "~/lib/modal-stack.ts"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { openProjectTab, ProjectsPageMutations } from "./mutations.ts"
 import { deriveProjectName } from "./project-name.ts"
@@ -29,6 +30,16 @@ export component ProjectsPage() {
   const selectedProject = resolvedSelectedProjectPath
     ? projectRegistry.projectsByPath[resolvedSelectedProjectPath] ?? null
     : null
+
+  useModalStackEntry(
+    {
+      id: "projects:add-project",
+      open: addProjectDialog.open,
+      close() {
+        addProjectDialog.setOpen(false)
+      },
+    },
+  )
 
   function selectProject(projectPath: string): void {
     selectedProjectPath.value = projectPath

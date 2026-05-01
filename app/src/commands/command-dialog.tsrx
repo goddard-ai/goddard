@@ -4,6 +4,7 @@ import { Suspense, lazy } from "preact/compat"
 import { useId, useMemo } from "preact/hooks"
 import { concat } from "radashi"
 
+import { useModalStackEntry } from "~/lib/modal-stack.ts"
 import { menuPortalId } from "~/lib/menu-portal.tsrx"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { useAppCommand, type AppCommand } from "./app-command.ts"
@@ -38,6 +39,16 @@ export component CommandDialog(props: CommandDialogProps) {
         () => document.getElementById(menuPortalId),
         props.dialogProps?.persistentElements,
       ),
+    },
+  )
+
+  useModalStackEntry(
+    {
+      id: `command-dialog:${dialogId}`,
+      open: dialog.open,
+      close() {
+        dialog.setOpen(false)
+      },
     },
   )
 

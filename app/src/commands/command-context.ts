@@ -1,6 +1,7 @@
 import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
+import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
 
@@ -16,6 +17,9 @@ const sessionInputCanSubmit = signal(false)
 const sessionInputHasModelSelector = signal(false)
 const sessionInputHasProjectSelector = signal(false)
 const sessionInputHasThinkingLevel = signal(false)
+const hasCloseTarget = computed(() => {
+  return hasClosableActiveTab.value || hasOpenModalDialog.value
+})
 
 const whenContext = computed(() => {
   return {
@@ -28,7 +32,9 @@ const whenContext = computed(() => {
     "sessionInput.hasProjectSelector": sessionInputHasProjectSelector.value,
     "sessionInput.hasThinkingLevel": sessionInputHasThinkingLevel.value,
     "workbench.activeTabKind": activeTabKind.value,
+    "workbench.hasCloseTarget": hasCloseTarget.value,
     "workbench.hasClosableActiveTab": hasClosableActiveTab.value,
+    "workbench.hasOpenModal": hasOpenModalDialog.value,
     "navigation.selectedNavId": selectedNavId.value,
   }
 })
@@ -36,7 +42,9 @@ const whenContext = computed(() => {
 export const commandContext = {
   activeScopes,
   activeTabKind,
+  hasCloseTarget,
   hasClosableActiveTab,
+  hasOpenModalDialog,
   selectedNavId,
   sessionInputActive,
   sessionInputHasAdapterSelector,

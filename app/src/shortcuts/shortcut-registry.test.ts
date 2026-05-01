@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 
 import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
+import { registerModalStackEntry } from "~/lib/modal-stack.ts"
 import { ShortcutRegistry } from "./shortcut-registry.ts"
 
 /** Creates one registry instance with an isolated document-like event boundary. */
@@ -211,10 +212,23 @@ test("command-owned when clauses gate both dispatch and palette availability", (
   }
 })
 
-test("hasClosableActiveTab drives runtime availability for closeActiveTab", () => {
+test("modal or closable tab drives runtime availability for closeActiveTab", () => {
   const { registry, cleanup } = createTestRegistry()
 
   try {
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
+
+    const unregisterModal = registerModalStackEntry({
+      id: "shortcut-registry-test:modal",
+      close() {},
+    })
+
+    try {
+      expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
+    } finally {
+      unregisterModal()
+    }
+
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
 
     commandContext.hasClosableActiveTab.value = true
