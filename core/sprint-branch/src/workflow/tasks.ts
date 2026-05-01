@@ -72,7 +72,8 @@ export function findMatchingStash(state: SprintBranchState) {
   )
 }
 
-async function listTaskStems(rootDir: string, sprint: string) {
+/** Lists sprint task file stems in queue order, excluding sprint metadata files. */
+export async function listTaskStems(rootDir: string, sprint: string) {
   const sprintDir = path.join(rootDir, "sprints", sprint)
   const entries = await fs.readdir(sprintDir, { withFileTypes: true })
   return entries

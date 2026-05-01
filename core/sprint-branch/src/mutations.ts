@@ -7,6 +7,7 @@ import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
 import { getExpectedBranches } from "./state/branches"
 import { inferSprintContext } from "./state/inference"
+import { readSprintStateFile } from "./state/io"
 import { readTransientConflict } from "./transient-conflict"
 import type { SprintActiveStash, SprintBranchState, SprintDiagnostic } from "./types"
 import { moveBranchOperation, moveRecordedBranch } from "./workflow/branch-movement"
@@ -31,6 +32,7 @@ import {
   cloneState,
   emptyTasks,
   findMatchingStash,
+  listTaskStems,
   nextTaskDiagnostic,
   noPlannedTaskDiagnostic,
   normalizeTaskName,
@@ -118,6 +120,102 @@ export async function runInit(input: MutationInput & { base: string }) {
     await runGit(context.rootDir, ["branch", branches.approved, input.base])
     await runGit(context.rootDir, ["branch", branches.review, branches.approved])
     await writeSprintState(context.rootDir, state)
+    return { ...plan, executed: true }
+  })
+}
+
+/** Recreates sprint branch state so the selected task becomes the next start target. */
+export async function runResetState(
+  input: MutationInput & { task?: string; base?: string; force?: boolean },
+) {
+  const context = await inferSprintContext(input)
+  const diagnostics: SprintDiagnostic[] = []
+  const existingState = await readResetSeedState(context.statePath, diagnostics)
+  const branches = getExpectedBranches(context.sprint)
+  const baseBranch = input.base ?? existingState?.baseBranch ?? "main"
+  const workingTree = await getWorkingTreeStatus(context.rootDir)
+  const sprintDir = path.join(context.rootDir, "sprints", context.sprint)
+  const taskStems = (await pathExists(sprintDir))
+    ? await listTaskStems(context.rootDir, context.sprint)
+    : []
+  const targetTask = input.task ? normalizeTaskName(input.task) : (taskStems[0] ?? null)
+  const targetTaskIndex = targetTask ? taskStems.indexOf(targetTask) : -1
+  const nextState: SprintBranchState = {
+    schemaVersion: 1,
+    sprint: context.sprint,
+    baseBranch,
+    branches,
+    tasks: {
+      review: null,
+      next: null,
+      approved: targetTaskIndex >= 0 ? taskStems.slice(0, targetTaskIndex) : [],
+      finishedUnreviewed: [],
+    },
+    activeStashes: [],
+    lock: null,
+    conflict: null,
+  }
+
+  if (!workingTree.clean) {
+    diagnostics.push({
+      severity: "error",
+      code: "dirty_worktree",
+      message: "reset-state requires a clean working tree before rewriting sprint state.",
+    })
+  }
+  if (!(await pathExists(sprintDir))) {
+    diagnostics.push({
+      severity: "error",
+      code: "sprint_folder_missing",
+      message: `Sprint folder sprints/${context.sprint} does not exist.`,
+    })
+  }
+  if (taskStems.length === 0) {
+    diagnostics.push({
+      severity: "error",
+      code: "no_sprint_tasks",
+      message: `Sprint folder sprints/${context.sprint} has no task files.`,
+    })
+  }
+  if (targetTask && targetTaskIndex === -1) {
+    diagnostics.push({
+      severity: "error",
+      code: "task_file_missing",
+      message: `Task file sprints/${context.sprint}/${targetTask}.md does not exist.`,
+    })
+  }
+  diagnostics.push(...duplicateTaskPrefixDiagnostics(taskStems))
+
+  await pushResetBranchDiagnostics(
+    context.rootDir,
+    branches,
+    baseBranch,
+    Boolean(input.force),
+    diagnostics,
+  )
+  pushResetStateDiagnostics(existingState, Boolean(input.force), diagnostics)
+
+  const plan = makePlan({
+    command: "reset-state",
+    context,
+    state: nextState,
+    summary: targetTask
+      ? `Reset sprint ${context.sprint} state so ${targetTask} is next.`
+      : `Reset sprint ${context.sprint} state to the first task.`,
+    requiresCleanWorkingTree: true,
+    gitOperations: [],
+    stateFiles: stateFilesForState(nextState),
+    conflictHandling:
+      "Only Git-private sprint state is rewritten. Branches are not moved; use --force only after preserving or discarding branch-local work intentionally.",
+    diagnostics,
+  })
+
+  if (input.dryRun || !plan.ok) {
+    return withDryRun(plan, input.dryRun)
+  }
+
+  return withSprintLock(context, nextState, "reset-state", async () => {
+    await writeSprintState(context.rootDir, nextState)
     return { ...plan, executed: true }
   })
 }
@@ -684,6 +782,192 @@ async function getLatestStash(rootDir: string) {
     ref: first[0],
     message: first[1],
   }
+}
+
+async function readResetSeedState(statePath: string, diagnostics: SprintDiagnostic[]) {
+  try {
+    const parsed = await readSprintStateFile(statePath)
+    if (parsed.state) {
+      return parsed.state
+    }
+
+    for (const diagnostic of parsed.diagnostics) {
+      diagnostics.push({
+        severity: "warning",
+        code: `existing_state_${diagnostic.code}`,
+        message: `Existing state is invalid and will be replaced: ${diagnostic.message}`,
+      })
+    }
+    return null
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      diagnostics.push({
+        severity: "info",
+        code: "state_file_missing",
+        message: "No existing sprint state file was found; reset-state will create one.",
+      })
+      return null
+    }
+    if (error instanceof SyntaxError) {
+      diagnostics.push({
+        severity: "warning",
+        code: "existing_state_invalid_json",
+        message: "Existing sprint state is not valid JSON and will be replaced.",
+      })
+      return null
+    }
+    throw error
+  }
+}
+
+async function pushResetBranchDiagnostics(
+  rootDir: string,
+  branches: SprintBranchState["branches"],
+  baseBranch: string,
+  force: boolean,
+  diagnostics: SprintDiagnostic[],
+) {
+  const approvedHead = await getBranchHead(rootDir, branches.approved)
+  const reviewHead = await getBranchHead(rootDir, branches.review)
+  const nextHead = await getBranchHead(rootDir, branches.next)
+
+  if (!(await branchExists(rootDir, baseBranch))) {
+    diagnostics.push({
+      severity: "error",
+      code: "base_branch_missing",
+      message: `Base branch ${baseBranch} does not exist.`,
+    })
+  }
+  if (!approvedHead) {
+    diagnostics.push({
+      severity: "error",
+      code: "approved_branch_missing",
+      message: `Approved branch ${branches.approved} does not exist.`,
+    })
+  }
+  if (!reviewHead) {
+    diagnostics.push({
+      severity: "error",
+      code: "review_branch_missing",
+      message: `Review branch ${branches.review} does not exist.`,
+    })
+  }
+  if (approvedHead && reviewHead && approvedHead !== reviewHead) {
+    diagnostics.push({
+      severity: force ? "warning" : "error",
+      code: "review_branch_has_unrecorded_work",
+      message: `${branches.review} differs from approved while reset-state would clear the review task mapping.`,
+      suggestion: force
+        ? "The next start may reset review back to approved."
+        : "Use --force only after preserving or intentionally discarding review branch work.",
+    })
+  }
+  if (reviewHead && nextHead && reviewHead !== nextHead) {
+    diagnostics.push({
+      severity: force ? "warning" : "error",
+      code: "next_branch_has_unrecorded_work",
+      message: `${branches.next} differs from review while reset-state would clear the next task mapping.`,
+      suggestion: force
+        ? "Doctor will continue to report unrecorded next-branch work until it is recovered or discarded."
+        : "Use --force only after preserving or intentionally discarding next branch work.",
+    })
+  }
+}
+
+function pushResetStateDiagnostics(
+  existingState: SprintBranchState | null,
+  force: boolean,
+  diagnostics: SprintDiagnostic[],
+) {
+  if (!existingState) {
+    return
+  }
+
+  pushForceableResetDiagnostic(
+    Boolean(existingState.conflict),
+    force,
+    diagnostics,
+    "conflict_recorded",
+    `State records an unresolved ${existingState.conflict?.command ?? "unknown"} conflict.`,
+    "Resolve the Git conflict before resetting state, or use --force after preserving the work.",
+  )
+  pushForceableResetDiagnostic(
+    Boolean(existingState.lock),
+    force,
+    diagnostics,
+    "state_lock_recorded",
+    `State records an active ${existingState.lock?.command ?? "unknown"} lock.`,
+    "Run sprint-branch doctor before retrying, or use --force after confirming no command is running.",
+  )
+  pushForceableResetDiagnostic(
+    existingState.activeStashes.length > 0,
+    force,
+    diagnostics,
+    "active_stashes_recorded",
+    `State records ${existingState.activeStashes.length} active sprint stash record(s).`,
+    "Resume or inspect recorded stashes before resetting state, or use --force after preserving them.",
+  )
+  pushForceableResetDiagnostic(
+    Boolean(existingState.tasks.review),
+    force,
+    diagnostics,
+    "active_review_task_recorded",
+    `State records review task ${existingState.tasks.review ?? "unknown"}.`,
+    "Approve, recover, or preserve review work before resetting state, or use --force.",
+  )
+  pushForceableResetDiagnostic(
+    Boolean(existingState.tasks.next),
+    force,
+    diagnostics,
+    "active_next_task_recorded",
+    `State records next task ${existingState.tasks.next ?? "unknown"}.`,
+    "Resume, recover, or preserve next work before resetting state, or use --force.",
+  )
+}
+
+function pushForceableResetDiagnostic(
+  condition: boolean,
+  force: boolean,
+  diagnostics: SprintDiagnostic[],
+  code: string,
+  message: string,
+  suggestion: string,
+) {
+  if (!condition) {
+    return
+  }
+
+  diagnostics.push({
+    severity: force ? "warning" : "error",
+    code,
+    message,
+    suggestion,
+  })
+}
+
+function duplicateTaskPrefixDiagnostics(taskStems: string[]) {
+  const diagnostics: SprintDiagnostic[] = []
+  const prefixes = new Map<string, string[]>()
+
+  for (const task of taskStems) {
+    const match = task.match(/^(\d{3})-/)
+    if (!match) {
+      continue
+    }
+    prefixes.set(match[1], [...(prefixes.get(match[1]) ?? []), task])
+  }
+
+  for (const [prefix, tasks] of prefixes) {
+    if (tasks.length > 1) {
+      diagnostics.push({
+        severity: "error",
+        code: "duplicate_task_file_prefix",
+        message: `Task prefix ${prefix} is used by multiple task files: ${tasks.join(", ")}.`,
+      })
+    }
+  }
+
+  return diagnostics
 }
 
 async function pushIfBranchExists(

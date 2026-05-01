@@ -11,6 +11,7 @@ import {
   runFeedback,
   runFinalize,
   runInit,
+  runResetState,
   runResume,
   runStart,
   SprintMutationError,
@@ -277,6 +278,33 @@ export async function main(argv: string[]) {
           await writeMutation(
             args.json,
             runInit({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
+        },
+      }),
+      "reset-state": command({
+        name: "reset-state",
+        description: "Recreate sprint state so a task becomes the next start target",
+        args: {
+          ...commonMutationArgs,
+          task: option({
+            type: optional(string),
+            long: "task",
+            description: "Task file stem to make next, such as 020-task-name",
+          }),
+          base: option({
+            type: optional(string),
+            long: "base",
+            description: "Base branch to record when existing state cannot supply one",
+          }),
+          force: flag({
+            long: "force",
+            description: "Clear active sprint state despite recorded work or branch drift",
+          }),
+        },
+        handler: async (args) => {
+          await writeMutation(
+            args.json,
+            runResetState({ cwd: process.cwd(), ...args, interactive: !args.json }),
           )
         },
       }),

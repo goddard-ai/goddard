@@ -8,6 +8,7 @@ export {
   runFeedback,
   runFinalize,
   runInit,
+  runResetState,
   runResume,
   runStart,
 } from "./mutations"
