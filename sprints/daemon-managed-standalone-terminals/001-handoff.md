@@ -6,6 +6,7 @@
 - Base branch assumption: `codex/add-custom-terminal-input`.
 - The user confirmed the sprint should include a real standalone terminal tab and app state surface, not only daemon infrastructure.
 - The agreed architecture is: daemon owns PTYs, desktop Bun host owns the daemon terminal websocket connection, webview talks to Bun host through Electrobun.
+- Sprint branch state is initialized; `010-define-terminal-contract-and-lifecycle` is complete on review and waiting for human review.
 
 ## Key Constraints
 
@@ -21,3 +22,8 @@
 - `020-validate-daemon-pty-runtime` is the stop/go task for `bun-pty` viability.
 - `050-add-standalone-terminal-tab-state-and-view` is the first user-visible terminal slice and should not be worked beyond until reviewed.
 
+## Task 010 Notes
+
+- The terminal contract lives in shared schema as websocket frames, not daemon IPC requests.
+- SDK additions are type-only surface definitions for the future `sdk.terminal` runtime.
+- Focused schema and SDK tests, typechecks, and lints passed.

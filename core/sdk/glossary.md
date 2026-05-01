@@ -28,3 +28,6 @@
 - `Inbox Surface`
   - The SDK namespace that mirrors daemon inbox list and mutation IPC methods.
   - Why: so non-app hosts can inspect and update local human-attention state through the same shared daemon contract.
+- `Terminal Surface`
+  - The SDK shape for opening one daemon terminal websocket and controlling connection-local terminal instances.
+  - Why: so terminal commands remain scoped to the owning desktop host connection instead of becoming daemon-global methods.

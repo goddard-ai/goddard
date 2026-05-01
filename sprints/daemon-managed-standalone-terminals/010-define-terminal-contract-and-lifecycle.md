@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+finished-unreviewed
 
 ## Objective
 
@@ -34,3 +34,18 @@ The human is reviewing the control contract and lifecycle semantics, not impleme
 
 One task ahead is safe only for daemon PTY viability work, because that work depends on terminal ownership semantics but not on later UI decisions.
 
+## Implementation Notes
+
+- Added shared terminal websocket frame schemas under `@goddard-ai/schema/daemon`.
+- Defined connection-local terminal instance ids, create/input/resize/restart/close client frames, and created/output/exit/title/cwd/error daemon events.
+- Added SDK-facing terminal connection types that model one websocket-owned set of terminal instances without implementing transport yet.
+- Documented terminal terms in the schema and SDK glossaries.
+
+## Verification Evidence
+
+- `bun --cwd core/schema test`
+- `bun --cwd core/sdk test`
+- `bun run --cwd core/schema typecheck`
+- `bun run --cwd core/sdk typecheck`
+- `bun run --cwd core/schema lint`
+- `bun run --cwd core/sdk lint`
