@@ -25,17 +25,19 @@ flowchart LR
 
   GitHub --> Backend
   Backend <--> Daemon
-  App <--> Daemon
-  SDK --> Daemon
+  App --> SDK
   Workforce --> SDK
+  SDK <--> Daemon
+  App -. "packaged runtime lifecycle" .-> Daemon
   Daemon --> Agents
   Daemon --> Repo
 ```
 
 The backend owns remote platform authority. The daemon owns local runtime
 authority. The SDK is the stable programmatic daemon-control surface. The
-desktop app is the primary human workspace and keeps privileged daemon and OS
-access behind its trusted host boundary.
+desktop app and operator CLI use the SDK for daemon-backed control. The desktop
+host separately owns packaged daemon installation and supervision while keeping
+privileged daemon and OS access behind its trusted host boundary.
 
 ## Runtime Responsibilities
 
@@ -48,7 +50,7 @@ access behind its trusted host boundary.
 | Daemon client | [`core/daemon/client`](./core/daemon/client/) | Low-level daemon URL, TCP transport, and injected daemon IPC client helpers | Use the SDK for stable daemon actions |
 | SDK | [`core/sdk`](./core/sdk/) | Stable daemon-backed auth, PR, session, action, loop, and workforce methods | Not a general backend real-time client |
 | Daemon | [`core/daemon`](./core/daemon/) | Local background runtime, sessions, PR feedback handling, loop runtime, workforce runtime, IPC server | Clients observe and control daemon-owned runtimes; they do not own parallel runtime state |
-| Desktop app | [`app`](./app/) | Electrobun host, Preact workspace UI, embedded daemon lifecycle in packaged builds | Browser code talks through host RPC and must not bypass the trusted host boundary |
+| Desktop app | [`app`](./app/) | Electrobun host, Preact workspace UI, embedded daemon lifecycle in packaged builds | Browser code uses SDK calls over host-backed IPC and must not bypass the trusted host boundary |
 | Workforce CLI | [`workforce`](./workforce/) | Headless operator surface for repository-scoped multi-agent orchestration | Thin daemon-backed client, not runtime owner |
 | Config | [`core/config`](./core/config/) | JSON-safe persisted config merge helpers and precedence | Does not load prompt frontmatter or own runtime effects |
 | Paths | [`core/paths`](./core/paths/) | Pure Goddard path names and path resolution | Does not read, write, persist tokens, or open databases |
@@ -82,9 +84,9 @@ Read more: [`spec/daemon/pr-feedback.md`](./spec/daemon/pr-feedback.md).
 
 ### Daemon Control
 
-1. Local clients communicate with the daemon through typed IPC.
-2. `@goddard-ai/sdk` exposes the stable method surface for daemon-backed
-   behavior.
+1. Local clients use the SDK for daemon-backed control.
+2. `@goddard-ai/sdk` communicates with the daemon through typed IPC and exposes
+   one stable method surface for daemon-backed behavior.
 3. App, CLI, and custom integrations remain thin clients over the same daemon
    contracts.
 
