@@ -6,7 +6,7 @@
 - Base branch assumption: `codex/add-custom-terminal-input`.
 - The user confirmed the sprint should include a real standalone terminal tab and app state surface, not only daemon infrastructure.
 - The agreed architecture is: daemon owns PTYs, desktop Bun host owns the daemon terminal stream connection, webview talks to Bun host through Electrobun.
-- Sprint branch state is initialized; `010-define-terminal-contract-and-lifecycle` is complete on review and waiting for human review.
+- Sprint branch state is initialized; `010-define-terminal-contract-and-lifecycle` is approved.
 - Human feedback replaced the prior websocket transport direction with HTTP requests plus daemon streams.
 
 ## Key Constraints
@@ -28,3 +28,4 @@
 - The terminal contract lives in shared schema as HTTP request payloads plus daemon stream events, not websocket frames.
 - SDK additions are type-only surface definitions for the future `sdk.terminal` runtime.
 - Focused schema and SDK tests, typechecks, and lints passed.
+- Human approved `010` after the request/stream revision.

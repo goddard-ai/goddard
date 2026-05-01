@@ -2,7 +2,7 @@
 
 ## Status
 
-finished-unreviewed
+approved
 
 ## Objective
 
@@ -45,6 +45,10 @@ One task ahead is safe only for daemon PTY viability work, because that work dep
 ## Feedback Notes
 
 - Revised the task after human feedback to remove websocket terminology and model terminal control as HTTP requests plus daemon streams.
+
+## Approval Notes
+
+- Approved by the human after the request/stream contract revision.
 
 ## Verification Evidence
 
