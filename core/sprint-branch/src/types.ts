@@ -1,6 +1,9 @@
 /** Valid sprint branch roles managed by the sprint-branch workflow. */
 export type SprintBranchRole = "review" | "approved" | "next"
 
+/** Whether a sprint participates in default active-sprint selection. */
+export type SprintVisibility = "active" | "parked"
+
 /** Canonical branch names derived for one sprint branch workflow instance. */
 export type SprintBranchNames = Record<SprintBranchRole, string>
 
@@ -34,10 +37,11 @@ export type SprintBranchState = {
   schemaVersion?: number
   sprint: string
   baseBranch: string
+  visibility: SprintVisibility
   branches: SprintBranchNames
   tasks: SprintTaskState
   activeStashes: SprintActiveStash[]
-  lock?: { command?: string; [key: string]: unknown } | null
+  lock?: SprintConflictState | null
   conflict: SprintConflictState | null
 }
 
@@ -82,6 +86,7 @@ export type SprintStatusReport = {
   currentBranch: string | null
   inferredFrom: string
   state: SprintBranchState
+  visibility: SprintVisibility
   branches: Record<SprintBranchRole, SprintBranchStatus>
   ancestry: {
     reviewDescendsFromApproved: boolean | null

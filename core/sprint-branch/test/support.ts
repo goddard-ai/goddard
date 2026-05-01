@@ -200,6 +200,7 @@ async function writeSprintState(repo: string, sprint: string, tasks: SprintTestT
       {
         sprint,
         baseBranch: "main",
+        visibility: "active",
         tasks,
         activeStashes: [],
         conflict: null,

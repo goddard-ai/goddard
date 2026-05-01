@@ -8,6 +8,8 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 
 `sprint-branch checkout [name]` is the human review command: it checks out the sprint review branch as a detached snapshot so the live review branch remains agent-owned.
 
+`sprint-branch park [--sprint <name>]` hides a sprint from default active-sprint selection without deleting branches or Git-private state. `sprint-branch unpark [--sprint <name>]` makes it active again. Use `sprint-branch list --all` to include parked sprints.
+
 `sprint-branch land <target> [name]` and `sprint-branch cleanup <target> [name]` are human-only landing commands. Actual landing and cleanup require an interactive terminal confirmation; use `--dry-run` to inspect them non-interactively. Cleanup removes landed sprint branches, associated review worktrees, and the Git-private sprint state file.
 
 `sprint-branch reset-state [--task <task>] [--force]` recreates only the Git-private state file after a sprint plan is reworked. It makes the first task, or the selected task, the next valid `start` target by recording earlier task files as approved; it does not move Git branches.
@@ -17,11 +19,14 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 - `sprint-branch status`
 - `sprint-branch diff`
 - `sprint-branch doctor`
+- `sprint-branch list [--all]`
 - `sprint-branch checkout [name]`
 - `sprint-branch land <target> [name]`
 - `sprint-branch cleanup <target> [name]`
 - `sprint-branch init`
 - `sprint-branch reset-state`
+- `sprint-branch park`
+- `sprint-branch unpark`
 - `sprint-branch start`
 - `sprint-branch feedback`
 - `sprint-branch resume`

@@ -151,6 +151,7 @@ export async function buildStatusReport(input: SprintInferenceInput) {
     currentBranch: context.currentBranch,
     inferredFrom: context.inferredFrom,
     state: parsed.state,
+    visibility: parsed.state.visibility,
     branches,
     ancestry: {
       reviewDescendsFromApproved,
@@ -186,6 +187,7 @@ export function formatStatusReport(report: SprintStatusReport) {
   const lines = [
     `Sprint: ${report.sprint}`,
     `State: ${report.stateRelativePath}`,
+    `Visibility: ${report.visibility}`,
     `Inferred from: ${report.inferredFrom}`,
     `Current branch: ${report.currentBranch ?? "detached HEAD"}`,
     "",

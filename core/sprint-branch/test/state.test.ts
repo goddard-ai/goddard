@@ -31,6 +31,7 @@ describe("sprint branch state parsing", () => {
     const parsed = parseSprintState({
       sprint: "example",
       baseBranch: "main",
+      visibility: "parked",
       tasks: {
         review: "010-task-name",
         next: null,
@@ -42,6 +43,24 @@ describe("sprint branch state parsing", () => {
 
     expect(parsed.diagnostics).toEqual([])
     expect(parsed.state?.branches).toEqual(branches)
+    expect(parsed.state?.visibility).toBe("parked")
+  })
+
+  test("defaults missing visibility to active", () => {
+    const parsed = parseSprintState({
+      sprint: "example",
+      baseBranch: "main",
+      tasks: {
+        review: "010-task-name",
+        next: null,
+        approved: [],
+      },
+      activeStashes: [],
+      conflict: null,
+    })
+
+    expect(parsed.diagnostics).toEqual([])
+    expect(parsed.state?.visibility).toBe("active")
   })
 
   test("rejects invalid task state", () => {
@@ -61,5 +80,23 @@ describe("sprint branch state parsing", () => {
     expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "invalid_string_array",
     )
+  })
+
+  test("rejects invalid visibility", () => {
+    const parsed = parseSprintState({
+      sprint: "example",
+      baseBranch: "main",
+      visibility: "hidden",
+      tasks: {
+        review: "010-task-name",
+        next: null,
+        approved: [],
+      },
+      activeStashes: [],
+      conflict: null,
+    })
+
+    expect(parsed.state).toBeNull()
+    expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid_visibility")
   })
 })

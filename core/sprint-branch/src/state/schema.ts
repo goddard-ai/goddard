@@ -26,6 +26,7 @@ export function parseSprintState(value: unknown) {
 
   const sprint = readString(record.sprint, "sprint", diagnostics)
   const baseBranch = readString(record.baseBranch, "baseBranch", diagnostics)
+  const visibility = readVisibility(record.visibility, diagnostics)
   const tasks = parseTasks(record.tasks, diagnostics)
   const activeStashes = parseActiveStashes(record.activeStashes, diagnostics)
   const conflict =
@@ -62,6 +63,7 @@ export function parseSprintState(value: unknown) {
   const state: SprintBranchState = {
     sprint,
     baseBranch,
+    visibility,
     branches: getExpectedBranches(sprint),
     tasks,
     activeStashes,
@@ -159,6 +161,22 @@ function readOptionalString(value: unknown, field: string, diagnostics: SprintDi
     message: `${field} must be null or a non-empty string.`,
   })
   return null
+}
+
+function readVisibility(value: unknown, diagnostics: SprintDiagnostic[]) {
+  if (value === undefined) {
+    return "active"
+  }
+  if (value === "active" || value === "parked") {
+    return value
+  }
+
+  diagnostics.push({
+    severity: "error",
+    code: "invalid_visibility",
+    message: "visibility must be active or parked.",
+  })
+  return "active"
 }
 
 function readStringArray(value: unknown, field: string, diagnostics: SprintDiagnostic[]) {

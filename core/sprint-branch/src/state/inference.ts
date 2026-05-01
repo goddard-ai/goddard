@@ -4,7 +4,7 @@ import { autocomplete, isCancel } from "@clack/prompts"
 import { getCurrentBranch, resolveRepositoryRoot } from "../git/repository"
 import type { SprintContext, SprintDiagnostic } from "../types"
 import { parseSprintBranchName, validateSprintName } from "./branches"
-import { findSprintStateFiles } from "./io"
+import { findSprintStateFiles, readSprintStateFile } from "./io"
 import { sprintStateDisplayPath, sprintStatePath } from "./paths"
 
 /** Error raised when the current sprint cannot be inferred safely. */
@@ -57,7 +57,10 @@ export async function inferSprintContext(input: SprintInferenceInput) {
     )
   }
 
-  const candidates = sprintCandidatesForSelection(rootDir, await findSprintStateFiles(rootDir))
+  const candidates = await sprintCandidatesForSelection(
+    rootDir,
+    await findSprintStateFiles(rootDir),
+  )
   if (candidates.length > 0) {
     if (canPromptForSprint(input)) {
       const selected = await autocomplete({
@@ -150,13 +153,23 @@ function inferSprintFromPath(rootDir: string, cwd: string) {
   return sprint || null
 }
 
-function sprintCandidatesForSelection(rootDir: string, stateFiles: string[]) {
-  return stateFiles
-    .map((statePath) => ({
-      sprint: path.basename(path.dirname(statePath)),
-      relativePath: statePathForDisplay(rootDir, statePath),
-    }))
-    .sort((left, right) => left.sprint.localeCompare(right.sprint))
+async function sprintCandidatesForSelection(rootDir: string, stateFiles: string[]) {
+  const candidates = []
+  for (const statePath of stateFiles) {
+    try {
+      const parsed = await readSprintStateFile(statePath)
+      if (parsed.state?.visibility === "active") {
+        candidates.push({
+          sprint: path.basename(path.dirname(statePath)),
+          relativePath: statePathForDisplay(rootDir, statePath),
+        })
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return candidates.sort((left, right) => left.sprint.localeCompare(right.sprint))
 }
 
 function canPromptForSprint(input: SprintInferenceInput) {

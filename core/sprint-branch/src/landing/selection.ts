@@ -18,16 +18,17 @@ export async function resolveSprintCandidate(
     return readExplicitCandidate(rootDir, input.sprint, diagnostics)
   }
 
-  const candidates = await readSprintCandidates(rootDir)
+  const candidates = await readSprintCandidates(rootDir, true)
   const inferred = inferCandidate(rootDir, input.cwd, currentBranch, candidates)
+  const activeCandidates = candidates.filter((candidate) => candidate.state.visibility === "active")
   if (inferred) {
     return inferred
   }
-  if (candidates.length === 0) {
+  if (activeCandidates.length === 0) {
     diagnostics.push({
       severity: "error",
       code: "missing_sprint_state",
-      message: "No Git metadata sprint-branch/*/state.json files were found.",
+      message: "No active Git metadata sprint-branch/*/state.json files were found.",
     })
     return null
   }
@@ -44,7 +45,7 @@ export async function resolveSprintCandidate(
   const selected = await autocomplete({
     message: "Select sprint",
     placeholder: "Type to filter sprints...",
-    options: candidates.map((candidate) => ({
+    options: activeCandidates.map((candidate) => ({
       value: candidate.sprint,
       label: candidate.sprint,
       hint: candidate.reviewBranch,
@@ -60,7 +61,7 @@ export async function resolveSprintCandidate(
     return null
   }
 
-  return candidates.find((candidate) => candidate.sprint === selected) ?? null
+  return activeCandidates.find((candidate) => candidate.sprint === selected) ?? null
 }
 
 /** Lists available sprint candidates for non-interactive diagnostics. */
@@ -101,14 +102,14 @@ async function readExplicitCandidate(
   }
 }
 
-async function readSprintCandidates(rootDir: string) {
+async function readSprintCandidates(rootDir: string, includeParked = false) {
   const stateFiles = await findSprintStateFiles(rootDir)
   const candidates: SprintCandidate[] = []
 
   for (const statePath of stateFiles) {
     try {
       const parsed = await readSprintStateFile(statePath)
-      if (parsed.state) {
+      if (parsed.state && (includeParked || parsed.state.visibility === "active")) {
         candidates.push(candidateFromState(rootDir, statePath, parsed.state))
       }
     } catch {

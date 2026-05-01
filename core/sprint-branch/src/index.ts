@@ -2,16 +2,19 @@ export { formatCheckoutReport, runCheckout } from "./checkout"
 export { buildDoctorReport, formatDoctorReport } from "./doctor"
 export { GitCommandError, runGit } from "./git/command"
 export { formatHumanCommandReport, runCleanup, runLand } from "./landing"
+export { buildSprintList, formatSprintList } from "./listing"
 export {
   formatMutationReport,
   runApprove,
   runFeedback,
   runFinalize,
   runInit,
+  runPark,
   runRebase,
   runResetState,
   runResume,
   runStart,
+  runUnpark,
 } from "./mutations"
 export { getExpectedBranches, parseSprintBranchName, validateSprintName } from "./state/branches"
 export { SprintInferenceError, inferSprintContext } from "./state/inference"
@@ -31,6 +34,7 @@ export type {
   SprintBranchRole,
   SprintBranchState,
   SprintBranchStatus,
+  SprintVisibility,
   SprintConflictState,
   SprintContext,
   SprintDiagnostic,

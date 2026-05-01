@@ -5,16 +5,19 @@ import { formatCheckoutReport, runCheckout } from "./checkout"
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
 import { GitCommandError, runGit } from "./git/command"
 import { formatHumanCommandReport, runCleanup, runLand } from "./landing"
+import { buildSprintList, formatSprintList } from "./listing"
 import {
   formatMutationReport,
   runApprove,
   runFeedback,
   runFinalize,
   runInit,
+  runPark,
   runRebase,
   runResetState,
   runResume,
   runStart,
+  runUnpark,
   SprintMutationError,
 } from "./mutations"
 import { SprintInferenceError } from "./state/inference"
@@ -176,6 +179,27 @@ export async function main(argv: string[]) {
           }
         },
       }),
+      list: command({
+        name: "list",
+        description: "List sprint branch states",
+        args: {
+          json: jsonFlag(),
+          all: flag({
+            long: "all",
+            description: "Include parked sprints",
+          }),
+        },
+        handler: async ({ json, all }) => {
+          const report = await buildSprintList({
+            cwd: process.cwd(),
+            includeParked: all,
+          })
+          writeOutput(json, report, formatSprintList(report))
+          if (!report.ok) {
+            process.exitCode = 1
+          }
+        },
+      }),
       checkout: command({
         name: "checkout",
         description: "Check out a sprint review snapshot in detached HEAD",
@@ -306,6 +330,28 @@ export async function main(argv: string[]) {
           await writeMutation(
             args.json,
             runResetState({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
+        },
+      }),
+      park: command({
+        name: "park",
+        description: "Hide a sprint from default active selection",
+        args: commonMutationArgs,
+        handler: async (args) => {
+          await writeMutation(
+            args.json,
+            runPark({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
+        },
+      }),
+      unpark: command({
+        name: "unpark",
+        description: "Restore a parked sprint to default active selection",
+        args: commonMutationArgs,
+        handler: async (args) => {
+          await writeMutation(
+            args.json,
+            runUnpark({ cwd: process.cwd(), ...args, interactive: !args.json }),
           )
         },
       }),

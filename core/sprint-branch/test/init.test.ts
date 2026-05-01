@@ -31,10 +31,12 @@ describe("sprint-branch init", () => {
     expect(Object.keys(state)).toEqual([
       "sprint",
       "baseBranch",
+      "visibility",
       "tasks",
       "activeStashes",
       "conflict",
     ])
+    expect(state.visibility).toBe("active")
     expect(state.tasks.review).toBeNull()
   })
 

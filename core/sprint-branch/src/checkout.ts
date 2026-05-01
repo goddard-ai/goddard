@@ -23,6 +23,7 @@ type CheckoutCandidate = {
   sprint: string
   stateRelativePath: string
   reviewBranch: string
+  visibility: SprintBranchState["visibility"]
 }
 
 /** Report returned after planning or running a human-safe review checkout. */
@@ -169,16 +170,17 @@ async function resolveCheckoutTarget(
     return readExplicitCandidate(rootDir, input.sprint, diagnostics)
   }
 
-  const candidates = await readCheckoutCandidates(rootDir)
+  const candidates = await readCheckoutCandidates(rootDir, true)
   const inferred = inferCandidate(rootDir, input.cwd, currentBranch, candidates)
+  const activeCandidates = candidates.filter((candidate) => candidate.visibility === "active")
   if (inferred) {
     return inferred
   }
-  if (candidates.length === 0) {
+  if (activeCandidates.length === 0) {
     diagnostics.push({
       severity: "error",
       code: "missing_sprint_state",
-      message: "No Git metadata sprint-branch/*/state.json files were found.",
+      message: "No active Git metadata sprint-branch/*/state.json files were found.",
     })
     return null
   }
@@ -196,7 +198,7 @@ async function resolveCheckoutTarget(
   const selected = await autocomplete({
     message: "Select sprint review snapshot",
     placeholder: "Type to filter sprints...",
-    options: candidates.map((candidate) => ({
+    options: activeCandidates.map((candidate) => ({
       value: candidate.sprint,
       label: candidate.sprint,
       hint: candidate.reviewBranch,
@@ -212,7 +214,7 @@ async function resolveCheckoutTarget(
     return null
   }
 
-  return candidates.find((candidate) => candidate.sprint === selected) ?? null
+  return activeCandidates.find((candidate) => candidate.sprint === selected) ?? null
 }
 
 async function readExplicitCandidate(
@@ -262,14 +264,14 @@ function inferCandidate(
   return candidates.find((entry) => entry.sprint === pathSprint) ?? null
 }
 
-async function readCheckoutCandidates(rootDir: string) {
+async function readCheckoutCandidates(rootDir: string, includeParked = false) {
   const stateFiles = await findSprintStateFiles(rootDir)
   const candidates: CheckoutCandidate[] = []
 
   for (const statePath of stateFiles) {
     try {
       const parsed = await readSprintStateFile(statePath)
-      if (parsed.state) {
+      if (parsed.state && (includeParked || parsed.state.visibility === "active")) {
         candidates.push(candidateFromState(rootDir, statePath, parsed.state))
       }
     } catch {
@@ -297,6 +299,7 @@ function candidateFromState(
     sprint: state.sprint,
     stateRelativePath: statePathForDisplay(rootDir, statePath),
     reviewBranch: state.branches.review,
+    visibility: state.visibility,
   }
 }
 

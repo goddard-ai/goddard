@@ -50,6 +50,7 @@ export async function runInit(input: MutationInput & { base: string }) {
   const state: SprintBranchState = {
     sprint: context.sprint,
     baseBranch: input.base,
+    visibility: "active",
     branches,
     tasks: emptyTasks(),
     activeStashes: [],
@@ -142,6 +143,7 @@ export async function runResetState(
   const nextState: SprintBranchState = {
     sprint: context.sprint,
     baseBranch,
+    visibility: existingState?.visibility ?? "active",
     branches,
     tasks: {
       review: null,
@@ -214,6 +216,16 @@ export async function runResetState(
     await writeSprintState(context.rootDir, nextState)
     return { ...plan, executed: true }
   })
+}
+
+/** Parks a sprint so default selection ignores it until explicitly requested. */
+export async function runPark(input: MutationInput) {
+  return runVisibilityChange(input, "park", "parked")
+}
+
+/** Restores a parked sprint to default active selection. */
+export async function runUnpark(input: MutationInput) {
+  return runVisibilityChange(input, "unpark", "active")
 }
 
 /** Starts the requested task on review or next according to the rolling branch state. */
@@ -1169,6 +1181,41 @@ function pushForceableResetDiagnostic(
     code,
     message,
     suggestion,
+  })
+}
+
+async function runVisibilityChange(
+  input: MutationInput,
+  command: "park" | "unpark",
+  visibility: SprintBranchState["visibility"],
+) {
+  const { context, state, diagnostics } = await readCommandState(input, command)
+  const nextState = { ...cloneState(state), visibility }
+  const summary =
+    state.visibility === visibility
+      ? `Sprint ${state.sprint} is already ${visibility}.`
+      : `${command === "park" ? "Park" : "Unpark"} sprint ${state.sprint}.`
+
+  const plan = makePlan({
+    command,
+    context,
+    state: nextState,
+    summary,
+    requiresCleanWorkingTree: false,
+    gitOperations: [],
+    stateFiles: stateFilesForState(nextState),
+    conflictHandling:
+      "Only Git-private sprint visibility is rewritten. Branches and working tree files are not moved.",
+    diagnostics,
+  })
+
+  if (input.dryRun || !plan.ok) {
+    return withDryRun(plan, input.dryRun)
+  }
+
+  return withSprintLock(context, state, command, async () => {
+    await writeSprintState(context.rootDir, nextState)
+    return { ...plan, state: nextState, executed: true }
   })
 }
 
