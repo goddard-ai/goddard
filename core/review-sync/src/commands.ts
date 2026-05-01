@@ -5,10 +5,19 @@ import { autocomplete, cancel, isCancel } from "@clack/prompts"
 import { command, flag, optional, positional, runSafely, string, subcommands } from "cmd-ts"
 
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
-import { git, pathExists, resolveCurrentBranch, resolveRef, resolveRequiredGitDir } from "./git.ts"
+import {
+  git,
+  pathExists,
+  resolveCurrentBranch,
+  resolveRef,
+  resolveRequiredGitCommonDir,
+  resolveRequiredGitDir,
+  resolveRequiredRepoRoot,
+} from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { createRuntimeContext, writeResult } from "./runtime.ts"
 import {
+  AgentBranchWorktreeMissingError,
   AgentWorktreeCheckoutMismatchError,
   createSessionForStart,
   inferSession,
@@ -245,7 +254,12 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
 
 /** Performs the watch workflow after CLI parsing and command-level error handling. */
 async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
-  const { session, startResult } = await resolveSessionForWatch(input, context)
+  const resolution = await resolveSessionForWatch(input, context)
+  if (resolution.kind === "stopped") {
+    return resolution.result
+  }
+
+  const { session, startResult } = resolution
   let fingerprint = await createWatchFingerprint(session, context)
   const events = createWatchEventQueue(input.signal)
   const watchers = await createReviewSyncWatchers(session, context, events)
@@ -407,16 +421,76 @@ function createReviewSyncCommand(cwd: string) {
 /** Resolves an existing watch session or creates it from start-compatible input. */
 async function resolveSessionForWatch(input: WatchReviewSyncInput, context: RuntimeContext) {
   if (input.agentBranch) {
-    const { session, result } = await startReviewSyncOperationWithSession(
-      input.agentBranch,
+    return await resolveAgentBranchSessionForWatch(
+      {
+        ...input,
+        agentBranch: input.agentBranch,
+      },
       context,
     )
-    return { session, startResult: result }
   }
 
   return {
+    kind: "ready" as const,
     session: await inferSession(context),
     startResult: null,
+  }
+}
+
+/** Waits for Git metadata to show that the requested agent branch owns a worktree. */
+async function resolveAgentBranchSessionForWatch(
+  input: WatchReviewSyncInput & { agentBranch: string },
+  context: RuntimeContext,
+) {
+  const events = createWatchEventQueue(input.signal)
+  const watchers = await createRepositoryMetadataWatchers(context, events)
+  let waitingResultSent = false
+
+  try {
+    while (!isAbortSignalAborted(input.signal)) {
+      try {
+        const { session, result } = await startReviewSyncOperationWithSession(
+          input.agentBranch,
+          context,
+        )
+        return { kind: "ready" as const, session, startResult: result }
+      } catch (error) {
+        if (!(error instanceof AgentBranchWorktreeMissingError)) {
+          throw error
+        }
+
+        if (!waitingResultSent) {
+          waitingResultSent = true
+          await input.onResult?.(
+            createReviewSyncResult({
+              exitCode: 0,
+              command: "watch",
+              status: "ok",
+              message: `Waiting for ${input.agentBranch} to be checked out in an agent worktree.`,
+            }),
+          )
+        }
+
+        if (
+          !(await events.waitForEvent()) ||
+          !(await waitForWatchQuietPeriod(events, input.signal))
+        ) {
+          break
+        }
+      }
+    }
+  } finally {
+    closeReviewSyncWatchers(watchers)
+  }
+
+  return {
+    kind: "stopped" as const,
+    result: createReviewSyncResult({
+      exitCode: getWatchExitCode(input.signal),
+      command: "watch",
+      status: "ok",
+      message: `Stopped waiting for ${input.agentBranch} to be checked out in an agent worktree.`,
+    }),
   }
 }
 
@@ -568,6 +642,47 @@ async function createReviewSyncWatchers(
     },
   ])
 
+  return await createFsWatchers(targets, events)
+}
+
+/** Watches repository-level Git metadata before a session knows its agent worktree. */
+async function createRepositoryMetadataWatchers(context: RuntimeContext, events: WatchEventQueue) {
+  const repoRoot = await resolveRequiredRepoRoot(context.cwd, context)
+  const [commonDir, gitDir] = await Promise.all([
+    resolveRequiredGitCommonDir(repoRoot, context),
+    resolveRequiredGitDir(repoRoot, context),
+  ])
+  const targets = await resolveExistingWatchTargets([
+    {
+      path: gitDir,
+      recursive: false,
+      source: "git",
+    },
+    {
+      path: commonDir,
+      recursive: false,
+      source: "git",
+    },
+    {
+      path: join(commonDir, "refs"),
+      recursive: true,
+      source: "git",
+    },
+    {
+      path: join(commonDir, "worktrees"),
+      recursive: true,
+      source: "git",
+    },
+  ])
+
+  return await createFsWatchers(targets, events)
+}
+
+/** Creates filesystem watchers for an already resolved set of existing targets. */
+async function createFsWatchers(
+  targets: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }>,
+  events: WatchEventQueue,
+) {
   const watchers: FSWatcher[] = []
   try {
     for (const target of targets) {

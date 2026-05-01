@@ -35,7 +35,9 @@ either the agent worktree or the review worktree. `watch` monitors both worktree
 and their Git metadata, then runs `sync` when either worktree's branch, `HEAD`,
 or snapshot tree changes.
 Passing `<agent-branch>` to `watch` starts or reuses the review-sync session
-before watching, so a separate `start` command is not required.
+before watching, so a separate `start` command is not required. If that branch
+is not currently checked out in an agent worktree, `watch` waits for Git
+metadata to show the checkout before starting the session.
 If the agent worktree temporarily checks out another branch while `watch` is
 running, `watch` waits for the recorded agent branch to be checked out again
 before retrying sync. One-shot `start` and `sync` commands fail fast when the

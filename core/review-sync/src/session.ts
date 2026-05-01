@@ -40,6 +40,16 @@ export type AgentWorktreeChoice = {
   path: string
 }
 
+/** Signals that the requested agent branch is not currently owned by a worktree. */
+export class AgentBranchWorktreeMissingError extends UserError {
+  readonly agentBranch
+
+  constructor(agentBranch: string) {
+    super(`Agent branch ${agentBranch} is not checked out in another worktree.`)
+    this.agentBranch = agentBranch
+  }
+}
+
 /** Signals a temporary agent checkout mismatch that callers can wait through. */
 export class AgentWorktreeCheckoutMismatchError extends UserError {
   readonly worktree
@@ -178,7 +188,7 @@ async function resolveAgentWorktreeForStart(
   const choices = await listAgentWorktreeChoices(reviewWorktree, context)
   const match = choices.find((choice) => choice.branch === agentBranch)
   if (!match) {
-    throw new UserError(`Agent branch ${agentBranch} is not checked out in another worktree.`)
+    throw new AgentBranchWorktreeMissingError(agentBranch)
   }
   return match.path
 }
