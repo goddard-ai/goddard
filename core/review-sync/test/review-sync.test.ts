@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -10,6 +10,7 @@ import {
   pauseReviewSession,
   resumeReviewSession,
   startReviewSync,
+  statusReviewSession,
   syncReviewSession,
   watchReviewSession,
   type ReviewSyncResult,
@@ -168,6 +169,52 @@ test("sync fails when the agent worktree is not on the expected branch", async (
   expect(result.message).toContain("must be on codex/review-sync-test; currently codex/temporary")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("base\n")
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+})
+
+test("status explains recovery when multiple sessions match the worktree", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const commonDir = (
+    await runGit(fixture.agentDir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+  ).stdout.trim()
+  const sessionsRoot = join(commonDir, "review-sync", "sessions")
+  const [sessionId] = await readdir(sessionsRoot)
+  const state = JSON.parse(
+    await readFile(join(sessionsRoot, sessionId!, "state.json"), "utf-8"),
+  ) as Record<string, unknown>
+  const duplicateSessionId = "sha256-duplicate-session"
+  await mkdir(join(sessionsRoot, duplicateSessionId), { recursive: true })
+  await writeText(
+    join(sessionsRoot, duplicateSessionId, "state.json"),
+    `${JSON.stringify(
+      {
+        ...state,
+        sessionId: duplicateSessionId,
+        agentBranch: "codex/second-review-sync-test",
+        reviewBranch: "codex/second-review-sync-test--review",
+        refs: {
+          agentSnapshot: `refs/review-sync/${duplicateSessionId}/agent-snapshot`,
+          renderedSnapshot: `refs/review-sync/${duplicateSessionId}/rendered-snapshot`,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  )
+
+  const result = await statusReviewSession({
+    cwd: fixture.agentDir,
+  })
+
+  expect(result.status).toBe("error")
+  expect(result.message).toContain("Multiple review-sync sessions match")
+  expect(result.message).toContain("codex/review-sync-test -> codex/review-sync-test--review")
+  expect(result.message).toContain(
+    "codex/second-review-sync-test -> codex/second-review-sync-test--review",
+  )
+  expect(result.message).toContain(`move stale session dirs out of ${sessionsRoot}`)
+  expect(result.message).toContain("accepted/rejected patches live under each state dir")
 })
 
 test("sync preserves rejected human patches and refreshes review from the agent", async () => {

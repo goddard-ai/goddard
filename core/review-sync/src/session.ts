@@ -25,6 +25,7 @@ import {
   listSessions,
   readSessionStateFile,
   resolveSessionDir,
+  resolveSessionsRoot,
   writeSessionState,
 } from "./state.ts"
 import {
@@ -208,7 +209,26 @@ export async function inferSession(context: RuntimeContext) {
     return pathMatches[0]!
   }
   if (pathMatches.length > 1) {
-    throw new UserError(`Multiple review-sync sessions match ${cwd}.`)
+    throw new UserError(
+      [
+        `Multiple review-sync sessions match ${cwd}.`,
+        "review-sync cannot infer which saved session to use from this worktree.",
+        "Matching sessions:",
+        ...pathMatches.flatMap((session) => [
+          `- ${session.agentBranch} -> ${session.reviewBranch}`,
+          `  session: ${session.sessionId}`,
+          `  agent worktree: ${session.agentWorktree}`,
+          `  review worktree: ${session.reviewWorktree}`,
+          `  state dir: ${resolveSessionDir(commonDir, session.sessionId)}`,
+        ]),
+        "Recovery options:",
+        "- Run the command from a worktree recorded by only one session.",
+        "- For start/watch, choose the intended branch explicitly: review-sync start <agent-branch> or review-sync watch <agent-branch>.",
+        `- Keep the intended session and move stale session dirs out of ${resolveSessionsRoot(commonDir)}.`,
+        "- Example cleanup: mv <state-dir> /tmp/review-sync-stale-<session-id>.",
+        "- Check stale session patches before deleting them; accepted/rejected patches live under each state dir.",
+      ].join("\n"),
+    )
   }
 
   const branch = await resolveCurrentBranch(repoRoot, context)
