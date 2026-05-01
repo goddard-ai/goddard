@@ -1,15 +1,17 @@
 import { expect, test } from "bun:test"
 
 import {
-  TerminalClientFrame,
+  TerminalCreateRequest,
   TerminalDaemonEvent,
+  TerminalEventStreamFilter,
   TerminalResizeRequest,
+  TerminalRestartRequest,
 } from "../src/daemon/terminals.ts"
 
-test("TerminalClientFrame accepts the terminal control frames", () => {
+test("terminal HTTP request payloads address a connection-local instance", () => {
   expect(
-    TerminalClientFrame.safeParse({
-      type: "terminal.create",
+    TerminalCreateRequest.safeParse({
+      connectionId: "term-conn-1",
       instanceId: "primary",
       options: {
         cwd: "/repo",
@@ -22,16 +24,8 @@ test("TerminalClientFrame accepts the terminal control frames", () => {
   ).toBe(true)
 
   expect(
-    TerminalClientFrame.safeParse({
-      type: "terminal.input",
-      instanceId: "primary",
-      data: "\u0003",
-    }).success,
-  ).toBe(true)
-
-  expect(
-    TerminalClientFrame.safeParse({
-      type: "terminal.close",
+    TerminalRestartRequest.safeParse({
+      connectionId: "term-conn-1",
       instanceId: "primary",
     }).success,
   ).toBe(true)
@@ -40,7 +34,7 @@ test("TerminalClientFrame accepts the terminal control frames", () => {
 test("TerminalResizeRequest requires positive PTY dimensions", () => {
   expect(
     TerminalResizeRequest.safeParse({
-      type: "terminal.resize",
+      connectionId: "term-conn-1",
       instanceId: "primary",
       dimensions: {
         cols: 0,
@@ -50,10 +44,11 @@ test("TerminalResizeRequest requires positive PTY dimensions", () => {
   ).toBe(false)
 })
 
-test("TerminalDaemonEvent accepts lifecycle events and connection-level errors", () => {
+test("TerminalDaemonEvent accepts lifecycle events and connection-scoped errors", () => {
   expect(
     TerminalDaemonEvent.safeParse({
       type: "terminal.output",
+      connectionId: "term-conn-1",
       instanceId: "primary",
       data: "ready\n",
     }).success,
@@ -62,17 +57,24 @@ test("TerminalDaemonEvent accepts lifecycle events and connection-level errors",
   expect(
     TerminalDaemonEvent.safeParse({
       type: "terminal.error",
-      code: "invalid-frame",
-      message: "Expected terminal client frame.",
+      connectionId: "term-conn-1",
+      code: "invalid-request",
+      message: "Expected terminal request payload.",
       recoverable: true,
     }).success,
   ).toBe(true)
 })
 
-test("TerminalClientFrame rejects empty connection-local instance ids", () => {
+test("terminal stream filters and requests reject empty connection-local ids", () => {
   expect(
-    TerminalClientFrame.safeParse({
-      type: "terminal.restart",
+    TerminalEventStreamFilter.safeParse({
+      connectionId: "",
+    }).success,
+  ).toBe(false)
+
+  expect(
+    TerminalRestartRequest.safeParse({
+      connectionId: "term-conn-1",
       instanceId: "",
     }).success,
   ).toBe(false)

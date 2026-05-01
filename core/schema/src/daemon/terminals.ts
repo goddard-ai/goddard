@@ -1,11 +1,13 @@
-/**
- * Shared daemon terminal websocket contract.
- *
- * Terminal instance ids are scoped to one terminal websocket connection. The daemon must not
- * persist them or route commands by a global terminal id; closing the websocket disposes every
- * instance created through that connection.
- */
+/** Shared daemon terminal HTTP request and event-stream contract. */
 import { z } from "zod"
+
+/**
+ * Daemon-minted id for the host terminal event stream that owns terminal instances.
+ * Closing this stream disposes every terminal instance created under the connection.
+ */
+export const TerminalConnectionId = z.string().min(1)
+
+export type TerminalConnectionId = z.infer<typeof TerminalConnectionId>
 
 /** Connection-local id chosen by the terminal client for one daemon-managed terminal. */
 export const TerminalInstanceId = z.string().min(1)
@@ -37,7 +39,7 @@ export const TerminalRuntimeState = z.enum(["starting", "running", "exited", "cl
 
 export type TerminalRuntimeState = z.infer<typeof TerminalRuntimeState>
 
-/** Runtime metadata returned for one terminal instance on the current websocket connection. */
+/** Runtime metadata returned for one terminal instance on the current terminal connection. */
 export const TerminalRuntimeMetadata = z.strictObject({
   instanceId: TerminalInstanceId,
   state: TerminalRuntimeState,
@@ -50,78 +52,106 @@ export const TerminalRuntimeMetadata = z.strictObject({
 
 export type TerminalRuntimeMetadata = z.infer<typeof TerminalRuntimeMetadata>
 
-const TerminalInstanceFrame = z.strictObject({
+/** Request payload used to create one daemon terminal connection and event stream owner. */
+export const TerminalConnectRequest = z.strictObject({})
+
+export type TerminalConnectRequest = z.infer<typeof TerminalConnectRequest>
+
+/** Response payload returned after creating one daemon terminal connection. */
+export type TerminalConnectResponse = {
+  connectionId: TerminalConnectionId
+}
+
+/** Path or filter params used to address one daemon terminal connection. */
+export const TerminalConnectionParams = z.strictObject({
+  connectionId: TerminalConnectionId,
+})
+
+export type TerminalConnectionParams = z.infer<typeof TerminalConnectionParams>
+
+/** Stream filter used to subscribe to events for one daemon terminal connection. */
+export const TerminalEventStreamFilter = TerminalConnectionParams
+
+export type TerminalEventStreamFilter = z.infer<typeof TerminalEventStreamFilter>
+
+/** Request payload fragment used to address one connection-local terminal instance. */
+export const TerminalInstanceParams = TerminalConnectionParams.extend({
   instanceId: TerminalInstanceId,
 })
 
-/** Client frame that asks the daemon to create one terminal on the current connection. */
-export const TerminalCreateRequest = TerminalInstanceFrame.extend({
-  type: z.literal("terminal.create"),
+export type TerminalInstanceParams = z.infer<typeof TerminalInstanceParams>
+
+/** HTTP request payload that asks the daemon to create one terminal on a connection. */
+export const TerminalCreateRequest = TerminalInstanceParams.extend({
   options: TerminalSpawnOptions.optional(),
 })
 
 export type TerminalCreateRequest = z.infer<typeof TerminalCreateRequest>
 
-/** Client frame that writes raw terminal input to one connection-local instance. */
-export const TerminalInputRequest = TerminalInstanceFrame.extend({
-  type: z.literal("terminal.input"),
+/** Response payload returned after creating one terminal instance. */
+export type TerminalCreateResponse = {
+  terminal: TerminalRuntimeMetadata
+}
+
+/** HTTP request payload that writes raw terminal input to one connection-local instance. */
+export const TerminalInputRequest = TerminalInstanceParams.extend({
   data: z.string().min(1),
 })
 
 export type TerminalInputRequest = z.infer<typeof TerminalInputRequest>
 
-/** Client frame that resizes one connection-local terminal instance. */
-export const TerminalResizeRequest = TerminalInstanceFrame.extend({
-  type: z.literal("terminal.resize"),
+/** HTTP request payload that resizes one connection-local terminal instance. */
+export const TerminalResizeRequest = TerminalInstanceParams.extend({
   dimensions: TerminalDimensions,
 })
 
 export type TerminalResizeRequest = z.infer<typeof TerminalResizeRequest>
 
-/** Client frame that restarts one connection-local terminal instance. */
-export const TerminalRestartRequest = TerminalInstanceFrame.extend({
-  type: z.literal("terminal.restart"),
+/** HTTP request payload that restarts one connection-local terminal instance. */
+export const TerminalRestartRequest = TerminalInstanceParams.extend({
   options: TerminalSpawnOptions.optional(),
 })
 
 export type TerminalRestartRequest = z.infer<typeof TerminalRestartRequest>
 
-/** Client frame that disposes one connection-local terminal instance. */
-export const TerminalCloseRequest = TerminalInstanceFrame.extend({
-  type: z.literal("terminal.close"),
-})
+/** HTTP request payload that disposes one connection-local terminal instance. */
+export const TerminalCloseRequest = TerminalInstanceParams
 
 export type TerminalCloseRequest = z.infer<typeof TerminalCloseRequest>
 
-/** All terminal control frames accepted from one daemon terminal websocket client. */
-export const TerminalClientFrame = z.discriminatedUnion("type", [
-  TerminalCreateRequest,
-  TerminalInputRequest,
-  TerminalResizeRequest,
-  TerminalRestartRequest,
-  TerminalCloseRequest,
-])
+/** HTTP request payload that disposes all terminal instances for one connection. */
+export const TerminalDisconnectRequest = TerminalConnectionParams
 
-export type TerminalClientFrame = z.infer<typeof TerminalClientFrame>
+export type TerminalDisconnectRequest = z.infer<typeof TerminalDisconnectRequest>
 
-/** Daemon event emitted after a terminal instance has been created on the current connection. */
-export const TerminalCreatedEvent = z.strictObject({
+/** Common event payload fields for one daemon terminal event stream. */
+const TerminalConnectionEvent = z.strictObject({
+  connectionId: TerminalConnectionId,
+})
+
+/** Common event payload fields for one connection-local terminal instance. */
+const TerminalInstanceEvent = TerminalConnectionEvent.extend({
+  instanceId: TerminalInstanceId,
+})
+
+/** Daemon stream event emitted after a terminal instance has been created on a connection. */
+export const TerminalCreatedEvent = TerminalConnectionEvent.extend({
   type: z.literal("terminal.created"),
   terminal: TerminalRuntimeMetadata,
 })
 
 export type TerminalCreatedEvent = z.infer<typeof TerminalCreatedEvent>
 
-/** Daemon event carrying terminal output for one connection-local instance. */
-export const TerminalOutputEvent = TerminalInstanceFrame.extend({
+/** Daemon stream event carrying terminal output for one connection-local instance. */
+export const TerminalOutputEvent = TerminalInstanceEvent.extend({
   type: z.literal("terminal.output"),
   data: z.string().min(1),
 })
 
 export type TerminalOutputEvent = z.infer<typeof TerminalOutputEvent>
 
-/** Daemon event emitted when one terminal process exits. */
-export const TerminalExitEvent = TerminalInstanceFrame.extend({
+/** Daemon stream event emitted when one terminal process exits. */
+export const TerminalExitEvent = TerminalInstanceEvent.extend({
   type: z.literal("terminal.exit"),
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable(),
@@ -129,26 +159,27 @@ export const TerminalExitEvent = TerminalInstanceFrame.extend({
 
 export type TerminalExitEvent = z.infer<typeof TerminalExitEvent>
 
-/** Daemon event emitted when a terminal title changes. */
-export const TerminalTitleEvent = TerminalInstanceFrame.extend({
+/** Daemon stream event emitted when a terminal title changes. */
+export const TerminalTitleEvent = TerminalInstanceEvent.extend({
   type: z.literal("terminal.title"),
   title: z.string(),
 })
 
 export type TerminalTitleEvent = z.infer<typeof TerminalTitleEvent>
 
-/** Daemon event emitted when a terminal reports a current working directory change. */
-export const TerminalCwdEvent = TerminalInstanceFrame.extend({
+/** Daemon stream event emitted when a terminal reports a current working directory change. */
+export const TerminalCwdEvent = TerminalInstanceEvent.extend({
   type: z.literal("terminal.cwd"),
   cwd: z.string().min(1),
 })
 
 export type TerminalCwdEvent = z.infer<typeof TerminalCwdEvent>
 
-/** Stable error categories for terminal websocket failures. */
+/** Stable error categories for terminal request or stream failures. */
 export const TerminalErrorCode = z.enum([
-  "invalid-frame",
+  "invalid-request",
   "duplicate-instance",
+  "unknown-connection",
   "unknown-instance",
   "spawn-failed",
   "input-failed",
@@ -160,8 +191,8 @@ export const TerminalErrorCode = z.enum([
 
 export type TerminalErrorCode = z.infer<typeof TerminalErrorCode>
 
-/** Daemon event emitted for frame, instance, or terminal runtime failures. */
-export const TerminalErrorEvent = z.strictObject({
+/** Daemon stream event emitted for connection, instance, or terminal runtime failures. */
+export const TerminalErrorEvent = TerminalConnectionEvent.extend({
   type: z.literal("terminal.error"),
   instanceId: TerminalInstanceId.optional(),
   code: TerminalErrorCode,
@@ -171,7 +202,7 @@ export const TerminalErrorEvent = z.strictObject({
 
 export type TerminalErrorEvent = z.infer<typeof TerminalErrorEvent>
 
-/** All terminal events emitted by one daemon terminal websocket connection. */
+/** All terminal events emitted by one daemon terminal event stream. */
 export const TerminalDaemonEvent = z.discriminatedUnion("type", [
   TerminalCreatedEvent,
   TerminalOutputEvent,

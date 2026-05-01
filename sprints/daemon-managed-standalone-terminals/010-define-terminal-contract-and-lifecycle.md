@@ -10,14 +10,15 @@ Lock the shared terminal protocol and lifecycle rules before runtime work starts
 
 ## Scope
 
-- Add shared schema/types for terminal websocket frames and terminal runtime metadata.
+- Add shared schema/types for terminal HTTP request payloads, daemon stream events, and terminal runtime metadata.
 - Define the SDK-facing terminal surface shape.
 - Codify connection-scoped instance ids, Bun-host ownership, and disconnect disposal semantics.
 
 ## Dependencies
 
-- Confirmed sprint architecture: Bun host owns the daemon terminal connection.
-- Terminals are ephemeral to the Bun-host daemon websocket connection in this sprint.
+- Confirmed sprint architecture: Bun host owns the daemon terminal stream connection.
+- Terminals are ephemeral to the Bun-host daemon terminal stream connection in this sprint.
+- Human feedback replaced the prior websocket direction with HTTP requests plus daemon streams.
 
 ## Acceptance Criteria
 
@@ -36,10 +37,14 @@ One task ahead is safe only for daemon PTY viability work, because that work dep
 
 ## Implementation Notes
 
-- Added shared terminal websocket frame schemas under `@goddard-ai/schema/daemon`.
-- Defined connection-local terminal instance ids, create/input/resize/restart/close client frames, and created/output/exit/title/cwd/error daemon events.
-- Added SDK-facing terminal connection types that model one websocket-owned set of terminal instances without implementing transport yet.
+- Added shared terminal HTTP request and daemon stream event schemas under `@goddard-ai/schema/daemon`.
+- Defined daemon-minted terminal connection ids, connection-local terminal instance ids, create/input/resize/restart/close request payloads, and created/output/exit/title/cwd/error daemon events.
+- Added SDK-facing terminal connection types that model request-based controls and stream-based events without implementing transport yet.
 - Documented terminal terms in the schema and SDK glossaries.
+
+## Feedback Notes
+
+- Revised the task after human feedback to remove websocket terminology and model terminal control as HTTP requests plus daemon streams.
 
 ## Verification Evidence
 

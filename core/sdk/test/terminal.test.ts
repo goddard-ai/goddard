@@ -2,12 +2,22 @@ import { expect, test, vi } from "bun:test"
 
 import type { GoddardTerminalConnection } from "../src/index.ts"
 
-test("GoddardTerminalConnection models connection-local terminal controls", async () => {
+test("GoddardTerminalConnection models HTTP controls and stream events", async () => {
   const onEvent = vi.fn()
   const sent: string[] = []
   const terminal: GoddardTerminalConnection = {
+    connectionId: "term-conn-1",
     create: async (input) => {
       sent.push(`create:${input.instanceId}`)
+      return {
+        terminal: {
+          instanceId: input.instanceId,
+          state: "running",
+          cwd: input.options?.cwd ?? "/repo",
+          title: null,
+          dimensions: input.options?.dimensions ?? { cols: 80, rows: 24 },
+        },
+      }
     },
     write: async (input) => {
       sent.push(`write:${input.instanceId}:${input.data}`)
@@ -17,6 +27,15 @@ test("GoddardTerminalConnection models connection-local terminal controls", asyn
     },
     restart: async (input) => {
       sent.push(`restart:${input.instanceId}:${input.options?.cwd ?? ""}`)
+      return {
+        terminal: {
+          instanceId: input.instanceId,
+          state: "running",
+          cwd: input.options?.cwd ?? "/repo",
+          title: null,
+          dimensions: input.options?.dimensions ?? { cols: 80, rows: 24 },
+        },
+      }
     },
     close: async (input) => {
       sent.push(`close:${input.instanceId}`)
@@ -24,9 +43,10 @@ test("GoddardTerminalConnection models connection-local terminal controls", asyn
     disconnect: async () => {
       sent.push("disconnect")
     },
-    onEvent: (handler) => {
+    subscribe: async (handler) => {
       handler({
         type: "terminal.output",
+        connectionId: "term-conn-1",
         instanceId: "primary",
         data: "ok\n",
       })
@@ -36,7 +56,7 @@ test("GoddardTerminalConnection models connection-local terminal controls", asyn
     },
   }
 
-  const unsubscribe = terminal.onEvent(onEvent)
+  const unsubscribe = await terminal.subscribe(onEvent)
   await terminal.create({ instanceId: "primary", options: { cwd: "/repo" } })
   await terminal.write({ instanceId: "primary", data: "ls\n" })
   await terminal.resize({ instanceId: "primary", dimensions: { cols: 100, rows: 30 } })
@@ -47,6 +67,7 @@ test("GoddardTerminalConnection models connection-local terminal controls", asyn
 
   expect(onEvent).toHaveBeenCalledWith({
     type: "terminal.output",
+    connectionId: "term-conn-1",
     instanceId: "primary",
     data: "ok\n",
   })
