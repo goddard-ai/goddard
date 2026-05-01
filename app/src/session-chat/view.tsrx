@@ -1,11 +1,12 @@
-import type { DaemonSession } from "@goddard-ai/sdk"
+import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { useSigma } from "preact-sigma"
+import { useState } from "preact/hooks"
 
 import { SessionChat } from "./chat.ts"
 import { Composer } from "./composer.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
-import { useQueries } from "~/lib/query.ts"
+import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { submitSessionPrompt } from "~/sessions/mutations.ts"
@@ -14,31 +15,127 @@ export component SessionChatView(props: {
   projectPath: string | null;
   sessionId: DaemonSession["id"];
 }) {
-  const [history, { session }] = useQueries([
-    [goddardSdk.session.history, [{ id: props.sessionId }]],
-    [goddardSdk.session.get, [{ id: props.sessionId }]],
+  const [, setRetryVersion] = useState(0)
+  let sessionHistory = null as GetSessionHistoryResponse | null
+  let session = null as DaemonSession | null
+  let isLoading = false
+  let loadError = null as unknown
+
+  try {
+    const [loadedHistory, loadedSession] = useQueries([
+      [goddardSdk.session.history, [{ id: props.sessionId }]],
+      [goddardSdk.session.get, [{ id: props.sessionId }]],
+    ])
+
+    sessionHistory = loadedHistory
+    session = loadedSession.session
+  } catch (error) {
+    if (isPromiseLike(error)) {
+      isLoading = true
+    } else {
+      loadError = error
+    }
+  }
+
+  if (isLoading) {
+    <SessionChatLoadingState />
+    return
+  }
+
+  if (loadError !== null || !sessionHistory || !session) {
+    <main class={styles.root}>
+      <SessionChatStateMessage
+        actionLabel="Try again"
+        description="The daemon-backed session or history request failed."
+        onAction={() => {
+          retrySessionChatLoad(props.sessionId)
+          setRetryVersion((version) => version + 1)
+        }}
+        title="Couldn't load session"
+      />
+    </main>
+    return
+  }
+
+  <LoadedSessionChatView {...props} history={sessionHistory} {session} />
+}
+
+component SessionChatLoadingState() {
+  <main class={styles.root}>
+    <SessionChatStateMessage
+      description="Loading the session transcript and current session details."
+      title="Loading session"
+    />
+  </main>
+}
+
+component SessionChatStateMessage(props: {
+  actionLabel?: string;
+  description: string;
+  onAction?: () => void;
+  title: string;
+}) {
+  <div class={styles.stateMessage}>
+    <h2 class={styles.stateTitle}>{props.title}</h2>
+    <p class={styles.stateDescription}>{props.description}</p>
+    if (props.actionLabel && props.onAction) {
+      <button class={styles.stateAction} type="button" onClick={props.onAction}>
+        {props.actionLabel}
+      </button>
+    }
+  </div>
+}
+
+/** Identifies the promises thrown by the local query cache during initial reads. */
+function isPromiseLike(value: unknown) {
+  const maybePromise = value as { then?: unknown } | null
+
+  return typeof maybePromise === "object" && maybePromise !== null &&
+    typeof maybePromise.then === "function"
+}
+
+/** Retries both reads required for the current query-driven session chat view. */
+function retrySessionChatLoad(sessionId: DaemonSession["id"]) {
+  queryClient.invalidate(goddardSdk.session.get, [{ id: sessionId }])
+  queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
+}
+
+component LoadedSessionChatView(props: {
+  history: GetSessionHistoryResponse;
+  projectPath: string | null;
+  session: DaemonSession;
+}) {
+  const chat = useSigma(() => new SessionChat({ session: props.session, turns: props.history.turns }), [
+    props.session,
+    props.history.turns,
   ])
-  const chat = useSigma(() => new SessionChat({ session, turns: history.turns }), [
-    session,
-    history.turns,
-  ])
-  const resolvedProjectPath = useNearestProjectPath(session.cwd)
+  const hasEmptyTranscript = props.history.turns.length === 0 && !props.session.lastAgentMessage
+  const resolvedProjectPath = useNearestProjectPath(props.session.cwd)
 
   useReportTabProject(resolvedProjectPath)
 
   <main class={styles.root}>
-    <Transcript
-      class={styles.transcript}
-      initialScrollPosition="bottom"
-      messages={chat.messages}
-      scrollCacheKey={`detail:session:${session.id}:transcript`}
-    />
+    if (hasEmptyTranscript) {
+      <div class={styles.transcript}>
+        <SessionChatStateMessage
+          description="Send a prompt to start this session."
+          title="No messages yet"
+        />
+      </div>
+    } else {
+      <Transcript
+        class={styles.transcript}
+        initialScrollPosition="bottom"
+        messages={chat.messages}
+        scrollCacheKey={`detail:session:${props.session.id}:transcript`}
+      />
+    }
     <footer class={styles.composerDock}>
       <Composer
         loadSuggestions={async (input) => {
           const response = await goddardSdk.session.composerSuggestions(
             {
-              id: session.id,
+              id: props.session.id,
               trigger: input.trigger,
               query: input.query,
             },
@@ -50,8 +147,8 @@ export component SessionChatView(props: {
           try {
             await submitSessionPrompt(
               {
-                id: session.id,
-                acpId: session.acpSessionId,
+                id: props.session.id,
+                acpId: props.session.acpSessionId,
                 prompt,
               },
             )
