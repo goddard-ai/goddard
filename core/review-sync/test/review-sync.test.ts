@@ -41,24 +41,24 @@ test("start derives and checks out the review branch", async () => {
   })
 
   expect(result.status).toBe("ok")
-  expect(result.reviewBranch).toBe("codex/review-sync-test--review")
-  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+  expect(result.reviewBranch).toBe("review-sync/codex/review-sync-test")
+  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
 })
 
 test("start refuses agent branches that already look like review branches", async () => {
   const fixture = await createFixture({
     "shared.txt": "base\n",
   })
-  await runGit(fixture.agentDir, ["checkout", "-B", "codex/already--review"])
+  await runGit(fixture.agentDir, ["checkout", "-B", "review-sync/codex/already"])
 
   const result = await startReviewSync({
     cwd: fixture.reviewDir,
-    agentBranch: "codex/already--review",
+    agentBranch: "review-sync/codex/already",
   })
 
   expect(result.status).toBe("error")
   expect(result.exitCode).toBe(1)
-  expect(result.message).toContain("already ends with --review")
+  expect(result.message).toContain("already starts with review-sync/")
 })
 
 test("start refuses branches not checked out in another worktree", async () => {
@@ -90,7 +90,7 @@ test("cli start accepts an agent branch from the review worktree", async () => {
 
   expect(result.status).toBe(0)
   expect(result.stdout).toContain("Started review sync")
-  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
 })
 
 test("cli start requires an agent branch when non-interactive", async () => {
@@ -118,7 +118,7 @@ test("cli watch accepts an agent branch from the review worktree", async () => {
 
   expect(result.stdout).toContain("Started review sync")
   expect(result.stdout).toContain("Watching review sync")
-  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
 })
 
 test("sync mirrors agent uncommitted changes through the review branch", async () => {
@@ -249,7 +249,7 @@ test("watch starts a session from an agent branch before syncing", async () => {
   expect(stopped.status).toBe("ok")
   expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(true)
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
-  expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 

@@ -90,5 +90,5 @@ export type PatchFlowResult = {
 }
 
 export const schemaVersion = 1
-export const reviewBranchSuffix = "--review"
+export const reviewBranchPrefix = "review-sync/"
 export const lockStaleAfterMs = 10 * 60 * 1000

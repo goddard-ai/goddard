@@ -28,10 +28,10 @@ try {
     agentBranch: "codex/review-sync-smoke",
   })
   assert.equal(start.status, "ok", "start status")
-  assert.equal(start.reviewBranch, "codex/review-sync-smoke--review", "review branch")
+  assert.equal(start.reviewBranch, "review-sync/codex/review-sync-smoke", "review branch")
   assert.equal(
     await currentBranch(fixture.reviewDir),
-    "codex/review-sync-smoke--review",
+    "review-sync/codex/review-sync-smoke",
     "review worktree branch",
   )
 

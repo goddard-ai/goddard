@@ -5,7 +5,7 @@
 - `Review Worktree`
   - The separate local Git worktree a human opens in their editor.
 - `Review Branch`
-  - The disposable branch derived as `<agent-branch>--review` and checked out in the review worktree.
+  - The disposable branch derived as `review-sync/<agent-branch>` and checked out in the review worktree.
 - `Rendered Snapshot`
   - The synthetic snapshot commit last written into the review branch.
 - `Human Patch`

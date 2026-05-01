@@ -28,7 +28,7 @@ import {
   writeSessionState,
 } from "./state.ts"
 import {
-  reviewBranchSuffix,
+  reviewBranchPrefix,
   schemaVersion,
   type RuntimeContext,
   type SessionState,
@@ -66,8 +66,8 @@ export async function createSessionForStart(agentBranchInput: string, context: R
   const reviewWorktree = await resolveRequiredRepoRoot(context.cwd, context)
   await assertSupportedGitState(reviewWorktree, context)
 
-  if (agentBranch.endsWith(reviewBranchSuffix)) {
-    throw new UserError(`Agent branch ${agentBranch} already ends with ${reviewBranchSuffix}.`)
+  if (agentBranch.startsWith(reviewBranchPrefix)) {
+    throw new UserError(`Agent branch ${agentBranch} already starts with ${reviewBranchPrefix}.`)
   }
 
   const agentWorktree = await resolveAgentWorktreeForStart(agentBranch, reviewWorktree, context)
@@ -81,7 +81,7 @@ export async function createSessionForStart(agentBranchInput: string, context: R
     throw new UserError("Agent and review worktrees must belong to the same Git repository.")
   }
 
-  const reviewBranch = `${agentBranch}${reviewBranchSuffix}`
+  const reviewBranch = `${reviewBranchPrefix}${agentBranch}`
   await assertReviewBranchNotCheckedOutElsewhere({
     cwd: agentWorktree,
     reviewBranch,
@@ -119,7 +119,7 @@ async function listAgentWorktreeChoices(reviewWorktree: string, context: Runtime
     if (
       !worktree.branch ||
       worktree.path === reviewWorktree ||
-      worktree.branch.endsWith(reviewBranchSuffix)
+      worktree.branch.startsWith(reviewBranchPrefix)
     ) {
       continue
     }
