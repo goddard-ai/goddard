@@ -128,6 +128,23 @@ Future mock fixtures should be added only when they exercise a named
 user-visible screen state or workflow. Avoid adding rows solely because a schema
 field or enum exists.
 
+## Terminal Runtime
+
+Terminal PTY support lives in the internal `features/terminal` package. The
+daemon includes that package as a feature contribution so PTY ownership stays
+inside the daemon process without making terminal code part of the daemon
+substrate.
+
+Terminal instances are in-memory and scoped to one terminal connection; closing
+that connection should call `closeAll()` so no PTY outlives its owning app
+connection.
+
+Use the diagnostic command to validate native PTY loading, spawn, write, resize, and close behavior in the daemon runtime:
+
+```sh
+goddard-daemon terminal-check --json
+```
+
 ## Standalone Build
 
 Build standalone Bun executables for the daemon and bundled helper tools with:

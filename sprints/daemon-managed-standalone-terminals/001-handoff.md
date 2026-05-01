@@ -29,3 +29,10 @@
 - SDK additions are type-only surface definitions for the future `sdk.terminal` runtime.
 - Focused schema and SDK tests, typechecks, and lints passed.
 - Human approved `010` after the request/stream revision.
+
+## Task 020 Notes
+
+- Daemon PTY ownership is viable with `bun-pty` from `core/daemon`.
+- The daemon terminal manager currently owns PTYs per future terminal stream connection and supports deterministic `closeAll()` cleanup for disconnect disposal.
+- `goddard-daemon terminal-check --json` exercises spawn, write, resize, and close in both source runtime and the compiled standalone daemon binary.
+- Full daemon tests passed. Daemon lint returned 0 errors with one existing unrelated warning in `core/daemon/test/daemon.test.ts`.

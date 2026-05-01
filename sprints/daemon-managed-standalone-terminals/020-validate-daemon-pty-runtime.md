@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+finished-unreviewed
 
 ## Objective
 
@@ -33,3 +33,18 @@ The human is reviewing whether daemon PTY ownership is technically viable and wo
 
 One task ahead is not safe. If daemon PTY viability or packaging behavior changes, websocket and app work would likely need rework.
 
+## Implementation Notes
+
+- Added `bun-pty` as a daemon package dependency.
+- Added a daemon terminal manager that owns one connection-local set of PTYs, supports create/input/resize/restart/close frames, and closes all runtimes deterministically.
+- Added a `goddard-daemon terminal-check --json` diagnostic path that exercises daemon PTY spawn, write, resize, and close.
+- Extended the standalone build test so the compiled daemon binary runs `terminal-check`, verifying native PTY packaging in the actual daemon artifact.
+
+## Verification Evidence
+
+- `bun test core/daemon/test/terminal-runtime.test.ts`
+- `bun run --cwd core/daemon src/main.ts terminal-check --json`
+- `bun run --cwd core/daemon typecheck`
+- `bun run --cwd core/daemon lint` passed with 0 errors and one existing warning in `test/daemon.test.ts`.
+- `bun test core/daemon/test/standalone-build.test.ts`
+- `bun run --cwd core/daemon test`

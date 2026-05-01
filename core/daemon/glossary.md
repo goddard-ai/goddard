@@ -42,3 +42,6 @@
 - `Workforce Runtime`
   - The daemon-owned coordinator for repository-local multi-agent work.
   - Why: so delegated requests, ownership boundaries, and queue progression can be managed consistently inside one repository context.
+- `Terminal Manager`
+  - The terminal feature's daemon-side in-memory owner for PTYs created through one terminal connection.
+  - Why: so terminal lifecycle, cleanup, and instance-id ownership are enforced inside the daemon process without making terminal code part of the daemon substrate.

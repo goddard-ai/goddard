@@ -164,6 +164,26 @@ export async function main(argv = process.argv.slice(2)) {
           }
         },
       }),
+      "terminal-check": command({
+        name: "terminal-check",
+        description: "Validate daemon PTY spawn, write, resize, and close behavior",
+        args: {
+          json: flag({
+            long: "json",
+            description: "Render the terminal runtime check result as JSON",
+          }),
+        },
+        handler: async (args) => {
+          const { runTerminalRuntimeCheck } = await import("@goddard-ai/terminal/daemon")
+          const result = await runTerminalRuntimeCheck()
+          if (args.json) {
+            console.log(JSON.stringify(result))
+          } else {
+            console.log(result.ok ? "daemon terminal runtime ok" : "daemon terminal runtime failed")
+          }
+          process.exit(result.ok ? 0 : 1)
+        },
+      }),
     },
   })
 
