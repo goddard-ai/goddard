@@ -162,7 +162,6 @@ export async function runResetState(
       review: null,
       next: null,
       approved: targetTaskIndex >= 0 ? taskStems.slice(0, targetTaskIndex) : [],
-      finishedUnreviewed: [],
     },
     activeStashes: [],
     ignoredNextBranchAtFinalize: null,
