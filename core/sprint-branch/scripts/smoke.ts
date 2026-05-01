@@ -48,10 +48,18 @@ async function main() {
 
     // A human or agent should be able to inspect the sprint from the primary
     // worktree right after the agent initializes it.
-    // TECHNICAL NOTE: This covers inference from the Git-private state file,
-    // without relying on the current branch or current directory.
-    const initialStatus = await expectOk<JsonOutput>(primary, ["status", "--json"])
-    const initialDoctor = await expectOk<JsonOutput>(primary, ["doctor", "--json"])
+    const initialStatus = await expectOk<JsonOutput>(primary, [
+      "status",
+      "--sprint",
+      "example",
+      "--json",
+    ])
+    const initialDoctor = await expectOk<JsonOutput>(primary, [
+      "doctor",
+      "--sprint",
+      "example",
+      "--json",
+    ])
     assert.equal(initialStatus.sprint, "example")
     assert.equal(initialDoctor.ok, true)
 
@@ -59,7 +67,7 @@ async function main() {
     // asking it to choose a branch role.
     // TECHNICAL NOTE: The clean worktree check guards against state writes
     // showing up as tracked bookkeeping changes.
-    await expectOk(agent, ["start", "--task", "010-task-name", "--json"])
+    await expectOk(agent, ["start", "--sprint", "example", "--task", "010-task-name", "--json"])
     assert.equal(await currentBranch(agent), "sprint/example/review")
     assert.equal(await workingTreePorcelain(agent), "")
     await fs.writeFile(path.join(agent, "feature-one.txt"), "one\n")
@@ -68,17 +76,22 @@ async function main() {
     // The review diff should show the first task's work.
     // TECHNICAL NOTE: This verifies the CLI is still diffing approved to review
     // after the branch-moving command chose the branch roles.
-    const diff = await expectOk<JsonOutput>(primary, ["diff", "--json"])
+    const diff = await expectOk<JsonOutput>(primary, ["diff", "--sprint", "example", "--json"])
     assert.match(diff.output ?? "", /feature-one\.txt/)
 
     // Starting another task while review is busy should create work-ahead.
     // TECHNICAL NOTE: That work-ahead branch must be based on review, not on
     // approved, so feedback can be folded in before approval.
-    await expectOk(agent, ["start", "--task", "020-task-name", "--json"])
+    await expectOk(agent, ["start", "--sprint", "example", "--task", "020-task-name", "--json"])
     assert.equal(await currentBranch(agent), "sprint/example/next")
     await fs.writeFile(path.join(agent, "feature-two.txt"), "two\n")
     await commitAll(agent, "complete second task")
-    const withNextDoctor = await expectOk<JsonOutput>(primary, ["doctor", "--json"])
+    const withNextDoctor = await expectOk<JsonOutput>(primary, [
+      "doctor",
+      "--sprint",
+      "example",
+      "--json",
+    ])
     assert.equal(withNextDoctor.ok, true)
 
     // Feedback should pause the in-progress work and move the agent back to
@@ -86,7 +99,7 @@ async function main() {
     // TECHNICAL NOTE: The scratch file is untracked on purpose. This checks that
     // feedback stashes untracked files and records a sprint-specific stash.
     await fs.writeFile(path.join(agent, "scratch-note.txt"), "carry this through feedback\n")
-    await expectOk(agent, ["feedback", "--json"])
+    await expectOk(agent, ["feedback", "--sprint", "example", "--json"])
     assert.equal(await currentBranch(agent), "sprint/example/review")
     assert.equal(await workingTreePorcelain(agent), "")
     assert.match(await stashList(agent), /sprint-branch:example:020-task-name:feedback/)
@@ -97,7 +110,7 @@ async function main() {
     // the recorded stash, then commits the restored scratch file before approval.
     await fs.writeFile(path.join(agent, "feature-one.txt"), "one\nreview feedback\n")
     await commitAll(agent, "apply review feedback")
-    await expectOk(agent, ["resume", "--json"])
+    await expectOk(agent, ["resume", "--sprint", "example", "--json"])
     assert.equal(await currentBranch(agent), "sprint/example/next")
     assert.equal(
       await fs.readFile(path.join(agent, "scratch-note.txt"), "utf-8"),
@@ -108,7 +121,7 @@ async function main() {
     // Approving the first task should move the review window forward.
     // TECHNICAL NOTE: Approved fast-forwards to the old review branch, then the
     // rebased next branch becomes the new review branch.
-    await expectOk(agent, ["approve", "--json"])
+    await expectOk(agent, ["approve", "--sprint", "example", "--json"])
     let state = await readState(primary, "example")
     assert.deepEqual(
       {
@@ -130,7 +143,7 @@ async function main() {
     // After promotion, the agent can start one more work-ahead task.
     // TECHNICAL NOTE: This protects the two-slot model: one review task and at
     // most one next task.
-    await expectOk(agent, ["start", "--task", "030-task-name", "--json"])
+    await expectOk(agent, ["start", "--sprint", "example", "--task", "030-task-name", "--json"])
     assert.equal(await currentBranch(agent), "sprint/example/next")
     await fs.writeFile(path.join(agent, "feature-three.txt"), "three\n")
     await commitAll(agent, "complete third task")
@@ -138,7 +151,7 @@ async function main() {
     // Approving twice more should finish the sprint's task queue.
     // TECHNICAL NOTE: The first approval promotes task three into review. The
     // second leaves no review or next work.
-    await expectOk(agent, ["approve", "--json"])
+    await expectOk(agent, ["approve", "--sprint", "example", "--json"])
     state = await readState(primary, "example")
     assert.deepEqual(
       {
@@ -153,7 +166,7 @@ async function main() {
       },
     )
 
-    await expectOk(agent, ["approve", "--json"])
+    await expectOk(agent, ["approve", "--sprint", "example", "--json"])
     state = await readState(primary, "example")
     assert.deepEqual(state.tasks, {
       review: null,
@@ -164,7 +177,7 @@ async function main() {
     // Finalize should prepare the review branch for the human's final merge.
     // TECHNICAL NOTE: Review, approved, and next should all point at the same
     // finalized content, while state changes stay out of the worktree.
-    await expectOk(agent, ["finalize", "--json"])
+    await expectOk(agent, ["finalize", "--sprint", "example", "--json"])
     assert.equal(await currentBranch(agent), "sprint/example/review")
     assert.equal(await workingTreePorcelain(agent), "")
     const reviewHead = await branchHead(primary, "sprint/example/review")

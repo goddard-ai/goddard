@@ -14,6 +14,7 @@ export type SprintTestTasks = {
   review: string | null
   next: string | null
   approved: string[]
+  finishedUnreviewed?: string[]
 }
 
 export type DiagnosticOutput = {
@@ -175,6 +176,15 @@ export async function currentBranch(repo: string) {
 
 export async function branchHead(repo: string, branch: string) {
   return (await git(repo, ["rev-parse", branch])).trim()
+}
+
+export async function isAncestor(repo: string, ancestor: string, descendant: string) {
+  const subprocess = Bun.spawn(["git", "merge-base", "--is-ancestor", ancestor, descendant], {
+    cwd: repo,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  return (await subprocess.exited) === 0
 }
 
 export async function stashList(repo: string) {

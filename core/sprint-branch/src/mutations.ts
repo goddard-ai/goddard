@@ -2,7 +2,8 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 
 import { GitCommandError, runGit } from "./git/command"
-import { branchExists, getBranchHead, isAncestor } from "./git/refs"
+import { branchExists, getBranchHead, getMergeBase, isAncestor, refExists } from "./git/refs"
+import { getGitOperations } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
 import { getExpectedBranches } from "./state/branches"
@@ -71,11 +72,11 @@ export async function runInit(input: MutationInput & { base: string }) {
       message: `${context.stateRelativePath} already exists.`,
     })
   }
-  if (!(await branchExists(context.rootDir, input.base))) {
+  if (!(await refExists(context.rootDir, input.base))) {
     diagnostics.push({
       severity: "error",
       code: "base_branch_missing",
-      message: `Base branch ${input.base} does not exist.`,
+      message: `Base ref ${input.base} does not resolve to a commit.`,
     })
   }
   await pushIfBranchExists(
@@ -652,6 +653,179 @@ export async function runApprove(input: MutationInput) {
   })
 }
 
+/** Rebases the recorded sprint branch stack onto a target ref. */
+export async function runRebase(input: MutationInput & { target: string }) {
+  const { context, state, diagnostics } = await readCommandState(input, "rebase", {
+    allowOwnConflictRetry: true,
+  })
+  const transientConflict = await readTransientConflict(context.rootDir, state.sprint)
+  const retryConflict = rebaseConflict(state.conflict) ?? rebaseConflict(transientConflict)
+  const retryingRebase = Boolean(retryConflict)
+  const workingTree = await getWorkingTreeStatus(context.rootDir)
+  const targetRef = input.target
+  const targetExists = await refExists(context.rootDir, targetRef)
+  const approvedHead = await getBranchHead(context.rootDir, state.branches.approved)
+  const reviewHead = await getBranchHead(context.rootDir, state.branches.review)
+  const nextHead = await getBranchHead(context.rootDir, state.branches.next)
+  const approvedBase =
+    readConflictString(retryConflict, "approvedBase") ??
+    (targetExists && approvedHead
+      ? await getMergeBase(context.rootDir, targetRef, approvedHead)
+      : null)
+  const originalApprovedHead = readConflictString(retryConflict, "approvedHead") ?? approvedHead
+  const originalReviewHead = readConflictString(retryConflict, "reviewHead") ?? reviewHead
+  const originalNextHead = readConflictString(retryConflict, "nextHead") ?? nextHead
+  const nextState = cloneState(state)
+  nextState.baseBranch = targetRef
+  nextState.conflict = null
+
+  if (!workingTree.clean) {
+    diagnostics.push({
+      severity: "error",
+      code: "dirty_worktree",
+      message: "rebase requires a clean working tree.",
+    })
+  }
+  if (state.activeStashes.length > 0) {
+    diagnostics.push({
+      severity: "error",
+      code: "active_stashes_recorded",
+      message: `State records ${state.activeStashes.length} active sprint stash record(s).`,
+      suggestion: "Run sprint-branch resume before rebasing sprint branches.",
+    })
+  }
+  if (Object.values(state.branches).includes(targetRef)) {
+    diagnostics.push({
+      severity: "error",
+      code: "target_ref_is_sprint_branch",
+      message: `Target ref ${targetRef} must not be one of the recorded sprint branches.`,
+    })
+  }
+  if (!targetExists) {
+    diagnostics.push({
+      severity: "error",
+      code: "target_ref_missing",
+      message: `Target ref ${targetRef} does not resolve to a commit.`,
+    })
+  }
+  if (targetExists && approvedHead && !approvedBase) {
+    diagnostics.push({
+      severity: "error",
+      code: "target_ref_unrelated",
+      message: `Target ref ${targetRef} has no merge base with ${state.branches.approved}.`,
+    })
+  }
+  if (!retryingRebase) {
+    await pushRebaseStackDiagnostics(
+      context.rootDir,
+      state,
+      approvedHead,
+      reviewHead,
+      nextHead,
+      diagnostics,
+    )
+  }
+
+  const activeGitOperations = retryingRebase ? await getGitOperations(context.rootDir) : []
+  if (activeGitOperations.length > 0) {
+    await pushActiveGitOperationDiagnostics(context.rootDir, diagnostics)
+  }
+
+  const steps: Array<{ branch: string; onto: string; upstream: string }> = []
+  if (approvedBase) {
+    steps.push({
+      branch: state.branches.approved,
+      onto: targetRef,
+      upstream: approvedBase,
+    })
+  }
+  if (originalApprovedHead && reviewHead) {
+    steps.push({
+      branch: state.branches.review,
+      onto: state.branches.approved,
+      upstream: originalApprovedHead,
+    })
+  }
+  if (nextHead && originalReviewHead) {
+    steps.push({
+      branch: state.branches.next,
+      onto: state.branches.review,
+      upstream: originalReviewHead,
+    })
+  }
+
+  const retryStart = retryingRebase
+    ? nextRebaseStepIndex(steps, readConflictString(retryConflict, "branch"))
+    : 0
+  if (retryingRebase && activeGitOperations.length === 0) {
+    await pushCompletedRebaseDiagnostics(context.rootDir, steps.slice(0, retryStart), diagnostics)
+  }
+
+  const plannedSteps = steps.slice(retryStart)
+  const gitOperations = plannedSteps.flatMap(formatRebaseStep)
+  const finalPlannedBranch = plannedSteps[plannedSteps.length - 1]?.branch ?? null
+  if (context.currentBranch && context.currentBranch !== finalPlannedBranch) {
+    gitOperations.push(`git checkout ${context.currentBranch}`)
+  }
+
+  const plan = makePlan({
+    command: "rebase",
+    context,
+    state: nextState,
+    summary: `Rebase sprint ${state.sprint} branches onto ${targetRef}.`,
+    requiresCleanWorkingTree: true,
+    gitOperations,
+    stateFiles: stateFilesForState(nextState),
+    conflictHandling:
+      "Git performs each rebase. State keeps the previous base ref until every sprint branch is rebased; retry rebase after resolving any Git conflict.",
+    diagnostics,
+  })
+
+  if (input.dryRun || !plan.ok) {
+    return withDryRun(plan, input.dryRun)
+  }
+
+  return withSprintLock(context, state, "rebase", async () => {
+    const metadata = {
+      targetRef,
+      currentBranch: context.currentBranch,
+      approvedBase,
+      approvedHead: originalApprovedHead,
+      reviewHead: originalReviewHead,
+      nextHead: originalNextHead,
+    }
+    let conflictBranch = plannedSteps[0]?.branch ?? context.currentBranch ?? state.branches.review
+
+    try {
+      for (const step of plannedSteps) {
+        conflictBranch = step.branch
+        await runGit(context.rootDir, ["checkout", step.branch])
+        await runGit(context.rootDir, ["rebase", "--onto", step.onto, step.upstream])
+      }
+      if (context.currentBranch) {
+        conflictBranch = context.currentBranch
+        await runGit(context.rootDir, ["checkout", context.currentBranch])
+      }
+
+      await writeSprintState(context.rootDir, nextState)
+      return { ...plan, state: nextState, executed: true }
+    } catch (error) {
+      if (error instanceof GitCommandError) {
+        const conflictState = await writeConflictStateWhenSafe(
+          context.rootDir,
+          state,
+          "rebase",
+          conflictBranch,
+          error,
+          metadata,
+        )
+        return conflictReport(plan, conflictState, error)
+      }
+      throw error
+    }
+  })
+}
+
 /** Rebases the completed review branch onto base for the final human merge. */
 export async function runFinalize(input: MutationInput & { overrideBase?: string }) {
   const { context, state, diagnostics } = await readCommandState(input, "finalize", {
@@ -701,11 +875,11 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       message: `${state.branches.next} still points at content different from review.`,
     })
   }
-  if (!(await branchExists(context.rootDir, baseBranch))) {
+  if (!(await refExists(context.rootDir, baseBranch))) {
     diagnostics.push({
       severity: "error",
       code: "base_branch_missing",
-      message: `Base branch ${baseBranch} does not exist.`,
+      message: `Base ref ${baseBranch} does not resolve to a commit.`,
     })
   }
   if (retryingFinalize) {
@@ -762,6 +936,78 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       throw error
     }
   })
+}
+
+function rebaseConflict(conflict: SprintBranchState["conflict"] | null) {
+  return conflict?.command === "rebase" ? conflict : null
+}
+
+function readConflictString(conflict: SprintBranchState["conflict"] | null, key: string) {
+  const value = conflict?.[key]
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function nextRebaseStepIndex(
+  steps: Array<{ branch: string; onto: string; upstream: string }>,
+  failedBranch: string | null,
+) {
+  const failedIndex = failedBranch ? steps.findIndex((step) => step.branch === failedBranch) : -1
+  return failedIndex >= 0 ? failedIndex + 1 : 0
+}
+
+function formatRebaseStep(step: { branch: string; onto: string; upstream: string }) {
+  return [`git checkout ${step.branch}`, `git rebase --onto ${step.onto} ${step.upstream}`]
+}
+
+async function pushRebaseStackDiagnostics(
+  rootDir: string,
+  state: SprintBranchState,
+  approvedHead: string | null,
+  reviewHead: string | null,
+  nextHead: string | null,
+  diagnostics: SprintDiagnostic[],
+) {
+  if (
+    approvedHead &&
+    reviewHead &&
+    !(await isAncestor(rootDir, state.branches.approved, state.branches.review))
+  ) {
+    diagnostics.push({
+      severity: "error",
+      code: "review_not_based_on_approved",
+      message: `${state.branches.review} does not descend from ${state.branches.approved}.`,
+    })
+  }
+  if (
+    nextHead &&
+    reviewHead &&
+    !(await isAncestor(rootDir, state.branches.review, state.branches.next))
+  ) {
+    diagnostics.push({
+      severity: "error",
+      code: "next_not_based_on_review",
+      message: `${state.branches.next} does not descend from ${state.branches.review}.`,
+    })
+  }
+}
+
+async function pushCompletedRebaseDiagnostics(
+  rootDir: string,
+  completedSteps: Array<{ branch: string; onto: string; upstream: string }>,
+  diagnostics: SprintDiagnostic[],
+) {
+  for (const step of completedSteps) {
+    if (await isAncestor(rootDir, step.onto, step.branch)) {
+      continue
+    }
+
+    diagnostics.push({
+      severity: "error",
+      code: "rebase_conflict_not_resolved",
+      message: `${step.branch} does not descend from ${step.onto} after the recorded rebase conflict.`,
+      suggestion: "Resolve or abort the Git rebase before retrying sprint-branch rebase.",
+    })
+  }
 }
 
 async function getLatestStash(rootDir: string) {
@@ -823,11 +1069,11 @@ async function pushResetBranchDiagnostics(
   const reviewHead = await getBranchHead(rootDir, branches.review)
   const nextHead = await getBranchHead(rootDir, branches.next)
 
-  if (!(await branchExists(rootDir, baseBranch))) {
+  if (!(await refExists(rootDir, baseBranch))) {
     diagnostics.push({
       severity: "error",
       code: "base_branch_missing",
-      message: `Base branch ${baseBranch} does not exist.`,
+      message: `Base ref ${baseBranch} does not resolve to a commit.`,
     })
   }
   if (!approvedHead) {

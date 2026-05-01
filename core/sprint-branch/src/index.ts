@@ -8,6 +8,7 @@ export {
   runFeedback,
   runFinalize,
   runInit,
+  runRebase,
   runResetState,
   runResume,
   runStart,

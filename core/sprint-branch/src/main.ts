@@ -11,6 +11,7 @@ import {
   runFeedback,
   runFinalize,
   runInit,
+  runRebase,
   runResetState,
   runResume,
   runStart,
@@ -356,6 +357,24 @@ export async function main(argv: string[]) {
           await writeMutation(
             args.json,
             runApprove({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
+        },
+      }),
+      rebase: command({
+        name: "rebase",
+        description: "Rebase recorded sprint branches onto a target ref",
+        args: {
+          ...commonMutationArgs,
+          target: positional({
+            type: string,
+            displayName: "target",
+            description: "Target ref to rebase the sprint branch stack onto",
+          }),
+        },
+        handler: async (args) => {
+          await writeMutation(
+            args.json,
+            runRebase({ cwd: process.cwd(), ...args, interactive: !args.json }),
           )
         },
       }),

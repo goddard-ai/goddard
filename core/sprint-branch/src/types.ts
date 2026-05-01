@@ -9,6 +9,7 @@ export type SprintTaskState = {
   review: string | null
   next: string | null
   approved: string[]
+  finishedUnreviewed?: string[]
 }
 
 /** A stash created by the CLI while interrupting next-branch work. */
@@ -30,11 +31,13 @@ export type SprintConflictState = {
 
 /** Runtime representation of canonical sprint state loaded from Git metadata. */
 export type SprintBranchState = {
+  schemaVersion?: number
   sprint: string
   baseBranch: string
   branches: SprintBranchNames
   tasks: SprintTaskState
   activeStashes: SprintActiveStash[]
+  lock?: { command?: string; [key: string]: unknown } | null
   conflict: SprintConflictState | null
 }
 

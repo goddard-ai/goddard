@@ -12,6 +12,8 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 
 `sprint-branch reset-state [--task <task>] [--force]` recreates only the Git-private state file after a sprint plan is reworked. It makes the first task, or the selected task, the next valid `start` target by recording earlier task files as approved; it does not move Git branches.
 
+`sprint-branch rebase <target>` rebases the recorded approved, review, and existing next sprint branches onto a target Git ref. Git performs the rebases; sprint state records the new base ref only after every branch rebase succeeds.
+
 - `sprint-branch status`
 - `sprint-branch diff`
 - `sprint-branch doctor`
@@ -24,6 +26,7 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 - `sprint-branch feedback`
 - `sprint-branch resume`
 - `sprint-branch approve`
+- `sprint-branch rebase <target>`
 - `sprint-branch finalize`
 
 Agent workflow mutations support `--dry-run` and `--json`. Human landing commands support `--json` for `--dry-run` inspection, but actual landing and cleanup require an interactive terminal. The sprint state mutations use a Git-private lock file, write JSON state atomically, and only move recorded sprint branches.

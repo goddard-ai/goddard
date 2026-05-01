@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { branchExists } from "../git/refs"
+import { branchExists, refExists } from "../git/refs"
 import { getStashRefs } from "../git/stash"
 import type {
   SprintBranchState,
@@ -81,13 +81,13 @@ async function checkBaseBranches(report: SprintStatusReport) {
   const diagnostics: SprintDiagnostic[] = []
   const { state } = report
 
-  if (!(await branchExists(report.rootDir, state.baseBranch))) {
+  if (!(await refExists(report.rootDir, state.baseBranch))) {
     diagnostics.push({
       severity: "error",
       code: "base_branch_missing",
-      message: `Base branch ${state.baseBranch} does not exist.`,
+      message: `Base ref ${state.baseBranch} does not resolve to a commit.`,
       suggestion:
-        "Use sprint-branch finalize --override-base <branch> only after confirming the intended base.",
+        "Use sprint-branch rebase <ref> or finalize --override-base <ref> only after confirming the intended base.",
     })
   }
   if (Object.values(state.branches).includes(state.baseBranch)) {
