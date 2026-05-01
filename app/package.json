@@ -41,7 +41,7 @@
     "lexical": "^0.30.0",
     "lucide-react": "^1.11.0",
     "powerkeys": "^0.1.2",
-    "preact": "11.0.0-beta.1",
+    "preact": "11.0.0-experimental.1",
     "preact-comark": "0.2.4",
     "preact-in-motion": "^0.2.9",
     "preact-sigma": "6.1.0",
