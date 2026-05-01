@@ -52,23 +52,13 @@ export component AppShell() {
       case "project":
         projectContext.applyFocusedTabProject(
           activeTab.id,
-          findNearestProjectPath(
-            projects,
-            (activeTab.payload as {
-              projectPath?: string | null;
-            }).projectPath ?? null,
-          ),
+          findNearestProjectPath(projects, activeTab.payload.projectPath),
         )
         return
       case "sessionChat":
         projectContext.applyFocusedTabProject(
           activeTab.id,
-          findNearestProjectPath(
-            projects,
-            (activeTab.payload as {
-              projectPath?: string | null;
-            }).projectPath ?? null,
-          ),
+          findNearestProjectPath(projects, activeTab.payload.projectPath),
         )
         return
       default:

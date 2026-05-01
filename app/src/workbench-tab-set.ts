@@ -55,9 +55,9 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   }
 
   /** Opens one closable tab or focuses the existing tab with the same stable id. */
-  openOrFocusTab(tab: WorkbenchDetailTab & { payload: any }) {
+  openOrFocusTab(tab: WorkbenchDetailTab) {
     if (this.tabs[tab.id]) {
-      this.tabs[tab.id] = { ...this.tabs[tab.id], ...tab }
+      this.tabs[tab.id] = tab
       this.activateTab(tab.id)
       return
     }

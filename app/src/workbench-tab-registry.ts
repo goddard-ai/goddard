@@ -1,6 +1,37 @@
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { lazy } from "preact/compat"
 
 import type { SvgIconName } from "./lib/good-icon.tsrx"
+
+/** Empty payload marker for tabs that do not need opening data. */
+type WorkbenchEmptyTabPayload = Record<string, never>
+
+/** Required payload shape for each registered closable workbench tab kind. */
+type WorkbenchTabPayloadByKind = {
+  inbox: WorkbenchEmptyTabPayload
+  projects: WorkbenchEmptyTabPayload
+  sessions: WorkbenchEmptyTabPayload
+  search: WorkbenchEmptyTabPayload
+  specs: WorkbenchEmptyTabPayload
+  tasks: WorkbenchEmptyTabPayload
+  roadmap: WorkbenchEmptyTabPayload
+  settings: WorkbenchEmptyTabPayload
+  keyboardShortcuts: WorkbenchEmptyTabPayload
+  project: {
+    projectPath: string
+  }
+  sessionChat: {
+    projectPath: string | null
+    sessionId: DaemonSession["id"]
+  }
+  sessionChanges: {
+    repositoryLabel: string
+    sessionId: DaemonSession["id"]
+    sessionTitle: string
+  }
+  sessionChatTranscriptDebug: WorkbenchEmptyTabPayload
+  terminalDebug: WorkbenchEmptyTabPayload
+}
 
 /** One registered non-primary workbench tab definition. */
 type WorkbenchTabDefinition = {
@@ -74,18 +105,17 @@ export const workbenchTabComponents = {
     component: lazy(() => import("~/terminal/debug-view.tsrx")),
     icon: "tabs/sessions",
   },
-} satisfies Record<string, WorkbenchTabDefinition>
+} satisfies Record<keyof WorkbenchTabPayloadByKind, WorkbenchTabDefinition>
 
 /** The supported non-primary workbench tab kinds available in the shell. */
-export type WorkbenchRegisteredTabKind = keyof typeof workbenchTabComponents
+export type WorkbenchRegisteredTabKind = keyof WorkbenchTabPayloadByKind
 
 /** The supported closable workbench tab kinds available in the shell. */
 export type WorkbenchDetailTabKind = WorkbenchRegisteredTabKind
 
-/** Payload inferred from one registered non-primary workbench tab component. */
-type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> = preact.ComponentProps<
-  (typeof workbenchTabComponents)[TKind]["component"]
->
+/** Required payload for one registered non-primary workbench tab kind. */
+type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> =
+  WorkbenchTabPayloadByKind[TKind]
 
 /** One workbench tab tracked by the shell, including the always-present main tab. */
 type WorkbenchTabByKind = {

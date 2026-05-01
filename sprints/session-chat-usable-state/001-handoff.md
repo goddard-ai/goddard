@@ -47,3 +47,5 @@
 - Applied review feedback: `SessionChangesView` now requires `sessionId` again because its valid render path always comes from `openSessionChanges`.
 - Redid the task queue after rebasing onto a branch that includes `d7e87aa4b`; the generic subscription bridge is no longer a sprint task.
 - `sprint-branch init --base main --dry-run` was blocked because old sprint state and `review`/`approved` branches already exist.
+- Human recovered sprint branch state and approved proceeding with `sprint-branch start` on the first revised task.
+- Finished `010-require-session-tab-payloads` on review. Verification: `bun run fmt`, `bun run typecheck` in `app/`, and `git diff --check` passed.

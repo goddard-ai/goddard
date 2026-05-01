@@ -1,6 +1,6 @@
 # 010-require-session-tab-payloads
 
-Status: planned
+Status: finished-unreviewed
 
 ## Title
 
@@ -44,8 +44,14 @@ Safe to work one task ahead after this because later chat work depends only on t
 
 ## Implementation Notes
 
-Pending.
+- Started on `sprint/session-chat-usable-state/review` through `sprint-branch start`.
+- Added an explicit workbench tab payload map so `sessionChat` requires `sessionId` and `sessionChanges` keeps its required payload fields.
+- Removed the component-level missing-`sessionId` fallback from `SessionChatView`; the view now requires a typed `sessionId` prop.
+- Removed the workbench tab panel's object-or-empty fallback and spread the typed tab payload directly at the tab boundary.
+- Removed stale casts when deriving project context from `project` and `sessionChat` tab payloads.
 
 ## Verification Evidence
 
-Pending.
+- `bun run fmt` in `app/` completed.
+- `bun run typecheck` in `app/` passed.
+- `git diff --check` passed.
