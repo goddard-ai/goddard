@@ -140,7 +140,6 @@ export async function runResetState(
   const targetTask = input.task ? normalizeTaskName(input.task) : (taskStems[0] ?? null)
   const targetTaskIndex = targetTask ? taskStems.indexOf(targetTask) : -1
   const nextState: SprintBranchState = {
-    schemaVersion: 1,
     sprint: context.sprint,
     baseBranch,
     branches,
@@ -148,10 +147,8 @@ export async function runResetState(
       review: null,
       next: null,
       approved: targetTaskIndex >= 0 ? taskStems.slice(0, targetTaskIndex) : [],
-      finishedUnreviewed: [],
     },
     activeStashes: [],
-    lock: null,
     conflict: null,
   }
 
@@ -1128,14 +1125,6 @@ function pushResetStateDiagnostics(
     "conflict_recorded",
     `State records an unresolved ${existingState.conflict?.command ?? "unknown"} conflict.`,
     "Resolve the Git conflict before resetting state, or use --force after preserving the work.",
-  )
-  pushForceableResetDiagnostic(
-    Boolean(existingState.lock),
-    force,
-    diagnostics,
-    "state_lock_recorded",
-    `State records an active ${existingState.lock?.command ?? "unknown"} lock.`,
-    "Run sprint-branch doctor before retrying, or use --force after confirming no command is running.",
   )
   pushForceableResetDiagnostic(
     existingState.activeStashes.length > 0,
