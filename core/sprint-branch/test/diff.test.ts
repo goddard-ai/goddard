@@ -19,7 +19,6 @@ describe("sprint-branch diff", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
@@ -39,7 +38,6 @@ describe("sprint-branch diff", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
@@ -56,7 +54,6 @@ describe("sprint-branch diff", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
@@ -77,7 +74,6 @@ describe("sprint-branch diff", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/approved"])
     await fs.writeFile(path.join(repo, "approved.txt"), "approved-only\n")

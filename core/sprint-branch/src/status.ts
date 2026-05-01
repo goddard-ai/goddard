@@ -25,13 +25,6 @@ export async function buildStatusReport(input: SprintInferenceInput) {
     }
   }
 
-  if (parsed.state.sprint !== context.sprint) {
-    diagnostics.push({
-      severity: "error",
-      code: "state_sprint_mismatch",
-      message: `${context.stateRelativePath} records sprint ${parsed.state.sprint}, but inference selected ${context.sprint}.`,
-    })
-  }
   const lockFilePath = await resolveGitCommonPath(
     context.rootDir,
     `sprint-branch/${context.sprint}.lock`,
@@ -216,11 +209,6 @@ export function formatStatusReport(report: SprintStatusReport) {
     `  review: ${report.state.tasks.review ?? "none"}`,
     `  next: ${report.state.tasks.next ?? "none"}`,
     `  approved: ${report.state.tasks.approved.length ? report.state.tasks.approved.join(", ") : "none"}`,
-    `  finished unreviewed: ${
-      report.state.tasks.finishedUnreviewed.length
-        ? report.state.tasks.finishedUnreviewed.join(", ")
-        : "none"
-    }`,
     "",
     `Working tree: ${report.workingTree.clean ? "clean" : "dirty"}`,
   )
@@ -262,12 +250,9 @@ async function inspectBranch(rootDir: string, name: string) {
 
 async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
   const tasks = new Set(
-    [
-      state.tasks.review,
-      state.tasks.next,
-      ...state.tasks.approved,
-      ...state.tasks.finishedUnreviewed,
-    ].filter((task): task is string => typeof task === "string" && task.length > 0),
+    [state.tasks.review, state.tasks.next, ...state.tasks.approved].filter(
+      (task): task is string => typeof task === "string" && task.length > 0,
+    ),
   )
   const missing: string[] = []
 
@@ -295,9 +280,6 @@ function resolveBlockedReasons(
 
   if (state.conflict) {
     reasons.push("conflict recorded")
-  }
-  if (state.lock) {
-    reasons.push("lock recorded")
   }
   if (state.tasks.review) {
     reasons.push(`review branch carries ${state.tasks.review}`)

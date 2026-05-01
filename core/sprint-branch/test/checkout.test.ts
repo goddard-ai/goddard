@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { getExpectedBranches, type SprintBranchState } from "../src"
 import {
   branchHead,
   cleanupTestRepos,
@@ -38,7 +37,6 @@ describe("sprint-branch checkout", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
@@ -65,7 +63,6 @@ describe("sprint-branch checkout", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
 
     const result = await runCli(repo, ["checkout", "--json"])
@@ -85,7 +82,6 @@ describe("sprint-branch checkout", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await addSprint(repo, "other")
 
@@ -106,7 +102,6 @@ describe("sprint-branch checkout", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty\n")
 
@@ -125,7 +120,6 @@ describe("sprint-branch checkout", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
 
     const result = await runCli(repo, ["checkout", "example", "--dry-run", "--json"])
@@ -150,20 +144,16 @@ async function addSprint(repo: string, sprint: string) {
 }
 
 /** Builds minimal canonical state for a test-only sprint. */
-function sprintState(sprint: string): SprintBranchState {
+function sprintState(sprint: string) {
   return {
-    schemaVersion: 1,
     sprint,
     baseBranch: "main",
-    branches: getExpectedBranches(sprint),
     tasks: {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     },
     activeStashes: [],
-    lock: null,
     conflict: null,
   }
 }

@@ -27,7 +27,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -54,7 +53,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -81,7 +79,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -105,7 +102,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -137,7 +133,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: null,
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -164,7 +159,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -196,7 +190,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -220,7 +213,6 @@ describe("sprint-branch feedback", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )

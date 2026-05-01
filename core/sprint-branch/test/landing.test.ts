@@ -98,7 +98,6 @@ describe("sprint-branch human landing commands", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
 
     const result = await runCli(repo, ["land", "main", "example", "--dry-run", "--json"])
@@ -142,7 +141,6 @@ describe("sprint-branch human landing commands", () => {
         review: null,
         next: null,
         approved: ["010-task-name"],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -179,7 +177,6 @@ describe("sprint-branch human landing commands", () => {
         review: null,
         next: null,
         approved: ["010-task-name"],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -215,7 +212,6 @@ describe("sprint-branch human landing commands", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
-      finishedUnreviewed: [],
     })
 
     const result = await runCli(repo, ["cleanup", "main", "example"])
@@ -231,7 +227,6 @@ async function createFinalizedReviewAheadOfMain() {
     review: null,
     next: null,
     approved: ["010-task-name"],
-    finishedUnreviewed: [],
   })
   await git(repo, ["checkout", "sprint/example/review"])
   await fs.writeFile(path.join(repo, "final.txt"), "finalized\n")

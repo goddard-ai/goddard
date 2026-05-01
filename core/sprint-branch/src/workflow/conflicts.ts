@@ -83,7 +83,6 @@ function makeConflictState(
 ) {
   return {
     ...state,
-    lock: null,
     conflict: {
       command: commandName,
       branch,

@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { getExpectedBranches, type SprintBranchState } from "../src"
 import {
   cleanupTestRepos,
   commitAll,
@@ -21,7 +20,6 @@ describe("sprint-branch status", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const result = await runCli(path.join(repo, "sprints", "example"), ["status", "--json"])
 
@@ -44,7 +42,6 @@ describe("sprint-branch status", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
 
@@ -68,7 +65,6 @@ describe("sprint-branch status", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await writeState(repo, "other", sprintState("other"))
 
@@ -88,7 +84,6 @@ describe("sprint-branch status", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/approved"])
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty approved\n")
@@ -113,7 +108,6 @@ describe("sprint-branch status", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await fs.rm(path.join(repo, "sprints", "example", "010-task-name.md"))
     await commitAll(repo, "remove recorded task file")
@@ -131,20 +125,16 @@ describe("sprint-branch status", () => {
 })
 
 /** Builds minimal canonical state for a test-only sprint. */
-function sprintState(sprint: string): SprintBranchState {
+function sprintState(sprint: string) {
   return {
-    schemaVersion: 1,
     sprint,
     baseBranch: "main",
-    branches: getExpectedBranches(sprint),
     tasks: {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     },
     activeStashes: [],
-    lock: null,
     conflict: null,
   }
 }

@@ -23,7 +23,6 @@ describe("sprint-branch start", () => {
       review: null,
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const result = await runCli(repo, [
       "start",
@@ -45,7 +44,6 @@ describe("sprint-branch start", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const result = await runCli(repo, [
       "start",
@@ -70,7 +68,6 @@ describe("sprint-branch start", () => {
       review: null,
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const beforeState = await readState(repo, "example")
 
@@ -100,7 +97,6 @@ describe("sprint-branch start", () => {
       review: null,
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const beforeState = await readState(repo, "example")
 
@@ -129,7 +125,6 @@ describe("sprint-branch start", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -161,7 +156,6 @@ describe("sprint-branch start", () => {
       review: null,
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await fs.writeFile(path.join(repo, "README.md"), "# Test\ndirty\n")
 

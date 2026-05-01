@@ -137,7 +137,7 @@ async function main() {
 
     // Approving twice more should finish the sprint's task queue.
     // TECHNICAL NOTE: The first approval promotes task three into review. The
-    // second leaves no review, next, or finished-unreviewed work.
+    // second leaves no review or next work.
     await expectOk(agent, ["approve", "--json"])
     state = await readState(primary, "example")
     assert.deepEqual(
@@ -159,7 +159,6 @@ async function main() {
       review: null,
       next: null,
       approved: ["010-task-name", "020-task-name", "030-task-name"],
-      finishedUnreviewed: [],
     })
 
     // Finalize should prepare the review branch for the human's final merge.

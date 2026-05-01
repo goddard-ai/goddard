@@ -1,7 +1,7 @@
 /** Valid sprint branch roles managed by the sprint-branch workflow. */
 export type SprintBranchRole = "review" | "approved" | "next"
 
-/** Branch names recorded for one sprint branch workflow instance. */
+/** Canonical branch names derived for one sprint branch workflow instance. */
 export type SprintBranchNames = Record<SprintBranchRole, string>
 
 /** Task ownership recorded for the rolling sprint branches. */
@@ -9,7 +9,6 @@ export type SprintTaskState = {
   review: string | null
   next: string | null
   approved: string[]
-  finishedUnreviewed: string[]
 }
 
 /** A stash created by the CLI while interrupting next-branch work. */
@@ -21,13 +20,6 @@ export type SprintActiveStash = {
   message?: string
 }
 
-/** Lock metadata written while one mutating command owns sprint branch state. */
-export type SprintLockState = {
-  command: string
-  createdAt: string
-  pid: number
-}
-
 /** Conflict metadata recorded when a sprint branch transition stops early. */
 export type SprintConflictState = {
   command?: string
@@ -36,15 +28,13 @@ export type SprintConflictState = {
   [key: string]: unknown
 }
 
-/** Canonical machine-readable state stored in Git metadata outside the working tree. */
+/** Runtime representation of canonical sprint state loaded from Git metadata. */
 export type SprintBranchState = {
-  schemaVersion: 1
   sprint: string
   baseBranch: string
   branches: SprintBranchNames
   tasks: SprintTaskState
   activeStashes: SprintActiveStash[]
-  lock: SprintLockState | null
   conflict: SprintConflictState | null
 }
 

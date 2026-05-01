@@ -27,7 +27,15 @@ describe("sprint-branch init", () => {
     expect(await branchExists(repo, "sprint/example/review")).toBe(true)
     expect(await branchExists(repo, "sprint/example/next")).toBe(false)
     expect(await git(repo, ["status", "--porcelain"])).toBe("")
-    expect((await readState(repo, "example")).tasks.review).toBeNull()
+    const state = await readState(repo, "example")
+    expect(Object.keys(state)).toEqual([
+      "sprint",
+      "baseBranch",
+      "tasks",
+      "activeStashes",
+      "conflict",
+    ])
+    expect(state.tasks.review).toBeNull()
   })
 
   // Dry-run is the agent's chance to inspect branch-moving commands before they happen.

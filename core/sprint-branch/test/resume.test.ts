@@ -25,7 +25,6 @@ describe("sprint-branch resume", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -51,7 +50,6 @@ describe("sprint-branch resume", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -82,7 +80,6 @@ describe("sprint-branch resume", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -119,7 +116,6 @@ describe("sprint-branch resume", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -163,7 +159,6 @@ describe("sprint-branch resume", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -186,7 +181,6 @@ describe("sprint-branch resume", () => {
       review: "010-task-name",
       next: "020-task-name",
       approved: [],
-      finishedUnreviewed: [],
     })
     const beforeState = await readState(repo, "example")
 
@@ -206,7 +200,6 @@ describe("sprint-branch resume", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
 
     const result = await runCli(repo, ["resume", "--sprint", "example", "--json"])

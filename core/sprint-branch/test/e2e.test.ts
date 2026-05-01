@@ -23,7 +23,6 @@ type StatusOutput = JsonCommandOutput & {
       review: string | null
       next: string | null
       approved: string[]
-      finishedUnreviewed: string[]
     }
   }
   workingTree: {
@@ -48,7 +47,6 @@ describe("sprint-branch three-task happy path", () => {
         review: null,
         next: null,
         approved: [],
-        finishedUnreviewed: [],
       },
       { extraTaskStems: ["030-task-name"] },
     )
@@ -82,7 +80,6 @@ describe("sprint-branch three-task happy path", () => {
       review: null,
       next: null,
       approved: ["010-task-name", "020-task-name", "030-task-name"],
-      finishedUnreviewed: [],
     })
     expect(doctor.ok).toBe(true)
     expect(doctor.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([])

@@ -142,7 +142,7 @@ export async function runCleanup(input: CleanupInput) {
 /** Executes already-confirmed cleanup of sprint refs, worktrees, and Git-private state. */
 export async function executeCleanupOperations(
   rootDir: string,
-  state: SprintBranchState,
+  state: Pick<SprintBranchState, "sprint">,
   branchesToDelete: string[],
   worktreesToRemove: AssociatedWorktree[],
 ) {

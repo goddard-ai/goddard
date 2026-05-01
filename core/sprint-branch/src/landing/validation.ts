@@ -136,11 +136,11 @@ async function pushSharedFinalizedDiagnostics(
       message: `Sprint state records an unresolved ${state.conflict.command ?? "unknown"} conflict.`,
     })
   }
-  if (state.tasks.review || state.tasks.next || state.tasks.finishedUnreviewed.length > 0) {
+  if (state.tasks.review || state.tasks.next) {
     diagnostics.push({
       severity: "error",
       code: "unreviewed_work_exists",
-      message: "Landing requires no review task, no next task, and no finished unreviewed tasks.",
+      message: "Landing requires no review task and no next task.",
     })
   }
   if (state.activeStashes.length > 0) {

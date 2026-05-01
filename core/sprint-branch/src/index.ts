@@ -33,7 +33,6 @@ export type {
   SprintConflictState,
   SprintContext,
   SprintDiagnostic,
-  SprintLockState,
   SprintMutationReport,
   SprintStatusReport,
   SprintTaskState,

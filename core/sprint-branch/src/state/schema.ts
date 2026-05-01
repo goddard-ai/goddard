@@ -1,6 +1,5 @@
 import type {
   SprintActiveStash,
-  SprintBranchRole,
   SprintBranchState,
   SprintDiagnostic,
   SprintTaskState,
@@ -25,20 +24,10 @@ export function parseSprintState(value: unknown) {
     }
   }
 
-  if (record.schemaVersion !== 1) {
-    diagnostics.push({
-      severity: "error",
-      code: "unsupported_schema_version",
-      message: `Unsupported sprint state schema version: ${String(record.schemaVersion)}.`,
-    })
-  }
-
   const sprint = readString(record.sprint, "sprint", diagnostics)
   const baseBranch = readString(record.baseBranch, "baseBranch", diagnostics)
-  const branches = parseBranches(record.branches, diagnostics)
   const tasks = parseTasks(record.tasks, diagnostics)
   const activeStashes = parseActiveStashes(record.activeStashes, diagnostics)
-  const lock = parseLock(record.lock, diagnostics)
   const conflict =
     record.conflict === null || isRecord(record.conflict)
       ? (record.conflict as SprintBranchState["conflict"] | null)
@@ -52,7 +41,7 @@ export function parseSprintState(value: unknown) {
     })
   }
 
-  if (!sprint || !baseBranch || !branches || !tasks || diagnostics.some(hasError)) {
+  if (!sprint || !baseBranch || !tasks || diagnostics.some(hasError)) {
     return {
       state: null,
       diagnostics,
@@ -63,17 +52,6 @@ export function parseSprintState(value: unknown) {
     diagnostics.push(diagnostic)
   }
 
-  const expectedBranches = getExpectedBranches(sprint)
-  for (const role of Object.keys(expectedBranches) as SprintBranchRole[]) {
-    if (branches[role] !== expectedBranches[role]) {
-      diagnostics.push({
-        severity: "error",
-        code: "unexpected_branch_name",
-        message: `${role} branch must be ${expectedBranches[role]}, but state records ${branches[role]}.`,
-      })
-    }
-  }
-
   if (diagnostics.some(hasError)) {
     return {
       state: null,
@@ -82,13 +60,11 @@ export function parseSprintState(value: unknown) {
   }
 
   const state: SprintBranchState = {
-    schemaVersion: 1,
     sprint,
     baseBranch,
-    branches,
+    branches: getExpectedBranches(sprint),
     tasks,
     activeStashes,
-    lock,
     conflict,
   }
 
@@ -96,27 +72,6 @@ export function parseSprintState(value: unknown) {
     state,
     diagnostics,
   }
-}
-
-function parseBranches(value: unknown, diagnostics: SprintDiagnostic[]) {
-  if (!isRecord(value)) {
-    diagnostics.push({
-      severity: "error",
-      code: "invalid_branches",
-      message: "branches must be an object with review, approved, and next names.",
-    })
-    return null
-  }
-
-  const review = readString(value.review, "branches.review", diagnostics)
-  const approved = readString(value.approved, "branches.approved", diagnostics)
-  const next = readString(value.next, "branches.next", diagnostics)
-
-  if (!review || !approved || !next) {
-    return null
-  }
-
-  return { review, approved, next }
 }
 
 function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
@@ -132,13 +87,8 @@ function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
   const review = readOptionalString(value.review, "tasks.review", diagnostics)
   const next = readOptionalString(value.next, "tasks.next", diagnostics)
   const approved = readStringArray(value.approved, "tasks.approved", diagnostics)
-  const finishedUnreviewed = readStringArray(
-    value.finishedUnreviewed,
-    "tasks.finishedUnreviewed",
-    diagnostics,
-  )
 
-  if (!approved || !finishedUnreviewed || diagnostics.some(hasError)) {
+  if (!approved || diagnostics.some(hasError)) {
     return null
   }
 
@@ -146,7 +96,6 @@ function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
     review,
     next,
     approved,
-    finishedUnreviewed,
   } satisfies SprintTaskState
 }
 
@@ -181,37 +130,6 @@ function parseActiveStashes(value: unknown, diagnostics: SprintDiagnostic[]) {
   }
 
   return stashes
-}
-
-function parseLock(value: unknown, diagnostics: SprintDiagnostic[]) {
-  if (value === null || value === undefined) {
-    return null
-  }
-  if (!isRecord(value)) {
-    diagnostics.push({
-      severity: "error",
-      code: "invalid_lock",
-      message: "lock must be null or an object.",
-    })
-    return null
-  }
-
-  const command = readString(value.command, "lock.command", diagnostics)
-  const createdAt = readString(value.createdAt, "lock.createdAt", diagnostics)
-  const pid = typeof value.pid === "number" ? value.pid : null
-
-  if (pid === null) {
-    diagnostics.push({
-      severity: "error",
-      code: "invalid_lock_pid",
-      message: "lock.pid must be a number.",
-    })
-  }
-  if (!command || !createdAt || pid === null) {
-    return null
-  }
-
-  return { command, createdAt, pid }
 }
 
 function readString(value: unknown, field: string, diagnostics: SprintDiagnostic[]) {

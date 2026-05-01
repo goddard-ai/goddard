@@ -8,7 +8,20 @@ import { parseSprintState } from "./schema"
 /** Reads and validates one sprint branch state file. */
 export async function readSprintStateFile(statePath: string) {
   const text = await fs.readFile(statePath, "utf-8")
-  return parseSprintState(JSON.parse(text) as unknown)
+  const parsed = parseSprintState(JSON.parse(text) as unknown)
+  const pathSprint = path.basename(path.dirname(statePath))
+
+  if (parsed.state && parsed.state.sprint !== pathSprint) {
+    parsed.diagnostics.push({
+      severity: "error",
+      code: "state_sprint_mismatch",
+      message:
+        `${statePathForDisplay(statePath)} records sprint ${parsed.state.sprint}, ` +
+        `but its state directory is ${pathSprint}.`,
+    })
+  }
+
+  return parsed
 }
 
 /** Finds sprint branch state files in Git metadata. */
@@ -54,4 +67,13 @@ function isMissingFileError(error: unknown) {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   )
+}
+
+function statePathForDisplay(statePath: string) {
+  const parts = statePath.split(path.sep)
+  const rootIndex = parts.lastIndexOf("sprint-branch")
+  if (rootIndex !== -1) {
+    return path.join(".git", ...parts.slice(rootIndex))
+  }
+  return statePath
 }

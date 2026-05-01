@@ -6,12 +6,7 @@ import type { SprintBranchState, SprintTaskState } from "../types"
 /** Resolves the next unassigned task file stem from sprint task queue order. */
 export async function resolveNextPlannedTask(rootDir: string, state: SprintBranchState) {
   const tasks = await listTaskStems(rootDir, state.sprint)
-  const assigned = new Set([
-    ...state.tasks.approved,
-    ...state.tasks.finishedUnreviewed,
-    state.tasks.review,
-    state.tasks.next,
-  ])
+  const assigned = new Set([...state.tasks.approved, state.tasks.review, state.tasks.next])
   return tasks.find((task) => !assigned.has(task)) ?? null
 }
 
@@ -53,7 +48,6 @@ export function emptyTasks(): SprintTaskState {
     review: null,
     next: null,
     approved: [],
-    finishedUnreviewed: [],
   }
 }
 

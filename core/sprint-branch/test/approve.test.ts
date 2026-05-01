@@ -24,7 +24,6 @@ describe("sprint-branch approve", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
@@ -52,7 +51,6 @@ describe("sprint-branch approve", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -85,7 +83,6 @@ describe("sprint-branch approve", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
@@ -110,7 +107,6 @@ describe("sprint-branch approve", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/approved"])
     await fs.writeFile(path.join(repo, "approved.txt"), "approved-only\n")
@@ -141,7 +137,6 @@ describe("sprint-branch approve", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )

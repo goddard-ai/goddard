@@ -47,13 +47,11 @@ export async function runInit(input: MutationInput & { base: string }) {
   const context = await inferSprintContext(input)
   const branches = getExpectedBranches(context.sprint)
   const state: SprintBranchState = {
-    schemaVersion: 1,
     sprint: context.sprint,
     baseBranch: input.base,
     branches,
     tasks: emptyTasks(),
     activeStashes: [],
-    lock: null,
     conflict: null,
   }
   const diagnostics: SprintDiagnostic[] = []
@@ -564,9 +562,6 @@ export async function runApprove(input: MutationInput) {
     nextState.tasks.approved = [...nextState.tasks.approved, state.tasks.review].filter(
       (task): task is string => Boolean(task),
     )
-    nextState.tasks.finishedUnreviewed = nextState.tasks.finishedUnreviewed.filter(
-      (task) => task !== state.tasks.review,
-    )
     nextState.tasks.review = state.tasks.next
     nextState.tasks.next = null
   }
@@ -588,9 +583,6 @@ export async function runApprove(input: MutationInput) {
     )
     nextState.tasks.approved = [...nextState.tasks.approved, state.tasks.review].filter(
       (task): task is string => Boolean(task),
-    )
-    nextState.tasks.finishedUnreviewed = nextState.tasks.finishedUnreviewed.filter(
-      (task) => task !== state.tasks.review,
     )
     nextState.tasks.review = null
   }
@@ -688,11 +680,11 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       message: "finalize requires a clean working tree.",
     })
   }
-  if (state.tasks.review || state.tasks.next || state.tasks.finishedUnreviewed.length > 0) {
+  if (state.tasks.review || state.tasks.next) {
     diagnostics.push({
       severity: "error",
       code: "unreviewed_work_exists",
-      message: "finalize requires no review task, no next task, and no finished unreviewed tasks.",
+      message: "finalize requires no review task and no next task.",
     })
   }
   if (reviewHead && approvedHead && reviewHead !== approvedHead && !retryingFinalize) {

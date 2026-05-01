@@ -22,7 +22,6 @@ describe("sprint-branch doctor", () => {
       review: "010-task-name",
       next: "020-task-name",
       approved: [],
-      finishedUnreviewed: [],
     })
 
     const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
@@ -43,7 +42,6 @@ describe("sprint-branch doctor", () => {
       review: null,
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "unrecorded.txt"), "review work\n")
@@ -63,9 +61,8 @@ describe("sprint-branch doctor", () => {
       "example",
       {
         review: "020-task-name",
-        next: "010-task-name",
+        next: "020-task-name",
         approved: [],
-        finishedUnreviewed: ["010-task-name"],
       },
       { createNextBranch: true },
     )
@@ -88,7 +85,6 @@ describe("sprint-branch doctor", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -117,7 +113,6 @@ describe("sprint-branch doctor", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -147,7 +142,6 @@ describe("sprint-branch doctor", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -178,7 +172,6 @@ describe("sprint-branch doctor", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
@@ -213,7 +206,6 @@ describe("sprint-branch doctor", () => {
         review: "010-task-name",
         next: "020-task-name",
         approved: [],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -246,7 +238,6 @@ describe("sprint-branch doctor", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const state = await readState(repo, "example")
     await writeState(repo, "example", {
@@ -272,7 +263,6 @@ describe("sprint-branch doctor", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await git(repo, ["branch", "-D", "main"])
@@ -291,7 +281,6 @@ describe("sprint-branch doctor", () => {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "-b", "sprint/example/experimental"])
 

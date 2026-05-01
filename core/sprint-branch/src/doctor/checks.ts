@@ -159,13 +159,6 @@ async function checkBranchDrift(report: SprintStatusReport, context: DoctorConte
       message: `Next task ${state.tasks.next} is recorded without a current review task.`,
     })
   }
-  if (state.tasks.finishedUnreviewed.length > 0) {
-    diagnostics.push({
-      severity: "warning",
-      code: "finished_unreviewed_tasks_recorded",
-      message: `Finished unreviewed tasks remain: ${state.tasks.finishedUnreviewed.join(", ")}.`,
-    })
-  }
 
   return diagnostics
 }
@@ -202,7 +195,6 @@ async function checkTaskQueue(report: SprintStatusReport) {
   const taskFiles = await listTaskFiles(report.rootDir, report.state.sprint)
   const taskStems = taskFiles.map((task) => task.stem)
   const approved = new Set(report.state.tasks.approved)
-  const finishedUnreviewed = new Set(report.state.tasks.finishedUnreviewed)
 
   for (const task of taskFiles) {
     if (!taskStemPattern.test(task.stem)) {
@@ -239,8 +231,7 @@ async function checkTaskQueue(report: SprintStatusReport) {
 
   if (report.state.tasks.next && taskStems.includes(report.state.tasks.next)) {
     const expectedNext = taskStems.find(
-      (task) =>
-        !approved.has(task) && !finishedUnreviewed.has(task) && task !== report.state.tasks.review,
+      (task) => !approved.has(task) && task !== report.state.tasks.review,
     )
     if (expectedNext && expectedNext !== report.state.tasks.next) {
       diagnostics.push({
@@ -449,10 +440,6 @@ function taskAssignments(state: SprintBranchState): Array<[string, string | null
     ["tasks.next", state.tasks.next],
     ...state.tasks.approved.map((task, index): [string, string] => [
       `tasks.approved[${index}]`,
-      task,
-    ]),
-    ...state.tasks.finishedUnreviewed.map((task, index): [string, string] => [
-      `tasks.finishedUnreviewed[${index}]`,
       task,
     ]),
   ]

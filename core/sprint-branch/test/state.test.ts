@@ -29,18 +29,14 @@ describe("sprint branch state parsing", () => {
   test("accepts the canonical schema", () => {
     const branches = getExpectedBranches("example")
     const parsed = parseSprintState({
-      schemaVersion: 1,
       sprint: "example",
       baseBranch: "main",
-      branches,
       tasks: {
         review: "010-task-name",
         next: null,
         approved: [],
-        finishedUnreviewed: [],
       },
       activeStashes: [],
-      lock: null,
       conflict: null,
     })
 
@@ -48,14 +44,22 @@ describe("sprint branch state parsing", () => {
     expect(parsed.state?.branches).toEqual(branches)
   })
 
-  test("rejects unsupported schema versions", () => {
+  test("rejects invalid task state", () => {
     const parsed = parseSprintState({
-      schemaVersion: 2,
+      sprint: "example",
+      baseBranch: "main",
+      tasks: {
+        review: "010-task-name",
+        next: null,
+        approved: null,
+      },
+      activeStashes: [],
+      conflict: null,
     })
 
     expect(parsed.state).toBeNull()
     expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      "unsupported_schema_version",
+      "invalid_string_array",
     )
   })
 })

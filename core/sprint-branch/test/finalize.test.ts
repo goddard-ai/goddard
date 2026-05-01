@@ -24,7 +24,6 @@ describe("sprint-branch finalize", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
-      finishedUnreviewed: [],
     })
     const result = await runCli(repo, ["finalize", "--sprint", "example", "--json"])
 
@@ -39,7 +38,6 @@ describe("sprint-branch finalize", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
-      finishedUnreviewed: [],
     })
     await git(repo, ["branch", "release", "main"])
 
@@ -57,13 +55,12 @@ describe("sprint-branch finalize", () => {
   })
 
   // Finalize prepares the one branch a human will merge.
-  // Any recorded review, next, or finished-unreviewed task means that branch is not final yet.
+  // Any recorded review or next task means that branch is not final yet.
   test("refuses to finalize while unreviewed work is recorded", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
       approved: [],
-      finishedUnreviewed: [],
     })
     const beforeState = await readState(repo, "example")
 
@@ -85,7 +82,6 @@ describe("sprint-branch finalize", () => {
         review: null,
         next: null,
         approved: ["010-task-name"],
-        finishedUnreviewed: [],
       },
       { createNextBranch: true },
     )
@@ -108,7 +104,6 @@ describe("sprint-branch finalize", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
@@ -141,7 +136,6 @@ describe("sprint-branch finalize", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
-      finishedUnreviewed: [],
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")

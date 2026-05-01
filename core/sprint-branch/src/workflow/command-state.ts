@@ -48,14 +48,6 @@ export async function readCommandState(
       suggestion: "Finish any active Git operation before retrying the command.",
     })
   }
-  if (parsed.state.lock) {
-    diagnostics.push({
-      severity: "error",
-      code: "state_lock_recorded",
-      message: `State records an active ${parsed.state.lock.command} lock.`,
-      suggestion: "Run sprint-branch doctor before retrying the command.",
-    })
-  }
   if (!(await branchExists(context.rootDir, parsed.state.branches.approved))) {
     diagnostics.push({
       severity: "error",

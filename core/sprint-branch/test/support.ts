@@ -2,16 +2,18 @@ import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { getExpectedBranches, sprintStatePath, type SprintBranchState } from "../src"
+import { sprintStatePath, type SprintBranchState } from "../src"
 
 const cliPath = path.join(import.meta.dir, "..", "src", "main.ts")
 const tempRepos: string[] = []
+
+/** Raw sprint state as it appears in state.json test fixtures. */
+export type SprintStoredState = Omit<SprintBranchState, "branches">
 
 export type SprintTestTasks = {
   review: string | null
   next: string | null
   approved: string[]
-  finishedUnreviewed: string[]
 }
 
 export type DiagnosticOutput = {
@@ -86,10 +88,10 @@ export async function createSprintRepo(
 export async function readState(repo: string, sprint: string) {
   return JSON.parse(
     await fs.readFile(await sprintStatePath(repo, sprint), "utf-8"),
-  ) as SprintBranchState
+  ) as SprintStoredState
 }
 
-export async function writeState(repo: string, sprint: string, state: SprintBranchState) {
+export async function writeState(repo: string, sprint: string, state: unknown) {
   const statePath = await sprintStatePath(repo, sprint)
   await fs.mkdir(path.dirname(statePath), { recursive: true })
   await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`)
@@ -180,20 +182,16 @@ export async function stashList(repo: string) {
 }
 
 async function writeSprintState(repo: string, sprint: string, tasks: SprintTestTasks) {
-  const branches = getExpectedBranches(sprint)
   const statePath = await sprintStatePath(repo, sprint)
   await fs.mkdir(path.dirname(statePath), { recursive: true })
   await fs.writeFile(
     statePath,
     `${JSON.stringify(
       {
-        schemaVersion: 1,
         sprint,
         baseBranch: "main",
-        branches,
         tasks,
         activeStashes: [],
-        lock: null,
         conflict: null,
       },
       null,
