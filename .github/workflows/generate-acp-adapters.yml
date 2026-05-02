@@ -26,9 +26,6 @@ jobs:
       - name: Run generation script
         run: bun ./core/schema/scripts/generate-acp-adapters.js
 
-      - name: Format generated files
-        run: bun run fmt
-
       - name: Setup Git Identity
         run: |
           git config --global user.name "github-actions[bot]"
