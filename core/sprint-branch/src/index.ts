@@ -28,6 +28,7 @@ export {
 } from "./state/paths"
 export { parseSprintState } from "./state/schema"
 export { buildStatusReport, formatStatusReport } from "./status"
+export { formatSprintSyncReport, runSprintSync } from "./sync"
 export type {
   SprintActiveStash,
   SprintBranchNames,
@@ -39,6 +40,7 @@ export type {
   SprintContext,
   SprintDiagnostic,
   SprintMutationReport,
+  SprintSyncReport,
   SprintStatusReport,
   SprintTaskState,
   SprintWorkingTreeStatus,

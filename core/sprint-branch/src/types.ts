@@ -1,3 +1,5 @@
+import type { ReviewSyncResult } from "@goddard-ai/review-sync"
+
 /** Valid sprint branch roles managed by the sprint-branch workflow. */
 export type SprintBranchRole = "review" | "approved" | "next"
 
@@ -118,4 +120,17 @@ export type SprintMutationReport = {
   conflictHandling: string
   diagnostics: SprintDiagnostic[]
   state: SprintBranchState | null
+}
+
+/** Result returned when sprint-branch watches review-sync for one sprint. */
+export type SprintSyncReport = {
+  ok: boolean
+  command: "sync"
+  sprint: string | null
+  currentBranch: string | null
+  inferredFrom: string | null
+  agentBranch: string | null
+  reviewBranch: string | null
+  diagnostics: SprintDiagnostic[]
+  reviewSync: ReviewSyncResult | null
 }

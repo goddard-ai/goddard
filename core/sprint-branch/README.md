@@ -16,8 +16,11 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 
 `sprint-branch rebase <target>` rebases the recorded approved, review, and existing next sprint branches onto a target Git ref. Git performs the rebases; sprint state records the new base ref only after every branch rebase succeeds.
 
+`sprint-branch sync [--sprint <name>]` watches `review-sync` for the active sprint review branch in process, matching `review-sync watch <agent-branch>` after sprint resolution. The command resolves the active sprint the same way as read-only sprint commands: explicit `--sprint`, current sprint branch, `sprints/<name>` working directory, or interactive selection from active sprint state.
+
 - `sprint-branch status`
 - `sprint-branch diff`
+- `sprint-branch sync`
 - `sprint-branch doctor`
 - `sprint-branch list [--all]`
 - `sprint-branch checkout [name]`

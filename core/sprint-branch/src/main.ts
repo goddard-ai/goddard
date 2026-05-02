@@ -22,6 +22,7 @@ import {
 } from "./mutations"
 import { SprintInferenceError } from "./state/inference"
 import { buildStatusReport, formatStatusReport } from "./status"
+import { formatSprintSyncReport, runSprintSync } from "./sync"
 import type { SprintMutationReport, SprintStatusReport } from "./types"
 
 function sprintOption() {
@@ -140,6 +141,35 @@ export async function main(argv: string[]) {
 
           const output = await runGit(report.rootDir, args)
           writeOutput(json, { ok: true, command: commandLine, args, output }, output.trimEnd())
+        },
+      }),
+      sync: command({
+        name: "sync",
+        description: "Watch review-sync for the active sprint review branch",
+        args: commonReadArgs,
+        handler: async ({ sprint, json }) => {
+          const abort = createProcessAbortSignal()
+          try {
+            const report = await runSprintSync({
+              cwd: process.cwd(),
+              sprint,
+              interactive: !json,
+              signal: abort.signal,
+              onResult: json
+                ? undefined
+                : (result) => {
+                    writeOutput(false, result, result.message)
+                  },
+            })
+            writeOutput(json, report, formatSprintSyncReport(report))
+            if (report.reviewSync) {
+              process.exitCode = report.reviewSync.exitCode
+            } else if (!report.ok) {
+              process.exitCode = 1
+            }
+          } finally {
+            abort.cleanup()
+          }
         },
       }),
       doctor: command({
@@ -484,6 +514,23 @@ function writeOutput(json: boolean, value: unknown, text: string) {
 
   if (text.length > 0) {
     console.log(text)
+  }
+}
+
+/** Creates an abort signal that lets watch-style commands clean up on process signals. */
+function createProcessAbortSignal() {
+  const controller = new AbortController()
+  const abortForSigint = () => controller.abort("SIGINT")
+  const abortForSigterm = () => controller.abort("SIGTERM")
+  process.once("SIGINT", abortForSigint)
+  process.once("SIGTERM", abortForSigterm)
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      process.off("SIGINT", abortForSigint)
+      process.off("SIGTERM", abortForSigterm)
+    },
   }
 }
 

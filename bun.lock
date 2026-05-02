@@ -230,6 +230,7 @@
       },
       "dependencies": {
         "@clack/prompts": "catalog:",
+        "@goddard-ai/review-sync": "workspace:^",
         "cmd-ts": "catalog:",
       },
     },
