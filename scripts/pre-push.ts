@@ -66,6 +66,7 @@ type WorkspaceCheckTask = {
 type WorkspaceCheckResult = {
   task: WorkspaceCheckTask
   status: number | null
+  elapsedMilliseconds: number
   stdout: string
   stderr: string
   error?: Error
@@ -266,9 +267,20 @@ function formatTaskLabel(task: WorkspaceCheckTask) {
   return `${task.packageName} ${task.script}`
 }
 
+/** Formats task duration only when it is long enough to help scan hook output. */
+function formatElapsedTime(elapsedMilliseconds: number) {
+  if (elapsedMilliseconds < 1000) {
+    return undefined
+  }
+
+  const elapsedSeconds = elapsedMilliseconds / 1000
+  return elapsedSeconds < 10 ? `${elapsedSeconds.toFixed(1)}s` : `${Math.round(elapsedSeconds)}s`
+}
+
 /** Runs one workspace package script while capturing output for grouped failures. */
 function runWorkspaceCheckTask(task: WorkspaceCheckTask) {
   return new Promise<WorkspaceCheckResult>((resolve) => {
+    const startedAt = performance.now()
     let childProcess: ReturnType<typeof Bun.spawn>
 
     try {
@@ -281,6 +293,7 @@ function runWorkspaceCheckTask(task: WorkspaceCheckTask) {
       resolve({
         task,
         status: null,
+        elapsedMilliseconds: performance.now() - startedAt,
         stdout: "",
         stderr: "",
         error: error instanceof Error ? error : new Error(String(error)),
@@ -297,6 +310,7 @@ function runWorkspaceCheckTask(task: WorkspaceCheckTask) {
         resolve({
           task,
           status,
+          elapsedMilliseconds: performance.now() - startedAt,
           stdout,
           stderr,
         })
@@ -305,6 +319,7 @@ function runWorkspaceCheckTask(task: WorkspaceCheckTask) {
         resolve({
           task,
           status: null,
+          elapsedMilliseconds: performance.now() - startedAt,
           stdout: "",
           stderr: "",
           error: error instanceof Error ? error : new Error(String(error)),
@@ -319,9 +334,12 @@ function printWorkspaceCheckFailures(failures: WorkspaceCheckResult[]) {
   for (const failure of failures) {
     const output = `${failure.stdout}${failure.stderr}`.trimEnd()
     const statusLabel = failure.status === null ? "spawn failed" : `exit ${failure.status}`
+    const elapsedTime = formatElapsedTime(failure.elapsedMilliseconds)
 
     process.stderr.write(
-      `\npre-push: ${formatTaskLabel(failure.task)} failed (${statusLabel}) in ${failure.task.relativePath}\n`,
+      `\npre-push: ${formatTaskLabel(failure.task)} failed (${[statusLabel, elapsedTime]
+        .filter(Boolean)
+        .join(", ")}) in ${failure.task.relativePath}\n`,
     )
 
     if (failure.error) {
@@ -350,7 +368,10 @@ async function runWorkspaceChecks(repoRoot: string) {
       const result = await runWorkspaceCheckTask(task)
 
       if (result.status === 0) {
-        process.stdout.write(`pre-push: passed ${formatTaskLabel(task)}\n`)
+        const elapsedTime = formatElapsedTime(result.elapsedMilliseconds)
+        process.stdout.write(
+          `pre-push: passed ${formatTaskLabel(task)}${elapsedTime ? ` (${elapsedTime})` : ""}\n`,
+        )
       }
 
       return result
