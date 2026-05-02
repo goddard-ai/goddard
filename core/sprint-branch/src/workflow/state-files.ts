@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
+import { ensureGitInfoExcludeEntry } from "../git/repository"
 import { sprintStateDisplayPath, sprintStatePath } from "../state/paths"
 import { clearTransientConflict } from "../transient-conflict"
 import type { SprintBranchState } from "../types"
@@ -17,6 +18,7 @@ type StoredSprintState = {
 
 /** Writes canonical sprint branch state outside the repository working tree. */
 export async function writeSprintState(rootDir: string, state: SprintBranchState) {
+  await ensureGitInfoExcludeEntry(rootDir, "sprints/")
   await writeSprintStateAtomic(
     await sprintStatePath(rootDir, state.sprint),
     storedSprintState(state),

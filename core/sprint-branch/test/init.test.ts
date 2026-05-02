@@ -1,3 +1,5 @@
+import * as fs from "node:fs/promises"
+import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import {
@@ -27,6 +29,7 @@ describe("sprint-branch init", () => {
     expect(await branchExists(repo, "sprint/example/review")).toBe(true)
     expect(await branchExists(repo, "sprint/example/next")).toBe(false)
     expect(await git(repo, ["status", "--porcelain"])).toBe("")
+    await expectGitInfoExcludeLines(repo, ["sprints/"])
     const state = await readState(repo, "example")
     expect(Object.keys(state)).toEqual([
       "sprint",
@@ -66,6 +69,17 @@ describe("sprint-branch init", () => {
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
     expect(await branchExists(repo, "sprint/example/review")).toBe(false)
     expect(await stateFileExists(repo, "example")).toBe(false)
+    await expectGitInfoExcludeLines(repo, [])
+  })
+
+  test("does not duplicate an existing sprints exclude entry", async () => {
+    const repo = await createBaseRepo("example")
+    await fs.writeFile(path.join(repo, ".git", "info", "exclude"), "# local excludes\nsprints/\n")
+
+    const result = await runCli(repo, ["init", "--sprint", "example", "--base", "main", "--json"])
+
+    expect(result.exitCode).toBe(0)
+    await expectGitInfoExcludeLines(repo, ["sprints/"])
   })
 
   // A bare sprint/<name> branch collides with the namespace used for role branches.
@@ -83,3 +97,8 @@ describe("sprint-branch init", () => {
     expect(await stateFileExists(repo, "example")).toBe(false)
   })
 })
+
+async function expectGitInfoExcludeLines(repo: string, expected: string[]) {
+  const exclude = await fs.readFile(path.join(repo, ".git", "info", "exclude"), "utf-8")
+  expect(exclude.split(/\r?\n/).filter((line) => line.trim() === "sprints/")).toEqual(expected)
+}

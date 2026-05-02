@@ -14,6 +14,24 @@ export async function resolveGitPath(rootDir: string, gitPath: string) {
   return path.isAbsolute(resolved) ? resolved : path.join(rootDir, resolved)
 }
 
+/** Ensures a Git-private exclude pattern exists without duplicating it. */
+export async function ensureGitInfoExcludeEntry(rootDir: string, entry: string) {
+  const excludePath = await resolveGitPath(rootDir, "info/exclude")
+  await fs.mkdir(path.dirname(excludePath), { recursive: true })
+
+  let existing = ""
+  if (await pathExists(excludePath)) {
+    existing = await fs.readFile(excludePath, "utf-8")
+  }
+
+  if (existing.split(/\r?\n/).some((line) => line.trim() === entry)) {
+    return
+  }
+
+  const prefix = existing.length === 0 || existing.endsWith("\n") ? existing : `${existing}\n`
+  await fs.writeFile(excludePath, `${prefix}${entry}\n`)
+}
+
 /** Resolves a path inside Git's common metadata directory shared by linked worktrees. */
 export async function resolveGitCommonPath(rootDir: string, gitPath: string) {
   const resolved = (await runGit(rootDir, ["rev-parse", "--git-common-dir"])).trim()
