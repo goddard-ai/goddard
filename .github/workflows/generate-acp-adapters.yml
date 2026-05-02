@@ -37,6 +37,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: auto-generate ACP adapters" --no-verify
-            git push
+            git commit -m "chore: auto-generate ACP adapters"
+            git push --no-verify
           fi
