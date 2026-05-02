@@ -10,7 +10,7 @@ import type {
   WorkforceStatus,
 } from "@goddard-ai/schema/workforce"
 import { concat, dedent } from "radashi"
-import { v7 as uuidv7 } from "uuid"
+import { ulid } from "ulid"
 
 import { WorkforceActorContext, WorkforceDispatchContext } from "../context.ts"
 import { createLogger, createPayloadPreview, isVerboseLogging } from "../logging.ts"
@@ -452,7 +452,7 @@ export class WorkforceRuntime {
       throw new Error("Create requests must target the root workforce agent")
     }
 
-    const requestId = uuidv7()
+    const requestId = ulid()
     await this.appendEvent({
       at: new Date().toISOString(),
       type: "request",
@@ -649,7 +649,7 @@ export class WorkforceRuntime {
   ): Promise<void> {
     const eventWithId = {
       ...event,
-      id: event.id ?? uuidv7(),
+      id: event.id ?? ulid(),
     } as WorkforceLedgerEvent
     await appendWorkforceLedgerEvent(this.#rootDir, eventWithId)
     this.#events.push(eventWithId)

@@ -13,6 +13,7 @@ import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
 import { WorkforceRuntime } from "../src/workforce/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
+const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -387,7 +388,15 @@ test("domain agents can update and cancel requests they originally sent", async 
   })
 
   const ledger = await readFile(join(rootDir, ".goddard", "ledger.jsonl"), "utf-8")
+  const ledgerEvents = ledger
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { id: string })
 
+  expect(requestId).toMatch(ulidPattern)
+  for (const event of ledgerEvents) {
+    expect(event.id).toMatch(ulidPattern)
+  }
   expect(ledger).toMatch(new RegExp(`"requestId":"${requestId}"`))
   expect(ledger).toMatch(/"type":"update"/)
   expect(ledger).toMatch(/"type":"cancel"/)
