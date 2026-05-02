@@ -43,6 +43,8 @@ export async function createBaseRepo(sprint: string) {
   tempRepos.push(repo)
 
   await git(repo, ["init"])
+  await git(repo, ["config", "user.name", "Test"])
+  await git(repo, ["config", "user.email", "test@example.com"])
   await git(repo, ["checkout", "-b", "main"])
   await fs.writeFile(path.join(repo, "README.md"), "# Test\n")
   await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
