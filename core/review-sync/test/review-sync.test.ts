@@ -492,6 +492,66 @@ test("watch refreshes the review worktree from the target branch ref while waiti
   }
 })
 
+test("watch warns when branch ref refresh is blocked by human edits", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const started = createDeferred<void>()
+  const warning = createDeferred<ReviewSyncResult>()
+  let warningResolved = false
+  const results: ReviewSyncResult[] = []
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    signal: controller.signal,
+    onResult: (result) => {
+      results.push(result)
+      if (result.command === "watch") {
+        started.resolve()
+      }
+      if (result.message.startsWith("Warning: review refresh skipped")) {
+        warningResolved = true
+        warning.resolve(result)
+      }
+    },
+  })
+
+  try {
+    await started.promise
+    await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
+    await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
+
+    const branchWriterDir = join(fixture.rootDir, "branch-writer")
+    await runGit(fixture.agentDir, ["worktree", "add", branchWriterDir, "codex/review-sync-test"])
+    await writeText(join(branchWriterDir, "shared.txt"), "branch ref edit\n")
+    await runGit(branchWriterDir, ["add", "shared.txt"])
+    await runGit(branchWriterDir, ["commit", "-m", "branch ref edit"])
+
+    const warningResult = await Promise.race([
+      warning.promise,
+      watch.then((result) => {
+        if (!warningResolved) {
+          throw new Error(`watch stopped before warning: ${result.message}`)
+        }
+        return warning.promise
+      }),
+    ])
+    expect(warningResult.message).toContain("has unapplied human edits")
+    expect(results.filter((result) => result.message.startsWith("Warning:")).length).toBe(1)
+    expect(results.some((result) => result.command === "sync")).toBe(false)
+    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+
+    controller.abort()
+    const stopped = await watch
+    expect(stopped.status).toBe("ok")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
 async function runWatchUntilNextSync(
   cwd: string,
   mutate: () => Promise<void>,

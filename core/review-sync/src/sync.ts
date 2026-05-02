@@ -67,7 +67,7 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
   return await withSessionLock(session, async () => {
     const latest = await readSessionState(session)
     if (latest.paused) {
-      return false
+      return { status: "skipped", reason: "paused" } as const
     }
 
     await validateReviewWorktreeForRefresh(latest, context)
@@ -82,7 +82,14 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
       context,
     )
     if (!branchHead || !renderedSnapshot || branchHead === renderedSnapshot) {
-      return false
+      return {
+        status: "skipped",
+        reason: !branchHead
+          ? "missing-agent-branch-ref"
+          : !renderedSnapshot
+            ? "missing-rendered-snapshot"
+            : "unchanged",
+      } as const
     }
 
     const reviewSnapshot = await createSnapshotCommit({
@@ -97,7 +104,7 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
       context,
     )
     if (humanPatch.trim()) {
-      return false
+      return { status: "skipped", reason: "pending-human-patch" } as const
     }
 
     await refreshReviewWorktree(latest, branchHead, context)
@@ -109,7 +116,7 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
       status: "synced",
       source: "agent-branch-ref",
     })
-    return true
+    return { status: "refreshed" } as const
   })
 }
 

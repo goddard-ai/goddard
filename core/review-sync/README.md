@@ -42,6 +42,8 @@ If the agent worktree temporarily checks out another branch while `watch` is
 running, `watch` waits for the recorded agent branch to be checked out again
 before retrying sync. While waiting, it still refreshes the review worktree from
 the recorded agent branch ref when no unapplied human patch would be discarded.
+If review-side edits block that refresh, `watch` prints a warning and leaves
+those edits in place.
 One-shot `start` and `sync` commands fail fast when the agent worktree is on a
 different branch.
 

@@ -292,7 +292,13 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
         continue
       }
 
-      const result = await syncForWatchWhenAgentCheckoutReady(latest, context, events, input.signal)
+      const result = await syncForWatchWhenAgentCheckoutReady(
+        latest,
+        context,
+        events,
+        input.signal,
+        input.onResult,
+      )
       if (!result) {
         break
       }
@@ -527,6 +533,7 @@ async function syncForWatchWhenAgentCheckoutReady(
   context: RuntimeContext,
   events: WatchEventQueue,
   signal: AbortSignal | undefined,
+  onResult: WatchReviewSyncInput["onResult"],
 ) {
   while (!isAbortSignalAborted(signal)) {
     try {
@@ -535,7 +542,9 @@ async function syncForWatchWhenAgentCheckoutReady(
       if (!(error instanceof AgentWorktreeCheckoutMismatchError)) {
         return createErrorResult("sync", error)
       }
-      if (!(await waitForExpectedAgentCheckout(session, error, context, events, signal))) {
+      if (
+        !(await waitForExpectedAgentCheckout(session, error, context, events, signal, onResult))
+      ) {
         return null
       }
     }
@@ -551,14 +560,33 @@ async function waitForExpectedAgentCheckout(
   context: RuntimeContext,
   events: WatchEventQueue,
   signal: AbortSignal | undefined,
+  onResult: WatchReviewSyncInput["onResult"],
 ) {
+  let pendingHumanPatchWarningSent = false
   while (!isAbortSignalAborted(signal)) {
     const branch = await resolveCurrentBranch(mismatch.worktree, context)
     if (branch === mismatch.expectedBranch) {
       return true
     }
 
-    await refreshReviewWorktreeFromAgentBranchRef(session, context)
+    const refreshResult = await refreshReviewWorktreeFromAgentBranchRef(session, context)
+    if (
+      refreshResult.status === "skipped" &&
+      refreshResult.reason === "pending-human-patch" &&
+      !pendingHumanPatchWarningSent
+    ) {
+      pendingHumanPatchWarningSent = true
+      await onResult?.(
+        createReviewSyncResult({
+          exitCode: 0,
+          command: "watch",
+          status: "ok",
+          sessionId: session.sessionId,
+          reviewBranch: session.reviewBranch,
+          message: `Warning: review refresh skipped while waiting for ${session.agentBranch}; ${session.reviewWorktree} has unapplied human edits.`,
+        }),
+      )
+    }
 
     if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, signal))) {
       return false
