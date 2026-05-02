@@ -633,7 +633,7 @@ test("watch reuses an existing session when the agent branch is not checked out"
 
     controller.abort()
     const stopped = await watch
-    expect(stopped.status).toBe("ok")
+    expect(stopped.status).toBe("paused")
     expect(controller.signal.reason).not.toBe(timeoutReason)
   } finally {
     clearTimeout(timeout)
