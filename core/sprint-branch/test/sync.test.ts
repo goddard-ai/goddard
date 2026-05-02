@@ -80,7 +80,7 @@ describe("sprint-branch sync", () => {
       expect(sync.agentBranch).toBe("sprint/example/review")
       expect(sync.reviewBranch).toBe("review-sync/sprint/example/review")
       expect(sync.reviewSync?.command).toBe("watch")
-      expect(sync.reviewSync?.status).toBe("ok")
+      expect(sync.reviewSync?.status).toBe("paused")
       expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(
         true,
       )
