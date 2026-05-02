@@ -22,6 +22,7 @@ export const ACPAdapterNames = [
   "fast-agent",
   "gemini",
   "github-copilot-cli",
+  "glm-acp-agent",
   "goose",
   "junie",
   "kilo",
