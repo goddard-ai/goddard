@@ -173,7 +173,14 @@ export async function prepareReviewBranchForStart(session: SessionState, context
     return
   }
 
-  const agentHead = (await git(session.agentWorktree, ["rev-parse", "HEAD"], context)).stdout.trim()
+  const agentHead = await resolveRef(
+    session.agentWorktree,
+    `refs/heads/${session.agentBranch}`,
+    context,
+  )
+  if (!agentHead) {
+    throw new UserError(`Agent branch ${session.agentBranch} no longer exists.`)
+  }
   await git(session.reviewWorktree, ["branch", session.reviewBranch, agentHead], context)
   await git(session.reviewWorktree, ["checkout", session.reviewBranch], context, {
     stdin: "ignore",

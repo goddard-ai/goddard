@@ -272,6 +272,7 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
   }
 
   const { session, startResult, refreshFromBranchRefOnStart } = resolution
+  await prepareReviewBranchForStart(session, context)
   let fingerprint = await createWatchFingerprint(session, context)
   const warningState = { pendingHumanPatchWarningSent: false }
   const events = createWatchEventQueue(input.signal)

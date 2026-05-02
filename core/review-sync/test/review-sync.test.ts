@@ -640,6 +640,39 @@ test("watch reuses an existing session when the agent branch is not checked out"
   }
 })
 
+test("watch checks out the saved review branch before reusing a session", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
+  await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+    signal: controller.signal,
+    onResult: (result) => {
+      if (result.command === "watch" && result.reviewBranch) {
+        controller.abort()
+      }
+    },
+  })
+
+  try {
+    const stopped = await watch
+
+    expect(stopped.status).toBe("paused")
+    expect(stopped.message).toContain("Checked out main.")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+    expect(await currentBranch(fixture.reviewDir)).toBe("main")
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
 test("watch warns when branch ref refresh is blocked by human edits", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
