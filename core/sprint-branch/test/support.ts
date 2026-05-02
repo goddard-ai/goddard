@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs"
 import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -6,6 +7,9 @@ import { sprintStatePath, type SprintBranchState } from "../src"
 
 const cliPath = path.join(import.meta.dir, "..", "src", "main.ts")
 const tempRepos: string[] = []
+const templateRepos: string[] = []
+const baseRepoTemplatePromises = new Map<string, Promise<string>>()
+let templateCleanupRegistered = false
 
 /** Raw sprint state as it appears in state.json test fixtures. */
 export type SprintStoredState = Omit<SprintBranchState, "branches">
@@ -41,17 +45,14 @@ export async function cleanupTestRepos() {
 export async function createBaseRepo(sprint: string) {
   const repo = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-branch-"))
   tempRepos.push(repo)
-
-  await git(repo, ["init"])
-  await git(repo, ["config", "user.name", "Test"])
-  await git(repo, ["config", "user.email", "test@example.com"])
-  await git(repo, ["checkout", "-b", "main"])
-  await fs.writeFile(path.join(repo, "README.md"), "# Test\n")
-  await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
-  for (const task of ["010-task-name", "020-task-name"]) {
-    await fs.writeFile(path.join(repo, "sprints", sprint, `${task}.md`), `# ${task}\n`)
-  }
-  await commitAll(repo, "init")
+  await fs.rm(repo, { recursive: true, force: true })
+  await git(path.dirname(repo), [
+    "clone",
+    "--local",
+    "--quiet",
+    await baseRepoTemplate(sprint),
+    repo,
+  ])
 
   return repo
 }
@@ -211,6 +212,52 @@ async function writeSprintState(repo: string, sprint: string, tasks: SprintTestT
       2,
     )}\n`,
   )
+}
+
+/** Creates the immutable seed repository cloned by sprint-branch integration tests. */
+async function baseRepoTemplate(sprint: string) {
+  let template = baseRepoTemplatePromises.get(sprint)
+
+  if (!template) {
+    template = createBaseRepoTemplate(sprint)
+    baseRepoTemplatePromises.set(sprint, template)
+  }
+
+  return await template
+}
+
+/** Initializes one reusable base repository for a sprint name. */
+async function createBaseRepoTemplate(sprint: string) {
+  registerTemplateCleanup()
+  const repo = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-branch-template-"))
+  templateRepos.push(repo)
+
+  await git(repo, ["init"])
+  await git(repo, ["config", "user.name", "Test"])
+  await git(repo, ["config", "user.email", "test@example.com"])
+  await git(repo, ["checkout", "-b", "main"])
+  await fs.writeFile(path.join(repo, "README.md"), "# Test\n")
+  await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
+  for (const task of ["010-task-name", "020-task-name"]) {
+    await fs.writeFile(path.join(repo, "sprints", sprint, `${task}.md`), `# ${task}\n`)
+  }
+  await commitAll(repo, "init")
+
+  return repo
+}
+
+/** Registers synchronous cleanup because process exit hooks cannot await temp directory removal. */
+function registerTemplateCleanup() {
+  if (templateCleanupRegistered) {
+    return
+  }
+
+  templateCleanupRegistered = true
+  process.once("exit", () => {
+    for (const repo of templateRepos) {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
 }
 
 async function pathExists(pathname: string) {

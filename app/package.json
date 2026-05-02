@@ -5,16 +5,17 @@
   "license": "AGPL-3.0",
   "type": "module",
   "scripts": {
-    "prepare": "panda codegen && bun run ./scripts/generate-svg-icon-data.ts",
+    "prepare": "bun run panda:codegen && bun run ./scripts/generate-svg-icon-data.ts",
     "dev": "bun install --frozen-lockfile && bun run ./scripts/dev.ts",
-    "build": "panda codegen && vite build && electrobun build",
+    "build": "bun run panda:codegen && vite build && electrobun build",
     "build:canary": "bun run build --env=canary",
     "build:stable": "bun run build --env=stable",
     "icons:generate": "bun run ./scripts/generate-iconset.ts",
+    "panda:codegen": "panda codegen",
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "test": "bun test --dots",
-    "typecheck": "panda codegen && tsrx-tsc --noEmit"
+    "typecheck": "bun run panda:codegen && tsrx-tsc --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",

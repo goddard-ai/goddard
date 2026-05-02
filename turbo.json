@@ -5,11 +5,20 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "panda:codegen": {
+      "inputs": ["panda.config.ts", "src/**/*.{js,jsx,ts,tsrx}", "package.json"],
+      "outputs": ["styled-system/**"]
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": [
         "**/*.ts",
         "**/*.tsrx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs",
+        "**/*.json",
         "**/tsconfig.json",
         "**/tsdown.config.ts",
         "tsconfig.base.json"
@@ -18,12 +27,28 @@
     },
     "lint": {
       "dependsOn": ["^lint"],
-      "inputs": ["**/*.ts", "**/*.tsrx", "**/oxlintrc.json"],
+      "inputs": [
+        "**/*.ts",
+        "**/*.tsrx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs",
+        "**/oxlintrc.json"
+      ],
       "outputs": []
     },
     "test": {
       "dependsOn": ["^test"],
-      "inputs": ["**/*.ts", "**/*.tsrx"],
+      "inputs": [
+        "**/*.ts",
+        "**/*.tsrx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs",
+        "**/*.json"
+      ],
       "outputs": []
     },
     "fmt": {

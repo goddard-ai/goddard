@@ -277,18 +277,31 @@ function formatElapsedTime(elapsedMilliseconds: number) {
   return elapsedSeconds < 10 ? `${elapsedSeconds.toFixed(1)}s` : `${Math.round(elapsedSeconds)}s`
 }
 
-/** Runs one workspace package script while capturing output for grouped failures. */
-function runWorkspaceCheckTask(task: WorkspaceCheckTask) {
+/** Runs one workspace package script through Turbo while capturing output for grouped failures. */
+function runWorkspaceCheckTask(repoRoot: string, task: WorkspaceCheckTask) {
   return new Promise<WorkspaceCheckResult>((resolve) => {
     const startedAt = performance.now()
     let childProcess: ReturnType<typeof Bun.spawn>
 
     try {
-      childProcess = Bun.spawn([process.execPath, "run", task.script], {
-        cwd: task.packagePath,
-        stdout: "pipe",
-        stderr: "pipe",
-      })
+      childProcess = Bun.spawn(
+        [
+          process.execPath,
+          "run",
+          "turbo",
+          "--ui=stream",
+          "run",
+          task.script,
+          `--filter=${task.packageName}`,
+          "--only",
+          "--output-logs=errors-only",
+        ],
+        {
+          cwd: repoRoot,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      )
     } catch (error) {
       resolve({
         task,
@@ -352,7 +365,7 @@ function printWorkspaceCheckFailures(failures: WorkspaceCheckResult[]) {
   }
 }
 
-/** Runs all check lanes across all workspace packages at the same time. */
+/** Runs all check lanes across all workspace packages while each task can use Turbo cache. */
 async function runWorkspaceChecks(repoRoot: string) {
   const tasks = getWorkspaceCheckTasks(repoRoot)
   const taskCounts = CHECK_SCRIPTS.map(
@@ -360,12 +373,12 @@ async function runWorkspaceChecks(repoRoot: string) {
   ).join(", ")
 
   process.stdout.write(
-    `pre-push: running ${tasks.length} workspace checks in parallel (${taskCounts})\n`,
+    `pre-push: running ${tasks.length} workspace checks in parallel through Turbo (${taskCounts})\n`,
   )
 
   const results = await Promise.all(
     tasks.map(async (task) => {
-      const result = await runWorkspaceCheckTask(task)
+      const result = await runWorkspaceCheckTask(repoRoot, task)
 
       if (result.status === 0) {
         const elapsedTime = formatElapsedTime(result.elapsedMilliseconds)
