@@ -96,7 +96,7 @@ async function createRegistryRepo(version: string) {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-registry-remote-"))
   cleanupDirs.push(repoDir)
   await writeRegistryAgent(repoDir, version)
-  runGit(repoDir, ["init"])
+  runGit(repoDir, ["init", "--initial-branch", "main"])
   runGit(repoDir, ["config", "user.email", "bot@example.com"])
   runGit(repoDir, ["config", "user.name", "Bot"])
   runGit(repoDir, ["add", "."])
