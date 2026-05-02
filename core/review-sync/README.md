@@ -44,6 +44,10 @@ before retrying sync. While waiting, it still refreshes the review worktree from
 the recorded agent branch ref when no unapplied human patch would be discarded.
 If review-side edits block that refresh, `watch` prints a warning and leaves
 those edits in place.
+Once a session is active, `watch` pauses the review-sync session before exiting
+and attempts to check out the review worktree branch that was active when
+`watch` started. If cleanup cannot complete, the final command output explains
+which step failed and why.
 One-shot `start` and `sync` commands fail fast when the agent worktree is on a
 different branch.
 

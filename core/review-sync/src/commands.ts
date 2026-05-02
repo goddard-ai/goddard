@@ -203,6 +203,20 @@ async function statusReviewSessionOperation(json: boolean, context: RuntimeConte
 /** Performs the pause workflow after CLI parsing and command-level error handling. */
 async function pauseReviewSessionOperation(context: RuntimeContext) {
   const session = await inferSession(context)
+  const latest = await pauseSession(session)
+
+  return createReviewSyncResult({
+    exitCode: 0,
+    command: "pause",
+    status: "paused",
+    sessionId: latest.sessionId,
+    reviewBranch: latest.reviewBranch,
+    message: `Paused review sync for ${latest.reviewBranch}.`,
+  })
+}
+
+/** Marks a known session paused without relying on branch-based session inference. */
+async function pauseSession(session: SessionState) {
   return await withSessionLock(session, async () => {
     const latest = await readSessionState(session)
     latest.paused = true
@@ -217,15 +231,7 @@ async function pauseReviewSessionOperation(context: RuntimeContext) {
       command: "pause",
       status: "paused",
     })
-
-    return createReviewSyncResult({
-      exitCode: 0,
-      command: "pause",
-      status: "paused",
-      sessionId: latest.sessionId,
-      reviewBranch: latest.reviewBranch,
-      message: `Paused review sync for ${latest.reviewBranch}.`,
-    })
+    return latest
   })
 }
 
@@ -255,6 +261,8 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
 
 /** Performs the watch workflow after CLI parsing and command-level error handling. */
 async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
+  const startedWorktree = await resolveRequiredRepoRoot(context.cwd, context)
+  const startedBranch = await resolveCurrentBranch(startedWorktree, context)
   const resolution = await resolveSessionForWatch(input, context)
   if (resolution.kind === "stopped") {
     return resolution.result
@@ -264,6 +272,7 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
   let fingerprint = await createWatchFingerprint(session, context)
   const events = createWatchEventQueue(input.signal)
   const watchers = await createReviewSyncWatchers(session, context, events)
+  let watchError: unknown
 
   try {
     if (startResult) {
@@ -308,19 +317,120 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
       }
       fingerprint = await createWatchFingerprint(await readSessionState(session), context)
     }
+  } catch (error) {
+    watchError = error
   } finally {
     closeReviewSyncWatchers(watchers)
   }
 
-  const latest = await readSessionState(session)
-  return createReviewSyncResult({
-    exitCode: getWatchExitCode(input.signal),
-    command: "watch",
-    status: latest.paused ? "paused" : "ok",
-    sessionId: latest.sessionId,
-    reviewBranch: latest.reviewBranch,
-    message: `Stopped watching review sync for ${latest.reviewBranch}.`,
+  const cleanup = await cleanupWatchExit({
+    session,
+    context,
+    startedWorktree,
+    startedBranch,
   })
+
+  if (watchError) {
+    if (cleanup.failures.length > 0) {
+      throw new UserError(
+        [
+          formatThrownError(watchError),
+          "Additionally, watch cleanup did not complete:",
+          ...cleanup.failures.map((failure) => `- ${failure}`),
+        ].join("\n"),
+      )
+    }
+    throw watchError
+  }
+
+  return createReviewSyncResult({
+    exitCode:
+      cleanup.failures.length > 0
+        ? getWatchCleanupFailureExitCode(input.signal)
+        : getWatchExitCode(input.signal),
+    command: "watch",
+    status: cleanup.failures.length > 0 ? "error" : "paused",
+    sessionId: cleanup.latest.sessionId,
+    reviewBranch: cleanup.latest.reviewBranch,
+    message: formatWatchStoppedMessage(cleanup),
+  })
+}
+
+/** Pauses watch state and restores the review worktree branch that launched watch. */
+async function cleanupWatchExit(input: {
+  session: SessionState
+  context: RuntimeContext
+  startedWorktree: string
+  startedBranch: string | null
+}) {
+  const failures: string[] = []
+  const notes: string[] = []
+  let latest = input.session
+  let paused = false
+
+  try {
+    latest = await pauseSession(input.session)
+    paused = true
+  } catch (error) {
+    failures.push(`Could not pause review sync: ${formatThrownError(error)}`)
+    try {
+      latest = await readSessionState(input.session)
+    } catch {
+      latest = input.session
+    }
+  }
+
+  if (!paused) {
+    return { latest, notes, failures }
+  }
+
+  if (input.startedWorktree === latest.reviewWorktree) {
+    if (input.startedBranch) {
+      try {
+        const currentBranch = await resolveCurrentBranch(latest.reviewWorktree, input.context)
+        if (currentBranch !== input.startedBranch) {
+          await git(latest.reviewWorktree, ["checkout", input.startedBranch], input.context, {
+            stdin: "ignore",
+          })
+        }
+        notes.push(`Checked out ${input.startedBranch}.`)
+      } catch (error) {
+        failures.push(
+          `Could not check out ${input.startedBranch} in ${latest.reviewWorktree}: ${formatThrownError(error)}`,
+        )
+      }
+    } else {
+      notes.push("No starting branch was checked out, so no branch was restored.")
+    }
+  }
+
+  return { latest, notes, failures }
+}
+
+/** Formats the final watch result with any cleanup outcome the user must act on. */
+function formatWatchStoppedMessage(cleanup: Awaited<ReturnType<typeof cleanupWatchExit>>) {
+  const stopped = `Stopped watching review sync for ${cleanup.latest.reviewBranch}.`
+  if (cleanup.failures.length > 0) {
+    return [
+      `${stopped} Cleanup did not complete:`,
+      ...cleanup.failures.map((failure) => `- ${failure}`),
+    ].join("\n")
+  }
+  if (cleanup.notes.length > 0) {
+    return `${stopped} Paused review sync. ${cleanup.notes.join(" ")}`
+  }
+  return `${stopped} Paused review sync.`
+}
+
+/** Keeps signal exits conventional unless cleanup is the only failure. */
+function getWatchCleanupFailureExitCode(signal: AbortSignal | undefined) {
+  const signalExitCode = getWatchExitCode(signal)
+  return signalExitCode === 0 ? 1 : signalExitCode
+}
+
+/** Returns a concise user-facing message for thrown values. */
+function formatThrownError(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** Preserves command-specific structured errors while letting cmd-ts route subcommands. */

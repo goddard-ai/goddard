@@ -293,11 +293,105 @@ test("watch starts a session from an agent branch before syncing", async () => {
     "codex/review-sync-test",
   )
 
-  expect(stopped.status).toBe("ok")
+  expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(true)
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
   expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+})
+
+test("watch pauses and restores the starting review branch on exit", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.reviewDir, ["checkout", "-B", "review-base"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const started = createDeferred<void>()
+  let startedResolved = false
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+    signal: controller.signal,
+    onResult: (result) => {
+      if (result.command === "watch" && result.reviewBranch) {
+        startedResolved = true
+        started.resolve()
+        controller.abort()
+      }
+    },
+  })
+
+  try {
+    await Promise.race([
+      started.promise,
+      watch.then((result) => {
+        if (!startedResolved) {
+          throw new Error(`watch stopped before starting: ${result.message}`)
+        }
+      }),
+    ])
+    const stopped = await watch
+
+    expect(stopped.status).toBe("paused")
+    expect(stopped.message).toContain("Paused review sync. Checked out review-base.")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+    expect(await currentBranch(fixture.reviewDir)).toBe("review-base")
+    expect((await statusReviewSession({ cwd: fixture.reviewDir })).status).toBe("paused")
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
+test("watch explains when restoring the starting review branch fails", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.reviewDir, ["checkout", "-B", "review-base"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const started = createDeferred<void>()
+  let startedResolved = false
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+    signal: controller.signal,
+    onResult: (result) => {
+      if (result.command === "watch" && result.reviewBranch) {
+        startedResolved = true
+        started.resolve()
+      }
+    },
+  })
+
+  try {
+    await Promise.race([
+      started.promise,
+      watch.then((result) => {
+        if (!startedResolved) {
+          throw new Error(`watch stopped before starting: ${result.message}`)
+        }
+      }),
+    ])
+    await runGit(fixture.reviewDir, ["branch", "-D", "review-base"])
+    controller.abort()
+    const stopped = await watch
+
+    expect(stopped.status).toBe("error")
+    expect(stopped.exitCode).toBe(1)
+    expect(stopped.message).toContain("Cleanup did not complete")
+    expect(stopped.message).toContain("Could not check out review-base")
+    expect(stopped.message).toContain("pathspec")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+    expect((await statusReviewSession({ cwd: fixture.reviewDir })).status).toBe("paused")
+  } finally {
+    clearTimeout(timeout)
+  }
 })
 
 test("watch waits for an agent branch to get checked out before starting", async () => {
@@ -357,7 +451,7 @@ test("watch waits for an agent branch to get checked out before starting", async
     ])
     const stopped = await watch
 
-    expect(stopped.status).toBe("ok")
+    expect(stopped.status).toBe("paused")
     expect(controller.signal.reason).not.toBe(timeoutReason)
     expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(
       true,
@@ -376,7 +470,7 @@ test("watch syncs when the review worktree changes", async () => {
     await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
   })
 
-  expect(stopped.status).toBe("ok")
+  expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
@@ -389,7 +483,7 @@ test("watch syncs when the agent worktree changes", async () => {
     await writeText(join(fixture.agentDir, "shared.txt"), "agent edit\n")
   })
 
-  expect(stopped.status).toBe("ok")
+  expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
 })
@@ -402,7 +496,7 @@ test("watch syncs when the agent branch HEAD changes", async () => {
     await runGit(fixture.agentDir, ["commit", "--allow-empty", "-m", "empty"])
   })
 
-  expect(stopped.status).toBe("ok")
+  expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
 })
 
@@ -441,7 +535,7 @@ test("watch waits for the expected agent checkout before syncing", async () => {
     await runGit(fixture.agentDir, ["checkout", "codex/review-sync-test"])
     const stopped = await watch
 
-    expect(stopped.status).toBe("ok")
+    expect(stopped.status).toBe("paused")
     expect(controller.signal.reason).not.toBe(timeoutReason)
     expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
     expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
@@ -485,7 +579,7 @@ test("watch refreshes the review worktree from the target branch ref while waiti
     controller.abort()
 
     const stopped = await watch
-    expect(stopped.status).toBe("ok")
+    expect(stopped.status).toBe("paused")
     expect(controller.signal.reason).not.toBe(timeoutReason)
   } finally {
     clearTimeout(timeout)
@@ -545,7 +639,7 @@ test("watch warns when branch ref refresh is blocked by human edits", async () =
 
     controller.abort()
     const stopped = await watch
-    expect(stopped.status).toBe("ok")
+    expect(stopped.status).toBe("paused")
     expect(controller.signal.reason).not.toBe(timeoutReason)
   } finally {
     clearTimeout(timeout)
