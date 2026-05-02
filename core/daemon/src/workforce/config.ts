@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
-import { basename, join, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
 import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
 
@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile)
 
 // Common directory names skipped during workspace package discovery.
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
+const workforceLedgerGitExcludePattern = ".goddard/ledger.jsonl"
 
 /** Package metadata discovered from nested package manifests under a repository root. */
 export type DiscoveredWorkforcePackage = {
@@ -145,6 +146,53 @@ function sanitizeAgentId(value: string): string {
     .toLowerCase()
 }
 
+/** Keeps the append-only ledger out of Git status without changing tracked ignore files. */
+async function ensureWorkforceLedgerGitExclude(rootDir: string) {
+  let stdout: string
+  try {
+    const result = await execFileAsync("git", ["rev-parse", "--git-path", "info/exclude"], {
+      cwd: rootDir,
+    })
+    stdout = result.stdout
+  } catch {
+    return
+  }
+
+  const resolvedExcludePath = stdout.trim()
+  if (!resolvedExcludePath) {
+    throw new Error(`Unable to resolve git exclude path for ${rootDir}`)
+  }
+
+  const excludePath = isAbsolute(resolvedExcludePath)
+    ? resolvedExcludePath
+    : join(rootDir, resolvedExcludePath)
+  await mkdir(dirname(excludePath), { recursive: true })
+
+  let excludeContents = ""
+  try {
+    excludeContents = await readFile(excludePath, "utf-8")
+  } catch (error) {
+    const code =
+      error instanceof Error && "code" in error ? (error as NodeJS.ErrnoException).code : undefined
+    if (code !== "ENOENT") {
+      throw error
+    }
+  }
+
+  if (
+    excludeContents.split(/\r?\n/).some((line) => line.trim() === workforceLedgerGitExcludePattern)
+  ) {
+    return
+  }
+
+  const separator = excludeContents.length === 0 || excludeContents.endsWith("\n") ? "" : "\n"
+  await writeFile(
+    excludePath,
+    `${excludeContents}${separator}${workforceLedgerGitExcludePattern}\n`,
+    "utf-8",
+  )
+}
+
 /** Builds the initial repo-local workforce config for the selected packages. */
 function buildInitializedWorkforceConfig(packages: DiscoveredWorkforcePackage[]): WorkforceConfig {
   const domainAgents = packages
@@ -212,6 +260,8 @@ export async function ensureWorkforceFiles(rootDir: string): Promise<void> {
   } catch {
     await Bun.write(paths.ledgerPath, "")
   }
+
+  await ensureWorkforceLedgerGitExclude(rootDir)
 }
 
 /** Resolves the nearest git repository root from one starting directory. */
@@ -269,6 +319,8 @@ export async function initializeWorkforce(
     await writeFile(paths.ledgerPath, "", "utf-8")
     createdPaths.push(paths.ledgerPath)
   }
+
+  await ensureWorkforceLedgerGitExclude(repositoryRoot)
 
   return {
     rootDir: repositoryRoot,

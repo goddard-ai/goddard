@@ -100,6 +100,77 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   expect(config.rootAgentId).toBe("root")
   expect(config.agents.map((agent) => agent.cwd)).toEqual([".", "packages/ui"])
   await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
+
+  let gitExclude = await readFile(join(repoDir, ".git", "info", "exclude"), "utf-8")
+  expect(gitExclude.split(/\r?\n/).filter((line) => line === ".goddard/ledger.jsonl")).toEqual([
+    ".goddard/ledger.jsonl",
+  ])
+
+  const ignoredLedger = spawnSync("git", ["check-ignore", ".goddard/ledger.jsonl"], {
+    cwd: repoDir,
+    encoding: "utf-8",
+  })
+  expect(ignoredLedger.status).toBe(0)
+  expect(ignoredLedger.stdout.trim()).toBe(".goddard/ledger.jsonl")
+
+  await client.send("workforce.initialize", {
+    rootDir: packageDir,
+    packageDirs: discovered.candidates.map((candidate) => candidate.rootDir),
+  })
+  gitExclude = await readFile(join(repoDir, ".git", "info", "exclude"), "utf-8")
+  expect(gitExclude.split(/\r?\n/).filter((line) => line === ".goddard/ledger.jsonl")).toEqual([
+    ".goddard/ledger.jsonl",
+  ])
+})
+
+test("workforce runtime start excludes the ledger for existing repo-local config", async () => {
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-clone-"))
+  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+
+  await mkdir(join(repoDir, ".goddard"), { recursive: true })
+  await writeFile(
+    join(repoDir, ".goddard", "workforce.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        defaultAgent: "pi-acp",
+        rootAgentId: "root",
+        agents: [
+          {
+            id: "root",
+            name: "@repo/root",
+            role: "root",
+            cwd: ".",
+            owns: ["."],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  expect(spawnSync("git", ["init"], { cwd: repoDir }).status).toBe(0)
+
+  const runtime = await WorkforceRuntime.start(repoDir, {
+    sessionManager: {} as never,
+    runSession: async () => {},
+  })
+  await runtime.stop()
+
+  await expect(readFile(join(repoDir, ".goddard", "ledger.jsonl"), "utf-8")).resolves.toBe("")
+
+  const gitExclude = await readFile(join(repoDir, ".git", "info", "exclude"), "utf-8")
+  expect(gitExclude.split(/\r?\n/).filter((line) => line === ".goddard/ledger.jsonl")).toEqual([
+    ".goddard/ledger.jsonl",
+  ])
+
+  const ignoredLedger = spawnSync("git", ["check-ignore", ".goddard/ledger.jsonl"], {
+    cwd: repoDir,
+    encoding: "utf-8",
+  })
+  expect(ignoredLedger.status).toBe(0)
+  expect(ignoredLedger.stdout.trim()).toBe(".goddard/ledger.jsonl")
 })
 
 test("daemon workforce event stream rejects inactive repositories", async () => {
