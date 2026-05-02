@@ -6,7 +6,7 @@
       "outputs": ["dist/**"]
     },
     "panda:codegen": {
-      "inputs": ["panda.config.ts", "src/**/*.{js,jsx,ts,tsrx}", "package.json"],
+      "inputs": ["panda.config.ts", "src/panda-css/global.css.ts", "package.json"],
       "outputs": ["styled-system/**"]
     },
     "typecheck": {
