@@ -32,12 +32,13 @@ import {
   resolveSessionDir,
   writeSessionState,
 } from "./state.ts"
-import { syncSession } from "./sync.ts"
+import { refreshReviewWorktreeFromAgentBranchRef, syncSession } from "./sync.ts"
 import type {
   ReviewSyncCommand,
   ReviewSyncResult,
   ReviewSyncWorktreeInput,
   RuntimeContext,
+  SessionState,
   StartReviewSyncInput,
   StatusReviewSyncInput,
   WatchReviewSyncInput,
@@ -291,7 +292,7 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
         continue
       }
 
-      const result = await syncForWatchWhenAgentCheckoutReady(context, events, input.signal)
+      const result = await syncForWatchWhenAgentCheckoutReady(latest, context, events, input.signal)
       if (!result) {
         break
       }
@@ -522,6 +523,7 @@ async function promptForAgentBranch(context: RuntimeContext) {
 
 /** Runs watch-triggered syncs once the agent returns to the recorded branch. */
 async function syncForWatchWhenAgentCheckoutReady(
+  session: SessionState,
   context: RuntimeContext,
   events: WatchEventQueue,
   signal: AbortSignal | undefined,
@@ -533,7 +535,7 @@ async function syncForWatchWhenAgentCheckoutReady(
       if (!(error instanceof AgentWorktreeCheckoutMismatchError)) {
         return createErrorResult("sync", error)
       }
-      if (!(await waitForExpectedAgentCheckout(error, context, events, signal))) {
+      if (!(await waitForExpectedAgentCheckout(session, error, context, events, signal))) {
         return null
       }
     }
@@ -544,6 +546,7 @@ async function syncForWatchWhenAgentCheckoutReady(
 
 /** Waits on watch events until the recorded agent branch is checked out again. */
 async function waitForExpectedAgentCheckout(
+  session: SessionState,
   mismatch: AgentWorktreeCheckoutMismatchError,
   context: RuntimeContext,
   events: WatchEventQueue,
@@ -555,6 +558,8 @@ async function waitForExpectedAgentCheckout(
       return true
     }
 
+    await refreshReviewWorktreeFromAgentBranchRef(session, context)
+
     if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, signal))) {
       return false
     }
@@ -565,14 +570,15 @@ async function waitForExpectedAgentCheckout(
 
 /** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */
 async function createWatchFingerprint(
-  session: { agentWorktree: string; reviewWorktree: string },
+  session: { agentWorktree: string; reviewWorktree: string; agentBranch: string },
   context: RuntimeContext,
 ) {
-  const [agent, review] = await Promise.all([
+  const [agent, review, agentBranchHead] = await Promise.all([
     createWorktreeFingerprint(session.agentWorktree, context),
     createWorktreeFingerprint(session.reviewWorktree, context),
+    resolveRef(session.reviewWorktree, `refs/heads/${session.agentBranch}`, context),
   ])
-  return JSON.stringify({ agent, review })
+  return JSON.stringify({ agent, review, agentBranchHead })
 }
 
 /** Captures the branch, HEAD, and snapshot tree for one worktree. */

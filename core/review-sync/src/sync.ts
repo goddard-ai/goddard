@@ -1,10 +1,17 @@
 /** Review-sync orchestration for one complete sync cycle. */
 import { UserError } from "./errors.ts"
-import { git, updateRef } from "./git.ts"
+import {
+  assertSupportedGitState,
+  git,
+  resolveCurrentBranch,
+  resolveRef,
+  resolveRequiredGitCommonDir,
+  updateRef,
+} from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { handleHumanPatch } from "./patch-flow.ts"
 import { validateSessionWorktrees } from "./session.ts"
-import { createSnapshotCommit } from "./snapshot.ts"
+import { createSnapshotCommit, diffCommits } from "./snapshot.ts"
 import { appendEvent, readSessionState, writeSessionState } from "./state.ts"
 import type { RuntimeContext, SessionState } from "./types.ts"
 
@@ -49,6 +56,63 @@ export async function syncSession(session: SessionState, context: RuntimeContext
   })
 }
 
+/**
+ * Refreshes only the review worktree from the target branch ref while the agent
+ * checkout is unavailable.
+ */
+export async function refreshReviewWorktreeFromAgentBranchRef(
+  session: SessionState,
+  context: RuntimeContext,
+) {
+  return await withSessionLock(session, async () => {
+    const latest = await readSessionState(session)
+    if (latest.paused) {
+      return false
+    }
+
+    await validateReviewWorktreeForRefresh(latest, context)
+    const branchHead = await resolveRef(
+      latest.reviewWorktree,
+      `refs/heads/${latest.agentBranch}`,
+      context,
+    )
+    const renderedSnapshot = await resolveRef(
+      latest.reviewWorktree,
+      latest.refs.renderedSnapshot,
+      context,
+    )
+    if (!branchHead || !renderedSnapshot || branchHead === renderedSnapshot) {
+      return false
+    }
+
+    const reviewSnapshot = await createSnapshotCommit({
+      cwd: latest.reviewWorktree,
+      label: `${latest.sessionId}:review`,
+      context,
+    })
+    const humanPatch = await diffCommits(
+      latest.reviewWorktree,
+      renderedSnapshot,
+      reviewSnapshot,
+      context,
+    )
+    if (humanPatch.trim()) {
+      return false
+    }
+
+    await refreshReviewWorktree(latest, branchHead, context)
+    await updateRef(latest.reviewWorktree, latest.refs.renderedSnapshot, branchHead, context)
+    latest.updatedAt = new Date().toISOString()
+    await writeSessionState(latest)
+    await appendEvent(latest, {
+      command: "sync",
+      status: "synced",
+      source: "agent-branch-ref",
+    })
+    return true
+  })
+}
+
 /** Moves the checked-out review branch to the latest agent snapshot and cleans mirror state. */
 async function refreshReviewWorktree(
   session: SessionState,
@@ -57,4 +121,21 @@ async function refreshReviewWorktree(
 ) {
   await git(session.reviewWorktree, ["reset", "--hard", agentSnapshot], context)
   await git(session.reviewWorktree, ["clean", "-fd"], context)
+}
+
+/** Validates only the worktree that the branch-ref refresh mutates. */
+async function validateReviewWorktreeForRefresh(session: SessionState, context: RuntimeContext) {
+  await assertSupportedGitState(session.reviewWorktree, context)
+
+  const reviewBranch = await resolveCurrentBranch(session.reviewWorktree, context)
+  if (reviewBranch !== session.reviewBranch) {
+    throw new UserError(
+      `Review worktree must be on ${session.reviewBranch}; currently ${reviewBranch ?? "detached HEAD"}.`,
+    )
+  }
+
+  const reviewCommonDir = await resolveRequiredGitCommonDir(session.reviewWorktree, context)
+  if (reviewCommonDir !== session.repoCommonDir) {
+    throw new UserError("Review worktree no longer shares the recorded Git common dir.")
+  }
 }
