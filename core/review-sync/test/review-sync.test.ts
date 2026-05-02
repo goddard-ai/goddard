@@ -740,7 +740,7 @@ async function runWatchUntilNextSync(
 ) {
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 4000)
   const started = createDeferred<void>()
   let startedResolved = false
   const results: ReviewSyncResult[] = []
@@ -769,6 +769,8 @@ async function runWatchUntilNextSync(
         }
       }),
     ])
+    // macOS can deliver a one-shot write before fs.watch has fully armed.
+    await sleep(100)
     await mutate()
     const stopped = await watch
     if (controller.signal.reason === timeoutReason) {
