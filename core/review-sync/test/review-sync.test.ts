@@ -192,7 +192,7 @@ test("status explains recovery when multiple sessions match the worktree", async
         ...state,
         sessionId: duplicateSessionId,
         agentBranch: "codex/second-review-sync-test",
-        reviewBranch: "codex/second-review-sync-test--review",
+        reviewBranch: "review-sync/codex/second-review-sync-test",
         refs: {
           agentSnapshot: `refs/review-sync/${duplicateSessionId}/agent-snapshot`,
           renderedSnapshot: `refs/review-sync/${duplicateSessionId}/rendered-snapshot`,
@@ -209,9 +209,9 @@ test("status explains recovery when multiple sessions match the worktree", async
 
   expect(result.status).toBe("error")
   expect(result.message).toContain("Multiple review-sync sessions match")
-  expect(result.message).toContain("codex/review-sync-test -> codex/review-sync-test--review")
+  expect(result.message).toContain("codex/review-sync-test -> review-sync/codex/review-sync-test")
   expect(result.message).toContain(
-    "codex/second-review-sync-test -> codex/second-review-sync-test--review",
+    "codex/second-review-sync-test -> review-sync/codex/second-review-sync-test",
   )
   expect(result.message).toContain(`move stale session dirs out of ${sessionsRoot}`)
   expect(result.message).toContain("accepted/rejected patches live under each state dir")
@@ -362,7 +362,7 @@ test("watch waits for an agent branch to get checked out before starting", async
     expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(
       true,
     )
-    expect(await currentBranch(fixture.reviewDir)).toBe("codex/review-sync-test--review")
+    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
   } finally {
     clearTimeout(timeout)
   }
