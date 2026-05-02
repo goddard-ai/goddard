@@ -7,6 +7,8 @@ import { command, flag, optional, positional, runSafely, string, subcommands } f
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
 import {
   git,
+  isInsideOrEqual,
+  normalizePath,
   pathExists,
   resolveCurrentBranch,
   resolveRef,
@@ -28,6 +30,7 @@ import { createSnapshotTree } from "./snapshot.ts"
 import {
   appendEvent,
   countPatchFiles,
+  listSessions,
   readSessionState,
   resolveSessionDir,
   writeSessionState,
@@ -268,8 +271,9 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
     return resolution.result
   }
 
-  const { session, startResult } = resolution
+  const { session, startResult, refreshFromBranchRefOnStart } = resolution
   let fingerprint = await createWatchFingerprint(session, context)
+  const warningState = { pendingHumanPatchWarningSent: false }
   const events = createWatchEventQueue(input.signal)
   const watchers = await createReviewSyncWatchers(session, context, events)
   let watchError: unknown
@@ -290,6 +294,16 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
       }),
     )
 
+    if (refreshFromBranchRefOnStart) {
+      await refreshReviewWorktreeFromAgentBranchRefForWatch(
+        session,
+        context,
+        input.onResult,
+        warningState,
+      )
+      fingerprint = await createWatchFingerprint(await readSessionState(session), context)
+    }
+
     while (await events.waitForEvent()) {
       if (!(await waitForWatchQuietPeriod(events, input.signal))) {
         break
@@ -307,6 +321,7 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
         events,
         input.signal,
         input.onResult,
+        warningState,
       )
       if (!result) {
         break
@@ -551,6 +566,7 @@ async function resolveSessionForWatch(input: WatchReviewSyncInput, context: Runt
     kind: "ready" as const,
     session: await inferSession(context),
     startResult: null,
+    refreshFromBranchRefOnStart: false,
   }
 }
 
@@ -565,15 +581,46 @@ async function resolveAgentBranchSessionForWatch(
 
   try {
     while (!isAbortSignalAborted(input.signal)) {
+      const existingSession = await findExistingAgentBranchSessionForWatch(
+        input.agentBranch,
+        context,
+      )
+      if (existingSession && (await isRecordedAgentCheckoutUnavailable(existingSession, context))) {
+        return {
+          kind: "ready" as const,
+          session: existingSession,
+          startResult: null,
+          refreshFromBranchRefOnStart: true,
+        }
+      }
+
       try {
         const { session, result } = await startReviewSyncOperationWithSession(
           input.agentBranch,
           context,
         )
-        return { kind: "ready" as const, session, startResult: result }
+        return {
+          kind: "ready" as const,
+          session,
+          startResult: result,
+          refreshFromBranchRefOnStart: false,
+        }
       } catch (error) {
         if (!(error instanceof AgentBranchWorktreeMissingError)) {
           throw error
+        }
+
+        const existingSession = await findExistingAgentBranchSessionForWatch(
+          input.agentBranch,
+          context,
+        )
+        if (existingSession) {
+          return {
+            kind: "ready" as const,
+            session: existingSession,
+            startResult: null,
+            refreshFromBranchRefOnStart: true,
+          }
         }
 
         if (!waitingResultSent) {
@@ -611,6 +658,47 @@ async function resolveAgentBranchSessionForWatch(
   }
 }
 
+/** Finds a saved session for explicit watch when the agent branch is temporarily unavailable. */
+async function findExistingAgentBranchSessionForWatch(
+  agentBranch: string,
+  context: RuntimeContext,
+) {
+  const repoRoot = await resolveRequiredRepoRoot(context.cwd, context)
+  const [repoCommonDir, cwd] = await Promise.all([
+    resolveRequiredGitCommonDir(repoRoot, context),
+    normalizePath(context.cwd),
+  ])
+  const matches = (await listSessions(repoCommonDir)).filter((session) => {
+    if (session.agentBranch !== agentBranch) {
+      return false
+    }
+    return (
+      isInsideOrEqual(session.agentWorktree, cwd) || isInsideOrEqual(session.reviewWorktree, cwd)
+    )
+  })
+
+  if (matches.length === 1) {
+    return matches[0]!
+  }
+  if (matches.length > 1) {
+    throw new UserError(
+      [
+        `Multiple review-sync sessions for ${agentBranch} match ${cwd}.`,
+        "Run watch from a worktree recorded by only one session, or move stale session dirs out of the Git common directory.",
+        "Matching sessions:",
+        ...matches.map((session) => `- ${session.sessionId}: ${session.reviewBranch}`),
+      ].join("\n"),
+    )
+  }
+
+  return null
+}
+
+/** Checks the saved agent worktree without treating other worktrees as session owners. */
+async function isRecordedAgentCheckoutUnavailable(session: SessionState, context: RuntimeContext) {
+  return (await resolveCurrentBranch(session.agentWorktree, context)) !== session.agentBranch
+}
+
 /** Selects an eligible checked-out agent branch when start runs interactively. */
 async function promptForAgentBranch(context: RuntimeContext) {
   const choices = await listAgentWorktreeChoicesForStart(context)
@@ -644,6 +732,7 @@ async function syncForWatchWhenAgentCheckoutReady(
   events: WatchEventQueue,
   signal: AbortSignal | undefined,
   onResult: WatchReviewSyncInput["onResult"],
+  warningState: { pendingHumanPatchWarningSent: boolean },
 ) {
   while (!isAbortSignalAborted(signal)) {
     try {
@@ -653,7 +742,15 @@ async function syncForWatchWhenAgentCheckoutReady(
         return createErrorResult("sync", error)
       }
       if (
-        !(await waitForExpectedAgentCheckout(session, error, context, events, signal, onResult))
+        !(await waitForExpectedAgentCheckout(
+          session,
+          error,
+          context,
+          events,
+          signal,
+          onResult,
+          warningState,
+        ))
       ) {
         return null
       }
@@ -671,32 +768,15 @@ async function waitForExpectedAgentCheckout(
   events: WatchEventQueue,
   signal: AbortSignal | undefined,
   onResult: WatchReviewSyncInput["onResult"],
+  warningState: { pendingHumanPatchWarningSent: boolean },
 ) {
-  let pendingHumanPatchWarningSent = false
   while (!isAbortSignalAborted(signal)) {
     const branch = await resolveCurrentBranch(mismatch.worktree, context)
     if (branch === mismatch.expectedBranch) {
       return true
     }
 
-    const refreshResult = await refreshReviewWorktreeFromAgentBranchRef(session, context)
-    if (
-      refreshResult.status === "skipped" &&
-      refreshResult.reason === "pending-human-patch" &&
-      !pendingHumanPatchWarningSent
-    ) {
-      pendingHumanPatchWarningSent = true
-      await onResult?.(
-        createReviewSyncResult({
-          exitCode: 0,
-          command: "watch",
-          status: "ok",
-          sessionId: session.sessionId,
-          reviewBranch: session.reviewBranch,
-          message: `Warning: review refresh skipped while waiting for ${session.agentBranch}; ${session.reviewWorktree} has unapplied human edits.`,
-        }),
-      )
-    }
+    await refreshReviewWorktreeFromAgentBranchRefForWatch(session, context, onResult, warningState)
 
     if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, signal))) {
       return false
@@ -704,6 +784,33 @@ async function waitForExpectedAgentCheckout(
   }
 
   return false
+}
+
+/** Refreshes from the agent branch ref and emits the watch warning only once. */
+async function refreshReviewWorktreeFromAgentBranchRefForWatch(
+  session: SessionState,
+  context: RuntimeContext,
+  onResult: WatchReviewSyncInput["onResult"],
+  warningState: { pendingHumanPatchWarningSent: boolean },
+) {
+  const refreshResult = await refreshReviewWorktreeFromAgentBranchRef(session, context)
+  if (
+    refreshResult.status === "skipped" &&
+    refreshResult.reason === "pending-human-patch" &&
+    !warningState.pendingHumanPatchWarningSent
+  ) {
+    warningState.pendingHumanPatchWarningSent = true
+    await onResult?.(
+      createReviewSyncResult({
+        exitCode: 0,
+        command: "watch",
+        status: "ok",
+        sessionId: session.sessionId,
+        reviewBranch: session.reviewBranch,
+        message: `Warning: review refresh skipped while waiting for ${session.agentBranch}; ${session.reviewWorktree} has unapplied human edits.`,
+      }),
+    )
+  }
 }
 
 /** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */

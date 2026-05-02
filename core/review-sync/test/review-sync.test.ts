@@ -586,6 +586,60 @@ test("watch refreshes the review worktree from the target branch ref while waiti
   }
 })
 
+test("watch reuses an existing session when the agent branch is not checked out", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
+
+  const branchWriterDir = join(fixture.rootDir, "branch-writer")
+  await runGit(fixture.agentDir, ["worktree", "add", branchWriterDir, "codex/review-sync-test"])
+  await writeText(join(branchWriterDir, "shared.txt"), "branch ref edit\n")
+  await runGit(branchWriterDir, ["add", "shared.txt"])
+  await runGit(branchWriterDir, ["commit", "-m", "branch ref edit"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const watching = createDeferred<void>()
+  let watchingResolved = false
+  const results: ReviewSyncResult[] = []
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+    signal: controller.signal,
+    onResult: (result) => {
+      results.push(result)
+      if (result.command === "watch" && result.reviewBranch) {
+        watchingResolved = true
+        watching.resolve()
+      }
+    },
+  })
+
+  try {
+    await Promise.race([
+      watching.promise,
+      watch.then((result) => {
+        if (!watchingResolved) {
+          throw new Error(`watch stopped before watching: ${result.message}`)
+        }
+      }),
+    ])
+    await waitForFileContent(join(fixture.reviewDir, "shared.txt"), "branch ref edit\n")
+    expect(results.some((result) => result.message.startsWith("Waiting for "))).toBe(false)
+    expect(await currentBranch(fixture.agentDir)).toBe("codex/temporary")
+    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+
+    controller.abort()
+    const stopped = await watch
+    expect(stopped.status).toBe("ok")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
 test("watch warns when branch ref refresh is blocked by human edits", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
