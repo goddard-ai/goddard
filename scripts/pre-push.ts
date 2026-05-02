@@ -79,7 +79,7 @@ function compileFileFilterGlob(fileGlob: string) {
     globstar: true,
   })
 
-  return compiled.path.regex as RegExp
+  return compiled.path!.regex
 }
 
 /** Compiles one filepath glob for both repo-root and nested package paths. */
@@ -315,8 +315,8 @@ function runWorkspaceCheckTask(repoRoot: string, task: WorkspaceCheckTask) {
     }
 
     Promise.all([
-      new Response(childProcess.stdout).text(),
-      new Response(childProcess.stderr).text(),
+      new Response(childProcess.stdout as ReadableStream).text(),
+      new Response(childProcess.stderr as ReadableStream).text(),
       childProcess.exited,
     ]).then(
       ([stdout, stderr, status]) => {
