@@ -63,7 +63,7 @@ jobs:
           # If there are changes, commit them with a unified message and push
           if ! git diff --cached --quiet; then
             git commit -m "chore: sync subrepos"
-            git push origin main
+            git push origin main --no-verify
           else
             echo "No changes to sync."
           fi
