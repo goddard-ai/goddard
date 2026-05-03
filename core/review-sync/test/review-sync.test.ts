@@ -318,6 +318,31 @@ test("watch starts a session from an agent branch before syncing", async () => {
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 
+test("watch restarts a paused session before syncing", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const pause = await pauseReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  expect(pause.status).toBe("paused")
+
+  const { results, stopped } = await runWatchUntilNextSync(
+    fixture.reviewDir,
+    async () => {
+      await writeText(join(fixture.agentDir, "shared.txt"), "agent edit after pause\n")
+    },
+    "codex/review-sync-test",
+  )
+
+  expect(stopped.status).toBe("paused")
+  expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(true)
+  expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe(
+    "agent edit after pause\n",
+  )
+})
+
 test("watch pauses and restores the starting review branch on exit", async () => {
   const fixture = await createFixture({
     "shared.txt": "base\n",
@@ -867,6 +892,65 @@ test("watch reuses an existing session when the agent branch is not checked out"
     ])
     await waitForFileContent(join(fixture.reviewDir, "shared.txt"), "branch ref edit\n")
     expect(results.some((result) => result.message.startsWith("Waiting for "))).toBe(false)
+    expect(await currentBranch(fixture.agentDir)).toBe("codex/temporary")
+    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+
+    controller.abort()
+    const stopped = await watch
+    expect(stopped.status).toBe("paused")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
+test("watch refreshes a paused session from the branch ref while agent checkout is unavailable", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  await pauseReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
+
+  const branchWriterDir = join(fixture.rootDir, "branch-writer")
+  await runGit(fixture.agentDir, ["worktree", "add", branchWriterDir, "codex/review-sync-test"])
+  await writeText(join(branchWriterDir, "shared.txt"), "branch ref edit after pause\n")
+  await runGit(branchWriterDir, ["add", "shared.txt"])
+  await runGit(branchWriterDir, ["commit", "-m", "branch ref edit after pause"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const watching = createDeferred<void>()
+  let watchingResolved = false
+  const results: ReviewSyncResult[] = []
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+    signal: controller.signal,
+    onResult: (result) => {
+      results.push(result)
+      if (result.command === "watch" && result.reviewBranch) {
+        watchingResolved = true
+        watching.resolve()
+      }
+    },
+  })
+
+  try {
+    await Promise.race([
+      watching.promise,
+      watch.then((result) => {
+        if (!watchingResolved) {
+          throw new Error(`watch stopped before watching: ${result.message}`)
+        }
+      }),
+    ])
+    await waitForFileContent(join(fixture.reviewDir, "shared.txt"), "branch ref edit after pause\n")
+    expect(results.some((result) => result.command === "resume" && result.status === "ok")).toBe(
+      true,
+    )
     expect(await currentBranch(fixture.agentDir)).toBe("codex/temporary")
     expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
 

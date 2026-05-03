@@ -57,6 +57,8 @@ Once a session is active, `watch` pauses the review-sync session before exiting
 and attempts to check out the review worktree branch that was active when
 `watch` started. If cleanup cannot complete, the final command output explains
 which step failed and why.
+Starting `watch` again reactivates a paused session before watching, matching
+`start` rather than leaving the watcher armed but unable to sync.
 One-shot `start` and `sync` commands fail fast when the agent worktree is on a
 different branch.
 

@@ -133,25 +133,32 @@ async function startReviewSyncOperation(agentBranch: string, context: RuntimeCon
 /** Performs the start workflow and keeps the loaded session for command composition. */
 async function startReviewSyncOperationWithSession(agentBranch: string, context: RuntimeContext) {
   const session = await createSessionForStart(agentBranch, context)
+  return await startLoadedReviewSyncSession(session, context)
+}
+
+/** Runs the start refresh for an already resolved session, reactivating it if needed. */
+async function startLoadedReviewSyncSession(session: SessionState, context: RuntimeContext) {
   await seedRenderedSnapshotForExistingReviewBranch(session, context)
   await prepareReviewBranchForStart(session, context)
   await seedRenderedSnapshotForExistingReviewBranch(session, context)
-  const syncResult = await syncSession(session, context)
+  const active = await resumeSession(session, "start")
+  const syncResult = await syncSession(active, context)
+  const latest = await readSessionState(active)
 
   const result = createReviewSyncResult({
     exitCode: 0,
     command: "start",
     status: syncResult.status === "rejected-human-patch" ? "rejected-human-patch" : "ok",
-    sessionId: session.sessionId,
-    reviewBranch: session.reviewBranch,
+    sessionId: latest.sessionId,
+    reviewBranch: latest.reviewBranch,
     acceptedPatchPath: syncResult.acceptedPatchPath ?? undefined,
     rejectedPatchPath: syncResult.rejectedPatchPath ?? undefined,
     message:
       syncResult.status === "rejected-human-patch"
-        ? `Started review sync for ${session.agentBranch} as ${session.reviewBranch}; human patch was rejected and saved to ${syncResult.rejectedPatchPath}.`
-        : `Started review sync for ${session.agentBranch} as ${session.reviewBranch}.`,
+        ? `Started review sync for ${latest.agentBranch} as ${latest.reviewBranch}; human patch was rejected and saved to ${syncResult.rejectedPatchPath}.`
+        : `Started review sync for ${latest.agentBranch} as ${latest.reviewBranch}.`,
   })
-  return { session, result }
+  return { session: latest, result }
 }
 
 /** Performs the sync workflow after CLI parsing and command-level error handling. */
@@ -261,27 +268,38 @@ async function pauseSession(session: SessionState) {
   })
 }
 
-/** Performs the resume workflow after CLI parsing and command-level error handling. */
-async function resumeReviewSessionOperation(context: RuntimeContext) {
-  const session = await inferSession(context)
+/** Clears paused state for commands that reactivate a saved session. */
+async function resumeSession(session: SessionState, source?: "start" | "watch") {
   return await withSessionLock(session, async () => {
     const latest = await readSessionState(session)
+    if (!latest.paused) {
+      return latest
+    }
+
     latest.paused = false
     latest.updatedAt = new Date().toISOString()
     await writeSessionState(latest)
     await appendEvent(latest, {
       command: "resume",
       status: "ok",
+      ...(source ? { source } : {}),
     })
+    return latest
+  })
+}
 
-    return createReviewSyncResult({
-      exitCode: 0,
-      command: "resume",
-      status: "ok",
-      sessionId: latest.sessionId,
-      reviewBranch: latest.reviewBranch,
-      message: `Resumed review sync for ${latest.reviewBranch}.`,
-    })
+/** Performs the resume workflow after CLI parsing and command-level error handling. */
+async function resumeReviewSessionOperation(context: RuntimeContext) {
+  const session = await inferSession(context)
+  const latest = await resumeSession(session)
+
+  return createReviewSyncResult({
+    exitCode: 0,
+    command: "resume",
+    status: "ok",
+    sessionId: latest.sessionId,
+    reviewBranch: latest.reviewBranch,
+    message: `Resumed review sync for ${latest.reviewBranch}.`,
   })
 }
 
@@ -313,7 +331,27 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
     return resolution.result
   }
 
-  const { session, startResult, refreshFromBranchRefOnStart } = resolution
+  let { session, startResult, refreshFromBranchRefOnStart } = resolution
+  if (!startResult && session.paused) {
+    if (await isRecordedAgentCheckoutUnavailable(session, context)) {
+      session = await resumeSession(session, "watch")
+      refreshFromBranchRefOnStart = true
+      startResult = createReviewSyncResult({
+        exitCode: 0,
+        command: "resume",
+        status: "ok",
+        sessionId: session.sessionId,
+        reviewBranch: session.reviewBranch,
+        message: `Resumed review sync for ${session.reviewBranch} before watching.`,
+      })
+    } else {
+      const restarted = await startLoadedReviewSyncSession(session, context)
+      session = restarted.session
+      startResult = restarted.result
+      refreshFromBranchRefOnStart = false
+    }
+  }
+
   await emitVerbose(`preparing ${session.reviewBranch} in ${session.reviewWorktree}.`, session)
   await prepareReviewBranchForStart(session, context)
   let fingerprint = await createWatchFingerprint(session, context)
