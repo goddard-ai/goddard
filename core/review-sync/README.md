@@ -39,9 +39,10 @@ Pass `--verbose` to `watch` to print session resolution, watched paths,
 coalesced filesystem events, sync decisions, and cleanup steps while it runs.
 Passing `<agent-branch>` to `watch` starts or reuses the review-sync session
 before watching, so a separate `start` command is not required. If that branch
-is not currently checked out in an agent worktree and no matching saved session
-exists for the current worktree, `watch` waits for Git metadata to show the
-checkout before starting the session.
+is not currently checked out in an agent worktree, `watch` still checks out the
+derived review branch and resets it to the branch ref when the current worktree
+is clean and the branch ref exists. It then waits for Git metadata to show an
+agent checkout before starting the session.
 When a saved session starts from another review-worktree branch, `watch` checks
 out the review branch first using the same clean-worktree guard as `start`.
 If the agent worktree temporarily checks out another branch while `watch` is

@@ -6,8 +6,12 @@ import { command, flag, optional, positional, runSafely, string, subcommands } f
 
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
 import {
+  assertReviewBranchNotCheckedOutElsewhere,
+  assertSupportedGitState,
+  branchExists,
   git,
   isInsideOrEqual,
+  isWorktreeClean,
   normalizePath,
   pathExists,
   resolveCurrentBranch,
@@ -36,15 +40,16 @@ import {
   writeSessionState,
 } from "./state.ts"
 import { refreshReviewWorktreeFromAgentBranchRef, syncSession } from "./sync.ts"
-import type {
-  ReviewSyncCommand,
-  ReviewSyncResult,
-  ReviewSyncWorktreeInput,
-  RuntimeContext,
-  SessionState,
-  StartReviewSyncInput,
-  StatusReviewSyncInput,
-  WatchReviewSyncInput,
+import {
+  reviewBranchPrefix,
+  type ReviewSyncCommand,
+  type ReviewSyncResult,
+  type ReviewSyncWorktreeInput,
+  type RuntimeContext,
+  type SessionState,
+  type StartReviewSyncInput,
+  type StatusReviewSyncInput,
+  type WatchReviewSyncInput,
 } from "./types.ts"
 
 const watchDebounceMs = 100
@@ -294,7 +299,13 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
       : `started from ${startedWorktree} with detached HEAD.`,
   )
 
-  const resolution = await resolveSessionForWatch(input, context, emitVerbose)
+  const resolution = await resolveSessionForWatch(
+    input,
+    context,
+    emitVerbose,
+    startedWorktree,
+    startedBranch,
+  )
   if (resolution.kind === "stopped") {
     return resolution.result
   }
@@ -624,6 +635,8 @@ async function resolveSessionForWatch(
   input: WatchReviewSyncInput,
   context: RuntimeContext,
   emitVerbose: WatchVerboseEmitter,
+  startedWorktree: string,
+  startedBranch: string | null,
 ) {
   if (input.agentBranch) {
     return await resolveAgentBranchSessionForWatch(
@@ -633,6 +646,8 @@ async function resolveSessionForWatch(
       },
       context,
       emitVerbose,
+      startedWorktree,
+      startedBranch,
     )
   }
 
@@ -652,10 +667,15 @@ async function resolveAgentBranchSessionForWatch(
   input: WatchReviewSyncInput & { agentBranch: string },
   context: RuntimeContext,
   emitVerbose: WatchVerboseEmitter,
+  startedWorktree: string,
+  startedBranch: string | null,
 ) {
   const events = createWatchEventQueue(input.signal)
   const watchers = await createRepositoryMetadataWatchers(context, events, emitVerbose)
   let waitingResultSent = false
+  let preparedReviewBranch: string | null = null
+  let branchRefPreparationCurrent = false
+  let lastBranchRefPreparation: BranchRefPreparation | null = null
 
   try {
     await emitVerbose(
@@ -717,6 +737,23 @@ async function resolveAgentBranchSessionForWatch(
           }
         }
 
+        let preparedThisIteration = false
+        if (!branchRefPreparationCurrent) {
+          lastBranchRefPreparation = await prepareReviewBranchFromAgentBranchRefForWatch(
+            input.agentBranch,
+            context,
+            emitVerbose,
+          )
+          branchRefPreparationCurrent = true
+          preparedThisIteration = true
+          if (lastBranchRefPreparation.status === "prepared") {
+            preparedReviewBranch = lastBranchRefPreparation.reviewBranch
+          }
+          if (lastBranchRefPreparation.generatedEvents) {
+            await discardSelfGeneratedWatchEvents(events, input.signal, emitVerbose)
+          }
+        }
+
         if (!waitingResultSent) {
           waitingResultSent = true
           await emitVerbose(
@@ -727,9 +764,16 @@ async function resolveAgentBranchSessionForWatch(
               exitCode: 0,
               command: "watch",
               status: "ok",
-              message: `Waiting for ${input.agentBranch} to be checked out in an agent worktree.`,
+              message: formatAgentCheckoutWaitingMessage(
+                input.agentBranch,
+                lastBranchRefPreparation,
+              ),
             }),
           )
+        }
+
+        if (preparedThisIteration && lastBranchRefPreparation?.status === "prepared") {
+          continue
         }
 
         if (
@@ -739,6 +783,7 @@ async function resolveAgentBranchSessionForWatch(
           break
         }
         await emitQueuedWatchEvents(emitVerbose, events)
+        branchRefPreparationCurrent = false
         await emitVerbose(`repository metadata changed; retrying ${input.agentBranch}.`)
       }
     }
@@ -749,15 +794,211 @@ async function resolveAgentBranchSessionForWatch(
     closeReviewSyncWatchers(watchers)
   }
 
+  const restoreNote = preparedReviewBranch
+    ? await restorePreparedBranchRefPreviewForWatch({
+        context,
+        startedWorktree,
+        startedBranch,
+        preparedReviewBranch,
+        emitVerbose,
+      })
+    : null
+
   return {
     kind: "stopped" as const,
     result: createReviewSyncResult({
       exitCode: getWatchExitCode(input.signal),
       command: "watch",
       status: "ok",
-      message: `Stopped waiting for ${input.agentBranch} to be checked out in an agent worktree.`,
+      message: [
+        `Stopped waiting for ${input.agentBranch} to be checked out in an agent worktree.`,
+        restoreNote,
+      ]
+        .filter(Boolean)
+        .join(" "),
     }),
   }
+}
+
+/** Outcome of preparing a review branch from an agent branch ref before a session exists. */
+type BranchRefPreparation =
+  | {
+      status: "prepared"
+      reviewBranch: string
+      generatedEvents: boolean
+    }
+  | {
+      status: "skipped"
+      reason: "dirty-review-worktree" | "missing-agent-branch-ref" | "unsupported-git-state"
+      reviewBranch: string
+      generatedEvents: boolean
+    }
+
+/** Prepares the human review branch from the agent branch ref while no agent checkout exists. */
+async function prepareReviewBranchFromAgentBranchRefForWatch(
+  agentBranch: string,
+  context: RuntimeContext,
+  emitVerbose: WatchVerboseEmitter,
+) {
+  const reviewWorktree = await resolveRequiredRepoRoot(context.cwd, context)
+  const reviewBranch = `${reviewBranchPrefix}${agentBranch}`
+
+  try {
+    await assertSupportedGitState(reviewWorktree, context)
+  } catch (error) {
+    if (!(error instanceof UserError)) {
+      throw error
+    }
+    await emitVerbose(
+      `branch-ref preparation skipped for ${reviewBranch}: unsupported Git state in ${reviewWorktree}.`,
+    )
+    return {
+      status: "skipped",
+      reason: "unsupported-git-state",
+      reviewBranch,
+      generatedEvents: false,
+    } satisfies BranchRefPreparation
+  }
+
+  const branchHead = await resolveRef(reviewWorktree, `refs/heads/${agentBranch}`, context)
+  if (!branchHead) {
+    await emitVerbose(
+      `branch-ref preparation skipped for ${reviewBranch}: ${agentBranch} branch ref is missing.`,
+    )
+    return {
+      status: "skipped",
+      reason: "missing-agent-branch-ref",
+      reviewBranch,
+      generatedEvents: false,
+    } satisfies BranchRefPreparation
+  }
+
+  const currentBranch = await resolveCurrentBranch(reviewWorktree, context)
+  const currentHead = await resolveRef(reviewWorktree, "HEAD", context)
+  if (currentBranch === reviewBranch && currentHead === branchHead) {
+    await emitVerbose(
+      `${reviewBranch} in ${reviewWorktree} is already prepared from ${agentBranch} branch ref.`,
+    )
+    return {
+      status: "prepared",
+      reviewBranch,
+      generatedEvents: false,
+    } satisfies BranchRefPreparation
+  }
+
+  await assertReviewBranchNotCheckedOutElsewhere({
+    cwd: reviewWorktree,
+    reviewBranch,
+    reviewWorktree,
+    context,
+  })
+
+  if (!(await isWorktreeClean(reviewWorktree, context))) {
+    await emitVerbose(
+      `branch-ref preparation skipped for ${reviewBranch}: ${reviewWorktree} has local changes.`,
+    )
+    return {
+      status: "skipped",
+      reason: "dirty-review-worktree",
+      reviewBranch,
+      generatedEvents: true,
+    } satisfies BranchRefPreparation
+  }
+
+  if (currentBranch !== reviewBranch) {
+    if (await branchExists(reviewWorktree, reviewBranch, context)) {
+      await git(reviewWorktree, ["checkout", reviewBranch], context, {
+        stdin: "ignore",
+      })
+    } else {
+      await git(reviewWorktree, ["branch", reviewBranch, branchHead], context)
+      await git(reviewWorktree, ["checkout", reviewBranch], context, {
+        stdin: "ignore",
+      })
+    }
+  }
+
+  const preparedHead = await resolveRef(reviewWorktree, "HEAD", context)
+  if (preparedHead !== branchHead) {
+    await git(reviewWorktree, ["reset", "--hard", branchHead], context)
+    await git(reviewWorktree, ["clean", "-fd"], context)
+  }
+
+  await emitVerbose(`prepared ${reviewBranch} in ${reviewWorktree} from ${agentBranch} branch ref.`)
+  return {
+    status: "prepared",
+    reviewBranch,
+    generatedEvents: true,
+  } satisfies BranchRefPreparation
+}
+
+/** Drops Git metadata events produced by branch-ref preparation before waiting. */
+async function discardSelfGeneratedWatchEvents(
+  events: WatchEventQueue,
+  signal: AbortSignal | undefined,
+  emitVerbose: WatchVerboseEmitter,
+) {
+  if (!(await events.waitForEventOrTimeout(watchDebounceMs))) {
+    return
+  }
+
+  await waitForWatchQuietPeriod(events, signal)
+  const discarded = events.drainEvents()
+  if (discarded.length === 0) {
+    return
+  }
+
+  await emitVerbose(
+    `ignored ${discarded.length} filesystem event${discarded.length === 1 ? "" : "s"} generated while preparing the review branch.`,
+  )
+}
+
+/** Restores the starting branch if watch stops before a durable session exists. */
+async function restorePreparedBranchRefPreviewForWatch(input: {
+  context: RuntimeContext
+  startedWorktree: string
+  startedBranch: string | null
+  preparedReviewBranch: string
+  emitVerbose: WatchVerboseEmitter
+}) {
+  if (!input.startedBranch) {
+    return "No starting branch was checked out, so no branch was restored."
+  }
+
+  const currentBranch = await resolveCurrentBranch(input.startedWorktree, input.context)
+  if (currentBranch !== input.preparedReviewBranch) {
+    return null
+  }
+
+  if (!(await isWorktreeClean(input.startedWorktree, input.context))) {
+    return `Left ${input.preparedReviewBranch} checked out because the review worktree has local changes.`
+  }
+
+  await git(input.startedWorktree, ["checkout", input.startedBranch], input.context, {
+    stdin: "ignore",
+  })
+  await input.emitVerbose(
+    `restored ${input.startedBranch} after stopping before a session was ready.`,
+  )
+  return `Checked out ${input.startedBranch}.`
+}
+
+/** Describes the safe branch-ref preparation state in the first waiting message. */
+function formatAgentCheckoutWaitingMessage(
+  agentBranch: string,
+  branchRefPreparation: BranchRefPreparation | null,
+) {
+  const waiting = `Waiting for ${agentBranch} to be checked out in an agent worktree.`
+  if (branchRefPreparation?.status === "prepared") {
+    return `${waiting} Checked out ${branchRefPreparation.reviewBranch} from the ${agentBranch} branch ref.`
+  }
+  if (branchRefPreparation?.reason === "dirty-review-worktree") {
+    return `${waiting} Review worktree has local changes, so ${branchRefPreparation.reviewBranch} was not checked out.`
+  }
+  if (branchRefPreparation?.reason === "unsupported-git-state") {
+    return `${waiting} Review worktree has an in-progress Git operation, so ${branchRefPreparation.reviewBranch} was not checked out.`
+  }
+  return waiting
 }
 
 /** Finds a saved session for explicit watch when the agent branch is temporarily unavailable. */
