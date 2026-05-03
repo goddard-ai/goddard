@@ -38,7 +38,7 @@
     "acp": "bun run ./scripts/acp-session.ts",
     "goddard:daemon": "NODE_ENV=development bun run ./core/daemon/src/main.ts",
     "goddard:workforce": "NODE_ENV=development bun run ./workforce/src/main.ts",
-    "check": "bun run typecheck && bun run lint && bun run test"
+    "check": "turbo run typecheck lint test --output-logs=errors-only --continue=always"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",

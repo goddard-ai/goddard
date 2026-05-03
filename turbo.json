@@ -10,7 +10,6 @@
       "outputs": ["styled-system/**"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
       "inputs": [
         "**/*.ts",
         "**/*.tsrx",
@@ -26,7 +25,6 @@
       "outputs": []
     },
     "lint": {
-      "dependsOn": ["^lint"],
       "inputs": [
         "**/*.ts",
         "**/*.tsrx",
@@ -39,7 +37,6 @@
       "outputs": []
     },
     "test": {
-      "dependsOn": ["^test"],
       "inputs": [
         "**/*.ts",
         "**/*.tsrx",
