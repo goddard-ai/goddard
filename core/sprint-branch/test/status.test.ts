@@ -133,6 +133,29 @@ describe("sprint-branch status", () => {
     expect(diagnosticCodes(status)).toContain("task_file_missing")
   })
 
+  test("reports status for state missing sprint worktree root", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+    })
+    const legacyState = { ...(await readState(repo, "example")) } as Record<string, unknown>
+    delete legacyState.sprintWorktreeRoot
+    await writeState(repo, "example", legacyState)
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      state: { sprintWorktreeRoot: string }
+      diagnostics: Array<{ code: string }>
+    }
+
+    expect(result.exitCode).toBe(0)
+    expect(status.ok).toBe(true)
+    expect(status.state.sprintWorktreeRoot).toBe(await fs.realpath(repo))
+    expect(diagnosticCodes(status)).not.toContain("invalid_string")
+  })
+
   test("reports a missing recorded sprint worktree", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",

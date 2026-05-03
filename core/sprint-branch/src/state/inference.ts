@@ -157,7 +157,9 @@ async function sprintCandidatesForSelection(rootDir: string, stateFiles: string[
   const candidates = []
   for (const statePath of stateFiles) {
     try {
-      const parsed = await readSprintStateFile(statePath)
+      const parsed = await readSprintStateFile(statePath, {
+        defaultSprintWorktreeRoot: rootDir,
+      })
       if (parsed.state?.visibility === "active") {
         candidates.push({
           sprint: path.basename(path.dirname(statePath)),

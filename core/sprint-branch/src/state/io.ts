@@ -5,10 +5,19 @@ import { resolveGitCommonPath } from "../git/repository"
 import { sprintStateFileName, sprintStateRoot } from "./paths"
 import { parseSprintState } from "./schema"
 
+/** Caller context that can complete legacy sprint state while reading it. */
+type SprintStateReadOptions = {
+  defaultSprintWorktreeRoot?: string
+}
+
 /** Reads and validates one sprint branch state file. */
-export async function readSprintStateFile(statePath: string) {
+export async function readSprintStateFile(statePath: string, options: SprintStateReadOptions = {}) {
   const text = await fs.readFile(statePath, "utf-8")
-  const parsed = parseSprintState(JSON.parse(text) as unknown)
+  const parsed = parseSprintState(JSON.parse(text) as unknown, {
+    defaultSprintWorktreeRoot: options.defaultSprintWorktreeRoot
+      ? await fs.realpath(options.defaultSprintWorktreeRoot)
+      : undefined,
+  })
   const pathSprint = path.basename(path.dirname(statePath))
 
   if (parsed.state && parsed.state.sprint !== pathSprint) {

@@ -133,7 +133,7 @@ export async function runResetState(
 ) {
   const context = await inferSprintContext(input)
   const diagnostics: SprintDiagnostic[] = []
-  const existingState = await readResetSeedState(context.statePath, diagnostics)
+  const existingState = await readResetSeedState(context.statePath, context.rootDir, diagnostics)
   const branches = getExpectedBranches(context.sprint)
   const baseBranch = input.base ?? existingState?.baseBranch ?? "main"
   const sprintWorktreeRoot = await fs.realpath(context.rootDir)
@@ -1119,9 +1119,15 @@ async function getLatestStash(rootDir: string) {
   }
 }
 
-async function readResetSeedState(statePath: string, diagnostics: SprintDiagnostic[]) {
+async function readResetSeedState(
+  statePath: string,
+  rootDir: string,
+  diagnostics: SprintDiagnostic[],
+) {
   try {
-    const parsed = await readSprintStateFile(statePath)
+    const parsed = await readSprintStateFile(statePath, {
+      defaultSprintWorktreeRoot: rootDir,
+    })
     if (parsed.state) {
       return parsed.state
     }

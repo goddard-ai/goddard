@@ -12,6 +12,7 @@ import {
   readState,
   runCli,
   workingTreePorcelain,
+  writeState,
   type MutationOutput,
 } from "./support"
 
@@ -37,6 +38,31 @@ describe("sprint-branch start", () => {
     expect(await currentBranch(repo)).toBe("sprint/example/review")
     expect(await workingTreePorcelain(repo)).toBe("")
     expect((await readState(repo, "example")).tasks.review).toBe("010-task-name")
+  })
+
+  test("fills missing sprint worktree root when writing updated state", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: [],
+    })
+    const legacyState = { ...(await readState(repo, "example")) } as Record<string, unknown>
+    delete legacyState.sprintWorktreeRoot
+    await writeState(repo, "example", legacyState)
+
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "010-task-name",
+      "--json",
+    ])
+    const nextState = await readState(repo, "example")
+
+    expect(result.exitCode).toBe(0)
+    expect(nextState.sprintWorktreeRoot).toBe(await fs.realpath(repo))
+    expect(nextState.tasks.review).toBe("010-task-name")
   })
 
   test("creates next work when review is occupied", async () => {

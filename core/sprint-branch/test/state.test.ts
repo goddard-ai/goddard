@@ -68,6 +68,26 @@ describe("sprint branch state parsing", () => {
     expect(parsed.state?.tasks.finishedUnreviewed).toEqual([])
   })
 
+  test("defaults missing sprint worktree root from caller context", () => {
+    const parsed = parseSprintState(
+      {
+        sprint: "example",
+        baseBranch: "main",
+        tasks: {
+          review: "010-task-name",
+          next: null,
+          approved: [],
+        },
+        activeStashes: [],
+        conflict: null,
+      },
+      { defaultSprintWorktreeRoot: "/repo-agent" },
+    )
+
+    expect(parsed.diagnostics).toEqual([])
+    expect(parsed.state?.sprintWorktreeRoot).toBe("/repo-agent")
+  })
+
   test("rejects invalid task state", () => {
     const parsed = parseSprintState({
       sprint: "example",

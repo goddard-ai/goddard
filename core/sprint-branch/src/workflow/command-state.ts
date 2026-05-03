@@ -10,7 +10,9 @@ export async function readCommandState(
   options: { allowOwnConflictRetry?: boolean } = {},
 ) {
   const context = await inferSprintContext(input)
-  const parsed = await readSprintStateFile(context.statePath)
+  const parsed = await readSprintStateFile(context.statePath, {
+    defaultSprintWorktreeRoot: context.rootDir,
+  })
   const diagnostics = [...parsed.diagnostics]
 
   if (!parsed.state) {

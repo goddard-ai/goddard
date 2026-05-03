@@ -86,7 +86,9 @@ async function readExplicitCandidate(
 
   const statePath = await sprintStatePath(rootDir, sprint)
   try {
-    const parsed = await readSprintStateFile(statePath)
+    const parsed = await readSprintStateFile(statePath, {
+      defaultSprintWorktreeRoot: rootDir,
+    })
     diagnostics.push(...parsed.diagnostics)
     return parsed.state ? candidateFromState(rootDir, statePath, parsed.state) : null
   } catch (error) {
@@ -108,7 +110,9 @@ async function readSprintCandidates(rootDir: string, includeParked = false) {
 
   for (const statePath of stateFiles) {
     try {
-      const parsed = await readSprintStateFile(statePath)
+      const parsed = await readSprintStateFile(statePath, {
+        defaultSprintWorktreeRoot: rootDir,
+      })
       if (parsed.state && (includeParked || parsed.state.visibility === "active")) {
         candidates.push(candidateFromState(rootDir, statePath, parsed.state))
       }

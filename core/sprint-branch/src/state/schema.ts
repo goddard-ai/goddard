@@ -6,8 +6,13 @@ import type {
 } from "../types"
 import { getExpectedBranches, validateSprintName } from "./branches"
 
+/** Defaults used when reading state files written before newer fields existed. */
+type SprintStateParseOptions = {
+  defaultSprintWorktreeRoot?: string
+}
+
 /** Parses and validates the canonical sprint branch state JSON object. */
-export function parseSprintState(value: unknown) {
+export function parseSprintState(value: unknown, options: SprintStateParseOptions = {}) {
   const diagnostics: SprintDiagnostic[] = []
   const record = isRecord(value) ? value : null
 
@@ -27,7 +32,7 @@ export function parseSprintState(value: unknown) {
   const sprint = readString(record.sprint, "sprint", diagnostics)
   const baseBranch = readString(record.baseBranch, "baseBranch", diagnostics)
   const sprintWorktreeRoot = readString(
-    record.sprintWorktreeRoot,
+    record.sprintWorktreeRoot ?? options.defaultSprintWorktreeRoot,
     "sprintWorktreeRoot",
     diagnostics,
   )

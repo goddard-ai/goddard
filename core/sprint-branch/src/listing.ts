@@ -29,7 +29,9 @@ export async function buildSprintList(input: { cwd: string; includeParked: boole
 
   for (const statePath of await findSprintStateFiles(rootDir)) {
     try {
-      const parsed = await readSprintStateFile(statePath)
+      const parsed = await readSprintStateFile(statePath, {
+        defaultSprintWorktreeRoot: rootDir,
+      })
       diagnostics.push(...parsed.diagnostics)
       if (parsed.state && (input.includeParked || parsed.state.visibility === "active")) {
         sprints.push({

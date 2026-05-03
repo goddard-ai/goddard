@@ -20,7 +20,9 @@ const sprintRoles: SprintBranchRole[] = ["review", "approved", "next"]
 /** Builds the read-only sprint branch status report used by status, diff, and doctor. */
 export async function buildStatusReport(input: SprintInferenceInput) {
   const context = await inferSprintContext(input)
-  const parsed = await readSprintStateFile(context.statePath)
+  const parsed = await readSprintStateFile(context.statePath, {
+    defaultSprintWorktreeRoot: context.rootDir,
+  })
   const diagnostics = [...parsed.diagnostics]
 
   if (!parsed.state) {
