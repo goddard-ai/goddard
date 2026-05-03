@@ -16,6 +16,7 @@ export type ReviewSyncResult = {
   reviewBranch?: string
   acceptedPatchPath?: string
   rejectedPatchPath?: string
+  verbose?: boolean
   message: string
 }
 
@@ -38,6 +39,7 @@ export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
 export type WatchReviewSyncInput = ReviewSyncWorktreeInput & {
   agentBranch?: string
   signal?: AbortSignal
+  verbose?: boolean
   onResult?: (result: ReviewSyncResult) => void | Promise<void>
 }
 

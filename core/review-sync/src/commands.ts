@@ -49,6 +49,21 @@ import type {
 
 const watchDebounceMs = 100
 
+/** Session identifiers attached to verbose watch diagnostics when available. */
+type WatchVerboseSession = Pick<SessionState, "sessionId" | "reviewBranch">
+
+/** Emits verbose watch diagnostics through the regular result callback. */
+type WatchVerboseEmitter = (message: string, session?: WatchVerboseSession) => Promise<void>
+
+/** Filesystem event details retained until the watch loop can log them in order. */
+type WatchEventDetail = {
+  source: "worktree" | "git"
+  path: string
+  recursive: boolean
+  eventType: string
+  filename: string | null
+}
+
 /**
  * Runs one review-sync command using the same command names and process context as the CLI.
  */
@@ -264,19 +279,37 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
 
 /** Performs the watch workflow after CLI parsing and command-level error handling. */
 async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
+  const emitVerbose = createWatchVerboseEmitter(input)
+  await emitVerbose(
+    input.agentBranch
+      ? `resolving session for ${input.agentBranch}.`
+      : `inferring session from ${context.cwd}.`,
+  )
+
   const startedWorktree = await resolveRequiredRepoRoot(context.cwd, context)
   const startedBranch = await resolveCurrentBranch(startedWorktree, context)
-  const resolution = await resolveSessionForWatch(input, context)
+  await emitVerbose(
+    startedBranch
+      ? `started from ${startedWorktree} on ${startedBranch}.`
+      : `started from ${startedWorktree} with detached HEAD.`,
+  )
+
+  const resolution = await resolveSessionForWatch(input, context, emitVerbose)
   if (resolution.kind === "stopped") {
     return resolution.result
   }
 
   const { session, startResult, refreshFromBranchRefOnStart } = resolution
+  await emitVerbose(`preparing ${session.reviewBranch} in ${session.reviewWorktree}.`, session)
   await prepareReviewBranchForStart(session, context)
   let fingerprint = await createWatchFingerprint(session, context)
+  await emitVerbose(
+    `captured initial fingerprint for ${session.agentBranch} and ${session.reviewBranch}.`,
+    session,
+  )
   const warningState = { pendingHumanPatchWarningSent: false }
   const events = createWatchEventQueue(input.signal)
-  const watchers = await createReviewSyncWatchers(session, context, events)
+  const watchers = await createReviewSyncWatchers(session, context, events, emitVerbose)
   let watchError: unknown
 
   try {
@@ -294,28 +327,42 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
         message: `Watching review sync for ${session.agentBranch} -> ${session.reviewBranch}.`,
       }),
     )
+    await emitVerbose("watchers are armed; waiting for changes.", session)
 
     if (refreshFromBranchRefOnStart) {
+      await emitVerbose(
+        `refreshing ${session.reviewBranch} from ${session.agentBranch} branch ref because the recorded agent checkout is unavailable.`,
+        session,
+      )
       await refreshReviewWorktreeFromAgentBranchRefForWatch(
         session,
         context,
         input.onResult,
         warningState,
+        emitVerbose,
       )
       fingerprint = await createWatchFingerprint(await readSessionState(session), context)
+      await emitVerbose("updated fingerprint after branch-ref refresh.", session)
     }
 
     while (await events.waitForEvent()) {
       if (!(await waitForWatchQuietPeriod(events, input.signal))) {
         break
       }
+      await emitQueuedWatchEvents(emitVerbose, events, session)
 
       const latest = await readSessionState(session)
       const nextFingerprint = await createWatchFingerprint(latest, context)
+      await emitVerbose("compared current fingerprint with the last handled fingerprint.", latest)
       if (nextFingerprint === fingerprint) {
+        await emitVerbose("fingerprint unchanged; no sync needed.", latest)
         continue
       }
 
+      await emitVerbose(
+        "fingerprint changed; running sync when the agent checkout is ready.",
+        latest,
+      )
       const result = await syncForWatchWhenAgentCheckoutReady(
         latest,
         context,
@@ -323,6 +370,7 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
         input.signal,
         input.onResult,
         warningState,
+        emitVerbose,
       )
       if (!result) {
         break
@@ -336,15 +384,29 @@ async function watchReviewSessionOperation(input: WatchReviewSyncInput, context:
   } catch (error) {
     watchError = error
   } finally {
+    await emitVerbose(
+      `closing ${watchers.length} filesystem watcher${watchers.length === 1 ? "" : "s"}.`,
+      session,
+    )
     closeReviewSyncWatchers(watchers)
   }
 
+  await emitVerbose(
+    "pausing session and restoring the starting review branch when needed.",
+    session,
+  )
   const cleanup = await cleanupWatchExit({
     session,
     context,
     startedWorktree,
     startedBranch,
   })
+  await emitVerbose(
+    cleanup.failures.length > 0
+      ? `watch cleanup finished with ${cleanup.failures.length} failure${cleanup.failures.length === 1 ? "" : "s"}.`
+      : "watch cleanup complete.",
+    cleanup.latest,
+  )
 
   if (watchError) {
     if (cleanup.failures.length > 0) {
@@ -532,14 +594,20 @@ function createReviewSyncCommand(cwd: string) {
             displayName: "agent-branch",
             description: "Agent branch checked out in another worktree",
           }),
+          verbose: flag({
+            long: "verbose",
+            description:
+              "Print watch diagnostics for session resolution, filesystem events, and sync decisions",
+          }),
         },
-        handler: async ({ agentBranch }) => {
+        handler: async ({ agentBranch, verbose }) => {
           const abort = createProcessAbortSignal()
           try {
             return await watchReviewSession({
               cwd,
               agentBranch,
               signal: abort.signal,
+              verbose,
               onResult: writeResult,
             })
           } finally {
@@ -552,7 +620,11 @@ function createReviewSyncCommand(cwd: string) {
 }
 
 /** Resolves an existing watch session or creates it from start-compatible input. */
-async function resolveSessionForWatch(input: WatchReviewSyncInput, context: RuntimeContext) {
+async function resolveSessionForWatch(
+  input: WatchReviewSyncInput,
+  context: RuntimeContext,
+  emitVerbose: WatchVerboseEmitter,
+) {
   if (input.agentBranch) {
     return await resolveAgentBranchSessionForWatch(
       {
@@ -560,12 +632,16 @@ async function resolveSessionForWatch(input: WatchReviewSyncInput, context: Runt
         agentBranch: input.agentBranch,
       },
       context,
+      emitVerbose,
     )
   }
 
+  await emitVerbose("inferring saved session from the current worktree.")
+  const session = await inferSession(context)
+  await emitVerbose(`inferred session ${session.sessionId} for ${session.agentBranch}.`, session)
   return {
     kind: "ready" as const,
-    session: await inferSession(context),
+    session,
     startResult: null,
     refreshFromBranchRefOnStart: false,
   }
@@ -575,18 +651,26 @@ async function resolveSessionForWatch(input: WatchReviewSyncInput, context: Runt
 async function resolveAgentBranchSessionForWatch(
   input: WatchReviewSyncInput & { agentBranch: string },
   context: RuntimeContext,
+  emitVerbose: WatchVerboseEmitter,
 ) {
   const events = createWatchEventQueue(input.signal)
-  const watchers = await createRepositoryMetadataWatchers(context, events)
+  const watchers = await createRepositoryMetadataWatchers(context, events, emitVerbose)
   let waitingResultSent = false
 
   try {
+    await emitVerbose(
+      `looking for an existing session or checked-out worktree for ${input.agentBranch}.`,
+    )
     while (!isAbortSignalAborted(input.signal)) {
       const existingSession = await findExistingAgentBranchSessionForWatch(
         input.agentBranch,
         context,
       )
       if (existingSession && (await isRecordedAgentCheckoutUnavailable(existingSession, context))) {
+        await emitVerbose(
+          `reusing session ${existingSession.sessionId}; recorded agent worktree ${existingSession.agentWorktree} is not on ${existingSession.agentBranch}.`,
+          existingSession,
+        )
         return {
           kind: "ready" as const,
           session: existingSession,
@@ -596,9 +680,14 @@ async function resolveAgentBranchSessionForWatch(
       }
 
       try {
+        await emitVerbose(`attempting to start session for ${input.agentBranch}.`)
         const { session, result } = await startReviewSyncOperationWithSession(
           input.agentBranch,
           context,
+        )
+        await emitVerbose(
+          `session ready with agent worktree ${session.agentWorktree} and review worktree ${session.reviewWorktree}.`,
+          session,
         )
         return {
           kind: "ready" as const,
@@ -616,6 +705,10 @@ async function resolveAgentBranchSessionForWatch(
           context,
         )
         if (existingSession) {
+          await emitVerbose(
+            `reusing saved session ${existingSession.sessionId} while the agent checkout is unavailable.`,
+            existingSession,
+          )
           return {
             kind: "ready" as const,
             session: existingSession,
@@ -626,6 +719,9 @@ async function resolveAgentBranchSessionForWatch(
 
         if (!waitingResultSent) {
           waitingResultSent = true
+          await emitVerbose(
+            `no checked-out agent worktree found for ${input.agentBranch}; waiting for repository metadata.`,
+          )
           await input.onResult?.(
             createReviewSyncResult({
               exitCode: 0,
@@ -642,9 +738,14 @@ async function resolveAgentBranchSessionForWatch(
         ) {
           break
         }
+        await emitQueuedWatchEvents(emitVerbose, events)
+        await emitVerbose(`repository metadata changed; retrying ${input.agentBranch}.`)
       }
     }
   } finally {
+    await emitVerbose(
+      `closing ${watchers.length} repository metadata watcher${watchers.length === 1 ? "" : "s"}.`,
+    )
     closeReviewSyncWatchers(watchers)
   }
 
@@ -734,6 +835,7 @@ async function syncForWatchWhenAgentCheckoutReady(
   signal: AbortSignal | undefined,
   onResult: WatchReviewSyncInput["onResult"],
   warningState: { pendingHumanPatchWarningSent: boolean },
+  emitVerbose: WatchVerboseEmitter,
 ) {
   while (!isAbortSignalAborted(signal)) {
     try {
@@ -751,6 +853,7 @@ async function syncForWatchWhenAgentCheckoutReady(
           signal,
           onResult,
           warningState,
+          emitVerbose,
         ))
       ) {
         return null
@@ -770,18 +873,34 @@ async function waitForExpectedAgentCheckout(
   signal: AbortSignal | undefined,
   onResult: WatchReviewSyncInput["onResult"],
   warningState: { pendingHumanPatchWarningSent: boolean },
+  emitVerbose: WatchVerboseEmitter,
 ) {
   while (!isAbortSignalAborted(signal)) {
     const branch = await resolveCurrentBranch(mismatch.worktree, context)
     if (branch === mismatch.expectedBranch) {
+      await emitVerbose(
+        `agent worktree ${mismatch.worktree} returned to ${mismatch.expectedBranch}.`,
+        session,
+      )
       return true
     }
 
-    await refreshReviewWorktreeFromAgentBranchRefForWatch(session, context, onResult, warningState)
+    await emitVerbose(
+      `agent worktree ${mismatch.worktree} is on ${branch ?? "detached HEAD"}; waiting for ${mismatch.expectedBranch}.`,
+      session,
+    )
+    await refreshReviewWorktreeFromAgentBranchRefForWatch(
+      session,
+      context,
+      onResult,
+      warningState,
+      emitVerbose,
+    )
 
     if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, signal))) {
       return false
     }
+    await emitQueuedWatchEvents(emitVerbose, events, session)
   }
 
   return false
@@ -793,8 +912,21 @@ async function refreshReviewWorktreeFromAgentBranchRefForWatch(
   context: RuntimeContext,
   onResult: WatchReviewSyncInput["onResult"],
   warningState: { pendingHumanPatchWarningSent: boolean },
+  emitVerbose: WatchVerboseEmitter,
 ) {
+  await emitVerbose(
+    `checking whether ${session.reviewBranch} can refresh from ${session.agentBranch} branch ref.`,
+    session,
+  )
   const refreshResult = await refreshReviewWorktreeFromAgentBranchRef(session, context)
+  if (refreshResult.status === "refreshed") {
+    await emitVerbose(
+      `refreshed ${session.reviewBranch} from ${session.agentBranch} branch ref.`,
+      session,
+    )
+  } else {
+    await emitVerbose(`branch-ref refresh skipped: ${refreshResult.reason}.`, session)
+  }
   if (
     refreshResult.status === "skipped" &&
     refreshResult.reason === "pending-human-patch" &&
@@ -856,6 +988,7 @@ async function createReviewSyncWatchers(
   },
   context: RuntimeContext,
   events: WatchEventQueue,
+  emitVerbose: WatchVerboseEmitter,
 ) {
   const [agentGitDir, reviewGitDir] = await Promise.all([
     resolveRequiredGitDir(session.agentWorktree, context),
@@ -893,12 +1026,17 @@ async function createReviewSyncWatchers(
       source: "git",
     },
   ])
+  await emitVerbose(`watching paths: ${formatWatchTargets(targets)}.`)
 
   return await createFsWatchers(targets, events)
 }
 
 /** Watches repository-level Git metadata before a session knows its agent worktree. */
-async function createRepositoryMetadataWatchers(context: RuntimeContext, events: WatchEventQueue) {
+async function createRepositoryMetadataWatchers(
+  context: RuntimeContext,
+  events: WatchEventQueue,
+  emitVerbose: WatchVerboseEmitter,
+) {
   const repoRoot = await resolveRequiredRepoRoot(context.cwd, context)
   const [commonDir, gitDir] = await Promise.all([
     resolveRequiredGitCommonDir(repoRoot, context),
@@ -926,6 +1064,7 @@ async function createRepositoryMetadataWatchers(context: RuntimeContext, events:
       source: "git",
     },
   ])
+  await emitVerbose(`watching repository metadata paths: ${formatWatchTargets(targets)}.`)
 
   return await createFsWatchers(targets, events)
 }
@@ -938,16 +1077,18 @@ async function createFsWatchers(
   const watchers: FSWatcher[] = []
   try {
     for (const target of targets) {
-      const watcher = watch(
-        target.path,
-        { recursive: target.recursive },
-        (_eventType, filename) => {
-          if (shouldIgnoreWatchEvent(target.source, filename)) {
-            return
-          }
-          events.notify()
-        },
-      )
+      const watcher = watch(target.path, { recursive: target.recursive }, (eventType, filename) => {
+        if (shouldIgnoreWatchEvent(target.source, filename)) {
+          return
+        }
+        events.notify({
+          source: target.source,
+          path: target.path,
+          recursive: target.recursive,
+          eventType,
+          filename: filename?.toString() ?? null,
+        })
+      })
       watcher.on("error", events.fail)
       watchers.push(watcher)
     }
@@ -995,9 +1136,66 @@ function closeReviewSyncWatchers(watchers: FSWatcher[]) {
   }
 }
 
+/** Creates a no-op logger unless watch verbose output was requested. */
+function createWatchVerboseEmitter(input: WatchReviewSyncInput) {
+  return async (message: string, session?: WatchVerboseSession) => {
+    if (!input.verbose) {
+      return
+    }
+
+    await input.onResult?.(
+      createReviewSyncResult({
+        exitCode: 0,
+        command: "watch",
+        status: "ok",
+        sessionId: session?.sessionId,
+        reviewBranch: session?.reviewBranch,
+        verbose: true,
+        message: `Verbose: ${message}`,
+      }),
+    )
+  }
+}
+
+/** Emits a compact summary of filesystem events coalesced into one watch cycle. */
+async function emitQueuedWatchEvents(
+  emitVerbose: WatchVerboseEmitter,
+  events: WatchEventQueue,
+  session?: WatchVerboseSession,
+) {
+  const queued = events.drainEvents()
+  if (queued.length === 0) {
+    await emitVerbose("received a watch signal without filesystem event details.", session)
+    return
+  }
+
+  const shown = queued.slice(0, 5).map(formatWatchEvent)
+  const suffix = queued.length > shown.length ? `; +${queued.length - shown.length} more` : ""
+  await emitVerbose(
+    `coalesced ${queued.length} filesystem event${queued.length === 1 ? "" : "s"}: ${shown.join("; ")}${suffix}.`,
+    session,
+  )
+}
+
+/** Formats watcher targets in the same compact style as verbose event summaries. */
+function formatWatchTargets(
+  targets: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }>,
+) {
+  return targets
+    .map((target) => `${target.source} ${target.recursive ? "recursive " : ""}${target.path}`)
+    .join("; ")
+}
+
+/** Formats one filesystem event without hiding whether it came from Git metadata. */
+function formatWatchEvent(event: WatchEventDetail) {
+  const changedPath = event.filename ? join(event.path, event.filename) : event.path
+  return `${event.source} ${event.eventType} ${changedPath}`
+}
+
 /** Creates a small event queue that can also wake on aborts or watcher errors. */
 function createWatchEventQueue(signal: AbortSignal | undefined) {
   let pending = false
+  const pendingEvents: WatchEventDetail[] = []
   let failure: unknown
   const waiters = new Set<(value: boolean) => void>()
 
@@ -1048,10 +1246,14 @@ function createWatchEventQueue(signal: AbortSignal | undefined) {
   }
 
   return {
-    notify: () => {
+    notify: (event?: WatchEventDetail) => {
       pending = true
+      if (event) {
+        pendingEvents.push(event)
+      }
       flushWaiters(true)
     },
+    drainEvents: () => pendingEvents.splice(0),
     fail: (error: unknown) => {
       failure = error
       flushWaiters(false)

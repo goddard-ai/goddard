@@ -24,6 +24,7 @@ review-sync status --json
 review-sync pause
 review-sync resume
 review-sync watch <agent-branch>
+review-sync watch --verbose <agent-branch>
 review-sync watch
 ```
 
@@ -34,6 +35,8 @@ of the eligible checked-out agent branches. The other commands may run from
 either the agent worktree or the review worktree. `watch` monitors both worktrees
 and their Git metadata, then runs `sync` when either worktree's branch, `HEAD`,
 or snapshot tree changes.
+Pass `--verbose` to `watch` to print session resolution, watched paths,
+coalesced filesystem events, sync decisions, and cleanup steps while it runs.
 Passing `<agent-branch>` to `watch` starts or reuses the review-sync session
 before watching, so a separate `start` command is not required. If that branch
 is not currently checked out in an agent worktree and no matching saved session

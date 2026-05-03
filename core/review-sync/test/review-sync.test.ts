@@ -122,6 +122,24 @@ test("cli watch accepts an agent branch from the review worktree", async () => {
   expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
 })
 
+test("cli watch --verbose explains watcher setup", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+
+  const result = await runProcessUntilOutput(
+    fixture.reviewDir,
+    "bun",
+    [cliPath, "watch", "--verbose", "codex/review-sync-test"],
+    "Verbose: watchers are armed; waiting for changes.",
+  )
+  const output = `${result.stdout}\n${result.stderr}`
+
+  expect(output).toContain("Verbose: resolving session for codex/review-sync-test.")
+  expect(output).toContain("Verbose: watching paths:")
+  expect(output).toContain("Watching review sync")
+})
+
 test("sync mirrors agent uncommitted changes through the review branch", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
