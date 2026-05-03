@@ -22,10 +22,10 @@ export component GoodToaster() {
             <Toast.Title class={styles.title}>
               {toast.title}
             </Toast.Title>
-            if (toast.description)
-            {<Toast.Description class={styles.description}>
-              {toast.description}
-            </Toast.Description>}
+            {toast.description != null &&
+              <Toast.Description class={styles.description}>
+                {toast.description}
+              </Toast.Description>}
           </div>
           <Toast.CloseTrigger class={styles.closeButton}>
             <X size={15} strokeWidth={2.2} />
