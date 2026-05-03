@@ -1,14 +1,13 @@
-import * as fs from "node:fs/promises"
-import path from "node:path"
-
 import { branchExists, refExists } from "../git/refs"
 import { getStashRefs } from "../git/stash"
+import { readTaskReviewReport } from "../review-report"
 import type {
   SprintBranchState,
   SprintConflictState,
   SprintDiagnostic,
   SprintStatusReport,
 } from "../types"
+import { listTaskFiles } from "../workflow/tasks"
 import type { DoctorContext } from "./types"
 
 const taskStemPattern = /^\d{3}-[a-z0-9][a-z0-9-]*$/
@@ -20,7 +19,9 @@ export async function runDoctorChecks(report: SprintStatusReport, context: Docto
   diagnostics.push(...(await checkBaseBranches(report)))
   diagnostics.push(...(await checkBranchDrift(report, context)))
   diagnostics.push(...checkTaskAssignments(report))
+  diagnostics.push(...checkFinishedUnreviewedAssignments(report))
   diagnostics.push(...(await checkTaskQueue(report)))
+  diagnostics.push(...(await checkFinishedReviewReports(report)))
   diagnostics.push(...(await checkStashes(report)))
   diagnostics.push(...(await checkGitOperationState(report, context)))
   diagnostics.push(...checkCurrentBranch(report))
@@ -190,9 +191,56 @@ function checkTaskAssignments(report: SprintStatusReport) {
   return diagnostics
 }
 
+function checkFinishedUnreviewedAssignments(report: SprintStatusReport) {
+  const diagnostics: SprintDiagnostic[] = []
+  const activeTasks = new Set(
+    [report.state.tasks.review, report.state.tasks.next].filter((task): task is string =>
+      Boolean(task),
+    ),
+  )
+  const approved = new Set(report.state.tasks.approved)
+  const seen = new Set<string>()
+
+  if (report.state.tasks.finishedUnreviewed.length > 2) {
+    diagnostics.push({
+      severity: "error",
+      code: "unreviewed_limit_reached",
+      message: `State records ${report.state.tasks.finishedUnreviewed.length} finished-unreviewed tasks; at most two are allowed.`,
+    })
+  }
+
+  for (const task of report.state.tasks.finishedUnreviewed) {
+    if (seen.has(task)) {
+      diagnostics.push({
+        severity: "error",
+        code: "finished_unreviewed_task_duplicated",
+        message: `Task ${task} is recorded more than once in tasks.finishedUnreviewed.`,
+      })
+    }
+    seen.add(task)
+
+    if (!activeTasks.has(task)) {
+      diagnostics.push({
+        severity: "error",
+        code: "finished_unreviewed_task_not_active",
+        message: `Task ${task} is marked finished-unreviewed but is not recorded on review or next.`,
+      })
+    }
+    if (approved.has(task)) {
+      diagnostics.push({
+        severity: "error",
+        code: "finished_unreviewed_task_approved",
+        message: `Task ${task} is both approved and finished-unreviewed.`,
+      })
+    }
+  }
+
+  return diagnostics
+}
+
 async function checkTaskQueue(report: SprintStatusReport) {
   const diagnostics: SprintDiagnostic[] = []
-  const taskFiles = await listTaskFiles(report.rootDir, report.state.sprint)
+  const taskFiles = await listTaskFilesIfPresent(report.rootDir, report.state.sprint)
   const taskStems = taskFiles.map((task) => task.stem)
   const approved = new Set(report.state.tasks.approved)
 
@@ -242,6 +290,20 @@ async function checkTaskQueue(report: SprintStatusReport) {
     }
   }
 
+  return diagnostics
+}
+
+async function checkFinishedReviewReports(report: SprintStatusReport) {
+  const diagnostics: SprintDiagnostic[] = []
+  for (const task of report.state.tasks.finishedUnreviewed) {
+    const reviewReport = await readTaskReviewReport(report.rootDir, report.state.sprint, task, {
+      ref:
+        report.state.tasks.next === task
+          ? report.state.branches.next
+          : report.state.branches.review,
+    })
+    diagnostics.push(...reviewReport.diagnostics)
+  }
   return diagnostics
 }
 
@@ -445,20 +507,9 @@ function taskAssignments(state: SprintBranchState): Array<[string, string | null
   ]
 }
 
-async function listTaskFiles(rootDir: string, sprint: string) {
-  const sprintDir = path.join(rootDir, "sprints", sprint)
+async function listTaskFilesIfPresent(rootDir: string, sprint: string) {
   try {
-    const entries = await fs.readdir(sprintDir, { withFileTypes: true })
-    return entries
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name)
-      .filter((name) => name.endsWith(".md"))
-      .filter((name) => name !== "000-index.md" && name !== "001-handoff.md")
-      .map((name) => ({
-        stem: name.slice(0, -".md".length),
-        relativePath: path.join("sprints", sprint, name),
-      }))
-      .sort((left, right) => left.stem.localeCompare(right.stem))
+    return await listTaskFiles(rootDir, sprint)
   } catch (error) {
     if (isMissingFileError(error)) {
       return []

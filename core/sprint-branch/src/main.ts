@@ -11,6 +11,7 @@ import {
   runApprove,
   runFeedback,
   runFinalize,
+  runFinish,
   runInit,
   runPark,
   runRebase,
@@ -24,6 +25,7 @@ import { SprintInferenceError } from "./state/inference"
 import { buildStatusReport, formatStatusReport } from "./status"
 import { formatSprintSyncReport, runSprintSync } from "./sync"
 import type { SprintMutationReport, SprintStatusReport } from "./types"
+import { buildSprintReviewView, formatSprintReviewView } from "./view"
 
 function sprintOption() {
   return option({
@@ -141,6 +143,42 @@ export async function main(argv: string[]) {
 
           const output = await runGit(report.rootDir, args)
           writeOutput(json, { ok: true, command: commandLine, args, output }, output.trimEnd())
+        },
+      }),
+      view: command({
+        name: "view",
+        description: "Print the concise human approval view for a finished task",
+        args: {
+          ...commonReadArgs,
+          task: option({
+            type: optional(string),
+            long: "task",
+            description: "Task file stem to view; defaults to the current review task",
+          }),
+        },
+        handler: async ({ sprint, task, json }) => {
+          const { report, diagnostics } = await buildSprintReviewView({
+            cwd: process.cwd(),
+            sprint,
+            task,
+            interactive: !json,
+          })
+          if (!report) {
+            writeOutput(
+              json,
+              { ok: false, diagnostics },
+              diagnostics
+                .map((diagnostic) => `[${diagnostic.severity}] ${diagnostic.message}`)
+                .join("\n"),
+            )
+            process.exitCode = 1
+            return
+          }
+
+          writeOutput(json, report, formatSprintReviewView(report))
+          if (!report.ok) {
+            process.exitCode = 1
+          }
         },
       }),
       sync: command({
@@ -400,6 +438,24 @@ export async function main(argv: string[]) {
           await writeMutation(
             args.json,
             runStart({ cwd: process.cwd(), ...args, interactive: !args.json }),
+          )
+        },
+      }),
+      finish: command({
+        name: "finish",
+        description: "Mark a task finished and ready for human review",
+        args: {
+          ...commonMutationArgs,
+          task: option({
+            type: string,
+            long: "task",
+            description: "Task file stem, such as 020-task-name",
+          }),
+        },
+        handler: async (args) => {
+          await writeMutation(
+            args.json,
+            runFinish({ cwd: process.cwd(), ...args, interactive: !args.json }),
           )
         },
       }),

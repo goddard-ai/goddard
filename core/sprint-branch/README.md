@@ -18,8 +18,11 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 
 `sprint-branch sync [--sprint <name>]` watches `review-sync` for the active sprint review branch in process, matching `review-sync watch <agent-branch>` after sprint resolution. The command resolves the active sprint the same way as read-only sprint commands: explicit `--sprint`, current sprint branch, `sprints/<name>` working directory, or interactive selection from active sprint state.
 
+`sprint-branch finish --task <task>` marks an active review or next task as `finished-unreviewed` after its task markdown contains the required Review Report. `sprint-branch view [--task <task>]` prints the human approval view for a finished task, defaulting to the current review task.
+
 - `sprint-branch status`
 - `sprint-branch diff`
+- `sprint-branch view`
 - `sprint-branch sync`
 - `sprint-branch doctor`
 - `sprint-branch list [--all]`
@@ -31,6 +34,7 @@ Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name
 - `sprint-branch park`
 - `sprint-branch unpark`
 - `sprint-branch start`
+- `sprint-branch finish`
 - `sprint-branch feedback`
 - `sprint-branch resume`
 - `sprint-branch approve`

@@ -3,10 +3,22 @@ import path from "node:path"
 
 import type { SprintBranchState, SprintTaskState } from "../types"
 
+/** Sprint task file metadata derived from one task markdown file. */
+export type SprintTaskFile = {
+  stem: string
+  title: string
+  relativePath: string
+}
+
 /** Resolves the next unassigned task file stem from sprint task queue order. */
 export async function resolveNextPlannedTask(rootDir: string, state: SprintBranchState) {
   const tasks = await listTaskStems(rootDir, state.sprint)
-  const assigned = new Set([...state.tasks.approved, state.tasks.review, state.tasks.next])
+  const assigned = new Set([
+    ...state.tasks.approved,
+    ...state.tasks.finishedUnreviewed,
+    state.tasks.review,
+    state.tasks.next,
+  ])
   return tasks.find((task) => !assigned.has(task)) ?? null
 }
 
@@ -48,6 +60,7 @@ export function emptyTasks(): SprintTaskState {
     review: null,
     next: null,
     approved: [],
+    finishedUnreviewed: [],
   }
 }
 
@@ -66,17 +79,40 @@ export function findMatchingStash(state: SprintBranchState) {
   )
 }
 
-/** Lists sprint task file stems in queue order, excluding sprint metadata files. */
+/** Lists sprint task file stems in queue order. */
 export async function listTaskStems(rootDir: string, sprint: string) {
+  return (await listTaskFiles(rootDir, sprint)).map((task) => task.stem)
+}
+
+/** Lists sprint task markdown files in queue order. */
+export async function listTaskFiles(rootDir: string, sprint: string) {
   const sprintDir = path.join(rootDir, "sprints", sprint)
   const entries = await fs.readdir(sprintDir, { withFileTypes: true })
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) => name.endsWith(".md"))
-    .filter((name) => name !== "000-index.md" && name !== "001-handoff.md")
-    .map((name) => name.slice(0, -".md".length))
-    .sort()
+  const taskFiles = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => name.endsWith(".md"))
+      .map(async (name) => {
+        const text = await fs.readFile(path.join(sprintDir, name), "utf-8")
+        return {
+          stem: name.slice(0, -".md".length),
+          title: readTaskTitle(text) ?? name.slice(0, -".md".length),
+          relativePath: path.join("sprints", sprint, name),
+        } satisfies SprintTaskFile
+      }),
+  )
+
+  return taskFiles.sort((left, right) => left.stem.localeCompare(right.stem))
+}
+
+function readTaskTitle(text: string) {
+  return (
+    text
+      .split(/\r?\n/)
+      .map((line) => line.match(/^#\s+(.+?)\s*#*\s*$/)?.[1]?.trim())
+      .find((title) => title && title.length > 0) ?? null
+  )
 }
 
 async function pathExists(pathname: string) {

@@ -14,7 +14,7 @@ export type SprintTaskState = {
   review: string | null
   next: string | null
   approved: string[]
-  finishedUnreviewed?: string[]
+  finishedUnreviewed: string[]
 }
 
 /** A stash created by the CLI while interrupting next-branch work. */
@@ -78,6 +78,14 @@ export type SprintWorkingTreeStatus = {
   entries: string[]
 }
 
+/** Queue entry derived from committed sprint task markdown files. */
+export type SprintTaskQueueItem = {
+  id: string
+  path: string
+  title: string
+  state: "approved" | "review" | "next" | "finished-unreviewed" | "planned"
+}
+
 /** Full status payload returned by sprint-branch status and reused by doctor. */
 export type SprintStatusReport = {
   ok: boolean
@@ -95,6 +103,12 @@ export type SprintStatusReport = {
     nextDescendsFromReview: boolean | null
   }
   workingTree: SprintWorkingTreeStatus
+  taskQueue: SprintTaskQueueItem[]
+  review: {
+    currentTask: string | null
+    finishedUnreviewed: string[]
+    viewCommand: string | null
+  }
   blocked: {
     review: boolean
     conflict: boolean
@@ -120,6 +134,23 @@ export type SprintMutationReport = {
   conflictHandling: string
   diagnostics: SprintDiagnostic[]
   state: SprintBranchState | null
+}
+
+/** Report returned by sprint-branch view for a human approval pass. */
+export type SprintReviewViewReport = {
+  ok: boolean
+  sprint: string
+  task: {
+    id: string
+    title: string
+    path: string
+    state: "review" | "next" | "approved" | "finished-unreviewed" | "planned" | "unknown"
+  } | null
+  reviewBranch: string
+  approvedBranch: string
+  diffCommand: string
+  reviewReport: string | null
+  diagnostics: SprintDiagnostic[]
 }
 
 /** Result returned when sprint-branch watches review-sync for one sprint. */

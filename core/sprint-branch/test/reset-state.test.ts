@@ -36,6 +36,7 @@ describe("sprint-branch reset-state", () => {
       review: null,
       next: null,
       approved: [],
+      finishedUnreviewed: [],
     })
     expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedHead)
     expect(await branchHead(repo, "sprint/example/review")).toBe(reviewHead)
@@ -67,6 +68,7 @@ describe("sprint-branch reset-state", () => {
       review: null,
       next: null,
       approved: ["010-task-name", "020-task-name"],
+      finishedUnreviewed: [],
     })
   })
 
@@ -106,6 +108,7 @@ describe("sprint-branch reset-state", () => {
       review: null,
       next: null,
       approved: ["010-task-name"],
+      finishedUnreviewed: [],
     })
   })
 

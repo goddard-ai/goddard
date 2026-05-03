@@ -89,8 +89,12 @@ function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
   const review = readOptionalString(value.review, "tasks.review", diagnostics)
   const next = readOptionalString(value.next, "tasks.next", diagnostics)
   const approved = readStringArray(value.approved, "tasks.approved", diagnostics)
+  const finishedUnreviewed =
+    value.finishedUnreviewed === undefined
+      ? []
+      : readStringArray(value.finishedUnreviewed, "tasks.finishedUnreviewed", diagnostics)
 
-  if (!approved || diagnostics.some(hasError)) {
+  if (!approved || !finishedUnreviewed || diagnostics.some(hasError)) {
     return null
   }
 
@@ -98,6 +102,7 @@ function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
     review,
     next,
     approved,
+    finishedUnreviewed,
   } satisfies SprintTaskState
 }
 

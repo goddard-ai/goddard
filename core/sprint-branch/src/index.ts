@@ -7,6 +7,7 @@ export {
   formatMutationReport,
   runApprove,
   runFeedback,
+  runFinish,
   runFinalize,
   runInit,
   runPark,
@@ -29,6 +30,7 @@ export {
 export { parseSprintState } from "./state/schema"
 export { buildStatusReport, formatStatusReport } from "./status"
 export { formatSprintSyncReport, runSprintSync } from "./sync"
+export { buildSprintReviewView, formatSprintReviewView } from "./view"
 export type {
   SprintActiveStash,
   SprintBranchNames,
@@ -40,6 +42,7 @@ export type {
   SprintContext,
   SprintDiagnostic,
   SprintMutationReport,
+  SprintReviewViewReport,
   SprintSyncReport,
   SprintStatusReport,
   SprintTaskState,

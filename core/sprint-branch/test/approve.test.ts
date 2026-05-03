@@ -13,6 +13,7 @@ import {
   readState,
   runCli,
   workingTreePorcelain,
+  writeCompleteReviewReport,
   type MutationOutput,
 } from "./support"
 
@@ -27,7 +28,9 @@ describe("sprint-branch approve", () => {
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await commitAll(repo, "add reviewed work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
 
     const result = await runCli(repo, ["approve", "--sprint", "example", "--json"])
 
@@ -56,11 +59,15 @@ describe("sprint-branch approve", () => {
     )
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "review.txt"), "reviewed\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await commitAll(repo, "add review work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
     await git(repo, ["checkout", "sprint/example/next"])
     await git(repo, ["rebase", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "next.txt"), "ahead\n")
+    await writeCompleteReviewReport(repo, "example", "020-task-name")
     await commitAll(repo, "add next work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "020-task-name", "--json"])
     await git(repo, ["checkout", "sprint/example/review"])
 
     const result = await runCli(repo, ["approve", "--sprint", "example", "--json"])
@@ -86,7 +93,9 @@ describe("sprint-branch approve", () => {
     })
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "feature.txt"), "reviewed\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await commitAll(repo, "add reviewed work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
     const approvedHead = await branchHead(repo, "sprint/example/approved")
 
     const result = await runCli(repo, ["approve", "--sprint", "example", "--dry-run", "--json"])
@@ -113,7 +122,9 @@ describe("sprint-branch approve", () => {
     await commitAll(repo, "diverge approved")
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "review.txt"), "reviewed\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await commitAll(repo, "add reviewed work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
     const beforeState = await readState(repo, "example")
     const approvedHead = await branchHead(repo, "sprint/example/approved")
 
@@ -143,11 +154,15 @@ describe("sprint-branch approve", () => {
     const approvedHead = await branchHead(repo, "sprint/example/approved")
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await commitAll(repo, "add review conflict")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
     const reviewedHead = await branchHead(repo, "sprint/example/review")
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await writeCompleteReviewReport(repo, "example", "020-task-name")
     await commitAll(repo, "add next conflict")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "020-task-name", "--json"])
 
     const first = await runCli(repo, ["approve", "--sprint", "example", "--json"])
     const failedApprove = JSON.parse(first.stdout) as MutationOutput

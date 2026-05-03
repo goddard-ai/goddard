@@ -10,6 +10,7 @@ import {
   currentBranch,
   readState,
   runCli,
+  writeCompleteReviewReport,
 } from "./support"
 
 type JsonCommandOutput = {
@@ -23,6 +24,7 @@ type StatusOutput = JsonCommandOutput & {
       review: string | null
       next: string | null
       approved: string[]
+      finishedUnreviewed: string[]
     }
   }
   workingTree: {
@@ -80,6 +82,7 @@ describe("sprint-branch three-task happy path", () => {
       review: null,
       next: null,
       approved: ["010-task-name", "020-task-name", "030-task-name"],
+      finishedUnreviewed: [],
     })
     expect(doctor.ok).toBe(true)
     expect(doctor.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([])
@@ -102,7 +105,16 @@ describe("sprint-branch three-task happy path", () => {
 async function startAndCommitTask(repo: string, task: string, content: string) {
   await runJson<JsonCommandOutput>(repo, ["start", "--sprint", "example", "--task", task, "--json"])
   await fs.writeFile(path.join(repo, `${task}.txt`), `${content}\n`)
+  await writeCompleteReviewReport(repo, "example", task)
   await commitAll(repo, `complete ${task}`)
+  await runJson<JsonCommandOutput>(repo, [
+    "finish",
+    "--sprint",
+    "example",
+    "--task",
+    task,
+    "--json",
+  ])
 }
 
 async function runJson<T extends JsonCommandOutput>(repo: string, args: string[]) {

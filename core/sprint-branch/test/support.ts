@@ -95,6 +95,15 @@ export async function readState(repo: string, sprint: string) {
   ) as SprintStoredState
 }
 
+export async function writeCompleteReviewReport(repo: string, sprint: string, task: string) {
+  const taskPath = path.join(repo, "sprints", sprint, `${task}.md`)
+  const text = await fs.readFile(taskPath, "utf-8")
+  await fs.writeFile(
+    taskPath,
+    `${text.trimEnd()}\n\n## Review Report\n\n### Plain-English Summary\n\nImplemented ${task}.\n\n### How To Verify Without Reading Code\n\nRun the listed command and inspect the result.\n\n### Agent Verification\n\n- Verified with tests.\n\n### Approval Questions\n\n- Is this ready to approve?\n\n### Known Limits\n\n- None known.\n`,
+  )
+}
+
 export async function writeState(repo: string, sprint: string, state: unknown) {
   const statePath = await sprintStatePath(repo, sprint)
   await fs.mkdir(path.dirname(statePath), { recursive: true })
@@ -204,7 +213,10 @@ async function writeSprintState(repo: string, sprint: string, tasks: SprintTestT
         sprint,
         baseBranch: "main",
         visibility: "active",
-        tasks,
+        tasks: {
+          ...tasks,
+          finishedUnreviewed: tasks.finishedUnreviewed ?? [],
+        },
         activeStashes: [],
         conflict: null,
       },

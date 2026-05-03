@@ -6,6 +6,7 @@ import { branchExists, getBranchHead, getMergeBase, isAncestor, refExists } from
 import { getGitOperations } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
+import { readTaskReviewReport } from "./review-report"
 import { getExpectedBranches } from "./state/branches"
 import { inferSprintContext } from "./state/inference"
 import { readSprintStateFile } from "./state/io"
@@ -149,6 +150,7 @@ export async function runResetState(
       review: null,
       next: null,
       approved: targetTaskIndex >= 0 ? taskStems.slice(0, targetTaskIndex) : [],
+      finishedUnreviewed: [],
     },
     activeStashes: [],
     conflict: null,
@@ -329,6 +331,72 @@ export async function runStart(input: MutationInput & { task: string }) {
     await runGit(context.rootDir, ["checkout", targetBranch])
     await writeSprintState(context.rootDir, nextState)
     return { ...plan, executed: true }
+  })
+}
+
+/** Marks a completed active task as ready for human review. */
+export async function runFinish(input: MutationInput & { task: string }) {
+  const { context, state, diagnostics } = await readCommandState(input, "finish")
+  const task = normalizeTaskName(input.task)
+  const nextState = cloneState(state)
+  const taskBranch =
+    task === state.tasks.review
+      ? state.branches.review
+      : task === state.tasks.next
+        ? state.branches.next
+        : undefined
+  const reviewReport = await readTaskReviewReport(context.rootDir, state.sprint, task, {
+    ref: taskBranch,
+  })
+  const activeTasks = [state.tasks.review, state.tasks.next].filter(
+    (activeTask): activeTask is string => Boolean(activeTask),
+  )
+  const alreadyFinished = state.tasks.finishedUnreviewed.includes(task)
+
+  diagnostics.push(...reviewReport.diagnostics)
+  if (!activeTasks.includes(task)) {
+    diagnostics.push({
+      severity: "error",
+      code: "task_not_active",
+      message: `Task ${task} is not recorded on review or next.`,
+      suggestion: "Run sprint-branch start before finishing a task.",
+    })
+  }
+  if (!alreadyFinished && state.tasks.finishedUnreviewed.length >= 2) {
+    diagnostics.push({
+      severity: "error",
+      code: "unreviewed_limit_reached",
+      message: "At most two tasks can be finished and unreviewed at once.",
+      suggestion: "Run sprint-branch view and approve an existing finished task first.",
+    })
+  }
+
+  if (!alreadyFinished) {
+    nextState.tasks.finishedUnreviewed = [...nextState.tasks.finishedUnreviewed, task]
+  }
+
+  const plan = makePlan({
+    command: "finish",
+    context,
+    state: nextState,
+    summary: alreadyFinished
+      ? `${task} is already marked finished-unreviewed.`
+      : `Mark ${task} finished-unreviewed.`,
+    requiresCleanWorkingTree: false,
+    gitOperations: [],
+    stateFiles: stateFilesForState(nextState),
+    conflictHandling:
+      "Only Git-private sprint state is rewritten after the task Review Report is complete.",
+    diagnostics,
+  })
+
+  if (input.dryRun || !plan.ok) {
+    return withDryRun(plan, input.dryRun)
+  }
+
+  return withSprintLock(context, state, "finish", async () => {
+    await writeSprintState(context.rootDir, nextState)
+    return { ...plan, state: nextState, executed: true }
   })
 }
 
@@ -535,6 +603,11 @@ export async function runApprove(input: MutationInput) {
   const nextNeedsRebase =
     Boolean(state.tasks.next) &&
     !(await isAncestor(context.rootDir, state.branches.review, state.branches.next))
+  const reviewReport = state.tasks.review
+    ? await readTaskReviewReport(context.rootDir, state.sprint, state.tasks.review, {
+        ref: state.branches.review,
+      })
+    : null
 
   if (!workingTree.clean) {
     diagnostics.push({
@@ -549,6 +622,17 @@ export async function runApprove(input: MutationInput) {
       code: "review_task_missing",
       message: "No review task is recorded for approval.",
     })
+  }
+  if (state.tasks.review && !state.tasks.finishedUnreviewed.includes(state.tasks.review)) {
+    diagnostics.push({
+      severity: "error",
+      code: "review_task_unfinished",
+      message: `Review task ${state.tasks.review} is not marked finished-unreviewed.`,
+      suggestion: `Run sprint-branch finish --task ${state.tasks.review} before approval.`,
+    })
+  }
+  if (reviewReport) {
+    diagnostics.push(...reviewReport.diagnostics)
   }
   if (
     state.tasks.review &&
@@ -575,6 +659,9 @@ export async function runApprove(input: MutationInput) {
     nextState.tasks.review = state.tasks.next
     nextState.tasks.next = null
   }
+  nextState.tasks.finishedUnreviewed = nextState.tasks.finishedUnreviewed.filter(
+    (task) => task !== state.tasks.review,
+  )
 
   gitOperations.push(
     `git checkout ${state.branches.approved}`,
@@ -868,6 +955,13 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
       severity: "error",
       code: "unreviewed_work_exists",
       message: "finalize requires no review task and no next task.",
+    })
+  }
+  if (state.tasks.finishedUnreviewed.length > 0) {
+    diagnostics.push({
+      severity: "error",
+      code: "unreviewed_work_exists",
+      message: `finalize requires no finished-unreviewed tasks; found ${state.tasks.finishedUnreviewed.join(", ")}.`,
     })
   }
   if (reviewHead && approvedHead && reviewHead !== approvedHead && !retryingFinalize) {

@@ -9,6 +9,7 @@ import {
   git,
   readState,
   runCli,
+  writeCompleteReviewReport,
   writeState,
 } from "./support"
 
@@ -74,6 +75,27 @@ describe("sprint-branch doctor", () => {
     expect(result.exitCode).toBe(1)
     expect(codes).toContain("task_assigned_multiple_roles")
     expect(codes).toContain("review_task_out_of_order")
+  })
+
+  test("reports incomplete Review Reports for finished-unreviewed tasks", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+      finishedUnreviewed: ["010-task-name"],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(
+      path.join(repo, "sprints", "example", "010-task-name.md"),
+      "# Task\n\n## Review Report\n\n### Plain-English Summary\n\nDone.\n",
+    )
+    await commitAll(repo, "add incomplete review report")
+
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(doctor)).toContain("review_report_incomplete")
   })
 
   // Sprint stashes are only safe to reapply when JSON records their branch and task.
@@ -147,10 +169,14 @@ describe("sprint-branch doctor", () => {
     )
     await git(repo, ["checkout", "sprint/example/review"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "review\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await commitAll(repo, "add review conflict")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await writeCompleteReviewReport(repo, "example", "020-task-name")
     await commitAll(repo, "add next conflict")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "020-task-name", "--json"])
 
     expect((await runCli(repo, ["approve", "--sprint", "example", "--json"])).exitCode).toBe(1)
 

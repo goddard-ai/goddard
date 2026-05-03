@@ -27,13 +27,22 @@ describe("sprint-branch status", () => {
     const status = JSON.parse(result.stdout) as {
       ok: boolean
       sprint: string
+      state: { tasks: { finishedUnreviewed: string[] } }
       branches: { review: { exists: boolean }; approved: { exists: boolean } }
       blocked: { review: boolean }
+      review: { currentTask: string | null }
+      taskQueue: Array<{ id: string; state: string }>
     }
     expect(status.ok).toBe(true)
     expect(status.sprint).toBe("example")
+    expect(status.state.tasks.finishedUnreviewed).toEqual([])
     expect(status.branches.review.exists).toBe(true)
     expect(status.branches.approved.exists).toBe(true)
+    expect(status.review.currentTask).toBe("010-task-name")
+    expect(status.taskQueue.map((task) => [task.id, task.state])).toEqual([
+      ["010-task-name", "review"],
+      ["020-task-name", "planned"],
+    ])
     expect(status.blocked.review).toBe(true)
   })
 

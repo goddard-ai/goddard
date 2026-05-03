@@ -7,7 +7,13 @@ import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
 import { inferSprintContext, type SprintInferenceInput } from "./state/inference"
 import { readSprintStateFile } from "./state/io"
-import type { SprintBranchRole, SprintBranchState, SprintStatusReport } from "./types"
+import type {
+  SprintBranchRole,
+  SprintBranchState,
+  SprintStatusReport,
+  SprintTaskQueueItem,
+} from "./types"
+import { listTaskFiles } from "./workflow/tasks"
 
 const sprintRoles: SprintBranchRole[] = ["review", "approved", "next"]
 
@@ -38,6 +44,7 @@ export async function buildStatusReport(input: SprintInferenceInput) {
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const stashRefs = await getStashRefs(context.rootDir)
   const missingTaskFiles = await findMissingTaskFiles(context.rootDir, parsed.state)
+  const taskQueue = await buildTaskQueue(context.rootDir, parsed.state)
 
   if (await pathExists(lockFilePath)) {
     diagnostics.push({
@@ -158,6 +165,16 @@ export async function buildStatusReport(input: SprintInferenceInput) {
       nextDescendsFromReview,
     },
     workingTree,
+    taskQueue,
+    review: {
+      currentTask: parsed.state.tasks.review,
+      finishedUnreviewed: parsed.state.tasks.finishedUnreviewed,
+      viewCommand:
+        parsed.state.tasks.review &&
+        parsed.state.tasks.finishedUnreviewed.includes(parsed.state.tasks.review)
+          ? "sprint-branch view"
+          : null,
+    },
     blocked: {
       review: Boolean(parsed.state.tasks.review),
       conflict: parsed.state.conflict !== null,
@@ -211,6 +228,7 @@ export function formatStatusReport(report: SprintStatusReport) {
     `  review: ${report.state.tasks.review ?? "none"}`,
     `  next: ${report.state.tasks.next ?? "none"}`,
     `  approved: ${report.state.tasks.approved.length ? report.state.tasks.approved.join(", ") : "none"}`,
+    `  finished-unreviewed: ${report.state.tasks.finishedUnreviewed.length ? report.state.tasks.finishedUnreviewed.join(", ") : "none"}`,
     "",
     `Working tree: ${report.workingTree.clean ? "clean" : "dirty"}`,
   )
@@ -252,9 +270,12 @@ async function inspectBranch(rootDir: string, name: string) {
 
 async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
   const tasks = new Set(
-    [state.tasks.review, state.tasks.next, ...state.tasks.approved].filter(
-      (task): task is string => typeof task === "string" && task.length > 0,
-    ),
+    [
+      state.tasks.review,
+      state.tasks.next,
+      ...state.tasks.approved,
+      ...state.tasks.finishedUnreviewed,
+    ].filter((task): task is string => typeof task === "string" && task.length > 0),
   )
   const missing: string[] = []
 
@@ -271,6 +292,46 @@ async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
   }
 
   return missing
+}
+
+async function buildTaskQueue(rootDir: string, state: SprintBranchState) {
+  const files = await listTaskFilesIfPresent(rootDir, state.sprint)
+  return files.map((file) => {
+    const queueItem = {
+      id: file.stem,
+      title: file.title,
+      path: file.relativePath,
+      state: taskQueueState(state, file.stem),
+    } satisfies SprintTaskQueueItem
+    return queueItem
+  })
+}
+
+async function listTaskFilesIfPresent(rootDir: string, sprint: string) {
+  try {
+    return await listTaskFiles(rootDir, sprint)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+}
+
+function taskQueueState(state: SprintBranchState, task: string) {
+  if (state.tasks.approved.includes(task)) {
+    return "approved"
+  }
+  if (state.tasks.review === task) {
+    return state.tasks.finishedUnreviewed.includes(task) ? "finished-unreviewed" : "review"
+  }
+  if (state.tasks.next === task) {
+    return state.tasks.finishedUnreviewed.includes(task) ? "finished-unreviewed" : "next"
+  }
+  if (state.tasks.finishedUnreviewed.includes(task)) {
+    return "finished-unreviewed"
+  }
+  return "planned"
 }
 
 function resolveBlockedReasons(
@@ -305,7 +366,9 @@ function resolveNextSafeCommand(
     return "sprint-branch feedback --dry-run"
   }
   if (state.tasks.review) {
-    return "sprint-branch approve --dry-run after human approval"
+    return state.tasks.finishedUnreviewed.includes(state.tasks.review)
+      ? "sprint-branch view"
+      : `sprint-branch finish --task ${state.tasks.review} --dry-run`
   }
   if (state.tasks.next) {
     return "sprint-branch resume --dry-run"

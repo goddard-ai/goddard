@@ -41,6 +41,12 @@ describe("sprint-branch init", () => {
     ])
     expect(state.visibility).toBe("active")
     expect(state.tasks.review).toBeNull()
+    await expect(pathExists(path.join(repo, "sprints", "example", "000-index.md"))).resolves.toBe(
+      false,
+    )
+    await expect(pathExists(path.join(repo, "sprints", "example", "001-handoff.md"))).resolves.toBe(
+      false,
+    )
   })
 
   // Dry-run is the agent's chance to inspect branch-moving commands before they happen.
@@ -101,4 +107,21 @@ describe("sprint-branch init", () => {
 async function expectGitInfoExcludeLines(repo: string, expected: string[]) {
   const exclude = await fs.readFile(path.join(repo, ".git", "info", "exclude"), "utf-8")
   expect(exclude.split(/\r?\n/).filter((line) => line.trim() === "sprints/")).toEqual(expected)
+}
+
+async function pathExists(pathname: string) {
+  try {
+    await fs.access(pathname)
+    return true
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT"
+    ) {
+      return false
+    }
+    throw error
+  }
 }

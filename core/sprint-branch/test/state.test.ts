@@ -36,6 +36,7 @@ describe("sprint branch state parsing", () => {
         review: "010-task-name",
         next: null,
         approved: [],
+        finishedUnreviewed: [],
       },
       activeStashes: [],
       conflict: null,
@@ -44,6 +45,7 @@ describe("sprint branch state parsing", () => {
     expect(parsed.diagnostics).toEqual([])
     expect(parsed.state?.branches).toEqual(branches)
     expect(parsed.state?.visibility).toBe("parked")
+    expect(parsed.state?.tasks.finishedUnreviewed).toEqual([])
   })
 
   test("defaults missing visibility to active", () => {
@@ -61,6 +63,7 @@ describe("sprint branch state parsing", () => {
 
     expect(parsed.diagnostics).toEqual([])
     expect(parsed.state?.visibility).toBe("active")
+    expect(parsed.state?.tasks.finishedUnreviewed).toEqual([])
   })
 
   test("rejects invalid task state", () => {
