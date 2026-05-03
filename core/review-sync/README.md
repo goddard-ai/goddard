@@ -43,6 +43,8 @@ is not currently checked out in an agent worktree, `watch` still checks out the
 derived review branch and resets it to the branch ref when the current worktree
 is clean and the branch ref exists. It then waits for Git metadata to show an
 agent checkout before starting the session.
+Human commits or dirty edits made on that prepared review branch are preserved
+and applied once an agent checkout becomes available.
 When a saved session starts from another review-worktree branch, `watch` checks
 out the review branch first using the same clean-worktree guard as `start`.
 If the agent worktree temporarily checks out another branch while `watch` is

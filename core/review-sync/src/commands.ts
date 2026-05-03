@@ -19,6 +19,7 @@ import {
   resolveRequiredGitCommonDir,
   resolveRequiredGitDir,
   resolveRequiredRepoRoot,
+  updateRef,
 } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
 import { createRuntimeContext, writeResult } from "./runtime.ts"
@@ -132,7 +133,9 @@ async function startReviewSyncOperation(agentBranch: string, context: RuntimeCon
 /** Performs the start workflow and keeps the loaded session for command composition. */
 async function startReviewSyncOperationWithSession(agentBranch: string, context: RuntimeContext) {
   const session = await createSessionForStart(agentBranch, context)
+  await seedRenderedSnapshotForExistingReviewBranch(session, context)
   await prepareReviewBranchForStart(session, context)
+  await seedRenderedSnapshotForExistingReviewBranch(session, context)
   const syncResult = await syncSession(session, context)
 
   const result = createReviewSyncResult({
@@ -829,7 +832,11 @@ type BranchRefPreparation =
     }
   | {
       status: "skipped"
-      reason: "dirty-review-worktree" | "missing-agent-branch-ref" | "unsupported-git-state"
+      reason:
+        | "dirty-review-worktree"
+        | "missing-agent-branch-ref"
+        | "pending-human-change"
+        | "unsupported-git-state"
       reviewBranch: string
       generatedEvents: boolean
     }
@@ -885,6 +892,26 @@ async function prepareReviewBranchFromAgentBranchRefForWatch(
       generatedEvents: false,
     } satisfies BranchRefPreparation
   }
+  if (
+    currentBranch === reviewBranch &&
+    currentHead &&
+    (await reviewBranchHasHumanCommits({
+      cwd: reviewWorktree,
+      branchHead,
+      currentHead,
+      context,
+    }))
+  ) {
+    await emitVerbose(
+      `branch-ref preparation skipped for ${reviewBranch}: review branch has human commits.`,
+    )
+    return {
+      status: "skipped",
+      reason: "pending-human-change",
+      reviewBranch,
+      generatedEvents: false,
+    } satisfies BranchRefPreparation
+  }
 
   await assertReviewBranchNotCheckedOutElsewhere({
     cwd: reviewWorktree,
@@ -930,6 +957,131 @@ async function prepareReviewBranchFromAgentBranchRefForWatch(
     reviewBranch,
     generatedEvents: true,
   } satisfies BranchRefPreparation
+}
+
+/** Seeds the first rendered baseline when a review branch already carries human work. */
+async function seedRenderedSnapshotForExistingReviewBranch(
+  session: SessionState,
+  context: RuntimeContext,
+) {
+  const renderedSnapshot = await resolveRef(
+    session.agentWorktree,
+    session.refs.renderedSnapshot,
+    context,
+  )
+  if (renderedSnapshot) {
+    return
+  }
+
+  const currentBranch = await resolveCurrentBranch(session.reviewWorktree, context)
+  if (currentBranch !== session.reviewBranch) {
+    return
+  }
+  const currentHead = await resolveRef(session.reviewWorktree, "HEAD", context)
+  if (!currentHead) {
+    return
+  }
+
+  const agentHead = await resolveRef(
+    session.agentWorktree,
+    `refs/heads/${session.agentBranch}`,
+    context,
+  )
+  if (!agentHead) {
+    throw new UserError(`Agent branch ${session.agentBranch} no longer exists.`)
+  }
+
+  const baseline = await resolveExistingReviewBranchBaseline({
+    cwd: session.reviewWorktree,
+    currentHead,
+    agentHead,
+    clean: await isWorktreeClean(session.reviewWorktree, context),
+    context,
+  })
+  if (!baseline) {
+    return
+  }
+
+  await updateRef(session.agentWorktree, session.refs.renderedSnapshot, baseline, context)
+}
+
+/** Infers the rendered baseline for human work made before a session existed. */
+async function resolveExistingReviewBranchBaseline(input: {
+  cwd: string
+  currentHead: string
+  agentHead: string
+  clean: boolean
+  context: RuntimeContext
+}) {
+  if (input.currentHead === input.agentHead) {
+    return input.clean ? null : input.currentHead
+  }
+
+  if (await isAncestor(input.cwd, input.agentHead, input.currentHead, input.context)) {
+    return input.agentHead
+  }
+  if (await isAncestor(input.cwd, input.currentHead, input.agentHead, input.context)) {
+    return input.clean ? null : input.currentHead
+  }
+
+  return await resolveMergeBase(input.cwd, input.agentHead, input.currentHead, input.context)
+}
+
+/** Checks whether the review branch contains commits not reachable from the agent ref. */
+async function reviewBranchHasHumanCommits(input: {
+  cwd: string
+  branchHead: string
+  currentHead: string
+  context: RuntimeContext
+}) {
+  if (await isAncestor(input.cwd, input.branchHead, input.currentHead, input.context)) {
+    return true
+  }
+  if (await isAncestor(input.cwd, input.currentHead, input.branchHead, input.context)) {
+    return false
+  }
+  return true
+}
+
+/** Wraps Git's ancestry check with a clear failure for unexpected Git errors. */
+async function isAncestor(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+  context: RuntimeContext,
+) {
+  const result = await git(cwd, ["merge-base", "--is-ancestor", ancestor, descendant], context, {
+    allowFailure: true,
+  })
+  if (result.status === 0) {
+    return true
+  }
+  if (result.status === 1) {
+    return false
+  }
+  throw new Error(
+    `git merge-base --is-ancestor failed in ${cwd}: ${
+      result.stderr.trim() || result.stdout.trim() || "unknown Git error"
+    }`,
+  )
+}
+
+/** Resolves the common baseline for divergent review and agent histories. */
+async function resolveMergeBase(cwd: string, left: string, right: string, context: RuntimeContext) {
+  const result = await git(cwd, ["merge-base", left, right], context, {
+    allowFailure: true,
+  })
+  if (result.status === 0) {
+    return result.stdout.trim() || null
+  }
+  if (result.status === 1) {
+    return null
+  }
+  throw new Error(
+    `git merge-base failed in ${cwd}: ${
+      result.stderr.trim() || result.stdout.trim() || "unknown Git error"
+    }`,
+  )
 }
 
 /** Drops Git metadata events produced by branch-ref preparation before waiting. */
@@ -994,6 +1146,9 @@ function formatAgentCheckoutWaitingMessage(
   }
   if (branchRefPreparation?.reason === "dirty-review-worktree") {
     return `${waiting} Review worktree has local changes, so ${branchRefPreparation.reviewBranch} was not checked out.`
+  }
+  if (branchRefPreparation?.reason === "pending-human-change") {
+    return `${waiting} Review branch has human changes, so ${branchRefPreparation.reviewBranch} was not reset.`
   }
   if (branchRefPreparation?.reason === "unsupported-git-state") {
     return `${waiting} Review worktree has an in-progress Git operation, so ${branchRefPreparation.reviewBranch} was not checked out.`

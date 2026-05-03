@@ -587,6 +587,72 @@ test("watch does not retry on its own branch-ref preparation events", async () =
   }
 })
 
+test("watch syncs human commits made while waiting for agent checkout", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const waiting = createDeferred<void>()
+  const started = createDeferred<ReviewSyncResult>()
+  let waitingResolved = false
+  let startedResolved = false
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+    signal: controller.signal,
+    onResult: (result) => {
+      if (result.command === "watch" && result.message.startsWith("Waiting for ")) {
+        waitingResolved = true
+        waiting.resolve()
+      }
+      if (result.command === "start") {
+        startedResolved = true
+        started.resolve(result)
+        controller.abort()
+      }
+    },
+  })
+
+  try {
+    await Promise.race([
+      waiting.promise,
+      watch.then((result) => {
+        if (!waitingResolved) {
+          throw new Error(`watch stopped before waiting: ${result.message}`)
+        }
+      }),
+    ])
+
+    await writeText(join(fixture.reviewDir, "shared.txt"), "human commit\n")
+    await runGit(fixture.reviewDir, ["add", "shared.txt"])
+    await runGit(fixture.reviewDir, ["commit", "-m", "human review commit"])
+    await runGit(fixture.agentDir, ["checkout", "codex/review-sync-test"])
+
+    const startResult = await Promise.race([
+      started.promise,
+      watch.then((result) => {
+        if (!startedResolved) {
+          throw new Error(`watch stopped before start: ${result.message}`)
+        }
+        return started.promise
+      }),
+    ])
+    const stopped = await watch
+
+    expect(stopped.status).toBe("paused")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+    expect(startResult.acceptedPatchPath).toBeTruthy()
+    expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human commit\n")
+    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human commit\n")
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
 test("watch leaves a dirty review worktree alone while waiting", async () => {
   const fixture = await createFixture({
     "shared.txt": "base\n",
