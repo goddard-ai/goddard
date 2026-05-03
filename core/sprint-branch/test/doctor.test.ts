@@ -174,6 +174,7 @@ describe("sprint-branch doctor", () => {
     await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await writeCompleteReviewReport(repo, "example", "020-task-name")
     await commitAll(repo, "add next conflict")
     await runCli(repo, ["finish", "--sprint", "example", "--task", "020-task-name", "--json"])

@@ -11,8 +11,8 @@ export type SprintTaskFile = {
 }
 
 /** Resolves the next unassigned task file stem from sprint task queue order. */
-export async function resolveNextPlannedTask(rootDir: string, state: SprintBranchState) {
-  const tasks = await listTaskStems(rootDir, state.sprint)
+export async function resolveNextPlannedTask(sprintWorktreeRoot: string, state: SprintBranchState) {
+  const tasks = await listTaskStems(sprintWorktreeRoot, state.sprint)
   const assigned = new Set([
     ...state.tasks.approved,
     ...state.tasks.finishedUnreviewed,
@@ -23,8 +23,8 @@ export async function resolveNextPlannedTask(rootDir: string, state: SprintBranc
 }
 
 /** Checks whether a requested sprint task file exists. */
-export function taskFileExists(rootDir: string, sprint: string, task: string) {
-  return pathExists(path.join(rootDir, "sprints", sprint, `${task}.md`))
+export function taskFileExists(sprintWorktreeRoot: string, sprint: string, task: string) {
+  return pathExists(path.join(sprintWorktreeRoot, "sprints", sprint, `${task}.md`))
 }
 
 /** Normalizes a task argument into a sprint-local task stem. */
@@ -80,13 +80,13 @@ export function findMatchingStash(state: SprintBranchState) {
 }
 
 /** Lists sprint task file stems in queue order. */
-export async function listTaskStems(rootDir: string, sprint: string) {
-  return (await listTaskFiles(rootDir, sprint)).map((task) => task.stem)
+export async function listTaskStems(sprintWorktreeRoot: string, sprint: string) {
+  return (await listTaskFiles(sprintWorktreeRoot, sprint)).map((task) => task.stem)
 }
 
 /** Lists sprint task markdown files in queue order. */
-export async function listTaskFiles(rootDir: string, sprint: string) {
-  const sprintDir = path.join(rootDir, "sprints", sprint)
+export async function listTaskFiles(sprintWorktreeRoot: string, sprint: string) {
+  const sprintDir = path.join(sprintWorktreeRoot, "sprints", sprint)
   const entries = await fs.readdir(sprintDir, { withFileTypes: true })
   const taskFiles = await Promise.all(
     entries

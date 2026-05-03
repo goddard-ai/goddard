@@ -48,9 +48,11 @@ export { formatMutationReport, SprintMutationError }
 export async function runInit(input: MutationInput & { base: string }) {
   const context = await inferSprintContext(input)
   const branches = getExpectedBranches(context.sprint)
+  const sprintWorktreeRoot = await fs.realpath(context.rootDir)
   const state: SprintBranchState = {
     sprint: context.sprint,
     baseBranch: input.base,
+    sprintWorktreeRoot,
     visibility: "active",
     branches,
     tasks: emptyTasks(),
@@ -134,16 +136,18 @@ export async function runResetState(
   const existingState = await readResetSeedState(context.statePath, diagnostics)
   const branches = getExpectedBranches(context.sprint)
   const baseBranch = input.base ?? existingState?.baseBranch ?? "main"
+  const sprintWorktreeRoot = await fs.realpath(context.rootDir)
   const workingTree = await getWorkingTreeStatus(context.rootDir)
-  const sprintDir = path.join(context.rootDir, "sprints", context.sprint)
+  const sprintDir = path.join(sprintWorktreeRoot, "sprints", context.sprint)
   const taskStems = (await pathExists(sprintDir))
-    ? await listTaskStems(context.rootDir, context.sprint)
+    ? await listTaskStems(sprintWorktreeRoot, context.sprint)
     : []
   const targetTask = input.task ? normalizeTaskName(input.task) : (taskStems[0] ?? null)
   const targetTaskIndex = targetTask ? taskStems.indexOf(targetTask) : -1
   const nextState: SprintBranchState = {
     sprint: context.sprint,
     baseBranch,
+    sprintWorktreeRoot,
     visibility: existingState?.visibility ?? "active",
     branches,
     tasks: {
@@ -235,7 +239,7 @@ export async function runStart(input: MutationInput & { task: string }) {
   const { context, state, diagnostics } = await readCommandState(input, "start")
   const task = normalizeTaskName(input.task)
   const workingTree = await getWorkingTreeStatus(context.rootDir)
-  const plannedTask = await resolveNextPlannedTask(context.rootDir, state)
+  const plannedTask = await resolveNextPlannedTask(state.sprintWorktreeRoot, state)
   const gitOperations: string[] = []
   let summary = ""
   let targetBranch = state.branches.review
@@ -248,7 +252,7 @@ export async function runStart(input: MutationInput & { task: string }) {
       message: "start requires a clean working tree before moving sprint branches.",
     })
   }
-  if (!(await taskFileExists(context.rootDir, state.sprint, task))) {
+  if (!(await taskFileExists(state.sprintWorktreeRoot, state.sprint, task))) {
     diagnostics.push({
       severity: "error",
       code: "task_file_missing",
@@ -339,15 +343,7 @@ export async function runFinish(input: MutationInput & { task: string }) {
   const { context, state, diagnostics } = await readCommandState(input, "finish")
   const task = normalizeTaskName(input.task)
   const nextState = cloneState(state)
-  const taskBranch =
-    task === state.tasks.review
-      ? state.branches.review
-      : task === state.tasks.next
-        ? state.branches.next
-        : undefined
-  const reviewReport = await readTaskReviewReport(context.rootDir, state.sprint, task, {
-    ref: taskBranch,
-  })
+  const reviewReport = await readTaskReviewReport(state.sprintWorktreeRoot, state.sprint, task)
   const activeTasks = [state.tasks.review, state.tasks.next].filter(
     (activeTask): activeTask is string => Boolean(activeTask),
   )
@@ -604,9 +600,7 @@ export async function runApprove(input: MutationInput) {
     Boolean(state.tasks.next) &&
     !(await isAncestor(context.rootDir, state.branches.review, state.branches.next))
   const reviewReport = state.tasks.review
-    ? await readTaskReviewReport(context.rootDir, state.sprint, state.tasks.review, {
-        ref: state.branches.review,
-      })
+    ? await readTaskReviewReport(state.sprintWorktreeRoot, state.sprint, state.tasks.review)
     : null
 
   if (!workingTree.clean) {

@@ -39,6 +39,7 @@ export type SprintBranchState = {
   schemaVersion?: number
   sprint: string
   baseBranch: string
+  sprintWorktreeRoot: string
   visibility: SprintVisibility
   branches: SprintBranchNames
   tasks: SprintTaskState
@@ -78,7 +79,7 @@ export type SprintWorkingTreeStatus = {
   entries: string[]
 }
 
-/** Queue entry derived from committed sprint task markdown files. */
+/** Queue entry derived from task markdown files in the recorded sprint worktree. */
 export type SprintTaskQueueItem = {
   id: string
   path: string

@@ -43,8 +43,12 @@ export async function buildStatusReport(input: SprintInferenceInput) {
   }
   const workingTree = await getWorkingTreeStatus(context.rootDir)
   const stashRefs = await getStashRefs(context.rootDir)
-  const missingTaskFiles = await findMissingTaskFiles(context.rootDir, parsed.state)
-  const taskQueue = await buildTaskQueue(context.rootDir, parsed.state)
+  const sprintWorktreeRootExists = await pathExists(parsed.state.sprintWorktreeRoot)
+  const sprintFolderExists =
+    sprintWorktreeRootExists &&
+    (await pathExists(path.join(parsed.state.sprintWorktreeRoot, "sprints", parsed.state.sprint)))
+  const missingTaskFiles = sprintFolderExists ? await findMissingTaskFiles(parsed.state) : []
+  const taskQueue = sprintFolderExists ? await buildTaskQueue(parsed.state) : []
 
   if (await pathExists(lockFilePath)) {
     diagnostics.push({
@@ -93,6 +97,22 @@ export async function buildStatusReport(input: SprintInferenceInput) {
       code: "next_branch_without_task",
       message: `${parsed.state.branches.next} is checked out but no next task is recorded.`,
       suggestion: "Run sprint-branch doctor before using the next branch.",
+    })
+  }
+  if (!sprintWorktreeRootExists) {
+    diagnostics.push({
+      severity: "error",
+      code: "sprint_worktree_missing",
+      message: `Recorded sprint worktree ${parsed.state.sprintWorktreeRoot} does not exist.`,
+      suggestion: "Run sprint-branch reset-state from the sprint worktree to record a new path.",
+    })
+  } else if (!sprintFolderExists) {
+    diagnostics.push({
+      severity: "error",
+      code: "sprint_folder_missing",
+      message: `Recorded sprint worktree does not contain sprints/${parsed.state.sprint}.`,
+      suggestion:
+        "Run sprint-branch reset-state from the sprint worktree after restoring the plan.",
     })
   }
 
@@ -207,6 +227,7 @@ export function formatStatusReport(report: SprintStatusReport) {
     `Visibility: ${report.visibility}`,
     `Inferred from: ${report.inferredFrom}`,
     `Current branch: ${report.currentBranch ?? "detached HEAD"}`,
+    `Sprint worktree: ${report.state.sprintWorktreeRoot}`,
     "",
     "Branches:",
   ]
@@ -268,7 +289,7 @@ async function inspectBranch(rootDir: string, name: string) {
   }
 }
 
-async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
+async function findMissingTaskFiles(state: SprintBranchState) {
   const tasks = new Set(
     [
       state.tasks.review,
@@ -281,7 +302,7 @@ async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
 
   for (const task of tasks) {
     try {
-      await fs.access(path.join(rootDir, "sprints", state.sprint, `${task}.md`))
+      await fs.access(path.join(state.sprintWorktreeRoot, "sprints", state.sprint, `${task}.md`))
     } catch (error) {
       if (isMissingFileError(error)) {
         missing.push(task)
@@ -294,8 +315,8 @@ async function findMissingTaskFiles(rootDir: string, state: SprintBranchState) {
   return missing
 }
 
-async function buildTaskQueue(rootDir: string, state: SprintBranchState) {
-  const files = await listTaskFilesIfPresent(rootDir, state.sprint)
+async function buildTaskQueue(state: SprintBranchState) {
+  const files = await listTaskFilesIfPresent(state.sprintWorktreeRoot, state.sprint)
   return files.map((file) => {
     const queueItem = {
       id: file.stem,

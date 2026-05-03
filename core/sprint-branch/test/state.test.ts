@@ -31,6 +31,7 @@ describe("sprint branch state parsing", () => {
     const parsed = parseSprintState({
       sprint: "example",
       baseBranch: "main",
+      sprintWorktreeRoot: "/repo-agent",
       visibility: "parked",
       tasks: {
         review: "010-task-name",
@@ -52,6 +53,7 @@ describe("sprint branch state parsing", () => {
     const parsed = parseSprintState({
       sprint: "example",
       baseBranch: "main",
+      sprintWorktreeRoot: "/repo-agent",
       tasks: {
         review: "010-task-name",
         next: null,
@@ -70,6 +72,7 @@ describe("sprint branch state parsing", () => {
     const parsed = parseSprintState({
       sprint: "example",
       baseBranch: "main",
+      sprintWorktreeRoot: "/repo-agent",
       tasks: {
         review: "010-task-name",
         next: null,
@@ -89,6 +92,7 @@ describe("sprint branch state parsing", () => {
     const parsed = parseSprintState({
       sprint: "example",
       baseBranch: "main",
+      sprintWorktreeRoot: "/repo-agent",
       visibility: "hidden",
       tasks: {
         review: "010-task-name",

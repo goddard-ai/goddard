@@ -120,17 +120,18 @@ describe("sprint-branch park", () => {
 async function addSprint(repo: string, sprint: string, visibility: "active" | "parked") {
   await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
   await fs.writeFile(path.join(repo, "sprints", sprint, "010-task-name.md"), "# Task 010\n")
-  await writeState(repo, sprint, sprintState(sprint, visibility))
+  await writeState(repo, sprint, sprintState(repo, sprint, visibility))
   await commitAll(repo, `add ${sprint} sprint`)
   await git(repo, ["branch", `sprint/${sprint}/approved`, "main"])
   await git(repo, ["branch", `sprint/${sprint}/review`, `sprint/${sprint}/approved`])
 }
 
 /** Builds minimal canonical state for a test-only sprint. */
-function sprintState(sprint: string, visibility: "active" | "parked") {
+function sprintState(repo: string, sprint: string, visibility: "active" | "parked") {
   return {
     sprint,
     baseBranch: "main",
+    sprintWorktreeRoot: repo,
     visibility,
     tasks: {
       review: "010-task-name",

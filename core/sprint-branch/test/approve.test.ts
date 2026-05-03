@@ -160,6 +160,7 @@ describe("sprint-branch approve", () => {
     const reviewedHead = await branchHead(repo, "sprint/example/review")
     await git(repo, ["checkout", "sprint/example/next"])
     await fs.writeFile(path.join(repo, "conflict.txt"), "next\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
     await writeCompleteReviewReport(repo, "example", "020-task-name")
     await commitAll(repo, "add next conflict")
     await runCli(repo, ["finish", "--sprint", "example", "--task", "020-task-name", "--json"])

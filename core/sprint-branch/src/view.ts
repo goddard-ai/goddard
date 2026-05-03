@@ -44,9 +44,11 @@ export async function buildSprintReviewView(input: {
     }
   }
 
-  const taskReviewReport = await readTaskReviewReport(status.rootDir, status.sprint, task, {
-    ref: taskBranch(status, task),
-  })
+  const taskReviewReport = await readTaskReviewReport(
+    status.state.sprintWorktreeRoot,
+    status.sprint,
+    task,
+  )
   viewDiagnostics.push(...taskReviewReport.diagnostics)
   if (!status.state.tasks.finishedUnreviewed.includes(task)) {
     viewDiagnostics.push({
@@ -120,11 +122,4 @@ function resolveTaskState(status: SprintStatusReport, task: string) {
     return "planned"
   }
   return "unknown"
-}
-
-function taskBranch(status: SprintStatusReport, task: string) {
-  if (status.state.tasks.next === task) {
-    return status.state.branches.next
-  }
-  return status.state.branches.review
 }

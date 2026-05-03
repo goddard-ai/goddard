@@ -206,12 +206,14 @@ export async function stashList(repo: string) {
 async function writeSprintState(repo: string, sprint: string, tasks: SprintTestTasks) {
   const statePath = await sprintStatePath(repo, sprint)
   await fs.mkdir(path.dirname(statePath), { recursive: true })
+  const sprintWorktreeRoot = await fs.realpath(repo)
   await fs.writeFile(
     statePath,
     `${JSON.stringify(
       {
         sprint,
         baseBranch: "main",
+        sprintWorktreeRoot,
         visibility: "active",
         tasks: {
           ...tasks,

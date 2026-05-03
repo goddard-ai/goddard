@@ -34,11 +34,13 @@ describe("sprint-branch init", () => {
     expect(Object.keys(state)).toEqual([
       "sprint",
       "baseBranch",
+      "sprintWorktreeRoot",
       "visibility",
       "tasks",
       "activeStashes",
       "conflict",
     ])
+    expect(state.sprintWorktreeRoot).toBe(await fs.realpath(repo))
     expect(state.visibility).toBe("active")
     expect(state.tasks.review).toBeNull()
     await expect(pathExists(path.join(repo, "sprints", "example", "000-index.md"))).resolves.toBe(

@@ -1,7 +1,6 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { GitCommandError, runGit } from "./git/command"
 import type { SprintDiagnostic } from "./types"
 
 /** Required task Review Report subsections, in the order humans review them. */
@@ -23,29 +22,24 @@ export type TaskReviewReport = {
   diagnostics: SprintDiagnostic[]
 }
 
-/** Reads a sprint task file and validates its required Review Report section. */
+/** Reads a sprint task file from the recorded sprint worktree and validates its Review Report. */
 export async function readTaskReviewReport(
-  rootDir: string,
+  sprintWorktreeRoot: string,
   sprint: string,
   task: string,
-  options: { ref?: string } = {},
 ) {
   const taskPath = path.join("sprints", sprint, `${task}.md`)
   let text = ""
 
   try {
-    text = options.ref
-      ? await runGit(rootDir, ["show", `${options.ref}:${taskPath}`])
-      : await fs.readFile(path.join(rootDir, taskPath), "utf-8")
+    text = await fs.readFile(path.join(sprintWorktreeRoot, taskPath), "utf-8")
   } catch (error) {
-    if (isMissingFileError(error) || error instanceof GitCommandError) {
+    if (isMissingFileError(error)) {
       const diagnostics = [
         {
           severity: "error" as const,
           code: "task_file_missing",
-          message: options.ref
-            ? `Task file ${taskPath} does not exist on ${options.ref}.`
-            : `Task file ${taskPath} does not exist.`,
+          message: `Task file ${taskPath} does not exist in ${sprintWorktreeRoot}.`,
         },
       ]
       return {

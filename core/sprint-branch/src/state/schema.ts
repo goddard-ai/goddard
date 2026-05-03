@@ -26,6 +26,11 @@ export function parseSprintState(value: unknown) {
 
   const sprint = readString(record.sprint, "sprint", diagnostics)
   const baseBranch = readString(record.baseBranch, "baseBranch", diagnostics)
+  const sprintWorktreeRoot = readString(
+    record.sprintWorktreeRoot,
+    "sprintWorktreeRoot",
+    diagnostics,
+  )
   const visibility = readVisibility(record.visibility, diagnostics)
   const tasks = parseTasks(record.tasks, diagnostics)
   const activeStashes = parseActiveStashes(record.activeStashes, diagnostics)
@@ -42,7 +47,7 @@ export function parseSprintState(value: unknown) {
     })
   }
 
-  if (!sprint || !baseBranch || !tasks || diagnostics.some(hasError)) {
+  if (!sprint || !baseBranch || !sprintWorktreeRoot || !tasks || diagnostics.some(hasError)) {
     return {
       state: null,
       diagnostics,
@@ -63,6 +68,7 @@ export function parseSprintState(value: unknown) {
   const state: SprintBranchState = {
     sprint,
     baseBranch,
+    sprintWorktreeRoot,
     visibility,
     branches: getExpectedBranches(sprint),
     tasks,

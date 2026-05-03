@@ -8,6 +8,7 @@ import {
   createSprintRepo,
   diagnosticCodes,
   git,
+  readState,
   runCli,
   writeState,
 } from "./support"
@@ -75,7 +76,7 @@ describe("sprint-branch status", () => {
       next: null,
       approved: [],
     })
-    await writeState(repo, "other", sprintState("other"))
+    await writeState(repo, "other", sprintState(repo, "other"))
 
     const result = await runCli(repo, ["status", "--json"])
 
@@ -131,13 +132,37 @@ describe("sprint-branch status", () => {
     expect(status.ok).toBe(true)
     expect(diagnosticCodes(status)).toContain("task_file_missing")
   })
+
+  test("reports a missing recorded sprint worktree", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+    })
+    const state = await readState(repo, "example")
+    await writeState(repo, "example", {
+      ...state,
+      sprintWorktreeRoot: path.join(repo, "missing-worktree"),
+    })
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      diagnostics: Array<{ code: string }>
+    }
+
+    expect(result.exitCode).toBe(1)
+    expect(status.ok).toBe(false)
+    expect(diagnosticCodes(status)).toContain("sprint_worktree_missing")
+  })
 })
 
 /** Builds minimal canonical state for a test-only sprint. */
-function sprintState(sprint: string) {
+function sprintState(repo: string, sprint: string) {
   return {
     sprint,
     baseBranch: "main",
+    sprintWorktreeRoot: repo,
     tasks: {
       review: "010-task-name",
       next: null,

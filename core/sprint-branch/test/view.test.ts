@@ -5,6 +5,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   cleanupTestRepos,
   commitAll,
+  createBaseRepo,
+  createLinkedWorktree,
   createSprintRepo,
   diagnosticCodes,
   git,
@@ -35,6 +37,41 @@ describe("sprint-branch view", () => {
     expect(result.stdout).toContain("Diff: sprint-branch diff --sprint example --stat")
     expect(result.stdout).toContain("## Review Report")
     expect(result.stdout).toContain("### Plain-English Summary")
+  })
+
+  test("reads untracked task markdown from the recorded sprint worktree", async () => {
+    const repo = await createBaseRepo("example")
+    await git(repo, ["rm", "-r", "sprints"])
+    await commitAll(repo, "remove tracked sprint plans")
+    await fs.mkdir(path.join(repo, "sprints", "example"), { recursive: true })
+    await fs.writeFile(path.join(repo, "sprints", "example", "010-task-name.md"), "# Task 010\n")
+    await fs.writeFile(path.join(repo, "sprints", "example", "020-task-name.md"), "# Task 020\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
+
+    expect(
+      (await runCli(repo, ["init", "--sprint", "example", "--base", "main", "--json"])).exitCode,
+    ).toBe(0)
+    expect(
+      (await runCli(repo, ["start", "--sprint", "example", "--task", "010-task-name", "--json"]))
+        .exitCode,
+    ).toBe(0)
+    expect(
+      (await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"]))
+        .exitCode,
+    ).toBe(0)
+
+    const reviewWorktree = await createLinkedWorktree(repo, "sprint/example/review")
+    const result = await runCli(reviewWorktree, ["view", "--sprint", "example", "--json"])
+    const view = JSON.parse(result.stdout) as {
+      ok: boolean
+      reviewReport: string
+    }
+    const reviewTree = await git(reviewWorktree, ["ls-tree", "-r", "--name-only", "HEAD"])
+
+    expect(result.exitCode).toBe(0)
+    expect(view.ok).toBe(true)
+    expect(view.reviewReport).toContain("## Review Report")
+    expect(reviewTree).not.toContain("sprints/example/010-task-name.md")
   })
 
   test("prints a JSON approval view for an explicit task", async () => {

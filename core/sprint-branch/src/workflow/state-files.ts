@@ -10,6 +10,7 @@ import type { SprintBranchState } from "../types"
 type StoredSprintState = {
   sprint: string
   baseBranch: string
+  sprintWorktreeRoot: string
   visibility: SprintBranchState["visibility"]
   tasks: SprintBranchState["tasks"]
   activeStashes: SprintBranchState["activeStashes"]
@@ -35,6 +36,7 @@ function storedSprintState(state: SprintBranchState) {
   return {
     sprint: state.sprint,
     baseBranch: state.baseBranch,
+    sprintWorktreeRoot: state.sprintWorktreeRoot,
     visibility: state.visibility,
     tasks: state.tasks,
     activeStashes: state.activeStashes,

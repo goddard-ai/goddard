@@ -240,7 +240,10 @@ function checkFinishedUnreviewedAssignments(report: SprintStatusReport) {
 
 async function checkTaskQueue(report: SprintStatusReport) {
   const diagnostics: SprintDiagnostic[] = []
-  const taskFiles = await listTaskFilesIfPresent(report.rootDir, report.state.sprint)
+  const taskFiles = await listTaskFilesIfPresent(
+    report.state.sprintWorktreeRoot,
+    report.state.sprint,
+  )
   const taskStems = taskFiles.map((task) => task.stem)
   const approved = new Set(report.state.tasks.approved)
 
@@ -296,12 +299,11 @@ async function checkTaskQueue(report: SprintStatusReport) {
 async function checkFinishedReviewReports(report: SprintStatusReport) {
   const diagnostics: SprintDiagnostic[] = []
   for (const task of report.state.tasks.finishedUnreviewed) {
-    const reviewReport = await readTaskReviewReport(report.rootDir, report.state.sprint, task, {
-      ref:
-        report.state.tasks.next === task
-          ? report.state.branches.next
-          : report.state.branches.review,
-    })
+    const reviewReport = await readTaskReviewReport(
+      report.state.sprintWorktreeRoot,
+      report.state.sprint,
+      task,
+    )
     diagnostics.push(...reviewReport.diagnostics)
   }
   return diagnostics
