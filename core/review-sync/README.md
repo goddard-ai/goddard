@@ -3,6 +3,8 @@
 `@goddard-ai/review-sync` is a small Git-only operator for reviewing an agent-owned
 branch from a separate local worktree.
 
+For durable conceptual documentation, start with [overview/README.md](./overview/README.md).
+
 The package derives a disposable review branch by prepending `review-sync/` to the
 full agent branch name. Each sync captures the review worktree against the last rendered
 snapshot, tries to apply the resulting human patch to the agent worktree, saves the
