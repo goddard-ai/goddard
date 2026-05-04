@@ -54,7 +54,7 @@
     "@types/node": "^25.6.0",
     "@typescript/native-preview": "7.0.0-dev.20260401.1",
     "cmd-ts": "catalog:",
-    "drizzle-kit": "1.0.0-beta.18-7eb39f0",
+    "drizzle-kit": "1.0.0-beta.20",
     "globrex": "^0.1.2",
     "husky": "^9.1.7",
     "oxlint": "^1.61.0",
