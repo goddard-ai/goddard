@@ -136,7 +136,6 @@ export async function assertSupportedGitState(cwd: string, context: RuntimeConte
     join(gitDir, "MERGE_HEAD"),
     join(gitDir, "CHERRY_PICK_HEAD"),
     join(gitDir, "REVERT_HEAD"),
-    join(gitDir, "REBASE_HEAD"),
     join(gitDir, "rebase-merge"),
     join(gitDir, "rebase-apply"),
     join(gitDir, "BISECT_LOG"),
@@ -148,6 +147,23 @@ export async function assertSupportedGitState(cwd: string, context: RuntimeConte
       throw new UserError(`Unsupported in-progress Git state in ${cwd}: ${basename(marker)}.`)
     }
   }
+
+  const rebaseHead = join(gitDir, "REBASE_HEAD")
+  if ((await pathExists(rebaseHead)) && !(await isStaleRebaseHead(cwd, context))) {
+    throw new UserError(`Unsupported in-progress Git state in ${cwd}: ${basename(rebaseHead)}.`)
+  }
+}
+
+/** Distinguishes abandoned REBASE_HEAD files from a Git-recognized active rebase. */
+async function isStaleRebaseHead(cwd: string, context: RuntimeContext) {
+  const result = await git(cwd, ["rebase", "--show-current-patch"], context, {
+    allowFailure: true,
+  })
+  if (result.status === 0) {
+    return false
+  }
+
+  return `${result.stderr}\n${result.stdout}`.toLowerCase().includes("no rebase in progress")
 }
 
 /** Resolves and canonicalizes an existing filesystem path. */

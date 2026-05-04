@@ -189,6 +189,22 @@ test("sync fails when the agent worktree is not on the expected branch", async (
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 
+test("sync ignores stale REBASE_HEAD when Git reports no active rebase", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const reviewGitDir = await gitDir(fixture.reviewDir)
+  const reviewHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
+  await writeText(join(reviewGitDir, "REBASE_HEAD"), `${reviewHead}\n`)
+
+  const result = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+
+  expect(result.status).toBe("ok")
+  expect(existsSync(join(reviewGitDir, "REBASE_HEAD"))).toBe(true)
+})
+
 test("status explains recovery when multiple sessions match the worktree", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
@@ -1149,6 +1165,10 @@ async function writeText(path: string, content: string) {
 
 async function currentBranch(cwd: string) {
   return (await runGit(cwd, ["symbolic-ref", "--short", "HEAD"])).stdout.trim()
+}
+
+async function gitDir(cwd: string) {
+  return (await runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-dir"])).stdout.trim()
 }
 
 function sleep(ms: number) {
