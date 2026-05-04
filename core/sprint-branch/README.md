@@ -2,6 +2,8 @@
 
 `@goddard-ai/sprint-branch` provides the `sprint-branch` CLI for inspecting and safely transitioning sprint review branches.
 
+For a durable conceptual map of each supported command, see [commands.md](./commands.md).
+
 The package stores sprint branch-management state in Git metadata at `.git/sprint-branch/<name>/state.json`, outside the working tree and outside review diffs. State records the sprint worktree root that owns `sprints/<name>/`, and task markdown is read from that recorded worktree even when read-only commands run from another linked worktree. The `sprints/<name>/` folder remains for human-authored task files; successful sprint state writes add `sprints/` to `.git/info/exclude` so local sprint plans stay out of review diffs.
 
 Commands infer a sprint only from explicit `--sprint`, the current `sprint/<name>/<role>` branch, or a working directory under `sprints/<name>`. When that strong context is missing, interactive terminals select from existing sprint state with autocomplete; non-interactive callers must pass the sprint name.
