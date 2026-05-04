@@ -1,0 +1,111 @@
+# `sprint-branch` Overview
+
+- **Purpose**
+  - This directory describes what `sprint-branch` supports at a conceptual
+    level.
+  - It is written for agents and humans, including people who need to
+    understand the sprint review process without reading source code.
+  - It intentionally avoids implementation details:
+    - Outcomes, guardrails, and procedural shape belong here.
+    - Internal files, schemas, locks, and command implementation do not.
+
+- **Start here**
+  - [Sprint branch model](./model.md)
+    - Branch roles.
+    - Task states.
+    - Sprint selection.
+    - Dry-run behavior.
+    - Clean-working-tree guardrails.
+  - [Standard sprint workflow](./standard-sprint-workflow.md)
+    - Normal setup through cleanup.
+    - Work-ahead feedback and resume.
+    - Recovery entry points.
+
+- **Inspection commands**
+  - [`status`](./commands/status.md)
+    - Inspect sprint branch state and the next safe action.
+    - Audience: agents and humans.
+    - Mutates: nothing.
+  - [`diff`](./commands/diff.md)
+    - Show the review delta against approved work.
+    - Audience: agents and humans.
+    - Mutates: nothing.
+  - [`view`](./commands/view.md)
+    - Print the approval packet for a finished task.
+    - Audience: humans and agents preparing review.
+    - Mutates: nothing.
+  - [`sync`](./commands/sync.md)
+    - Watch the active review branch through `review-sync`.
+    - Audience: humans reviewing agent work.
+    - Mutates: delegates to the review-sync workflow.
+  - [`doctor`](./commands/doctor.md)
+    - Diagnose inconsistent sprint state and recovery direction.
+    - Audience: agents and humans.
+    - Mutates: nothing.
+  - [`list`](./commands/list.md)
+    - List known active or parked sprints.
+    - Audience: agents and humans.
+    - Mutates: nothing.
+
+- **Human review and landing commands**
+  - [`checkout`](./commands/checkout.md)
+    - Inspect a review branch without taking branch ownership.
+    - Audience: humans.
+    - Mutates: checks out a detached snapshot.
+  - [`land`](./commands/land.md)
+    - Fast-forward a target branch to finalized sprint work.
+    - Audience: humans.
+    - Mutates: target branch.
+  - [`cleanup`](./commands/cleanup.md)
+    - Remove landed sprint branches, review worktrees, and state.
+    - Audience: humans.
+    - Mutates: local sprint branches, associated worktrees, and sprint state.
+
+- **Setup, recovery, and visibility commands**
+  - [`init`](./commands/init.md)
+    - Create the branch scaffold and initial sprint state.
+    - Audience: agents setting up a sprint.
+    - Mutates: sprint branches and sprint state.
+  - [`reset-state`](./commands/reset-state.md)
+    - Rebuild private sprint state around a selected next task.
+    - Audience: agents recovering or replanning.
+    - Mutates: sprint state only.
+  - [`park`](./commands/park.md)
+    - Hide a sprint from default active selection.
+    - Audience: agents and humans.
+    - Mutates: sprint visibility state only.
+  - [`unpark`](./commands/unpark.md)
+    - Restore a parked sprint to default active selection.
+    - Audience: agents and humans.
+    - Mutates: sprint visibility state only.
+
+- **Agent workflow commands**
+  - [`start`](./commands/start.md)
+    - Assign the next planned task to `review` or `next`.
+    - Audience: agents.
+    - Mutates: branch position, checkout state, and sprint task state.
+  - [`finish`](./commands/finish.md)
+    - Mark an active task ready for human review.
+    - Audience: agents.
+    - Mutates: sprint task state only.
+  - [`feedback`](./commands/feedback.md)
+    - Interrupt work-ahead and return to `review`.
+    - Audience: agents.
+    - Mutates: checkout state and possibly recorded interrupted work.
+  - [`resume`](./commands/resume.md)
+    - Return to interrupted or dependent `next` work.
+    - Audience: agents.
+    - Mutates: checkout state, dependent branch content, and recorded
+      interrupted work.
+  - [`approve`](./commands/approve.md)
+    - Promote reviewed work into `approved` and roll the queue forward.
+    - Audience: agents after human approval.
+    - Mutates: sprint branches and task state.
+  - [`rebase`](./commands/rebase.md)
+    - Move the whole sprint branch stack onto a new target ref.
+    - Audience: agents.
+    - Mutates: recorded sprint branches and base state.
+  - [`finalize`](./commands/finalize.md)
+    - Prepare fully approved sprint work for human landing.
+    - Audience: agents.
+    - Mutates: sprint branches and base state.

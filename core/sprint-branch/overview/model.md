@@ -1,0 +1,70 @@
+# Sprint Branch Model
+
+- **Core idea**
+  - `sprint-branch` manages a sprint as a small rolling branch system.
+  - The system has:
+    - One human review boundary.
+    - One optional work-ahead slot.
+
+- **Branch roles**
+  - `approved`
+    - The last human-approved sprint content.
+    - The baseline for review diffs and future sprint work.
+  - `review`
+    - The content currently being reviewed or prepared for review.
+    - The branch humans inspect before approval.
+  - `next`
+    - Optional work-ahead content.
+    - Depends on `review` and must be reconciled after review changes.
+
+- **Task source**
+  - Task markdown files in `sprints/<name>/` define sprint task order.
+  - Sprint state records:
+    - Which tasks are approved.
+    - Which task is on `review`.
+    - Which task is on `next`.
+    - Which active tasks are finished but not yet approved.
+
+- **Task states**
+  - `planned`
+    - Present in the sprint folder.
+    - Not assigned to a branch.
+  - `review`
+    - Assigned to the review branch.
+  - `next`
+    - Assigned to the work-ahead branch.
+  - `finished-unreviewed`
+    - Marked complete by the agent.
+    - Ready for human review.
+    - Not yet approved.
+  - `approved`
+    - Accepted into the approved branch.
+    - No longer active.
+
+- **Sprint resolution**
+  - Most commands first resolve the active sprint.
+  - A sprint can be resolved from:
+    - An explicit sprint argument.
+    - The current sprint branch.
+    - A working directory under `sprints/<name>`.
+    - Interactive selection from active sprint state.
+  - Non-interactive callers must pass a sprint when strong local context cannot
+    identify one.
+
+- **Planning and output**
+  - Many commands support `--json` for machine-readable output.
+  - Mutating workflow commands support `--dry-run`.
+    - Dry runs report the intended transition.
+    - Dry runs do not change branches, task state, or working tree files.
+  - Human landing commands support JSON only for dry-run inspection.
+    - Real landing and cleanup require interactive confirmation.
+
+- **Clean-working-tree guardrails**
+  - Commands that switch, move, rebase, or finalize branches usually require a
+    clean working tree.
+  - The guardrail exists so unrelated local edits are not stranded inside a
+    sprint transition.
+  - Commands with narrower requirements include:
+    - Read-only reporting commands.
+    - Private sprint metadata updates.
+    - Commands that intentionally preserve interrupted work.
