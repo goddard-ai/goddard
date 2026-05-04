@@ -3,20 +3,23 @@
 - **Question it answers**
   - Is the fully approved sprint ready for the human's final merge?
 
+- **Inputs and selection**
+  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
+  - `--override-base <ref>` is available for recovery when the recorded base is
+    not the target humans intend to land onto.
+
 - **What it does**
   - Prepares the completed review branch for landing.
   - Brings completed review content onto the sprint's recorded base.
   - Updates the approved boundary to match review.
   - Leaves the review branch as the branch humans land from.
 
-- **Inputs**
-  - `--override-base <ref>` is available for recovery when the recorded base is
-    not the target humans intend to land onto.
-
 - **What it changes**
   - Review branch content.
   - Approved branch boundary.
   - Sprint base state.
+  - Checkout state:
+    - Leaves `review` checked out after success.
 
 - **Guardrails**
   - No review task may be active.
@@ -29,6 +32,14 @@
   - If a finalize conflict occurs:
     - Sprint state remains at the pre-finalize boundary.
     - `finalize` must be retried after conflict resolution.
+  - On retry, `--override-base` can replace the base used for the finalization
+    attempt.
+
+- **Dry run**
+  - Reports how the completed sprint would be prepared for landing.
+  - Does not move branches.
+  - Does not switch checkout state.
+  - Does not update sprint state.
 
 - **Why it exists**
   - Approval finishes the task queue.

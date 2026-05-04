@@ -50,6 +50,8 @@
     - Interactive selection from active sprint state.
   - Non-interactive callers must pass a sprint when strong local context cannot
     identify one.
+  - Parked sprints stay available through explicit or strong-context selection.
+    - They are omitted from default active selection.
 
 - **Planning and output**
   - Many commands support `--json` for machine-readable output.
@@ -68,3 +70,10 @@
     - Read-only reporting commands.
     - Private sprint metadata updates.
     - Commands that intentionally preserve interrupted work.
+
+- **Interrupted transitions**
+  - Some commands may stop at a conflict boundary and record recovery state.
+  - While recovery state exists:
+    - Other mutating commands are blocked.
+    - The same command is retried after the user resolves the conflict.
+    - `doctor` explains the recorded recovery state and the next safe command.
