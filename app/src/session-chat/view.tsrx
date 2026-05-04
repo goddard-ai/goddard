@@ -1,6 +1,7 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { useSigma } from "preact-sigma"
 import { useState } from "preact/hooks"
+import { isPromise } from "radashi"
 
 import { SessionChat } from "./chat.ts"
 import { Composer } from "./composer.tsrx"
@@ -30,7 +31,7 @@ export component SessionChatView(props: {
     sessionHistory = loadedHistory
     session = loadedSession.session
   } catch (error) {
-    if (isPromiseLike(error)) {
+    if (isPromise(error)) {
       isLoading = true
     } else {
       loadError = error
@@ -84,14 +85,6 @@ component SessionChatStateMessage(props: {
       </button>
     }
   </div>
-}
-
-/** Identifies the promises thrown by the local query cache during initial reads. */
-function isPromiseLike(value: unknown) {
-  const maybePromise = value as { then?: unknown } | null
-
-  return typeof maybePromise === "object" && maybePromise !== null &&
-    typeof maybePromise.then === "function"
 }
 
 /** Retries both reads required for the current query-driven session chat view. */
