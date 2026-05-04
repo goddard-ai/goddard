@@ -81,6 +81,7 @@ component LoadedSessionChatView(props: {
   projectPath: string | null;
   session: DaemonSession;
 }) {
+  const [submitError, setSubmitError] = useState<unknown>(null)
   const chat = useSigma(() => new SessionChat({ session: props.session, turns: props.history.turns }), [
     props.session,
     props.history.turns,
@@ -107,6 +108,14 @@ component LoadedSessionChatView(props: {
       />
     }
     <footer class={styles.composerDock}>
+      if (submitError) {
+        <div class={styles.composerError} role="alert">
+          <strong class={styles.composerErrorTitle}>{"Prompt wasn't sent"}</strong>
+          <span class={styles.composerErrorDescription}>
+            {"Your draft is still here. Try again when the session is available."}
+          </span>
+        </div>
+      }
       <Composer
         loadSuggestions={async (input) => {
           const response = await goddardSdk.session.composerSuggestions(
@@ -119,7 +128,14 @@ component LoadedSessionChatView(props: {
 
           return response.suggestions
         }}
+        onPromptChange={() => {
+          if (submitError) {
+            setSubmitError(null)
+          }
+        }}
         onSubmit={async (prompt) => {
+          setSubmitError(null)
+
           try {
             await submitSessionPrompt(
               {
@@ -130,6 +146,8 @@ component LoadedSessionChatView(props: {
             )
           } catch (error) {
             console.error("Failed to submit session prompt.", error)
+            setSubmitError(error)
+            throw error
           }
         }}
       />

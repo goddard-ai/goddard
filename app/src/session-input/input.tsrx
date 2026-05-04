@@ -145,16 +145,19 @@ export component SessionInput(props: {
 
     try {
       await props.onSubmit(promptBlocks)
-      dismissedMenuRef.current = null
-      setPromptBlocks([])
-      props.onPromptChange?.([])
-
-      if (editorRef.current) {
-        clearSessionInputEditor(editorRef.current)
-        focusEditor()
-      }
+    } catch {
+      return
     } finally {
       setIsSubmitting(false)
+    }
+
+    dismissedMenuRef.current = null
+    setPromptBlocks([])
+    props.onPromptChange?.([])
+
+    if (editorRef.current) {
+      clearSessionInputEditor(editorRef.current)
+      focusEditor()
     }
   }
 

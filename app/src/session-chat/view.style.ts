@@ -52,4 +52,25 @@ export default {
     paddingBottom: "20px",
     backgroundColor: "background",
   }),
+  composerError: css({
+    display: "grid",
+    gap: "3px",
+    marginBottom: "10px",
+    border: "1px solid",
+    borderColor: "danger",
+    borderRadius: "6px",
+    paddingBlock: "9px",
+    paddingInline: "12px",
+    backgroundColor: "surface",
+    color: "text",
+    fontSize: "0.9rem",
+  }),
+  composerErrorTitle: css({
+    color: "danger",
+    fontWeight: "680",
+  }),
+  composerErrorDescription: css({
+    color: "muted",
+    lineHeight: "1.45",
+  }),
 }
