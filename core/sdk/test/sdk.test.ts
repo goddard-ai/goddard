@@ -47,6 +47,49 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
   })
 
+  test("appSettings namespace forwards daemon app setting requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+    const record = {
+      version: 1,
+      savedAt: 100,
+      value: {
+        navigation: {
+          selectedNavId: "sessions",
+        },
+      },
+    }
+
+    send.mockResolvedValueOnce({ setting: record })
+    send.mockResolvedValueOnce({ setting: record })
+    send.mockResolvedValueOnce({ deleted: true })
+
+    await expect(sdk.appSettings.get({ key: "goddard.app.state.v1" })).resolves.toEqual({
+      setting: record,
+    })
+    await expect(
+      sdk.appSettings.set({
+        key: "goddard.app.state.v1",
+        record,
+      }),
+    ).resolves.toEqual({
+      setting: record,
+    })
+    await expect(sdk.appSettings.delete({ key: "goddard.app.state.v1" })).resolves.toEqual({
+      deleted: true,
+    })
+
+    expect(send).toHaveBeenNthCalledWith(1, "appSettings.get", {
+      key: "goddard.app.state.v1",
+    })
+    expect(send).toHaveBeenNthCalledWith(2, "appSettings.set", {
+      key: "goddard.app.state.v1",
+      record,
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "appSettings.delete", {
+      key: "goddard.app.state.v1",
+    })
+  })
+
   test("session.changes forwards to session.changes", async () => {
     const { sdk, send } = createSdkWithClient()
 

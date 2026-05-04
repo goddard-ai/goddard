@@ -2,6 +2,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import {
+  DaemonAppSetting,
   DaemonInboxItem,
   DaemonPullRequest,
   DaemonSession,
@@ -24,6 +25,8 @@ const metadata = {
 }
 
 const schema = {
+  appSettings: kind("aps", DaemonAppSetting).index("key", { unique: true }),
+
   sessions: kind("ses", DaemonSession)
     .createdAt()
     .updatedAt()

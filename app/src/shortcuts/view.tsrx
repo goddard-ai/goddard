@@ -286,7 +286,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
     </label>
     if (persistenceErrors.loadError) {
       <div class={styles.warning}>
-        {"The saved keymap could not be loaded, so the built-in profile is active."}
+        {"The saved shortcut settings could not be loaded, so the built-in profile is active."}
         <br />
         {persistenceErrors.loadError}
       </div>

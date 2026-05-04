@@ -46,8 +46,6 @@ export const shortcutKeymapProfiles = {
   },
 } satisfies Record<string, ShortcutKeymapProfile>
 
-const defaultKeymapProfileId = "goddard" satisfies KeymapProfileId
-
 const ShortcutBindingObject = z.union([
   z.looseObject({
     combo: z.string().min(1),
@@ -71,32 +69,6 @@ export const ShortcutKeymapOverrides = z.record(
 )
 
 export type ShortcutKeymapOverrides = z.infer<typeof ShortcutKeymapOverrides>
-
-/** Returns one empty user keymap file using the default built-in profile. */
-export function createDefaultShortcutKeymapFile(): UserShortcutKeymapFile {
-  return {
-    version: 1,
-    profile: defaultKeymapProfileId,
-    overrides: {},
-  }
-}
-
-/** Returns whether one runtime string matches a shipped keymap profile id. */
-export function isKeymapProfileId(value: unknown): value is KeymapProfileId {
-  return typeof value === "string" && value in shortcutKeymapProfiles
-}
-
-/** Schema for one persisted shortcut keymap file stored under the user-scoped Goddard directory. */
-export const UserShortcutKeymapFile = z.object({
-  version: z.literal(1),
-  profile: z.preprocess(
-    (value: unknown) => (isKeymapProfileId(value) ? value : defaultKeymapProfileId),
-    z.custom<KeymapProfileId>(isKeymapProfileId),
-  ),
-  overrides: ShortcutKeymapOverrides,
-})
-
-export type UserShortcutKeymapFile = z.infer<typeof UserShortcutKeymapFile>
 
 /** Returns the canonical combo or sequence expression for one binding. */
 export function getShortcutBindingExpression(binding: ShortcutBinding | null | undefined) {

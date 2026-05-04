@@ -9,7 +9,9 @@ import type {
   CreateSessionRequest,
   CreateWorkforceRequest,
   DeclareSessionInitiativeRequest,
+  DeleteAppSettingRequest,
   DiscoverWorkforceCandidatesRequest,
+  GetAppSettingRequest,
   GetLoopRequest,
   GetPullRequestRequest,
   GetSessionChangesRequest,
@@ -30,6 +32,7 @@ import type {
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
+  SetAppSettingRequest,
   ShutdownLoopRequest,
   ShutdownWorkforceRequest,
   StartLoopRequest,
@@ -97,6 +100,20 @@ function createAdapterNamespace(client: DaemonIpcClient) {
   return {
     /** Lists adapters available for one project or global launch flow. */
     list: async (input: ListAdaptersRequest = {}) => client.send("adapter.list", input),
+  }
+}
+
+/** Builds the app settings namespace with one thin method per daemon app settings IPC action. */
+function createAppSettingsNamespace(client: DaemonIpcClient) {
+  return {
+    /** Reads one daemon-owned desktop app setting record. */
+    get: async (input: GetAppSettingRequest) => client.send("appSettings.get", input),
+
+    /** Replaces one daemon-owned desktop app setting record. */
+    set: async (input: SetAppSettingRequest) => client.send("appSettings.set", input),
+
+    /** Deletes one daemon-owned desktop app setting record. */
+    delete: async (input: DeleteAppSettingRequest) => client.send("appSettings.delete", input),
   }
 }
 
@@ -328,6 +345,10 @@ export class GoddardSdk {
 
   get adapter() {
     return defineCachedNamespace(this, "adapter", createAdapterNamespace(this.#client))
+  }
+
+  get appSettings() {
+    return defineCachedNamespace(this, "appSettings", createAppSettingsNamespace(this.#client))
   }
 
   get pr() {

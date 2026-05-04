@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test"
 
-import { createRestoredAppModels } from "./app-state-persistence.ts"
+import {
+  createRestoredAppModels,
+  observeAppStateSnapshot,
+  type PersistedAppStateSnapshot,
+} from "./app-state-persistence.ts"
 import { Navigation } from "./navigation.ts"
-
-const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v3"
 
 function ensureMatchMedia() {
   window.matchMedia = (() => {
@@ -23,8 +25,6 @@ function ensureMatchMedia() {
 }
 
 test("navigation omits projects from the primary workbench items", () => {
-  window.localStorage.clear()
-
   const navigation = new Navigation()
 
   expect(navigation.items.map((item) => item.id)).toEqual([
@@ -37,22 +37,32 @@ test("navigation omits projects from the primary workbench items", () => {
   ])
 })
 
-test("navigation persistence restores selected navigation id", () => {
-  window.localStorage.clear()
-  window.localStorage.setItem(
-    NAVIGATION_STORAGE_KEY,
-    JSON.stringify({
-      version: 1,
-      savedAt: 100,
-      value: { selectedNavId: "sessions" },
-    }),
-  )
-
+test("app state persistence observes captured navigation snapshots", async () => {
   ensureMatchMedia()
   const appModels = createRestoredAppModels({
     mode: "system",
     highContrast: false,
   })
+  const snapshots: PersistedAppStateSnapshot[] = []
+  const observer = observeAppStateSnapshot(
+    appModels,
+    async (snapshot) => {
+      snapshots.push(snapshot)
+    },
+    {
+      debounceMs: 0,
+    },
+  )
 
-  expect(appModels.navigation.selectedNavId).toBe("sessions")
+  try {
+    appModels.navigation.selectNavItem("sessions")
+    await observer.flush()
+
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0].navigation).toEqual({
+      selectedNavId: "sessions",
+    })
+  } finally {
+    await observer.stop()
+  }
 })

@@ -4,6 +4,7 @@ import { z } from "zod"
 import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonPullRequestId, DaemonSessionId } from "../common/params.ts"
+import { DaemonAppSetting } from "./app-settings.ts"
 import {
   InboxEntityId,
   InboxHeadline,
@@ -248,3 +249,5 @@ export const DaemonInboxItem = z.strictObject({
 export type DaemonInboxItem = z.output<typeof DaemonInboxItem> & {
   id: `inb_${string}`
 }
+
+export { DaemonAppSetting }

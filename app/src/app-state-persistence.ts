@@ -1,15 +1,12 @@
 import { signal } from "@preact/signals"
-import { useSigma, type Protected } from "preact-sigma"
-import { hydrate, persist, restoreSync, type PersistStore } from "preact-sigma/persist"
+import { sigma, useSigma, type Immutable, type Protected } from "preact-sigma"
 import { useEffect, useMemo } from "preact/hooks"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { desktopHost } from "./desktop-host.ts"
-import { createWorkspaceStorageStore } from "./lib/workspace-storage.ts"
 import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
-import { createDefaultShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
 import {
   shortcutRegistry,
   type ShortcutRegistry,
@@ -17,14 +14,11 @@ import {
 } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
 
-const APPEARANCE_STORAGE_KEY = "goddard.app.appearance.v2"
-const NAVIGATION_STORAGE_KEY = "goddard.app.navigation.v3"
-const PROJECT_CONTEXT_STORAGE_KEY = "goddard.app.project-context.v2"
-const PROJECT_REGISTRY_STORAGE_KEY = "goddard.app.projects.v2"
-const WORKBENCH_TABS_STORAGE_KEY = "goddard.app.workbench-tabs.v4"
-const SHORTCUT_REGISTRY_STORAGE_KEY = "goddard.app.shortcuts.v1"
+const APP_STATE_STORAGE_KEY = "goddard.app.state.v1"
+const APP_STATE_RECORD_VERSION = 1
+const APP_STATE_WRITE_DEBOUNCE_MS = 250
 
-/** Raw app Sigma model bundle after synchronous state restoration. */
+/** Raw app Sigma model bundle before async daemon state restoration. */
 export type RestoredAppModels = {
   appearance: Appearance
   navigation: Navigation
@@ -43,7 +37,32 @@ export type PersistentAppModels = {
   workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
-/** Non-Sigma persistence status for the keyboard shortcut settings UI. */
+/** Persisted Sigma state captured and restored as one daemon-owned app settings record. */
+export type PersistedAppStateSnapshot = {
+  appearance: Immutable<AppearanceState>
+  navigation: Immutable<NavigationState>
+  projectContext: Immutable<ProjectContextState>
+  projectRegistry: Immutable<ProjectRegistryState>
+  shortcutRegistry: Immutable<ShortcutRegistryState>
+  workbenchTabSet: Immutable<WorkbenchTabSetState>
+}
+
+/** Async persistence writer used by the app-state snapshot observer. */
+type AppStateSnapshotWriter = (snapshot: PersistedAppStateSnapshot) => Promise<void>
+
+/** Runtime handle for the app-state snapshot observation loop. */
+type AppStateSnapshotObserver = {
+  flush(): Promise<void>
+  stop(): Promise<void>
+}
+
+/** Optional behavior for the app-state snapshot observation loop. */
+type ObserveAppStateSnapshotOptions = {
+  debounceMs?: number
+  onWriteError?: (error: unknown) => void
+}
+
+/** Non-Sigma persistence status surfaced in settings UI. */
 export const shortcutPersistenceErrors = signal({
   loadError: null as string | null,
   writeError: null as string | null,
@@ -71,34 +90,151 @@ function createDefaultAppearanceState() {
   } satisfies AppearanceState
 }
 
-/** Creates the app's singleton Sigma models and restores their persisted state. */
+/** Captures the current committed app Sigma state as one daemon-persisted snapshot. */
+export function captureAppStateSnapshot(appModels: RestoredAppModels) {
+  return {
+    appearance: sigma.captureState(appModels.appearance),
+    navigation: sigma.captureState(appModels.navigation),
+    projectContext: sigma.captureState(appModels.projectContext),
+    projectRegistry: sigma.captureState(appModels.projectRegistry),
+    shortcutRegistry: sigma.captureState(shortcutRegistry),
+    workbenchTabSet: sigma.captureState(appModels.workbenchTabSet),
+  }
+}
+
+function applyAppStateSnapshot(appModels: RestoredAppModels, snapshot: PersistedAppStateSnapshot) {
+  sigma.replaceState(appModels.appearance, snapshot.appearance as AppearanceState)
+  sigma.replaceState(appModels.navigation, snapshot.navigation as NavigationState)
+  sigma.replaceState(appModels.projectContext, snapshot.projectContext as ProjectContextState)
+  sigma.replaceState(appModels.projectRegistry, snapshot.projectRegistry as ProjectRegistryState)
+  sigma.replaceState(shortcutRegistry, snapshot.shortcutRegistry as ShortcutRegistryState)
+  sigma.replaceState(appModels.workbenchTabSet, snapshot.workbenchTabSet as WorkbenchTabSetState)
+
+  appModels.appearance.applyDocumentAppearance()
+  shortcutRegistry.rebindRuntime()
+}
+
+function cancelTimer(timer: ReturnType<typeof setTimeout> | null) {
+  if (timer !== null) {
+    clearTimeout(timer)
+  }
+}
+
+/** Observes committed app Sigma changes and writes the latest combined snapshot. */
+export function observeAppStateSnapshot(
+  appModels: RestoredAppModels,
+  writeSnapshot: AppStateSnapshotWriter,
+  options: ObserveAppStateSnapshotOptions = {},
+) {
+  const debounceMs = options.debounceMs ?? APP_STATE_WRITE_DEBOUNCE_MS
+  let isStopped = false
+  let pendingSnapshot: PersistedAppStateSnapshot | null = null
+  let writeTimer: ReturnType<typeof setTimeout> | null = null
+  let runningWrite: Promise<void> | null = null
+
+  function cancelScheduledWrite() {
+    cancelTimer(writeTimer)
+    writeTimer = null
+  }
+
+  async function drainPendingWrites() {
+    if (runningWrite) {
+      return runningWrite
+    }
+
+    cancelScheduledWrite()
+    runningWrite = (async () => {
+      while (pendingSnapshot && !isStopped) {
+        const snapshot = pendingSnapshot
+        pendingSnapshot = null
+        await writeSnapshot(snapshot)
+      }
+    })()
+
+    try {
+      await runningWrite
+    } finally {
+      runningWrite = null
+
+      if (pendingSnapshot && !isStopped) {
+        startBackgroundWrite()
+      }
+    }
+  }
+
+  function startBackgroundWrite() {
+    void drainPendingWrites().catch((error) => {
+      options.onWriteError?.(error)
+    })
+  }
+
+  function scheduleWrite() {
+    if (isStopped) {
+      return
+    }
+
+    cancelScheduledWrite()
+    writeTimer = setTimeout(() => {
+      writeTimer = null
+      startBackgroundWrite()
+    }, debounceMs)
+  }
+
+  function queueSnapshotWrite() {
+    if (isStopped) {
+      return
+    }
+
+    pendingSnapshot = captureAppStateSnapshot(appModels)
+    scheduleWrite()
+  }
+
+  const unsubscribe = [
+    sigma.subscribe(appModels.appearance, queueSnapshotWrite),
+    sigma.subscribe(appModels.navigation, queueSnapshotWrite),
+    sigma.subscribe(appModels.projectContext, queueSnapshotWrite),
+    sigma.subscribe(appModels.projectRegistry, queueSnapshotWrite),
+    sigma.subscribe(shortcutRegistry, queueSnapshotWrite),
+    sigma.subscribe(appModels.workbenchTabSet, queueSnapshotWrite),
+  ]
+
+  return {
+    async flush() {
+      cancelScheduledWrite()
+
+      if (!pendingSnapshot) {
+        await runningWrite
+        return
+      }
+
+      await drainPendingWrites()
+    },
+    async stop() {
+      if (isStopped) {
+        await runningWrite
+        return
+      }
+
+      isStopped = true
+      cancelScheduledWrite()
+      pendingSnapshot = null
+
+      for (const unsubscribeSnapshot of unsubscribe) {
+        unsubscribeSnapshot()
+      }
+
+      await runningWrite
+    },
+  }
+}
+
+/** Creates the app's singleton Sigma models before async daemon state restoration. */
 export function createRestoredAppModels(initialAppearanceState: AppearanceState) {
   const appearance = new Appearance(initialAppearanceState)
   const navigation = new Navigation()
   const projectContext = new ProjectContext()
   const projectRegistry = new ProjectRegistry()
   const workbenchTabSet = new WorkbenchTabSet()
-
-  restoreSync(appearance, {
-    key: APPEARANCE_STORAGE_KEY,
-    store: createWorkspaceStorageStore<AppearanceState>(),
-  })
-  restoreSync(navigation, {
-    key: NAVIGATION_STORAGE_KEY,
-    store: createWorkspaceStorageStore<NavigationState>(),
-  })
-  restoreSync(projectContext, {
-    key: PROJECT_CONTEXT_STORAGE_KEY,
-    store: createWorkspaceStorageStore<ProjectContextState>(),
-  })
-  restoreSync(projectRegistry, {
-    key: PROJECT_REGISTRY_STORAGE_KEY,
-    store: createWorkspaceStorageStore<ProjectRegistryState>(),
-  })
-  restoreSync(workbenchTabSet, {
-    key: WORKBENCH_TABS_STORAGE_KEY,
-    store: createWorkspaceStorageStore<WorkbenchTabSetState>(),
-  })
 
   appearance.applyDocumentAppearance()
 
@@ -111,47 +247,32 @@ export function createRestoredAppModels(initialAppearanceState: AppearanceState)
   } satisfies RestoredAppModels
 }
 
-const shortcutRegistryStore = {
-  async get() {
-    const response = await desktopHost.readShortcutKeymap()
-    const keymap = response.keymap ?? createDefaultShortcutKeymapFile()
-    shortcutPersistenceErrors.value = {
-      ...shortcutPersistenceErrors.value,
-      loadError: response.error,
-    }
+async function loadPersistedAppStateSnapshot() {
+  const response = await desktopHost.sdk.appSettings.get({
+    key: APP_STATE_STORAGE_KEY,
+  })
 
-    return {
+  return (response.setting?.value ?? null) as PersistedAppStateSnapshot | null
+}
+
+async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapshot) {
+  await desktopHost.sdk.appSettings.set({
+    key: APP_STATE_STORAGE_KEY,
+    record: {
+      version: APP_STATE_RECORD_VERSION,
       savedAt: Date.now(),
-      value: {
-        selectedProfileId: keymap.profile,
-        overrides: keymap.overrides,
-      },
-      version: keymap.version,
-    }
-  },
-  async set(_key, record) {
-    await desktopHost.writeShortcutKeymap({
-      version: 1,
-      profile: record.value.selectedProfileId,
-      overrides: record.value.overrides,
-    })
-    shortcutPersistenceErrors.value = {
-      ...shortcutPersistenceErrors.value,
-      writeError: null,
-    }
-  },
-  async delete() {
-    await desktopHost.writeShortcutKeymap(createDefaultShortcutKeymapFile())
-  },
-} satisfies PersistStore<ShortcutRegistryState>
+      value: snapshot,
+    },
+  })
+  shortcutPersistenceErrors.value = {
+    ...shortcutPersistenceErrors.value,
+    writeError: null,
+  }
+}
 
-/** Reads the persisted appearance state before the first render and applies it to the document. */
+/** Creates the initial appearance state before async daemon persistence is available. */
 export function getInitialAppearanceState() {
   const appearance = new Appearance(createDefaultAppearanceState())
-  restoreSync(appearance, {
-    key: APPEARANCE_STORAGE_KEY,
-    store: createWorkspaceStorageStore<AppearanceState>(),
-  })
   appearance.applyDocumentAppearance()
 
   return cloneAppearanceState(appearance)
@@ -172,62 +293,67 @@ export function usePersistentAppModels(initialAppearanceState: AppearanceState) 
   const workbenchTabSet = useSigma(() => appModels.workbenchTabSet, [appModels.workbenchTabSet])
 
   useEffect(() => {
-    const persistenceHandles = [
-      persist(appModels.appearance, {
-        key: APPEARANCE_STORAGE_KEY,
-        store: createWorkspaceStorageStore<AppearanceState>(),
-      }),
-      persist(appModels.navigation, {
-        key: NAVIGATION_STORAGE_KEY,
-        store: createWorkspaceStorageStore<NavigationState>(),
-      }),
-      persist(appModels.projectContext, {
-        key: PROJECT_CONTEXT_STORAGE_KEY,
-        store: createWorkspaceStorageStore<ProjectContextState>(),
-      }),
-      persist(appModels.projectRegistry, {
-        key: PROJECT_REGISTRY_STORAGE_KEY,
-        store: createWorkspaceStorageStore<ProjectRegistryState>(),
-      }),
-      persist(appModels.workbenchTabSet, {
-        key: WORKBENCH_TABS_STORAGE_KEY,
-        store: createWorkspaceStorageStore<WorkbenchTabSetState>(),
-      }),
-    ]
-    const shortcutPersistence = hydrate(shortcutRegistry, {
-      key: SHORTCUT_REGISTRY_STORAGE_KEY,
-      store: shortcutRegistryStore,
-      onWriteError(error) {
-        shortcutPersistenceErrors.value = {
-          ...shortcutPersistenceErrors.value,
-          writeError: `Failed to save shortcut overrides: ${getErrorMessage(error)}`,
-        }
-      },
-    })
+    let isDisposed = false
+    let appStateObserver: AppStateSnapshotObserver | null = null
     const cleanupShortcutRegistry = shortcutRegistry.setup()
 
-    void shortcutPersistence.restored.then(
-      () => {
-        shortcutRegistry.rebindRuntime()
-      },
-      (error) => {
+    function syncProjectContext() {
+      appModels.projectContext.syncProjects(
+        appModels.projectRegistry.projectList.map((project) => project.path),
+      )
+    }
+
+    function startAppStateObserver() {
+      if (isDisposed || appStateObserver) {
+        return
+      }
+
+      appStateObserver = observeAppStateSnapshot(appModels, writePersistedAppStateSnapshot, {
+        onWriteError(error) {
+          shortcutPersistenceErrors.value = {
+            ...shortcutPersistenceErrors.value,
+            writeError: `Failed to save app settings: ${getErrorMessage(error)}`,
+          }
+        },
+      })
+    }
+
+    void loadPersistedAppStateSnapshot().then(
+      (snapshot) => {
+        if (isDisposed) {
+          return
+        }
+
+        if (snapshot) {
+          applyAppStateSnapshot(appModels, snapshot)
+        } else {
+          shortcutRegistry.rebindRuntime()
+        }
+
+        startAppStateObserver()
+        syncProjectContext()
         shortcutPersistenceErrors.value = {
           ...shortcutPersistenceErrors.value,
-          loadError: `Failed to read shortcut keymap: ${getErrorMessage(error)}`,
+          loadError: null,
         }
       },
-    )
+      (error) => {
+        if (isDisposed) {
+          return
+        }
 
-    appModels.projectContext.syncProjects(
-      appModels.projectRegistry.projectList.map((project) => project.path),
+        startAppStateObserver()
+        syncProjectContext()
+        shortcutPersistenceErrors.value = {
+          ...shortcutPersistenceErrors.value,
+          loadError: `Failed to load app settings: ${getErrorMessage(error)}`,
+        }
+      },
     )
 
     return () => {
-      for (const handle of persistenceHandles) {
-        void handle.stop()
-      }
-
-      void shortcutPersistence.stop()
+      isDisposed = true
+      void appStateObserver?.stop()
       cleanupShortcutRegistry()
     }
   }, [appModels])

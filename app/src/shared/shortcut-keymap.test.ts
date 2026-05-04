@@ -1,10 +1,6 @@
 import { expect, test } from "bun:test"
 
-import {
-  createDefaultShortcutKeymapFile,
-  resolveShortcutBindings,
-  UserShortcutKeymapFile,
-} from "./shortcut-keymap.ts"
+import { resolveShortcutBindings, ShortcutKeymapOverrides } from "./shortcut-keymap.ts"
 
 const newSession = "navigation.openNewSessionDialog" as const
 const openSwitchProject = "navigation.openSwitchProject" as const
@@ -25,65 +21,43 @@ const openModelSelector = "sessionInput.openModelSelector" as const
 const openThinkingLevelSelector = "sessionInput.openThinkingLevelSelector" as const
 const submitSessionInput = "sessionInput.submit" as const
 
-test("parseShortcutKeymapFile accepts a valid persisted keymap", () => {
+test("shortcut keymap overrides accept valid persisted bindings", () => {
   expect(
-    UserShortcutKeymapFile.safeParse({
-      version: 1,
-      profile: "goddard",
-      overrides: {
-        [newSession]: ["Mod+Shift+n"],
-        [openKeyboardShortcuts]: null,
-      },
+    ShortcutKeymapOverrides.safeParse({
+      [newSession]: ["Mod+Shift+n"],
+      [openKeyboardShortcuts]: null,
     }),
   ).toEqual({
     success: true,
     data: {
-      version: 1,
-      profile: "goddard",
-      overrides: {
-        [newSession]: ["Mod+Shift+n"],
-        [openKeyboardShortcuts]: null,
-      },
+      [newSession]: ["Mod+Shift+n"],
+      [openKeyboardShortcuts]: null,
     },
   })
 })
 
-test("parseShortcutKeymapFile keeps unknown command ids and rejects empty override arrays", () => {
+test("shortcut keymap overrides keep unknown command ids and reject empty arrays", () => {
   expect(
-    UserShortcutKeymapFile.safeParse({
-      version: 1,
-      profile: "goddard",
-      overrides: {
-        unknown: ["Mod+k"],
-      },
+    ShortcutKeymapOverrides.safeParse({
+      unknown: ["Mod+k"],
     }),
   ).toEqual({
     success: true,
     data: {
-      version: 1,
-      profile: "goddard",
-      overrides: {
-        unknown: ["Mod+k"],
-      },
+      unknown: ["Mod+k"],
     },
   })
 
   expect(
-    UserShortcutKeymapFile.safeParse({
-      version: 1,
-      profile: "goddard",
-      overrides: {
-        [newSession]: [],
-      },
+    ShortcutKeymapOverrides.safeParse({
+      [newSession]: [],
     }).success,
   ).toBe(false)
 })
 
 test("resolveShortcutBindings applies unbind and replacement overrides over the built-in profile", () => {
-  const defaultFile = createDefaultShortcutKeymapFile()
-
   expect(
-    resolveShortcutBindings(defaultFile.profile, {
+    resolveShortcutBindings("goddard", {
       [newSession]: ["Mod+Shift+n"],
       [openInbox]: null,
     }),
@@ -108,10 +82,8 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
 })
 
 test("resolveShortcutBindings allows overrides for known commands that ship without defaults", () => {
-  const defaultFile = createDefaultShortcutKeymapFile()
-
   expect(
-    resolveShortcutBindings(defaultFile.profile, {
+    resolveShortcutBindings("goddard", {
       [openKeyboardShortcuts]: ["Mod+/"],
       unknown: ["Alt+/"],
     }),

@@ -1,5 +1,13 @@
 export { AdapterCatalogEntry, ListAdaptersRequest } from "./daemon-adapters.ts"
 export type * from "./daemon-adapters.ts"
+export {
+  AppSettingKey,
+  AppSettingRecord,
+  DeleteAppSettingRequest,
+  GetAppSettingRequest,
+  SetAppSettingRequest,
+} from "./daemon/app-settings.ts"
+export type * from "./daemon/app-settings.ts"
 export type * from "./daemon/actions.ts"
 export {
   BulkUpdateInboxItemsRequest,

@@ -5,7 +5,12 @@ import * as acp from "@agentclientprotocol/sdk"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
-import type { DaemonSession, SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
+import type {
+  AppSettingRecord,
+  DaemonAppSetting,
+  DaemonSession,
+  SubscribeWorkforceEventsRequest,
+} from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 
@@ -108,6 +113,14 @@ export async function startDaemonServer(
       },
       record,
     )
+  }
+
+  function toAppSettingRecord(setting: DaemonAppSetting) {
+    return {
+      version: setting.version,
+      savedAt: setting.savedAt,
+      value: setting.value,
+    } satisfies AppSettingRecord
   }
 
   function requireIpcRequestContext() {
@@ -213,6 +226,39 @@ export async function startDaemonServer(
           mergedAdapters.some((adapter) => adapter.id === defaultAgent)
             ? defaultAgent
             : null,
+      }
+    },
+    "appSettings.get": async ({ key }) => {
+      const setting =
+        db.appSettings.first({
+          where: { key },
+        }) ?? null
+
+      return {
+        setting: setting ? toAppSettingRecord(setting) : null,
+      }
+    },
+    "appSettings.set": async ({ key, record }) => {
+      const setting = db.appSettings.putByUnique(
+        { key },
+        {
+          key,
+          ...record,
+        },
+      )
+
+      return {
+        setting: toAppSettingRecord(setting),
+      }
+    },
+    "appSettings.delete": async ({ key }) => {
+      const setting =
+        db.appSettings.first({
+          where: { key },
+        }) ?? null
+
+      return {
+        deleted: setting ? db.appSettings.delete(setting.id) : false,
       }
     },
     "pr.submit": async (payload) => {
