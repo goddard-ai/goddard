@@ -11,3 +11,11 @@
 - When adding, removing, renaming, or changing the meaning of a command, update
   the relevant file in `overview/commands/` and the index in
   `overview/README.md`.
+- Prefer contract tests that assert externally observable behavior documented in
+  `overview/`. Add regression tests when protecting a known bug or subtle
+  safety invariant, and include a short comment naming the risk. Add internal
+  tests cautiously, only for complex pure logic or safety-critical invariants
+  that are hard to cover through public commands.
+- Avoid tests that only prove one first-party wrapper calls another, freeze
+  incidental wording or helper structure, or assert behavior that neither
+  appears in `overview/` nor protects a named regression risk.
