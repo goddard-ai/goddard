@@ -1,12 +1,10 @@
-# `sprint-branch finish --task <task> [-l|--last]`
+# `sprint-branch finish --task <task>`
 
 - **Question it answers**
   - Is this active task ready for human review?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
   - `--task <task>` identifies the active task being marked ready.
     - The task may be named by its task-file stem or matching task filename.
 
@@ -18,7 +16,6 @@
 
 - **What it changes**
   - Sprint task state only.
-  - The sprint's private `lastActedAt` timestamp.
   - It does not:
     - Approve the task.
     - Move any branch.

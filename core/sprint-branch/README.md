@@ -6,13 +6,13 @@ For durable conceptual documentation, start with [overview/README.md](./overview
 
 The package stores sprint branch-management state in Git metadata at `.git/sprint-branch/<name>/state.json`, outside the working tree and outside review diffs. State records the sprint worktree root that owns `sprints/<name>/`, and task markdown is read from that recorded worktree even when read-only commands run from another linked worktree. The `sprints/<name>/` folder remains for human-authored task files; successful sprint state writes add `sprints/` to `.git/info/exclude` so local sprint plans stay out of review diffs.
 
-Commands infer a sprint from explicit `--sprint`, `-l` / `--last`, the current `sprint/<name>/<role>` branch, or a working directory under `sprints/<name>`. When that strong context is missing, interactive terminals select from existing active sprint state with autocomplete; prompted choices are ordered by last activity. Non-interactive callers must pass the sprint name or use `-l` after at least one sprint has been acted upon.
+Commands use the shared sprint selection behavior documented in [overview/sprint-selection.md](./overview/sprint-selection.md): explicit sprint selection, `-l` / `--last`, current sprint branches, `sprints/<name>` working directories, and interactive active-sprint prompts.
 
-Each sprint state records `lastActedAt`, the time `sprint-branch` last successfully acted on that sprint. Read-only commands update only this private timestamp; dry runs and failed mutating commands do not update it. `sprint-branch list` reports sprints by last activity, and `sprint-branch list -l` reports only the latest acted-upon sprint.
+Each sprint state records `lastActedAt`, the time `sprint-branch` last acted on that sprint. `sprint-branch list` reports sprints by last activity, and `sprint-branch list -l` reports only the latest acted-upon sprint.
 
 `sprint-branch checkout [name]` is the human review command: it checks out the sprint review branch as a detached snapshot so the live review branch remains agent-owned.
 
-`sprint-branch park [--sprint <name>]` hides a sprint from default active-sprint selection without deleting branches or Git-private state. `sprint-branch unpark [--sprint <name>]` makes it active again. Use `sprint-branch list --all` to include parked sprints. `-l` / `--last` can still select a parked sprint when it is the latest acted-upon sprint.
+`sprint-branch park [--sprint <name>]` hides a sprint from default active-sprint selection without deleting branches or Git-private state. `sprint-branch unpark [--sprint <name>]` makes it active again. Use `sprint-branch list --all` to include parked sprints.
 
 `sprint-branch land <target> [name]` and `sprint-branch cleanup <target> [name]` are human-only landing commands. Actual landing and cleanup require an interactive terminal confirmation; use `--dry-run` to inspect them non-interactively. Cleanup removes landed sprint branches, associated review worktrees, and the Git-private sprint state file.
 

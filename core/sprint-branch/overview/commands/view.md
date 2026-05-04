@@ -1,14 +1,10 @@
-# `sprint-branch view [--task <task>] [-l|--last]`
+# `sprint-branch view [--task <task>]`
 
 - **Question it answers**
   - What should a human read to approve this task?
 
 - **Sprint selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - Non-interactive callers need a sprint argument, `-l` after recorded
-    activity, or strong local context.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
 
 - **What it reports**
   - The concise approval view for a finished task.
@@ -26,9 +22,9 @@
     approval packet reflects the sprint plan text the agent prepared.
 
 - **What it changes**
+  - Nothing.
   - It does not change branches, task state, review state, or working tree
     files.
-  - It records the selected sprint's private `lastActedAt` timestamp.
 
 - **Guardrails**
   - By default, a review task must be recorded.

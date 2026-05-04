@@ -1,15 +1,11 @@
-# `sprint-branch park [-l|--last]`
+# `sprint-branch park`
 
 - **Question it answers**
   - How can this sprint stay recorded but stop appearing in default active
     selection?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
-  - Explicit or strong-context selection can still target a parked sprint after
-    parking.
+  - Uses [standard sprint selection](../sprint-selection.md).
 
 - **What it does**
   - Marks the sprint as parked.
@@ -21,7 +17,6 @@
 
 - **What it changes**
   - Sprint visibility state only.
-  - The sprint's private `lastActedAt` timestamp.
   - No branches move.
   - If the sprint is already parked, reports that state without changing branch
     or task content.

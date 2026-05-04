@@ -1,12 +1,10 @@
-# `sprint-branch finalize [--override-base <ref>] [-l|--last]`
+# `sprint-branch finalize [--override-base <ref>]`
 
 - **Question it answers**
   - Is the fully approved sprint ready for the human's final merge?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
   - `--override-base <ref>` is available for recovery when the recorded base is
     not the target humans intend to land onto.
 
@@ -20,7 +18,6 @@
   - Review branch content.
   - Approved branch boundary.
   - Sprint base state.
-  - The sprint's private `lastActedAt` timestamp.
   - Checkout state:
     - Leaves `review` checked out after success.
 

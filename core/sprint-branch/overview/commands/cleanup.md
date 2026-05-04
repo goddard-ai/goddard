@@ -1,4 +1,4 @@
-# `sprint-branch cleanup <target> [name] [-l|--last]`
+# `sprint-branch cleanup <target> [name]`
 
 - **Question it answers**
   - How do we remove sprint-specific local artifacts after landing?
@@ -6,16 +6,8 @@
 - **Inputs and selection**
   - `<target>` is the branch that must already contain the finalized sprint
     review commit.
-  - `name` selects the sprint explicitly.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
-  - If `name` is omitted, the sprint can be inferred from strong local context.
-  - In an interactive terminal, the command can prompt for an active sprint.
-  - Non-interactive callers must provide enough context, `name`, or `-l` to
-    select one sprint.
-  - Parked sprints can be cleaned up by explicit or strong-context selection.
-    - Prompted default selection only offers active sprints.
-    - `-l` / `--last` can select a parked sprint when it is the latest
-      acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
+  - The optional `name` argument is this command's explicit sprint selector.
 
 - **What it removes**
   - Landed sprint branches.

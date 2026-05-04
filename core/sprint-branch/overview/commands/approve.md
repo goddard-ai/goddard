@@ -1,12 +1,10 @@
-# `sprint-branch approve [-l|--last]`
+# `sprint-branch approve`
 
 - **Question it answers**
   - How does human-approved review work become the new approved boundary?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
   - Approval always applies to the task currently recorded on `review`.
 
 - **What it does**
@@ -29,7 +27,6 @@
   - Review branch role.
   - Possibly next branch content.
   - Sprint task state.
-  - The sprint's private `lastActedAt` timestamp.
 
 - **Guardrails**
   - The review task must exist.

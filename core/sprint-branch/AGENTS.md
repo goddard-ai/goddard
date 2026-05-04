@@ -19,6 +19,9 @@
 - When adding, removing, renaming, or changing the meaning of a command, update
   the relevant file in `overview/commands/` and the index in
   `overview/README.md`.
+- When changing shared sprint selection or activity-tracking behavior, update
+  `overview/sprint-selection.md`; command pages should document only local
+  selection exceptions.
 - Prefer contract tests that assert externally observable behavior documented in
   `overview/`. Add regression tests when protecting a known bug or subtle
   safety invariant, and include a short comment naming the risk. Add internal

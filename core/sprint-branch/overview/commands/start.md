@@ -1,12 +1,10 @@
-# `sprint-branch start --task <task> [-l|--last]`
+# `sprint-branch start --task <task>`
 
 - **Question it answers**
   - Which branch should the agent use for the next task?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
   - `--task <task>` identifies a task file in the sprint folder.
     - The task may be named by its task-file stem or matching task filename.
     - The task must still be the next unassigned task in sprint task-file order
@@ -29,7 +27,6 @@
   - May move the branch that represents the requested task.
   - Checks out the relevant sprint branch.
   - Updates sprint task state.
-  - Records the sprint's private `lastActedAt` timestamp.
 
 - **Guardrails**
   - The requested task must be the next unassigned task in sprint task-file

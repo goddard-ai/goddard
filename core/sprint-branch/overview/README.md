@@ -13,9 +13,12 @@
   - [Sprint branch model](./model.md)
     - Branch roles.
     - Task states.
-    - Sprint selection.
     - Dry-run behavior.
     - Clean-working-tree guardrails.
+  - [Sprint selection](./sprint-selection.md)
+    - Standard selectors.
+    - Parked sprint selection.
+    - Activity tracking.
   - [Standard sprint workflow](./standard-sprint-workflow.md)
     - Normal setup through cleanup.
     - Work-ahead feedback and resume.

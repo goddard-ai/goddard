@@ -1,20 +1,12 @@
-# `sprint-branch land <target> [name] [-l|--last]`
+# `sprint-branch land <target> [name]`
 
 - **Question it answers**
   - How does finalized sprint work enter the target branch?
 
 - **Inputs and selection**
   - `<target>` is the branch that should receive finalized sprint content.
-  - `name` selects the sprint explicitly.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
-  - If `name` is omitted, the sprint can be inferred from strong local context.
-  - In an interactive terminal, the command can prompt for an active sprint.
-  - Non-interactive callers must provide enough context, `name`, or `-l` to
-    select one sprint.
-  - Parked sprints can be landed by explicit or strong-context selection.
-    - Prompted default selection only offers active sprints.
-    - `-l` / `--last` can select a parked sprint when it is the latest
-      acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
+  - The optional `name` argument is this command's explicit sprint selector.
 
 - **What it does**
   - Fast-forwards a human-selected target branch to finalized sprint review
@@ -24,8 +16,6 @@
 - **What it changes**
   - The target branch moves to the finalized sprint content.
   - Sprint branches and sprint state are not deleted.
-  - Successful landing records the selected sprint's private `lastActedAt`
-    timestamp.
   - It does not run cleanup.
 
 - **Finalized-sprint requirements**

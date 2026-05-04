@@ -1,4 +1,4 @@
-# `sprint-branch checkout [name] [-l|--last]`
+# `sprint-branch checkout [name]`
 
 - **Question it answers**
   - How can a human inspect the sprint review branch without taking over the
@@ -10,25 +10,12 @@
   - Gives the human a commit snapshot rather than a live branch to move.
 
 - **Sprint selection**
-  - If `name` is provided, that sprint is selected explicitly.
-  - If `-l` / `--last` is provided, the most recently acted-upon sprint is
-    selected.
-  - If `name` is omitted, the sprint can be inferred from strong local context:
-    - The current sprint branch.
-    - A `sprints/<name>` working directory.
-  - In an interactive terminal, the command can prompt for an active sprint.
-  - Non-interactive callers must provide `name` or `-l` when no strong context
-    exists.
-  - Parked sprints can be checked out by explicit or strong-context selection.
-    - Prompted default selection only offers active sprints.
-    - `-l` / `--last` can select a parked sprint when it is the latest
-      acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
+  - The optional `name` argument is this command's explicit sprint selector.
 
 - **What it changes**
   - The current checkout becomes a detached review snapshot.
   - Sprint branches and workflow state are not advanced.
-  - Successful checkout records the selected sprint's private `lastActedAt`
-    timestamp.
 
 - **Guardrails**
   - The working tree must be clean before switching snapshots.

@@ -1,14 +1,10 @@
-# `sprint-branch unpark [-l|--last]`
+# `sprint-branch unpark`
 
 - **Question it answers**
   - How can a parked sprint become active again?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
-  - Explicit or strong-context selection can target the parked sprint that is
-    being restored.
+  - Uses [standard sprint selection](../sprint-selection.md).
 
 - **What it does**
   - Marks the sprint as active for default selection.
@@ -17,7 +13,6 @@
 
 - **What it changes**
   - Sprint visibility state only.
-  - The sprint's private `lastActedAt` timestamp.
   - It does not:
     - Move branches.
     - Change task assignments.

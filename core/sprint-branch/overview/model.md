@@ -43,30 +43,8 @@
 
 - **Sprint resolution**
   - Most commands first resolve the active sprint.
-  - A sprint can be resolved from:
-    - An explicit sprint argument.
-    - `-l` / `--last`, which selects the most recently acted-upon sprint.
-    - The current sprint branch.
-    - A working directory under `sprints/<name>`.
-    - Interactive selection from active sprint state.
-  - Non-interactive callers must pass a sprint when strong local context cannot
-    identify one.
-  - Parked sprints stay available through explicit or strong-context selection.
-    - They are omitted from default active selection.
-    - `-l` / `--last` can still select a parked sprint when it is the latest
-      acted-upon sprint.
-  - Prompted sprint choices are ordered by last activity, with name order as the
-    fallback for untouched sprints.
-
-- **Activity tracking**
-  - Sprint state records `lastActedAt` when `sprint-branch` successfully acts on
-    that sprint.
-  - Read-only inspection commands update only this private activity timestamp.
-  - Successful mutating commands update the activity timestamp as part of their
-    normal private state write.
-  - Dry runs and failed mutating commands do not update it.
-  - `list` reports sprints in last-activity order; `list -l` reports only the
-    latest acted-upon sprint.
+  - Shared selectors, prompted ordering, parked sprint handling, and activity
+    tracking are defined in [Sprint selection](./sprint-selection.md).
 
 - **Planning and output**
   - Many commands support `--json` for machine-readable output.

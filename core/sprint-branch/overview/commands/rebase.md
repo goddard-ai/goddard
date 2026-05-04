@@ -1,12 +1,10 @@
-# `sprint-branch rebase <target> [-l|--last]`
+# `sprint-branch rebase <target>`
 
 - **Question it answers**
   - How can the whole sprint branch stack move onto a newer base?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
-    explicit `--sprint`.
-  - `-l` / `--last` selects the most recently acted-upon sprint.
+  - Uses [standard sprint selection](../sprint-selection.md).
   - `<target>` is the ref that should become the sprint's new base.
 
 - **What it does**
@@ -21,7 +19,6 @@
 - **What it changes**
   - Recorded sprint branch commits.
   - Sprint base state after all branch movement succeeds.
-  - The sprint's private `lastActedAt` timestamp.
   - Returns the checkout to the branch that was current before the rebase when
     possible.
 
