@@ -7,8 +7,8 @@ async function main() {
   const daemon = supervise({
     name: "daemon",
     command: "bun",
-    args: ["dev", "run", "--verbose"],
-    cwd: "core/daemon",
+    args: ["--watch", "run", "daemon/src/main.ts", "run", "--verbose"],
+    cwd: "core",
   })
 
   await daemon.waitFor(/ipc\.server_listening/)
