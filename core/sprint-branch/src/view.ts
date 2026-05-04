@@ -7,6 +7,7 @@ import { normalizeTaskName } from "./workflow/tasks"
 export async function buildSprintReviewView(input: {
   cwd: string
   sprint?: string
+  lastSprint?: boolean
   task?: string
   interactive?: boolean
 }) {

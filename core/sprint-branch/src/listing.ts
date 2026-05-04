@@ -1,6 +1,11 @@
 import path from "node:path"
 
 import { resolveRepositoryRoot } from "./git/repository"
+import {
+  latestActedSprint,
+  pushMissingLastSprintDiagnostic,
+  sortSprintActivity,
+} from "./state/activity"
 import { findSprintStateFiles, readSprintStateFile } from "./state/io"
 import type { SprintDiagnostic, SprintVisibility } from "./types"
 
@@ -10,6 +15,7 @@ export type SprintListEntry = {
   statePath: string
   reviewBranch: string
   visibility: SprintVisibility
+  lastActedAt: string | null
 }
 
 /** Report returned by the read-only sprint list command. */
@@ -17,12 +23,17 @@ export type SprintListReport = {
   ok: boolean
   rootDir: string
   includeParked: boolean
+  lastOnly: boolean
   sprints: SprintListEntry[]
   diagnostics: SprintDiagnostic[]
 }
 
 /** Lists known sprint branch state files, hiding parked sprints by default. */
-export async function buildSprintList(input: { cwd: string; includeParked: boolean }) {
+export async function buildSprintList(input: {
+  cwd: string
+  includeParked: boolean
+  lastOnly?: boolean
+}) {
   const rootDir = await resolveRepositoryRoot(input.cwd)
   const diagnostics: SprintDiagnostic[] = []
   const sprints: SprintListEntry[] = []
@@ -33,12 +44,16 @@ export async function buildSprintList(input: { cwd: string; includeParked: boole
         defaultSprintWorktreeRoot: rootDir,
       })
       diagnostics.push(...parsed.diagnostics)
-      if (parsed.state && (input.includeParked || parsed.state.visibility === "active")) {
+      if (
+        parsed.state &&
+        (input.includeParked || input.lastOnly || parsed.state.visibility === "active")
+      ) {
         sprints.push({
           sprint: parsed.state.sprint,
           statePath: statePathForDisplay(rootDir, statePath),
           reviewBranch: parsed.state.branches.review,
           visibility: parsed.state.visibility,
+          lastActedAt: parsed.state.lastActedAt,
         })
       }
     } catch {
@@ -50,24 +65,33 @@ export async function buildSprintList(input: { cwd: string; includeParked: boole
     }
   }
 
+  const sortedSprints = sortSprintActivity(sprints)
+  const lastSprint = latestActedSprint(sortedSprints)
+  if (input.lastOnly && !lastSprint) {
+    pushMissingLastSprintDiagnostic(diagnostics)
+  }
+  const listedSprints = input.lastOnly ? (lastSprint ? [lastSprint] : []) : sortedSprints
+
   return {
     ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
     rootDir,
     includeParked: input.includeParked,
-    sprints: sprints.sort((left, right) => left.sprint.localeCompare(right.sprint)),
+    lastOnly: Boolean(input.lastOnly),
+    sprints: listedSprints,
     diagnostics,
   } satisfies SprintListReport
 }
 
 /** Formats known sprint states for terminal output. */
 export function formatSprintList(report: SprintListReport) {
-  const lines = [`Sprints: ${report.includeParked ? "all" : "active"}`]
+  const lines = [`Sprints: ${report.lastOnly ? "last" : report.includeParked ? "all" : "active"}`]
 
   if (report.sprints.length === 0) {
     lines.push("  none")
   } else {
     for (const sprint of report.sprints) {
-      lines.push(`  - ${sprint.sprint} [${sprint.visibility}]: ${sprint.reviewBranch}`)
+      const activity = sprint.lastActedAt ? `, last acted ${sprint.lastActedAt}` : ""
+      lines.push(`  - ${sprint.sprint} [${sprint.visibility}${activity}]: ${sprint.reviewBranch}`)
     }
   }
 

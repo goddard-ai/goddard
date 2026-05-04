@@ -37,6 +37,7 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
     diagnostics,
   )
   const visibility = readVisibility(record.visibility, diagnostics)
+  const lastActedAt = readOptionalTimestamp(record.lastActedAt, diagnostics)
   const tasks = parseTasks(record.tasks, diagnostics)
   const activeStashes = parseActiveStashes(record.activeStashes, diagnostics)
   const conflict =
@@ -75,6 +76,7 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
     baseBranch,
     sprintWorktreeRoot,
     visibility,
+    lastActedAt,
     branches: getExpectedBranches(sprint),
     tasks,
     activeStashes,
@@ -193,6 +195,22 @@ function readVisibility(value: unknown, diagnostics: SprintDiagnostic[]) {
     message: "visibility must be active or parked.",
   })
   return "active"
+}
+
+function readOptionalTimestamp(value: unknown, diagnostics: SprintDiagnostic[]) {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value))) {
+    return value
+  }
+
+  diagnostics.push({
+    severity: "warning",
+    code: "invalid_last_acted_at",
+    message: "lastActedAt must be null or a valid timestamp string.",
+  })
+  return null
 }
 
 function readStringArray(value: unknown, field: string, diagnostics: SprintDiagnostic[]) {

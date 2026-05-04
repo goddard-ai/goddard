@@ -54,6 +54,7 @@ export async function runInit(input: MutationInput & { base: string }) {
     baseBranch: input.base,
     sprintWorktreeRoot,
     visibility: "active",
+    lastActedAt: null,
     branches,
     tasks: emptyTasks(),
     activeStashes: [],
@@ -149,6 +150,7 @@ export async function runResetState(
     baseBranch,
     sprintWorktreeRoot,
     visibility: existingState?.visibility ?? "active",
+    lastActedAt: existingState?.lastActedAt ?? null,
     branches,
     tasks: {
       review: null,

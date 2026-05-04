@@ -1,11 +1,13 @@
-# `sprint-branch feedback`
+# `sprint-branch feedback [-l|--last]`
 
 - **Question it answers**
   - How can the agent stop work-ahead and return to the review branch for
     human-requested changes?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
 
 - **What it does**
   - Prepares the review branch for feedback work.
@@ -20,6 +22,7 @@
 - **What it changes**
   - Checkout state.
   - Possibly recorded interrupted sprint work.
+  - The sprint's private `lastActedAt` timestamp.
   - Task assignments do not move:
     - The review task remains the review task.
     - The next task remains the next task.

@@ -1,12 +1,15 @@
-# `sprint-branch sync`
+# `sprint-branch sync [-l|--last]`
 
 - **Question it answers**
   - How do I watch the active sprint review branch through the review-sync
     workflow?
 
 - **Sprint selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
-  - Non-interactive callers need a sprint argument or strong local context.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - Non-interactive callers need a sprint argument, `-l` after recorded
+    activity, or strong local context.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
 
 - **What it does**
   - Resolves the active sprint.
@@ -20,6 +23,8 @@
   - `review-sync` keeps a disposable review branch aligned with the agent-owned
     branch while preserving human review edits.
   - It does not advance sprint task state by itself.
+  - It records the selected sprint's private `lastActedAt` timestamp after
+    sprint status is readable.
 
 - **Guardrails**
   - If sprint status is invalid, `sync` reports sprint diagnostics instead of

@@ -5,6 +5,7 @@ import { branchExists, getBranchHead, isAncestor } from "./git/refs"
 import { resolveGitCommonPath } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
+import { writeSprintLastActedAt } from "./state/activity"
 import { inferSprintContext, type SprintInferenceInput } from "./state/inference"
 import { readSprintStateFile } from "./state/io"
 import type {
@@ -52,7 +53,8 @@ export async function buildStatusReport(input: SprintInferenceInput) {
   const missingTaskFiles = sprintFolderExists ? await findMissingTaskFiles(parsed.state) : []
   const taskQueue = sprintFolderExists ? await buildTaskQueue(parsed.state) : []
 
-  if (await pathExists(lockFilePath)) {
+  const lockFileExists = await pathExists(lockFilePath)
+  if (lockFileExists) {
     diagnostics.push({
       severity: "error",
       code: "lock_file_exists",
@@ -212,6 +214,10 @@ export async function buildStatusReport(input: SprintInferenceInput) {
       ),
     },
     diagnostics,
+  }
+
+  if (!lockFileExists) {
+    await writeSprintLastActedAt(context.rootDir, report.state)
   }
 
   return {

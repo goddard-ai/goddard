@@ -36,6 +36,14 @@ function sprintOption() {
   })
 }
 
+function lastSprintFlag() {
+  return flag({
+    long: "last",
+    short: "l",
+    description: "Use the last sprint acted upon by sprint-branch",
+  })
+}
+
 function jsonFlag() {
   return flag({
     long: "json",
@@ -54,10 +62,12 @@ function dryRunFlag() {
 export async function main(argv: string[]) {
   const commonReadArgs = {
     sprint: sprintOption(),
+    lastSprint: lastSprintFlag(),
     json: jsonFlag(),
   }
   const commonMutationArgs = {
     sprint: sprintOption(),
+    lastSprint: lastSprintFlag(),
     dryRun: dryRunFlag(),
     json: jsonFlag(),
   }
@@ -70,10 +80,11 @@ export async function main(argv: string[]) {
         name: "status",
         description: "Inspect sprint branch state without changing anything",
         args: commonReadArgs,
-        handler: async ({ sprint, json }) => {
+        handler: async ({ sprint, lastSprint, json }) => {
           const { report, diagnostics } = await buildStatusReport({
             cwd: process.cwd(),
             sprint,
+            lastSprint,
             interactive: !json,
           })
           if (!report) {
@@ -108,10 +119,11 @@ export async function main(argv: string[]) {
             description: "Use git diff --stat",
           }),
         },
-        handler: async ({ sprint, json, nameOnly, stat }) => {
+        handler: async ({ sprint, lastSprint, json, nameOnly, stat }) => {
           const { report, diagnostics } = await buildStatusReport({
             cwd: process.cwd(),
             sprint,
+            lastSprint,
             interactive: !json,
           })
           if (!report) {
@@ -156,10 +168,11 @@ export async function main(argv: string[]) {
             description: "Task file stem to view; defaults to the current review task",
           }),
         },
-        handler: async ({ sprint, task, json }) => {
+        handler: async ({ sprint, lastSprint, task, json }) => {
           const { report, diagnostics } = await buildSprintReviewView({
             cwd: process.cwd(),
             sprint,
+            lastSprint,
             task,
             interactive: !json,
           })
@@ -185,12 +198,13 @@ export async function main(argv: string[]) {
         name: "sync",
         description: "Watch review-sync for the active sprint review branch",
         args: commonReadArgs,
-        handler: async ({ sprint, json }) => {
+        handler: async ({ sprint, lastSprint, json }) => {
           const abort = createProcessAbortSignal()
           try {
             const report = await runSprintSync({
               cwd: process.cwd(),
               sprint,
+              lastSprint,
               interactive: !json,
               signal: abort.signal,
               onResult: json
@@ -214,10 +228,11 @@ export async function main(argv: string[]) {
         name: "doctor",
         description: "Detect and explain inconsistent sprint branch state",
         args: commonReadArgs,
-        handler: async ({ sprint, json }) => {
+        handler: async ({ sprint, lastSprint, json }) => {
           const { report, diagnostics } = await buildDoctorReport({
             cwd: process.cwd(),
             sprint,
+            lastSprint,
             interactive: !json,
           })
           if (!report) {
@@ -252,15 +267,17 @@ export async function main(argv: string[]) {
         description: "List sprint branch states",
         args: {
           json: jsonFlag(),
+          lastSprint: lastSprintFlag(),
           all: flag({
             long: "all",
             description: "Include parked sprints",
           }),
         },
-        handler: async ({ json, all }) => {
+        handler: async ({ json, lastSprint, all }) => {
           const report = await buildSprintList({
             cwd: process.cwd(),
             includeParked: all,
+            lastOnly: lastSprint,
           })
           writeOutput(json, report, formatSprintList(report))
           if (!report.ok) {
@@ -277,13 +294,15 @@ export async function main(argv: string[]) {
             displayName: "name",
             description: "Sprint name to review",
           }),
+          lastSprint: lastSprintFlag(),
           dryRun: dryRunFlag(),
           json: jsonFlag(),
         },
-        handler: async ({ name, dryRun, json }) => {
+        handler: async ({ name, lastSprint, dryRun, json }) => {
           const report = await runCheckout({
             cwd: process.cwd(),
             sprint: name,
+            lastSprint,
             dryRun,
             json,
           })
@@ -307,14 +326,16 @@ export async function main(argv: string[]) {
             displayName: "name",
             description: "Sprint name to land",
           }),
+          lastSprint: lastSprintFlag(),
           dryRun: dryRunFlag(),
           json: jsonFlag(),
         },
-        handler: async ({ target, name, dryRun, json }) => {
+        handler: async ({ target, name, lastSprint, dryRun, json }) => {
           const report = await runLand({
             cwd: process.cwd(),
             target,
             sprint: name,
+            lastSprint,
             dryRun,
             json,
           })
@@ -338,14 +359,16 @@ export async function main(argv: string[]) {
             displayName: "name",
             description: "Sprint name to clean up",
           }),
+          lastSprint: lastSprintFlag(),
           dryRun: dryRunFlag(),
           json: jsonFlag(),
         },
-        handler: async ({ target, name, dryRun, json }) => {
+        handler: async ({ target, name, lastSprint, dryRun, json }) => {
           const report = await runCleanup({
             cwd: process.cwd(),
             target,
             sprint: name,
+            lastSprint,
             dryRun,
             json,
           })

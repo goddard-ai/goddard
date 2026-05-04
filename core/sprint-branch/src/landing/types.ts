@@ -4,6 +4,7 @@ import type { SprintBranchState, SprintDiagnostic } from "../types"
 export type HumanCommandInput = {
   cwd: string
   sprint?: string
+  lastSprint?: boolean
   dryRun: boolean
   json: boolean
 }
@@ -23,6 +24,7 @@ export type SprintCandidate = {
   sprint: string
   stateRelativePath: string
   reviewBranch: string
+  lastActedAt: string | null
   state: SprintBranchState
 }
 

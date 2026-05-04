@@ -46,7 +46,29 @@ describe("sprint branch state parsing", () => {
     expect(parsed.diagnostics).toEqual([])
     expect(parsed.state?.branches).toEqual(branches)
     expect(parsed.state?.visibility).toBe("parked")
+    expect(parsed.state?.lastActedAt).toBeNull()
     expect(parsed.state?.tasks.finishedUnreviewed).toEqual([])
+  })
+
+  test("parses last activity timestamps", () => {
+    const parsed = parseSprintState({
+      sprint: "example",
+      baseBranch: "main",
+      sprintWorktreeRoot: "/repo-agent",
+      visibility: "active",
+      lastActedAt: "2026-02-01T00:00:00.000Z",
+      tasks: {
+        review: "010-task-name",
+        next: null,
+        approved: [],
+        finishedUnreviewed: [],
+      },
+      activeStashes: [],
+      conflict: null,
+    })
+
+    expect(parsed.diagnostics).toEqual([])
+    expect(parsed.state?.lastActedAt).toBe("2026-02-01T00:00:00.000Z")
   })
 
   test("defaults missing visibility to active", () => {

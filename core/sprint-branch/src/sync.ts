@@ -8,6 +8,7 @@ import type { SprintDiagnostic, SprintSyncReport } from "./types"
 export async function runSprintSync(input: {
   cwd: string
   sprint?: string
+  lastSprint?: boolean
   interactive?: boolean
   signal?: AbortSignal
   onResult?: (result: ReviewSyncResult) => void | Promise<void>

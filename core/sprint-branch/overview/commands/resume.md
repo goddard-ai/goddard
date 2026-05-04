@@ -1,11 +1,13 @@
-# `sprint-branch resume`
+# `sprint-branch resume [-l|--last]`
 
 - **Question it answers**
   - How does the agent return to interrupted or dependent work-ahead after
     feedback?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
 
 - **What it does**
   - If a `next` task exists:
@@ -19,6 +21,7 @@
   - Checkout state.
   - Dependent `next` work when it needs to be brought forward.
   - Recorded interrupted work when it is restored or cleared.
+  - The sprint's private `lastActedAt` timestamp.
 
 - **Guardrails**
   - Normally requires a clean working tree.

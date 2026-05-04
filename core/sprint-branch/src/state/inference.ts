@@ -3,6 +3,11 @@ import { autocomplete, isCancel } from "@clack/prompts"
 
 import { getCurrentBranch, resolveRepositoryRoot } from "../git/repository"
 import type { SprintContext, SprintDiagnostic } from "../types"
+import {
+  latestActedSprint,
+  pushMissingLastSprintDiagnostic,
+  readSprintActivityCandidates,
+} from "./activity"
 import { parseSprintBranchName, validateSprintName } from "./branches"
 import { findSprintStateFiles, readSprintStateFile } from "./io"
 import { sprintStateDisplayPath, sprintStatePath } from "./paths"
@@ -22,6 +27,7 @@ export class SprintInferenceError extends Error {
 export type SprintInferenceInput = {
   cwd: string
   sprint?: string
+  lastSprint?: boolean
   interactive?: boolean
 }
 
@@ -33,6 +39,23 @@ export async function inferSprintContext(input: SprintInferenceInput) {
   if (input.sprint) {
     assertValidSprintName(input.sprint)
     return await buildContext(rootDir, input.sprint, currentBranch, "explicit --sprint")
+  }
+
+  if (input.lastSprint) {
+    const candidates = await readSprintActivityCandidates(rootDir, { includeParked: true })
+    const candidate = latestActedSprint(candidates)
+    if (candidate) {
+      return await buildContext(
+        rootDir,
+        candidate.sprint,
+        currentBranch,
+        `last sprint acted at ${candidate.lastActedAt}`,
+      )
+    }
+
+    const diagnostics: SprintDiagnostic[] = []
+    pushMissingLastSprintDiagnostic(diagnostics)
+    throw new SprintInferenceError("No last sprint is recorded.", diagnostics)
   }
 
   if (currentBranch) {
@@ -164,6 +187,7 @@ async function sprintCandidatesForSelection(rootDir: string, stateFiles: string[
         candidates.push({
           sprint: path.basename(path.dirname(statePath)),
           relativePath: statePathForDisplay(rootDir, statePath),
+          lastActedAt: parsed.state.lastActedAt,
         })
       }
     } catch {
@@ -171,7 +195,10 @@ async function sprintCandidatesForSelection(rootDir: string, stateFiles: string[
     }
   }
 
-  return candidates.sort((left, right) => left.sprint.localeCompare(right.sprint))
+  return candidates.sort((left, right) => {
+    const timeDelta = timestampValue(right.lastActedAt) - timestampValue(left.lastActedAt)
+    return timeDelta === 0 ? left.sprint.localeCompare(right.sprint) : timeDelta
+  })
 }
 
 function canPromptForSprint(input: SprintInferenceInput) {
@@ -185,4 +212,12 @@ function statePathForDisplay(rootDir: string, statePath: string) {
     return path.join(".git", ...parts.slice(rootIndex))
   }
   return path.relative(rootDir, statePath)
+}
+
+function timestampValue(value: string | null) {
+  if (!value) {
+    return 0
+  }
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? 0 : timestamp
 }

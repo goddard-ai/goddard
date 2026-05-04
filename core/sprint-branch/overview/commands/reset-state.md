@@ -1,11 +1,13 @@
-# `sprint-branch reset-state [--task <task>] [--base <ref>] [--force]`
+# `sprint-branch reset-state [--task <task>] [--base <ref>] [--force] [-l|--last]`
 
 - **Question it answers**
   - How can private sprint state be recreated after a sprint plan is reworked
     or state is missing?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
   - `--task <task>` selects the next task that `start` should accept.
     - The task may be named by its task-file stem or matching task filename.
     - If no task is selected, the first task in sprint task-file order becomes
@@ -18,6 +20,7 @@
 
 - **What it does**
   - Rewrites only private sprint state.
+  - Records the sprint's private `lastActedAt` timestamp.
   - Does not move sprint branches.
   - Makes the selected task the next valid `start` target.
   - Tasks before the selected task are recorded as already approved.

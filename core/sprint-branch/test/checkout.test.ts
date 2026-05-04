@@ -55,7 +55,9 @@ describe("sprint-branch checkout", () => {
     expect(checkout.reviewBranch).toBe("sprint/example/review")
     expect((await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("HEAD")
     expect(await branchHead(repo, "HEAD")).toBe(await branchHead(repo, "sprint/example/review"))
-    expect(await readState(repo, "example")).toEqual(beforeState)
+    const afterState = await readState(repo, "example")
+    expect(withoutActivity(afterState)).toEqual(withoutActivity(beforeState))
+    expect(typeof afterState.lastActedAt).toBe("string")
   })
 
   test("refuses non-interactive checkout without a strong sprint context", async () => {
@@ -132,6 +134,11 @@ describe("sprint-branch checkout", () => {
     expect(await currentBranch(repo)).toBe("main")
   })
 })
+
+function withoutActivity<T extends { lastActedAt?: string | null }>(state: T) {
+  const { lastActedAt: _lastActedAt, ...rest } = state
+  return rest
+}
 
 /** Adds a second valid sprint state and review branch to make checkout inference ambiguous. */
 async function addSprint(repo: string, sprint: string) {

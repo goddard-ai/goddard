@@ -41,6 +41,7 @@ export type SprintBranchState = {
   baseBranch: string
   sprintWorktreeRoot: string
   visibility: SprintVisibility
+  lastActedAt: string | null
   branches: SprintBranchNames
   tasks: SprintTaskState
   activeStashes: SprintActiveStash[]

@@ -5,6 +5,12 @@ import { GitCommandError, runGit } from "./git/command"
 import { branchExists, getBranchHead } from "./git/refs"
 import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
 import { getWorkingTreeStatus } from "./git/worktree"
+import {
+  latestActedSprint,
+  pushMissingLastSprintDiagnostic,
+  sortSprintActivity,
+  writeSprintLastActedAt,
+} from "./state/activity"
 import { parseSprintBranchName, validateSprintName } from "./state/branches"
 import { findSprintStateFiles, readSprintStateFile } from "./state/io"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
@@ -14,6 +20,7 @@ import type { SprintBranchState, SprintDiagnostic } from "./types"
 type CheckoutInput = {
   cwd: string
   sprint?: string
+  lastSprint?: boolean
   dryRun: boolean
   json: boolean
 }
@@ -24,6 +31,8 @@ type CheckoutCandidate = {
   stateRelativePath: string
   reviewBranch: string
   visibility: SprintBranchState["visibility"]
+  lastActedAt: string | null
+  state: SprintBranchState
 }
 
 /** Report returned after planning or running a human-safe review checkout. */
@@ -93,6 +102,7 @@ export async function runCheckout(input: CheckoutInput) {
 
   try {
     await runGit(rootDir, ["checkout", "--detach", target.reviewBranch])
+    await writeSprintLastActedAt(rootDir, target.state)
     return {
       ...report,
       executed: true,
@@ -171,6 +181,14 @@ async function resolveCheckoutTarget(
   }
 
   const candidates = await readCheckoutCandidates(rootDir, true)
+  if (input.lastSprint) {
+    const latest = latestActedSprint(candidates)
+    if (!latest) {
+      pushMissingLastSprintDiagnostic(diagnostics)
+    }
+    return latest
+  }
+
   const inferred = inferCandidate(rootDir, input.cwd, currentBranch, candidates)
   const activeCandidates = candidates.filter((candidate) => candidate.visibility === "active")
   if (inferred) {
@@ -283,7 +301,7 @@ async function readCheckoutCandidates(rootDir: string, includeParked = false) {
     }
   }
 
-  return candidates.sort((left, right) => left.sprint.localeCompare(right.sprint))
+  return sortSprintActivity(candidates)
 }
 
 async function checkoutCandidatesForOutput(rootDir: string) {
@@ -304,6 +322,8 @@ function candidateFromState(
     stateRelativePath: statePathForDisplay(rootDir, statePath),
     reviewBranch: state.branches.review,
     visibility: state.visibility,
+    lastActedAt: state.lastActedAt,
+    state,
   }
 }
 

@@ -1,6 +1,11 @@
 import path from "node:path"
 import { autocomplete, isCancel } from "@clack/prompts"
 
+import {
+  latestActedSprint,
+  pushMissingLastSprintDiagnostic,
+  sortSprintActivity,
+} from "../state/activity"
 import { parseSprintBranchName, validateSprintName } from "../state/branches"
 import { findSprintStateFiles, readSprintStateFile } from "../state/io"
 import { sprintStateDisplayPath, sprintStatePath } from "../state/paths"
@@ -19,6 +24,14 @@ export async function resolveSprintCandidate(
   }
 
   const candidates = await readSprintCandidates(rootDir, true)
+  if (input.lastSprint) {
+    const latest = latestActedSprint(candidates)
+    if (!latest) {
+      pushMissingLastSprintDiagnostic(diagnostics)
+    }
+    return latest
+  }
+
   const inferred = inferCandidate(rootDir, input.cwd, currentBranch, candidates)
   const activeCandidates = candidates.filter((candidate) => candidate.state.visibility === "active")
   if (inferred) {
@@ -121,7 +134,7 @@ async function readSprintCandidates(rootDir: string, includeParked = false) {
     }
   }
 
-  return candidates.sort((left, right) => left.sprint.localeCompare(right.sprint))
+  return sortSprintActivity(candidates)
 }
 
 function inferCandidate(
@@ -151,6 +164,7 @@ function candidateFromState(
     sprint: state.sprint,
     stateRelativePath: statePathForDisplay(rootDir, statePath),
     reviewBranch: state.branches.review,
+    lastActedAt: state.lastActedAt,
     state,
   }
 }

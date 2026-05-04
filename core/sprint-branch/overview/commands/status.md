@@ -1,11 +1,14 @@
-# `sprint-branch status`
+# `sprint-branch status [-l|--last]`
 
 - **Question it answers**
   - What is the current sprint branch state?
 
 - **Sprint selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
-  - Non-interactive callers need a sprint argument or strong local context.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - Non-interactive callers need a sprint argument, `-l` after recorded
+    activity, or strong local context.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
   - State records alone are not enough for non-interactive inference because
     they may represent multiple active or parked sprints.
 
@@ -22,9 +25,9 @@
   - The next safe command when one is known.
 
 - **What it changes**
-  - Nothing.
   - It does not change branches, task state, review state, or working tree
     files.
+  - It records the selected sprint's private `lastActedAt` timestamp.
 
 - **Guardrails**
   - It can fail when:

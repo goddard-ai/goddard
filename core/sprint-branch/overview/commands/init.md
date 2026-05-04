@@ -1,10 +1,12 @@
-# `sprint-branch init [--base <ref>]`
+# `sprint-branch init [--base <ref>] [-l|--last]`
 
 - **Question it answers**
   - How does a sprint become branch-managed?
 
 - **Inputs and selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
   - `--base <ref>` selects the initial approved boundary.
     - The base defaults to `main`.
 
@@ -18,6 +20,7 @@
   - Creates sprint branches and records sprint state.
   - Leaves no task active.
   - Marks the sprint active for default selection.
+  - Records the sprint's private `lastActedAt` timestamp.
 
 - **Guardrails**
   - The sprint folder must already exist.

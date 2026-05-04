@@ -1,11 +1,14 @@
-# `sprint-branch doctor`
+# `sprint-branch doctor [-l|--last]`
 
 - **Question it answers**
   - What is unsafe or inconsistent, and what should happen next?
 
 - **Sprint selection**
-  - The sprint comes from normal sprint resolution or an explicit `--sprint`.
-  - Non-interactive callers need a sprint argument or strong local context.
+  - The sprint comes from normal sprint resolution, `-l` / `--last`, or an
+    explicit `--sprint`.
+  - Non-interactive callers need a sprint argument, `-l` after recorded
+    activity, or strong local context.
+  - `-l` / `--last` selects the most recently acted-upon sprint.
 
 - **What it reports**
   - The broad inspection surface from `status`.
@@ -31,8 +34,10 @@
     - Current-branch situations that make deletion or mutation unsafe.
 
 - **What it changes**
-  - Nothing.
   - It does not repair state by itself.
+  - It does not change branches, task state, review state, or working tree
+    files.
+  - It records the selected sprint's private `lastActedAt` timestamp.
 
 - **Recovery guidance**
   - It explains the problem.

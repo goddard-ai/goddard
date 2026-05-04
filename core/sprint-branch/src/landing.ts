@@ -15,6 +15,7 @@ import type {
 } from "./landing/types"
 import { pushCleanupDiagnostics, pushLandingDiagnostics } from "./landing/validation"
 import { associatedWorktrees, cleanupBranches } from "./landing/worktrees"
+import { writeSprintLastActedAt } from "./state/activity"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
 import type { SprintBranchState, SprintDiagnostic } from "./types"
 
@@ -66,6 +67,7 @@ export async function runLand(input: LandInput) {
   try {
     await runGit(rootDir, ["checkout", input.target])
     await runGit(rootDir, ["merge", "--ff-only", state.branches.review])
+    await writeSprintLastActedAt(rootDir, state)
     return { ...report, executed: true } satisfies SprintLandReport
   } catch (error) {
     return handleHumanGitError(report, error)

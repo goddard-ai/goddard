@@ -12,6 +12,7 @@ type StoredSprintState = {
   baseBranch: string
   sprintWorktreeRoot: string
   visibility: SprintBranchState["visibility"]
+  lastActedAt: SprintBranchState["lastActedAt"]
   tasks: SprintBranchState["tasks"]
   activeStashes: SprintBranchState["activeStashes"]
   conflict: SprintBranchState["conflict"]
@@ -20,6 +21,7 @@ type StoredSprintState = {
 /** Writes canonical sprint branch state outside the repository working tree. */
 export async function writeSprintState(rootDir: string, state: SprintBranchState) {
   await ensureGitInfoExcludeEntry(rootDir, "sprints/")
+  state.lastActedAt = new Date().toISOString()
   await writeSprintStateAtomic(
     await sprintStatePath(rootDir, state.sprint),
     storedSprintState(state),
@@ -38,6 +40,7 @@ function storedSprintState(state: SprintBranchState) {
     baseBranch: state.baseBranch,
     sprintWorktreeRoot: state.sprintWorktreeRoot,
     visibility: state.visibility,
+    lastActedAt: state.lastActedAt,
     tasks: state.tasks,
     activeStashes: state.activeStashes,
     conflict: state.conflict,
