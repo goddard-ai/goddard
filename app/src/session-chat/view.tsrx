@@ -25,25 +25,22 @@ export component SessionChatView(props: {
     ])
 
     <LoadedSessionChatView {...props} history={sessionHistory} session={loadedSession.session} />
-    return
   } catch (error) {
     if (isPromise(error)) {
       <SessionChatLoadingState />
-      return
+    } else {
+      <main class={styles.root}>
+        <SessionChatStateMessage
+          actionLabel="Try again"
+          description="The daemon-backed session or history request failed."
+          onAction={() => {
+            retrySessionChatLoad(props.sessionId)
+            setRetryVersion((version) => version + 1)
+          }}
+          title="Couldn't load session"
+        />
+      </main>
     }
-
-    <main class={styles.root}>
-      <SessionChatStateMessage
-        actionLabel="Try again"
-        description="The daemon-backed session or history request failed."
-        onAction={() => {
-          retrySessionChatLoad(props.sessionId)
-          setRetryVersion((version) => version + 1)
-        }}
-        title="Couldn't load session"
-      />
-    </main>
-    return
   }
 }
 
