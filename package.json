@@ -52,7 +52,7 @@
     "@types/bun": "^1.3.13",
     "@types/globrex": "^0.1.4",
     "@types/node": "^25.6.0",
-    "@typescript/native-preview": "7.0.0-dev.20260401.1",
+    "@typescript/native-preview": "7.0.0-dev.20260404.1",
     "cmd-ts": "catalog:",
     "drizzle-kit": "1.0.0-beta.18-7eb39f0",
     "globrex": "^0.1.2",
