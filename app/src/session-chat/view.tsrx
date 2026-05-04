@@ -17,33 +17,21 @@ export component SessionChatView(props: {
   sessionId: DaemonSession["id"];
 }) {
   const [, setRetryVersion] = useState(0)
-  let sessionHistory = null as GetSessionHistoryResponse | null
-  let session = null as DaemonSession | null
-  let isLoading = false
-  let loadError = null as unknown
 
   try {
-    const [loadedHistory, loadedSession] = useQueries([
+    const [sessionHistory, loadedSession] = useQueries([
       [goddardSdk.session.history, [{ id: props.sessionId }]],
       [goddardSdk.session.get, [{ id: props.sessionId }]],
     ])
 
-    sessionHistory = loadedHistory
-    session = loadedSession.session
+    <LoadedSessionChatView {...props} history={sessionHistory} session={loadedSession.session} />
+    return
   } catch (error) {
     if (isPromise(error)) {
-      isLoading = true
-    } else {
-      loadError = error
+      <SessionChatLoadingState />
+      return
     }
-  }
 
-  if (isLoading) {
-    <SessionChatLoadingState />
-    return
-  }
-
-  if (loadError !== null || !sessionHistory || !session) {
     <main class={styles.root}>
       <SessionChatStateMessage
         actionLabel="Try again"
@@ -57,8 +45,6 @@ export component SessionChatView(props: {
     </main>
     return
   }
-
-  <LoadedSessionChatView {...props} history={sessionHistory} {session} />
 }
 
 component SessionChatLoadingState() {
