@@ -7,6 +7,14 @@
   - Prefer bold root bullets such as `**Purpose**` over additional hash
     headings inside overview pages.
   - Describe what is supported, what changes, and why guardrails exist.
+  - Do not force a fixed page template; shape each overview page around the
+    command or procedure's actual risk and complexity.
+  - Document handled edge cases when they are externally observable, affect
+    workflow decisions, define a safety boundary, or explain recovery/retry
+    behavior.
+  - Usually omit edge cases that only expose internal helper behavior, exact
+    diagnostic wording, parser details, lock mechanics, atomic write strategy,
+    or implementation order.
   - Avoid implementation walkthroughs.
 - When adding, removing, renaming, or changing the meaning of a command, update
   the relevant file in `overview/commands/` and the index in
