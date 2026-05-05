@@ -20,9 +20,7 @@ type SyncRunControlFile = {
   pid: number
   cwd: string
   startedAt: string
-  stopRequested: boolean
   stopRequestedAt?: string
-  stopReason?: string
 }
 
 /** A registered sync process that still appears to be alive. */
@@ -48,7 +46,6 @@ export async function createSprintSyncStopControl(input: { cwd: string; signal?:
       pid: process.pid,
       cwd,
       startedAt: new Date().toISOString(),
-      stopRequested: false,
     }),
   )
 
@@ -73,7 +70,7 @@ export async function createSprintSyncStopControl(input: { cwd: string; signal?:
     checking = true
     try {
       const control = await readSyncRunControlFile(controlPath)
-      if (control?.stopRequested && !controller.signal.aborted) {
+      if (control?.stopRequestedAt && !controller.signal.aborted) {
         controller.abort(syncStopReason)
       }
     } finally {
@@ -106,9 +103,7 @@ export async function requestSprintSyncStop(input: { cwd: string }) {
     const { controlPath, ...storedControl } = control
     const stopped = {
       ...storedControl,
-      stopRequested: true,
       stopRequestedAt: new Date().toISOString(),
-      stopReason: syncStopReason,
     }
 
     if (await overwriteExistingSyncRunControlFile(controlPath, stopped)) {
@@ -327,8 +322,7 @@ function normalizeSyncRunControlFile(value: unknown) {
     typeof candidate.runId !== "string" ||
     typeof candidate.pid !== "number" ||
     typeof candidate.cwd !== "string" ||
-    typeof candidate.startedAt !== "string" ||
-    typeof candidate.stopRequested !== "boolean"
+    typeof candidate.startedAt !== "string"
   ) {
     return null
   }
@@ -339,11 +333,9 @@ function normalizeSyncRunControlFile(value: unknown) {
     pid: candidate.pid,
     cwd: candidate.cwd,
     startedAt: candidate.startedAt,
-    stopRequested: candidate.stopRequested,
     ...(typeof candidate.stopRequestedAt === "string"
       ? { stopRequestedAt: candidate.stopRequestedAt }
       : {}),
-    ...(typeof candidate.stopReason === "string" ? { stopReason: candidate.stopReason } : {}),
   } satisfies SyncRunControlFile
 }
 
