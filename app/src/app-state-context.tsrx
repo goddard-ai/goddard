@@ -2,7 +2,6 @@ import { createContext } from "preact"
 import { useContext } from "preact/hooks"
 
 import { type PersistentAppModels, usePersistentAppModels } from "./app-state-persistence.ts"
-import type { AppearanceState } from "./appearance/appearance.ts"
 
 function requireContext<Value>(value: Value | null, name: string) {
   if (!value) {
@@ -45,9 +44,8 @@ const context = {
 
 export component AppStateProvider(props: {
   children: preact.ComponentChildren;
-  initialAppearanceState: AppearanceState;
 }) {
-  const appModels = usePersistentAppModels(props.initialAppearanceState)
+  const appModels = usePersistentAppModels()
 
   <context.Appearance value={appModels.appearance}>
     <context.Navigation value={appModels.navigation}>

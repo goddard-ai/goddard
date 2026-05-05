@@ -39,10 +39,7 @@ test("navigation omits projects from the primary workbench items", () => {
 
 test("app state persistence observes captured navigation snapshots", async () => {
   ensureMatchMedia()
-  const appModels = createRestoredAppModels({
-    mode: "system",
-    highContrast: false,
-  })
+  const appModels = createRestoredAppModels()
   const snapshots: PersistedAppStateSnapshot[] = []
   const observer = observeAppStateSnapshot(
     appModels,

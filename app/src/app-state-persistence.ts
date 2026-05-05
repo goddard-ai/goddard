@@ -80,13 +80,6 @@ function getErrorMessage(error: unknown) {
   return typeof error === "string" && error.length > 0 ? error : "Unknown error."
 }
 
-function cloneAppearanceState(state: AppearanceState) {
-  return {
-    mode: state.mode,
-    highContrast: state.highContrast,
-  }
-}
-
 function createDefaultAppearanceState() {
   return {
     mode: "system",
@@ -233,8 +226,8 @@ export function observeAppStateSnapshot(
 }
 
 /** Creates the app's singleton Sigma models before async daemon state restoration. */
-export function createRestoredAppModels(initialAppearanceState: AppearanceState) {
-  const appearance = new Appearance(initialAppearanceState)
+export function createRestoredAppModels() {
+  const appearance = new Appearance(createDefaultAppearanceState())
   const navigation = new Navigation()
   const projectContext = new ProjectContext()
   const projectRegistry = new ProjectRegistry()
@@ -276,20 +269,9 @@ async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapsho
   }
 }
 
-/** Creates the initial appearance state before async daemon persistence is available. */
-export function getInitialAppearanceState() {
-  const appearance = new Appearance(createDefaultAppearanceState())
-  appearance.applyDocumentAppearance()
-
-  return cloneAppearanceState(appearance)
-}
-
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
-export function usePersistentAppModels(initialAppearanceState: AppearanceState) {
-  const appModels = useMemo(
-    () => createRestoredAppModels(initialAppearanceState),
-    [initialAppearanceState],
-  )
+export function usePersistentAppModels() {
+  const appModels = useMemo(() => createRestoredAppModels(), [])
   const appearance = useSigma(() => appModels.appearance, {
     deps: [appModels.appearance],
   })
