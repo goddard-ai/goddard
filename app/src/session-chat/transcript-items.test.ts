@@ -1,7 +1,7 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
-import { buildSessionChatTranscript } from "./chat.ts"
+import { buildSessionChatTranscript } from "./transcript-items.ts"
 
 function createSession(lastAgentMessage: string | null) {
   return {

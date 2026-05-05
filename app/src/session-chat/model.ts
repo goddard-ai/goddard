@@ -3,13 +3,13 @@ import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { Sigma } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
-import { buildSessionChatTranscript } from "./chat.ts"
 import {
   applySessionChatMessage,
   createSessionChatState,
   mergeSessionChatHistory,
   type SessionChatState,
 } from "./state.ts"
+import { buildSessionChatTranscript } from "./transcript-items.ts"
 
 /** Reactive session chat owner that merges loaded history with live daemon updates. */
 export class SessionChat extends Sigma<SessionChatState> {
