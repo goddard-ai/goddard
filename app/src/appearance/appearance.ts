@@ -41,43 +41,16 @@ export class Appearance extends Sigma<AppearanceState> {
 
   setMode(mode: AppearanceMode) {
     this.mode = mode
-    this.#applyAppearance()
+    this.applyDocumentAppearance()
   }
 
   setHighContrast(highContrast: boolean) {
     this.highContrast = highContrast
-    this.#applyAppearance()
+    this.applyDocumentAppearance()
   }
 
   /** Applies the current appearance preferences to the document without changing persisted state. */
   applyDocumentAppearance() {
-    this.#applyAppearance()
-  }
-
-  onSetup() {
-    this.#applyAppearance()
-
-    const mediaQuery = window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY)
-    const syncSystemTheme = () => {
-      const systemTheme = readSystemThemeName(mediaQuery)
-
-      if (this.#systemTheme.value === systemTheme) {
-        return
-      }
-
-      this.#systemTheme.value = systemTheme
-
-      if (this.mode === "system") {
-        this.#applyAppearance()
-      }
-    }
-
-    syncSystemTheme()
-
-    return [listen(mediaQuery, "change", syncSystemTheme)]
-  }
-
-  #applyAppearance() {
     const root = document.documentElement
     const documentState = buildAppearanceDocumentState({
       mode: this.mode,
@@ -94,6 +67,29 @@ export class Appearance extends Sigma<AppearanceState> {
     for (const [name, value] of Object.entries(documentState.variables)) {
       root.style.setProperty(name, value)
     }
+  }
+
+  onSetup() {
+    this.applyDocumentAppearance()
+
+    const mediaQuery = window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY)
+    const syncSystemTheme = () => {
+      const systemTheme = readSystemThemeName(mediaQuery)
+
+      if (this.#systemTheme.value === systemTheme) {
+        return
+      }
+
+      this.#systemTheme.value = systemTheme
+
+      if (this.mode === "system") {
+        this.applyDocumentAppearance()
+      }
+    }
+
+    syncSystemTheme()
+
+    return [listen(mediaQuery, "change", syncSystemTheme)]
   }
 }
 
