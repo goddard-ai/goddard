@@ -13,8 +13,8 @@ type SvgIconSource = { name: SvgIconName; data?: never } | {
 
 type ParsedInlineSvg = {
   innerMarkup: string;
-  preserveAspectRatio: string | null;
-  viewBox: string | null;
+  preserveAspectRatio: string | undefined;
+  viewBox: string | undefined;
 }
 
 const parsedInlineSvgs = new Map<string, ParsedInlineSvg>()
@@ -25,20 +25,20 @@ export component GoodIcon(props: SvgIconSource & preact.JSX.IntrinsicElements["s
 
   if (props.data !== undefined) {
     const parsedSvg = getParsedInlineSvg(props.data)
+
     <svg
+      preserveAspectRatio={parsedSvg.preserveAspectRatio}
+      viewBox={parsedSvg.viewBox}
+      {...svgProps}
       dangerouslySetInnerHTML={{
         __html: parsedSvg.innerMarkup,
       }}
-      preserveAspectRatio={svgProps.preserveAspectRatio ?? parsedSvg.preserveAspectRatio ??
-        undefined}
-      viewBox={svgProps.viewBox ?? parsedSvg.viewBox ?? undefined}
     />
-    return
+  } else {
+    <svg {...svgProps}>
+      <use href={`/__spritemap#${svgIconSymbolIds[props.name]}`} />
+    </svg>
   }
-
-  <svg>
-    <use href={`/__spritemap#${svgIconSymbolIds[props.name]}`} />
-  </svg>
 }
 
 /** Removes SvgIcon-only props before forwarding the rest to the `<svg>` element. */
@@ -66,10 +66,10 @@ function getParsedInlineSvg(data: SvgIconData) {
     throw new Error("Expected inline SvgIcon data to parse into an <svg> root element.")
   }
 
-  const parsedSvg = {
+  const parsedSvg: ParsedInlineSvg = {
     innerMarkup: sourceSvg.innerHTML,
-    preserveAspectRatio: sourceSvg.getAttribute("preserveAspectRatio"),
-    viewBox: sourceSvg.getAttribute("viewBox"),
+    preserveAspectRatio: sourceSvg.getAttribute("preserveAspectRatio") ?? undefined,
+    viewBox: sourceSvg.getAttribute("viewBox") ?? undefined,
   }
 
   parsedInlineSvgs.set(data, parsedSvg)
