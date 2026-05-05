@@ -3,6 +3,7 @@ import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { Sigma } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
+import type { SessionTranscriptItem } from "~/sessions/models.ts"
 import { SessionChatTranscript } from "./chat.ts"
 import {
   applySessionChatMessage,
@@ -11,26 +12,31 @@ import {
   type SessionChatState,
 } from "./state.ts"
 
-/** Reactive session chat owner that merges loaded history with live daemon updates. */
-export class SessionChat extends Sigma<SessionChatState> {
-  #transcript: SessionChatTranscript
+/** Reactive session chat state exposed to the session chat view. */
+export type SessionChatViewState = SessionChatState & {
+  transcriptMessages: SessionTranscriptItem[]
+}
 
+function createTranscriptMessages(state: Pick<SessionChatState, "session" | "turns">) {
+  return new SessionChatTranscript({
+    session: state.session,
+    turns: state.turns,
+  }).messages
+}
+
+/** Reactive session chat owner that merges loaded history with live daemon updates. */
+export class SessionChat extends Sigma<SessionChatViewState> {
   constructor(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
     const state = createSessionChatState(input)
 
-    super(state)
-    this.#transcript = new SessionChatTranscript({
-      session: state.session,
-      turns: state.turns,
+    super({
+      ...state,
+      transcriptMessages: createTranscriptMessages(state),
     })
   }
 
   get hasEmptyTranscript() {
     return this.turns.length === 0 && !this.session.lastAgentMessage
-  }
-
-  get transcriptMessages() {
-    return this.#transcript.messages
   }
 
   /** Applies refreshed query data while preserving live messages already received locally. */
@@ -84,11 +90,8 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.session = state.session
     this.summary = state.summary
     this.turns = state.turns
-    this.#transcript.loadTranscript({
-      session: state.session,
-      turns: state.turns,
-    })
+    this.transcriptMessages = createTranscriptMessages(state)
   }
 }
 
-export interface SessionChat extends SessionChatState {}
+export interface SessionChat extends SessionChatViewState {}
