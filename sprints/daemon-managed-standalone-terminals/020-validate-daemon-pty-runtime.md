@@ -29,6 +29,14 @@ Prove the daemon can safely own PTYs with `bun-pty` before daemon terminal strea
 
 The human is reviewing whether daemon PTY ownership is technically viable and worth building on.
 
+## Review Report
+
+- Review question: Is daemon-side PTY ownership with `bun-pty` viable enough to build the terminal request/stream surface on top of it?
+- Approval means: The sprint can proceed to daemon terminal request handlers, stream events, and SDK wiring without changing the PTY library or packaging strategy.
+- Downstream unlock: `030` can depend on the daemon terminal manager, deterministic cleanup behavior, and standalone packaging validation.
+- Rework trigger: PTY spawn instability, native packaging failure, cleanup leaks, or a decision not to use `bun-pty` would invalidate daemon transport and app bridge work.
+- Revert or revision boundary: This task can be revised independently from the approved contract if the public request/stream shape remains intact.
+
 ## Work-Ahead Safety
 
 One task ahead is not safe. If daemon PTY viability or packaging behavior changes, terminal stream and app work would likely need rework.

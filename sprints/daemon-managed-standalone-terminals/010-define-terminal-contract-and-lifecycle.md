@@ -31,6 +31,14 @@ Lock the shared terminal protocol and lifecycle rules before runtime work starts
 
 The human is reviewing the control contract and lifecycle semantics, not implementation detail.
 
+## Review Report
+
+- Review question: Does the terminal contract correctly establish daemon HTTP requests plus daemon streams as the shared control model, with connection-local instance ownership and disconnect disposal?
+- Approval means: Later daemon runtime, Bun-host bridge, SDK, and app work can build against the request/stream contract without re-litigating transport semantics.
+- Downstream unlock: `020` can validate daemon PTY ownership, and `030` can implement the daemon terminal request and stream surface.
+- Rework trigger: Any change to terminal identity scope, reconnect/resume semantics, stream ownership, or SDK-facing method shape would force downstream transport and app bridge revisions.
+- Revert or revision boundary: This task can be revised without discarding daemon PTY viability work as long as the core ownership invariant remains connection-local.
+
 ## Work-Ahead Safety
 
 One task ahead is safe only for daemon PTY viability work, because that work depends on terminal ownership semantics but not on later UI decisions.
