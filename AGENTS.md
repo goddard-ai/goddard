@@ -23,6 +23,15 @@
 - Do not knowingly let code, docs, or tests diverge from `spec/`.
 - If a request conflicts with `spec/`, call it out instead of silently working around it.
 
+## Default Values
+
+- Treat behavior-affecting defaults as resolution-boundary logic, not local convenience.
+- Default config, persisted data, SDK inputs, and domain values only in named resolver, factory, normalization, or config-loading modules.
+- After a value has crossed into a resolved type, do not default it again downstream.
+- Avoid parameter defaults, destructuring defaults, and scattered `??` or `||` fallbacks for domain or configuration values.
+- UI-only presentation fallbacks are allowed when they do not affect shared behavior, persistence, SDK behavior, or system configuration.
+- For important config values, prefer resolver tests that document precedence and source.
+
 ## Code Style And Patch Discipline
 
 - Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task requires refactoring.

@@ -19,6 +19,16 @@ For bootstrap rules such as repository state, shared behavior, patch discipline,
 - Strange coding patterns must have a brief `//` comment stating what they are doing and why they are necessary.
 - Do not document the obvious or describe line-by-line implementation mechanics.
 
+## Default Value Policy
+
+- Treat defaults as explicit resolution-boundary behavior, not as general-purpose defensive coding.
+- Prefer separate raw and resolved shapes when a boundary fills missing values, such as `RawConfig` with optional fields and `ResolvedConfig` with required fields.
+- Keep default constants close to the resolver that owns them, and name them for the specific behavior they control.
+- Do not re-default values after they are resolved. Downstream code should receive either a resolved value or an intentionally absent value.
+- Avoid meaningful defaults in function parameters, destructuring patterns, and ad hoc expressions such as `value ?? fallback` or `value || fallback` outside resolver, factory, normalization, and config-loading code.
+- Use UI presentation fallbacks only for rendering concerns that do not change shared behavior, persistence, SDK behavior, or system configuration.
+- For behavior-affecting configuration, add focused tests around resolver precedence and, when useful for debugging, preserve the source of the resolved value.
+
 ## Dependency Policy
 
 - Do not add dependencies lightly. Prefer existing platform APIs, workspace packages, and project utilities.
