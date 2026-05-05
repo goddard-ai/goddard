@@ -33,11 +33,28 @@ The human is reviewing the public daemon terminal surface and ownership/security
 
 ## Review Report
 
-- Review question: Does the daemon expose the right request methods, stream events, SDK surface, and ownership checks for host-managed terminals?
-- Approval means: The Bun host can consume the daemon terminal surface without inventing protocol behavior or bypassing connection ownership rules.
-- Downstream unlock: `040` can wire the Bun host to the daemon terminal client and route terminal events to the app webview.
-- Rework trigger: Changes to request names, stream event payloads, connection teardown semantics, or SDK method shape would force bridge and app-state rework.
-- Revert or revision boundary: This task can be revised without discarding app UI work if `040` has not yet treated the SDK surface as stable.
+### Plain-English Summary
+
+This task will expose daemon-owned terminals through the approved HTTP request and daemon stream contract. It is responsible for multi-instance ownership checks, connection teardown disposal, and the SDK/client surface that hosts use to control terminals.
+
+### How To Verify Without Reading Code
+
+After implementation, review the reported request, stream, SDK, and ownership validation results. Acceptance should mean one host connection can create multiple terminals, cannot control terminals it does not own, receives terminal events through the stream surface, and disposes all owned terminals on disconnect.
+
+### Agent Verification
+
+- Pending implementation. Replace this with the exact automated checks and manual diagnostics run before marking the task finished-unreviewed.
+
+### Approval Questions
+
+- Does the daemon expose the right terminal request methods, stream events, and SDK/client surface for host-managed terminals?
+- Are ownership checks strict enough to prevent a client from controlling terminals it did not create?
+- Is disconnect teardown deterministic enough for the Bun host and app to rely on it?
+
+### Known Limits
+
+- This task should not implement Bun-host Electrobun bridging or app UI behavior.
+- The task name still contains the earlier websocket wording, but the intended contract is HTTP requests plus daemon streams.
 
 ## Work-Ahead Safety
 

@@ -33,11 +33,33 @@ The human is reviewing the control contract and lifecycle semantics, not impleme
 
 ## Review Report
 
-- Review question: Does the terminal contract correctly establish daemon HTTP requests plus daemon streams as the shared control model, with connection-local instance ownership and disconnect disposal?
-- Approval means: Later daemon runtime, Bun-host bridge, SDK, and app work can build against the request/stream contract without re-litigating transport semantics.
-- Downstream unlock: `020` can validate daemon PTY ownership, and `030` can implement the daemon terminal request and stream surface.
-- Rework trigger: Any change to terminal identity scope, reconnect/resume semantics, stream ownership, or SDK-facing method shape would force downstream transport and app bridge revisions.
-- Revert or revision boundary: This task can be revised without discarding daemon PTY viability work as long as the core ownership invariant remains connection-local.
+### Plain-English Summary
+
+This task locks the terminal contract around daemon HTTP requests plus daemon streams. It defines connection-local terminal ids, daemon-minted connection ids, disconnect disposal semantics, and SDK-facing request/event types so later daemon, host, and app work share the same protocol.
+
+### How To Verify Without Reading Code
+
+Review the contract decision: terminal commands are request-based, terminal output and lifecycle updates arrive through daemon streams, and terminal instances are owned by one daemon terminal connection. Acceptance means downstream work should not reopen transport, identity, reconnect, or SDK surface questions unless product semantics change.
+
+### Agent Verification
+
+- `bun --cwd core/schema test`
+- `bun --cwd core/sdk test`
+- `bun run --cwd core/schema typecheck`
+- `bun run --cwd core/sdk typecheck`
+- `bun run --cwd core/schema lint`
+- `bun run --cwd core/sdk lint`
+
+### Approval Questions
+
+- Does the terminal contract correctly establish HTTP requests plus daemon streams as the shared control model?
+- Are connection-local instance ownership and disconnect disposal the intended lifecycle semantics for this sprint?
+- Is the SDK-facing method and event shape stable enough for daemon, Bun host, and app work to build against?
+
+### Known Limits
+
+- This task defines the contract; it does not implement daemon PTY runtime behavior, host bridging, or app terminal UI.
+- The task intentionally does not support reconnect or resume across desktop-host disconnect in this sprint.
 
 ## Work-Ahead Safety
 

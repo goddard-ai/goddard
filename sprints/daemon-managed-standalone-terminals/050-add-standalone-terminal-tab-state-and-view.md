@@ -34,11 +34,28 @@ The human is reviewing the actual user-visible terminal behavior, especially ope
 
 ## Review Report
 
-- Review question: Does the app provide a real standalone daemon-backed terminal tab with the intended open path, state retention, input/output behavior, and close/restart lifecycle?
-- Approval means: The sprint has delivered the first acceptable user-visible terminal slice and can be landed or iterated from product feedback rather than infrastructure gaps.
-- Downstream unlock: Final sprint acceptance and landing become possible once this behavior is accepted.
-- Rework trigger: User confusion around terminal launch semantics, cwd defaults, tab close behavior, state retention, or terminal prominence would require app-state and UX revision.
-- Revert or revision boundary: This app slice can be revised without changing the daemon request/stream contract or PTY runtime if the host bridge remains stable.
+### Plain-English Summary
+
+This task will deliver the standalone app terminal surface: a real daemon-backed terminal tab with state, output rendering, input forwarding, resize handling, close/restart behavior, and a non-debug entrypoint.
+
+### How To Verify Without Reading Code
+
+After implementation, review the reported app behavior checks and, if needed, inspect the app manually. Acceptance should mean a user can open multiple terminal tabs, interact with live daemon-backed terminals, preserve hidden-tab state while the Bun host remains connected, and close/restart terminals with the intended lifecycle.
+
+### Agent Verification
+
+- Pending implementation. Replace this with the exact automated checks and app interaction verification run before marking the task finished-unreviewed.
+
+### Approval Questions
+
+- Does the app provide the intended standalone terminal open path and tab behavior?
+- Are cwd defaults, state retention, close semantics, and restart semantics acceptable for the first user-visible slice?
+- Does the terminal remain a bounded utility rather than becoming a terminal-first primary workflow?
+
+### Known Limits
+
+- This is the first vertical user-visible terminal slice, not a complete terminal product.
+- No additional work-ahead is recommended after this task; product feedback on the visible behavior should drive follow-up revisions.
 
 ## Work-Ahead Safety
 

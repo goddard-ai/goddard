@@ -32,11 +32,28 @@ The human is reviewing the host boundary and whether terminal ownership is corre
 
 ## Review Report
 
-- Review question: Does the Bun host own the daemon terminal connection and expose only the intended browser-safe terminal bridge to the app webview?
-- Approval means: App state can treat terminals as Bun-host-backed resources and does not need direct daemon access or app-only protocol semantics.
-- Downstream unlock: `050` can build user-visible standalone terminal tabs on the approved host bridge.
-- Rework trigger: If ownership moves into the webview, lifecycle cleanup is ambiguous, or bridge payloads diverge from the shared terminal contract, the app surface must be revised.
-- Revert or revision boundary: This bridge can be revised without discarding daemon terminal runtime and SDK work, but app tab work should wait for approval.
+### Plain-English Summary
+
+This task will make the Bun host the sole daemon terminal client for the app. The webview should receive a narrow, browser-safe terminal bridge over Electrobun instead of connecting directly to daemon terminal streams or daemon IPC.
+
+### How To Verify Without Reading Code
+
+After implementation, review the reported bridge and lifecycle checks. Acceptance should mean the Bun host can multiplex multiple daemon terminals, route events to the right webview terminal ids, and clean up app-side registrations on reload or teardown without exposing daemon access directly to the browser.
+
+### Agent Verification
+
+- Pending implementation. Replace this with the exact automated checks and app/host diagnostics run before marking the task finished-unreviewed.
+
+### Approval Questions
+
+- Does the Bun host own the daemon terminal connection rather than the webview?
+- Is the browser-safe bridge narrow and aligned to the shared terminal contract?
+- Are webview reload, teardown, and host cleanup semantics clear enough for app terminal state to depend on them?
+
+### Known Limits
+
+- This task should not implement the final user-facing terminal tab experience.
+- App state work should wait for this bridge shape to be accepted before treating terminal instances as stable user-visible resources.
 
 ## Work-Ahead Safety
 
