@@ -35,6 +35,7 @@ export const ACPAdapterNames = [
   "poolside",
   "qoder",
   "qwen-code",
+  "sigit",
   "stakpak",
   "vtcode",
 ] as const
