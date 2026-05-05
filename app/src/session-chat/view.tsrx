@@ -1,10 +1,10 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
+import { useEffect, useState } from "preact/hooks"
 import { useSigma } from "preact-sigma"
-import { useState } from "preact/hooks"
 import { isPromise } from "radashi"
 
-import { SessionChat } from "./chat.ts"
 import { Composer } from "./composer.tsrx"
+import { SessionChatModel } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { queryClient, useQueries } from "~/lib/query.ts"
@@ -82,17 +82,28 @@ component LoadedSessionChatView(props: {
   session: DaemonSession;
 }) {
   const [submitError, setSubmitError] = useState<unknown>(null)
-  const chat = useSigma(() => new SessionChat({ session: props.session, turns: props.history.turns }), [
-    props.session,
-    props.history.turns,
-  ])
-  const hasEmptyTranscript = props.history.turns.length === 0 && !props.session.lastAgentMessage
-  const resolvedProjectPath = useNearestProjectPath(props.session.cwd)
+  const chat = useSigma(
+    () => new SessionChatModel({
+      history: props.history,
+      session: props.session,
+    }),
+    { deps: [props.session.id] },
+  )
+  const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
+
+  useEffect(() => {
+    chat.syncLoadedData(
+      {
+        history: props.history,
+        session: props.session,
+      },
+    )
+  }, [chat, props.history, props.session])
 
   useReportTabProject(resolvedProjectPath)
 
   <main class={styles.root}>
-    if (hasEmptyTranscript) {
+    if (chat.hasEmptyTranscript) {
       <div class={styles.transcript}>
         <SessionChatStateMessage
           description="Send a prompt to start this session."
@@ -103,8 +114,8 @@ component LoadedSessionChatView(props: {
       <Transcript
         class={styles.transcript}
         initialScrollPosition="bottom"
-        messages={chat.messages}
-        scrollCacheKey={`detail:session:${props.session.id}:transcript`}
+        messages={chat.transcriptMessages}
+        scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
       />
     }
     <footer class={styles.composerDock}>
@@ -120,7 +131,7 @@ component LoadedSessionChatView(props: {
         loadSuggestions={async (input) => {
           const response = await goddardSdk.session.composerSuggestions(
             {
-              id: props.session.id,
+              id: chat.session.id,
               trigger: input.trigger,
               query: input.query,
             },
@@ -139,8 +150,8 @@ component LoadedSessionChatView(props: {
           try {
             await submitSessionPrompt(
               {
-                id: props.session.id,
-                acpId: props.session.acpSessionId,
+                id: chat.session.id,
+                acpId: chat.session.acpSessionId,
                 prompt,
               },
             )

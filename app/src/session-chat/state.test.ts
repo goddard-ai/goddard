@@ -2,7 +2,11 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
-import { applySessionChatMessage, createSessionChatState } from "./state.ts"
+import {
+  applySessionChatMessage,
+  createSessionChatState,
+  mergeSessionChatHistory,
+} from "./state.ts"
 
 function createSession(overrides: Partial<DaemonSession> = {}) {
   return {
@@ -248,4 +252,35 @@ test("applySessionChatMessage exposes pending permission and plan events", () =>
     "permissionRequest",
     "planUpdate",
   ])
+})
+
+test("mergeSessionChatHistory preserves live messages that are not in refreshed history yet", () => {
+  const loaded = createSessionChatState({
+    session: createSession(),
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+  const live = applySessionChatMessage(loaded, agentChunk("Still working"), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  const refreshed = mergeSessionChatHistory(live, {
+    session: createSession({ title: "Updated title" }),
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  expect(refreshed.session.title).toBe("Updated title")
+  expect(refreshed.turns).toHaveLength(1)
+  expect(refreshed.turns[0].messages).toHaveLength(2)
+  expect(refreshed.turns[0].events.map((event) => event.kind)).toEqual(["prompt", "sessionUpdate"])
 })

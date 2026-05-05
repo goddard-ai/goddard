@@ -576,6 +576,31 @@ export function applySessionChatMessage(
   })
 }
 
+/** Merges a refreshed history page without dropping live messages already applied locally. */
+export function mergeSessionChatHistory(
+  state: SessionChatState,
+  input: {
+    history: GetSessionHistoryResponse
+    session: DaemonSession
+  },
+) {
+  let nextState = createSessionChatState(input)
+
+  for (const turn of state.turns) {
+    if (turn.source === "history") {
+      continue
+    }
+
+    for (const message of turn.messages) {
+      nextState = applySessionChatMessage(nextState, message, {
+        receivedAt: turn.completedAt ?? turn.startedAt,
+      })
+    }
+  }
+
+  return nextState
+}
+
 /** Replaces the session record while preserving the current merged turn state. */
 export function applySessionChatSession(state: SessionChatState, session: DaemonSession) {
   return withSummary({
