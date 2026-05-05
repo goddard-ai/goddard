@@ -3,6 +3,10 @@ export type * from "./daemon-adapters.ts"
 export {
   AppSettingKey,
   AppSettingRecord,
+  AppSettingScope,
+  AppSettingScopeId,
+  AppSettingScopeKind,
+  DEFAULT_APP_SETTING_SCOPE,
   DeleteAppSettingRequest,
   GetAppSettingRequest,
   SetAppSettingRequest,

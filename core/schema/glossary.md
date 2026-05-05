@@ -42,6 +42,9 @@
 - `App Setting`
   - A daemon-owned desktop app preference or UI state snapshot addressed by a stable setting key.
   - Why: so the app, SDK, and daemon can share one persistence contract for desktop app state.
+- `App Setting Scope`
+  - The global or window-local partition that owns one app setting key.
+  - Why: so multiple app windows can later store independent UI state without changing the daemon storage shape.
 - `Workforce Request`
   - One unit of delegated work inside a repository-local workforce.
   - Why: so multi-agent collaboration can reason about ownership, state transitions, and outcomes at the task level.

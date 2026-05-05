@@ -17,7 +17,7 @@ afterEach(async () => {
   resetDb({ filename: ":memory:" })
 })
 
-test("daemon app settings IPC stores one latest record per key", async () => {
+test("daemon app settings IPC stores one latest record per scope and key", async () => {
   daemon = await startDaemonServer(createBackendClient(), { port: 0 })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const key = "goddard.app.state.v1"
@@ -60,15 +60,47 @@ test("daemon app settings IPC stores one latest record per key", async () => {
     setting: secondRecord,
   })
 
-  expect(db.appSettings.findMany({ where: { key } })).toHaveLength(1)
+  await expect(
+    client.send("appSettings.set", {
+      key,
+      scopeKind: "window",
+      scopeId: "secondary",
+      record: firstRecord,
+    }),
+  ).resolves.toEqual({
+    setting: firstRecord,
+  })
+
+  expect(db.appSettings.findMany({ where: { key } })).toHaveLength(2)
+  expect(
+    db.appSettings.findMany({ where: { scopeKind: "window", scopeId: "primary" } }),
+  ).toHaveLength(1)
   await expect(client.send("appSettings.get", { key })).resolves.toEqual({
     setting: secondRecord,
+  })
+  await expect(
+    client.send("appSettings.get", {
+      key,
+      scopeKind: "window",
+      scopeId: "secondary",
+    }),
+  ).resolves.toEqual({
+    setting: firstRecord,
   })
   await expect(client.send("appSettings.delete", { key })).resolves.toEqual({
     deleted: true,
   })
   await expect(client.send("appSettings.get", { key })).resolves.toEqual({
     setting: null,
+  })
+  await expect(
+    client.send("appSettings.get", {
+      key,
+      scopeKind: "window",
+      scopeId: "secondary",
+    }),
+  ).resolves.toEqual({
+    setting: firstRecord,
   })
 })
 

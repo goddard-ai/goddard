@@ -69,6 +69,8 @@ describe("@goddard-ai/sdk session namespace", () => {
     await expect(
       sdk.appSettings.set({
         key: "goddard.app.state.v1",
+        scopeKind: "window",
+        scopeId: "secondary",
         record,
       }),
     ).resolves.toEqual({
@@ -83,6 +85,8 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
     expect(send).toHaveBeenNthCalledWith(2, "appSettings.set", {
       key: "goddard.app.state.v1",
+      scopeKind: "window",
+      scopeId: "secondary",
       record,
     })
     expect(send).toHaveBeenNthCalledWith(3, "appSettings.delete", {

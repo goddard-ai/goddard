@@ -5,11 +5,13 @@ import * as acp from "@agentclientprotocol/sdk"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
-import type {
-  AppSettingRecord,
-  DaemonAppSetting,
-  DaemonSession,
-  SubscribeWorkforceEventsRequest,
+import {
+  DEFAULT_APP_SETTING_SCOPE,
+  type AppSettingRecord,
+  type AppSettingScope,
+  type DaemonAppSetting,
+  type DaemonSession,
+  type SubscribeWorkforceEventsRequest,
 } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
@@ -123,6 +125,13 @@ export async function startDaemonServer(
     } satisfies AppSettingRecord
   }
 
+  function resolveAppSettingScope(input: AppSettingScope) {
+    return {
+      scopeKind: input.scopeKind ?? DEFAULT_APP_SETTING_SCOPE.scopeKind,
+      scopeId: input.scopeId ?? DEFAULT_APP_SETTING_SCOPE.scopeId,
+    }
+  }
+
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
     if (!context) {
@@ -228,21 +237,24 @@ export async function startDaemonServer(
             : null,
       }
     },
-    "appSettings.get": async ({ key }) => {
+    "appSettings.get": async ({ key, scopeKind, scopeId }) => {
+      const scope = resolveAppSettingScope({ scopeKind, scopeId })
       const setting =
         db.appSettings.first({
-          where: { key },
+          where: { key, ...scope },
         }) ?? null
 
       return {
         setting: setting ? toAppSettingRecord(setting) : null,
       }
     },
-    "appSettings.set": async ({ key, record }) => {
+    "appSettings.set": async ({ key, record, scopeKind, scopeId }) => {
+      const scope = resolveAppSettingScope({ scopeKind, scopeId })
       const setting = db.appSettings.putByUnique(
-        { key },
+        { key, ...scope },
         {
           key,
+          ...scope,
           ...record,
         },
       )
@@ -251,10 +263,11 @@ export async function startDaemonServer(
         setting: toAppSettingRecord(setting),
       }
     },
-    "appSettings.delete": async ({ key }) => {
+    "appSettings.delete": async ({ key, scopeKind, scopeId }) => {
+      const scope = resolveAppSettingScope({ scopeKind, scopeId })
       const setting =
         db.appSettings.first({
-          where: { key },
+          where: { key, ...scope },
         }) ?? null
 
       return {

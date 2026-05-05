@@ -25,7 +25,15 @@ const metadata = {
 }
 
 const schema = {
-  appSettings: kind("aps", DaemonAppSetting).index("key", { unique: true }),
+  appSettings: kind("aps", DaemonAppSetting).index("key").index("scopeKind").index("scopeId").multi(
+    "scopeKind_scopeId_key",
+    {
+      scopeKind: "asc",
+      scopeId: "asc",
+      key: "asc",
+    },
+    { unique: true },
+  ),
 
   sessions: kind("ses", DaemonSession)
     .createdAt()

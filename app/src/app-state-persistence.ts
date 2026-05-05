@@ -15,6 +15,10 @@ import {
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
 
 const APP_STATE_STORAGE_KEY = "goddard.app.state.v1"
+const APP_STATE_STORAGE_SCOPE = {
+  scopeKind: "window",
+  scopeId: "primary",
+} as const
 const APP_STATE_RECORD_VERSION = 1
 const APP_STATE_WRITE_DEBOUNCE_MS = 250
 
@@ -250,6 +254,7 @@ export function createRestoredAppModels(initialAppearanceState: AppearanceState)
 async function loadPersistedAppStateSnapshot() {
   const response = await desktopHost.sdk.appSettings.get({
     key: APP_STATE_STORAGE_KEY,
+    ...APP_STATE_STORAGE_SCOPE,
   })
 
   return (response.setting?.value ?? null) as PersistedAppStateSnapshot | null
@@ -258,6 +263,7 @@ async function loadPersistedAppStateSnapshot() {
 async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapshot) {
   await desktopHost.sdk.appSettings.set({
     key: APP_STATE_STORAGE_KEY,
+    ...APP_STATE_STORAGE_SCOPE,
     record: {
       version: APP_STATE_RECORD_VERSION,
       savedAt: Date.now(),
