@@ -1,7 +1,7 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
-import { SessionChatTranscript } from "./chat.ts"
+import { buildSessionChatTranscript } from "./chat.ts"
 
 function createSession(lastAgentMessage: string | null) {
   return {
@@ -60,10 +60,10 @@ function createTranscriptMessages(
   session: DaemonSession,
   turns: GetSessionHistoryResponse["turns"],
 ) {
-  return new SessionChatTranscript({ session, turns }).messages
+  return buildSessionChatTranscript({ session, turns })
 }
 
-test("SessionChatTranscript appends the latest daemon summary when turns have no assistant update yet", () => {
+test("buildSessionChatTranscript appends the latest daemon summary when turns have no assistant update yet", () => {
   const session = createSession("Ready to review the diff.")
   const turns = createTurns([
     {
@@ -88,7 +88,7 @@ test("SessionChatTranscript appends the latest daemon summary when turns have no
   })
 })
 
-test("SessionChatTranscript accumulates agent_message_chunk updates into one assistant row", () => {
+test("buildSessionChatTranscript accumulates agent_message_chunk updates into one assistant row", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -159,7 +159,7 @@ test("SessionChatTranscript accumulates agent_message_chunk updates into one ass
   ])
 })
 
-test("SessionChatTranscript merges tool_call updates into one stable tool row", () => {
+test("buildSessionChatTranscript merges tool_call updates into one stable tool row", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -253,7 +253,7 @@ test("SessionChatTranscript merges tool_call updates into one stable tool row", 
   ])
 })
 
-test("SessionChatTranscript ignores routed session/update payloads without rendering transcript text", () => {
+test("buildSessionChatTranscript ignores routed session/update payloads without rendering transcript text", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -286,7 +286,7 @@ test("SessionChatTranscript ignores routed session/update payloads without rende
   ])
 })
 
-test("SessionChatTranscript logs an error instead of flattening unsupported session/update payloads", () => {
+test("buildSessionChatTranscript logs an error instead of flattening unsupported session/update payloads", () => {
   const session = createSession(null)
   const turns = createTurns([
     {

@@ -45,11 +45,6 @@ export type SessionChatTranscriptInput = {
   turns: readonly SessionHistoryTurn[]
 }
 
-/** Public state for one session chat transcript builder. */
-export type SessionChatTranscriptState = {
-  messages: SessionTranscriptItem[]
-}
-
 const TOOL_KINDS = new Set<SessionTranscriptToolKind>([
   "read",
   "edit",
@@ -329,79 +324,24 @@ function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   } satisfies SessionTranscriptTextMessage
 }
 
-/** Builds one session chat transcript and applies ACP message accumulation rules. */
-export class SessionChatTranscript {
-  /** Assistant row lookup rebuilt with each transcript load; it is derived from ACP turn order. */
-  #agentRowIndexes = new Map<string, number>()
-  /** Tool row lookup rebuilt with each transcript load; it preserves stable ACP tool identities. */
-  #toolRowIndexes = new Map<string, number>()
+/** Builds one session chat transcript from session state and ACP message history. */
+export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
+  const agentRowIndexes = new Map<string, number>()
+  const toolRowIndexes = new Map<string, number>()
+  const messages: SessionTranscriptItem[] = [
+    createTextRow({
+      id: `${input.session.id}:context`,
+      role: "system",
+      authorName: "System",
+      timestampLabel: input.session.status,
+      content: [textContentBlock(`Working directory: ${input.session.cwd}`)],
+    }),
+  ]
 
-  messages: SessionTranscriptItem[] = []
-
-  constructor(input: SessionChatTranscriptInput) {
-    this.loadTranscript(input)
-  }
-
-  /** Rebuilds the transcript from the latest daemon session snapshot and ACP turn history. */
-  loadTranscript(input: SessionChatTranscriptInput) {
-    this.#agentRowIndexes.clear()
-    this.#toolRowIndexes.clear()
-    this.messages = [
-      createTextRow({
-        id: `${input.session.id}:context`,
-        role: "system",
-        authorName: "System",
-        timestampLabel: input.session.status,
-        content: [textContentBlock(`Working directory: ${input.session.cwd}`)],
-      }),
-    ]
-
-    for (const turn of input.turns) {
-      const isStreamingTurn = turn.completedAt === null
-
-      for (const [messageIndex, message] of turn.messages.entries()) {
-        const promptContent = extractPromptContent(message)
-
-        if (promptContent.length > 0) {
-          this.#appendUserPrompt(turn, messageIndex, promptContent)
-          continue
-        }
-
-        const sessionUpdate = parseTranscriptSessionUpdate(message)
-
-        if (sessionUpdate) {
-          if (sessionUpdate.kind === "toolCall") {
-            this.#applyToolCallUpdate(input.session, turn.turnId, sessionUpdate.toolCallUpdate)
-            continue
-          }
-
-          if (sessionUpdate.kind === "agentMessageChunk") {
-            this.#applyAgentMessageChunk({
-              session: input.session,
-              streaming: isStreamingTurn,
-              text: sessionUpdate.text,
-              turnId: turn.turnId,
-            })
-            continue
-          }
-
-          if (sessionUpdate.kind === "ignored") {
-            continue
-          }
-
-          reportUnsupportedTranscriptMessage(message, sessionUpdate.reason)
-          continue
-        }
-      }
-    }
-
-    this.#appendLatestDaemonSummary(input.session)
-  }
-
-  #appendLatestDaemonSummary(session: DaemonSession) {
+  function appendLatestDaemonSummary(session: DaemonSession) {
     if (
       !session.lastAgentMessage ||
-      this.messages.some(
+      messages.some(
         (item) =>
           item.kind === "message" &&
           item.role === "assistant" &&
@@ -413,7 +353,7 @@ export class SessionChatTranscript {
       return
     }
 
-    this.messages.push(
+    messages.push(
       createTextRow({
         id: `${session.id}:latest`,
         role: "assistant",
@@ -425,12 +365,12 @@ export class SessionChatTranscript {
     )
   }
 
-  #appendUserPrompt(
+  function appendUserPrompt(
     turn: SessionHistoryTurn,
     messageIndex: number,
     content: SessionTranscriptContentBlock[],
   ) {
-    this.messages.push(
+    messages.push(
       createTextRow({
         id: `${turn.turnId}:prompt:${messageIndex}`,
         role: "user",
@@ -441,7 +381,7 @@ export class SessionChatTranscript {
     )
   }
 
-  #applyAgentMessageChunk(input: {
+  function applyAgentMessageChunk(input: {
     session: DaemonSession
     streaming: boolean
     text: string
@@ -452,12 +392,12 @@ export class SessionChatTranscript {
     }
 
     const rowKey = `${input.turnId}:agent`
-    const rowIndex = this.#agentRowIndexes.get(rowKey)
+    const rowIndex = agentRowIndexes.get(rowKey)
 
     if (rowIndex == null) {
-      this.#agentRowIndexes.set(
+      agentRowIndexes.set(
         rowKey,
-        this.messages.push(
+        messages.push(
           createTextRow({
             id: rowKey,
             role: "assistant",
@@ -471,7 +411,7 @@ export class SessionChatTranscript {
       return
     }
 
-    const existingRow = this.messages[rowIndex]
+    const existingRow = messages[rowIndex]
 
     if (existingRow?.kind !== "message" || existingRow.role !== "assistant") {
       console.error("Session-chat transcript agent row is in an invalid state.", {
@@ -485,21 +425,20 @@ export class SessionChatTranscript {
       .flatMap((block) => (block.type === "text" ? [block.text] : []))
       .join("")
 
-    this.messages[rowIndex] = {
+    messages[rowIndex] = {
       ...existingRow,
       content: [textContentBlock(`${existingText}${input.text}`)],
       streaming: input.streaming,
     }
   }
 
-  /** Applies one ACP tool update to the transcript, updating an existing card when identities match. */
-  #applyToolCallUpdate(
+  function applyToolCallUpdate(
     session: DaemonSession,
     turnId: string,
     toolCallUpdate: ParsedToolCallUpdate,
   ) {
     const rowKey = `${turnId}:tool:${toolCallUpdate.toolCallId}`
-    const rowIndex = this.#toolRowIndexes.get(rowKey)
+    const rowIndex = toolRowIndexes.get(rowKey)
 
     if (rowIndex == null) {
       const toolKind = toolCallUpdate.toolKind ?? "other"
@@ -518,16 +457,16 @@ export class SessionChatTranscript {
         locations: toolCallUpdate.locations ?? [],
       }
 
-      this.#toolRowIndexes.set(rowKey, this.messages.push(toolRow) - 1)
+      toolRowIndexes.set(rowKey, messages.push(toolRow) - 1)
       return
     }
 
-    const existingRow = this.messages[rowIndex]
+    const existingRow = messages[rowIndex]
     if (existingRow.kind !== "toolCall") {
       return
     }
 
-    this.messages[rowIndex] = {
+    messages[rowIndex] = {
       ...existingRow,
       title: toolCallUpdate.title ?? existingRow.title,
       toolKind: toolCallUpdate.toolKind ?? existingRow.toolKind,
@@ -536,4 +475,47 @@ export class SessionChatTranscript {
       locations: toolCallUpdate.locations ?? existingRow.locations,
     }
   }
+
+  for (const turn of input.turns) {
+    const isStreamingTurn = turn.completedAt === null
+
+    for (const [messageIndex, message] of turn.messages.entries()) {
+      const promptContent = extractPromptContent(message)
+
+      if (promptContent.length > 0) {
+        appendUserPrompt(turn, messageIndex, promptContent)
+        continue
+      }
+
+      const sessionUpdate = parseTranscriptSessionUpdate(message)
+
+      if (sessionUpdate) {
+        if (sessionUpdate.kind === "toolCall") {
+          applyToolCallUpdate(input.session, turn.turnId, sessionUpdate.toolCallUpdate)
+          continue
+        }
+
+        if (sessionUpdate.kind === "agentMessageChunk") {
+          applyAgentMessageChunk({
+            session: input.session,
+            streaming: isStreamingTurn,
+            text: sessionUpdate.text,
+            turnId: turn.turnId,
+          })
+          continue
+        }
+
+        if (sessionUpdate.kind === "ignored") {
+          continue
+        }
+
+        reportUnsupportedTranscriptMessage(message, sessionUpdate.reason)
+        continue
+      }
+    }
+  }
+
+  appendLatestDaemonSummary(input.session)
+
+  return messages
 }
