@@ -283,7 +283,10 @@ async function listSyncRunControlPaths(controlDir: string) {
 /** Reads a control file, tolerating concurrent cleanup or writes. */
 async function readSyncRunControlFile(controlPath: string) {
   try {
-    return parseSyncRunControlFile(JSON.parse(await fs.readFile(controlPath, "utf-8")))
+    const parsed = syncRunControlFileSchema.safeParse(
+      JSON.parse(await fs.readFile(controlPath, "utf-8")),
+    )
+    return parsed.success ? parsed.data : null
   } catch (error) {
     if (isErrno(error, "ENOENT") || error instanceof SyntaxError) {
       return null
@@ -311,11 +314,6 @@ async function overwriteExistingSyncRunControlFile(
   } finally {
     await file?.close()
   }
-}
-
-function parseSyncRunControlFile(value: unknown) {
-  const parsed = syncRunControlFileSchema.safeParse(value)
-  return parsed.success ? parsed.data : null
 }
 
 function formatSyncRunControlFile(control: SyncRunControlFile) {
