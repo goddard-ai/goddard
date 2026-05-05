@@ -1,3 +1,4 @@
+import { signal } from "@preact/signals"
 import { sigma, useSigma, type Immutable, type Protected } from "preact-sigma"
 import { useEffect, useMemo } from "preact/hooks"
 import { getErrorMessage } from "radashi"
@@ -7,7 +8,6 @@ import { desktopHost } from "./desktop-host.ts"
 import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
-import { globalEventHub } from "./shared/global-event-hub.ts"
 import {
   shortcutRegistry,
   type ShortcutRegistry,
@@ -66,6 +66,12 @@ type ObserveAppStateSnapshotOptions = {
   debounceMs?: number
   onWriteError?: (error: unknown) => void
 }
+
+/** Non-Sigma persistence status surfaced in settings UI. */
+export const shortcutPersistenceErrors = signal({
+  loadError: null as string | null,
+  writeError: null as string | null,
+})
 
 /** Captures the current committed app Sigma state as one daemon-persisted snapshot. */
 export function captureAppStateSnapshot(appModels: RestoredAppModels) {
@@ -246,10 +252,10 @@ async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapsho
       value: snapshot,
     },
   })
-  globalEventHub.emit("appStatePersistence", {
-    operation: "write",
-    errorMessage: null,
-  })
+  shortcutPersistenceErrors.value = {
+    ...shortcutPersistenceErrors.value,
+    writeError: null,
+  }
 }
 
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
@@ -281,10 +287,10 @@ export function usePersistentAppModels() {
 
       appStateObserver = observeAppStateSnapshot(appModels, writePersistedAppStateSnapshot, {
         onWriteError(error) {
-          globalEventHub.emit("appStatePersistence", {
-            operation: "write",
-            errorMessage: getErrorMessage(error),
-          })
+          shortcutPersistenceErrors.value = {
+            ...shortcutPersistenceErrors.value,
+            writeError: `Failed to save app settings: ${getErrorMessage(error)}`,
+          }
         },
       })
     }
@@ -303,10 +309,10 @@ export function usePersistentAppModels() {
 
         startAppStateObserver()
         syncProjectContext()
-        globalEventHub.emit("appStatePersistence", {
-          operation: "load",
-          errorMessage: null,
-        })
+        shortcutPersistenceErrors.value = {
+          ...shortcutPersistenceErrors.value,
+          loadError: null,
+        }
       },
       (error) => {
         if (isDisposed) {
@@ -315,10 +321,10 @@ export function usePersistentAppModels() {
 
         startAppStateObserver()
         syncProjectContext()
-        globalEventHub.emit("appStatePersistence", {
-          operation: "load",
-          errorMessage: getErrorMessage(error),
-        })
+        shortcutPersistenceErrors.value = {
+          ...shortcutPersistenceErrors.value,
+          loadError: `Failed to load app settings: ${getErrorMessage(error)}`,
+        }
       },
     )
 

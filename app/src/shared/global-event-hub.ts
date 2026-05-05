@@ -17,16 +17,9 @@ export type DaemonStreamEventDetail<Name extends DaemonStreamName = DaemonStream
   payload: InferStreamPayload<DaemonSchema, Name>
 }
 
-/** Status update for app-state persistence backed by daemon app settings. */
-export type AppStatePersistenceEventDetail = {
-  operation: "load" | "write"
-  errorMessage: string | null
-}
-
 /** Shared typed global events dispatched across the active webview. */
 export type GlobalEvents = {
   appMenu: { command: AppCommandId }
-  appStatePersistence: AppStatePersistenceEventDetail
   commandDialogActivated: { dialogId: string }
   daemonStream: DaemonStreamEventDetail
   debugMenu: { surface: DebugMenuSurface }

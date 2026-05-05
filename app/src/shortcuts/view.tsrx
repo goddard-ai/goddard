@@ -3,15 +3,14 @@ import { Menu } from "@ark-ui/react/menu"
 import { cx } from "@goddard-ai/styled-system/css"
 import { Command, Search } from "lucide-react"
 import type { RecordingSession } from "powerkeys"
-import { useListener } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
+import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandList } from "~/commands/app-command.ts"
 import { useModalStackEntry } from "~/lib/modal-stack.ts"
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
-import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
 import { KeyboardShortcutCaptureDialog } from "./capture-dialog.tsrx"
 import styles from "./view.style.ts"
@@ -41,18 +40,13 @@ type CaptureState = {
 
 component KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
+  const persistenceErrors = shortcutPersistenceErrors.value
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchRecordingSessionRef = useRef<RecordingSession | null>(null)
   const [searchText, setSearchText] = useState("")
   const [isRecordingSearchEnabled, setIsRecordingSearchEnabled] = useState(false)
   const [editingWhenRowKey, setEditingWhenRowKey] = useState<string | null>(null)
   const [captureState, setCaptureState] = useState<CaptureState | null>(null)
-  const [persistenceErrors, setPersistenceErrors] = useState(
-    {
-      loadError: null as string | null,
-      writeError: null as string | null,
-    },
-  )
 
   const captureDialog = useDialog(
     {
@@ -74,25 +68,6 @@ component KeyboardShortcutsView(props: { class?: string }) {
       },
     },
   )
-
-  useListener(globalEventHub, "appStatePersistence", ({ operation, errorMessage }) => {
-    if (operation === "load") {
-      setPersistenceErrors(
-        (current) => ({
-          ...current,
-          loadError: errorMessage,
-        }),
-      )
-      return
-    }
-
-    setPersistenceErrors(
-      (current) => ({
-        ...current,
-        writeError: errorMessage,
-      }),
-    )
-  })
 
   function stopSearchRecording() {
     const session = searchRecordingSessionRef.current
@@ -313,12 +288,12 @@ component KeyboardShortcutsView(props: { class?: string }) {
       <div class={styles.warning}>
         {"The saved shortcut settings could not be loaded, so the built-in profile is active."}
         <br />
-        {`Failed to load app settings: ${persistenceErrors.loadError}`}
+        {persistenceErrors.loadError}
       </div>
     }
     if (persistenceErrors.writeError) {
       <div class={styles.error}>
-        {`Failed to save app settings: ${persistenceErrors.writeError}`}
+        {persistenceErrors.writeError}
       </div>
     }
     <div class={styles.tableFrame}>
