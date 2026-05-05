@@ -6,9 +6,7 @@ import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import {
-  DEFAULT_APP_SETTING_SCOPE,
   type AppSettingRecord,
-  type AppSettingScope,
   type DaemonAppSetting,
   type DaemonSession,
   type SubscribeWorkforceEventsRequest,
@@ -125,13 +123,6 @@ export async function startDaemonServer(
     } satisfies AppSettingRecord
   }
 
-  function resolveAppSettingScope(input: AppSettingScope) {
-    return {
-      scopeKind: input.scopeKind ?? DEFAULT_APP_SETTING_SCOPE.scopeKind,
-      scopeId: input.scopeId ?? DEFAULT_APP_SETTING_SCOPE.scopeId,
-    }
-  }
-
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
     if (!context) {
@@ -238,10 +229,9 @@ export async function startDaemonServer(
       }
     },
     "appSettings.get": async ({ key, scopeKind, scopeId }) => {
-      const scope = resolveAppSettingScope({ scopeKind, scopeId })
       const setting =
         db.appSettings.first({
-          where: { key, ...scope },
+          where: { key, scopeKind, scopeId },
         }) ?? null
 
       return {
@@ -249,12 +239,12 @@ export async function startDaemonServer(
       }
     },
     "appSettings.set": async ({ key, record, scopeKind, scopeId }) => {
-      const scope = resolveAppSettingScope({ scopeKind, scopeId })
       const setting = db.appSettings.putByUnique(
-        { key, ...scope },
+        { key, scopeKind, scopeId },
         {
           key,
-          ...scope,
+          scopeKind,
+          scopeId,
           ...record,
         },
       )
@@ -264,10 +254,9 @@ export async function startDaemonServer(
       }
     },
     "appSettings.delete": async ({ key, scopeKind, scopeId }) => {
-      const scope = resolveAppSettingScope({ scopeKind, scopeId })
       const setting =
         db.appSettings.first({
-          where: { key, ...scope },
+          where: { key, scopeKind, scopeId },
         }) ?? null
 
       return {

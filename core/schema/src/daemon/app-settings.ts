@@ -24,19 +24,13 @@ export const AppSettingRecord = z.strictObject({
 
 export type AppSettingRecord = z.output<typeof AppSettingRecord>
 
-/** Scope selector for one app setting. Defaults to today's single primary app window. */
+/** Scope selector for one app setting. */
 export const AppSettingScope = z.strictObject({
-  scopeKind: AppSettingScopeKind.optional(),
-  scopeId: AppSettingScopeId.optional(),
+  scopeKind: AppSettingScopeKind,
+  scopeId: AppSettingScopeId,
 })
 
 export type AppSettingScope = z.output<typeof AppSettingScope>
-
-/** Scope used by today's single desktop window until callers provide a window id. */
-export const DEFAULT_APP_SETTING_SCOPE = {
-  scopeKind: "window",
-  scopeId: "primary",
-} as const satisfies Required<AppSettingScope>
 
 /**
  * Persisted daemon-owned app setting row keyed by one scope plus desktop app storage key.

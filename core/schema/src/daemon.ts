@@ -6,7 +6,6 @@ export {
   AppSettingScope,
   AppSettingScopeId,
   AppSettingScopeKind,
-  DEFAULT_APP_SETTING_SCOPE,
   DeleteAppSettingRequest,
   GetAppSettingRequest,
   SetAppSettingRequest,

@@ -21,6 +21,14 @@ test("daemon app settings IPC stores one latest record per scope and key", async
   daemon = await startDaemonServer(createBackendClient(), { port: 0 })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const key = "goddard.app.state.v1"
+  const primaryScope = {
+    scopeKind: "window",
+    scopeId: "primary",
+  } as const
+  const secondaryScope = {
+    scopeKind: "window",
+    scopeId: "secondary",
+  } as const
   const firstRecord = {
     version: 1,
     savedAt: 100,
@@ -40,12 +48,13 @@ test("daemon app settings IPC stores one latest record per scope and key", async
     },
   }
 
-  await expect(client.send("appSettings.get", { key })).resolves.toEqual({
+  await expect(client.send("appSettings.get", { key, ...primaryScope })).resolves.toEqual({
     setting: null,
   })
   await expect(
     client.send("appSettings.set", {
       key,
+      ...primaryScope,
       record: firstRecord,
     }),
   ).resolves.toEqual({
@@ -54,6 +63,7 @@ test("daemon app settings IPC stores one latest record per scope and key", async
   await expect(
     client.send("appSettings.set", {
       key,
+      ...primaryScope,
       record: secondRecord,
     }),
   ).resolves.toEqual({
@@ -63,8 +73,7 @@ test("daemon app settings IPC stores one latest record per scope and key", async
   await expect(
     client.send("appSettings.set", {
       key,
-      scopeKind: "window",
-      scopeId: "secondary",
+      ...secondaryScope,
       record: firstRecord,
     }),
   ).resolves.toEqual({
@@ -75,29 +84,27 @@ test("daemon app settings IPC stores one latest record per scope and key", async
   expect(
     db.appSettings.findMany({ where: { scopeKind: "window", scopeId: "primary" } }),
   ).toHaveLength(1)
-  await expect(client.send("appSettings.get", { key })).resolves.toEqual({
+  await expect(client.send("appSettings.get", { key, ...primaryScope })).resolves.toEqual({
     setting: secondRecord,
   })
   await expect(
     client.send("appSettings.get", {
       key,
-      scopeKind: "window",
-      scopeId: "secondary",
+      ...secondaryScope,
     }),
   ).resolves.toEqual({
     setting: firstRecord,
   })
-  await expect(client.send("appSettings.delete", { key })).resolves.toEqual({
+  await expect(client.send("appSettings.delete", { key, ...primaryScope })).resolves.toEqual({
     deleted: true,
   })
-  await expect(client.send("appSettings.get", { key })).resolves.toEqual({
+  await expect(client.send("appSettings.get", { key, ...primaryScope })).resolves.toEqual({
     setting: null,
   })
   await expect(
     client.send("appSettings.get", {
       key,
-      scopeKind: "window",
-      scopeId: "secondary",
+      ...secondaryScope,
     }),
   ).resolves.toEqual({
     setting: firstRecord,
