@@ -40,13 +40,13 @@
   - Sprints without activity fall back to stable name order.
 
 - **Activity tracking**
-  - Sprint state records `lastActedAt` when `sprint-branch` acts on that
-    sprint.
-  - Inspection commands refresh activity after resolving readable sprint state.
-  - Mutating commands refresh activity as part of their normal private state
-    write.
+  - `sprint-branch` tracks when it last acted on each sprint so recent sprints
+    can be selected and ordered predictably.
+  - Inspection commands refresh activity after resolving a readable sprint.
+  - Mutating commands refresh activity when they successfully complete.
   - Dry runs and failed mutations do not refresh activity.
   - `list` does not select a current sprint and does not refresh activity.
-  - `cleanup` removes the selected sprint state instead of refreshing it.
+  - `cleanup` removes the selected sprint from future selection instead of
+    refreshing activity.
   - Command pages describe workflow effects; they do not repeat this shared
-    private activity metadata write in each `What it changes` section.
+    activity-tracking behavior in each `What it changes` section.
