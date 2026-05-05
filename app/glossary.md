@@ -12,6 +12,9 @@
 - `Tab Cache`
   - The in-memory record that keeps recently closed or hidden tab state available for fast restoration.
   - Why: so tab eviction can satisfy the cap without making every reopen a cold start.
+- `App State`
+  - The app-owned desktop UI state snapshot persisted by the Bun host.
+  - Why: so window state, appearance, projects, navigation, and tabs can survive restarts without making the daemon own app internals.
 - `Inbox Item`
   - One actionable notification in the coding-agent inbox, linked to a session, pull request, diff, or project-linked event.
   - Why: so inbox workflows operate on stable records instead of ad hoc UI rows.

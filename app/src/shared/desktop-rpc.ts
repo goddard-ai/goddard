@@ -7,6 +7,7 @@ import type {
 import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import type { RPCSchema } from "electrobun/bun"
 
+import type { AppStateSnapshot } from "./app-state.ts"
 import type { DaemonStreamName, GlobalEventEnvelope } from "./global-event-hub.ts"
 import type { ShortcutKeymapFile } from "./shortcut-keymap.ts"
 
@@ -69,6 +70,14 @@ export type AppDesktopRpc = {
       browseForProject: {
         params: {}
         response: { path: string | null }
+      }
+      loadAppStateSnapshot: {
+        params: {}
+        response: { snapshot: AppStateSnapshot | null }
+      }
+      writeAppStateSnapshot: {
+        params: { snapshot: AppStateSnapshot }
+        response: {}
       }
       loadShortcutKeymap: {
         params: {}

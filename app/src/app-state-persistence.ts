@@ -8,16 +8,11 @@ import { desktopHost } from "./desktop-host.ts"
 import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
+import type { AppStateSnapshot } from "./shared/app-state.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION, type ShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
 import { shortcutRegistry, type ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
 
-const APP_STATE_STORAGE_KEY = "goddard.app.state.v1"
-const APP_STATE_STORAGE_SCOPE = {
-  scopeKind: "window",
-  scopeId: "primary",
-} as const
-const APP_STATE_RECORD_VERSION = 1
 const APP_STATE_WRITE_DEBOUNCE_MS = 250
 
 /** Raw app Sigma model bundle before async daemon state restoration. */
@@ -39,8 +34,8 @@ export type PersistentAppModels = {
   workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
-/** Persisted Sigma state captured and restored as one daemon-owned app state record. */
-export type PersistedAppStateSnapshot = {
+/** Persisted Sigma state captured and restored through the Bun-host app state kindstore. */
+export type PersistedAppStateSnapshot = AppStateSnapshot & {
   appearance: Immutable<AppearanceState>
   navigation: Immutable<NavigationState>
   projectContext: Immutable<ProjectContextState>
@@ -69,7 +64,7 @@ export const shortcutPersistenceErrors = signal({
   writeError: null as string | null,
 })
 
-/** Captures the current committed app Sigma state as one daemon-persisted snapshot. */
+/** Captures the current committed app Sigma state as one app-owned persisted snapshot. */
 export function captureAppStateSnapshot(appModels: RestoredAppModels) {
   return {
     appearance: sigma.captureState(appModels.appearance),
@@ -270,24 +265,11 @@ export function createRestoredAppModels() {
 }
 
 async function loadPersistedAppStateSnapshot() {
-  const response = await desktopHost.sdk.appState.get({
-    key: APP_STATE_STORAGE_KEY,
-    ...APP_STATE_STORAGE_SCOPE,
-  })
-
-  return (response.state?.value ?? null) as PersistedAppStateSnapshot | null
+  return (await desktopHost.loadAppStateSnapshot()) as PersistedAppStateSnapshot | null
 }
 
 async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapshot) {
-  await desktopHost.sdk.appState.set({
-    key: APP_STATE_STORAGE_KEY,
-    ...APP_STATE_STORAGE_SCOPE,
-    record: {
-      version: APP_STATE_RECORD_VERSION,
-      savedAt: Date.now(),
-      value: snapshot,
-    },
-  })
+  await desktopHost.writeAppStateSnapshot(snapshot)
 }
 
 async function loadPersistedShortcutKeymapSnapshot() {

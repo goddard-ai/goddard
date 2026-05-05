@@ -47,69 +47,6 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
   })
 
-  test("appState namespace forwards daemon app state requests", async () => {
-    const { sdk, send } = createSdkWithClient()
-    const record = {
-      version: 1,
-      savedAt: 100,
-      value: {
-        navigation: {
-          selectedNavId: "sessions",
-        },
-      },
-    }
-
-    send.mockResolvedValueOnce({ state: record })
-    send.mockResolvedValueOnce({ state: record })
-    send.mockResolvedValueOnce({ deleted: true })
-
-    await expect(
-      sdk.appState.get({
-        key: "goddard.app.state.v1",
-        scopeKind: "window",
-        scopeId: "primary",
-      }),
-    ).resolves.toEqual({
-      state: record,
-    })
-    await expect(
-      sdk.appState.set({
-        key: "goddard.app.state.v1",
-        scopeKind: "window",
-        scopeId: "secondary",
-        record,
-      }),
-    ).resolves.toEqual({
-      state: record,
-    })
-    await expect(
-      sdk.appState.delete({
-        key: "goddard.app.state.v1",
-        scopeKind: "window",
-        scopeId: "primary",
-      }),
-    ).resolves.toEqual({
-      deleted: true,
-    })
-
-    expect(send).toHaveBeenNthCalledWith(1, "appState.get", {
-      key: "goddard.app.state.v1",
-      scopeKind: "window",
-      scopeId: "primary",
-    })
-    expect(send).toHaveBeenNthCalledWith(2, "appState.set", {
-      key: "goddard.app.state.v1",
-      scopeKind: "window",
-      scopeId: "secondary",
-      record,
-    })
-    expect(send).toHaveBeenNthCalledWith(3, "appState.delete", {
-      key: "goddard.app.state.v1",
-      scopeKind: "window",
-      scopeId: "primary",
-    })
-  })
-
   test("session.changes forwards to session.changes", async () => {
     const { sdk, send } = createSdkWithClient()
 

@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import {
   GODDARD_ACP_REGISTRY_CACHE_DIRECTORY,
+  GODDARD_APP_STATE_DATABASE_FILENAME,
   GODDARD_AUTH_TOKEN_FILENAME,
   GODDARD_CACHE_DIRECTORY_NAME,
   GODDARD_CONFIG_FILENAME,
@@ -114,6 +115,11 @@ export function getManagedPrLocationsPath(): string {
 /** Returns the global app-only user-preferences directory. */
 export function getGoddardUserDir(): string {
   return join(getGoddardGlobalDir(), GODDARD_USER_DIRECTORY)
+}
+
+/** Returns the app-owned state kindstore database path. */
+export function getAppStateDatabasePath(): string {
+  return join(getGoddardUserDir(), GODDARD_APP_STATE_DATABASE_FILENAME)
 }
 
 /** Returns the app keyboard shortcut keymap path. */

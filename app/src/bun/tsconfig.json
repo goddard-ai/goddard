@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "types": ["bun"],
+    "types": ["bun", "preact"],
     "rootDir": "../..",
     "paths": {
       "~/*": ["../*"]
@@ -18,8 +18,8 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "outDir": "dist",
-    "declaration": true,
-    "declarationMap": true,
+    "declaration": false,
+    "declarationMap": false,
     "customConditions": ["source", "import", "default"]
   },
   "include": [

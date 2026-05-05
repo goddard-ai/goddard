@@ -5,12 +5,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
-import {
-  type AppStateRecord,
-  type DaemonAppState,
-  type DaemonSession,
-  type SubscribeWorkforceEventsRequest,
-} from "@goddard-ai/schema/daemon"
+import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { getErrorMessage } from "radashi"
@@ -116,14 +111,6 @@ export async function startDaemonServer(
     )
   }
 
-  function toAppStateRecord(state: DaemonAppState) {
-    return {
-      version: state.version,
-      savedAt: state.savedAt,
-      value: state.value,
-    } satisfies AppStateRecord
-  }
-
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
     if (!context) {
@@ -227,41 +214,6 @@ export async function startDaemonServer(
           mergedAdapters.some((adapter) => adapter.id === defaultAgent)
             ? defaultAgent
             : null,
-      }
-    },
-    "appState.get": async ({ key, scopeKind, scopeId }) => {
-      const state =
-        db.appState.first({
-          where: { key, scopeKind, scopeId },
-        }) ?? null
-
-      return {
-        state: state ? toAppStateRecord(state) : null,
-      }
-    },
-    "appState.set": async ({ key, record, scopeKind, scopeId }) => {
-      const state = db.appState.putByUnique(
-        { key, scopeKind, scopeId },
-        {
-          key,
-          scopeKind,
-          scopeId,
-          ...record,
-        },
-      )
-
-      return {
-        state: toAppStateRecord(state),
-      }
-    },
-    "appState.delete": async ({ key, scopeKind, scopeId }) => {
-      const state =
-        db.appState.first({
-          where: { key, scopeKind, scopeId },
-        }) ?? null
-
-      return {
-        deleted: state ? db.appState.delete(state.id) : false,
       }
     },
     "pr.submit": async (payload) => {

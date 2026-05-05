@@ -4,6 +4,7 @@ import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
 import { listen } from "preact-sigma"
 
+import type { AppStateSnapshot } from "~/shared/app-state.ts"
 import { createDaemonSubscriptionCoordinator } from "~/shared/daemon-subscriptions.ts"
 import type {
   AppDesktopRpc,
@@ -47,6 +48,12 @@ export interface DesktopHostBridge {
 
   /** Opens one native directory picker and returns the chosen project root when present. */
   browseForProject(): Promise<string | null>
+
+  /** Reads the app-state snapshot through the Bun host bridge. */
+  loadAppStateSnapshot(): Promise<AppStateSnapshot | null>
+
+  /** Writes the app-state snapshot through the Bun host bridge. */
+  writeAppStateSnapshot(snapshot: AppStateSnapshot): Promise<void>
 
   /** Reads the app-only shortcut keymap file through the Bun host bridge. */
   loadShortcutKeymap(): Promise<ShortcutKeymapFile | null>
@@ -138,6 +145,17 @@ export async function browseForProject(): Promise<string | null> {
   return response.path
 }
 
+/** Reads the app-state snapshot through the Bun host bridge. */
+export async function loadAppStateSnapshot() {
+  const response = await rpc.request.loadAppStateSnapshot({})
+  return response.snapshot
+}
+
+/** Writes the app-state snapshot through the Bun host bridge. */
+export async function writeAppStateSnapshot(snapshot: AppStateSnapshot) {
+  await rpc.request.writeAppStateSnapshot({ snapshot })
+}
+
 /** Reads the app-only shortcut keymap file through the Bun host bridge. */
 export async function loadShortcutKeymap() {
   const response = await rpc.request.loadShortcutKeymap({})
@@ -194,6 +212,8 @@ export async function daemonSubscribe<Name extends DaemonStreamName>(
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
   browseForProject,
+  loadAppStateSnapshot,
+  writeAppStateSnapshot,
   loadShortcutKeymap,
   writeShortcutKeymap,
   maximizeWindow,

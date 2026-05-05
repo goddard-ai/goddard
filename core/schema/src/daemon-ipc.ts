@@ -6,14 +6,6 @@ import { DaemonSessionIdParams } from "./common/params.ts"
 import { ListAdaptersRequest, type ListAdaptersResponse } from "./daemon-adapters.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
-  DeleteAppStateRequest,
-  GetAppStateRequest,
-  SetAppStateRequest,
-  type DeleteAppStateResponse,
-  type GetAppStateResponse,
-  type SetAppStateResponse,
-} from "./daemon/app-state.ts"
-import {
   BulkUpdateInboxItemsRequest,
   ListInboxRequest,
   UpdateInboxItemRequest,
@@ -121,18 +113,6 @@ export const daemonIpcSchema = {
     "adapter.list": {
       payload: ListAdaptersRequest,
       response: $type<ListAdaptersResponse>(),
-    },
-    "appState.get": {
-      payload: GetAppStateRequest,
-      response: $type<GetAppStateResponse>(),
-    },
-    "appState.set": {
-      payload: SetAppStateRequest,
-      response: $type<SetAppStateResponse>(),
-    },
-    "appState.delete": {
-      payload: DeleteAppStateRequest,
-      response: $type<DeleteAppStateResponse>(),
     },
     "pr.submit": {
       payload: SubmitPrRequest.extend({

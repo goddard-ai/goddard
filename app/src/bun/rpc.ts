@@ -2,6 +2,7 @@ import { BrowserView } from "electrobun/bun"
 
 import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
+import { loadAppStateSnapshot, writeAppStateSnapshot } from "./app-state-store.ts"
 import {
   daemonResetSubscriptions,
   daemonSend,
@@ -20,6 +21,11 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
     requests: {
       runtimeInfo: async () => ({ runtime: "electrobun" }),
       browseForProject: async () => ({ path: await browseForProject() }),
+      loadAppStateSnapshot: async () => ({ snapshot: loadAppStateSnapshot() }),
+      writeAppStateSnapshot: async ({ snapshot }) => {
+        writeAppStateSnapshot(snapshot)
+        return {}
+      },
       loadShortcutKeymap: async () => ({ keymap: await loadShortcutKeymap() }),
       writeShortcutKeymap: async ({ keymap }) => {
         await writeShortcutKeymap(keymap)
