@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto"
 import * as fs from "node:fs/promises"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
+import { z } from "zod"
 
 import { resolveGitCommonPath, resolveRepositoryRoot } from "./git/repository"
 import { sprintStateRoot } from "./state/paths"
@@ -13,15 +14,17 @@ const syncControlSchemaVersion = 1
 const syncStopReason = "sprint-branch stop-sync"
 const syncReplaceWaitMs = 5000
 
+const syncRunControlFileSchema = z.object({
+  schemaVersion: z.literal(syncControlSchemaVersion),
+  runId: z.string(),
+  pid: z.number().int(),
+  cwd: z.string(),
+  startedAt: z.string(),
+  stopRequestedAt: z.string().optional(),
+})
+
 /** File contents owned by one running sync process. */
-type SyncRunControlFile = {
-  schemaVersion: 1
-  runId: string
-  pid: number
-  cwd: string
-  startedAt: string
-  stopRequestedAt?: string
-}
+type SyncRunControlFile = z.infer<typeof syncRunControlFileSchema>
 
 /** A registered sync process that still appears to be alive. */
 type RunningSyncControlFile = SyncRunControlFile & {
@@ -280,7 +283,7 @@ async function listSyncRunControlPaths(controlDir: string) {
 /** Reads a control file, tolerating concurrent cleanup or writes. */
 async function readSyncRunControlFile(controlPath: string) {
   try {
-    return normalizeSyncRunControlFile(JSON.parse(await fs.readFile(controlPath, "utf-8")))
+    return parseSyncRunControlFile(JSON.parse(await fs.readFile(controlPath, "utf-8")))
   } catch (error) {
     if (isErrno(error, "ENOENT") || error instanceof SyntaxError) {
       return null
@@ -310,33 +313,9 @@ async function overwriteExistingSyncRunControlFile(
   }
 }
 
-/** Normalizes untrusted JSON into the control shape used by running syncs. */
-function normalizeSyncRunControlFile(value: unknown) {
-  if (typeof value !== "object" || value === null) {
-    return null
-  }
-
-  const candidate = value as Partial<SyncRunControlFile>
-  if (
-    candidate.schemaVersion !== syncControlSchemaVersion ||
-    typeof candidate.runId !== "string" ||
-    typeof candidate.pid !== "number" ||
-    typeof candidate.cwd !== "string" ||
-    typeof candidate.startedAt !== "string"
-  ) {
-    return null
-  }
-
-  return {
-    schemaVersion: syncControlSchemaVersion,
-    runId: candidate.runId,
-    pid: candidate.pid,
-    cwd: candidate.cwd,
-    startedAt: candidate.startedAt,
-    ...(typeof candidate.stopRequestedAt === "string"
-      ? { stopRequestedAt: candidate.stopRequestedAt }
-      : {}),
-  } satisfies SyncRunControlFile
+function parseSyncRunControlFile(value: unknown) {
+  const parsed = syncRunControlFileSchema.safeParse(value)
+  return parsed.success ? parsed.data : null
 }
 
 function formatSyncRunControlFile(control: SyncRunControlFile) {

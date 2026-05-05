@@ -240,6 +240,7 @@
         "@goddard-ai/review-sync": "workspace:^",
         "cmd-ts": "catalog:",
         "radashi": "catalog:",
+        "zod": "catalog:",
       },
     },
     "core/worktree-plugin": {
