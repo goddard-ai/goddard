@@ -313,6 +313,7 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
       name: name as ValidStreamName<TSchema>,
       filter,
     }
+    const socket = req.socket
     const client = { name, filter, res }
     let removed = false
     let subscribed = false
@@ -322,6 +323,8 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
       }
 
       removed = true
+      res.off("close", removeClient)
+      socket.off("close", removeClient)
       streamClients.delete(client)
       if (!subscribed) {
         return
@@ -330,8 +333,8 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
       void invokeStreamLifecycleHook(afterUnsubscribe, subscribeInput).catch(() => {})
     }
 
-    req.on("close", removeClient)
     res.on("close", removeClient)
+    socket.on("close", removeClient)
     streamClients.add(client)
 
     try {
