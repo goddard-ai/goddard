@@ -99,5 +99,5 @@ component WorkbenchTabPanel() {
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
   const activeTabPayload = activeTab.payload as Record<string, unknown>
 
-  <ActiveTabComponent />
+  <ActiveTabComponent {...activeTabPayload} />
 }
