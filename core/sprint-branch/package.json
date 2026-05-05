@@ -23,7 +23,8 @@
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test --dots"
+    "test": "bun test --dots",
+    "repair-local-sprints": "bun run ./scripts/repair-local-sprints.ts"
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
