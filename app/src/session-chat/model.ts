@@ -3,6 +3,7 @@ import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { Sigma } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
+import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/presentation.ts"
 import {
   applySessionChatMessage,
   createSessionChatState,
@@ -26,6 +27,14 @@ export class SessionChat extends Sigma<SessionChatState> {
       session: this.session,
       turns: this.turns,
     })
+  }
+
+  get repositoryLabel() {
+    return getSessionRepositoryLabel(this.session)
+  }
+
+  get title() {
+    return getSessionDisplayTitle(this.session)
   }
 
   /** Applies refreshed query data while preserving live messages already received locally. */

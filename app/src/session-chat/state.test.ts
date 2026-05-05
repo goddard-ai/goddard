@@ -204,6 +204,31 @@ test("applySessionChatMessage keeps prompt and terminal messages deterministic w
   expect(withPrompt.turns[0].status).toBe("completed")
 })
 
+test("applySessionChatMessage returns to ready status after a live turn completes", () => {
+  const state = createSessionChatState({
+    session: createSession(),
+    history: createHistory([]),
+  })
+  const withPrompt = applySessionChatMessage(state, promptMessage("prompt-ready"), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  const completed = applySessionChatMessage(withPrompt, promptResult("prompt-ready"), {
+    receivedAt: "2026-04-14T00:00:04.000Z",
+  })
+
+  expect(withPrompt.summary.status).toBe("running")
+  expect(completed.summary.status).toBe("idle")
+})
+
+test("createSessionChatState treats an active session without a running turn as ready", () => {
+  const state = createSessionChatState({
+    session: createSession(),
+    history: createHistory([]),
+  })
+
+  expect(state.summary.status).toBe("idle")
+})
+
 test("applySessionChatMessage exposes pending permission and plan events", () => {
   const state = createSessionChatState({
     session: createSession(),

@@ -499,7 +499,7 @@ function sessionChatStatus(
     return "blocked"
   }
 
-  if (turns.some((turn) => turn.status === "running") || session.status === "active") {
+  if (turns.some((turn) => turn.status === "running")) {
     return "running"
   }
 

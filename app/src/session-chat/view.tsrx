@@ -1,10 +1,19 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
+import {
+  AlertCircle,
+  CheckCircle2,
+  CircleDot,
+  LoaderCircle,
+  PauseCircle,
+  XCircle,
+} from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
 import { useSigma } from "preact-sigma"
 import { isPromise } from "radashi"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
+import type { SessionChatStatus } from "./state.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { queryClient, useQueries } from "~/lib/query.ts"
@@ -76,6 +85,53 @@ function retrySessionChatLoad(sessionId: DaemonSession["id"]) {
   queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
 }
 
+function getSessionChatStatusPresentation(status: SessionChatStatus) {
+  switch (status) {
+    case "running":
+      return {
+        description: "Agent is working",
+        icon: LoaderCircle,
+        label: "Running",
+        tone: "running",
+      }
+    case "blocked":
+      return {
+        description: "Waiting for attention",
+        icon: PauseCircle,
+        label: "Blocked",
+        tone: "blocked",
+      }
+    case "completed":
+      return {
+        description: "Session finished",
+        icon: CheckCircle2,
+        label: "Completed",
+        tone: "completed",
+      }
+    case "failed":
+      return {
+        description: "Session failed",
+        icon: AlertCircle,
+        label: "Failed",
+        tone: "failed",
+      }
+    case "cancelled":
+      return {
+        description: "Session cancelled",
+        icon: XCircle,
+        label: "Cancelled",
+        tone: "cancelled",
+      }
+    default:
+      return {
+        description: "Ready for a prompt",
+        icon: CircleDot,
+        label: "Ready",
+        tone: "ready",
+      }
+  }
+}
+
 component LoadedSessionChatView(props: {
   history: GetSessionHistoryResponse;
   projectPath: string | null;
@@ -100,9 +156,33 @@ component LoadedSessionChatView(props: {
     )
   }, [chat, props.history, props.session])
 
+  const status = getSessionChatStatusPresentation(chat.summary.status)
+  const StatusIcon = status.icon
+
   useReportTabProject(resolvedProjectPath)
 
   <main class={styles.root}>
+    <header class={styles.header}>
+      <div class={styles.headerIdentity}>
+        <p class={styles.headerRepository}>
+          {chat.repositoryLabel}
+        </p>
+        <h1 class={styles.headerTitle}>
+          {chat.title}
+        </h1>
+      </div>
+      <div
+        aria-label={`${status.label}: ${status.description}`}
+        class={styles.headerStatus}
+        data-tone={status.tone}
+        title={status.description}
+      >
+        <StatusIcon size={15} strokeWidth={2.2} />
+        <span class={styles.headerStatusLabel}>
+          {status.label}
+        </span>
+      </div>
+    </header>
     if (chat.hasEmptyTranscript) {
       <div class={styles.transcript}>
         <SessionChatStateMessage
