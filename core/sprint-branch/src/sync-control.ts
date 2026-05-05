@@ -270,7 +270,7 @@ async function listSyncRunControlPaths(controlDir: string) {
       .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
       .map((entry) => path.join(controlDir, entry.name))
   } catch (error) {
-    if (isMissingFileError(error)) {
+    if (isErrno(error, "ENOENT")) {
       return []
     }
     throw error
@@ -282,7 +282,7 @@ async function readSyncRunControlFile(controlPath: string) {
   try {
     return normalizeSyncRunControlFile(JSON.parse(await fs.readFile(controlPath, "utf-8")))
   } catch (error) {
-    if (isMissingFileError(error) || error instanceof SyntaxError) {
+    if (isErrno(error, "ENOENT") || error instanceof SyntaxError) {
       return null
     }
     throw error
@@ -301,7 +301,7 @@ async function overwriteExistingSyncRunControlFile(
     await file.writeFile(formatSyncRunControlFile(control))
     return true
   } catch (error) {
-    if (isMissingFileError(error)) {
+    if (isErrno(error, "ENOENT")) {
       return false
     }
     throw error
@@ -352,7 +352,7 @@ function isProcessRunning(pid: number) {
     process.kill(pid, 0)
     return true
   } catch (error) {
-    return !isErrnoCode(error, "ESRCH")
+    return !isErrno(error, "ESRCH")
   }
 }
 
@@ -360,7 +360,7 @@ async function removeEmptyDirectory(directory: string) {
   try {
     await fs.rmdir(directory)
   } catch (error) {
-    if (!isErrnoCode(error, "ENOENT") && !isErrnoCode(error, "ENOTEMPTY")) {
+    if (!isErrno(error, "ENOENT") && !isErrno(error, "ENOTEMPTY")) {
       throw error
     }
   }
@@ -373,10 +373,6 @@ function formatDiagnostics(diagnostics: SprintDiagnostic[]) {
   ])
 }
 
-function isMissingFileError(error: unknown) {
-  return isErrnoCode(error, "ENOENT")
-}
-
-function isErrnoCode(error: unknown, code: string) {
-  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code
+function isErrno(error: unknown, code: string) {
+  return error instanceof Error && "code" in error && error.code === code
 }
