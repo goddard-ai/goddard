@@ -15,6 +15,7 @@ import type {
   RuntimeInfo,
 } from "~/shared/desktop-rpc.ts"
 import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
+import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import { goddardSdk } from "./sdk.ts"
 
 type DaemonSchema = typeof daemonIpcSchema
@@ -46,6 +47,12 @@ export interface DesktopHostBridge {
 
   /** Opens one native directory picker and returns the chosen project root when present. */
   browseForProject(): Promise<string | null>
+
+  /** Reads the app-only shortcut keymap file through the Bun host bridge. */
+  loadShortcutKeymap(): Promise<ShortcutKeymapFile | null>
+
+  /** Writes the app-only shortcut keymap file through the Bun host bridge. */
+  writeShortcutKeymap(keymap: ShortcutKeymapFile): Promise<void>
 
   /** Maximizes the active desktop window through the Bun host bridge. */
   maximizeWindow(): Promise<void>
@@ -131,6 +138,17 @@ export async function browseForProject(): Promise<string | null> {
   return response.path
 }
 
+/** Reads the app-only shortcut keymap file through the Bun host bridge. */
+export async function loadShortcutKeymap() {
+  const response = await rpc.request.loadShortcutKeymap({})
+  return response.keymap
+}
+
+/** Writes the app-only shortcut keymap file through the Bun host bridge. */
+export async function writeShortcutKeymap(keymap: ShortcutKeymapFile) {
+  await rpc.request.writeShortcutKeymap({ keymap })
+}
+
 /** Maximizes the active desktop window through the Bun host. */
 export async function maximizeWindow(): Promise<void> {
   await rpc.request.maximizeWindow({})
@@ -176,6 +194,8 @@ export async function daemonSubscribe<Name extends DaemonStreamName>(
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
   browseForProject,
+  loadShortcutKeymap,
+  writeShortcutKeymap,
   maximizeWindow,
   daemonSend,
   daemonSubscribe,

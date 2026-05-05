@@ -47,7 +47,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
   })
 
-  test("appSettings namespace forwards daemon app setting requests", async () => {
+  test("appState namespace forwards daemon app state requests", async () => {
     const { sdk, send } = createSdkWithClient()
     const record = {
       version: 1,
@@ -59,31 +59,31 @@ describe("@goddard-ai/sdk session namespace", () => {
       },
     }
 
-    send.mockResolvedValueOnce({ setting: record })
-    send.mockResolvedValueOnce({ setting: record })
+    send.mockResolvedValueOnce({ state: record })
+    send.mockResolvedValueOnce({ state: record })
     send.mockResolvedValueOnce({ deleted: true })
 
     await expect(
-      sdk.appSettings.get({
+      sdk.appState.get({
         key: "goddard.app.state.v1",
         scopeKind: "window",
         scopeId: "primary",
       }),
     ).resolves.toEqual({
-      setting: record,
+      state: record,
     })
     await expect(
-      sdk.appSettings.set({
+      sdk.appState.set({
         key: "goddard.app.state.v1",
         scopeKind: "window",
         scopeId: "secondary",
         record,
       }),
     ).resolves.toEqual({
-      setting: record,
+      state: record,
     })
     await expect(
-      sdk.appSettings.delete({
+      sdk.appState.delete({
         key: "goddard.app.state.v1",
         scopeKind: "window",
         scopeId: "primary",
@@ -92,18 +92,18 @@ describe("@goddard-ai/sdk session namespace", () => {
       deleted: true,
     })
 
-    expect(send).toHaveBeenNthCalledWith(1, "appSettings.get", {
+    expect(send).toHaveBeenNthCalledWith(1, "appState.get", {
       key: "goddard.app.state.v1",
       scopeKind: "window",
       scopeId: "primary",
     })
-    expect(send).toHaveBeenNthCalledWith(2, "appSettings.set", {
+    expect(send).toHaveBeenNthCalledWith(2, "appState.set", {
       key: "goddard.app.state.v1",
       scopeKind: "window",
       scopeId: "secondary",
       record,
     })
-    expect(send).toHaveBeenNthCalledWith(3, "appSettings.delete", {
+    expect(send).toHaveBeenNthCalledWith(3, "appState.delete", {
       key: "goddard.app.state.v1",
       scopeKind: "window",
       scopeId: "primary",

@@ -8,6 +8,7 @@ import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import type { RPCSchema } from "electrobun/bun"
 
 import type { DaemonStreamName, GlobalEventEnvelope } from "./global-event-hub.ts"
+import type { ShortcutKeymapFile } from "./shortcut-keymap.ts"
 
 /** Daemon IPC schema type reused for webview-to-Bun request forwarding. */
 type DaemonSchema = typeof daemonIpcSchema
@@ -68,6 +69,14 @@ export type AppDesktopRpc = {
       browseForProject: {
         params: {}
         response: { path: string | null }
+      }
+      loadShortcutKeymap: {
+        params: {}
+        response: { keymap: ShortcutKeymapFile | null }
+      }
+      writeShortcutKeymap: {
+        params: { keymap: ShortcutKeymapFile }
+        response: {}
       }
       daemonSend: {
         params: DaemonSendInput

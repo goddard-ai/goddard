@@ -8,11 +8,8 @@ import { desktopHost } from "./desktop-host.ts"
 import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
-import {
-  shortcutRegistry,
-  type ShortcutRegistry,
-  type ShortcutRegistryState,
-} from "./shortcuts/shortcut-registry.ts"
+import { SHORTCUT_KEYMAP_FILE_VERSION, type ShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
+import { shortcutRegistry, type ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
 
 const APP_STATE_STORAGE_KEY = "goddard.app.state.v1"
@@ -42,27 +39,26 @@ export type PersistentAppModels = {
   workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
-/** Persisted Sigma state captured and restored as one daemon-owned app settings record. */
+/** Persisted Sigma state captured and restored as one daemon-owned app state record. */
 export type PersistedAppStateSnapshot = {
   appearance: Immutable<AppearanceState>
   navigation: Immutable<NavigationState>
   projectContext: Immutable<ProjectContextState>
   projectRegistry: Immutable<ProjectRegistryState>
-  shortcutRegistry: Immutable<ShortcutRegistryState>
   workbenchTabSet: Immutable<WorkbenchTabSetState>
 }
 
-/** Async persistence writer used by the app-state snapshot observer. */
-type AppStateSnapshotWriter = (snapshot: PersistedAppStateSnapshot) => Promise<void>
+/** Async persistence writer used by debounced snapshot observers. */
+type SnapshotWriter<TSnapshot> = (snapshot: TSnapshot) => Promise<void>
 
-/** Runtime handle for the app-state snapshot observation loop. */
-type AppStateSnapshotObserver = {
+/** Runtime handle for a debounced persistence observation loop. */
+type SnapshotObserver = {
   flush(): Promise<void>
   stop(): Promise<void>
 }
 
-/** Optional behavior for the app-state snapshot observation loop. */
-type ObserveAppStateSnapshotOptions = {
+/** Optional behavior for debounced persistence observation loops. */
+type ObserveSnapshotOptions = {
   debounceMs?: number
   onWriteError?: (error: unknown) => void
 }
@@ -80,7 +76,6 @@ export function captureAppStateSnapshot(appModels: RestoredAppModels) {
     navigation: sigma.captureState(appModels.navigation),
     projectContext: sigma.captureState(appModels.projectContext),
     projectRegistry: sigma.captureState(appModels.projectRegistry),
-    shortcutRegistry: sigma.captureState(shortcutRegistry),
     workbenchTabSet: sigma.captureState(appModels.workbenchTabSet),
   }
 }
@@ -90,11 +85,9 @@ function applyAppStateSnapshot(appModels: RestoredAppModels, snapshot: Persisted
   sigma.replaceState(appModels.navigation, snapshot.navigation)
   sigma.replaceState(appModels.projectContext, snapshot.projectContext)
   sigma.replaceState(appModels.projectRegistry, snapshot.projectRegistry)
-  sigma.replaceState(shortcutRegistry, snapshot.shortcutRegistry)
   sigma.replaceState(appModels.workbenchTabSet, snapshot.workbenchTabSet)
 
   appModels.appearance.applyDocumentAppearance()
-  shortcutRegistry.rebindRuntime()
 }
 
 function cancelTimer(timer: ReturnType<typeof setTimeout> | null) {
@@ -103,15 +96,18 @@ function cancelTimer(timer: ReturnType<typeof setTimeout> | null) {
   }
 }
 
-/** Observes committed app Sigma changes and writes the latest combined snapshot. */
-export function observeAppStateSnapshot(
-  appModels: RestoredAppModels,
-  writeSnapshot: AppStateSnapshotWriter,
-  options: ObserveAppStateSnapshotOptions = {},
+/**
+ * Observes one or more Sigma sources and writes the latest captured snapshot after changes settle.
+ */
+function observeSnapshot<TSnapshot>(
+  captureSnapshot: () => TSnapshot,
+  writeSnapshot: SnapshotWriter<TSnapshot>,
+  subscribeSnapshots: (queueSnapshotWrite: () => void) => Array<() => void>,
+  options: ObserveSnapshotOptions = {},
 ) {
   const debounceMs = options.debounceMs ?? APP_STATE_WRITE_DEBOUNCE_MS
   let isStopped = false
-  let pendingSnapshot: PersistedAppStateSnapshot | null = null
+  let pendingSnapshot: TSnapshot | null = null
   let writeTimer: ReturnType<typeof setTimeout> | null = null
   let runningWrite: Promise<void> | null = null
 
@@ -168,18 +164,11 @@ export function observeAppStateSnapshot(
       return
     }
 
-    pendingSnapshot = captureAppStateSnapshot(appModels)
+    pendingSnapshot = captureSnapshot()
     scheduleWrite()
   }
 
-  const unsubscribe = [
-    sigma.subscribe(appModels.appearance, queueSnapshotWrite),
-    sigma.subscribe(appModels.navigation, queueSnapshotWrite),
-    sigma.subscribe(appModels.projectContext, queueSnapshotWrite),
-    sigma.subscribe(appModels.projectRegistry, queueSnapshotWrite),
-    sigma.subscribe(shortcutRegistry, queueSnapshotWrite),
-    sigma.subscribe(appModels.workbenchTabSet, queueSnapshotWrite),
-  ]
+  const unsubscribe = subscribeSnapshots(queueSnapshotWrite)
 
   return {
     async flush() {
@@ -211,6 +200,53 @@ export function observeAppStateSnapshot(
   }
 }
 
+/** Observes committed app Sigma changes and writes the latest combined snapshot. */
+export function observeAppStateSnapshot(
+  appModels: RestoredAppModels,
+  writeSnapshot: SnapshotWriter<PersistedAppStateSnapshot>,
+  options: ObserveSnapshotOptions = {},
+) {
+  return observeSnapshot(
+    () => captureAppStateSnapshot(appModels),
+    writeSnapshot,
+    (queueSnapshotWrite) => [
+      sigma.subscribe(appModels.appearance, queueSnapshotWrite),
+      sigma.subscribe(appModels.navigation, queueSnapshotWrite),
+      sigma.subscribe(appModels.projectContext, queueSnapshotWrite),
+      sigma.subscribe(appModels.projectRegistry, queueSnapshotWrite),
+      sigma.subscribe(appModels.workbenchTabSet, queueSnapshotWrite),
+    ],
+    options,
+  )
+}
+
+/** Captures the user-editable shortcut keymap as the app-only JSON file shape. */
+function captureShortcutKeymapSnapshot() {
+  return {
+    version: SHORTCUT_KEYMAP_FILE_VERSION as ShortcutKeymapFile["version"],
+    selectedProfileId: shortcutRegistry.selectedProfileId,
+    overrides: shortcutRegistry.overrides,
+  }
+}
+
+/** Applies one persisted shortcut keymap and refreshes the live keyboard runtime. */
+function applyShortcutKeymapSnapshot(snapshot: ShortcutKeymapFile) {
+  shortcutRegistry.applyKeymapSnapshot(snapshot.selectedProfileId, snapshot.overrides)
+}
+
+/** Observes shortcut keymap edits and writes the latest app-only keymap snapshot. */
+function observeShortcutKeymapSnapshot(
+  writeSnapshot: SnapshotWriter<ShortcutKeymapFile>,
+  options: ObserveSnapshotOptions = {},
+) {
+  return observeSnapshot(
+    captureShortcutKeymapSnapshot,
+    writeSnapshot,
+    (queueSnapshotWrite) => [sigma.subscribe(shortcutRegistry, queueSnapshotWrite)],
+    options,
+  )
+}
+
 /** Creates the app's singleton Sigma models before async daemon state restoration. */
 export function createRestoredAppModels() {
   const appearance = new Appearance({
@@ -234,16 +270,16 @@ export function createRestoredAppModels() {
 }
 
 async function loadPersistedAppStateSnapshot() {
-  const response = await desktopHost.sdk.appSettings.get({
+  const response = await desktopHost.sdk.appState.get({
     key: APP_STATE_STORAGE_KEY,
     ...APP_STATE_STORAGE_SCOPE,
   })
 
-  return (response.setting?.value ?? null) as PersistedAppStateSnapshot | null
+  return (response.state?.value ?? null) as PersistedAppStateSnapshot | null
 }
 
 async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapshot) {
-  await desktopHost.sdk.appSettings.set({
+  await desktopHost.sdk.appState.set({
     key: APP_STATE_STORAGE_KEY,
     ...APP_STATE_STORAGE_SCOPE,
     record: {
@@ -252,8 +288,17 @@ async function writePersistedAppStateSnapshot(snapshot: PersistedAppStateSnapsho
       value: snapshot,
     },
   })
+}
+
+async function loadPersistedShortcutKeymapSnapshot() {
+  return await desktopHost.loadShortcutKeymap()
+}
+
+async function writePersistedShortcutKeymapSnapshot(snapshot: ShortcutKeymapFile) {
+  await desktopHost.writeShortcutKeymap(snapshot)
   shortcutPersistenceErrors.value = {
     ...shortcutPersistenceErrors.value,
+    loadError: null,
     writeError: null,
   }
 }
@@ -271,7 +316,8 @@ export function usePersistentAppModels() {
 
   useEffect(() => {
     let isDisposed = false
-    let appStateObserver: AppStateSnapshotObserver | null = null
+    let appStateObserver: SnapshotObserver | null = null
+    let shortcutKeymapObserver: SnapshotObserver | null = null
     const cleanupShortcutRegistry = shortcutRegistry.setup()
 
     function syncProjectContext() {
@@ -287,9 +333,21 @@ export function usePersistentAppModels() {
 
       appStateObserver = observeAppStateSnapshot(appModels, writePersistedAppStateSnapshot, {
         onWriteError(error) {
+          console.error("Failed to save app state.", error)
+        },
+      })
+    }
+
+    function startShortcutKeymapObserver() {
+      if (isDisposed || shortcutKeymapObserver) {
+        return
+      }
+
+      shortcutKeymapObserver = observeShortcutKeymapSnapshot(writePersistedShortcutKeymapSnapshot, {
+        onWriteError(error) {
           shortcutPersistenceErrors.value = {
             ...shortcutPersistenceErrors.value,
-            writeError: `Failed to save app settings: ${getErrorMessage(error)}`,
+            writeError: `Failed to save shortcut keymap: ${getErrorMessage(error)}`,
           }
         },
       })
@@ -303,12 +361,35 @@ export function usePersistentAppModels() {
 
         if (snapshot) {
           applyAppStateSnapshot(appModels, snapshot)
-        } else {
-          shortcutRegistry.rebindRuntime()
         }
 
         startAppStateObserver()
         syncProjectContext()
+      },
+      (error) => {
+        if (isDisposed) {
+          return
+        }
+
+        startAppStateObserver()
+        syncProjectContext()
+        console.error("Failed to load app state.", error)
+      },
+    )
+
+    void loadPersistedShortcutKeymapSnapshot().then(
+      (snapshot) => {
+        if (isDisposed) {
+          return
+        }
+
+        if (snapshot) {
+          applyShortcutKeymapSnapshot(snapshot)
+        } else {
+          shortcutRegistry.rebindRuntime()
+        }
+
+        startShortcutKeymapObserver()
         shortcutPersistenceErrors.value = {
           ...shortcutPersistenceErrors.value,
           loadError: null,
@@ -319,11 +400,11 @@ export function usePersistentAppModels() {
           return
         }
 
-        startAppStateObserver()
-        syncProjectContext()
+        shortcutRegistry.rebindRuntime()
+        startShortcutKeymapObserver()
         shortcutPersistenceErrors.value = {
           ...shortcutPersistenceErrors.value,
-          loadError: `Failed to load app settings: ${getErrorMessage(error)}`,
+          loadError: `Failed to load shortcut keymap: ${getErrorMessage(error)}`,
         }
       },
     )
@@ -331,6 +412,7 @@ export function usePersistentAppModels() {
     return () => {
       isDisposed = true
       void appStateObserver?.stop()
+      void shortcutKeymapObserver?.stop()
       cleanupShortcutRegistry()
     }
   }, [appModels])

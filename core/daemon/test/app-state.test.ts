@@ -17,7 +17,7 @@ afterEach(async () => {
   resetDb({ filename: ":memory:" })
 })
 
-test("daemon app settings IPC stores one latest record per scope and key", async () => {
+test("daemon app state IPC stores one latest record per scope and key", async () => {
   daemon = await startDaemonServer(createBackendClient(), { port: 0 })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const key = "goddard.app.state.v1"
@@ -48,66 +48,66 @@ test("daemon app settings IPC stores one latest record per scope and key", async
     },
   }
 
-  await expect(client.send("appSettings.get", { key, ...primaryScope })).resolves.toEqual({
-    setting: null,
+  await expect(client.send("appState.get", { key, ...primaryScope })).resolves.toEqual({
+    state: null,
   })
   await expect(
-    client.send("appSettings.set", {
+    client.send("appState.set", {
       key,
       ...primaryScope,
       record: firstRecord,
     }),
   ).resolves.toEqual({
-    setting: firstRecord,
+    state: firstRecord,
   })
   await expect(
-    client.send("appSettings.set", {
+    client.send("appState.set", {
       key,
       ...primaryScope,
       record: secondRecord,
     }),
   ).resolves.toEqual({
-    setting: secondRecord,
+    state: secondRecord,
   })
 
   await expect(
-    client.send("appSettings.set", {
+    client.send("appState.set", {
       key,
       ...secondaryScope,
       record: firstRecord,
     }),
   ).resolves.toEqual({
-    setting: firstRecord,
+    state: firstRecord,
   })
 
-  expect(db.appSettings.findMany({ where: { key } })).toHaveLength(2)
-  expect(
-    db.appSettings.findMany({ where: { scopeKind: "window", scopeId: "primary" } }),
-  ).toHaveLength(1)
-  await expect(client.send("appSettings.get", { key, ...primaryScope })).resolves.toEqual({
-    setting: secondRecord,
+  expect(db.appState.findMany({ where: { key } })).toHaveLength(2)
+  expect(db.appState.findMany({ where: { scopeKind: "window", scopeId: "primary" } })).toHaveLength(
+    1,
+  )
+  await expect(client.send("appState.get", { key, ...primaryScope })).resolves.toEqual({
+    state: secondRecord,
   })
   await expect(
-    client.send("appSettings.get", {
+    client.send("appState.get", {
       key,
       ...secondaryScope,
     }),
   ).resolves.toEqual({
-    setting: firstRecord,
+    state: firstRecord,
   })
-  await expect(client.send("appSettings.delete", { key, ...primaryScope })).resolves.toEqual({
+  await expect(client.send("appState.delete", { key, ...primaryScope })).resolves.toEqual({
     deleted: true,
   })
-  await expect(client.send("appSettings.get", { key, ...primaryScope })).resolves.toEqual({
-    setting: null,
+  await expect(client.send("appState.get", { key, ...primaryScope })).resolves.toEqual({
+    state: null,
   })
   await expect(
-    client.send("appSettings.get", {
+    client.send("appState.get", {
       key,
       ...secondaryScope,
     }),
   ).resolves.toEqual({
-    setting: firstRecord,
+    state: firstRecord,
   })
 })
 

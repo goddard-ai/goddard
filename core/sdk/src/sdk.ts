@@ -9,9 +9,9 @@ import type {
   CreateSessionRequest,
   CreateWorkforceRequest,
   DeclareSessionInitiativeRequest,
-  DeleteAppSettingRequest,
+  DeleteAppStateRequest,
   DiscoverWorkforceCandidatesRequest,
-  GetAppSettingRequest,
+  GetAppStateRequest,
   GetLoopRequest,
   GetPullRequestRequest,
   GetSessionChangesRequest,
@@ -32,7 +32,7 @@ import type {
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
-  SetAppSettingRequest,
+  SetAppStateRequest,
   ShutdownLoopRequest,
   ShutdownWorkforceRequest,
   StartLoopRequest,
@@ -103,17 +103,17 @@ function createAdapterNamespace(client: DaemonIpcClient) {
   }
 }
 
-/** Builds the app settings namespace with one thin method per daemon app settings IPC action. */
-function createAppSettingsNamespace(client: DaemonIpcClient) {
+/** Builds the app state namespace with one thin method per daemon app state IPC action. */
+function createAppStateNamespace(client: DaemonIpcClient) {
   return {
-    /** Reads one daemon-owned desktop app setting record. */
-    get: async (input: GetAppSettingRequest) => client.send("appSettings.get", input),
+    /** Reads one daemon-owned desktop app state record. */
+    get: async (input: GetAppStateRequest) => client.send("appState.get", input),
 
-    /** Replaces one daemon-owned desktop app setting record. */
-    set: async (input: SetAppSettingRequest) => client.send("appSettings.set", input),
+    /** Replaces one daemon-owned desktop app state record. */
+    set: async (input: SetAppStateRequest) => client.send("appState.set", input),
 
-    /** Deletes one daemon-owned desktop app setting record. */
-    delete: async (input: DeleteAppSettingRequest) => client.send("appSettings.delete", input),
+    /** Deletes one daemon-owned desktop app state record. */
+    delete: async (input: DeleteAppStateRequest) => client.send("appState.delete", input),
   }
 }
 
@@ -347,8 +347,8 @@ export class GoddardSdk {
     return defineCachedNamespace(this, "adapter", createAdapterNamespace(this.#client))
   }
 
-  get appSettings() {
-    return defineCachedNamespace(this, "appSettings", createAppSettingsNamespace(this.#client))
+  get appState() {
+    return defineCachedNamespace(this, "appState", createAppStateNamespace(this.#client))
   }
 
   get pr() {

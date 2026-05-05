@@ -39,11 +39,11 @@
 - `Auth Session`
   - The authenticated backend identity granted to a user after login succeeds.
   - Why: so backend operations can be authorized without re-running the login flow for every request.
-- `App Setting`
-  - A daemon-owned desktop app preference or UI state snapshot addressed by a stable setting key.
+- `App State`
+  - A daemon-owned desktop app UI state snapshot addressed by a stable state key.
   - Why: so the app, SDK, and daemon can share one persistence contract for desktop app state.
-- `App Setting Scope`
-  - The global or window-local partition that owns one app setting key.
+- `App State Scope`
+  - The global or window-local partition that owns one app state key.
   - Why: so multiple app windows can later store independent UI state without changing the daemon storage shape.
 - `Workforce Request`
   - One unit of delegated work inside a repository-local workforce.

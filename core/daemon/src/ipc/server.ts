@@ -6,8 +6,8 @@ import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import {
-  type AppSettingRecord,
-  type DaemonAppSetting,
+  type AppStateRecord,
+  type DaemonAppState,
   type DaemonSession,
   type SubscribeWorkforceEventsRequest,
 } from "@goddard-ai/schema/daemon"
@@ -116,12 +116,12 @@ export async function startDaemonServer(
     )
   }
 
-  function toAppSettingRecord(setting: DaemonAppSetting) {
+  function toAppStateRecord(state: DaemonAppState) {
     return {
-      version: setting.version,
-      savedAt: setting.savedAt,
-      value: setting.value,
-    } satisfies AppSettingRecord
+      version: state.version,
+      savedAt: state.savedAt,
+      value: state.value,
+    } satisfies AppStateRecord
   }
 
   function requireIpcRequestContext() {
@@ -229,18 +229,18 @@ export async function startDaemonServer(
             : null,
       }
     },
-    "appSettings.get": async ({ key, scopeKind, scopeId }) => {
-      const setting =
-        db.appSettings.first({
+    "appState.get": async ({ key, scopeKind, scopeId }) => {
+      const state =
+        db.appState.first({
           where: { key, scopeKind, scopeId },
         }) ?? null
 
       return {
-        setting: setting ? toAppSettingRecord(setting) : null,
+        state: state ? toAppStateRecord(state) : null,
       }
     },
-    "appSettings.set": async ({ key, record, scopeKind, scopeId }) => {
-      const setting = db.appSettings.putByUnique(
+    "appState.set": async ({ key, record, scopeKind, scopeId }) => {
+      const state = db.appState.putByUnique(
         { key, scopeKind, scopeId },
         {
           key,
@@ -251,17 +251,17 @@ export async function startDaemonServer(
       )
 
       return {
-        setting: toAppSettingRecord(setting),
+        state: toAppStateRecord(state),
       }
     },
-    "appSettings.delete": async ({ key, scopeKind, scopeId }) => {
-      const setting =
-        db.appSettings.first({
+    "appState.delete": async ({ key, scopeKind, scopeId }) => {
+      const state =
+        db.appState.first({
           where: { key, scopeKind, scopeId },
         }) ?? null
 
       return {
-        deleted: setting ? db.appSettings.delete(setting.id) : false,
+        deleted: state ? db.appState.delete(state.id) : false,
       }
     },
     "pr.submit": async (payload) => {

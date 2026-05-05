@@ -70,6 +70,21 @@ export const ShortcutKeymapOverrides = z.record(
 
 export type ShortcutKeymapOverrides = z.infer<typeof ShortcutKeymapOverrides>
 
+const ShortcutKeymapProfileId = z.enum(
+  Object.keys(shortcutKeymapProfiles) as [KeymapProfileId, ...KeymapProfileId[]],
+)
+
+export const SHORTCUT_KEYMAP_FILE_VERSION = 1
+
+/** User-authored shortcut keymap persisted in the app-only Goddard user directory. */
+export const ShortcutKeymapFile = z.strictObject({
+  version: z.literal(SHORTCUT_KEYMAP_FILE_VERSION),
+  selectedProfileId: ShortcutKeymapProfileId,
+  overrides: ShortcutKeymapOverrides,
+})
+
+export type ShortcutKeymapFile = z.output<typeof ShortcutKeymapFile>
+
 /** Returns the canonical combo or sequence expression for one binding. */
 export function getShortcutBindingExpression(binding: ShortcutBinding | null | undefined) {
   if (!binding) {

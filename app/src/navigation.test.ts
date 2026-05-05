@@ -6,6 +6,7 @@ import {
   type PersistedAppStateSnapshot,
 } from "./app-state-persistence.ts"
 import { Navigation } from "./navigation.ts"
+import { shortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 
 function ensureMatchMedia() {
   window.matchMedia = (() => {
@@ -60,6 +61,33 @@ test("app state persistence observes captured navigation snapshots", async () =>
       selectedNavId: "sessions",
     })
   } finally {
+    await observer.stop()
+  }
+})
+
+test("app state persistence does not observe shortcut registry changes", async () => {
+  ensureMatchMedia()
+  const appModels = createRestoredAppModels()
+  const snapshots: PersistedAppStateSnapshot[] = []
+  const observer = observeAppStateSnapshot(
+    appModels,
+    async (snapshot) => {
+      snapshots.push(snapshot)
+    },
+    {
+      debounceMs: 0,
+    },
+  )
+
+  try {
+    shortcutRegistry.applyKeymapSnapshot("goddard", {
+      "navigation.openKeyboardShortcuts": ["Mod+/"],
+    })
+    await observer.flush()
+
+    expect(snapshots).toHaveLength(0)
+  } finally {
+    shortcutRegistry.applyKeymapSnapshot("goddard", {})
     await observer.stop()
   }
 })

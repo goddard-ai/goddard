@@ -10,6 +10,7 @@ import {
 } from "./daemon.ts"
 import { getMainWindow } from "./main-window.ts"
 import { browseForProject } from "./projects.ts"
+import { loadShortcutKeymap, writeShortcutKeymap } from "./shortcut-keymap.ts"
 
 type AppRpc = ReturnType<typeof BrowserView.defineRPC<AppDesktopRpc>>
 
@@ -19,6 +20,11 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
     requests: {
       runtimeInfo: async () => ({ runtime: "electrobun" }),
       browseForProject: async () => ({ path: await browseForProject() }),
+      loadShortcutKeymap: async () => ({ keymap: await loadShortcutKeymap() }),
+      writeShortcutKeymap: async ({ keymap }) => {
+        await writeShortcutKeymap(keymap)
+        return {}
+      },
       daemonSend: async (input) => await daemonSend(input),
       daemonSubscribe: async (input) => await daemonSubscribe(input),
       daemonUnsubscribe: async (input) => await daemonUnsubscribe(input),

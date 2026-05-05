@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import {
-  DaemonAppSetting,
+  DaemonAppState,
   DaemonInboxItem,
   DaemonPullRequest,
   DaemonSession,
@@ -25,7 +25,7 @@ const metadata = {
 }
 
 const schema = {
-  appSettings: kind("aps", DaemonAppSetting).index("key").index("scopeKind").index("scopeId").multi(
+  appState: kind("ast", DaemonAppState).index("key").index("scopeKind").index("scopeId").multi(
     "scopeKind_scopeId_key",
     {
       scopeKind: "asc",
