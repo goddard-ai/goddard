@@ -4,7 +4,7 @@ import { useSigma } from "preact-sigma"
 import { isPromise } from "radashi"
 
 import { Composer } from "./composer.tsrx"
-import { SessionChatModel } from "./model.ts"
+import { SessionChat } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { queryClient, useQueries } from "~/lib/query.ts"
@@ -83,7 +83,7 @@ component LoadedSessionChatView(props: {
 }) {
   const [submitError, setSubmitError] = useState<unknown>(null)
   const chat = useSigma(
-    () => new SessionChatModel({
+    () => new SessionChat({
       history: props.history,
       session: props.session,
     }),

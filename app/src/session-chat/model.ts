@@ -3,7 +3,7 @@ import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { Sigma } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
-import { SessionChat } from "./chat.ts"
+import { SessionChatTranscript } from "./chat.ts"
 import {
   applySessionChatMessage,
   createSessionChatState,
@@ -11,18 +11,15 @@ import {
   type SessionChatState,
 } from "./state.ts"
 
-/** Reactive session chat model that owns live daemon subscription wiring. */
-export type SessionChatModelState = SessionChatState
-
-/** Session chat Sigma wrapper around the pure state reducer. */
-export class SessionChatModel extends Sigma<SessionChatModelState> {
-  #transcript: SessionChat
+/** Reactive session chat owner that merges loaded history with live daemon updates. */
+export class SessionChat extends Sigma<SessionChatState> {
+  #transcript: SessionChatTranscript
 
   constructor(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
     const state = createSessionChatState(input)
 
     super(state)
-    this.#transcript = new SessionChat({
+    this.#transcript = new SessionChatTranscript({
       session: state.session,
       turns: state.turns,
     })
@@ -94,4 +91,4 @@ export class SessionChatModel extends Sigma<SessionChatModelState> {
   }
 }
 
-export interface SessionChatModel extends SessionChatModelState {}
+export interface SessionChat extends SessionChatState {}

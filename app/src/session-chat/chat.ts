@@ -1,5 +1,4 @@
 import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@goddard-ai/sdk"
-import { Sigma } from "preact-sigma"
 
 import type {
   SessionTranscriptContentBlock,
@@ -41,13 +40,13 @@ type ParsedTranscriptSessionUpdate =
     }
 
 /** Runtime inputs used to rebuild one session chat transcript. */
-export type SessionChatInput = {
+export type SessionChatTranscriptInput = {
   session: DaemonSession
   turns: readonly SessionHistoryTurn[]
 }
 
-/** Public state for one session chat transcript owner. */
-export type SessionChatState = {
+/** Public state for one session chat transcript builder. */
+export type SessionChatTranscriptState = {
   messages: SessionTranscriptItem[]
 }
 
@@ -330,23 +329,21 @@ function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   } satisfies SessionTranscriptTextMessage
 }
 
-/** Sigma owner for one session chat transcript and its ACP message accumulation rules. */
-export class SessionChat extends Sigma<SessionChatState> {
+/** Builds one session chat transcript and applies ACP message accumulation rules. */
+export class SessionChatTranscript {
   /** Assistant row lookup rebuilt with each transcript load; it is derived from ACP turn order. */
   #agentRowIndexes = new Map<string, number>()
   /** Tool row lookup rebuilt with each transcript load; it preserves stable ACP tool identities. */
   #toolRowIndexes = new Map<string, number>()
 
-  constructor(input: SessionChatInput) {
-    super({
-      messages: [],
-    })
+  messages: SessionTranscriptItem[] = []
 
+  constructor(input: SessionChatTranscriptInput) {
     this.loadTranscript(input)
   }
 
   /** Rebuilds the transcript from the latest daemon session snapshot and ACP turn history. */
-  loadTranscript(input: SessionChatInput) {
+  loadTranscript(input: SessionChatTranscriptInput) {
     this.#agentRowIndexes.clear()
     this.#toolRowIndexes.clear()
     this.messages = [
@@ -540,5 +537,3 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
   }
 }
-
-export interface SessionChat extends SessionChatState {}
