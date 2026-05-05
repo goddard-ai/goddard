@@ -21,13 +21,12 @@ For bootstrap rules such as repository state, shared behavior, patch discipline,
 
 ## Default Value Policy
 
-- Treat defaults as explicit resolution-boundary behavior, not as general-purpose defensive coding.
-- Prefer separate raw and resolved shapes when a boundary fills missing values, such as `RawConfig` with optional fields and `ResolvedConfig` with required fields.
+Follow the root `AGENTS.md` for the mandatory rule on where behavior-affecting defaults are allowed. Use this section for implementation guidance when a resolver boundary is the right place to fill missing values.
+
+- Prefer separate raw and resolved shapes, such as `RawConfig` with optional fields and `ResolvedConfig` with required fields.
 - Keep default constants close to the resolver that owns them, and name them for the specific behavior they control.
-- Do not re-default values after they are resolved. Downstream code should receive either a resolved value or an intentionally absent value.
-- Avoid meaningful defaults in function parameters, destructuring patterns, and ad hoc expressions such as `value ?? fallback` or `value || fallback` outside resolver, factory, normalization, and config-loading code.
-- Use UI presentation fallbacks only for rendering concerns that do not change shared behavior, persistence, SDK behavior, or system configuration.
-- For behavior-affecting configuration, add focused tests around resolver precedence and, when useful for debugging, preserve the source of the resolved value.
+- Represent intentional absence with an optional field or explicit union instead of encoding it as a magic default value.
+- Resolver tests should cover precedence across input sources and assert source metadata when provenance is kept for debugging.
 
 ## Dependency Policy
 
