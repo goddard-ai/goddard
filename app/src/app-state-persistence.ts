@@ -80,13 +80,6 @@ function getErrorMessage(error: unknown) {
   return typeof error === "string" && error.length > 0 ? error : "Unknown error."
 }
 
-function createDefaultAppearanceState() {
-  return {
-    mode: "system",
-    highContrast: false,
-  } satisfies AppearanceState
-}
-
 /** Captures the current committed app Sigma state as one daemon-persisted snapshot. */
 export function captureAppStateSnapshot(appModels: RestoredAppModels) {
   return {
@@ -227,7 +220,10 @@ export function observeAppStateSnapshot(
 
 /** Creates the app's singleton Sigma models before async daemon state restoration. */
 export function createRestoredAppModels() {
-  const appearance = new Appearance(createDefaultAppearanceState())
+  const appearance = new Appearance({
+    mode: "system",
+    highContrast: false,
+  })
   const navigation = new Navigation()
   const projectContext = new ProjectContext()
   const projectRegistry = new ProjectRegistry()
