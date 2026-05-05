@@ -107,12 +107,12 @@ export function captureAppStateSnapshot(appModels: RestoredAppModels) {
 }
 
 function applyAppStateSnapshot(appModels: RestoredAppModels, snapshot: PersistedAppStateSnapshot) {
-  sigma.replaceState(appModels.appearance, snapshot.appearance as AppearanceState)
-  sigma.replaceState(appModels.navigation, snapshot.navigation as NavigationState)
-  sigma.replaceState(appModels.projectContext, snapshot.projectContext as ProjectContextState)
-  sigma.replaceState(appModels.projectRegistry, snapshot.projectRegistry as ProjectRegistryState)
-  sigma.replaceState(shortcutRegistry, snapshot.shortcutRegistry as ShortcutRegistryState)
-  sigma.replaceState(appModels.workbenchTabSet, snapshot.workbenchTabSet as WorkbenchTabSetState)
+  sigma.replaceState(appModels.appearance, snapshot.appearance)
+  sigma.replaceState(appModels.navigation, snapshot.navigation)
+  sigma.replaceState(appModels.projectContext, snapshot.projectContext)
+  sigma.replaceState(appModels.projectRegistry, snapshot.projectRegistry)
+  sigma.replaceState(shortcutRegistry, snapshot.shortcutRegistry)
+  sigma.replaceState(appModels.workbenchTabSet, snapshot.workbenchTabSet)
 
   appModels.appearance.applyDocumentAppearance()
   shortcutRegistry.rebindRuntime()
