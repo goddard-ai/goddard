@@ -19,6 +19,8 @@
   - Keep appearance controls inline on the settings detail tab. Do not move them into a separate dialog or modal.
 - State ownership:
   - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
+  - Keep non-trivial Sigma workflow transitions on the owning Sigma class instead of hiding them behind pure-state reducers.
+  - Do not suffix app model class names or same-name model interfaces with `Model`; name the owning concept directly or use a more specific noun.
   - In Sigma classes, add a short human-readable comment to each `#private` field explaining the runtime or bookkeeping it owns and why it stays outside reactive state.
   - Do not add private methods that only mirror a public Sigma action with the same parameters. Inline that logic into the public action.
   - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.

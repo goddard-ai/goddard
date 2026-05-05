@@ -1,6 +1,7 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
+import { useSigma } from "preact-sigma"
 
-import { buildTranscriptMessages } from "./chat.ts"
+import { SessionChat } from "./chat.ts"
 import { Composer } from "./composer.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
@@ -15,7 +16,10 @@ export component SessionChatView(props: { sessionId: string }) {
     [goddardSdk.session.history, [{ id: sessionId }]],
     [goddardSdk.session.get, [{ id: sessionId }]],
   ])
-  const messages = buildTranscriptMessages(session, history.turns)
+  const chat = useSigma(() => new SessionChat({ session, turns: history.turns }), [
+    session,
+    history.turns,
+  ])
   const resolvedProjectPath = useNearestProjectPath(session.cwd)
 
   useReportTabProject(resolvedProjectPath)
@@ -24,7 +28,7 @@ export component SessionChatView(props: { sessionId: string }) {
     <Transcript
       class={styles.transcript}
       initialScrollPosition="bottom"
-      {messages}
+      messages={chat.messages}
       scrollCacheKey={`detail:session:${session.id}:transcript`}
     />
     <footer class={styles.composerDock}>

@@ -1,7 +1,7 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
-import { buildTranscriptMessages } from "./chat.ts"
+import { SessionChat } from "./chat.ts"
 
 function createSession(lastAgentMessage: string | null) {
   return {
@@ -56,7 +56,14 @@ function createTurns(
   ]
 }
 
-test("buildTranscriptMessages appends the latest daemon summary when turns have no assistant update yet", () => {
+function createTranscriptMessages(
+  session: DaemonSession,
+  turns: GetSessionHistoryResponse["turns"],
+) {
+  return new SessionChat({ session, turns }).messages
+}
+
+test("SessionChat appends the latest daemon summary when turns have no assistant update yet", () => {
   const session = createSession("Ready to review the diff.")
   const turns = createTurns([
     {
@@ -70,7 +77,7 @@ test("buildTranscriptMessages appends the latest daemon summary when turns have 
     },
   ])
 
-  expect(buildTranscriptMessages(session, turns).at(-1)).toEqual({
+  expect(createTranscriptMessages(session, turns).at(-1)).toEqual({
     kind: "message",
     id: "ses_session-1:latest",
     role: "assistant",
@@ -81,7 +88,7 @@ test("buildTranscriptMessages appends the latest daemon summary when turns have 
   })
 })
 
-test("buildTranscriptMessages accumulates agent_message_chunk updates into one assistant row", () => {
+test("SessionChat accumulates agent_message_chunk updates into one assistant row", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -123,7 +130,7 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
     },
   ])
 
-  expect(buildTranscriptMessages(session, turns)).toEqual([
+  expect(createTranscriptMessages(session, turns)).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -152,7 +159,7 @@ test("buildTranscriptMessages accumulates agent_message_chunk updates into one a
   ])
 })
 
-test("buildTranscriptMessages merges tool_call updates into one stable tool row", () => {
+test("SessionChat merges tool_call updates into one stable tool row", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -204,7 +211,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
     },
   ])
 
-  expect(buildTranscriptMessages(session, turns)).toEqual([
+  expect(createTranscriptMessages(session, turns)).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -246,7 +253,7 @@ test("buildTranscriptMessages merges tool_call updates into one stable tool row"
   ])
 })
 
-test("buildTranscriptMessages ignores routed session/update payloads without rendering transcript text", () => {
+test("SessionChat ignores routed session/update payloads without rendering transcript text", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -267,7 +274,7 @@ test("buildTranscriptMessages ignores routed session/update payloads without ren
     },
   ])
 
-  expect(buildTranscriptMessages(session, turns)).toEqual([
+  expect(createTranscriptMessages(session, turns)).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -279,7 +286,7 @@ test("buildTranscriptMessages ignores routed session/update payloads without ren
   ])
 })
 
-test("buildTranscriptMessages logs an error instead of flattening unsupported session/update payloads", () => {
+test("SessionChat logs an error instead of flattening unsupported session/update payloads", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -305,7 +312,7 @@ test("buildTranscriptMessages logs an error instead of flattening unsupported se
   }
 
   try {
-    expect(buildTranscriptMessages(session, turns)).toEqual([
+    expect(createTranscriptMessages(session, turns)).toEqual([
       {
         kind: "message",
         id: "ses_session-1:context",

@@ -2,7 +2,7 @@ import { useListener, useSigma } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import styles from "./debug-view.style.ts"
-import { TerminalViewportModel, type TerminalViewportChunk } from "./terminal-viewport-model.ts"
+import { TerminalViewportRuntime, type TerminalViewportChunk } from "./terminal-viewport-runtime.ts"
 import { TerminalViewport } from "./terminal-viewport.tsrx"
 
 const terminalDebugPrompt = "debug@goddard:~/workspace$ "
@@ -13,7 +13,7 @@ export type TerminalDebugViewProps = Record<string, never>
 /** Renders the standalone terminal-debug surface used by the native development menu. */
 export component TerminalDebugView(_props: TerminalDebugViewProps) {
   const terminal = useSigma(
-    () => new TerminalViewportModel({
+    () => new TerminalViewportRuntime({
       minimumCols: 56,
       minimumRows: 14,
     }),

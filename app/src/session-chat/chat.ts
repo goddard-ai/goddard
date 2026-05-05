@@ -1,4 +1,5 @@
 import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@goddard-ai/sdk"
+import { Sigma } from "preact-sigma"
 
 import type {
   SessionTranscriptContentBlock,
@@ -38,6 +39,17 @@ type ParsedTranscriptSessionUpdate =
       kind: "unsupported"
       reason: string
     }
+
+/** Runtime inputs used to rebuild one session chat transcript. */
+export type SessionChatInput = {
+  session: DaemonSession
+  turns: readonly SessionHistoryTurn[]
+}
+
+/** Public state for one session chat transcript owner. */
+export type SessionChatState = {
+  messages: SessionTranscriptItem[]
+}
 
 const TOOL_KINDS = new Set<SessionTranscriptToolKind>([
   "read",
@@ -311,106 +323,6 @@ function fallbackToolTitle(toolKind: SessionTranscriptToolKind) {
   return `${toolKind.slice(0, 1).toUpperCase()}${toolKind.slice(1)} tool`
 }
 
-function applyAgentMessageChunk(props: {
-  agentRowIndexes: Map<string, number>
-  items: SessionTranscriptItem[]
-  session: DaemonSession
-  streaming: boolean
-  text: string
-  turnId: string
-}) {
-  if (props.text.length === 0) {
-    return
-  }
-
-  const rowKey = `${props.turnId}:agent`
-  const rowIndex = props.agentRowIndexes.get(rowKey)
-
-  if (rowIndex == null) {
-    props.agentRowIndexes.set(
-      rowKey,
-      props.items.push(
-        createTextRow({
-          id: rowKey,
-          role: "assistant",
-          authorName: props.session.agentName,
-          timestampLabel: "Update",
-          content: [textContentBlock(props.text)],
-          streaming: props.streaming,
-        }),
-      ) - 1,
-    )
-    return
-  }
-
-  const existingRow = props.items[rowIndex]
-
-  if (existingRow?.kind !== "message" || existingRow.role !== "assistant") {
-    console.error("Session-chat transcript agent row is in an invalid state.", {
-      existingRow,
-      rowKey,
-    })
-    return
-  }
-
-  const existingText = existingRow.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("")
-
-  props.items[rowIndex] = {
-    ...existingRow,
-    content: [textContentBlock(`${existingText}${props.text}`)],
-    streaming: props.streaming,
-  }
-}
-
-/** Applies one ACP tool update to the transcript, updating an existing card when identities match. */
-function applyToolCallUpdate(props: {
-  items: SessionTranscriptItem[]
-  toolRowIndexes: Map<string, number>
-  session: DaemonSession
-  turnId: string
-  toolCallUpdate: ParsedToolCallUpdate
-}) {
-  const rowKey = `${props.turnId}:tool:${props.toolCallUpdate.toolCallId}`
-  const rowIndex = props.toolRowIndexes.get(rowKey)
-
-  if (rowIndex == null) {
-    const toolKind = props.toolCallUpdate.toolKind ?? "other"
-    const toolRow: SessionTranscriptToolCall = {
-      kind: "toolCall",
-      id: rowKey,
-      toolCallId: props.toolCallUpdate.toolCallId,
-      authorName: props.session.agentName,
-      timestampLabel: "Tool",
-      title: props.toolCallUpdate.title ?? fallbackToolTitle(toolKind),
-      toolKind,
-      status:
-        props.toolCallUpdate.status ??
-        (props.toolCallUpdate.updateKind === "tool_call" ? "in_progress" : "pending"),
-      content: props.toolCallUpdate.content ?? [],
-      locations: props.toolCallUpdate.locations ?? [],
-    }
-
-    props.toolRowIndexes.set(rowKey, props.items.push(toolRow) - 1)
-    return
-  }
-
-  const existingRow = props.items[rowIndex]
-  if (existingRow.kind !== "toolCall") {
-    return
-  }
-
-  props.items[rowIndex] = {
-    ...existingRow,
-    title: props.toolCallUpdate.title ?? existingRow.title,
-    toolKind: props.toolCallUpdate.toolKind ?? existingRow.toolKind,
-    status: props.toolCallUpdate.status ?? existingRow.status,
-    content: props.toolCallUpdate.content ?? existingRow.content,
-    locations: props.toolCallUpdate.locations ?? existingRow.locations,
-  }
-}
-
 function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   return {
     kind: "message",
@@ -418,89 +330,93 @@ function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   } satisfies SessionTranscriptTextMessage
 }
 
-export function buildTranscriptMessages(
-  session: DaemonSession,
-  turns: readonly SessionHistoryTurn[],
-) {
-  const items: SessionTranscriptItem[] = [
-    createTextRow({
-      id: `${session.id}:context`,
-      role: "system",
-      authorName: "System",
-      timestampLabel: session.status,
-      content: [textContentBlock(`Working directory: ${session.cwd}`)],
-    }),
-  ]
-  const agentRowIndexes = new Map<string, number>()
-  const toolRowIndexes = new Map<string, number>()
+/** Sigma owner for one session chat transcript and its ACP message accumulation rules. */
+export class SessionChat extends Sigma<SessionChatState> {
+  /** Assistant row lookup rebuilt with each transcript load; it is derived from ACP turn order. */
+  #agentRowIndexes = new Map<string, number>()
+  /** Tool row lookup rebuilt with each transcript load; it preserves stable ACP tool identities. */
+  #toolRowIndexes = new Map<string, number>()
 
-  for (const turn of turns) {
-    const isStreamingTurn = turn.completedAt === null
+  constructor(input: SessionChatInput) {
+    super({
+      messages: [],
+    })
 
-    for (const [messageIndex, message] of turn.messages.entries()) {
-      const promptContent = extractPromptContent(message)
-
-      if (promptContent.length > 0) {
-        items.push(
-          createTextRow({
-            id: `${turn.turnId}:prompt:${messageIndex}`,
-            role: "user",
-            authorName: "You",
-            timestampLabel: "Prompt",
-            content: promptContent,
-          }),
-        )
-        continue
-      }
-
-      const sessionUpdate = parseTranscriptSessionUpdate(message)
-
-      if (sessionUpdate) {
-        if (sessionUpdate.kind === "toolCall") {
-          applyToolCallUpdate({
-            items,
-            toolRowIndexes,
-            session,
-            turnId: turn.turnId,
-            toolCallUpdate: sessionUpdate.toolCallUpdate,
-          })
-          continue
-        }
-
-        if (sessionUpdate.kind === "agentMessageChunk") {
-          applyAgentMessageChunk({
-            agentRowIndexes,
-            items,
-            session,
-            streaming: isStreamingTurn,
-            text: sessionUpdate.text,
-            turnId: turn.turnId,
-          })
-          continue
-        }
-
-        if (sessionUpdate.kind === "ignored") {
-          continue
-        }
-
-        reportUnsupportedTranscriptMessage(message, sessionUpdate.reason)
-        continue
-      }
-    }
+    this.loadTranscript(input)
   }
 
-  if (
-    session.lastAgentMessage &&
-    !items.some(
-      (item) =>
-        item.kind === "message" &&
-        item.role === "assistant" &&
-        item.content.length === 1 &&
-        item.content[0]?.type === "text" &&
-        item.content[0].text === session.lastAgentMessage,
-    )
-  ) {
-    items.push(
+  /** Rebuilds the transcript from the latest daemon session snapshot and ACP turn history. */
+  loadTranscript(input: SessionChatInput) {
+    this.#agentRowIndexes.clear()
+    this.#toolRowIndexes.clear()
+    this.messages = [
+      createTextRow({
+        id: `${input.session.id}:context`,
+        role: "system",
+        authorName: "System",
+        timestampLabel: input.session.status,
+        content: [textContentBlock(`Working directory: ${input.session.cwd}`)],
+      }),
+    ]
+
+    for (const turn of input.turns) {
+      const isStreamingTurn = turn.completedAt === null
+
+      for (const [messageIndex, message] of turn.messages.entries()) {
+        const promptContent = extractPromptContent(message)
+
+        if (promptContent.length > 0) {
+          this.#appendUserPrompt(turn, messageIndex, promptContent)
+          continue
+        }
+
+        const sessionUpdate = parseTranscriptSessionUpdate(message)
+
+        if (sessionUpdate) {
+          if (sessionUpdate.kind === "toolCall") {
+            this.#applyToolCallUpdate(input.session, turn.turnId, sessionUpdate.toolCallUpdate)
+            continue
+          }
+
+          if (sessionUpdate.kind === "agentMessageChunk") {
+            this.#applyAgentMessageChunk({
+              session: input.session,
+              streaming: isStreamingTurn,
+              text: sessionUpdate.text,
+              turnId: turn.turnId,
+            })
+            continue
+          }
+
+          if (sessionUpdate.kind === "ignored") {
+            continue
+          }
+
+          reportUnsupportedTranscriptMessage(message, sessionUpdate.reason)
+          continue
+        }
+      }
+    }
+
+    this.#appendLatestDaemonSummary(input.session)
+  }
+
+  #appendLatestDaemonSummary(session: DaemonSession) {
+    if (
+      !session.lastAgentMessage ||
+      this.messages.some(
+        (item) =>
+          item.kind === "message" &&
+          item.role === "assistant" &&
+          item.content.length === 1 &&
+          item.content[0]?.type === "text" &&
+          item.content[0].text === session.lastAgentMessage,
+      )
+    ) {
+      return
+    }
+
+    this.messages.push(
       createTextRow({
         id: `${session.id}:latest`,
         role: "assistant",
@@ -512,5 +428,117 @@ export function buildTranscriptMessages(
     )
   }
 
-  return items
+  #appendUserPrompt(
+    turn: SessionHistoryTurn,
+    messageIndex: number,
+    content: SessionTranscriptContentBlock[],
+  ) {
+    this.messages.push(
+      createTextRow({
+        id: `${turn.turnId}:prompt:${messageIndex}`,
+        role: "user",
+        authorName: "You",
+        timestampLabel: "Prompt",
+        content,
+      }),
+    )
+  }
+
+  #applyAgentMessageChunk(input: {
+    session: DaemonSession
+    streaming: boolean
+    text: string
+    turnId: string
+  }) {
+    if (input.text.length === 0) {
+      return
+    }
+
+    const rowKey = `${input.turnId}:agent`
+    const rowIndex = this.#agentRowIndexes.get(rowKey)
+
+    if (rowIndex == null) {
+      this.#agentRowIndexes.set(
+        rowKey,
+        this.messages.push(
+          createTextRow({
+            id: rowKey,
+            role: "assistant",
+            authorName: input.session.agentName,
+            timestampLabel: "Update",
+            content: [textContentBlock(input.text)],
+            streaming: input.streaming,
+          }),
+        ) - 1,
+      )
+      return
+    }
+
+    const existingRow = this.messages[rowIndex]
+
+    if (existingRow?.kind !== "message" || existingRow.role !== "assistant") {
+      console.error("Session-chat transcript agent row is in an invalid state.", {
+        existingRow,
+        rowKey,
+      })
+      return
+    }
+
+    const existingText = existingRow.content
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
+      .join("")
+
+    this.messages[rowIndex] = {
+      ...existingRow,
+      content: [textContentBlock(`${existingText}${input.text}`)],
+      streaming: input.streaming,
+    }
+  }
+
+  /** Applies one ACP tool update to the transcript, updating an existing card when identities match. */
+  #applyToolCallUpdate(
+    session: DaemonSession,
+    turnId: string,
+    toolCallUpdate: ParsedToolCallUpdate,
+  ) {
+    const rowKey = `${turnId}:tool:${toolCallUpdate.toolCallId}`
+    const rowIndex = this.#toolRowIndexes.get(rowKey)
+
+    if (rowIndex == null) {
+      const toolKind = toolCallUpdate.toolKind ?? "other"
+      const toolRow: SessionTranscriptToolCall = {
+        kind: "toolCall",
+        id: rowKey,
+        toolCallId: toolCallUpdate.toolCallId,
+        authorName: session.agentName,
+        timestampLabel: "Tool",
+        title: toolCallUpdate.title ?? fallbackToolTitle(toolKind),
+        toolKind,
+        status:
+          toolCallUpdate.status ??
+          (toolCallUpdate.updateKind === "tool_call" ? "in_progress" : "pending"),
+        content: toolCallUpdate.content ?? [],
+        locations: toolCallUpdate.locations ?? [],
+      }
+
+      this.#toolRowIndexes.set(rowKey, this.messages.push(toolRow) - 1)
+      return
+    }
+
+    const existingRow = this.messages[rowIndex]
+    if (existingRow.kind !== "toolCall") {
+      return
+    }
+
+    this.messages[rowIndex] = {
+      ...existingRow,
+      title: toolCallUpdate.title ?? existingRow.title,
+      toolKind: toolCallUpdate.toolKind ?? existingRow.toolKind,
+      status: toolCallUpdate.status ?? existingRow.status,
+      content: toolCallUpdate.content ?? existingRow.content,
+      locations: toolCallUpdate.locations ?? existingRow.locations,
+    }
+  }
 }
+
+export interface SessionChat extends SessionChatState {}

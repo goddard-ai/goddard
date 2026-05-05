@@ -85,8 +85,8 @@ type TerminalViewportEvents = {
 
 type TerminalCell = ReturnType<Terminal["buffer"]["active"]["getNullCell"]>
 
-/** Long-lived terminal model that can outlive any single viewport mount. */
-export class TerminalViewportModel extends SigmaTarget<
+/** Long-lived terminal viewport runtime that can outlive any single viewport mount. */
+export class TerminalViewportRuntime extends SigmaTarget<
   TerminalViewportEvents,
   TerminalViewportState
 > {
@@ -319,7 +319,7 @@ export class TerminalViewportModel extends SigmaTarget<
   }
 }
 
-export interface TerminalViewportModel extends TerminalViewportState {}
+export interface TerminalViewportRuntime extends TerminalViewportState {}
 
 export function translateKeyboardEvent(
   event: preact.TargetedKeyboardEvent<HTMLDivElement>,
