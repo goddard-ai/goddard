@@ -111,9 +111,9 @@ describe("sprint-branch status", () => {
     expect(diagnosticCodes(status)).toContain("dirty_approved_worktree")
   })
 
-  // Branch state is canonical, but task files are the human-readable recovery surface.
+  // Branch state is canonical, but active task files are the human-readable recovery surface.
   // Missing files should not block read-only status, but they must be visible to the agent.
-  test("warns when a recorded task file is missing", async () => {
+  test("warns when an active review task file is missing", async () => {
     const repo = await createSprintRepo("example", {
       review: "010-task-name",
       next: null,
@@ -131,6 +131,44 @@ describe("sprint-branch status", () => {
     expect(result.exitCode).toBe(0)
     expect(status.ok).toBe(true)
     expect(diagnosticCodes(status)).toContain("task_file_missing")
+  })
+
+  test("does not warn when an approved task file is missing", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: ["010-task-name"],
+    })
+    await fs.rm(path.join(repo, "sprints", "example", "010-task-name.md"))
+    await commitAll(repo, "remove approved task file")
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      diagnostics: Array<{ code: string }>
+    }
+
+    expect(result.exitCode).toBe(0)
+    expect(diagnosticCodes(status)).not.toContain("task_file_missing")
+  })
+
+  test("keeps status ok when only approved task files are missing", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: ["010-task-name"],
+    })
+    await fs.rm(path.join(repo, "sprints", "example", "010-task-name.md"))
+    await commitAll(repo, "remove approved task file")
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      diagnostics: Array<{ code: string }>
+    }
+
+    expect(result.exitCode).toBe(0)
+    expect(status.ok).toBe(true)
+    expect(status.diagnostics).toEqual([])
   })
 
   test("reports status for state missing sprint worktree root", async () => {

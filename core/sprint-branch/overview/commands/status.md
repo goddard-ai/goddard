@@ -27,8 +27,12 @@
   - It can fail when:
     - The sprint cannot be inferred.
     - The recorded state is too invalid to read.
-  - Missing task files, missing branches, dirty worktrees, broken ancestry, and
-    recorded recovery state are reported as diagnostics rather than hidden.
+  - Missing task files for active, unreviewed, or reviewable local tasks;
+    missing branches; dirty worktrees; broken ancestry; and recorded recovery
+    state are reported as diagnostics rather than hidden.
+  - Already approved historical tasks are archival metadata:
+    - Their local task files are useful context.
+    - Missing local files do not create task-file diagnostics.
   - When the sprint is blocked:
     - The report identifies why.
     - The next safe command is included when one can be determined.

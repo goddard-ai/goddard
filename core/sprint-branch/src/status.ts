@@ -299,12 +299,9 @@ async function inspectBranch(rootDir: string, name: string) {
 
 async function findMissingTaskFiles(state: SprintBranchState) {
   const tasks = new Set(
-    [
-      state.tasks.review,
-      state.tasks.next,
-      ...state.tasks.approved,
-      ...state.tasks.finishedUnreviewed,
-    ].filter((task): task is string => typeof task === "string" && task.length > 0),
+    [state.tasks.review, state.tasks.next, ...state.tasks.finishedUnreviewed].filter(
+      (task): task is string => typeof task === "string" && task.length > 0,
+    ),
   )
   const missing: string[] = []
 
