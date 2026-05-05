@@ -27,10 +27,13 @@ import { buildStatusReport, formatStatusReport } from "./status"
 import { formatSprintSyncReport, runSprintSync } from "./sync"
 import {
   createSprintSyncStopControl,
+  findRunningSprintSyncs,
   formatSprintSyncStopReport,
+  replaceRunningSprintSyncs,
   requestSprintSyncStop,
+  runningSprintSyncDiagnostics,
 } from "./sync-control"
-import type { SprintMutationReport, SprintStatusReport } from "./types"
+import type { SprintDiagnostic, SprintMutationReport, SprintStatusReport } from "./types"
 import { buildSprintReviewView, formatSprintReviewView } from "./view"
 
 function sprintOption() {
@@ -203,36 +206,40 @@ export async function main(argv: string[]) {
       sync: command({
         name: "sync",
         description: "Watch review-sync for the active sprint review branch",
-        args: commonReadArgs,
-        handler: async ({ sprint, lastSprint, json }) => {
-          const abort = createProcessAbortSignal()
-          const stopControl = await createSprintSyncStopControl({
-            cwd: process.cwd(),
-            signal: abort.signal,
-          })
-          try {
-            const report = await runSprintSync({
-              cwd: process.cwd(),
-              sprint,
-              lastSprint,
-              interactive: !json,
-              signal: stopControl.signal,
-              onResult: json
-                ? undefined
-                : (result) => {
-                    writeOutput(false, result, result.message)
-                  },
-            })
-            writeOutput(json, report, formatSprintSyncReport(report))
-            if (report.reviewSync) {
-              process.exitCode = report.reviewSync.exitCode
-            } else if (!report.ok) {
+        args: {
+          ...commonReadArgs,
+          replace: flag({
+            long: "replace",
+            description: "Stop any same-directory sprint-branch sync before starting this one",
+          }),
+        },
+        handler: async ({ sprint, lastSprint, json, replace }) => {
+          const cwd = process.cwd()
+          if (replace) {
+            const replacement = await replaceRunningSprintSyncs({ cwd })
+            if (!replacement.ok) {
+              const report = syncPreflightFailure(replacement.diagnostics)
+              writeOutput(json, report, formatSprintSyncReport(report))
               process.exitCode = 1
+              return
             }
-          } finally {
-            await stopControl.cleanup()
-            abort.cleanup()
+
+            if (replacement.stopped > 0 && !json) {
+              writeOutput(false, replacement, formatSprintSyncStopReport(replacement))
+            }
+          } else {
+            const running = await findRunningSprintSyncs({ cwd })
+            if (running.syncs.length === 0) {
+              return await runSyncCommand({ cwd, sprint, lastSprint, json })
+            }
+            const diagnostics = [...runningSprintSyncDiagnostics(running), ...running.diagnostics]
+            const report = syncPreflightFailure(diagnostics)
+            writeOutput(json, report, formatSprintSyncReport(report))
+            process.exitCode = 1
+            return
           }
+
+          await runSyncCommand({ cwd, sprint, lastSprint, json })
         },
       }),
       "stop-sync": command({
@@ -618,6 +625,56 @@ function writeOutput(json: boolean, value: unknown, text: string) {
 
   if (text.length > 0) {
     console.log(text)
+  }
+}
+
+function syncPreflightFailure(diagnostics: SprintDiagnostic[]) {
+  return {
+    ok: false,
+    command: "sync" as const,
+    sprint: null,
+    currentBranch: null,
+    inferredFrom: null,
+    agentBranch: null,
+    reviewBranch: null,
+    diagnostics,
+    reviewSync: null,
+  }
+}
+
+async function runSyncCommand(input: {
+  cwd: string
+  sprint?: string
+  lastSprint?: boolean
+  json: boolean
+}) {
+  const abort = createProcessAbortSignal()
+  const stopControl = await createSprintSyncStopControl({
+    cwd: input.cwd,
+    signal: abort.signal,
+  })
+  try {
+    const report = await runSprintSync({
+      cwd: input.cwd,
+      sprint: input.sprint,
+      lastSprint: input.lastSprint,
+      interactive: !input.json,
+      signal: stopControl.signal,
+      onResult: input.json
+        ? undefined
+        : (result) => {
+            writeOutput(false, result, result.message)
+          },
+    })
+    writeOutput(input.json, report, formatSprintSyncReport(report))
+    if (report.reviewSync) {
+      process.exitCode = report.reviewSync.exitCode
+    } else if (!report.ok) {
+      process.exitCode = 1
+    }
+  } finally {
+    await stopControl.cleanup()
+    abort.cleanup()
   }
 }
 

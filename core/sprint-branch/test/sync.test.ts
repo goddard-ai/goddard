@@ -2,7 +2,12 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { runSprintSync, type SprintSyncReport, type SprintSyncStopReport } from "../src"
+import {
+  findRunningSprintSyncs,
+  runSprintSync,
+  type SprintSyncReport,
+  type SprintSyncStopReport,
+} from "../src"
 import {
   cleanupTestRepos,
   createLinkedWorktree,
@@ -180,6 +185,91 @@ describe("sprint-branch sync", () => {
       }
     }
   })
+
+  test("sync refuses to start while another sync is running in the same working directory", async () => {
+    const { reviewWorktree } = await createSprintSyncFixture()
+    const syncProcess = spawnCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])
+    let syncExited = false
+
+    try {
+      await waitForReviewSyncCheckout(reviewWorktree)
+      const result = await runCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])
+      const sync = JSON.parse(result.stdout) as SyncOutput & {
+        diagnostics: Array<{ code: string }>
+      }
+
+      expect(result.exitCode).toBe(1)
+      expect(sync.ok).toBe(false)
+      expect(sync.reviewSync).toBe(null)
+      expect(sync.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+        "sync_already_running",
+      )
+      expect(await exitsWithin(syncProcess, 300)).toBe(false)
+
+      const stopResult = await runCli(reviewWorktree, ["stop-sync", "--json"])
+      const stopped = JSON.parse(stopResult.stdout) as SprintSyncStopReport
+      expect(stopped.stopped).toBe(1)
+
+      expect(await waitForCliExit(syncProcess, "sprint-branch sync")).toBe(0)
+      syncExited = true
+    } finally {
+      if (!syncExited) {
+        syncProcess.kill("SIGTERM")
+        await syncProcess.exited
+      }
+    }
+  })
+
+  test("sync --replace stops a same-directory sync before starting", async () => {
+    const { reviewWorktree } = await createSprintSyncFixture()
+    const syncProcess = spawnCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])
+    let syncExited = false
+    let replacementExited = false
+
+    try {
+      await waitForReviewSyncCheckout(reviewWorktree)
+      const replacement = spawnCli(reviewWorktree, [
+        "sync",
+        "--sprint",
+        "example",
+        "--replace",
+        "--json",
+      ])
+
+      try {
+        await waitForCliExit(syncProcess, "original sprint-branch sync")
+        syncExited = true
+
+        await waitForRegisteredSync(reviewWorktree)
+        const stopResult = await runCli(reviewWorktree, ["stop-sync", "--json"])
+        const stopped = JSON.parse(stopResult.stdout) as SprintSyncStopReport
+        expect(stopped.stopped).toBe(1)
+
+        expect(await waitForCliExit(replacement, "replacement sprint-branch sync")).toBe(0)
+        replacementExited = true
+        const [stdout, stderr] = await Promise.all([
+          new Response(replacement.stdout).text(),
+          new Response(replacement.stderr).text(),
+        ])
+        const sync = JSON.parse(stdout) as SyncOutput
+
+        expect(stderr).toBe("")
+        expect(sync.ok).toBe(true)
+        expect(sync.reviewSync?.command).toBe("watch")
+        expect(sync.reviewSync?.status).toBe("paused")
+      } finally {
+        if (!replacementExited) {
+          replacement.kill("SIGTERM")
+          await replacement.exited
+        }
+      }
+    } finally {
+      if (!syncExited) {
+        syncProcess.kill("SIGTERM")
+        await syncProcess.exited
+      }
+    }
+  })
 })
 
 function createDeferred<T = void>() {
@@ -208,6 +298,13 @@ async function waitForReviewSyncCheckout(reviewWorktree: string) {
   await waitUntil(
     async () => (await currentBranch(reviewWorktree)) === "review-sync/sprint/example/review",
     "sync did not check out the review-sync branch",
+  )
+}
+
+async function waitForRegisteredSync(reviewWorktree: string) {
+  await waitUntil(
+    async () => (await findRunningSprintSyncs({ cwd: reviewWorktree })).syncs.length > 0,
+    "sync did not register before the timeout",
   )
 }
 

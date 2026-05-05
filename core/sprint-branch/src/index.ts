@@ -32,8 +32,11 @@ export { buildStatusReport, formatStatusReport } from "./status"
 export { formatSprintSyncReport, runSprintSync } from "./sync"
 export {
   createSprintSyncStopControl,
+  findRunningSprintSyncs,
   formatSprintSyncStopReport,
+  replaceRunningSprintSyncs,
   requestSprintSyncStop,
+  runningSprintSyncDiagnostics,
 } from "./sync-control"
 export { buildSprintReviewView, formatSprintReviewView } from "./view"
 export type {

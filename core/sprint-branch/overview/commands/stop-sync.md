@@ -15,6 +15,8 @@
   - Requests that each matching running `sync` command exit gracefully.
   - Reports how many matching processes were asked to stop.
   - Succeeds as a no-op when no matching `sync` process is running.
+  - `sprint-branch sync --replace` uses the same stop path before starting a
+    replacement watch.
 
 - **What it changes**
   - It changes only the local control state used by running `sync` commands.

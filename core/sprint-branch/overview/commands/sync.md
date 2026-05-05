@@ -15,6 +15,8 @@
   - Exits with the review-sync outcome.
   - Can be stopped from another shell by running `sprint-branch stop-sync` in
     the same working directory.
+  - With `--replace`, first asks any existing `sync` process from the same
+    working directory to stop, waits briefly for cleanup, then starts watching.
 
 - **What it changes**
   - It delegates to the separate `review-sync` workflow.
@@ -25,6 +27,8 @@
 - **Guardrails**
   - If sprint status is invalid, `sync` reports sprint diagnostics instead of
     starting the watch.
+  - Without `--replace`, refuses to start when another `sync` process is already
+    registered for the same resolved working directory.
   - The sprint review branch is the agent branch passed into `review-sync`.
   - The command exits with the `review-sync` outcome when the watch session
     starts.
