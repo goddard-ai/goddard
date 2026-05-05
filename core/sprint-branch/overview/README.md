@@ -41,6 +41,10 @@
     - Watch the active review branch through `review-sync`.
     - Audience: humans reviewing agent work.
     - Mutates: delegates to the review-sync workflow.
+  - [`stop-sync`](./commands/stop-sync.md)
+    - Ask running `sync` commands from the same working directory to stop.
+    - Audience: humans reviewing agent work.
+    - Mutates: sync control only.
   - [`doctor`](./commands/doctor.md)
     - Diagnose inconsistent sprint state and recovery direction.
     - Audience: agents and humans.

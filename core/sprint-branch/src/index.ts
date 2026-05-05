@@ -30,6 +30,11 @@ export {
 export { parseSprintState } from "./state/schema"
 export { buildStatusReport, formatStatusReport } from "./status"
 export { formatSprintSyncReport, runSprintSync } from "./sync"
+export {
+  createSprintSyncStopControl,
+  formatSprintSyncStopReport,
+  requestSprintSyncStop,
+} from "./sync-control"
 export { buildSprintReviewView, formatSprintReviewView } from "./view"
 export type {
   SprintActiveStash,
@@ -44,6 +49,8 @@ export type {
   SprintMutationReport,
   SprintReviewViewReport,
   SprintSyncReport,
+  SprintSyncStopReport,
+  SprintStoppedSync,
   SprintStatusReport,
   SprintTaskState,
   SprintWorkingTreeStatus,

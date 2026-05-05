@@ -25,6 +25,11 @@ import {
 import { SprintInferenceError } from "./state/inference"
 import { buildStatusReport, formatStatusReport } from "./status"
 import { formatSprintSyncReport, runSprintSync } from "./sync"
+import {
+  createSprintSyncStopControl,
+  formatSprintSyncStopReport,
+  requestSprintSyncStop,
+} from "./sync-control"
 import type { SprintMutationReport, SprintStatusReport } from "./types"
 import { buildSprintReviewView, formatSprintReviewView } from "./view"
 
@@ -201,13 +206,17 @@ export async function main(argv: string[]) {
         args: commonReadArgs,
         handler: async ({ sprint, lastSprint, json }) => {
           const abort = createProcessAbortSignal()
+          const stopControl = await createSprintSyncStopControl({
+            cwd: process.cwd(),
+            signal: abort.signal,
+          })
           try {
             const report = await runSprintSync({
               cwd: process.cwd(),
               sprint,
               lastSprint,
               interactive: !json,
-              signal: abort.signal,
+              signal: stopControl.signal,
               onResult: json
                 ? undefined
                 : (result) => {
@@ -221,7 +230,22 @@ export async function main(argv: string[]) {
               process.exitCode = 1
             }
           } finally {
+            await stopControl.cleanup()
             abort.cleanup()
+          }
+        },
+      }),
+      "stop-sync": command({
+        name: "stop-sync",
+        description: "Stop sprint-branch sync processes started in this working directory",
+        args: {
+          json: jsonFlag(),
+        },
+        handler: async ({ json }) => {
+          const report = await requestSprintSyncStop({ cwd: process.cwd() })
+          writeOutput(json, report, formatSprintSyncStopReport(report))
+          if (!report.ok) {
+            process.exitCode = 1
           }
         },
       }),

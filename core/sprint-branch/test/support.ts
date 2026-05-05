@@ -119,7 +119,19 @@ export async function workingTreePorcelain(repo: string) {
 }
 
 export async function runCli(cwd: string, args: string[]) {
-  const subprocess = Bun.spawn([process.execPath, cliPath, ...args], {
+  const subprocess = spawnCli(cwd, args)
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
+  ])
+
+  return { stdout, stderr, exitCode }
+}
+
+/** Starts the sprint-branch CLI without waiting for long-running commands to finish. */
+export function spawnCli(cwd: string, args: string[]) {
+  return Bun.spawn([process.execPath, cliPath, ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -128,13 +140,6 @@ export async function runCli(cwd: string, args: string[]) {
       NO_COLOR: "1",
     },
   })
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(subprocess.stdout).text(),
-    new Response(subprocess.stderr).text(),
-    subprocess.exited,
-  ])
-
-  return { stdout, stderr, exitCode }
 }
 
 export async function git(cwd: string, args: string[]) {

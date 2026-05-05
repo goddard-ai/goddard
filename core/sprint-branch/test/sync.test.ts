@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { runSprintSync, type SprintSyncReport } from "../src"
+import { runSprintSync, type SprintSyncReport, type SprintSyncStopReport } from "../src"
 import {
   cleanupTestRepos,
   createLinkedWorktree,
@@ -10,6 +10,7 @@ import {
   currentBranch,
   git,
   runCli,
+  spawnCli,
 } from "./support"
 
 type SyncOutput = SprintSyncReport & {
@@ -116,6 +117,69 @@ describe("sprint-branch sync", () => {
       "sprint_selection_required",
     )
   })
+
+  test("stop-sync stops a sync process started in the same working directory", async () => {
+    const { reviewWorktree } = await createSprintSyncFixture()
+    const syncProcess = spawnCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])
+    let syncExited = false
+
+    try {
+      await waitForReviewSyncCheckout(reviewWorktree)
+      const result = await runCli(reviewWorktree, ["stop-sync", "--json"])
+      const stop = JSON.parse(result.stdout) as SprintSyncStopReport
+
+      expect(result.exitCode).toBe(0)
+      expect(stop.ok).toBe(true)
+      expect(stop.stopped).toBe(1)
+
+      const exitCode = await waitForCliExit(syncProcess, "sprint-branch sync")
+      syncExited = true
+      const [stdout, stderr] = await Promise.all([
+        new Response(syncProcess.stdout).text(),
+        new Response(syncProcess.stderr).text(),
+      ])
+      const sync = JSON.parse(stdout) as SyncOutput
+
+      expect(exitCode).toBe(0)
+      expect(stderr).toBe("")
+      expect(sync.ok).toBe(true)
+      expect(sync.reviewSync?.command).toBe("watch")
+      expect(sync.reviewSync?.status).toBe("paused")
+    } finally {
+      if (!syncExited) {
+        syncProcess.kill("SIGTERM")
+        await syncProcess.exited
+      }
+    }
+  })
+
+  test("stop-sync ignores sync processes from a different working directory", async () => {
+    const { repo, reviewWorktree } = await createSprintSyncFixture()
+    const syncProcess = spawnCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])
+    let syncExited = false
+
+    try {
+      await waitForReviewSyncCheckout(reviewWorktree)
+      const missedResult = await runCli(repo, ["stop-sync", "--json"])
+      const missed = JSON.parse(missedResult.stdout) as SprintSyncStopReport
+
+      expect(missedResult.exitCode).toBe(0)
+      expect(missed.stopped).toBe(0)
+      expect(await exitsWithin(syncProcess, 300)).toBe(false)
+
+      const stopResult = await runCli(reviewWorktree, ["stop-sync", "--json"])
+      const stopped = JSON.parse(stopResult.stdout) as SprintSyncStopReport
+      expect(stopped.stopped).toBe(1)
+
+      expect(await waitForCliExit(syncProcess, "sprint-branch sync")).toBe(0)
+      syncExited = true
+    } finally {
+      if (!syncExited) {
+        syncProcess.kill("SIGTERM")
+        await syncProcess.exited
+      }
+    }
+  })
 })
 
 function createDeferred<T = void>() {
@@ -126,4 +190,60 @@ function createDeferred<T = void>() {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
+}
+
+async function createSprintSyncFixture() {
+  const repo = await createSprintRepo("example", {
+    review: "010-task-name",
+    next: null,
+    approved: [],
+  })
+  const reviewWorktree = await createLinkedWorktree(repo, "main")
+  await git(repo, ["checkout", "sprint/example/review"])
+  await fs.writeFile(path.join(repo, "feature.txt"), "agent review work\n")
+  return { repo, reviewWorktree }
+}
+
+async function waitForReviewSyncCheckout(reviewWorktree: string) {
+  await waitUntil(
+    async () => (await currentBranch(reviewWorktree)) === "review-sync/sprint/example/review",
+    "sync did not check out the review-sync branch",
+  )
+}
+
+async function waitUntil(check: () => Promise<boolean>, message: string) {
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    if (await check()) {
+      return
+    }
+    await Bun.sleep(50)
+  }
+  throw new Error(message)
+}
+
+async function waitForCliExit(subprocess: ReturnType<typeof spawnCli>, command: string) {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      subprocess.exited,
+      new Promise<number>((_, reject) => {
+        timeout = setTimeout(() => {
+          subprocess.kill("SIGTERM")
+          reject(new Error(`${command} did not exit within 5000ms`))
+        }, 5000)
+      }),
+    ])
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+async function exitsWithin(subprocess: ReturnType<typeof spawnCli>, timeoutMs: number) {
+  return await Promise.race([
+    subprocess.exited.then(() => true),
+    Bun.sleep(timeoutMs).then(() => false),
+  ])
 }

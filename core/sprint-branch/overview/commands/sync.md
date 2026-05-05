@@ -13,6 +13,8 @@
   - Starts a `review-sync` watch session for the sprint's review branch.
   - Surfaces `review-sync` results while running.
   - Exits with the review-sync outcome.
+  - Can be stopped from another shell by running `sprint-branch stop-sync` in
+    the same working directory.
 
 - **What it changes**
   - It delegates to the separate `review-sync` workflow.
@@ -26,6 +28,8 @@
   - The sprint review branch is the agent branch passed into `review-sync`.
   - The command exits with the `review-sync` outcome when the watch session
     starts.
+  - Stop requests only apply to `sync` processes started from the same resolved
+    working directory.
 
 - **Why it exists**
   - It lets humans review the current sprint review branch from a review

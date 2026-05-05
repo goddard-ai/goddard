@@ -167,3 +167,20 @@ export type SprintSyncReport = {
   diagnostics: SprintDiagnostic[]
   reviewSync: ReviewSyncResult | null
 }
+
+/** One running sync process that was asked to stop from the same working directory. */
+export type SprintStoppedSync = {
+  runId: string
+  pid: number
+  startedAt: string
+}
+
+/** Result returned when sprint-branch asks same-directory sync processes to stop. */
+export type SprintSyncStopReport = {
+  ok: boolean
+  command: "stop-sync"
+  cwd: string
+  stopped: number
+  syncs: SprintStoppedSync[]
+  diagnostics: SprintDiagnostic[]
+}
