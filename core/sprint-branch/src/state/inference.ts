@@ -10,7 +10,7 @@ import {
   readSprintActivityCandidates,
 } from "./activity"
 import { parseSprintBranchName, validateSprintName } from "./branches"
-import { findSprintStateFiles } from "./io"
+import { findSprintStateFiles, readSprintStateFile } from "./io"
 import { sprintStateDisplayPath, sprintStatePath } from "./paths"
 
 /** Error raised when the current sprint cannot be inferred safely. */
