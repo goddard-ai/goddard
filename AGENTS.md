@@ -27,10 +27,8 @@
 
 - Treat behavior-affecting defaults as resolution-boundary logic, not local convenience.
 - Default config, persisted data, SDK inputs, and domain values only in named resolver, factory, normalization, or config-loading modules.
-- After a value has crossed into a resolved type, do not default it again downstream.
-- Avoid parameter defaults, destructuring defaults, and scattered `??` or `||` fallbacks for domain or configuration values.
+- Once a value crosses into a resolved type, do not default it again downstream.
 - UI-only presentation fallbacks are allowed when they do not affect shared behavior, persistence, SDK behavior, or system configuration.
-- For important config values, prefer resolver tests that document precedence and source.
 
 ## Code Style And Patch Discipline
 
