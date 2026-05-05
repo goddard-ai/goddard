@@ -34,7 +34,7 @@ type RunningSyncControlFile = SyncRunControlFile & {
 /** Registers a running sync so another shell in the same directory can stop it. */
 export async function createSprintSyncStopControl(input: { cwd: string; signal?: AbortSignal }) {
   const cwd = await fs.realpath(input.cwd)
-  const controlDir = await syncControlDir(input.cwd, cwd)
+  const controlDir = await resolveSyncControlDir(input.cwd, cwd)
   await fs.mkdir(controlDir, { recursive: true })
 
   const runId = `${Date.now()}-${process.pid}-${randomUUID()}`
@@ -221,7 +221,7 @@ export function formatSprintSyncStopReport(report: SprintSyncStopReport) {
 }
 
 /** Resolves the shared Git-private directory for one real working directory. */
-async function syncControlDir(startDir: string, cwd: string) {
+async function resolveSyncControlDir(startDir: string, cwd: string) {
   const rootDir = await resolveRepositoryRoot(startDir)
   return resolveGitCommonPath(rootDir, path.join(sprintStateRoot, "sync", syncControlKey(cwd)))
 }
@@ -229,7 +229,7 @@ async function syncControlDir(startDir: string, cwd: string) {
 /** Reads running sync controls and removes records whose processes are gone. */
 async function readRunningSyncControls(input: { cwd: string }) {
   const cwd = await fs.realpath(input.cwd)
-  const controlDir = await syncControlDir(input.cwd, cwd)
+  const controlDir = await resolveSyncControlDir(input.cwd, cwd)
   const controlPaths = await listSyncRunControlPaths(controlDir)
   const diagnostics: SprintDiagnostic[] = []
   const controls: RunningSyncControlFile[] = []
