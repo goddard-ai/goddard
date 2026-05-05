@@ -13,9 +13,8 @@ Use this reference for repository-wide contribution guidance that intentionally 
 
 ## Expanded Code Style
 
-- Inline values instead of introducing single-use variables unless the variable materially improves readability or avoids repeating a complex expression.
-- Strange coding patterns must have a brief `//` comment stating what they are doing and why they are necessary.
-- Do not document the obvious or describe line-by-line implementation mechanics.
+- Good reviewability comments usually explain hidden invariants, intentional asymmetry, protocol or wire-format constraints, external tool workarounds, or edge-case handling whose failure mode is not locally obvious.
+- Prefer clearer names or structure over comments when the issue is ordinary readability.
 
 ## Default Value Policy
 

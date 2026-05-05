@@ -1,6 +1,6 @@
 ---
 name: goddard-app-sprint-planner
-description: Sequence and revise Goddard desktop app implementation sprints using `app/plans/sprints.md`, `app/plans/feature-recommendations.md`, `spec/app.md`, `app/best-practices.md`, and `app/glossary.md`. Use when Codex needs to add a feature to the sprint plan, rebalance sprint boundaries, classify app work as active MVP versus deferred or blocked, or explain the dependency-first rollout of app implementation.
+description: Sequence and revise Goddard desktop app implementation sprints using `app/plans/sprints.md`, `app/plans/feature-recommendations.md`, `spec/app.md`, `app/AGENTS.md`, and `app/glossary.md`. Use when Codex needs to add a feature to the sprint plan, rebalance sprint boundaries, classify app work as active MVP versus deferred or blocked, or explain the dependency-first rollout of app implementation.
 ---
 
 # goddard-app-sprint-planner
@@ -11,7 +11,8 @@ Maintain the app sprint plan as the dependency-first, MVP-first rollout of the d
 
 - Read `app/plans/sprints.md` first.
 - Read `app/plans/feature-recommendations.md`.
-- Read `app/best-practices.md` and `app/glossary.md`.
+- Read `app/AGENTS.md` and `app/glossary.md`.
+- Load `goddard-contributor` only when sprint sequencing depends on app implementation patterns not captured in the plans.
 - Read `spec/README.md` and `spec/app.md`.
 - Read any feature-specific plan file in `app/plans/` that the sprint change depends on.
 

@@ -2,8 +2,6 @@
 
 These practices are derived from the current app plans, `spec/`, and `app/glossary.md`. They are written for implementation work in the Electrobun app, not for backend or SDK packages.
 
-This file should stay shorter than the former `app/best-practices.md`. Keep only recurring architectural heuristics here, not product-layout decisions or roadmap priorities.
-
 ## State Ownership
 
 - Expose shared sigma instances through Preact Context hooks instead of threading them through intermediate component props.
@@ -34,7 +32,6 @@ This file should stay shorter than the former `app/best-practices.md`. Keep only
 - Let one state module call another through explicit actions or injected adapters when a workflow crosses boundaries.
 - Keep host RPC, filesystem reads, store persistence, and daemon operations behind state modules or service adapters.
 - Only operate on local roots the user explicitly adds to the app's project scope, and pass project identity through state and tab payloads for project-scoped workflows.
-- Maintain one authenticated user-scoped activity stream and fan normalized events into inbox, sessions, and pull-request state.
 
 ## Surface Composition
 

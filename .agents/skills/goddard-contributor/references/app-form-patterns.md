@@ -8,6 +8,8 @@ Use this reference for app-local form guidance that intentionally does not live 
 - Use one feature-local form model when a form has cross-field derivation, reset semantics, async option loading, or state that is shared across a dialog boundary.
 - Use simpler local state for trivial forms with a few independent inputs and no meaningful derived state.
 - Keep the form model local to the feature unless multiple forms prove they need the same behavior.
+- Prefer uncontrolled form inputs unless live validation, derived UI, formatting, or cross-field coordination needs per-keystroke state.
+- Prefer uncontrolled open state for dialogs, popovers, tooltips, and similar overlays unless another component, keyboard shortcut, persistence rule, or async flow drives the lifecycle.
 
 ## State Shape
 
@@ -40,3 +42,4 @@ Use this reference for app-local form guidance that intentionally does not live 
 - Keep form JSX visually segmented by major parts so the structure is easy to scan.
 - Extract narrow subcomponents for clearly bounded responsibilities such as one async select field, not for arbitrary chunks of JSX that only make the form harder to follow.
 - Prefer names that describe the field or responsibility directly, such as `AdapterSelect`, over generic helper names like `Fields` or `Controls`.
+- In `src/lib/use-form`, keep complex DOM API logic in `dom.ts`; form state modules should only orchestrate private handles and state changes around those helpers.

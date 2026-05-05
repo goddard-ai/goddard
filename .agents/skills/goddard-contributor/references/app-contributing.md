@@ -2,17 +2,9 @@
 
 Use this reference for app-local contribution guidance that intentionally does not live in `app/AGENTS.md`.
 
-## Additional Read Triggers
-
-- Read the relevant upstream package or platform docs when working with third-party APIs or patterns.
-
-## Architecture
-
-- Prefer shared host adapters over ad hoc browser-to-host calls so new desktop capabilities follow one transport boundary.
-
 ## Testing
 
-- Treat manual QA through `pnpm --dir app run dev` and the flow in `app/README.md` as the default verification path for `app/` changes.
+- Treat manual QA through `bun run dev` from the workspace root and the flow in `app/README.md` as the default verification path for `app/` changes.
 - Automated tests in `app/` are reserved for extracted pure logic or fragile user-visible contracts that are hard to validate manually and easy to regress.
 - Good candidates include deterministic transforms, ordering or merge rules, serialization boundaries, theme derivation, and other helpers with meaningful edge cases.
 - When app tests are warranted, keep them small and assert observable outputs rather than component internals.

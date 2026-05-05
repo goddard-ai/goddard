@@ -26,13 +26,7 @@
   - For singleton UI components, prefer subscribing to shared Preact context directly instead of threading pass-through JSX props through parent components just to preserve an abstraction boundary.
   - Avoid relay-layer parents. If a parent component mostly renames or forwards context-derived values and callbacks into a single app-specific child, move that wiring closer to the child unless the parent is coordinating behavior across multiple subtrees.
   - Keep event logic close to the event target. Do not hoist single-use UI event handlers into shell-level components unless coordination outside the local subtree requires it.
-  - Prefer uncontrolled form inputs when the UI does not need per-keystroke state.
-  - Use controlled inputs only when live validation, derived UI, formatting, or cross-field coordination requires it.
-  - Prefer uncontrolled open state for dialogs, popovers, tooltips, and similar overlays when no other part of the UI needs to coordinate them.
-  - Use controlled open state only when another component, keyboard shortcut, persistence rule, or async flow must drive the overlay lifecycle.
-  - In non-trivial components, group top-level expressions in this order when practical: consumed context/services/refs, local UI state, derived render model, local semantic actions, bridge hooks/subscriptions, then JSX.
   - Prefer derived render values over sync effects when the next value can be computed during render.
-  - Separate logical groups with blank lines.
   - TSRX allows Preact hooks anywhere in the component render scope, including after early returns, inside `if`/`for` blocks, and inside JSX children. Keep hook calls near their natural use site instead of hoisting them solely for React-style hook ordering.
   - When a dialog component accepts `dialog: UseDialogReturn`, treat it as content rendered under a parent `Dialog.RootProvider`; do not nest `Dialog.Root` inside that component.
   - Keep custom Preact hooks for state management local to the component that uses them.
@@ -57,7 +51,6 @@
   - Use `~/...` for imports that would otherwise traverse up to `src/` or across feature roots.
   - Use `../...` only when it does not traverse up to `src/` itself. A single `../...` is allowed when it still lands inside a child path such as `src/foo/...`, but do not use `../...` to reach `src/...` broadly.
   - Never use `../../...` or deeper upward traversal imports.
-  - In `src/lib/use-form`, keep complex DOM API logic in `dom.ts`; form state modules should only orchestrate private handles and state changes around those helpers.
 - In UI components, prefer `useListener` from `preact-sigma` over manual `addEventListener` and `removeEventListener` wiring.
 - Avoid `forwardRef` for cross-component coordination in `app/` unless there is no simpler option. Prefer semantic actions through context or `src/shared/global-event-hub.ts`.
 - Prefer the `class` JSX prop over `className`.
@@ -69,4 +62,3 @@
 - Run formatting after modifying app files.
 - When a human asks for a new task, commit any app work from the previous task before starting. If that work is unfinished, include `Next step: ...` in the commit message body.
 - Do not add module-level first-line description comments or routine component description comments unless a comment explains non-obvious behavior that the code itself does not make clear.
-- Keep this file short, scannable, and app-local. Move longer explanations to `goddard-contributor`.
