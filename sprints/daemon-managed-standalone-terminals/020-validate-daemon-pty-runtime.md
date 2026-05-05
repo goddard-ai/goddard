@@ -31,11 +31,32 @@ The human is reviewing whether daemon PTY ownership is technically viable and wo
 
 ## Review Report
 
-- Review question: Is daemon-side PTY ownership with `bun-pty` viable enough to build the terminal request/stream surface on top of it?
-- Approval means: The sprint can proceed to daemon terminal request handlers, stream events, and SDK wiring without changing the PTY library or packaging strategy.
-- Downstream unlock: `030` can depend on the daemon terminal manager, deterministic cleanup behavior, and standalone packaging validation.
-- Rework trigger: PTY spawn instability, native packaging failure, cleanup leaks, or a decision not to use `bun-pty` would invalidate daemon transport and app bridge work.
-- Revert or revision boundary: This task can be revised independently from the approved contract if the public request/stream shape remains intact.
+### Plain-English Summary
+
+This task proves the daemon can own terminal PTYs directly with `bun-pty`, including spawn, input, resize, restart, close, and deterministic cleanup. It also verifies the packaged standalone daemon can load and exercise the native PTY dependency.
+
+### How To Verify Without Reading Code
+
+Review the reported daemon terminal checks and standalone build test results. Acceptance means the daemon can create and control a PTY in its real runtime path, and the sprint can build terminal request handlers and stream delivery on top of this daemon-owned runtime.
+
+### Agent Verification
+
+- `bun test core/daemon/test/terminal-runtime.test.ts`
+- `bun run --cwd core/daemon src/main.ts terminal-check --json`
+- `bun run --cwd core/daemon typecheck`
+- `bun run --cwd core/daemon lint` passed with 0 errors and one existing warning in `test/daemon.test.ts`.
+- `bun test core/daemon/test/standalone-build.test.ts`
+- `bun run --cwd core/daemon test`
+
+### Approval Questions
+
+- Is daemon-side PTY ownership with `bun-pty` viable enough to build the HTTP request and daemon stream surface on top of it?
+- Is the standalone packaging validation sufficient to proceed without changing the PTY library or packaging strategy?
+
+### Known Limits
+
+- The task validates daemon PTY ownership, not the final HTTP request endpoints, SDK methods, or app terminal tab UI.
+- One task ahead is not safe until this is approved because terminal transport and app bridge work depend on PTY runtime viability.
 
 ## Work-Ahead Safety
 
