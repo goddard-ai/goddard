@@ -1,10 +1,25 @@
+import { resolve } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 import {
+  buildSessionListRequest,
   collectSessionUpdates,
   getPromptCompletionMessage,
   isResumeExitCommand,
 } from "./acp-session.ts"
+
+describe("buildSessionListRequest", () => {
+  test("omits optional filters when they are blank", () => {
+    expect(buildSessionListRequest({ cwd: " ", cursor: "" })).toEqual({})
+  })
+
+  test("resolves cwd filters to absolute paths and preserves opaque cursors", () => {
+    expect(buildSessionListRequest({ cwd: " ./core ", cursor: " page-token " })).toEqual({
+      cwd: resolve("./core"),
+      cursor: "page-token",
+    })
+  })
+})
 
 describe("collectSessionUpdates", () => {
   test("flattens paged history turns and keeps only session/update notifications", () => {

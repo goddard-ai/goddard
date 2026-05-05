@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 /** ACP debugging CLI for daemon-backed sessions and raw adapters. */
+import { resolve } from "node:path"
+import type * as acp from "@agentclientprotocol/sdk"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 
-import { inspectAdapterSession } from "../core/daemon/src/session/inspect.ts"
+import { inspectAdapterSession, listAdapterSessions } from "../core/daemon/src/session/inspect.ts"
 import { ACPAdapterNames } from "../core/schema/src/acp-adapters.ts"
 import { GoddardSdk } from "../core/sdk/src/node/index.ts"
 import {
@@ -20,6 +22,23 @@ const DEFAULT_PROMPT =
 function resolvePrompt(prompt?: string) {
   const trimmedPrompt = prompt?.trim() ?? ""
   return trimmedPrompt || DEFAULT_PROMPT
+}
+
+/** Builds a protocol-safe `session/list` request from CLI options. */
+export function buildSessionListRequest(args: { cwd?: string; cursor?: string }) {
+  const request: acp.ListSessionsRequest = {}
+  const cwd = args.cwd?.trim()
+  const cursor = args.cursor?.trim()
+
+  if (cwd) {
+    request.cwd = resolve(cwd)
+  }
+
+  if (cursor) {
+    request.cursor = cursor
+  }
+
+  return request
 }
 
 /** Serializes one JSON payload with stable indentation so the CLI stays pipe-friendly. */
@@ -178,6 +197,25 @@ async function showAdapter(adapter: string) {
       cwd: process.cwd(),
       initialize: inspection.initialize,
       session: inspection.session,
+      sessionUpdates: inspection.sessionUpdates,
+    })
+  } finally {
+    inspection.close()
+  }
+}
+
+/** Calls ACP `session/list` on one raw adapter and prints the first requested page. */
+async function showAdapterSessionList(args: { adapter: string; cwd?: string; cursor?: string }) {
+  const request = buildSessionListRequest(args)
+  const inspection = await listAdapterSessions(args.adapter, process.cwd(), request)
+
+  try {
+    writeJson({
+      adapter: args.adapter,
+      cwd: process.cwd(),
+      request,
+      initialize: inspection.initialize,
+      sessionList: inspection.sessionList,
       sessionUpdates: inspection.sessionUpdates,
     })
   } finally {
@@ -377,6 +415,31 @@ const app = subcommands({
       },
       handler: async ({ adapter }) => {
         await showAdapter(adapter.trim())
+      },
+    }),
+    "session-list": command({
+      name: "session-list",
+      description: "Call ACP session/list on one raw adapter without creating a new session",
+      args: {
+        adapter: positional({
+          type: string,
+          displayName: "adapter",
+          description: "ACP adapter name to inspect",
+        }),
+        cwd: option({
+          type: optional(string),
+          long: "cwd",
+          short: "C",
+          description: "Optional session cwd filter; relative paths are resolved before sending",
+        }),
+        cursor: option({
+          type: optional(string),
+          long: "cursor",
+          description: "Opaque pagination cursor from a previous session/list response",
+        }),
+      },
+      handler: async ({ adapter, cwd, cursor }) => {
+        await showAdapterSessionList({ adapter: adapter.trim(), cwd, cursor })
       },
     }),
     resume: command({
