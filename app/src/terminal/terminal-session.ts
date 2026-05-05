@@ -85,11 +85,8 @@ type TerminalViewportEvents = {
 
 type TerminalCell = ReturnType<Terminal["buffer"]["active"]["getNullCell"]>
 
-/** Long-lived terminal viewport runtime that can outlive any single viewport mount. */
-export class TerminalViewportRuntime extends SigmaTarget<
-  TerminalViewportEvents,
-  TerminalViewportState
-> {
+/** Long-lived terminal session that can outlive any single viewport mount. */
+export class TerminalSession extends SigmaTarget<TerminalViewportEvents, TerminalViewportState> {
   /** Headless xterm instance that owns parser and buffer state behind the rendered row snapshot. */
   #terminal: Terminal | null = null
   /** Mounted viewport element used for measurement; DOM nodes are not serializable Sigma state. */
@@ -319,7 +316,7 @@ export class TerminalViewportRuntime extends SigmaTarget<
   }
 }
 
-export interface TerminalViewportRuntime extends TerminalViewportState {}
+export interface TerminalSession extends TerminalViewportState {}
 
 export function translateKeyboardEvent(
   event: preact.TargetedKeyboardEvent<HTMLDivElement>,

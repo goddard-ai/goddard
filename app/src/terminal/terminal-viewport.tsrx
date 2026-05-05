@@ -1,14 +1,11 @@
 import { cx } from "@goddard-ai/styled-system/css"
 import type { Protected } from "preact-sigma"
 
-import {
-  translateKeyboardEvent,
-  type TerminalViewportRuntime,
-} from "./terminal-viewport-runtime.ts"
+import { translateKeyboardEvent, type TerminalSession } from "./terminal-session.ts"
 import styles from "./terminal-viewport.style.ts"
 
 export component TerminalViewport(props: {
-  terminal: Protected<TerminalViewportRuntime>;
+  terminal: Protected<TerminalSession>;
   class?: string;
   ariaLabel?: string;
 }) {
