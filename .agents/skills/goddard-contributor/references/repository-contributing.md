@@ -21,8 +21,6 @@ For bootstrap rules such as repository state, shared behavior, patch discipline,
 
 ## Default Value Policy
 
-Follow the root `AGENTS.md` for the mandatory rule on where behavior-affecting defaults are allowed. Use this section for implementation guidance when a resolver boundary is the right place to fill missing values.
-
 - Prefer separate raw and resolved shapes, such as `RawConfig` with optional fields and `ResolvedConfig` with required fields.
 - Keep default constants close to the resolver that owns them, and name them for the specific behavior they control.
 - Represent intentional absence with an optional field or explicit union instead of encoding it as a magic default value.
