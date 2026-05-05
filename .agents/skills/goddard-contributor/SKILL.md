@@ -5,7 +5,7 @@ description: Repository contribution guide for the Goddard workspace. Use when w
 
 # Goddard Contributor
 
-Use this skill after reading the applicable `AGENTS.md` files. It is the repository's source for long-form contribution guidance that should not live in `AGENTS.md`.
+This skill is the repository's source for long-form contribution guidance that should not live in `AGENTS.md`.
 
 ## Workflow
 
@@ -16,7 +16,7 @@ Use this skill after reading the applicable `AGENTS.md` files. It is the reposit
 
 ## Reference Map
 
-- Repo-wide documentation, dependency, expanded code-style, and testing policy: `references/repository-contributing.md`
+- Repo-wide documentation, default values, dependency, expanded code-style, and testing policy: `references/repository-contributing.md`
 - App-local contribution rules that do not belong in `app/AGENTS.md`: `references/app-contributing.md`
 - Detailed app implementation patterns: `references/app-best-practices.md`
 - App form state, async field loading, and dialog-form composition patterns: `references/app-form-patterns.md`
@@ -25,6 +25,7 @@ Use this skill after reading the applicable `AGENTS.md` files. It is the reposit
 
 - When editing `app/`, usually read `references/app-contributing.md` and `references/app-best-practices.md`.
 - When building or refactoring app forms, also read `references/app-form-patterns.md` and consider whether `src/lib/use-form.ts` fits before adding local draft state or a feature form model.
+- When adding or reviewing behavior-affecting defaults, read `references/repository-contributing.md`.
 - When changing tests or deciding whether to add tests, read `references/repository-contributing.md`.
 - When changing tests or deciding whether to add tests in `app/`, also read `references/app-contributing.md`.
 - When changing naming, states, roles, identifiers, or ownership rules, read the relevant `glossary.md` before editing code.

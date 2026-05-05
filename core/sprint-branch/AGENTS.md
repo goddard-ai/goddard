@@ -1,5 +1,6 @@
-# sprint-branch Agent Notes
+# Sprint Branch Agent Notes
 
+- These rules apply to work in `core/sprint-branch/` unless a deeper `AGENTS.md` narrows them.
 - Before answering conceptual questions about `sprint-branch` or changing
   overview docs, read `overview/README.md`.
 - Keep overview documentation durable, conceptual, and scan-first:

@@ -2,8 +2,6 @@
 
 Use this reference for app-local form guidance that intentionally does not live in `app/AGENTS.md`.
 
-For bootstrap rules and broad app contribution policy, follow `app/AGENTS.md`, `references/app-contributing.md`, and `references/app-best-practices.md` first.
-
 ## When To Use A Form Model
 
 - Consider `src/lib/use-form.ts` first for flat Zod-backed DOM forms that can stay mostly uncontrolled, especially dialog forms with default values, keyed validation errors, and submit-time parsing.

@@ -2,8 +2,6 @@
 
 Use this reference for repository-wide contribution guidance that intentionally does not live in `AGENTS.md`.
 
-For bootstrap rules such as repository state, shared behavior, patch discipline, and git, follow the root `AGENTS.md` first.
-
 ## Documentation Policy
 
 - Read the relevant `glossary.md` before changing domain behavior, naming, states, roles, identifiers, or ownership rules.

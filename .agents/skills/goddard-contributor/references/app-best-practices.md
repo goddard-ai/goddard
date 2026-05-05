@@ -2,8 +2,6 @@
 
 These practices are derived from the current app plans, `spec/`, and `app/glossary.md`. They are written for implementation work in the Electrobun app, not for backend or SDK packages.
 
-For app bootstrap rules already promoted into `app/AGENTS.md` and `references/app-contributing.md`, follow those first.
-
 This file should stay shorter than the former `app/best-practices.md`. Keep only recurring architectural heuristics here, not product-layout decisions or roadmap priorities.
 
 ## State Ownership

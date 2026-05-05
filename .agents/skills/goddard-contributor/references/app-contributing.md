@@ -2,8 +2,6 @@
 
 Use this reference for app-local contribution guidance that intentionally does not live in `app/AGENTS.md`.
 
-For the app bootstrap rules already promoted into `app/AGENTS.md`, follow that file first.
-
 ## Additional Read Triggers
 
 - Read the relevant upstream package or platform docs when working with third-party APIs or patterns.
