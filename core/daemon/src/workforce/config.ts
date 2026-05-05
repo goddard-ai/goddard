@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
 import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
+import { getErrorMessage } from "radashi"
 
 import { buildWorkforcePaths } from "./paths.ts"
 
@@ -223,9 +224,7 @@ export async function resolveRepositoryRoot(startDir: string): Promise<string> {
     return stdout.trim()
   } catch (error) {
     throw new Error(
-      `Unable to resolve the repository root from ${resolve(startDir)}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `Unable to resolve the repository root from ${resolve(startDir)}: ${getErrorMessage(error)}`,
     )
   }
 }

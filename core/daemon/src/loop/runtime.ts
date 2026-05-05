@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url"
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonLoop, DaemonLoopStatus, DaemonSession } from "@goddard-ai/schema/daemon"
-import { proportionalJitter } from "radashi"
+import { getErrorMessage, proportionalJitter } from "radashi"
 
 import { LoopContext } from "../context.ts"
 import { createLogger, createPayloadPreview } from "../logging.ts"
@@ -102,7 +102,7 @@ export class LoopRuntime {
       runtime.#run().catch(async (error) => {
         if (!runtime.#stopped) {
           logger.log("loop.runtime_failed", {
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
           })
           runtime.#stopped = true
           await runtime.#shutdownLoopRuntime()

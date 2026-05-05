@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { getErrorMessage } from "radashi"
 
 import { executeCleanupOperations } from "../src/landing"
 import type { AssociatedWorktree } from "../src/landing/types"
@@ -26,7 +27,9 @@ const tempPaths: string[] = []
 
 await main().catch(async (error) => {
   await cleanupTempPaths()
-  console.error(error instanceof Error ? error.stack || error.message : String(error))
+  console.error(
+    error instanceof Error ? error.stack || getErrorMessage(error) : getErrorMessage(error),
+  )
   process.exit(1)
 })
 

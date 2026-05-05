@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
+import { getErrorMessage } from "radashi"
 
 import { formatCheckoutReport, runCheckout } from "./checkout"
 import { buildDoctorReport, formatDoctorReport } from "./doctor"
@@ -652,7 +653,7 @@ export async function runCli(argv: string[]) {
       process.exit(1)
     }
 
-    console.error(error instanceof Error ? error.message : String(error))
+    console.error(getErrorMessage(error))
     process.exit(1)
   }
 }

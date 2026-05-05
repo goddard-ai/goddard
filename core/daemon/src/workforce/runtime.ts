@@ -9,7 +9,7 @@ import type {
   WorkforceRequestRecord,
   WorkforceStatus,
 } from "@goddard-ai/schema/workforce"
-import { concat, dedent } from "radashi"
+import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
 import { WorkforceActorContext, WorkforceDispatchContext } from "../context.ts"
@@ -772,7 +772,7 @@ export class WorkforceRuntime {
     attempt: number,
     error: unknown,
   ): Promise<void> {
-    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorMessage = getErrorMessage(error)
     if (attempt >= 3) {
       await this.appendEvent({
         at: new Date().toISOString(),

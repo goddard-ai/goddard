@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs
 import { dirname, join } from "node:path"
 import { getAcpRegistryCacheDir } from "@goddard-ai/paths/node"
 import type { AdapterCatalogEntry } from "@goddard-ai/schema/daemon"
+import { getErrorMessage } from "radashi"
 
 import { readAdapterCatalogFromRegistryDir } from "./registry-catalog.ts"
 import { ACPRegistryFallbackCatalog } from "./registry-fallback.ts"
@@ -87,7 +88,7 @@ export function createACPRegistryService(options: ACPRegistryServiceOptions = {}
           state: {
             ...state,
             lastAttemptedSyncAt: toIsoTimestamp(now()),
-            lastError: error instanceof Error ? error.message : String(error),
+            lastError: getErrorMessage(error),
           },
         })
       }
@@ -101,7 +102,7 @@ export function createACPRegistryService(options: ACPRegistryServiceOptions = {}
         return buildFallbackSnapshot({
           state: {
             ...state,
-            lastError: error instanceof Error ? error.message : String(error),
+            lastError: getErrorMessage(error),
           },
         })
       }
@@ -120,7 +121,7 @@ export function createACPRegistryService(options: ACPRegistryServiceOptions = {}
       const nextState = {
         ...state,
         lastAttemptedSyncAt: toIsoTimestamp(now()),
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: getErrorMessage(error),
       } satisfies RegistryState
 
       if (await pathExists(join(cacheDir, ".git"))) {

@@ -1,4 +1,6 @@
 /** Error and result helpers shared by review-sync command modules. */
+import { getErrorMessage } from "radashi"
+
 import type { ReviewSyncCommand, ReviewSyncResult, ReviewSyncStatus } from "./types.ts"
 
 /** User-facing command error with stable status and exit-code metadata. */
@@ -20,7 +22,7 @@ export function createErrorResult(command: ReviewSyncCommand, error: unknown) {
     exitCode: userError?.exitCode ?? 1,
     command,
     status: userError?.status ?? "error",
-    message: error instanceof Error ? error.message : String(error),
+    message: getErrorMessage(error),
   })
 }
 

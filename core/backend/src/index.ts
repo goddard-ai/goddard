@@ -1,6 +1,7 @@
 import type { Socket } from "node:net"
 import { type RepoEvent } from "@goddard-ai/schema/backend"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
+import { getErrorMessage } from "radashi"
 
 import { type BackendControlPlane } from "./api/control-plane.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
@@ -92,7 +93,7 @@ export async function startBackendServer(
         try {
           httpServer.close(handleClose)
         } catch (error) {
-          handleClose(error instanceof Error ? error : new Error(String(error)))
+          handleClose(error instanceof Error ? error : new Error(getErrorMessage(error)))
         }
 
         // Use the native bulk-close when the current runtime exposes it, but keep the

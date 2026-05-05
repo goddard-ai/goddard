@@ -16,7 +16,7 @@
     "@pandacss/dev": "^1.10.0",
     "ai-sdk-json-schema": "^0.3.0",
     "cmd-ts": "^0.15.0",
-    "radashi": "^12.7.2",
+    "radashi": "^12.8.0",
     "rouzer": "^2.0.0",
     "zod": "^4.3.6"
   },

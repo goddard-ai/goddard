@@ -1,6 +1,7 @@
 import { signal } from "@preact/signals"
 import { sigma, useSigma, type Immutable, type Protected } from "preact-sigma"
 import { useEffect, useMemo } from "preact/hooks"
+import { getErrorMessage } from "radashi"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { desktopHost } from "./desktop-host.ts"
@@ -71,14 +72,6 @@ export const shortcutPersistenceErrors = signal({
   loadError: null as string | null,
   writeError: null as string | null,
 })
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-
-  return typeof error === "string" && error.length > 0 ? error : "Unknown error."
-}
 
 /** Captures the current committed app Sigma state as one daemon-persisted snapshot. */
 export function captureAppStateSnapshot(appModels: RestoredAppModels) {

@@ -2,6 +2,7 @@ import { resolveDefaultAgent } from "@goddard-ai/config"
 /** Launches daemon-managed sessions for individual PR feedback events. */
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import { getErrorMessage } from "radashi"
 
 import type { ConfigManager } from "./config-manager.ts"
 import { prependAgentBinToPath } from "./config.ts"
@@ -93,7 +94,7 @@ export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<num
       prNumber: input.event.prNumber,
       daemonUrl: input.daemonUrl,
       cwd: projectDir,
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: getErrorMessage(error),
     })
     return 1
   }

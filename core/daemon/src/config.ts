@@ -3,6 +3,7 @@ import { delimiter, join } from "node:path"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
 import { DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
+import { getErrorMessage } from "radashi"
 
 /** Environment variables recognized by the daemon runtime. */
 export type RuntimeEnv = Record<string, string | undefined>
@@ -93,9 +94,7 @@ function readGlobalConfigDaemonPort() {
     return readDaemonConfigFromRootConfig(parsed)?.port
   } catch (error) {
     throw new Error(
-      `Global config at ${getGlobalConfigPath()} has an invalid daemon config: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `Global config at ${getGlobalConfigPath()} has an invalid daemon config: ${getErrorMessage(error)}`,
       { cause: error },
     )
   }

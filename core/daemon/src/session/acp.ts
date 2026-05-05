@@ -1,6 +1,7 @@
 import { Readable, Writable } from "node:stream"
 import * as acp from "@agentclientprotocol/sdk"
 import type { FileSink } from "bun"
+import { getErrorMessage } from "radashi"
 
 import { createLogger } from "../logging.ts"
 
@@ -63,7 +64,7 @@ export function createAgentConnection(
             }
 
             logger.log("agent.message_handler_failed", {
-              errorMessage: error instanceof Error ? error.message : String(error),
+              errorMessage: getErrorMessage(error),
             })
           })
         }

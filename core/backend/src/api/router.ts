@@ -1,6 +1,7 @@
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
+import { getErrorMessage } from "radashi"
 import { createRouter } from "rouzer"
 
 import { TursoBackendControlPlane } from "../db/persistence.ts"
@@ -186,7 +187,7 @@ function readBearerToken(header: string): string {
 /** Converts thrown backend errors into consistent JSON HTTP responses. */
 function toErrorResponse(error: unknown): Response {
   const statusCode = error instanceof HttpError ? error.statusCode : 500
-  const message = error instanceof Error ? error.message : "Unknown error"
+  const message = getErrorMessage(error)
   return Response.json({ error: message }, { status: statusCode })
 }
 

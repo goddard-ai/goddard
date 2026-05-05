@@ -17,6 +17,7 @@
   "dependencies": {
     "@clack/prompts": "catalog:",
     "@goddard-ai/sdk": "workspace:^",
-    "cmd-ts": "catalog:"
+    "cmd-ts": "catalog:",
+    "radashi": "catalog:"
   }
 }

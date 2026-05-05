@@ -54,7 +54,7 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type { KindInput, KindOutput } from "kindstore"
-import { omit } from "radashi"
+import { getErrorMessage, omit } from "radashi"
 
 import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
 import type { ConfigManager } from "../config-manager.ts"
@@ -982,14 +982,14 @@ function createAgentProcessHandle(input: {
       Promise.resolve(subprocess.stdin!.write(chunk))
         .then(() => callback())
         .catch((error) => {
-          callback(error instanceof Error ? error : new Error(String(error)))
+          callback(error instanceof Error ? error : new Error(getErrorMessage(error)))
         })
     },
     final(callback) {
       Promise.resolve(subprocess.stdin!.end())
         .then(() => callback())
         .catch((error) => {
-          callback(error instanceof Error ? error : new Error(String(error)))
+          callback(error instanceof Error ? error : new Error(getErrorMessage(error)))
         })
     },
   })
@@ -2138,7 +2138,7 @@ export function createSessionManager(input: {
           {
             provider: params.generatorConfig.provider,
             model: params.generatorConfig.model,
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
           },
           params.diagnosticLogger,
         )
@@ -2206,7 +2206,7 @@ export function createSessionManager(input: {
           params.id,
           "session_title_generation_failed",
           {
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
           },
           params.diagnosticLogger,
         )
@@ -2354,7 +2354,7 @@ export function createSessionManager(input: {
       void handleIdleShutdownTimerExpired(active.id).catch((error) => {
         logger.log("session_idle_shutdown_timer_failed", {
           sessionId: active.id,
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorMessage: getErrorMessage(error),
         })
       })
     }, idleSessionShutdownTimeoutMs)
@@ -2482,7 +2482,7 @@ export function createSessionManager(input: {
           "worktree.sync_warning",
           {
             reason,
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
           },
           diagnosticLogger,
         )
@@ -2515,7 +2515,7 @@ export function createSessionManager(input: {
             "worktree.sync_watcher_degraded",
             {
               side,
-              errorMessage: error instanceof Error ? error.message : String(error),
+              errorMessage: getErrorMessage(error),
             },
             diagnosticLogger,
           )
@@ -2528,7 +2528,7 @@ export function createSessionManager(input: {
           "worktree.sync_watcher_degraded",
           {
             side,
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
           },
           diagnosticLogger,
         )
@@ -2628,7 +2628,7 @@ export function createSessionManager(input: {
       persistedSessions = await Promise.resolve(db.sessions.findMany())
     } catch (error) {
       logger.log("session_reconciliation_failed", {
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: getErrorMessage(error),
       })
       return
     }
@@ -2661,7 +2661,7 @@ export function createSessionManager(input: {
             } catch (error) {
               emitDiagnostic(session.id, "worktree.sync_warning", {
                 reason: "daemon_reconciliation",
-                errorMessage: error instanceof Error ? error.message : String(error),
+                errorMessage: getErrorMessage(error),
               })
             }
           }
@@ -2912,7 +2912,7 @@ export function createSessionManager(input: {
       }
       active.pendingPrompts.delete(nextPrompt.requestId)
       refreshIdleShutdownState(active.id, "turn_start_failed")
-      nextPrompt.reject?.(error instanceof Error ? error : new Error(String(error)))
+      nextPrompt.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
       throw error
     }
   }
@@ -3057,7 +3057,7 @@ export function createSessionManager(input: {
       })
     } catch (error) {
       refreshIdleShutdownState(active.id, "steer_cleared")
-      steer.reject(error instanceof Error ? error : new Error(String(error)))
+      steer.reject(error instanceof Error ? error : new Error(getErrorMessage(error)))
     }
   }
 
@@ -3130,7 +3130,7 @@ export function createSessionManager(input: {
         },
         onMessageError: (error) => {
           params.sessionLogger.log("agent.message_handler_failed", {
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
           })
         },
       },
@@ -3250,7 +3250,7 @@ export function createSessionManager(input: {
               "worktree.sync_warning",
               {
                 reason: "agent_process_exit",
-                errorMessage: error instanceof Error ? error.message : String(error),
+                errorMessage: getErrorMessage(error),
               },
               activeSession.logger,
             )
@@ -3413,7 +3413,7 @@ export function createSessionManager(input: {
             id,
             "worktree.bootstrap_failed",
             {
-              errorMessage: error instanceof Error ? error.message : String(error),
+              errorMessage: getErrorMessage(error),
             },
             sessionLogger,
           )
@@ -3565,7 +3565,7 @@ export function createSessionManager(input: {
       sessionLogger.log("session.launch_failed", {
         sessionId: id,
         ...sessionLogContext,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: getErrorMessage(error),
       })
       if (spawnedAgentProcess && !activeSessions.has(id)) {
         await treeKill(spawnedAgentProcess).catch(() => {})
@@ -4276,7 +4276,7 @@ export function createSessionManager(input: {
         if (active.pendingSteer?.requestId === requestId) {
           active.pendingSteer = null
         }
-        reject(error instanceof Error ? error : new Error(String(error)))
+        reject(error instanceof Error ? error : new Error(getErrorMessage(error)))
       })
     })
   }
@@ -4312,7 +4312,7 @@ export function createSessionManager(input: {
             "worktree.sync_warning",
             {
               reason: "session_shutdown",
-              errorMessage: error instanceof Error ? error.message : String(error),
+              errorMessage: getErrorMessage(error),
             },
             active.logger,
           )

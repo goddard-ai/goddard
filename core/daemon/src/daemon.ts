@@ -1,4 +1,5 @@
 import type { RepoEvent } from "@goddard-ai/schema/backend"
+import { getErrorMessage } from "radashi"
 
 import {
   createBackendClient,
@@ -71,7 +72,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
       try {
         subscription = await client.stream.subscribe()
       } catch (error) {
-        const authError = error instanceof Error ? error : new Error(String(error))
+        const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
         if (!isBackendUnauthenticatedError(authError)) {
           throw authError
         }
@@ -152,7 +153,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
             })
           } catch (error) {
             logger.log("pr_feedback.failed", {
-              errorMessage: error instanceof Error ? error.message : String(error),
+              errorMessage: getErrorMessage(error),
             })
           } finally {
             runningPrs.delete(requestKey)
@@ -173,7 +174,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
     return 0
   } catch (error) {
     logger.log("daemon.run_failed", {
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: getErrorMessage(error),
     })
     return 1
   } finally {

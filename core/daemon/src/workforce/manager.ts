@@ -1,6 +1,7 @@
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { WorkforceDescription } from "@goddard-ai/schema/daemon"
 import type { WorkforceStatus } from "@goddard-ai/schema/workforce"
+import { getErrorMessage } from "radashi"
 
 import type { WorkforceActorContext } from "../context.ts"
 import { createLogger } from "../logging.ts"
@@ -99,7 +100,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
       } catch (error) {
         logger.log("workforce.runtime_start_failed", {
           rootDir: normalizedRootDir,
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorMessage: getErrorMessage(error),
         })
         throw error
       }

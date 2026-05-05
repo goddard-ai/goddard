@@ -3,6 +3,7 @@ import { watch, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { autocomplete, cancel, isCancel } from "@clack/prompts"
 import { command, flag, optional, positional, runSafely, string, subcommands } from "cmd-ts"
+import { getErrorMessage } from "radashi"
 
 import { createErrorResult, createReviewSyncResult, UserError } from "./errors.ts"
 import {
@@ -560,7 +561,7 @@ function getWatchCleanupFailureExitCode(signal: AbortSignal | undefined) {
 
 /** Returns a concise user-facing message for thrown values. */
 function formatThrownError(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
+  return getErrorMessage(error)
 }
 
 /** Preserves command-specific structured errors while letting cmd-ts route subcommands. */

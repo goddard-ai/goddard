@@ -9,6 +9,7 @@ import type {
   StreamMessage,
 } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
+import { getErrorMessage } from "radashi"
 import { createClient } from "rouzer"
 
 /** Fetch implementation consumed by the daemon's backend client. */
@@ -268,7 +269,7 @@ function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription)
       subscription.emit("event", parsed.event)
       subscription.emit(parsed.event.type, parsed.event)
     } catch (error) {
-      subscription.emit("error", new Error(`Invalid stream payload: ${String(error)}`))
+      subscription.emit("error", new Error(`Invalid stream payload: ${getErrorMessage(error)}`))
     }
   }
 }

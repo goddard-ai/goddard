@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
-    "cmd-ts": "catalog:"
+    "cmd-ts": "catalog:",
+    "radashi": "catalog:"
   }
 }

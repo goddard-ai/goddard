@@ -4,6 +4,7 @@ import { promisify } from "node:util"
 import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
 import { command, option, optional, positional, runSafely, string, subcommands } from "cmd-ts"
+import { getErrorMessage } from "radashi"
 
 const execFileAsync = promisify(execFile)
 
@@ -73,9 +74,7 @@ async function resolveRepositoryRoot(startDir: string): Promise<string> {
     return stdout.trim()
   } catch (error) {
     throw new Error(
-      `Unable to resolve the repository root from ${startDir}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `Unable to resolve the repository root from ${startDir}: ${getErrorMessage(error)}`,
     )
   }
 }

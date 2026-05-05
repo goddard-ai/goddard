@@ -8,6 +8,7 @@ import type {
   PullRequestRecord,
   RepoEvent,
 } from "@goddard-ai/schema/backend"
+import { getErrorMessage } from "radashi"
 
 import type { Env } from "../env.ts"
 
@@ -73,7 +74,7 @@ export async function postPrCommentViaApp(
       body,
     })
   } catch (error) {
-    throw new HttpError(500, `Failed to post comment to GitHub: ${(error as Error).message}`)
+    throw new HttpError(500, `Failed to post comment to GitHub: ${getErrorMessage(error)}`)
   }
 }
 
@@ -101,7 +102,7 @@ export async function createPrViaApp(
       createdAt: data.created_at,
     }
   } catch (error) {
-    throw new HttpError(500, `Failed to create pull request on GitHub: ${(error as Error).message}`)
+    throw new HttpError(500, `Failed to create pull request on GitHub: ${getErrorMessage(error)}`)
   }
 }
 

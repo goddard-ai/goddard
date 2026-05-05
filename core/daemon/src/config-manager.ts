@@ -7,6 +7,7 @@ import {
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
 import type { UserConfig } from "@goddard-ai/schema/config"
+import { getErrorMessage } from "radashi"
 
 import { createLogger } from "./logging.ts"
 import { readMergedRootConfig } from "./resolvers/config.ts"
@@ -180,7 +181,7 @@ export function createConfigManager() {
         watchScope: state.scope,
         watchRoot: state.watchedDir ?? nextTarget.watchedDir,
         configPath: state.configPath,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: getErrorMessage(error),
       })
     })
 
@@ -267,7 +268,7 @@ export function createConfigManager() {
           logger.log("config.reload_failed", {
             watchScope: changedLayer,
             localConfigPath: entry.localConfigPath,
-            errorMessage: error instanceof Error ? error.message : String(error),
+            errorMessage: getErrorMessage(error),
             version: entry.snapshot?.version,
           })
           if (entry.snapshot) {

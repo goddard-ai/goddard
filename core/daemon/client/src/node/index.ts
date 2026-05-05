@@ -9,6 +9,7 @@ import {
   DEFAULT_DAEMON_PORT,
   readDaemonTcpAddressFromDaemonUrl,
 } from "@goddard-ai/schema/daemon-url"
+import { getErrorMessage } from "radashi"
 
 import {
   type DaemonIpcClient,
@@ -114,9 +115,7 @@ function readDaemonPortFromGlobalConfig() {
     return readDaemonConfigFromRootConfig(parsed)?.port
   } catch (error) {
     throw new Error(
-      `Global config at ${getGlobalConfigPath()} has an invalid daemon config: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `Global config at ${getGlobalConfigPath()} has an invalid daemon config: ${getErrorMessage(error)}`,
       { cause: error },
     )
   }

@@ -3,6 +3,7 @@ import { once } from "node:events"
 import { request, type Server } from "node:http"
 import { createServer as createTcpServer } from "node:net"
 import { afterEach, describe, expect, test, vi } from "bun:test"
+import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
 import { $type, IpcClientError, type IpcSchema } from "../src/index.ts"
@@ -440,7 +441,7 @@ describe("core/ipc", () => {
         failures.push({
           name,
           payload,
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorMessage: getErrorMessage(error),
           durationMs,
           traceId,
         })

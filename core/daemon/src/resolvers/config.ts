@@ -8,6 +8,7 @@ import {
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
 import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
+import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
 /** Paths and merged root config for one daemon-side config resolution request. */
@@ -90,10 +91,7 @@ export async function readJsonConfig<T>(
   try {
     options.validateNormalized?.(normalized)
   } catch (error) {
-    throw new Error(
-      `${label} at ${path} is invalid: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    )
+    throw new Error(`${label} at ${path} is invalid: ${getErrorMessage(error)}`, { cause: error })
   }
 
   const result = schema.safeParse(normalized)

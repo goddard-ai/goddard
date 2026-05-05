@@ -105,6 +105,7 @@
         "@libsql/client": "^0.17.0",
         "drizzle-orm": "1.0.0-beta.20",
         "octokit": "^5.0.5",
+        "radashi": "catalog:",
         "rouzer": "catalog:",
       },
       "devDependencies": {
@@ -169,6 +170,7 @@
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
+        "radashi": "catalog:",
       },
     },
     "core/ipc": {
@@ -176,6 +178,9 @@
       "version": "0.1.0",
       "dependencies": {
         "zod": "catalog:",
+      },
+      "devDependencies": {
+        "radashi": "catalog:",
       },
     },
     "core/paths": {
@@ -197,6 +202,7 @@
       "dependencies": {
         "@clack/prompts": "catalog:",
         "cmd-ts": "catalog:",
+        "radashi": "catalog:",
       },
     },
     "core/schema": {
@@ -233,6 +239,7 @@
         "@clack/prompts": "catalog:",
         "@goddard-ai/review-sync": "workspace:^",
         "cmd-ts": "catalog:",
+        "radashi": "catalog:",
       },
     },
     "core/worktree-plugin": {
@@ -249,6 +256,7 @@
         "@clack/prompts": "catalog:",
         "@goddard-ai/sdk": "workspace:^",
         "cmd-ts": "catalog:",
+        "radashi": "catalog:",
       },
     },
   },
@@ -258,7 +266,7 @@
     "@pandacss/dev": "^1.10.0",
     "ai-sdk-json-schema": "^0.3.0",
     "cmd-ts": "^0.15.0",
-    "radashi": "^12.7.2",
+    "radashi": "^12.8.0",
     "rouzer": "^2.0.0",
     "zod": "^4.3.6",
   },
@@ -2269,7 +2277,7 @@
 
     "queue-microtask": ["queue-microtask@1.2.3", "", {}, "sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A=="],
 
-    "radashi": ["radashi@12.7.2", "", {}, "sha512-BfoN4XJll34ok3rCHjVlRypymJvD3cE+M3UATC8519wUgHl1/AXt2dEEIFv5865gO6t0ENAU6qEOqjr/NcIRyQ=="],
+    "radashi": ["radashi@12.8.0", "", {}, "sha512-u9aBPKX3jQZv9cEpJCpSW8gwVpg1ep04+4wetlnGVDjF+CP1JlQ32gruBZ7yO8NHbjTt8c0u6rdRfgALJL5ORw=="],
 
     "range-parser": ["range-parser@1.2.1", "", {}, "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg=="],
 

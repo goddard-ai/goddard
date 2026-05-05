@@ -13,6 +13,7 @@ import {
 } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import { getErrorMessage } from "radashi"
 
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
@@ -660,7 +661,7 @@ export async function startDaemonServer(
       logger.log("ipc.request_failed", {
         requestName: name,
         durationMs,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: getErrorMessage(error),
       })
     },
     beforeSubscribe: async ({ name, filter }) => {

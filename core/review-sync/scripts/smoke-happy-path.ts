@@ -4,6 +4,7 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { getErrorMessage } from "radashi"
 
 import { startReviewSync, statusReviewSession, syncReviewSession } from "../src/index.ts"
 
@@ -152,7 +153,7 @@ try {
   rootDir = null
   console.log("review-sync smoke happy path passed")
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error))
+  console.error(getErrorMessage(error))
   if (rootDir) {
     console.error(`smoke fixture preserved at ${rootDir}`)
   }
