@@ -22,8 +22,13 @@ export function createErrorResult(command: ReviewSyncCommand, error: unknown) {
     exitCode: userError?.exitCode ?? 1,
     command,
     status: userError?.status ?? "error",
-    message: getErrorMessage(error),
+    message: formatThrownError(error),
   })
+}
+
+/** Returns a concise user-facing message for thrown values. */
+export function formatThrownError(error: unknown) {
+  return getErrorMessage(error)
 }
 
 /** Preserves the public result shape for callers even when fields are absent at runtime. */

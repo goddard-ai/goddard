@@ -3,7 +3,12 @@ import { watch, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { command, flag, optional, positional, string } from "cmd-ts"
 
-import { createErrorResult, createReviewSyncResult, UserError } from "../errors.ts"
+import {
+  createErrorResult,
+  createReviewSyncResult,
+  formatThrownError,
+  UserError,
+} from "../errors.ts"
 import {
   assertReviewBranchNotCheckedOutElsewhere,
   assertSupportedGitState,
@@ -38,7 +43,6 @@ import {
 import { reviewBranchHasHumanCommits } from "./history.ts"
 import { pauseSession } from "./pause.ts"
 import { resumeSession } from "./resume.ts"
-import { formatThrownError } from "./shared.ts"
 import { startLoadedReviewSyncSession, startReviewSyncWithSession } from "./start.ts"
 import { syncLoadedReviewSyncSession } from "./sync.ts"
 

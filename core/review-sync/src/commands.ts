@@ -4,12 +4,11 @@ import { parse, runSafely, subcommands } from "cmd-ts"
 import { cleanupReviewSessions, createCleanupCommand } from "./commands/cleanup.ts"
 import { createPauseCommand, pauseReviewSession } from "./commands/pause.ts"
 import { createResumeCommand, resumeReviewSession } from "./commands/resume.ts"
-import { createCmdTsResult } from "./commands/shared.ts"
 import { createStartCommand, startReviewSync } from "./commands/start.ts"
 import { createStatusCommand, statusReviewSession } from "./commands/status.ts"
 import { createSyncCommand, syncReviewSession } from "./commands/sync.ts"
 import { createWatchCommand, watchReviewSession } from "./commands/watch.ts"
-import { createErrorResult } from "./errors.ts"
+import { createErrorResult, createReviewSyncResult } from "./errors.ts"
 import type { ReviewSyncCommand } from "./types.ts"
 
 export {
@@ -34,6 +33,16 @@ export async function runReviewSync(argv: string[]) {
   } catch (error) {
     return createErrorResult(selectedCommand ?? "status", error)
   }
+}
+
+/** Converts cmd-ts parse/help exits into the public structured result shape. */
+function createCmdTsResult(error: { config: { exitCode: number; message: string } }) {
+  return createReviewSyncResult({
+    exitCode: error.config.exitCode,
+    command: "status",
+    status: error.config.exitCode === 0 ? "ok" : "error",
+    message: error.config.message,
+  })
 }
 
 /** Identifies the subcommand before running so handler errors keep the right command label. */
