@@ -4,6 +4,7 @@ import { afterEach, expect, test } from "bun:test"
 
 import {
   cleanupReviewSessions,
+  listReviewSessions,
   startReviewSync,
   statusReviewSession,
   stopReviewSession,
@@ -59,6 +60,69 @@ test("status exposes structured data for TypeScript callers", async () => {
     rejected: 0,
   })
   expect(JSON.parse(result.message)).toEqual(result.data)
+})
+
+test("list exposes structured status data for every repository session", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  const secondAgentDir = join(fixture.rootDir, "agent-two")
+  await runGit(fixture.agentDir, ["branch", "codex/second-review-sync-test", "main"])
+  await runGit(fixture.agentDir, [
+    "worktree",
+    "add",
+    secondAgentDir,
+    "codex/second-review-sync-test",
+  ])
+
+  await startReviewSync({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/review-sync-test",
+  })
+  await startReviewSync({
+    cwd: fixture.reviewDir,
+    agentBranch: "codex/second-review-sync-test",
+  })
+
+  const sessions = (
+    await listReviewSessions({
+      cwd: fixture.reviewDir,
+    })
+  ).sort((left, right) => left.agentBranch.localeCompare(right.agentBranch))
+
+  expect(sessions).toHaveLength(2)
+  expect(sessions.map((session) => session.agentWorktree)).toEqual([
+    await realpath(fixture.agentDir),
+    await realpath(secondAgentDir),
+  ])
+  expect(sessions.map((session) => session.reviewWorktree)).toEqual([
+    await realpath(fixture.reviewDir),
+    await realpath(fixture.reviewDir),
+  ])
+  expect(sessions.map((session) => session.agentBranch)).toEqual([
+    "codex/review-sync-test",
+    "codex/second-review-sync-test",
+  ])
+  expect(sessions.map((session) => session.reviewBranch)).toEqual([
+    "review-sync/codex/review-sync-test",
+    "review-sync/codex/second-review-sync-test",
+  ])
+})
+
+test("list exposes sessions from an agent worktree checkout", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  const sessions = await listReviewSessions({
+    cwd: fixture.agentDir,
+  })
+
+  expect(sessions).toHaveLength(1)
+  expect(sessions[0]?.agentWorktree).toBe(await realpath(fixture.agentDir))
+  expect(sessions[0]?.reviewWorktree).toBe(await realpath(fixture.reviewDir))
+  expect(sessions[0]?.agentBranch).toBe("codex/review-sync-test")
+  expect(sessions[0]?.reviewBranch).toBe("review-sync/codex/review-sync-test")
 })
 
 test("status explains recovery when multiple sessions match the worktree", async () => {

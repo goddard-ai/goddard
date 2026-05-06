@@ -4,6 +4,7 @@ export {
   pauseReviewSession,
   resumeReviewSession,
   runReviewSync,
+  listReviewSessions,
   startReviewSync,
   statusReviewSession,
   stopReviewSession,
@@ -12,6 +13,7 @@ export {
 } from "./commands.ts"
 export type {
   CleanupReviewSyncInput,
+  ListReviewSyncInput,
   ReviewSyncCommand,
   ReviewSyncResult,
   ReviewSyncStatus,

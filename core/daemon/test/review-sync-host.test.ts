@@ -19,7 +19,7 @@ afterEach(async () => {
   }
 })
 
-test("review-sync host mounts, rehydrates, and unmounts a daemon worktree", async () => {
+test("review-sync host mounts, rehydrates, and unmounts through review-sync", async () => {
   const repoDir = await createRepoFixture({
     "shared.txt": "base\n",
   })
@@ -29,22 +29,18 @@ test("review-sync host mounts, rehydrates, and unmounts a daemon worktree", asyn
   })
   cleanup.push(created.worktreeDir)
 
-  await writeFile(join(repoDir, "shared.txt"), "primary pre-mount\n", "utf-8")
-  await writeFile(join(repoDir, "primary-note.txt"), "keep me\n", "utf-8")
   await writeFile(join(created.worktreeDir, "shared.txt"), "worktree dirty\n", "utf-8")
   await writeFile(join(created.worktreeDir, "worktree-note.txt"), "mirror me\n", "utf-8")
 
   const host = new ReviewSyncWorktreeSessionHost({
-    sessionId: "ses_review_sync_mount",
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
+    agentBranch: created.branchName,
   })
 
   const mounted = await host.mount()
   const expectedPrimaryDir = await realpath(repoDir)
   const expectedWorktreeDir = await realpath(created.worktreeDir)
-  expect(mounted?.mountStatus).toBe("mounted")
-  expect(mounted?.daemonSessionId).toBe("ses_review_sync_mount")
   expect(mounted?.sessionId.startsWith("sha256-")).toBe(true)
   expect(mounted?.reviewWorktree).toBe(expectedPrimaryDir)
   expect(mounted?.agentWorktree).toBe(expectedWorktreeDir)
@@ -52,20 +48,18 @@ test("review-sync host mounts, rehydrates, and unmounts a daemon worktree", asyn
   expect(mounted?.renderedSnapshot).toMatch(/^[0-9a-f]{40}$/)
   expect(mounted?.reviewBranch).toBe("review-sync/goddard-review-sync-a")
   expect(mounted?.agentBranch).toBe("goddard-review-sync-a")
-  expect(mounted?.primaryRestore.preMountSnapshotOid).toMatch(/^[0-9a-f]{40}$/)
   expect(await currentBranch(repoDir)).toBe("review-sync/goddard-review-sync-a")
   expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("worktree dirty\n")
   expect(await readFile(join(repoDir, "worktree-note.txt"), "utf-8")).toBe("mirror me\n")
 
   const found = await findMountedReviewSyncSessionByPrimaryDir(repoDir)
-  expect(found?.daemonSessionId).toBe("ses_review_sync_mount")
+  expect(found?.sessionId).toBe(mounted?.sessionId)
 
   const rehydrated = await new ReviewSyncWorktreeSessionHost({
-    sessionId: "ses_review_sync_mount",
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
+    agentBranch: created.branchName,
   }).inspect()
-  expect(rehydrated?.mountStatus).toBe("mounted")
   expect(rehydrated?.sessionId).toBe(mounted?.sessionId)
 
   const reused = await host.mount()
@@ -73,9 +67,8 @@ test("review-sync host mounts, rehydrates, and unmounts a daemon worktree", asyn
 
   const unmounted = await host.unmount()
   expect(unmounted.warnings).toEqual([])
-  expect(await currentBranch(repoDir)).toBe("main")
-  expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("primary pre-mount\n")
-  expect(await readFile(join(repoDir, "primary-note.txt"), "utf-8")).toBe("keep me\n")
+  expect(await currentBranch(repoDir)).toBe("review-sync/goddard-review-sync-a")
+  expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("worktree dirty\n")
   expect(await host.inspect()).toBeNull()
 
   await deleteWorktree({

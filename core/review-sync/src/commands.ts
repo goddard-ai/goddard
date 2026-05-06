@@ -9,7 +9,7 @@ import {
 import { createPauseCommand, pauseReviewSession } from "./commands/pause.ts"
 import { createResumeCommand, resumeReviewSession } from "./commands/resume.ts"
 import { createStartCommand, startReviewSync } from "./commands/start.ts"
-import { createStatusCommand, statusReviewSession } from "./commands/status.ts"
+import { createStatusCommand, listReviewSessions, statusReviewSession } from "./commands/status.ts"
 import { createSyncCommand, syncReviewSession } from "./commands/sync.ts"
 import { createWatchCommand, watchReviewSession } from "./commands/watch.ts"
 import { createErrorResult, createReviewSyncResult } from "./errors.ts"
@@ -19,6 +19,7 @@ export {
   cleanupReviewSessions,
   pauseReviewSession,
   resumeReviewSession,
+  listReviewSessions,
   startReviewSync,
   statusReviewSession,
   stopReviewSession,

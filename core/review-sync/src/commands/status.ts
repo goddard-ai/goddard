@@ -3,17 +3,48 @@ import { join } from "node:path"
 import { command, flag } from "cmd-ts"
 
 import { createReviewSyncResult } from "../errors.ts"
-import { resolveRef } from "../git.ts"
+import { resolveRef, resolveRequiredGitCommonDir, resolveRequiredRepoRoot } from "../git.ts"
 import { createRuntimeContext } from "../runtime.ts"
 import { inferSession } from "../session.ts"
-import { countPatchFiles, resolveSessionDir } from "../state.ts"
-import type { ReviewSyncStatusData, StatusReviewSyncInput } from "../types.ts"
+import { countPatchFiles, listSessions, resolveSessionDir } from "../state.ts"
+import type {
+  ListReviewSyncInput,
+  ReviewSyncStatusData,
+  RuntimeContext,
+  SessionState,
+  StatusReviewSyncInput,
+} from "../types.ts"
 
 /** Returns session state, patch counts, and refs without mutating Git or durable state. */
 export async function statusReviewSession(input: StatusReviewSyncInput) {
   const context = createRuntimeContext(input.cwd)
   const json = input.json ?? false
   const session = await inferSession(context)
+  const payload = await createReviewSyncStatusData(session, context)
+  const message = json ? JSON.stringify(payload, null, 2) : formatStatusMessage(payload)
+
+  return createReviewSyncResult({
+    exitCode: 0,
+    command: "status",
+    status: session.paused ? "paused" : "ok",
+    sessionId: session.sessionId,
+    reviewBranch: session.reviewBranch,
+    data: payload,
+    message,
+  })
+}
+
+/** Lists every review-sync session recorded for the current Git repository. */
+export async function listReviewSessions(input: ListReviewSyncInput) {
+  const context = createRuntimeContext(input.cwd)
+  const repoRoot = await resolveRequiredRepoRoot(input.cwd, context)
+  const commonDir = await resolveRequiredGitCommonDir(repoRoot, context)
+  const sessions = await listSessions(commonDir)
+  return await Promise.all(sessions.map((session) => createReviewSyncStatusData(session, context)))
+}
+
+/** Builds the status payload shared by direct status and session listing callers. */
+async function createReviewSyncStatusData(session: SessionState, context: RuntimeContext) {
   const sessionDir = resolveSessionDir(session.repoCommonDir, session.sessionId)
   const acceptedCount = await countPatchFiles(join(sessionDir, "patches", "accepted"))
   const rejectedCount = await countPatchFiles(join(sessionDir, "patches", "rejected"))
@@ -42,30 +73,22 @@ export async function statusReviewSession(input: StatusReviewSyncInput) {
       rejected: rejectedCount,
     },
   } satisfies ReviewSyncStatusData
-  const message = json
-    ? JSON.stringify(payload, null, 2)
-    : [
-        `review sync: ${session.agentBranch} -> ${session.reviewBranch}`,
-        `session: ${session.sessionId}`,
-        `paused: ${session.paused ? "yes" : "no"}`,
-        `agent worktree: ${session.agentWorktree}`,
-        `review worktree: ${session.reviewWorktree}`,
-        `agent snapshot: ${agentSnapshot ?? "(none)"}`,
-        `rendered snapshot: ${renderedSnapshot ?? "(none)"}`,
-        `last sync: ${session.lastSync.status}`,
-        `accepted patches: ${acceptedCount}`,
-        `rejected patches: ${rejectedCount}`,
-      ].join("\n")
+  return payload
+}
 
-  return createReviewSyncResult({
-    exitCode: 0,
-    command: "status",
-    status: session.paused ? "paused" : "ok",
-    sessionId: session.sessionId,
-    reviewBranch: session.reviewBranch,
-    data: payload,
-    message,
-  })
+function formatStatusMessage(payload: ReviewSyncStatusData) {
+  return [
+    `review sync: ${payload.agentBranch} -> ${payload.reviewBranch}`,
+    `session: ${payload.sessionId}`,
+    `paused: ${payload.paused ? "yes" : "no"}`,
+    `agent worktree: ${payload.agentWorktree}`,
+    `review worktree: ${payload.reviewWorktree}`,
+    `agent snapshot: ${payload.agentSnapshot ?? "(none)"}`,
+    `rendered snapshot: ${payload.renderedSnapshot ?? "(none)"}`,
+    `last sync: ${payload.lastSync.status}`,
+    `accepted patches: ${payload.patchCounts.accepted}`,
+    `rejected patches: ${payload.patchCounts.rejected}`,
+  ].join("\n")
 }
 
 /** Builds the status subcommand. */

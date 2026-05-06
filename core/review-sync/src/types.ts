@@ -72,6 +72,9 @@ export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
   json?: boolean
 }
 
+/** Inputs for listing review-sync sessions in one Git repository. */
+export type ListReviewSyncInput = ReviewSyncWorktreeInput
+
 /** Inputs for removing saved review-sync sessions that match one worktree. */
 export type CleanupReviewSyncInput = ReviewSyncWorktreeInput & {
   all?: boolean
