@@ -6,7 +6,7 @@ import { readJsonFile, writeJsonFile } from "./json-file.ts"
 /** Reads the latest app-state snapshot from the Bun-host JSON file. */
 export async function loadAppStateSnapshot() {
   const file = await readJsonFile(getAppStatePath(), AppStateFile)
-  return (file?.value ?? null) as AppStateSnapshot | null
+  return file?.value ?? null
 }
 
 /** Atomically writes the latest app-state snapshot to the Bun-host JSON file. */
