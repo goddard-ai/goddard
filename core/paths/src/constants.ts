@@ -31,8 +31,8 @@ export const GODDARD_ACP_REGISTRY_CACHE_DIRECTORY = "acp-registry"
 /** Directory name used for app-only user preference files. */
 export const GODDARD_USER_DIRECTORY = "user"
 
-/** Filename used for the app-owned state kindstore database. */
-export const GODDARD_APP_STATE_DATABASE_FILENAME = "app-state.db"
+/** Filename used for the app-owned state JSON file. */
+export const GODDARD_APP_STATE_FILENAME = "app-state.json"
 
 /** Filename used for the app keyboard shortcut keymap. */
 export const GODDARD_SHORTCUT_KEYMAP_FILENAME = "keymap.json"

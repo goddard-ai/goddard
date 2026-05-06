@@ -34,7 +34,7 @@ export type PersistentAppModels = {
   workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
-/** Persisted Sigma state captured and restored through the Bun-host app state kindstore. */
+/** Persisted Sigma state captured and restored through the Bun-host app state file. */
 export type PersistedAppStateSnapshot = AppStateSnapshot & {
   appearance: Immutable<AppearanceState>
   navigation: Immutable<NavigationState>

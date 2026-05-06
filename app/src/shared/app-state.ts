@@ -1,7 +1,8 @@
 import { z } from "zod"
 
-export const APP_STATE_STORAGE_KEY = "goddard.app.state.v1"
-export const APP_STATE_RECORD_VERSION = 1
+export const APP_STATE_FILE_VERSION = 1
+
+const RequiredUnknown = z.custom<unknown>((value) => value !== undefined)
 
 /** App-owned persisted Sigma snapshot transported between the webview and Bun host. */
 export type AppStateSnapshot = {
@@ -12,14 +13,17 @@ export type AppStateSnapshot = {
   workbenchTabSet: unknown
 }
 
-/** Versioned app state record stored in the Bun-host app state kindstore. */
-export const AppStateStorageRecord = z.strictObject({
-  key: z.string().min(1),
-  version: z.literal(APP_STATE_RECORD_VERSION),
+/** Versioned app state JSON file stored by the Bun host. */
+export const AppStateFile = z.strictObject({
+  version: z.literal(APP_STATE_FILE_VERSION),
   savedAt: z.number().int().nonnegative(),
-  value: z.unknown(),
+  value: z.strictObject({
+    appearance: RequiredUnknown,
+    navigation: RequiredUnknown,
+    projectContext: RequiredUnknown,
+    projectRegistry: RequiredUnknown,
+    workbenchTabSet: RequiredUnknown,
+  }),
 })
 
-export type AppStateStorageRecord = z.output<typeof AppStateStorageRecord> & {
-  id: `ast_${string}`
-}
+export type AppStateFile = z.output<typeof AppStateFile>

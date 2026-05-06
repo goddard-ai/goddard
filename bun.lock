@@ -57,7 +57,6 @@
         "fuzzysort2": "^0.1.1",
         "hash-sum": "^2.0.0",
         "immer": "^11.1.4",
-        "kindstore": "^0.4.4",
         "lexical": "^0.42.0",
         "lucide-react": "^1.11.0",
         "powerkeys": "^0.1.2",

@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { getAppStateDatabasePath, getDatabasePath } from "../src/node/index.ts"
+import { getAppStatePath, getDatabasePath } from "../src/node/index.ts"
 
 const originalHome = process.env.HOME
 const originalNodeEnv = process.env.NODE_ENV
@@ -36,12 +36,10 @@ test("getDatabasePath isolates development data for direct development runs", ()
   expect(getDatabasePath()).toBe(join("/tmp/goddard-home", ".goddard", "development", "goddard.db"))
 })
 
-test("getAppStateDatabasePath stores app-owned state under the user directory", () => {
+test("getAppStatePath stores app-owned state under the user directory", () => {
   process.env.HOME = "/tmp/goddard-home"
 
-  expect(getAppStateDatabasePath()).toBe(
-    join("/tmp/goddard-home", ".goddard", "user", "app-state.db"),
-  )
+  expect(getAppStatePath()).toBe(join("/tmp/goddard-home", ".goddard", "user", "app-state.json"))
 })
 
 function restoreEnv(key: string, value: string | undefined) {

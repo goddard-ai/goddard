@@ -21,9 +21,9 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
     requests: {
       runtimeInfo: async () => ({ runtime: "electrobun" }),
       browseForProject: async () => ({ path: await browseForProject() }),
-      loadAppStateSnapshot: async () => ({ snapshot: loadAppStateSnapshot() }),
+      loadAppStateSnapshot: async () => ({ snapshot: await loadAppStateSnapshot() }),
       writeAppStateSnapshot: async ({ snapshot }) => {
-        writeAppStateSnapshot(snapshot)
+        await writeAppStateSnapshot(snapshot)
         return {}
       },
       loadShortcutKeymap: async () => ({ keymap: await loadShortcutKeymap() }),

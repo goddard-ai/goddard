@@ -1,98 +1,57 @@
-import { mkdirSync, rmSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { getAppStateDatabasePath } from "@goddard-ai/paths/node"
-import { kind, kindstore, UnrecoverableStoreOpenError, type DatabaseOptions } from "kindstore"
+import { getAppStatePath } from "@goddard-ai/paths/node"
 
-import {
-  APP_STATE_RECORD_VERSION,
-  APP_STATE_STORAGE_KEY,
-  AppStateStorageRecord,
-  type AppStateSnapshot,
-} from "~/shared/app-state.ts"
+import { APP_STATE_FILE_VERSION, AppStateFile, type AppStateSnapshot } from "~/shared/app-state.ts"
 
-type StoreConnectionOptions = {
-  filename: string
-  databaseOptions?: DatabaseOptions
+function isNodeErrorCode(error: unknown, code: string) {
+  return error instanceof Error && "code" in error && error.code === code
 }
 
-const schema = {
-  appStateRecords: kind("ast", AppStateStorageRecord).index("key", { unique: true }),
-}
+/** Reads the latest app-state snapshot from the Bun-host JSON file. */
+export async function loadAppStateSnapshot() {
+  let source: string
 
-function createStore(options: StoreConnectionOptions) {
-  if (options.filename !== ":memory:") {
-    mkdirSync(dirname(options.filename), { recursive: true })
-  }
-
-  return kindstore({
-    filename: options.filename,
-    databaseOptions: options.databaseOptions,
-    schema,
-  })
-}
-
-function removeDatabaseArtifacts(filename: string) {
-  for (const suffix of ["", "-shm", "-wal"]) {
-    rmSync(`${filename}${suffix}`, { force: true })
-  }
-}
-
-function openStore(connection: StoreConnectionOptions) {
   try {
-    return createStore(connection)
+    source = await readFile(getAppStatePath(), "utf8")
   } catch (error) {
-    if (connection.filename === ":memory:" || !(error instanceof UnrecoverableStoreOpenError)) {
-      throw error
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return null
     }
 
-    removeDatabaseArtifacts(connection.filename)
-    return createStore(connection)
+    throw error
   }
+
+  return AppStateFile.parse(JSON.parse(source)).value as AppStateSnapshot
 }
 
-/**
- * Shared app-state kindstore handle owned by the Electrobun Bun host.
- * Tests that override HOME should call `resetAppStateDb()` after changing it.
- */
-export let appStateDb =
-  process.env.NODE_ENV !== "test" ? openStore({ filename: getAppStateDatabasePath() }) : null!
+/** Atomically writes the latest app-state snapshot to the Bun-host JSON file. */
+export async function writeAppStateSnapshot(snapshot: AppStateSnapshot) {
+  const appStatePath = getAppStatePath()
+  const temporaryPath = `${appStatePath}.${process.pid}.${randomUUID()}.tmp`
 
-/** Recreates the shared app-state kindstore handle with an optional explicit connection. */
-export function resetAppStateDb(
-  connection: StoreConnectionOptions = { filename: getAppStateDatabasePath() },
-) {
-  appStateDb?.close()
-  appStateDb = openStore(connection)
-  return appStateDb
-}
+  await mkdir(dirname(appStatePath), { recursive: true })
 
-/** Closes the shared app-state kindstore handle. */
-export function closeAppStateDb() {
-  appStateDb?.close()
-  appStateDb = null!
-}
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(
+        {
+          version: APP_STATE_FILE_VERSION,
+          savedAt: Date.now(),
+          value: snapshot,
+        } satisfies AppStateFile,
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    )
+    await rename(temporaryPath, appStatePath)
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {})
+    throw error
+  }
 
-/** Reads the latest app-state snapshot from the Bun-host app-state kindstore. */
-export function loadAppStateSnapshot() {
-  const record =
-    appStateDb.appStateRecords.first({
-      where: { key: APP_STATE_STORAGE_KEY },
-    }) ?? null
-
-  return (record?.value ?? null) as AppStateSnapshot | null
-}
-
-/** Replaces the app-state snapshot in the Bun-host app-state kindstore. */
-export function writeAppStateSnapshot(snapshot: AppStateSnapshot) {
-  const record = appStateDb.appStateRecords.putByUnique(
-    { key: APP_STATE_STORAGE_KEY },
-    {
-      key: APP_STATE_STORAGE_KEY,
-      version: APP_STATE_RECORD_VERSION,
-      savedAt: Date.now(),
-      value: snapshot,
-    },
-  )
-
-  return record.value as AppStateSnapshot
+  return snapshot
 }
