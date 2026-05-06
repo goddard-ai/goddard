@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
+import hashSum from "hash-sum"
 import { Sigma } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
@@ -140,24 +141,8 @@ function sessionUpdate(message: acp.AnyMessage) {
   return isRecord(params.update) ? params.update : null
 }
 
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return JSON.stringify(value.map((entry) => stableStringify(entry)))
-  }
-
-  if (!isRecord(value)) {
-    return JSON.stringify(value) ?? String(value)
-  }
-
-  const entries = Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entryValue]) => [key, stableStringify(entryValue)])
-
-  return JSON.stringify(entries)
-}
-
 function messageFingerprint(message: acp.AnyMessage) {
-  return stableStringify(message)
+  return hashSum(message)
 }
 
 function turnMessageRank(
@@ -534,89 +519,21 @@ function summarizeSessionChat(session: DaemonSession, turns: readonly SessionCha
   } satisfies SessionChatSummary
 }
 
-function withSummary(state: Omit<SessionChatState, "summary">) {
-  const turns = [...state.turns].sort(compareTurns)
-
-  return {
-    ...state,
-    turns,
-    summary: summarizeSessionChat(state.session, turns),
-  } satisfies SessionChatState
-}
-
-function createSessionChatState(input: {
-  history: GetSessionHistoryResponse
-  session: DaemonSession
-}) {
-  return withSummary({
-    connection: input.history.connection,
-    hasMore: input.history.hasMore,
-    nextCursor: input.history.nextCursor,
-    session: input.session,
-    turns: input.history.turns.map((turn) => normalizeTurn(turn, "history")),
-  })
-}
-
-function applySessionChatMessage(
-  state: SessionChatState,
-  message: acp.AnyMessage,
-  options: ApplySessionChatMessageOptions = {},
-) {
-  const receivedAt = options.receivedAt ?? new Date().toISOString()
-  const targetTurn = resolveTurnForMessage(state.turns, message, receivedAt)
-  const nextTurn = applyMessageToTurn(targetTurn, message, receivedAt)
-  const replaced = state.turns.some((turn) => turn.turnId === targetTurn.turnId)
-  const turns = replaced
-    ? state.turns.map((turn) => (turn.turnId === targetTurn.turnId ? nextTurn : turn))
-    : [...state.turns, nextTurn]
-
-  return withSummary({
-    connection: state.connection,
-    hasMore: state.hasMore,
-    nextCursor: state.nextCursor,
-    session: state.session,
-    turns,
-  })
-}
-
-function mergeSessionChatHistory(
-  state: SessionChatState,
-  input: {
-    history: GetSessionHistoryResponse
-    session: DaemonSession
-  },
-) {
-  let nextState = createSessionChatState(input)
-
-  for (const turn of state.turns) {
-    if (turn.source === "history") {
-      continue
-    }
-
-    for (const message of turn.messages) {
-      nextState = applySessionChatMessage(nextState, message, {
-        receivedAt: turn.completedAt ?? turn.startedAt,
-      })
-    }
-  }
-
-  return nextState
-}
-
-function applySessionChatSession(state: SessionChatState, session: DaemonSession) {
-  return withSummary({
-    connection: state.connection,
-    hasMore: state.hasMore,
-    nextCursor: state.nextCursor,
-    session,
-    turns: state.turns,
-  })
-}
-
 /** Reactive session chat owner that merges loaded history with live daemon updates. */
 export class SessionChat extends Sigma<SessionChatState> {
   constructor(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
-    super(createSessionChatState(input))
+    const turns = input.history.turns
+      .map((turn) => normalizeTurn(turn, "history"))
+      .sort(compareTurns)
+
+    super({
+      connection: input.history.connection,
+      hasMore: input.history.hasMore,
+      nextCursor: input.history.nextCursor,
+      session: input.session,
+      summary: summarizeSessionChat(input.session, turns),
+      turns,
+    })
   }
 
   get hasEmptyTranscript() {
@@ -640,17 +557,47 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   /** Applies refreshed query data while preserving live messages already received locally. */
   syncLoadedData(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
-    this.#applyState(mergeSessionChatHistory(this, input))
+    const localMessages = this.turns.flatMap((turn) =>
+      turn.source === "history"
+        ? []
+        : turn.messages.map((message) => ({
+            message,
+            receivedAt: turn.completedAt ?? turn.startedAt,
+          })),
+    )
+
+    this.connection = input.history.connection
+    this.hasMore = input.history.hasMore
+    this.nextCursor = input.history.nextCursor
+    this.session = input.session
+    this.turns = input.history.turns.map((turn) => normalizeTurn(turn, "history"))
+    this.#syncTurnsAndSummary()
+
+    for (const localMessage of localMessages) {
+      this.applyMessage(localMessage.message, { receivedAt: localMessage.receivedAt })
+    }
   }
 
   /** Applies one daemon-published ACP message to the chat state. */
   applyMessage(message: acp.AnyMessage, options: ApplySessionChatMessageOptions = {}) {
-    this.#applyState(applySessionChatMessage(this, message, options))
+    const receivedAt = options.receivedAt ?? new Date().toISOString()
+    const targetTurn = resolveTurnForMessage(this.turns, message, receivedAt)
+    const nextTurn = applyMessageToTurn(targetTurn, message, receivedAt)
+    const turnIndex = this.turns.findIndex((turn) => turn.turnId === targetTurn.turnId)
+
+    if (turnIndex === -1) {
+      this.turns = [...this.turns, nextTurn]
+    } else {
+      this.turns = this.turns.map((turn, index) => (index === turnIndex ? nextTurn : turn))
+    }
+
+    this.#syncTurnsAndSummary()
   }
 
   /** Applies a freshly returned session record without replacing the merged transcript. */
   syncSession(session: DaemonSession) {
-    this.#applyState(applySessionChatSession(this, session))
+    this.session = session
+    this.#syncTurnsAndSummary()
   }
 
   onSetup() {
@@ -687,13 +634,11 @@ export class SessionChat extends Sigma<SessionChatState> {
     ]
   }
 
-  #applyState(state: SessionChatState) {
-    this.connection = state.connection
-    this.hasMore = state.hasMore
-    this.nextCursor = state.nextCursor
-    this.session = state.session
-    this.summary = state.summary
-    this.turns = state.turns
+  #syncTurnsAndSummary() {
+    const turns = [...this.turns].sort(compareTurns)
+
+    this.turns = turns
+    this.summary = summarizeSessionChat(this.session, turns)
   }
 }
 
