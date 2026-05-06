@@ -46,6 +46,7 @@
   - Keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there, and do not create `state/` subfolders.
   - Use all-lowercase kebab-case folder names for UI feature trees.
   - Use all-lowercase kebab-case component filenames and avoid repeating the parent feature name in child component names.
+  - Name style modules after the component or surface they style, using `.style.ts` filenames such as `message-list.style.ts`; avoid generic `styles.ts` filenames.
   - Do not use bare generic component names like `List`, `View`, `Page`, or `Dialog`; include feature-specific context in exported component names.
   - Import-path precedence is `./...`, then `~/...`, then `../...`.
   - Use explicit TypeScript source extensions on those imports. Prefer `.ts` for `.ts` modules and `.tsrx` for `.tsrx` modules, including `~/...` imports.
