@@ -21,7 +21,7 @@ import {
   rowInnerClass,
   transcriptContentClass,
   userBubbleClass,
-} from "./styles.ts"
+} from "./transcript.style.ts"
 
 function isSkillResourceLink(block: Extract<SessionTranscriptContentBlock, {
   type: "resource_link";

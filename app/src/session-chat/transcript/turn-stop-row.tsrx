@@ -9,7 +9,7 @@ import {
   turnStopMetaClass,
   turnStopPillClass,
   turnStopTitleClass,
-} from "./styles.ts"
+} from "./transcript.style.ts"
 
 function getTurnStopIcon(status: SessionTranscriptTurnStop["status"]) {
   switch (status) {

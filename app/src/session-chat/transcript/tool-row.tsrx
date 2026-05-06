@@ -19,7 +19,7 @@ import {
   toolSummaryClass,
   toolSummaryTextClass,
   toolToggleHintClass,
-} from "./styles.ts"
+} from "./transcript.style.ts"
 
 function formatToolKindLabel(toolKind: SessionTranscriptToolCall["toolKind"]) {
   return toolKind === "switch_mode"

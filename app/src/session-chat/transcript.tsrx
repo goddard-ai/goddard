@@ -17,7 +17,7 @@ import {
   TURN_STOP_ROW_HEIGHT,
   transcriptViewportClass,
   VIRTUAL_OVERSCAN_PX,
-} from "./transcript/styles.ts"
+} from "./transcript/transcript.style.ts"
 import { TextTranscriptRow } from "./transcript/text-row.tsrx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsrx"
 import { TurnStopTranscriptRow } from "./transcript/turn-stop-row.tsrx"

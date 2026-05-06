@@ -25,7 +25,7 @@ import {
   TOOL_DIFF_PREVIEW_LINE_LIMIT,
   TURN_STOP_ROW_HEIGHT,
   WIDE_BUBBLE_WIDTH_BREAKPOINT,
-} from "./styles.ts"
+} from "./transcript.style.ts"
 
 const preparedParagraphCache = new Map<string, PreparedTextWithSegments>()
 
