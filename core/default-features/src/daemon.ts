@@ -8,6 +8,7 @@ import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
+import { terminalPlugin } from "@goddard-ai/terminal/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 
 const defaultDaemonPlugins = [
@@ -20,6 +21,7 @@ const defaultDaemonPlugins = [
   pullRequestPlugin,
   reviewSessionPlugin,
   loopPlugin,
+  terminalPlugin,
   workforcePlugin,
 ] as const
 

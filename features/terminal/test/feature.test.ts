@@ -10,8 +10,8 @@ describe("terminal feature package", () => {
   test("exports selected feature entrypoints", () => {
     expect(terminalAppPlugin.name).toBe("terminal")
     expect(terminalPlugin.name).toBe("terminal")
-    expect(terminalIpcRoutes).toEqual({})
-    expect(terminalSdkPlugin.namespace).toBe("terminal")
+    expect(Object.keys(terminalIpcRoutes)).toEqual(["terminal"])
+    expect(terminalSdkPlugin.name).toBe("terminal")
     expect(terminalIdSchema.parse("terminal")).toBe("terminal")
   })
 })

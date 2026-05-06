@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 
+import { daemonIpcRoutes } from "../src/daemon-ipc.ts"
 import {
   TerminalCreateRequest,
   TerminalDaemonEvent,
@@ -78,4 +79,17 @@ test("terminal stream filters and requests reject empty connection-local ids", (
       instanceId: "",
     }).success,
   ).toBe(false)
+})
+
+test("daemon IPC schema exposes terminal requests and event streams", () => {
+  expect(Object.keys(daemonIpcRoutes.terminal.children)).toEqual([
+    "connect",
+    "create",
+    "write",
+    "resize",
+    "restart",
+    "close",
+    "disconnect",
+    "event",
+  ])
 })

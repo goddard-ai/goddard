@@ -16,6 +16,7 @@ import {
   type InferSdkNamespaces,
 } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
+import { terminalSdkPlugin } from "@goddard-ai/terminal/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 import type * as acp from "acp-client/protocol"
 
@@ -39,6 +40,7 @@ const sdkPlugins = composeSdkPlugins([
   pullRequestSdkPlugin,
   reviewSessionSdkPlugin,
   sessionSdkPlugin,
+  terminalSdkPlugin,
   workforceSdkPlugin,
 ])
 
@@ -171,5 +173,9 @@ export class GoddardSdk {
     this.action = features.action
     this.loop = features.loop
     this.workforce = features.workforce
+  }
+
+  get terminal() {
+    return defineCachedNamespace(this, "terminal", this.#features.terminal)
   }
 }

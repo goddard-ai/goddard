@@ -9,6 +9,7 @@ import { pullRequestIpcRoutes } from "@goddard-ai/pull-request/daemon-ipc"
 import { reviewSessionIpcRoutes } from "@goddard-ai/review-session/daemon-ipc"
 import { coreDaemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { sessionIpcRoutes } from "@goddard-ai/session/daemon-ipc"
+import { terminalIpcRoutes } from "@goddard-ai/terminal/daemon-ipc"
 import { workforceIpcRoutes } from "@goddard-ai/workforce/daemon-ipc"
 
 const defaultDaemonFeatureIpcRoutes = [
@@ -21,6 +22,7 @@ const defaultDaemonFeatureIpcRoutes = [
   pullRequestIpcRoutes,
   reviewSessionIpcRoutes,
   loopIpcRoutes,
+  terminalIpcRoutes,
   workforceIpcRoutes,
 ] as const
 

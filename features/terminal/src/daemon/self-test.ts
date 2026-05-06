@@ -1,5 +1,5 @@
 /** Daemon terminal PTY smoke check used by tests and standalone diagnostics. */
-import type { TerminalDaemonEvent } from "@goddard-ai/schema/daemon"
+import type { TerminalDaemonEvent } from "@goddard-ai/schema/daemon/terminals"
 
 import { DaemonTerminalManager } from "./runtime.ts"
 

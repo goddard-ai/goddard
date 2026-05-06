@@ -12,7 +12,7 @@ import type {
   TerminalRestartRequest,
   TerminalRuntimeMetadata,
   TerminalSpawnOptions,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/schema/daemon/terminals"
 import { spawn, type IDisposable, type IExitEvent, type IPty } from "bun-pty"
 
 const DEFAULT_TERMINAL_NAME = "xterm-256color"
@@ -73,17 +73,29 @@ export class DaemonTerminalManager {
       )
     }
 
-    const runtime = new DaemonTerminalRuntime(
-      this.#connectionId,
-      request.instanceId,
-      request.options ?? {},
-      (event) => {
-        if (event.type === "terminal.exit") {
-          this.#runtimes.delete(event.instanceId)
-        }
-        this.#onEvent(event)
-      },
-    )
+    let runtime: DaemonTerminalRuntime
+    try {
+      runtime = new DaemonTerminalRuntime(
+        this.#connectionId,
+        request.instanceId,
+        request.options ?? {},
+        (event) => {
+          if (event.type === "terminal.exit") {
+            this.#runtimes.delete(event.instanceId)
+          }
+          this.#onEvent(event)
+        },
+      )
+    } catch (error) {
+      throw new DaemonTerminalError(
+        "spawn-failed",
+        `Failed to spawn terminal instance ${request.instanceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        this.#connectionId,
+        request.instanceId,
+      )
+    }
     this.#runtimes.set(request.instanceId, runtime)
     this.#onEvent({
       type: "terminal.created",

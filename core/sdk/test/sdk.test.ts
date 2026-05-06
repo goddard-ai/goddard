@@ -1256,3 +1256,100 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 })
+
+describe("@goddard-ai/sdk terminal namespace", () => {
+  test("terminal.connect returns a connection-scoped request and stream helper", async () => {
+    const { sdk, send, subscribe } = createSdkWithClient()
+    const onEvent = vi.fn()
+    const unsubscribe = vi.fn()
+
+    send.mockResolvedValueOnce({ connectionId: "term-conn-1" })
+    send.mockResolvedValueOnce({
+      terminal: {
+        instanceId: "primary",
+        state: "running",
+        cwd: "/repo",
+        title: null,
+        dimensions: { cols: 80, rows: 24 },
+      },
+    })
+    send.mockResolvedValueOnce({ success: true })
+    send.mockResolvedValueOnce({ success: true })
+    send.mockResolvedValueOnce({
+      terminal: {
+        instanceId: "primary",
+        state: "running",
+        cwd: "/repo",
+        title: null,
+        dimensions: { cols: 100, rows: 30 },
+      },
+    })
+    send.mockResolvedValueOnce({ success: true })
+    send.mockResolvedValueOnce({ success: true })
+    subscribe.mockImplementationOnce(
+      async (
+        target: Parameters<GoddardClient["subscribe"]>[0],
+        handler: Parameters<GoddardClient["subscribe"]>[1],
+      ) => {
+        expect(target).toEqual({
+          name: "terminal.event",
+          filter: { connectionId: "term-conn-1" },
+        })
+        handler({
+          type: "terminal.output",
+          connectionId: "term-conn-1",
+          instanceId: "primary",
+          data: "ok\n",
+        })
+        return unsubscribe
+      },
+    )
+
+    const terminal = await sdk.terminal.connect()
+    const stop = await terminal.subscribe(onEvent)
+    await terminal.create({ instanceId: "primary", options: { cwd: "/repo" } })
+    await terminal.write({ instanceId: "primary", data: "ls\n" })
+    await terminal.resize({ instanceId: "primary", dimensions: { cols: 100, rows: 30 } })
+    await terminal.restart({ instanceId: "primary", options: { cwd: "/repo" } })
+    await terminal.close({ instanceId: "primary" })
+    await terminal.disconnect()
+    stop()
+
+    expect(terminal.connectionId).toBe("term-conn-1")
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "terminal.output",
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      data: "ok\n",
+    })
+    expect(send).toHaveBeenNthCalledWith(1, "terminal.connect", {})
+    expect(send).toHaveBeenNthCalledWith(2, "terminal.create", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      options: { cwd: "/repo" },
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "terminal.write", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      data: "ls\n",
+    })
+    expect(send).toHaveBeenNthCalledWith(4, "terminal.resize", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      dimensions: { cols: 100, rows: 30 },
+    })
+    expect(send).toHaveBeenNthCalledWith(5, "terminal.restart", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      options: { cwd: "/repo" },
+    })
+    expect(send).toHaveBeenNthCalledWith(6, "terminal.close", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+    })
+    expect(send).toHaveBeenNthCalledWith(7, "terminal.disconnect", {
+      connectionId: "term-conn-1",
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+})
