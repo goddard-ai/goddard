@@ -23,6 +23,9 @@ review-sync status
 review-sync status --json
 review-sync pause
 review-sync resume
+review-sync cleanup
+review-sync cleanup --all
+review-sync cleanup -A
 review-sync watch <agent-branch>
 review-sync watch --verbose <agent-branch>
 review-sync watch
@@ -61,6 +64,11 @@ Starting `watch` again reactivates a paused session before watching, matching
 `start` rather than leaving the watcher armed but unable to sync.
 One-shot `start` and `sync` commands fail fast when the agent worktree is on a
 different branch.
+`cleanup` removes saved session records that match the current resolved worktree
+root. By default it keeps the most recently updated matching session and removes
+older matching sessions. Pass `--all` or `-A` to remove every matching saved
+session. Cleanup removes session state and hidden `refs/review-sync/` refs; it
+does not remove review branches or Git worktrees.
 
 ## API
 
@@ -77,7 +85,8 @@ await syncReviewSession({ cwd: "/repo-agent" })
 
 The package exports command-level functions for TypeScript callers:
 `startReviewSync`, `syncReviewSession`, `statusReviewSession`,
-`pauseReviewSession`, `resumeReviewSession`, and `watchReviewSession`.
+`pauseReviewSession`, `resumeReviewSession`, `cleanupReviewSessions`, and
+`watchReviewSession`.
 `runReviewSync(argv)` remains available for argv-compatible wrappers and uses the
 current process working directory. Internal Git helpers, state readers, lock
 handling, and snapshot builders are intentionally not exported.

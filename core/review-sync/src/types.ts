@@ -1,5 +1,12 @@
 /** Review-sync command names supported by the CLI and programmatic entrypoint. */
-export type ReviewSyncCommand = "start" | "sync" | "status" | "pause" | "resume" | "watch"
+export type ReviewSyncCommand =
+  | "start"
+  | "sync"
+  | "status"
+  | "pause"
+  | "resume"
+  | "cleanup"
+  | "watch"
 
 /** Stable top-level status values returned to callers. */
 export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error"
@@ -33,6 +40,11 @@ export type StartReviewSyncInput = ReviewSyncWorktreeInput & {
 /** Inputs for reading review-sync session state. */
 export type StatusReviewSyncInput = ReviewSyncWorktreeInput & {
   json?: boolean
+}
+
+/** Inputs for removing saved review-sync sessions that match one worktree. */
+export type CleanupReviewSyncInput = ReviewSyncWorktreeInput & {
+  all?: boolean
 }
 
 /** Inputs for watching a review-sync session until the caller aborts it. */

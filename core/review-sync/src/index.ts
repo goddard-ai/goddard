@@ -1,5 +1,6 @@
 /** Public entrypoint for Git-backed agent review branch synchronization. */
 export {
+  cleanupReviewSessions,
   pauseReviewSession,
   resumeReviewSession,
   runReviewSync,
@@ -9,6 +10,7 @@ export {
   watchReviewSession,
 } from "./commands.ts"
 export type {
+  CleanupReviewSyncInput,
   ReviewSyncCommand,
   ReviewSyncResult,
   ReviewSyncStatus,

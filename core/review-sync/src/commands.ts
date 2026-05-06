@@ -36,6 +36,7 @@ import { createSnapshotTree } from "./snapshot.ts"
 import {
   appendEvent,
   countPatchFiles,
+  deleteSessionState,
   listSessions,
   readSessionState,
   resolveSessionDir,
@@ -44,6 +45,7 @@ import {
 import { refreshReviewWorktreeFromAgentBranchRef, syncSession } from "./sync.ts"
 import {
   reviewBranchPrefix,
+  type CleanupReviewSyncInput,
   type ReviewSyncCommand,
   type ReviewSyncResult,
   type ReviewSyncWorktreeInput,
@@ -115,6 +117,13 @@ export async function pauseReviewSession(input: ReviewSyncWorktreeInput) {
 export async function resumeReviewSession(input: ReviewSyncWorktreeInput) {
   return await runCommandSafely("resume", () =>
     resumeReviewSessionOperation(createRuntimeContext(input.cwd)),
+  )
+}
+
+/** Removes saved session state records that match the current worktree root. */
+export async function cleanupReviewSessions(input: CleanupReviewSyncInput) {
+  return await runCommandSafely("cleanup", () =>
+    cleanupReviewSessionsOperation(input.all ?? false, createRuntimeContext(input.cwd)),
   )
 }
 
@@ -307,6 +316,33 @@ async function resumeReviewSessionOperation(context: RuntimeContext) {
     sessionId: latest.sessionId,
     reviewBranch: latest.reviewBranch,
     message: `Resumed review sync for ${latest.reviewBranch}.`,
+  })
+}
+
+/** Removes stale or all saved sessions matching the resolved worktree root. */
+async function cleanupReviewSessionsOperation(all: boolean, context: RuntimeContext) {
+  const { resolvedDirectory, sessions } = await listSessionsForResolvedDirectory(context)
+  const ordered = [...sessions].sort(compareSessionsByRecency)
+  const kept = all ? null : (ordered.at(-1) ?? null)
+  const removed = all ? ordered : ordered.slice(0, -1)
+
+  for (const session of removed) {
+    await deleteSavedSession(session, resolvedDirectory, context)
+  }
+
+  return createReviewSyncResult({
+    exitCode: 0,
+    command: "cleanup",
+    status: "ok",
+    sessionId: kept?.sessionId,
+    reviewBranch: kept?.reviewBranch,
+    message: formatCleanupMessage({
+      all,
+      resolvedDirectory,
+      removed,
+      kept,
+      matchedCount: ordered.length,
+    }),
   })
 }
 
@@ -592,6 +628,95 @@ function createCmdTsResult(error: { config: { exitCode: number; message: string 
   })
 }
 
+/** Lists saved sessions whose recorded agent or review worktree is the current worktree root. */
+async function listSessionsForResolvedDirectory(context: RuntimeContext) {
+  const resolvedDirectory = await resolveRequiredRepoRoot(context.cwd, context)
+  const repoCommonDir = await resolveRequiredGitCommonDir(resolvedDirectory, context)
+  const sessions = (await listSessions(repoCommonDir)).filter(
+    (session) =>
+      isInsideOrEqual(session.agentWorktree, resolvedDirectory) ||
+      isInsideOrEqual(session.reviewWorktree, resolvedDirectory),
+  )
+  return { resolvedDirectory, sessions }
+}
+
+/** Orders sessions from oldest to newest using durable state timestamps. */
+function compareSessionsByRecency(left: SessionState, right: SessionState) {
+  const leftTimestamp = sessionTimestamp(left)
+  const rightTimestamp = sessionTimestamp(right)
+  if (leftTimestamp !== rightTimestamp) {
+    return leftTimestamp - rightTimestamp
+  }
+  return left.sessionId.localeCompare(right.sessionId)
+}
+
+/** Converts session timestamps to comparable numbers, tolerating malformed stale state. */
+function sessionTimestamp(session: SessionState) {
+  const updatedAt = Date.parse(session.updatedAt)
+  if (!Number.isNaN(updatedAt)) {
+    return updatedAt
+  }
+  const createdAt = Date.parse(session.createdAt)
+  return Number.isNaN(createdAt) ? 0 : createdAt
+}
+
+/** Deletes one saved session directory and its hidden review-sync refs. */
+async function deleteSavedSession(
+  session: SessionState,
+  resolvedDirectory: string,
+  context: RuntimeContext,
+) {
+  await withSessionLock(session, async () => {
+    await Promise.all(
+      Object.values(session.refs).map((refName) =>
+        deleteSessionRefIfPresent(resolvedDirectory, refName, context),
+      ),
+    )
+    await deleteSessionState(session)
+  })
+}
+
+/** Removes a hidden session ref when it still exists. */
+async function deleteSessionRefIfPresent(
+  resolvedDirectory: string,
+  refName: string,
+  context: RuntimeContext,
+) {
+  if (await resolveRef(resolvedDirectory, refName, context)) {
+    await git(resolvedDirectory, ["update-ref", "-d", refName], context)
+  }
+}
+
+/** Formats cleanup output without exposing hidden filesystem details by default. */
+function formatCleanupMessage(input: {
+  all: boolean
+  resolvedDirectory: string
+  removed: SessionState[]
+  kept: SessionState | null
+  matchedCount: number
+}) {
+  if (input.matchedCount === 0) {
+    return `No review-sync sessions match ${input.resolvedDirectory}.`
+  }
+
+  if (input.removed.length === 0) {
+    return `No stale review-sync sessions to remove for ${input.resolvedDirectory}. Kept ${formatSessionSummary(input.kept!)}.`
+  }
+
+  const removed = `${input.removed.length} review-sync ${
+    input.removed.length === 1 ? "session" : "sessions"
+  }`
+  if (input.all || !input.kept) {
+    return `Removed ${removed} for ${input.resolvedDirectory}.`
+  }
+  return `Removed ${removed} for ${input.resolvedDirectory}. Kept ${formatSessionSummary(input.kept)}.`
+}
+
+/** Produces a compact human summary for cleanup output. */
+function formatSessionSummary(session: SessionState) {
+  return `${session.sessionId}: ${session.agentBranch} -> ${session.reviewBranch}`
+}
+
 /** Builds the command tree with handlers that execute the bounded operations directly. */
 function createReviewSyncCommand(cwd: string) {
   return subcommands({
@@ -643,6 +768,18 @@ function createReviewSyncCommand(cwd: string) {
         description: "Resume sync mutations without running an immediate sync",
         args: {},
         handler: () => resumeReviewSession({ cwd }),
+      }),
+      cleanup: command({
+        name: "cleanup",
+        description: "Remove saved review-sync sessions matching the current worktree",
+        args: {
+          all: flag({
+            long: "all",
+            short: "A",
+            description: "Remove every matching session instead of keeping the newest",
+          }),
+        },
+        handler: ({ all }) => cleanupReviewSessions({ cwd, all }),
       }),
       watch: command({
         name: "watch",

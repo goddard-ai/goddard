@@ -1,6 +1,6 @@
 /** Durable review-sync session state, event, and patch storage helpers. */
 import { createHash } from "node:crypto"
-import { appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { isNodeErrorWithCode } from "./git.ts"
@@ -83,6 +83,14 @@ export async function ensureSessionDirs(session: SessionState) {
   await mkdir(join(sessionDir, "patches", "accepted"), { recursive: true })
   await mkdir(join(sessionDir, "patches", "rejected"), { recursive: true })
   await mkdir(join(sessionDir, "patches", "pending"), { recursive: true })
+}
+
+/** Removes the durable state directory for one saved session. */
+export async function deleteSessionState(session: SessionState) {
+  await rm(resolveSessionDir(session.repoCommonDir, session.sessionId), {
+    recursive: true,
+    force: true,
+  })
 }
 
 /** Appends one audit event as newline-delimited JSON. */
