@@ -2,11 +2,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
-import {
-  applySessionChatMessage,
-  createSessionChatState,
-  mergeSessionChatHistory,
-} from "./state.ts"
+import { SessionChat } from "./model.ts"
 
 function createSession(overrides: Partial<DaemonSession> = {}) {
   return {
@@ -72,6 +68,13 @@ function createHistory(turns: SessionHistoryTurn[]): GetSessionHistoryResponse {
   }
 }
 
+function createChat(input: { history?: GetSessionHistoryResponse; session?: DaemonSession }) {
+  return new SessionChat({
+    history: input.history ?? createHistory([]),
+    session: input.session ?? createSession(),
+  })
+}
+
 function promptMessage(id = "prompt-1") {
   return {
     jsonrpc: "2.0",
@@ -108,8 +111,8 @@ function promptResult(id = "prompt-1") {
   } satisfies acp.AnyMessage
 }
 
-test("createSessionChatState normalizes history turns into deterministic order and statuses", () => {
-  const state = createSessionChatState({
+test("SessionChat normalizes history turns into deterministic order and statuses", () => {
+  const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
     history: createHistory([
       createTurn({ turnId: "turn-2", sequence: 2, completedAt: null, completionKind: null }),
@@ -117,41 +120,38 @@ test("createSessionChatState normalizes history turns into deterministic order a
     ]),
   })
 
-  expect(state.turns.map((turn) => [turn.turnId, turn.status])).toEqual([
+  expect(chat.turns.map((turn) => [turn.turnId, turn.status])).toEqual([
     ["turn-1", "completed"],
     ["turn-2", "running"],
   ])
-  expect(state.summary).toMatchObject({
+  expect(chat.summary).toMatchObject({
     activeTurnId: "turn-2",
     status: "running",
   })
 })
 
-test("applySessionChatMessage creates one live turn and ignores repeated messages", () => {
-  const state = createSessionChatState({
-    session: createSession(),
-    history: createHistory([]),
-  })
-  const withPrompt = applySessionChatMessage(state, promptMessage("prompt-live"), {
+test("SessionChat creates one live turn and ignores repeated messages", () => {
+  const chat = createChat({})
+
+  chat.applyMessage(promptMessage("prompt-live"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  const repeated = applySessionChatMessage(withPrompt, promptMessage("prompt-live"), {
+  chat.applyMessage(promptMessage("prompt-live"), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
 
-  expect(repeated.turns).toHaveLength(1)
-  expect(repeated.turns[0]).toMatchObject({
+  expect(chat.turns).toHaveLength(1)
+  expect(chat.turns[0]).toMatchObject({
     promptRequestId: "prompt-live",
     source: "live",
     status: "running",
   })
-  expect(repeated.turns[0].messages).toHaveLength(1)
-  expect(repeated.summary.activeTurnId).toBe("live:prompt-live")
+  expect(chat.turns[0].messages).toHaveLength(1)
+  expect(chat.summary.activeTurnId).toBe("live:prompt-live")
 })
 
-test("applySessionChatMessage merges live updates into an active history turn", () => {
-  const state = createSessionChatState({
-    session: createSession(),
+test("SessionChat merges live updates into an active history turn", () => {
+  const chat = createChat({
     history: createHistory([
       createTurn({
         completedAt: null,
@@ -160,78 +160,69 @@ test("applySessionChatMessage merges live updates into an active history turn", 
       }),
     ]),
   })
-  const withChunk = applySessionChatMessage(state, agentChunk("Working"), {
+
+  chat.applyMessage(agentChunk("Working"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  const repeated = applySessionChatMessage(withChunk, agentChunk("Working"), {
+  chat.applyMessage(agentChunk("Working"), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
-  const completed = applySessionChatMessage(repeated, promptResult(), {
+  chat.applyMessage(promptResult(), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
 
-  expect(completed.turns).toHaveLength(1)
-  expect(completed.turns[0]).toMatchObject({
+  expect(chat.turns).toHaveLength(1)
+  expect(chat.turns[0]).toMatchObject({
     source: "merged",
     completedAt: "2026-04-14T00:00:04.000Z",
     status: "completed",
   })
-  expect(completed.turns[0].messages).toHaveLength(3)
-  expect(completed.turns[0].events.map((event) => event.kind)).toEqual([
+  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.turns[0].events.map((event) => event.kind)).toEqual([
     "prompt",
     "sessionUpdate",
     "turnCompletion",
   ])
 })
 
-test("applySessionChatMessage keeps prompt and terminal messages deterministic when updates arrive out of order", () => {
-  const state = createSessionChatState({
-    session: createSession(),
-    history: createHistory([]),
-  })
-  const withResult = applySessionChatMessage(state, promptResult("prompt-late"), {
+test("SessionChat keeps prompt and terminal messages deterministic when updates arrive out of order", () => {
+  const chat = createChat({})
+
+  chat.applyMessage(promptResult("prompt-late"), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
-  const withPrompt = applySessionChatMessage(withResult, promptMessage("prompt-late"), {
+  chat.applyMessage(promptMessage("prompt-late"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
 
   expect(
-    withPrompt.turns[0].messages.map((message) =>
-      "method" in message ? message.method : "result",
-    ),
+    chat.turns[0].messages.map((message) => ("method" in message ? message.method : "result")),
   ).toEqual([acp.AGENT_METHODS.session_prompt, "result"])
-  expect(withPrompt.turns[0].status).toBe("completed")
+  expect(chat.turns[0].status).toBe("completed")
 })
 
-test("applySessionChatMessage returns to ready status after a live turn completes", () => {
-  const state = createSessionChatState({
-    session: createSession(),
-    history: createHistory([]),
-  })
-  const withPrompt = applySessionChatMessage(state, promptMessage("prompt-ready"), {
+test("SessionChat returns to ready status after a live turn completes", () => {
+  const chat = createChat({})
+
+  chat.applyMessage(promptMessage("prompt-ready"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  const completed = applySessionChatMessage(withPrompt, promptResult("prompt-ready"), {
+  expect(chat.summary.status).toBe("running")
+
+  chat.applyMessage(promptResult("prompt-ready"), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
-
-  expect(withPrompt.summary.status).toBe("running")
-  expect(completed.summary.status).toBe("idle")
+  expect(chat.summary.status).toBe("idle")
 })
 
-test("createSessionChatState treats an active session without a running turn as ready", () => {
-  const state = createSessionChatState({
-    session: createSession(),
-    history: createHistory([]),
-  })
+test("SessionChat treats an active session without a running turn as ready", () => {
+  const chat = createChat({})
 
-  expect(state.summary.status).toBe("idle")
+  expect(chat.summary.status).toBe("idle")
 })
 
-test("applySessionChatMessage exposes pending permission and plan events", () => {
-  const state = createSessionChatState({
-    session: createSession(),
+test("SessionChat exposes pending permission and plan events", () => {
+  const chat = createChat({
     history: createHistory([
       createTurn({
         completedAt: null,
@@ -267,21 +258,20 @@ test("applySessionChatMessage exposes pending permission and plan events", () =>
     },
   } satisfies acp.AnyMessage
 
-  const withPermission = applySessionChatMessage(state, permissionRequest)
-  const withPlan = applySessionChatMessage(withPermission, planUpdate)
+  chat.applyMessage(permissionRequest)
+  chat.applyMessage(planUpdate)
 
-  expect(withPlan.summary.status).toBe("blocked")
-  expect(withPlan.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
-  expect(withPlan.turns[0].events.map((event) => event.kind)).toEqual([
+  expect(chat.summary.status).toBe("blocked")
+  expect(chat.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
+  expect(chat.turns[0].events.map((event) => event.kind)).toEqual([
     "prompt",
     "permissionRequest",
     "planUpdate",
   ])
 })
 
-test("mergeSessionChatHistory preserves live messages that are not in refreshed history yet", () => {
-  const loaded = createSessionChatState({
-    session: createSession(),
+test("SessionChat preserves live messages that are not in refreshed history yet", () => {
+  const chat = createChat({
     history: createHistory([
       createTurn({
         completedAt: null,
@@ -290,10 +280,11 @@ test("mergeSessionChatHistory preserves live messages that are not in refreshed 
       }),
     ]),
   })
-  const live = applySessionChatMessage(loaded, agentChunk("Still working"), {
+
+  chat.applyMessage(agentChunk("Still working"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  const refreshed = mergeSessionChatHistory(live, {
+  chat.syncLoadedData({
     session: createSession({ title: "Updated title" }),
     history: createHistory([
       createTurn({
@@ -304,8 +295,8 @@ test("mergeSessionChatHistory preserves live messages that are not in refreshed 
     ]),
   })
 
-  expect(refreshed.session.title).toBe("Updated title")
-  expect(refreshed.turns).toHaveLength(1)
-  expect(refreshed.turns[0].messages).toHaveLength(2)
-  expect(refreshed.turns[0].events.map((event) => event.kind)).toEqual(["prompt", "sessionUpdate"])
+  expect(chat.session.title).toBe("Updated title")
+  expect(chat.turns).toHaveLength(1)
+  expect(chat.turns[0].messages).toHaveLength(2)
+  expect(chat.turns[0].events.map((event) => event.kind)).toEqual(["prompt", "sessionUpdate"])
 })

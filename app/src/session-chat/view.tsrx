@@ -15,7 +15,7 @@ import { isPromise } from "radashi"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
-import type { SessionChatStatus } from "./state.ts"
+import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
