@@ -40,9 +40,15 @@ export async function createSnapshotCommit(input: {
   context: RuntimeContext
 }) {
   const tree = await createSnapshotTree(input)
+  const subject = `review-sync snapshot: ${input.label}`
+  const body = [
+    "This snapshot lets review-sync compare the review worktree with the agent worktree.",
+    "Review-sync also uses it to refresh the disposable review branch.",
+    "You do not need to preserve this branch history; review-sync may rewrite it.",
+  ].join("\n")
   const commit = await git(
     input.cwd,
-    ["commit-tree", tree, "-p", "HEAD", "-m", `review-sync:${input.label}`],
+    ["commit-tree", tree, "-p", "HEAD", "-m", subject, "-m", body],
     input.context,
     {
       env: {

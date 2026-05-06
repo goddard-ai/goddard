@@ -9,6 +9,7 @@ import {
   cleanupReviewSyncFixtures,
   createStartedFixture,
   gitDir,
+  readSessionStates,
   runGit,
   writeText,
 } from "./support.ts"
@@ -27,6 +28,24 @@ test("sync mirrors agent uncommitted changes through the review branch", async (
 
   expect(result.status).toBe("ok")
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
+})
+
+test("sync writes explanatory snapshot commit messages", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const [session] = await readSessionStates(fixture.agentDir)
+  const snapshotRef = `refs/review-sync/${session!.sessionId}/agent-snapshot`
+
+  const subject = (
+    await runGit(fixture.agentDir, ["show", "-s", "--format=%s", snapshotRef])
+  ).stdout.trim()
+  const body = (await runGit(fixture.agentDir, ["show", "-s", "--format=%b", snapshotRef])).stdout
+
+  expect(subject).toBe(`review-sync snapshot: ${session!.sessionId}:agent`)
+  expect(body).toContain("compare the review worktree with the agent worktree")
+  expect(body).toContain("refresh the disposable review branch")
+  expect(body).toContain("review-sync may rewrite it")
 })
 
 test("sync applies clean human edits back to the agent worktree", async () => {
