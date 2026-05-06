@@ -60,7 +60,10 @@ export async function notifyReviewBranchReady(notification: ReviewReadyNotificat
     const notifier = require("node-notifier") as NodeNotifier
     notifier.notify(
       {
-        ...reviewReadyNotificationOptions(notification),
+        title: "Sprint branch ready for review",
+        subtitle: notification.sprint,
+        message: `${notification.task} is ready on ${notification.reviewBranch}.`,
+        sound: process.platform === "darwin" ? "Hero" : true,
       },
       (error) => {
         if (error) {
@@ -71,19 +74,6 @@ export async function notifyReviewBranchReady(notification: ReviewReadyNotificat
       },
     )
   })
-}
-
-/** Builds the cross-platform node-notifier options for review readiness alerts. */
-export function reviewReadyNotificationOptions(
-  notification: ReviewReadyNotification,
-  platform = process.platform,
-) {
-  return {
-    title: "Sprint branch ready for review",
-    subtitle: notification.sprint,
-    message: `${notification.task} is ready on ${notification.reviewBranch}.`,
-    sound: platform === "darwin" ? "Heroine" : true,
-  }
 }
 
 function reviewReadyTask(state: SprintBranchState) {
