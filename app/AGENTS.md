@@ -18,6 +18,7 @@
 - State ownership:
   - Keep complex shared state, persistence, and IPC in `preact-sigma` modules rather than components.
   - Keep non-trivial Sigma workflow transitions on the owning Sigma class instead of hiding them behind pure-state reducers.
+  - When moving helper logic onto a Sigma class, prefer class methods for transformation or mutation-oriented helpers. Keep stateless checks, readers, rankings, and lookups as top-level helpers when that is clearer.
   - Do not split one feature's state ownership between a Sigma owner module and a generic `state.ts` module when the Sigma instance can own and test the transitions directly. Collapse obvious one-owner state into the Sigma module, or use a narrowly named helper module only when it represents a distinct protocol, parser, or reusable transform boundary.
   - Do not suffix app model class names or same-name model interfaces with generic terms such as `Model` or `Runtime`; name the owning concept directly.
   - In Sigma classes, add a short human-readable comment to each `#private` field explaining the runtime or bookkeeping it owns and why it stays outside reactive state.
