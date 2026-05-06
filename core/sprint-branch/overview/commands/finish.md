@@ -13,6 +13,8 @@
   - Requires the task markdown to contain a complete Review Report.
   - If the task is already marked `finished-unreviewed`, the command reports
     that state without adding a duplicate record.
+  - When this makes the current review branch ready, attempts a best-effort
+    desktop notification for the human reviewer.
 
 - **What it changes**
   - Sprint task state only.

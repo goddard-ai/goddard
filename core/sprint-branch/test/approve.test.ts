@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
+import { runApprove } from "../src"
 import {
   branchHead,
   cleanupTestRepos,
@@ -81,6 +82,49 @@ describe("sprint-branch approve", () => {
     expect(await branchHead(repo, "sprint/example/review")).toBe(
       await branchHead(repo, "sprint/example/next"),
     )
+  })
+
+  test("notifies when approved work rolls a finished next task onto review", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "review.txt"), "reviewed\n")
+    await writeCompleteReviewReport(repo, "example", "010-task-name")
+    await commitAll(repo, "add review work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "010-task-name", "--json"])
+    await git(repo, ["checkout", "sprint/example/next"])
+    await git(repo, ["rebase", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "next.txt"), "ahead\n")
+    await writeCompleteReviewReport(repo, "example", "020-task-name")
+    await commitAll(repo, "add next work")
+    await runCli(repo, ["finish", "--sprint", "example", "--task", "020-task-name", "--json"])
+    await git(repo, ["checkout", "sprint/example/review"])
+    const notifications: Array<{ sprint: string; task: string; reviewBranch: string }> = []
+
+    const approve = await runApprove({
+      cwd: repo,
+      sprint: "example",
+      dryRun: false,
+      reviewReadyNotifier: (notification) => {
+        notifications.push(notification)
+      },
+    })
+
+    expect(approve.ok).toBe(true)
+    expect(notifications).toEqual([
+      {
+        sprint: "example",
+        task: "020-task-name",
+        reviewBranch: "sprint/example/review",
+      },
+    ])
   })
 
   // Agents should be able to preview approval mechanics before moving protected branches.

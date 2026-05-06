@@ -21,6 +21,8 @@
     - Rolls the next task forward into review.
     - Empties the `next` slot.
     - Leaves `review` checked out for the rolled-forward task.
+    - If that rolled-forward task is already finished, attempts a best-effort
+      desktop notification for the human reviewer.
 
 - **What it changes**
   - Approved branch content.

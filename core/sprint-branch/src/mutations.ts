@@ -6,6 +6,7 @@ import { branchExists, getBranchHead, getMergeBase, isAncestor, refExists } from
 import { getGitOperations } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
+import { notifyReviewBranchReadyTransition, type ReviewReadyNotifier } from "./notifications"
 import { readTaskReviewReport } from "./review-report"
 import { getExpectedBranches } from "./state/branches"
 import { inferSprintContext } from "./state/inference"
@@ -341,7 +342,9 @@ export async function runStart(input: MutationInput & { task: string }) {
 }
 
 /** Marks a completed active task as ready for human review. */
-export async function runFinish(input: MutationInput & { task: string }) {
+export async function runFinish(
+  input: MutationInput & { task: string; reviewReadyNotifier?: ReviewReadyNotifier },
+) {
   const { context, state, diagnostics } = await readCommandState(input, "finish")
   const task = normalizeTaskName(input.task)
   const nextState = cloneState(state)
@@ -394,6 +397,11 @@ export async function runFinish(input: MutationInput & { task: string }) {
 
   return withSprintLock(context, state, "finish", async () => {
     await writeSprintState(context.rootDir, nextState)
+    await notifyReviewBranchReadyTransition({
+      before: state,
+      after: nextState,
+      notifier: input.reviewReadyNotifier,
+    })
     return { ...plan, state: nextState, executed: true }
   })
 }
@@ -590,7 +598,9 @@ export async function runResume(input: MutationInput) {
 }
 
 /** Promotes the review branch into approved and rolls existing next work onto review. */
-export async function runApprove(input: MutationInput) {
+export async function runApprove(
+  input: MutationInput & { reviewReadyNotifier?: ReviewReadyNotifier },
+) {
   const { context, state, diagnostics } = await readCommandState(input, "approve", {
     allowOwnConflictRetry: true,
   })
@@ -728,6 +738,11 @@ export async function runApprove(input: MutationInput) {
       }
       nextState.conflict = null
       await writeSprintState(context.rootDir, nextState)
+      await notifyReviewBranchReadyTransition({
+        before: state,
+        after: nextState,
+        notifier: input.reviewReadyNotifier,
+      })
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
       if (error instanceof GitCommandError) {

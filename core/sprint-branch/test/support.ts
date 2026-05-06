@@ -138,6 +138,7 @@ export function spawnCli(cwd: string, args: string[]) {
     env: {
       ...process.env,
       NO_COLOR: "1",
+      SPRINT_BRANCH_DISABLE_NOTIFICATIONS: "1",
     },
   })
 }
