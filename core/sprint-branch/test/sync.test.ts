@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
+import { statusReviewSession } from "@goddard-ai/review-sync"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import {
@@ -240,7 +241,7 @@ describe("sprint-branch sync", () => {
         await waitForCliExit(syncProcess, "original sprint-branch sync")
         syncExited = true
 
-        await waitForRegisteredSync(reviewWorktree)
+        await waitForActiveReviewSyncSession(reviewWorktree)
         const stopResult = await runCli(reviewWorktree, ["stop-sync", "--json"])
         const stopped = JSON.parse(stopResult.stdout) as SprintSyncStopReport
         expect(stopped.stopped).toBe(1)
@@ -301,10 +302,12 @@ async function waitForReviewSyncCheckout(reviewWorktree: string) {
   )
 }
 
-async function waitForRegisteredSync(reviewWorktree: string) {
+async function waitForActiveReviewSyncSession(reviewWorktree: string) {
   await waitUntil(
-    async () => (await findRunningSprintSyncs({ cwd: reviewWorktree })).syncs.length > 0,
-    "sync did not register before the timeout",
+    async () =>
+      (await findRunningSprintSyncs({ cwd: reviewWorktree })).syncs.length > 0 &&
+      (await statusReviewSession({ cwd: reviewWorktree })).status === "ok",
+    "replacement sync did not start watching before the timeout",
   )
 }
 
