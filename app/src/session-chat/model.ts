@@ -6,6 +6,7 @@ import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/presentation.ts"
 import {
   applySessionChatMessage,
+  applySessionChatSession,
   createSessionChatState,
   mergeSessionChatHistory,
   type SessionChatState,
@@ -45,6 +46,11 @@ export class SessionChat extends Sigma<SessionChatState> {
   /** Applies one live daemon-published ACP message to the chat state. */
   applyMessage(message: acp.AnyMessage) {
     this.#applyState(applySessionChatMessage(this, message))
+  }
+
+  /** Applies a freshly returned session record without replacing the merged transcript. */
+  syncSession(session: DaemonSession) {
+    this.#applyState(applySessionChatSession(this, session))
   }
 
   onSetup() {

@@ -3,8 +3,10 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleDot,
+  GitBranch,
   LoaderCircle,
   PauseCircle,
+  RefreshCcw,
   XCircle,
 } from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
@@ -16,10 +18,12 @@ import { SessionChat } from "./model.ts"
 import type { SessionChatStatus } from "./state.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
+import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { submitSessionPrompt } from "~/sessions/mutations.ts"
+import { cancelSessionTurn, reconnectSession, submitSessionPrompt } from "~/sessions/mutations.ts"
 
 export component SessionChatView(props: {
   projectPath: string | null;
@@ -132,12 +136,29 @@ function getSessionChatStatusPresentation(status: SessionChatStatus) {
   }
 }
 
+function formatSessionActionError(error: unknown) {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return "The daemon rejected the request."
+}
+
 component LoadedSessionChatView(props: {
   history: GetSessionHistoryResponse;
   projectPath: string | null;
   session: DaemonSession;
 }) {
   const [submitError, setSubmitError] = useState<unknown>(null)
+  const [activeHeaderAction, setActiveHeaderAction] = useState<"cancel" | "reconnect" | null>(null)
+  const [headerActionError, setHeaderActionError] = useState<
+    {
+      description: string;
+      title: string;
+    } | null
+  >(null)
+  const [cancelRequestedTurnId, setCancelRequestedTurnId] = useState<string | null>(null)
+  const workbenchTabSet = useWorkbenchTabSet()
   const chat = useSigma(
     () => new SessionChat({
       history: props.history,
@@ -158,8 +179,98 @@ component LoadedSessionChatView(props: {
 
   const status = getSessionChatStatusPresentation(chat.summary.status)
   const StatusIcon = status.icon
+  const activeTurnId = chat.summary.activeTurnId
+  const cancelAlreadyRequested = activeTurnId !== null && cancelRequestedTurnId === activeTurnId
+  const canCancelTurn =
+    activeTurnId !== null && chat.session.activeDaemonSession &&
+      chat.summary.status === "running" &&
+      !cancelAlreadyRequested
+  const canReconnect =
+    chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+      chat.session.connectionMode === "live"
+  const canOpenSessionChanges = chat.session.cwd.trim().length > 0
 
   useReportTabProject(resolvedProjectPath)
+
+  async function reconnectCurrentSession() {
+    if (!canReconnect || activeHeaderAction) {
+      return
+    }
+
+    setActiveHeaderAction("reconnect")
+    setHeaderActionError(null)
+
+    try {
+      const { session } = await reconnectSession(chat.session.id)
+      chat.syncSession(session)
+    } catch (error) {
+      console.error("Failed to reconnect session.", error)
+      setHeaderActionError(
+        {
+          title: "Reconnect failed",
+          description: formatSessionActionError(error),
+        },
+      )
+    } finally {
+      setActiveHeaderAction(null)
+    }
+  }
+
+  async function cancelActiveTurn() {
+    if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
+      return
+    }
+
+    setActiveHeaderAction("cancel")
+    setHeaderActionError(null)
+
+    try {
+      const result = await cancelSessionTurn(chat.session.id)
+
+      if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
+        setHeaderActionError(
+          {
+            title: "Stop skipped",
+            description: "The daemon did not find an active turn to stop.",
+          },
+        )
+        return
+      }
+
+      setCancelRequestedTurnId(activeTurnId)
+    } catch (error) {
+      console.error("Failed to stop session turn.", error)
+      setHeaderActionError(
+        {
+          title: "Stop failed",
+          description: formatSessionActionError(error),
+        },
+      )
+    } finally {
+      setActiveHeaderAction(null)
+    }
+  }
+
+  function openSessionChanges() {
+    if (!canOpenSessionChanges) {
+      return
+    }
+
+    queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
+    workbenchTabSet.openOrFocusTab(
+      {
+        id: `session-changes:${chat.session.id}`,
+        kind: "sessionChanges",
+        title: `Changes · ${chat.title}`,
+        payload: {
+          sessionId: chat.session.id,
+          sessionTitle: chat.title,
+          repositoryLabel: chat.repositoryLabel,
+        },
+        dirty: false,
+      },
+    )
+  }
 
   <main class={styles.root}>
     <header class={styles.header}>
@@ -171,18 +282,73 @@ component LoadedSessionChatView(props: {
           {chat.title}
         </h1>
       </div>
-      <div
-        aria-label={`${status.label}: ${status.description}`}
-        class={styles.headerStatus}
-        data-tone={status.tone}
-        title={status.description}
-      >
-        <StatusIcon size={15} strokeWidth={2.2} />
-        <span class={styles.headerStatusLabel}>
-          {status.label}
-        </span>
+      <div class={styles.headerControls}>
+        <div
+          aria-label={`${status.label}: ${status.description}`}
+          class={styles.headerStatus}
+          data-tone={status.tone}
+          title={status.description}
+        >
+          <StatusIcon size={15} strokeWidth={2.2} />
+          <span class={styles.headerStatusLabel}>
+            {status.label}
+          </span>
+        </div>
+        <div class={styles.headerActions}>
+          if (canOpenSessionChanges) {
+            <GoodTooltip ariaLabel="View changes" content="View changes">
+              <button
+                aria-label="View session changes"
+                class={styles.headerActionButton}
+                type="button"
+                onClick={openSessionChanges}
+              >
+                <GitBranch size={15} strokeWidth={2.1} />
+              </button>
+            </GoodTooltip>
+          }
+          if (canReconnect) {
+            <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
+              <button
+                aria-label="Reconnect session"
+                class={styles.headerActionButton}
+                disabled={activeHeaderAction !== null}
+                type="button"
+                onClick={() => {
+                  void reconnectCurrentSession()
+                }}
+              >
+                <RefreshCcw size={15} strokeWidth={2.1} />
+              </button>
+            </GoodTooltip>
+          }
+          if (canCancelTurn) {
+            <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
+              <button
+                aria-label="Stop active turn"
+                class={styles.headerActionButton}
+                data-tone="danger"
+                disabled={activeHeaderAction !== null}
+                type="button"
+                onClick={() => {
+                  void cancelActiveTurn()
+                }}
+              >
+                <XCircle size={15} strokeWidth={2.1} />
+              </button>
+            </GoodTooltip>
+          }
+        </div>
       </div>
     </header>
+    if (headerActionError) {
+      <div class={styles.headerActionError} role="alert">
+        <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>
+        <span class={styles.headerActionErrorDescription}>
+          {headerActionError.description}
+        </span>
+      </div>
+    }
     if (chat.hasEmptyTranscript) {
       <div class={styles.transcript}>
         <SessionChatStateMessage

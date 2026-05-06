@@ -9,6 +9,7 @@ export default {
   header: css({
     display: "flex",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: "16px",
     flexShrink: "0",
     minWidth: "0",
@@ -41,6 +42,13 @@ export default {
     lineHeight: "1.35",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+  }),
+  headerControls: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    flexShrink: "0",
+    minWidth: "0",
   }),
   headerStatus: css({
     display: "inline-flex",
@@ -75,6 +83,61 @@ export default {
     },
   }),
   headerStatusLabel: css({
+    whiteSpace: "nowrap",
+  }),
+  headerActions: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    flexShrink: "0",
+  }),
+  headerActionButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "30px",
+    height: "30px",
+    border: "1px solid token(colors.border)",
+    borderRadius: "6px",
+    backgroundColor: "surface",
+    color: "muted",
+    _hover: {
+      backgroundColor: "bg.hover",
+      color: "text",
+    },
+    _disabled: {
+      cursor: "default",
+      opacity: "0.55",
+      pointerEvents: "none",
+    },
+    '&[data-tone="danger"]': {
+      color: "danger",
+    },
+  }),
+  headerActionError: css({
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexShrink: "0",
+    borderBottom: "1px solid",
+    borderColor: "danger",
+    paddingBlock: "8px",
+    paddingInline: "20px",
+    backgroundColor: "surface",
+    color: "text",
+    fontSize: "0.86rem",
+  }),
+  headerActionErrorTitle: css({
+    color: "danger",
+    fontWeight: "700",
+    whiteSpace: "nowrap",
+  }),
+  headerActionErrorDescription: css({
+    minWidth: "0",
+    overflow: "hidden",
+    color: "muted",
+    lineHeight: "1.45",
+    textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   }),
   transcript: css({
