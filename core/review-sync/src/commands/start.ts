@@ -15,7 +15,6 @@ import { syncSession } from "../sync.ts"
 import type { RuntimeContext, SessionState, StartReviewSyncInput } from "../types.ts"
 import { isAncestor, resolveMergeBase } from "./history.ts"
 import { resumeSession } from "./resume.ts"
-import { runCommandSafely } from "./shared.ts"
 
 /** Creates or reuses one durable review-sync session and runs the first refresh. */
 export async function startReviewSync(input: StartReviewSyncInput) {
@@ -163,10 +162,8 @@ export function createStartCommand(cwd: string) {
     },
     handler: async ({ agentBranch }) => {
       const context = createRuntimeContext(cwd)
-      return await runCommandSafely("start", async () => {
-        const resolvedAgentBranch = agentBranch ?? (await promptForAgentBranch(context))
-        return await startReviewSync({ cwd, agentBranch: resolvedAgentBranch })
-      })
+      const resolvedAgentBranch = agentBranch ?? (await promptForAgentBranch(context))
+      return await startReviewSync({ cwd, agentBranch: resolvedAgentBranch })
     },
   })
 }

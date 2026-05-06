@@ -8,7 +8,6 @@ import { createRuntimeContext } from "../runtime.ts"
 import { inferSession } from "../session.ts"
 import { countPatchFiles, resolveSessionDir } from "../state.ts"
 import type { StatusReviewSyncInput } from "../types.ts"
-import { runCommandSafely } from "./shared.ts"
 
 /** Returns session state, patch counts, and refs without mutating Git or durable state. */
 export async function statusReviewSession(input: StatusReviewSyncInput) {
@@ -75,6 +74,6 @@ export function createStatusCommand(cwd: string) {
         description: "Print status as JSON for machine consumers",
       }),
     },
-    handler: ({ json }) => runCommandSafely("status", () => statusReviewSession({ cwd, json })),
+    handler: ({ json }) => statusReviewSession({ cwd, json }),
   })
 }

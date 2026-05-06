@@ -38,7 +38,7 @@ import {
 import { reviewBranchHasHumanCommits } from "./history.ts"
 import { pauseSession } from "./pause.ts"
 import { resumeSession } from "./resume.ts"
-import { formatThrownError, runCommandSafely } from "./shared.ts"
+import { formatThrownError } from "./shared.ts"
 import { startLoadedReviewSyncSession, startReviewSyncWithSession } from "./start.ts"
 import { syncLoadedReviewSyncSession } from "./sync.ts"
 
@@ -1254,15 +1254,13 @@ export function createWatchCommand(cwd: string) {
     handler: async ({ agentBranch, verbose }) => {
       const abort = createProcessAbortSignal()
       try {
-        return await runCommandSafely("watch", () =>
-          watchReviewSession({
-            cwd,
-            agentBranch,
-            signal: abort.signal,
-            verbose,
-            onResult: writeResult,
-          }),
-        )
+        return await watchReviewSession({
+          cwd,
+          agentBranch,
+          signal: abort.signal,
+          verbose,
+          onResult: writeResult,
+        })
       } finally {
         abort.cleanup()
       }

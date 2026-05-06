@@ -7,7 +7,6 @@ import { createRuntimeContext } from "../runtime.ts"
 import { inferSession } from "../session.ts"
 import { appendEvent, readSessionState, writeSessionState } from "../state.ts"
 import type { ReviewSyncWorktreeInput, SessionState } from "../types.ts"
-import { runCommandSafely } from "./shared.ts"
 
 /** Clears the paused flag without running an implicit sync. */
 export async function resumeReviewSession(input: ReviewSyncWorktreeInput) {
@@ -51,6 +50,6 @@ export function createResumeCommand(cwd: string) {
     name: "resume",
     description: "Resume sync mutations without running an immediate sync",
     args: {},
-    handler: () => runCommandSafely("resume", () => resumeReviewSession({ cwd })),
+    handler: () => resumeReviewSession({ cwd }),
   })
 }

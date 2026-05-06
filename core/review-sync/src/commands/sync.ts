@@ -7,7 +7,6 @@ import { inferSession } from "../session.ts"
 import { readSessionState } from "../state.ts"
 import { syncSession } from "../sync.ts"
 import type { ReviewSyncWorktreeInput, RuntimeContext, SessionState } from "../types.ts"
-import { runCommandSafely } from "./shared.ts"
 
 /** Runs one sync operation for the session inferred from the current worktree. */
 export async function syncReviewSession(input: ReviewSyncWorktreeInput) {
@@ -42,6 +41,6 @@ export function createSyncCommand(cwd: string) {
     name: "sync",
     description: "Apply clean human edits to the agent worktree and refresh the review branch",
     args: {},
-    handler: () => runCommandSafely("sync", () => syncReviewSession({ cwd })),
+    handler: () => syncReviewSession({ cwd }),
   })
 }

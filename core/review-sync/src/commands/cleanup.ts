@@ -13,7 +13,6 @@ import { withSessionLock } from "../lock.ts"
 import { createRuntimeContext } from "../runtime.ts"
 import { deleteSessionState, listSessions } from "../state.ts"
 import type { CleanupReviewSyncInput, RuntimeContext, SessionState } from "../types.ts"
-import { runCommandSafely } from "./shared.ts"
 
 /** Removes saved session state records that match the current worktree root. */
 export async function cleanupReviewSessions(input: CleanupReviewSyncInput) {
@@ -145,6 +144,6 @@ export function createCleanupCommand(cwd: string) {
         description: "Remove every matching session instead of keeping the newest",
       }),
     },
-    handler: ({ all }) => runCommandSafely("cleanup", () => cleanupReviewSessions({ cwd, all })),
+    handler: ({ all }) => cleanupReviewSessions({ cwd, all }),
   })
 }

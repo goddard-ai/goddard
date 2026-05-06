@@ -1,5 +1,5 @@
 /** CLI-compatible review-sync command runner. */
-import { runSafely, subcommands } from "cmd-ts"
+import { parse, runSafely, subcommands } from "cmd-ts"
 
 import { cleanupReviewSessions, createCleanupCommand } from "./commands/cleanup.ts"
 import { createPauseCommand, pauseReviewSession } from "./commands/pause.ts"
@@ -10,6 +10,7 @@ import { createStatusCommand, statusReviewSession } from "./commands/status.ts"
 import { createSyncCommand, syncReviewSession } from "./commands/sync.ts"
 import { createWatchCommand, watchReviewSession } from "./commands/watch.ts"
 import { createErrorResult } from "./errors.ts"
+import type { ReviewSyncCommand } from "./types.ts"
 
 export {
   cleanupReviewSessions,
@@ -23,12 +24,55 @@ export {
 
 /** Runs one review-sync command using the same command names and process context as the CLI. */
 export async function runReviewSync(argv: string[]) {
+  const command = createReviewSyncCommand(process.cwd())
+  let selectedCommand: ReviewSyncCommand | null = null
+
   try {
-    const parsed = await runSafely(createReviewSyncCommand(process.cwd()), argv)
+    selectedCommand = await parseReviewSyncCommandName(command, argv)
+    const parsed = await runSafely(command, argv)
     return parsed._tag === "error" ? createCmdTsResult(parsed.error) : await parsed.value.value
   } catch (error) {
-    return createErrorResult("status", error)
+    return createErrorResult(selectedCommand ?? "status", error)
   }
+}
+
+/** Identifies the subcommand before running so handler errors keep the right command label. */
+async function parseReviewSyncCommandName(
+  command: ReturnType<typeof createReviewSyncCommand>,
+  argv: string[],
+) {
+  const parsed = await parse(command, argv)
+  if (parsed._tag === "ok") {
+    return parsed.value.command as ReviewSyncCommand
+  }
+
+  const partialValue = parsed.error.partialValue
+  if (isParsedReviewSyncCommand(partialValue)) {
+    return partialValue.command
+  }
+  return null
+}
+
+/** Narrows cmd-ts partial parse values without depending on its internal error shape. */
+function isParsedReviewSyncCommand(value: unknown): value is { command: ReviewSyncCommand } {
+  if (!value || typeof value !== "object" || !("command" in value)) {
+    return false
+  }
+
+  return isReviewSyncCommand((value as { command: unknown }).command)
+}
+
+/** Checks command names at the CLI boundary where argv is still untrusted. */
+function isReviewSyncCommand(command: unknown): command is ReviewSyncCommand {
+  return (
+    command === "start" ||
+    command === "sync" ||
+    command === "status" ||
+    command === "pause" ||
+    command === "resume" ||
+    command === "cleanup" ||
+    command === "watch"
+  )
 }
 
 /** Builds the command tree with handlers that execute the bounded operations directly. */
