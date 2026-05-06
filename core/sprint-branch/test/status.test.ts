@@ -133,6 +133,37 @@ describe("sprint-branch status", () => {
     expect(diagnosticCodes(status)).toContain("task_file_missing")
   })
 
+  // Review feedback can legitimately advance review while next still carries
+  // work-ahead commits based on the older review head.
+  test("warns without blocking when next is not based on review", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: "010-task-name",
+        next: "020-task-name",
+        approved: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "next.txt"), "next work\n")
+    await commitAll(repo, "add next work")
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "review.txt"), "review feedback\n")
+    await commitAll(repo, "address review feedback")
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      diagnostics: Array<{ code: string; severity: string }>
+    }
+    const diagnostic = status.diagnostics.find((item) => item.code === "next_not_based_on_review")
+
+    expect(result.exitCode).toBe(0)
+    expect(status.ok).toBe(true)
+    expect(diagnostic?.severity).toBe("warning")
+  })
+
   test("does not warn when an approved task file is missing", async () => {
     const repo = await createSprintRepo("example", {
       review: null,

@@ -142,10 +142,11 @@ export async function buildStatusReport(input: SprintInferenceInput) {
   }
   if (nextDescendsFromReview === false) {
     diagnostics.push({
-      severity: "error",
+      severity: "warning",
       code: "next_not_based_on_review",
       message: `${parsed.state.branches.next} does not descend from ${parsed.state.branches.review}.`,
-      suggestion: "Run sprint-branch resume --dry-run before continuing work-ahead changes.",
+      suggestion:
+        "Continue review work; run sprint-branch resume --dry-run before returning to work-ahead changes.",
     })
   }
 
