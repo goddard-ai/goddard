@@ -35,25 +35,27 @@ function createSession(lastAgentMessage: string | null) {
   } satisfies DaemonSession
 }
 
+function createTurn(overrides: Partial<GetSessionHistoryResponse["turns"][number]> = {}) {
+  return {
+    turnId: "turn-1",
+    sequence: 1,
+    promptRequestId: "prompt-1",
+    startedAt: "2026-04-14T00:00:00.000Z",
+    completedAt: "2026-04-14T00:00:01.000Z",
+    completionKind: "result",
+    stopReason: "end_turn",
+    inboxScope: null,
+    inboxHeadline: null,
+    messages: [],
+    ...overrides,
+  } satisfies GetSessionHistoryResponse["turns"][number]
+}
+
 function createTurns(
   messages: GetSessionHistoryResponse["turns"][number]["messages"],
   overrides: Partial<GetSessionHistoryResponse["turns"][number]> = {},
 ): GetSessionHistoryResponse["turns"] {
-  return [
-    {
-      turnId: "turn-1",
-      sequence: 1,
-      promptRequestId: "prompt-1",
-      startedAt: "2026-04-14T00:00:00.000Z",
-      completedAt: "2026-04-14T00:00:01.000Z",
-      completionKind: "result",
-      stopReason: "end_turn",
-      inboxScope: null,
-      inboxHeadline: null,
-      messages,
-      ...overrides,
-    },
-  ]
+  return [createTurn({ messages, ...overrides })]
 }
 
 function createTranscriptMessages(
@@ -61,6 +63,10 @@ function createTranscriptMessages(
   turns: GetSessionHistoryResponse["turns"],
 ) {
   return buildSessionChatTranscript({ session, turns })
+}
+
+function withoutTurnStopRows(messages: ReturnType<typeof createTranscriptMessages>) {
+  return messages.filter((message) => message.kind !== "turnStop")
 }
 
 test("buildSessionChatTranscript appends the latest daemon summary when turns have no assistant update yet", () => {
@@ -76,8 +82,11 @@ test("buildSessionChatTranscript appends the latest daemon summary when turns ha
       },
     },
   ])
+  const latestMessage = createTranscriptMessages(session, turns).find(
+    (message) => message.id === "ses_session-1:latest",
+  )
 
-  expect(createTranscriptMessages(session, turns).at(-1)).toEqual({
+  expect(latestMessage).toEqual({
     kind: "message",
     id: "ses_session-1:latest",
     role: "assistant",
@@ -130,7 +139,7 @@ test("buildSessionChatTranscript accumulates agent_message_chunk updates into on
     },
   ])
 
-  expect(createTranscriptMessages(session, turns)).toEqual([
+  expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -211,7 +220,7 @@ test("buildSessionChatTranscript merges tool_call updates into one stable tool r
     },
   ])
 
-  expect(createTranscriptMessages(session, turns)).toEqual([
+  expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -274,7 +283,7 @@ test("buildSessionChatTranscript ignores routed session/update payloads without 
     },
   ])
 
-  expect(createTranscriptMessages(session, turns)).toEqual([
+  expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([
     {
       kind: "message",
       id: "ses_session-1:context",
@@ -312,7 +321,7 @@ test("buildSessionChatTranscript logs an error instead of flattening unsupported
   }
 
   try {
-    expect(createTranscriptMessages(session, turns)).toEqual([
+    expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([
       {
         kind: "message",
         id: "ses_session-1:context",
@@ -333,4 +342,95 @@ test("buildSessionChatTranscript logs an error instead of flattening unsupported
       reason: "Unsupported transcript session/update payload: mystery_update",
     }),
   )
+})
+
+test("buildSessionChatTranscript renders lifecycle rows for terminal and interrupted turns", () => {
+  const session = createSession(null)
+  const messages = createTranscriptMessages(
+    {
+      ...session,
+      status: "error",
+      activeDaemonSession: false,
+      errorMessage: "Session interrupted when the previous daemon exited unexpectedly.",
+    },
+    [
+      createTurn({
+        turnId: "turn-completed",
+        sequence: 1,
+        promptRequestId: "prompt-completed",
+        completedAt: "2026-04-14T00:00:01.000Z",
+        completionKind: "result",
+        stopReason: "end_turn",
+      }),
+      createTurn({
+        turnId: "turn-stopped",
+        sequence: 2,
+        promptRequestId: "prompt-stopped",
+        completedAt: "2026-04-14T00:00:02.000Z",
+        completionKind: "result",
+        stopReason: "max_tokens",
+      }),
+      createTurn({
+        turnId: "turn-failed",
+        sequence: 3,
+        promptRequestId: "prompt-failed",
+        completedAt: "2026-04-14T00:00:03.000Z",
+        completionKind: "error",
+        stopReason: null,
+        messages: [
+          {
+            jsonrpc: "2.0",
+            id: "prompt-failed",
+            error: {
+              code: -32_000,
+              message: "Agent crashed",
+            },
+          },
+        ],
+      }),
+      createTurn({
+        turnId: "turn-interrupted",
+        sequence: 4,
+        promptRequestId: "prompt-interrupted",
+        completedAt: null,
+        completionKind: null,
+        stopReason: null,
+      }),
+    ],
+  )
+
+  expect(messages.filter((message) => message.kind === "turnStop")).toEqual([
+    {
+      kind: "turnStop",
+      id: "turn-completed:stop",
+      status: "completed",
+      title: "Completed",
+      reason: null,
+      timestamp: "2026-04-14T00:00:01.000Z",
+    },
+    {
+      kind: "turnStop",
+      id: "turn-stopped:stop",
+      status: "stopped",
+      title: "Stopped",
+      reason: "Reached the token limit",
+      timestamp: "2026-04-14T00:00:02.000Z",
+    },
+    {
+      kind: "turnStop",
+      id: "turn-failed:stop",
+      status: "failed",
+      title: "Failed",
+      reason: "Agent crashed",
+      timestamp: "2026-04-14T00:00:03.000Z",
+    },
+    {
+      kind: "turnStop",
+      id: "turn-interrupted:stop",
+      status: "interrupted",
+      title: "Interrupted",
+      reason: "Session interrupted when the previous daemon exited unexpectedly.",
+      timestamp: null,
+    },
+  ])
 })

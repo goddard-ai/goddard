@@ -5,6 +5,7 @@ import type {
   SessionTranscriptItem,
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
+  SessionTranscriptTurnStop,
 } from "~/sessions/models.ts"
 import { MessageList, type MessageListRow } from "./message-list.tsrx"
 import { estimateTranscriptRowHeight } from "./transcript/layout.ts"
@@ -13,11 +14,13 @@ import {
   DEFAULT_ROW_HEIGHT,
   loadingStateClass,
   ROW_GAP,
+  TURN_STOP_ROW_HEIGHT,
   transcriptViewportClass,
   VIRTUAL_OVERSCAN_PX,
 } from "./transcript/styles.ts"
 import { TextTranscriptRow } from "./transcript/text-row.tsrx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsrx"
+import { TurnStopTranscriptRow } from "./transcript/turn-stop-row.tsrx"
 
 /** One transcript row rendered by the session chat surface. */
 export type TranscriptMessage = SessionTranscriptItem
@@ -36,7 +39,7 @@ type CoalescedToolTranscriptRow = {
   toolCalls: readonly SessionTranscriptToolCall[];
 }
 
-type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow
+type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop
 
 function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   const renderItems: RenderTranscriptItem[] = []
@@ -64,6 +67,11 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
     }
 
     flushToolCalls()
+
+    if (message.kind === "turnStop") {
+      renderItems.push(message)
+      continue
+    }
 
     if (message.role === "system") {
       continue
@@ -96,6 +104,11 @@ component TranscriptRow(props: { row: MessageListRow<RenderTranscriptItem> }) {
     return
   }
 
+  if (props.row.item.kind === "turnStop") {
+    <TurnStopTranscriptRow row={props.row as MessageListRow<SessionTranscriptTurnStop>} />
+    return
+  }
+
   <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
 }
 
@@ -111,7 +124,9 @@ export component Transcript(props: TranscriptProps) {
       defaultRowHeight={DEFAULT_ROW_HEIGHT}
       estimateRowHeight={(message, _index, viewportWidth) => message.kind === "toolGroup"
         ? estimateToolGroupRowHeight(message.toolCalls, viewportWidth)
-        : estimateTranscriptRowHeight(message, viewportWidth)}
+        : message.kind === "turnStop"
+          ? TURN_STOP_ROW_HEIGHT
+          : estimateTranscriptRowHeight(message, viewportWidth)}
       getItemKey={(message) => message.id}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}

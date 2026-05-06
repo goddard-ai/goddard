@@ -190,6 +190,61 @@ export const toolDetailMonoClass = css({
   whiteSpace: "pre-wrap",
 })
 
+export const turnStopPillClass = css({
+  display: "inline-flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "6px",
+  maxWidth: "100%",
+  border: "1px solid token(colors.border)",
+  borderRadius: "999px",
+  paddingBlock: "5px",
+  paddingInline: "10px",
+  backgroundColor: "surface",
+  color: "fg.muted",
+  fontSize: "0.8rem",
+  fontWeight: "620",
+  lineHeight: "1.35",
+  '&[data-status="completed"]': {
+    color: "fg.muted",
+  },
+  '&[data-status="stopped"]': {
+    borderColor: "accent",
+    color: "accentStrong",
+  },
+  '&[data-status="failed"]': {
+    borderColor: "danger",
+    color: "danger",
+  },
+  '&[data-status="cancelled"]': {
+    color: "fg.muted",
+  },
+  '&[data-status="interrupted"]': {
+    borderColor: "danger",
+    borderStyle: "dashed",
+    color: "danger",
+  },
+})
+
+export const turnStopIconClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  flexShrink: "0",
+})
+
+export const turnStopTitleClass = css({
+  color: "fg.default",
+  fontWeight: "700",
+})
+
+export const turnStopMetaClass = css({
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+})
+
 export const BODY_FONT = '450 15px "SF Pro Text", "Segoe UI", sans-serif'
 export const BODY_LINE_HEIGHT = 24
 export const META_HEIGHT = 0
@@ -204,3 +259,4 @@ export const WIDE_BUBBLE_WIDTH_BREAKPOINT = 760
 export const CONTENT_BLOCK_GAP = 10
 export const ATTACHMENT_ROW_HEIGHT = 68
 export const TOOL_DIFF_PREVIEW_LINE_LIMIT = 6
+export const TURN_STOP_ROW_HEIGHT = 42

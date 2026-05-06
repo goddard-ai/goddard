@@ -23,6 +23,7 @@ import {
   NARROW_BUBBLE_WIDTH_BREAKPOINT,
   ROW_GAP,
   TOOL_DIFF_PREVIEW_LINE_LIMIT,
+  TURN_STOP_ROW_HEIGHT,
   WIDE_BUBBLE_WIDTH_BREAKPOINT,
 } from "./styles.ts"
 
@@ -204,6 +205,10 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
     const bubblePaddingY = message.role === "assistant" ? 0 : BUBBLE_PADDING_Y
 
     return META_HEIGHT + bubblePaddingY + Math.max(contentHeight, BODY_LINE_HEIGHT) + ROW_GAP
+  }
+
+  if (message.kind === "turnStop") {
+    return TURN_STOP_ROW_HEIGHT
   }
 
   let approximateLineCount = 2

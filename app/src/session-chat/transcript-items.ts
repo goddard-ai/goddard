@@ -9,6 +9,7 @@ import type {
   SessionTranscriptToolKind,
   SessionTranscriptToolLocation,
   SessionTranscriptToolStatus,
+  SessionTranscriptTurnStop,
 } from "~/sessions/models.ts"
 import { promptBlocksToTranscriptContent } from "./composer-content.ts"
 
@@ -324,6 +325,110 @@ function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
   } satisfies SessionTranscriptTextMessage
 }
 
+function extractMessageErrorText(message: SessionHistoryMessage) {
+  const error = isRecord(message) ? (message as Record<string, unknown>)["error"] : null
+
+  if (!isRecord(error)) {
+    return null
+  }
+
+  return typeof error.message === "string" && error.message.trim().length > 0
+    ? error.message.trim()
+    : null
+}
+
+function formatStopReason(stopReason: SessionHistoryTurn["stopReason"]) {
+  switch (stopReason) {
+    case "max_tokens":
+      return "Reached the token limit"
+    case "max_turn_requests":
+      return "Reached the turn limit"
+    case "refusal":
+      return "Agent refused"
+    case "cancelled":
+      return "Cancelled by request"
+    default:
+      return null
+  }
+}
+
+function extractTurnFailureReason(turn: SessionHistoryTurn, session: DaemonSession) {
+  for (const message of turn.messages) {
+    if (messageIdMatchesPrompt(turn, message)) {
+      const errorText = extractMessageErrorText(message)
+
+      if (errorText) {
+        return errorText
+      }
+    }
+  }
+
+  return session.errorMessage
+}
+
+function messageIdMatchesPrompt(turn: SessionHistoryTurn, message: SessionHistoryMessage) {
+  return isRecord(message) && (message as Record<string, unknown>)["id"] === turn.promptRequestId
+}
+
+function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
+  if (turn.completedAt === null) {
+    if (session.activeDaemonSession) {
+      return null
+    }
+
+    return {
+      kind: "turnStop",
+      id: `${turn.turnId}:stop`,
+      status: "interrupted",
+      title: "Interrupted",
+      reason: session.errorMessage ?? "No turn completion was recorded",
+      timestamp: null,
+    } satisfies SessionTranscriptTurnStop
+  }
+
+  if (turn.completionKind === "error") {
+    return {
+      kind: "turnStop",
+      id: `${turn.turnId}:stop`,
+      status: "failed",
+      title: "Failed",
+      reason: extractTurnFailureReason(turn, session),
+      timestamp: turn.completedAt,
+    } satisfies SessionTranscriptTurnStop
+  }
+
+  if (turn.stopReason === "cancelled") {
+    return {
+      kind: "turnStop",
+      id: `${turn.turnId}:stop`,
+      status: "cancelled",
+      title: "Cancelled",
+      reason: formatStopReason(turn.stopReason),
+      timestamp: turn.completedAt,
+    } satisfies SessionTranscriptTurnStop
+  }
+
+  if (turn.stopReason && turn.stopReason !== "end_turn") {
+    return {
+      kind: "turnStop",
+      id: `${turn.turnId}:stop`,
+      status: "stopped",
+      title: "Stopped",
+      reason: formatStopReason(turn.stopReason),
+      timestamp: turn.completedAt,
+    } satisfies SessionTranscriptTurnStop
+  }
+
+  return {
+    kind: "turnStop",
+    id: `${turn.turnId}:stop`,
+    status: "completed",
+    title: "Completed",
+    reason: null,
+    timestamp: turn.completedAt,
+  } satisfies SessionTranscriptTurnStop
+}
+
 /** Builds one session chat transcript from session state and ACP message history. */
 export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
   const agentRowIndexes = new Map<string, number>()
@@ -476,7 +581,7 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
     }
   }
 
-  for (const turn of input.turns) {
+  for (const [turnIndex, turn] of input.turns.entries()) {
     const isStreamingTurn = turn.completedAt === null
 
     for (const [messageIndex, message] of turn.messages.entries()) {
@@ -513,9 +618,21 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
         continue
       }
     }
+
+    if (turnIndex === input.turns.length - 1) {
+      appendLatestDaemonSummary(input.session)
+    }
+
+    const turnStopRow = createTurnStopRow(input.session, turn)
+
+    if (turnStopRow) {
+      messages.push(turnStopRow)
+    }
   }
 
-  appendLatestDaemonSummary(input.session)
+  if (input.turns.length === 0) {
+    appendLatestDaemonSummary(input.session)
+  }
 
   return messages
 }

@@ -76,5 +76,26 @@ export type SessionTranscriptToolCall = {
   locations: readonly SessionTranscriptToolLocation[]
 }
 
+/** Terminal lifecycle states shown after a turn stops producing transcript content. */
+export type SessionTranscriptTurnStopStatus =
+  | "completed"
+  | "stopped"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+
+/** One compact transcript row that marks how a prompt turn ended. */
+export type SessionTranscriptTurnStop = {
+  kind: "turnStop"
+  id: string
+  status: SessionTranscriptTurnStopStatus
+  title: string
+  reason: string | null
+  timestamp: string | null
+}
+
 /** One transcript row shown inside the session chat surface. */
-export type SessionTranscriptItem = SessionTranscriptTextMessage | SessionTranscriptToolCall
+export type SessionTranscriptItem =
+  | SessionTranscriptTextMessage
+  | SessionTranscriptToolCall
+  | SessionTranscriptTurnStop
