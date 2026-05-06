@@ -10,17 +10,17 @@ import {
 } from "@goddard-ai/review-sync"
 
 /** Mounted daemon host state mirrors review-sync's native status payload. */
-export type ReviewSyncWorktreeSessionState = ReviewSyncStatusData
+export type WorktreeSyncSessionState = ReviewSyncStatusData
 
 /** Explicit daemon worktree pair passed to each review-sync adapter operation. */
-export type ReviewSyncWorktreeSessionInput = {
+export type WorktreeSyncSessionInput = {
   primaryDir: string
   worktreeDir: string
   agentBranch: string
 }
 
-/** Finds the review-sync session whose review worktree is one daemon primary checkout. */
-export async function findMountedReviewSyncSessionByPrimaryDir(primaryDir: string) {
+/** Finds the mounted worktree sync session for one daemon primary checkout. */
+export async function findMountedWorktreeSyncSessionByPrimaryDir(primaryDir: string) {
   const normalizedPrimaryDir = await normalizePath(primaryDir)
   const sessions = await listReviewSessions({
     cwd: normalizedPrimaryDir,
@@ -28,14 +28,9 @@ export async function findMountedReviewSyncSessionByPrimaryDir(primaryDir: strin
   return sessions.find((session) => session.reviewWorktree === normalizedPrimaryDir) ?? null
 }
 
-/** Returns the mounted review-sync state when this daemon worktree pair is active. */
-export async function inspectReviewSyncWorktreeSession(input: ReviewSyncWorktreeSessionInput) {
-  return await loadExpectedReviewSyncStatus(input)
-}
-
-/** Starts or reuses review-sync for the daemon primary checkout and session worktree. */
-export async function mountReviewSyncWorktreeSession(input: ReviewSyncWorktreeSessionInput) {
-  const existing = await inspectReviewSyncWorktreeSession(input)
+/** Starts or reuses worktree sync for the daemon primary checkout and session worktree. */
+export async function mountWorktreeSyncSession(input: WorktreeSyncSessionInput) {
+  const existing = await loadWorktreeSyncSessionState(input)
   if (existing) {
     return existing
   }
@@ -44,15 +39,15 @@ export async function mountReviewSyncWorktreeSession(input: ReviewSyncWorktreeSe
     cwd: input.primaryDir,
     agentBranch: input.agentBranch,
   })
-  const state = await inspectReviewSyncWorktreeSession(input)
+  const state = await loadWorktreeSyncSessionState(input)
   if (!state) {
-    throw new Error("review-sync did not create an inspectable session")
+    throw new Error("worktree sync did not create a readable session")
   }
   return state
 }
 
-/** Stops review-sync ownership while leaving checkout semantics to review-sync. */
-export async function unmountReviewSyncWorktreeSession(input: ReviewSyncWorktreeSessionInput) {
+/** Stops worktree sync ownership while leaving checkout semantics to the sync implementation. */
+export async function unmountWorktreeSyncSession(input: WorktreeSyncSessionInput) {
   await stopReviewSession({
     cwd: input.worktreeDir,
   })
@@ -63,7 +58,7 @@ export async function unmountReviewSyncWorktreeSession(input: ReviewSyncWorktree
   }
 }
 
-async function loadExpectedReviewSyncStatus(input: ReviewSyncWorktreeSessionInput) {
+async function loadWorktreeSyncSessionState(input: WorktreeSyncSessionInput) {
   const expected = {
     primaryDir: await normalizePath(input.primaryDir),
     worktreeDir: await normalizePath(input.worktreeDir),
@@ -79,16 +74,16 @@ async function loadExpectedReviewSyncStatus(input: ReviewSyncWorktreeSessionInpu
       return null
     }
 
-    return isExpectedReviewSyncSession(expected, result.data) ? result.data : null
+    return isExpectedWorktreeSyncSession(expected, result.data) ? result.data : null
   } catch (error) {
-    if (isMissingReviewSyncSessionError(error)) {
+    if (isMissingWorktreeSyncSessionError(error)) {
       return null
     }
     throw error
   }
 }
 
-function isExpectedReviewSyncSession(
+function isExpectedWorktreeSyncSession(
   expected: {
     primaryDir: string
     worktreeDir: string
@@ -103,7 +98,7 @@ function isExpectedReviewSyncSession(
   )
 }
 
-function isMissingReviewSyncSessionError(error: unknown) {
+function isMissingWorktreeSyncSessionError(error: unknown) {
   return (
     error instanceof Error &&
     error.message.includes("No review-sync session matches the current worktree.")
