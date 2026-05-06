@@ -165,20 +165,26 @@ async function startLoadedReviewSyncSession(session: SessionState, context: Runt
 /** Performs the sync workflow after CLI parsing and command-level error handling. */
 async function syncReviewSessionOperation(context: RuntimeContext) {
   const session = await inferSession(context)
+  return await syncLoadedReviewSyncSession(session, context)
+}
+
+/** Syncs an already selected session without re-inferring ownership from cwd. */
+async function syncLoadedReviewSyncSession(session: SessionState, context: RuntimeContext) {
   const syncResult = await syncSession(session, context)
+  const latest = await readSessionState(session)
 
   return createReviewSyncResult({
     exitCode: 0,
     command: "sync",
     status: syncResult.status === "rejected-human-patch" ? "rejected-human-patch" : "ok",
-    sessionId: session.sessionId,
-    reviewBranch: session.reviewBranch,
+    sessionId: latest.sessionId,
+    reviewBranch: latest.reviewBranch,
     acceptedPatchPath: syncResult.acceptedPatchPath ?? undefined,
     rejectedPatchPath: syncResult.rejectedPatchPath ?? undefined,
     message:
       syncResult.status === "rejected-human-patch"
-        ? `Human patch rejected and saved to ${syncResult.rejectedPatchPath}. Review branch refreshed from ${session.agentBranch}.`
-        : `Synced ${session.agentBranch} to ${session.reviewBranch}.`,
+        ? `Human patch rejected and saved to ${syncResult.rejectedPatchPath}. Review branch refreshed from ${latest.agentBranch}.`
+        : `Synced ${latest.agentBranch} to ${latest.reviewBranch}.`,
   })
 }
 
@@ -1274,7 +1280,7 @@ async function syncForWatchWhenAgentCheckoutReady(
 ) {
   while (!isAbortSignalAborted(signal)) {
     try {
-      return await syncReviewSessionOperation(context)
+      return await syncLoadedReviewSyncSession(session, context)
     } catch (error) {
       if (!(error instanceof AgentWorktreeCheckoutMismatchError)) {
         return createErrorResult("sync", error)

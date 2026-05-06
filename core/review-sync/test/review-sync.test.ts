@@ -359,6 +359,52 @@ test("watch restarts a paused session before syncing", async () => {
   )
 })
 
+test("watch can start another session after the previous watch exits", async () => {
+  const fixture = await createFixture({
+    "shared.txt": "base\n",
+  })
+  const secondAgentDir = join(fixture.rootDir, "agent-two")
+  await runGit(fixture.agentDir, ["branch", "codex/second-review-sync-test", "main"])
+  await runGit(fixture.agentDir, [
+    "worktree",
+    "add",
+    secondAgentDir,
+    "codex/second-review-sync-test",
+  ])
+
+  const first = await runWatchUntilNextSync(
+    fixture.reviewDir,
+    async () => {
+      await writeText(join(fixture.reviewDir, "shared.txt"), "first human edit\n")
+    },
+    "codex/review-sync-test",
+  )
+
+  expect(first.stopped.status).toBe("paused")
+  expect(first.results.some((result) => result.command === "start" && result.status === "ok")).toBe(
+    true,
+  )
+  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("first human edit\n")
+
+  const second = await runWatchUntilNextSync(
+    fixture.reviewDir,
+    async () => {
+      await writeText(join(fixture.reviewDir, "shared.txt"), "second human edit\n")
+    },
+    "codex/second-review-sync-test",
+  )
+
+  expect(second.stopped.status).toBe("paused")
+  expect(
+    second.results.some((result) => result.command === "start" && result.status === "ok"),
+  ).toBe(true)
+  expect(second.stopped.reviewBranch).toBe("review-sync/codex/second-review-sync-test")
+  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("first human edit\n")
+  expect(await readFile(join(secondAgentDir, "shared.txt"), "utf-8")).toBe("second human edit\n")
+})
+
 test("watch pauses and restores the starting review branch on exit", async () => {
   const fixture = await createFixture({
     "shared.txt": "base\n",
