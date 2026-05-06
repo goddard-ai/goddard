@@ -12,6 +12,13 @@ import {
 /** Mounted daemon host state mirrors review-sync's native status payload. */
 export type ReviewSyncWorktreeSessionState = ReviewSyncStatusData
 
+/** Explicit daemon worktree pair passed to each review-sync adapter operation. */
+export type ReviewSyncWorktreeSessionInput = {
+  primaryDir: string
+  worktreeDir: string
+  agentBranch: string
+}
+
 /** Finds the review-sync session whose review worktree is one daemon primary checkout. */
 export async function findMountedReviewSyncSessionByPrimaryDir(primaryDir: string) {
   const normalizedPrimaryDir = await normalizePath(primaryDir)
@@ -21,63 +28,42 @@ export async function findMountedReviewSyncSessionByPrimaryDir(primaryDir: strin
   return sessions.find((session) => session.reviewWorktree === normalizedPrimaryDir) ?? null
 }
 
-/** Adapts daemon mount/inspect/unmount calls to review-sync commands without owning Git state. */
-export class ReviewSyncWorktreeSessionHost {
-  readonly #primaryDir
-  readonly #worktreeDir
-  readonly #agentBranch
+/** Returns the mounted review-sync state when this daemon worktree pair is active. */
+export async function inspectReviewSyncWorktreeSession(input: ReviewSyncWorktreeSessionInput) {
+  return await loadExpectedReviewSyncStatus(input)
+}
 
-  constructor(input: { primaryDir: string; worktreeDir: string; agentBranch: string }) {
-    this.#primaryDir = input.primaryDir
-    this.#worktreeDir = input.worktreeDir
-    this.#agentBranch = input.agentBranch
+/** Starts or reuses review-sync for the daemon primary checkout and session worktree. */
+export async function mountReviewSyncWorktreeSession(input: ReviewSyncWorktreeSessionInput) {
+  const existing = await inspectReviewSyncWorktreeSession(input)
+  if (existing) {
+    return existing
   }
 
-  /** Returns the mounted review-sync state when this daemon worktree pair is active. */
-  async inspect() {
-    return await loadExpectedReviewSyncStatus({
-      primaryDir: this.#primaryDir,
-      worktreeDir: this.#worktreeDir,
-      agentBranch: this.#agentBranch,
-    })
+  await startReviewSync({
+    cwd: input.primaryDir,
+    agentBranch: input.agentBranch,
+  })
+  const state = await inspectReviewSyncWorktreeSession(input)
+  if (!state) {
+    throw new Error("review-sync did not create an inspectable session")
   }
+  return state
+}
 
-  /** Starts or reuses review-sync for the daemon primary checkout and session worktree. */
-  async mount() {
-    const existing = await this.inspect()
-    if (existing) {
-      return existing
-    }
+/** Stops review-sync ownership while leaving checkout semantics to review-sync. */
+export async function unmountReviewSyncWorktreeSession(input: ReviewSyncWorktreeSessionInput) {
+  await stopReviewSession({
+    cwd: input.worktreeDir,
+  })
 
-    await startReviewSync({
-      cwd: this.#primaryDir,
-      agentBranch: this.#agentBranch,
-    })
-    const state = await this.inspect()
-    if (!state) {
-      throw new Error("review-sync did not create an inspectable session")
-    }
-    return state
-  }
-
-  /** Stops review-sync ownership while leaving checkout semantics to review-sync. */
-  async unmount() {
-    await stopReviewSession({
-      cwd: this.#worktreeDir,
-    })
-
-    return {
-      state: null,
-      warnings: [],
-    }
+  return {
+    state: null,
+    warnings: [],
   }
 }
 
-async function loadExpectedReviewSyncStatus(input: {
-  primaryDir: string
-  worktreeDir: string
-  agentBranch: string
-}) {
+async function loadExpectedReviewSyncStatus(input: ReviewSyncWorktreeSessionInput) {
   const expected = {
     primaryDir: await normalizePath(input.primaryDir),
     worktreeDir: await normalizePath(input.worktreeDir),

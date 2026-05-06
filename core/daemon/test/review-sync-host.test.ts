@@ -8,7 +8,9 @@ import { afterEach, expect, test } from "bun:test"
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
 import {
   findMountedReviewSyncSessionByPrimaryDir,
-  ReviewSyncWorktreeSessionHost,
+  inspectReviewSyncWorktreeSession,
+  mountReviewSyncWorktreeSession,
+  unmountReviewSyncWorktreeSession,
 } from "../src/worktrees/review-sync.ts"
 
 const cleanup: string[] = []
@@ -32,13 +34,13 @@ test("review-sync host mounts, rehydrates, and unmounts through review-sync", as
   await writeFile(join(created.worktreeDir, "shared.txt"), "worktree dirty\n", "utf-8")
   await writeFile(join(created.worktreeDir, "worktree-note.txt"), "mirror me\n", "utf-8")
 
-  const host = new ReviewSyncWorktreeSessionHost({
+  const sessionInput = {
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
     agentBranch: created.branchName,
-  })
+  }
 
-  const mounted = await host.mount()
+  const mounted = await mountReviewSyncWorktreeSession(sessionInput)
   const expectedPrimaryDir = await realpath(repoDir)
   const expectedWorktreeDir = await realpath(created.worktreeDir)
   expect(mounted?.sessionId.startsWith("sha256-")).toBe(true)
@@ -55,21 +57,17 @@ test("review-sync host mounts, rehydrates, and unmounts through review-sync", as
   const found = await findMountedReviewSyncSessionByPrimaryDir(repoDir)
   expect(found?.sessionId).toBe(mounted?.sessionId)
 
-  const rehydrated = await new ReviewSyncWorktreeSessionHost({
-    primaryDir: repoDir,
-    worktreeDir: created.worktreeDir,
-    agentBranch: created.branchName,
-  }).inspect()
+  const rehydrated = await inspectReviewSyncWorktreeSession(sessionInput)
   expect(rehydrated?.sessionId).toBe(mounted?.sessionId)
 
-  const reused = await host.mount()
+  const reused = await mountReviewSyncWorktreeSession(sessionInput)
   expect(reused?.sessionId).toBe(mounted?.sessionId)
 
-  const unmounted = await host.unmount()
+  const unmounted = await unmountReviewSyncWorktreeSession(sessionInput)
   expect(unmounted.warnings).toEqual([])
   expect(await currentBranch(repoDir)).toBe("review-sync/goddard-review-sync-a")
   expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("worktree dirty\n")
-  expect(await host.inspect()).toBeNull()
+  expect(await inspectReviewSyncWorktreeSession(sessionInput)).toBeNull()
 
   await deleteWorktree({
     cwd: repoDir,
