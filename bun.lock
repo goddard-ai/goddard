@@ -139,6 +139,7 @@
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
+        "@goddard-ai/review-sync": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/worktree-plugin": "workspace:^",
         "@openrouter/ai-sdk-provider": "^2.5.1",
