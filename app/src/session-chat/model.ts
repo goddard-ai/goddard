@@ -86,6 +86,225 @@ type MessageId = string | number
 
 type SessionPermissionRequest = Extract<SessionChatTurnEvent, { kind: "permissionRequest" }>
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function messageField(message: acp.AnyMessage, key: string) {
+  if (!isRecord(message)) {
+    return null
+  }
+
+  return (message as Record<string, unknown>)[key]
+}
+
+function messageId(message: acp.AnyMessage) {
+  const id = messageField(message, "id")
+
+  return typeof id === "string" || typeof id === "number" ? id : null
+}
+
+function messageMethod(message: acp.AnyMessage) {
+  const method = messageField(message, "method")
+
+  return typeof method === "string" ? method : null
+}
+
+function messageResult(message: acp.AnyMessage) {
+  const result = messageField(message, "result")
+
+  return isRecord(result) ? result : null
+}
+
+function messageError(message: acp.AnyMessage) {
+  const error = messageField(message, "error")
+
+  return isRecord(error) ? error : null
+}
+
+function isPromptMessage(message: acp.AnyMessage) {
+  return messageMethod(message) === acp.AGENT_METHODS.session_prompt && messageId(message) !== null
+}
+
+function isPermissionRequestMessage(message: acp.AnyMessage) {
+  return (
+    messageMethod(message) === acp.CLIENT_METHODS.session_request_permission &&
+    messageId(message) !== null
+  )
+}
+
+function sessionUpdate(message: acp.AnyMessage) {
+  const params = messageField(message, "params")
+
+  if (messageMethod(message) !== acp.CLIENT_METHODS.session_update || !isRecord(params)) {
+    return null
+  }
+
+  return isRecord(params.update) ? params.update : null
+}
+
+function messageFingerprint(message: acp.AnyMessage) {
+  return hashSum(message)
+}
+
+function turnMessageRank(
+  message: acp.AnyMessage,
+  promptRequestId: SessionHistoryTurn["promptRequestId"],
+) {
+  const id = messageId(message)
+
+  if (isPromptMessage(message) && id === promptRequestId) {
+    return 0
+  }
+
+  if (id === promptRequestId && (messageResult(message) || messageError(message))) {
+    return 2
+  }
+
+  return 1
+}
+
+function turnStatus(
+  turn: Pick<SessionHistoryTurn, "completedAt" | "completionKind" | "stopReason">,
+) {
+  if (turn.completedAt === null) {
+    return "running"
+  }
+
+  if (turn.completionKind === "error") {
+    return "failed"
+  }
+
+  if (turn.stopReason === "cancelled") {
+    return "cancelled"
+  }
+
+  if (turn.stopReason && turn.stopReason !== "end_turn") {
+    return "stopped"
+  }
+
+  return "completed"
+}
+
+function parsePlanEvent(update: Record<string, unknown>) {
+  return update.sessionUpdate === "plan" && Array.isArray(update.entries)
+    ? (update as acp.Plan)
+    : null
+}
+
+function permissionRequestFromMessage(message: acp.AnyMessage) {
+  const params = messageField(message, "params")
+
+  if (!isPermissionRequestMessage(message) || !isRecord(params)) {
+    return null
+  }
+
+  return params as acp.RequestPermissionRequest
+}
+
+function compareTurns(left: SessionChatTurn, right: SessionChatTurn) {
+  if (left.sequence !== right.sequence) {
+    return left.sequence - right.sequence
+  }
+
+  if (left.startedAt !== right.startedAt) {
+    return left.startedAt.localeCompare(right.startedAt)
+  }
+
+  return left.turnId.localeCompare(right.turnId)
+}
+
+function nextLiveSequence(turns: readonly SessionChatTurn[]) {
+  return turns.reduce((sequence, turn) => Math.max(sequence, turn.sequence), -1) + 1
+}
+
+function liveTurnId(promptRequestId: SessionHistoryTurn["promptRequestId"]) {
+  return `live:${String(promptRequestId)}`
+}
+
+function promptRequestIdFromMessage(message: acp.AnyMessage) {
+  const id = messageId(message)
+
+  if (id !== null && isPromptMessage(message)) {
+    return id
+  }
+
+  if (id !== null && (messageResult(message) || messageError(message))) {
+    return id
+  }
+
+  return null
+}
+
+function newestRunningTurn(turns: readonly SessionChatTurn[]) {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index].completedAt === null) {
+      return turns[index]
+    }
+  }
+
+  return null
+}
+
+function extractStopReason(message: acp.AnyMessage) {
+  const result = messageResult(message)
+  return typeof result?.stopReason === "string"
+    ? (result.stopReason as SessionHistoryTurn["stopReason"])
+    : null
+}
+
+function pendingPermissionRequest(turns: readonly SessionChatTurn[]) {
+  const resolvedRequestIds = new Set<MessageId>()
+  const pendingRequests: SessionPermissionRequest[] = []
+
+  for (const turn of turns) {
+    for (const event of turn.events) {
+      if (event.kind === "permissionResponse") {
+        resolvedRequestIds.add(event.requestId)
+      } else if (event.kind === "permissionRequest") {
+        pendingRequests.push(event)
+      }
+    }
+  }
+
+  for (let index = pendingRequests.length - 1; index >= 0; index -= 1) {
+    const request = pendingRequests[index]
+    if (!resolvedRequestIds.has(request.requestId)) {
+      return request
+    }
+  }
+
+  return null
+}
+
+function sessionChatStatus(
+  session: DaemonSession,
+  turns: readonly SessionChatTurn[],
+  permissionRequest: SessionPermissionRequest | null,
+): SessionChatStatus {
+  if (session.status === "blocked" || session.permissions !== null || permissionRequest) {
+    return "blocked"
+  }
+
+  if (turns.some((turn) => turn.status === "running")) {
+    return "running"
+  }
+
+  if (session.status === "error") {
+    return "failed"
+  }
+
+  if (session.status === "cancelled") {
+    return "cancelled"
+  }
+
+  if (session.status === "done" || session.status === "archived") {
+    return "completed"
+  }
+
+  return "idle"
+}
+
 /** Reactive session chat owner that merges loaded history with live daemon updates. */
 export class SessionChat extends Sigma<SessionChatState> {
   constructor(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
@@ -173,10 +392,10 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #mergeMessage(message: acp.AnyMessage, receivedAt: string) {
-    const promptRequestId = this.#promptRequestIdFromMessage(message)
+    const promptRequestId = promptRequestIdFromMessage(message)
     const existingTurn =
       promptRequestId === null
-        ? this.#newestRunningTurn()
+        ? newestRunningTurn(this.turns)
         : (this.turns.find((turn) => turn.promptRequestId === promptRequestId) ?? null)
 
     if (existingTurn) {
@@ -184,7 +403,7 @@ export class SessionChat extends Sigma<SessionChatState> {
       return
     }
 
-    const sequence = this.#nextLiveSequence()
+    const sequence = nextLiveSequence(this.turns)
     const turn = this.#createLiveTurn(
       promptRequestId ?? `unattributed:${sequence}`,
       receivedAt,
@@ -203,14 +422,14 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.#insertTurnMessage(turn, message)
     this.#completeTurnFromMessage(turn, message, receivedAt)
     this.#rebuildTurnEvents(turn)
-    turn.status = this.#turnStatus(turn)
+    turn.status = turnStatus(turn)
   }
 
   #insertTurnMessage(turn: SessionChatTurn, message: acp.AnyMessage) {
-    const fingerprint = this.#messageFingerprint(message)
+    const fingerprint = messageFingerprint(message)
 
     for (const existingMessage of turn.messages) {
-      if (this.#messageFingerprint(existingMessage) === fingerprint) {
+      if (messageFingerprint(existingMessage) === fingerprint) {
         return
       }
     }
@@ -218,27 +437,26 @@ export class SessionChat extends Sigma<SessionChatState> {
     turn.messages.push(message)
     turn.messages.sort(
       (left, right) =>
-        this.#turnMessageRank(left, turn.promptRequestId) -
-        this.#turnMessageRank(right, turn.promptRequestId),
+        turnMessageRank(left, turn.promptRequestId) - turnMessageRank(right, turn.promptRequestId),
     )
   }
 
   #completeTurnFromMessage(turn: SessionChatTurn, message: acp.AnyMessage, receivedAt: string) {
-    if (this.#messageId(message) !== turn.promptRequestId) {
+    if (messageId(message) !== turn.promptRequestId) {
       return
     }
 
-    if (this.#messageError(message)) {
+    if (messageError(message)) {
       turn.completedAt ??= receivedAt
       turn.completionKind = "error"
       turn.status = "failed"
       return
     }
 
-    if (this.#messageResult(message)) {
+    if (messageResult(message)) {
       turn.completedAt ??= receivedAt
       turn.completionKind = "result"
-      turn.stopReason = this.#extractStopReason(message)
+      turn.stopReason = extractStopReason(message)
     }
   }
 
@@ -249,11 +467,11 @@ export class SessionChat extends Sigma<SessionChatState> {
       messages: [...turn.messages],
       events,
       source,
-      status: this.#turnStatus(turn),
+      status: turnStatus(turn),
     } satisfies SessionChatTurn
 
     this.#rebuildTurnEvents(normalized)
-    normalized.status = this.#turnStatus(normalized)
+    normalized.status = turnStatus(normalized)
 
     return normalized
   }
@@ -265,7 +483,7 @@ export class SessionChat extends Sigma<SessionChatState> {
   ) {
     return this.#normalizeTurn(
       {
-        turnId: this.#liveTurnId(promptRequestId),
+        turnId: liveTurnId(promptRequestId),
         sequence,
         promptRequestId,
         startedAt: receivedAt,
@@ -284,17 +502,17 @@ export class SessionChat extends Sigma<SessionChatState> {
     const permissionRequestIds = new Set<MessageId>()
 
     for (const message of turn.messages) {
-      if (this.#isPermissionRequestMessage(message)) {
-        permissionRequestIds.add(this.#messageId(message)!)
+      if (isPermissionRequestMessage(message)) {
+        permissionRequestIds.add(messageId(message)!)
       }
     }
 
     turn.events.length = 0
 
     for (const [messageIndex, message] of turn.messages.entries()) {
-      const id = this.#messageId(message)
+      const id = messageId(message)
 
-      if (this.#isPromptMessage(message) && id === turn.promptRequestId) {
+      if (isPromptMessage(message) && id === turn.promptRequestId) {
         turn.events.push({
           kind: "prompt",
           messageIndex,
@@ -303,9 +521,9 @@ export class SessionChat extends Sigma<SessionChatState> {
         continue
       }
 
-      const update = this.#sessionUpdate(message)
+      const update = sessionUpdate(message)
       if (update && typeof update.sessionUpdate === "string") {
-        const plan = this.#parsePlanEvent(update)
+        const plan = parsePlanEvent(update)
 
         turn.events.push(
           plan
@@ -323,7 +541,7 @@ export class SessionChat extends Sigma<SessionChatState> {
         continue
       }
 
-      const permissionRequest = this.#permissionRequestFromMessage(message)
+      const permissionRequest = permissionRequestFromMessage(message)
       if (permissionRequest && id !== null) {
         turn.events.push({
           kind: "permissionRequest",
@@ -337,7 +555,7 @@ export class SessionChat extends Sigma<SessionChatState> {
       if (
         id !== null &&
         permissionRequestIds.has(id) &&
-        (this.#messageResult(message) || this.#messageError(message))
+        (messageResult(message) || messageError(message))
       ) {
         turn.events.push({
           kind: "permissionResponse",
@@ -347,259 +565,31 @@ export class SessionChat extends Sigma<SessionChatState> {
         continue
       }
 
-      if (
-        id === turn.promptRequestId &&
-        (this.#messageResult(message) || this.#messageError(message))
-      ) {
+      if (id === turn.promptRequestId && (messageResult(message) || messageError(message))) {
         turn.events.push({
           kind: "turnCompletion",
           messageIndex,
-          completionKind: this.#messageError(message) ? "error" : "result",
-          stopReason: this.#extractStopReason(message),
+          completionKind: messageError(message) ? "error" : "result",
+          stopReason: extractStopReason(message),
         })
       }
     }
   }
 
   #refreshTranscriptState() {
-    this.turns.sort((left, right) => this.#compareTurns(left, right))
+    this.turns.sort(compareTurns)
     this.#syncSummary()
   }
 
   #syncSummary() {
-    const activeTurn = this.#newestRunningTurn()
-    const permissionRequest = this.#pendingPermissionRequest()
+    const activeTurn = newestRunningTurn(this.turns)
+    const permissionRequest = pendingPermissionRequest(this.turns)
 
     this.summary = {
       activeTurnId: activeTurn?.turnId ?? null,
       pendingPermissionRequest: permissionRequest,
-      status: this.#sessionChatStatus(permissionRequest),
+      status: sessionChatStatus(this.session, this.turns, permissionRequest),
     }
-  }
-
-  #pendingPermissionRequest() {
-    const resolvedRequestIds = new Set<MessageId>()
-    const pendingRequests: SessionPermissionRequest[] = []
-
-    for (const turn of this.turns) {
-      for (const event of turn.events) {
-        if (event.kind === "permissionResponse") {
-          resolvedRequestIds.add(event.requestId)
-        } else if (event.kind === "permissionRequest") {
-          pendingRequests.push(event)
-        }
-      }
-    }
-
-    for (let index = pendingRequests.length - 1; index >= 0; index -= 1) {
-      const request = pendingRequests[index]
-      if (!resolvedRequestIds.has(request.requestId)) {
-        return request
-      }
-    }
-
-    return null
-  }
-
-  #sessionChatStatus(permissionRequest: SessionPermissionRequest | null) {
-    if (
-      this.session.status === "blocked" ||
-      this.session.permissions !== null ||
-      permissionRequest
-    ) {
-      return "blocked"
-    }
-
-    if (this.turns.some((turn) => turn.status === "running")) {
-      return "running"
-    }
-
-    if (this.session.status === "error") {
-      return "failed"
-    }
-
-    if (this.session.status === "cancelled") {
-      return "cancelled"
-    }
-
-    if (this.session.status === "done" || this.session.status === "archived") {
-      return "completed"
-    }
-
-    return "idle"
-  }
-
-  #newestRunningTurn() {
-    for (let index = this.turns.length - 1; index >= 0; index -= 1) {
-      if (this.turns[index].completedAt === null) {
-        return this.turns[index]
-      }
-    }
-
-    return null
-  }
-
-  #nextLiveSequence() {
-    return this.turns.reduce((sequence, turn) => Math.max(sequence, turn.sequence), -1) + 1
-  }
-
-  #turnStatus(turn: Pick<SessionHistoryTurn, "completedAt" | "completionKind" | "stopReason">) {
-    if (turn.completedAt === null) {
-      return "running"
-    }
-
-    if (turn.completionKind === "error") {
-      return "failed"
-    }
-
-    if (turn.stopReason === "cancelled") {
-      return "cancelled"
-    }
-
-    if (turn.stopReason && turn.stopReason !== "end_turn") {
-      return "stopped"
-    }
-
-    return "completed"
-  }
-
-  #compareTurns(left: SessionChatTurn, right: SessionChatTurn) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence
-    }
-
-    if (left.startedAt !== right.startedAt) {
-      return left.startedAt.localeCompare(right.startedAt)
-    }
-
-    return left.turnId.localeCompare(right.turnId)
-  }
-
-  #turnMessageRank(
-    message: acp.AnyMessage,
-    promptRequestId: SessionHistoryTurn["promptRequestId"],
-  ) {
-    const id = this.#messageId(message)
-
-    if (this.#isPromptMessage(message) && id === promptRequestId) {
-      return 0
-    }
-
-    if (id === promptRequestId && (this.#messageResult(message) || this.#messageError(message))) {
-      return 2
-    }
-
-    return 1
-  }
-
-  #promptRequestIdFromMessage(message: acp.AnyMessage) {
-    const id = this.#messageId(message)
-
-    if (id !== null && this.#isPromptMessage(message)) {
-      return id
-    }
-
-    if (id !== null && (this.#messageResult(message) || this.#messageError(message))) {
-      return id
-    }
-
-    return null
-  }
-
-  #messageField(message: acp.AnyMessage, key: string) {
-    if (!this.#isRecord(message)) {
-      return null
-    }
-
-    return (message as Record<string, unknown>)[key]
-  }
-
-  #messageId(message: acp.AnyMessage) {
-    const id = this.#messageField(message, "id")
-
-    return typeof id === "string" || typeof id === "number" ? id : null
-  }
-
-  #messageMethod(message: acp.AnyMessage) {
-    const method = this.#messageField(message, "method")
-
-    return typeof method === "string" ? method : null
-  }
-
-  #messageResult(message: acp.AnyMessage) {
-    const result = this.#messageField(message, "result")
-
-    return this.#isRecord(result) ? (result as Record<string, unknown>) : null
-  }
-
-  #messageError(message: acp.AnyMessage) {
-    const error = this.#messageField(message, "error")
-
-    return this.#isRecord(error) ? (error as Record<string, unknown>) : null
-  }
-
-  #isPromptMessage(message: acp.AnyMessage) {
-    return (
-      this.#messageMethod(message) === acp.AGENT_METHODS.session_prompt &&
-      this.#messageId(message) !== null
-    )
-  }
-
-  #isPermissionRequestMessage(message: acp.AnyMessage) {
-    return (
-      this.#messageMethod(message) === acp.CLIENT_METHODS.session_request_permission &&
-      this.#messageId(message) !== null
-    )
-  }
-
-  #sessionUpdate(message: acp.AnyMessage) {
-    const params = this.#messageField(message, "params")
-
-    if (
-      this.#messageMethod(message) !== acp.CLIENT_METHODS.session_update ||
-      !this.#isRecord(params)
-    ) {
-      return null
-    }
-
-    const update = (params as Record<string, unknown>).update
-
-    return this.#isRecord(update) ? (update as Record<string, unknown>) : null
-  }
-
-  #parsePlanEvent(update: Record<string, unknown>) {
-    return update.sessionUpdate === "plan" && Array.isArray(update.entries)
-      ? (update as acp.Plan)
-      : null
-  }
-
-  #permissionRequestFromMessage(message: acp.AnyMessage) {
-    const params = this.#messageField(message, "params")
-
-    if (!this.#isPermissionRequestMessage(message) || !this.#isRecord(params)) {
-      return null
-    }
-
-    return params as acp.RequestPermissionRequest
-  }
-
-  #extractStopReason(message: acp.AnyMessage) {
-    const result = this.#messageResult(message)
-    return typeof result?.stopReason === "string"
-      ? (result.stopReason as SessionHistoryTurn["stopReason"])
-      : null
-  }
-
-  #messageFingerprint(message: acp.AnyMessage) {
-    return hashSum(message)
-  }
-
-  #liveTurnId(promptRequestId: SessionHistoryTurn["promptRequestId"]) {
-    return `live:${String(promptRequestId)}`
-  }
-
-  #isRecord(value: unknown) {
-    return typeof value === "object" && value !== null
   }
 
   onSetup() {
