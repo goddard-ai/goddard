@@ -39,7 +39,7 @@ import { reviewBranchHasHumanCommits } from "./history.ts"
 import { pauseSession } from "./pause.ts"
 import { resumeSession } from "./resume.ts"
 import { formatThrownError, runCommandSafely } from "./shared.ts"
-import { startLoadedReviewSyncSession, startReviewSyncOperationWithSession } from "./start.ts"
+import { startLoadedReviewSyncSession, startReviewSyncWithSession } from "./start.ts"
 import { syncLoadedReviewSyncSession } from "./sync.ts"
 
 const watchDebounceMs = 100
@@ -61,13 +61,7 @@ type WatchEventDetail = {
 
 /** Watches both worktrees and runs sync when either snapshot changes. */
 export async function watchReviewSession(input: WatchReviewSyncInput) {
-  return await runCommandSafely("watch", () =>
-    watchReviewSessionOperation(input, createRuntimeContext(input.cwd)),
-  )
-}
-
-/** Performs the watch workflow after CLI parsing and command-level error handling. */
-async function watchReviewSessionOperation(input: WatchReviewSyncInput, context: RuntimeContext) {
+  const context = createRuntimeContext(input.cwd)
   const emitVerbose = createWatchVerboseEmitter(input)
   await emitVerbose(
     input.agentBranch
@@ -392,10 +386,7 @@ async function resolveAgentBranchSessionForWatch(
 
       try {
         await emitVerbose(`attempting to start session for ${input.agentBranch}.`)
-        const { session, result } = await startReviewSyncOperationWithSession(
-          input.agentBranch,
-          context,
-        )
+        const { session, result } = await startReviewSyncWithSession(input.agentBranch, context)
         await emitVerbose(
           `session ready with agent worktree ${session.agentWorktree} and review worktree ${session.reviewWorktree}.`,
           session,
@@ -1263,13 +1254,15 @@ export function createWatchCommand(cwd: string) {
     handler: async ({ agentBranch, verbose }) => {
       const abort = createProcessAbortSignal()
       try {
-        return await watchReviewSession({
-          cwd,
-          agentBranch,
-          signal: abort.signal,
-          verbose,
-          onResult: writeResult,
-        })
+        return await runCommandSafely("watch", () =>
+          watchReviewSession({
+            cwd,
+            agentBranch,
+            signal: abort.signal,
+            verbose,
+            onResult: writeResult,
+          }),
+        )
       } finally {
         abort.cleanup()
       }

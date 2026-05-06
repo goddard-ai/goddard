@@ -6,18 +6,12 @@ import { withSessionLock } from "../lock.ts"
 import { createRuntimeContext } from "../runtime.ts"
 import { inferSession } from "../session.ts"
 import { appendEvent, readSessionState, writeSessionState } from "../state.ts"
-import type { ReviewSyncWorktreeInput, RuntimeContext, SessionState } from "../types.ts"
+import type { ReviewSyncWorktreeInput, SessionState } from "../types.ts"
 import { runCommandSafely } from "./shared.ts"
 
 /** Marks the inferred session paused so later sync commands refuse to mutate it. */
 export async function pauseReviewSession(input: ReviewSyncWorktreeInput) {
-  return await runCommandSafely("pause", () =>
-    pauseReviewSessionOperation(createRuntimeContext(input.cwd)),
-  )
-}
-
-/** Performs the pause workflow after CLI parsing and command-level error handling. */
-async function pauseReviewSessionOperation(context: RuntimeContext) {
+  const context = createRuntimeContext(input.cwd)
   const session = await inferSession(context)
   const latest = await pauseSession(session)
 
@@ -57,6 +51,6 @@ export function createPauseCommand(cwd: string) {
     name: "pause",
     description: "Pause future sync mutations for the inferred session",
     args: {},
-    handler: () => pauseReviewSession({ cwd }),
+    handler: () => runCommandSafely("pause", () => pauseReviewSession({ cwd })),
   })
 }

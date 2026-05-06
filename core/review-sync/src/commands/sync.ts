@@ -11,13 +11,7 @@ import { runCommandSafely } from "./shared.ts"
 
 /** Runs one sync operation for the session inferred from the current worktree. */
 export async function syncReviewSession(input: ReviewSyncWorktreeInput) {
-  return await runCommandSafely("sync", () =>
-    syncReviewSessionOperation(createRuntimeContext(input.cwd)),
-  )
-}
-
-/** Performs the sync workflow after CLI parsing and command-level error handling. */
-async function syncReviewSessionOperation(context: RuntimeContext) {
+  const context = createRuntimeContext(input.cwd)
   const session = await inferSession(context)
   return await syncLoadedReviewSyncSession(session, context)
 }
@@ -48,6 +42,6 @@ export function createSyncCommand(cwd: string) {
     name: "sync",
     description: "Apply clean human edits to the agent worktree and refresh the review branch",
     args: {},
-    handler: () => syncReviewSession({ cwd }),
+    handler: () => runCommandSafely("sync", () => syncReviewSession({ cwd })),
   })
 }

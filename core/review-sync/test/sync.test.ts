@@ -5,6 +5,7 @@ import { afterEach, expect, test } from "bun:test"
 
 import { pauseReviewSession, resumeReviewSession, syncReviewSession } from "../src/index.ts"
 import {
+  captureReviewSyncError,
   cleanupReviewSyncFixtures,
   createStartedFixture,
   gitDir,
@@ -53,12 +54,14 @@ test("sync fails when the agent worktree is not on the expected branch", async (
   await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
   await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
 
-  const result = await syncReviewSession({
-    cwd: fixture.reviewDir,
-  })
+  const error = await captureReviewSyncError(() =>
+    syncReviewSession({
+      cwd: fixture.reviewDir,
+    }),
+  )
 
-  expect(result.status).toBe("error")
-  expect(result.message).toContain("must be on codex/review-sync-test; currently codex/temporary")
+  expect(error.status).toBe("error")
+  expect(error.message).toContain("must be on codex/review-sync-test; currently codex/temporary")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("base\n")
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
@@ -125,10 +128,12 @@ test("pause blocks sync mutations until resume", async () => {
   expect(pause.status).toBe("paused")
 
   await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
-  const pausedSync = await syncReviewSession({
-    cwd: fixture.reviewDir,
-  })
-  expect(pausedSync.status).toBe("paused")
+  const pausedSyncError = await captureReviewSyncError(() =>
+    syncReviewSession({
+      cwd: fixture.reviewDir,
+    }),
+  )
+  expect(pausedSyncError.status).toBe("paused")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("base\n")
 
   const resume = await resumeReviewSession({

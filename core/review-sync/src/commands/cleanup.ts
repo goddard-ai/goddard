@@ -17,13 +17,8 @@ import { runCommandSafely } from "./shared.ts"
 
 /** Removes saved session state records that match the current worktree root. */
 export async function cleanupReviewSessions(input: CleanupReviewSyncInput) {
-  return await runCommandSafely("cleanup", () =>
-    cleanupReviewSessionsOperation(input.all ?? false, createRuntimeContext(input.cwd)),
-  )
-}
-
-/** Removes stale or all saved sessions matching the resolved worktree root. */
-async function cleanupReviewSessionsOperation(all: boolean, context: RuntimeContext) {
+  const context = createRuntimeContext(input.cwd)
+  const all = input.all ?? false
   const { resolvedDirectory, sessions } = await listSessionsForResolvedDirectory(context)
   const ordered = [...sessions].sort(compareSessionsByRecency)
   const kept = all ? null : (ordered.at(-1) ?? null)
@@ -150,6 +145,6 @@ export function createCleanupCommand(cwd: string) {
         description: "Remove every matching session instead of keeping the newest",
       }),
     },
-    handler: ({ all }) => cleanupReviewSessions({ cwd, all }),
+    handler: ({ all }) => runCommandSafely("cleanup", () => cleanupReviewSessions({ cwd, all })),
   })
 }

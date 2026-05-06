@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 
 import { startReviewSync } from "../src/index.ts"
 import {
+  captureReviewSyncError,
   cleanupReviewSyncFixtures,
   cliPath,
   createFixture,
@@ -33,14 +34,16 @@ test("start refuses agent branches that already look like review branches", asyn
   })
   await runGit(fixture.agentDir, ["checkout", "-B", "review-sync/codex/already"])
 
-  const result = await startReviewSync({
-    cwd: fixture.reviewDir,
-    agentBranch: "review-sync/codex/already",
-  })
+  const error = await captureReviewSyncError(() =>
+    startReviewSync({
+      cwd: fixture.reviewDir,
+      agentBranch: "review-sync/codex/already",
+    }),
+  )
 
-  expect(result.status).toBe("error")
-  expect(result.exitCode).toBe(1)
-  expect(result.message).toContain("already starts with review-sync/")
+  expect(error.status).toBe("error")
+  expect(error.exitCode).toBe(1)
+  expect(error.message).toContain("already starts with review-sync/")
 })
 
 test("start refuses branches not checked out in another worktree", async () => {
@@ -49,14 +52,16 @@ test("start refuses branches not checked out in another worktree", async () => {
   })
   await runGit(fixture.agentDir, ["checkout", "-B", "codex/other-agent"])
 
-  const result = await startReviewSync({
-    cwd: fixture.reviewDir,
-    agentBranch: "codex/review-sync-test",
-  })
+  const error = await captureReviewSyncError(() =>
+    startReviewSync({
+      cwd: fixture.reviewDir,
+      agentBranch: "codex/review-sync-test",
+    }),
+  )
 
-  expect(result.status).toBe("error")
-  expect(result.exitCode).toBe(1)
-  expect(result.message).toContain("is not checked out in another worktree")
+  expect(error.status).toBe("error")
+  expect(error.exitCode).toBe(1)
+  expect(error.message).toContain("is not checked out in another worktree")
 })
 
 test("cli start accepts an agent branch from the review worktree", async () => {

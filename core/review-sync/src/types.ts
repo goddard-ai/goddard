@@ -14,7 +14,7 @@ export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error
 /** Last-sync statuses stored in durable session state. */
 export type LastSyncStatus = "synced" | "rejected-human-patch" | "paused" | "error"
 
-/** Structured command result returned by both CLI and embedded callers. */
+/** Structured command result returned by successful operations and CLI-safe handlers. */
 export type ReviewSyncResult = {
   exitCode: number
   command: ReviewSyncCommand

@@ -4,6 +4,7 @@ import { afterEach, expect, test } from "bun:test"
 
 import { cleanupReviewSessions, startReviewSync, statusReviewSession } from "../src/index.ts"
 import {
+  captureReviewSyncError,
   cleanupReviewSyncFixtures,
   cliPath,
   createFixture,
@@ -50,18 +51,20 @@ test("status explains recovery when multiple sessions match the worktree", async
     )}\n`,
   )
 
-  const result = await statusReviewSession({
-    cwd: fixture.agentDir,
-  })
+  const error = await captureReviewSyncError(() =>
+    statusReviewSession({
+      cwd: fixture.agentDir,
+    }),
+  )
 
-  expect(result.status).toBe("error")
-  expect(result.message).toContain("Multiple review-sync sessions match")
-  expect(result.message).toContain("codex/review-sync-test -> review-sync/codex/review-sync-test")
-  expect(result.message).toContain(
+  expect(error.status).toBe("error")
+  expect(error.message).toContain("Multiple review-sync sessions match")
+  expect(error.message).toContain("codex/review-sync-test -> review-sync/codex/review-sync-test")
+  expect(error.message).toContain(
     "codex/second-review-sync-test -> review-sync/codex/second-review-sync-test",
   )
-  expect(result.message).toContain(`move stale session dirs out of ${sessionsRoot}`)
-  expect(result.message).toContain("accepted/rejected patches live under each state dir")
+  expect(error.message).toContain(`move stale session dirs out of ${sessionsRoot}`)
+  expect(error.message).toContain("accepted/rejected patches live under each state dir")
 })
 
 test("cleanup removes older sessions for the resolved worktree", async () => {

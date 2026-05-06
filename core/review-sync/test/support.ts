@@ -5,6 +5,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { expect } from "bun:test"
 
+import { UserError } from "../src/errors.ts"
 import { startReviewSync, watchReviewSession, type ReviewSyncResult } from "../src/index.ts"
 
 export type ReviewSyncFixture = {
@@ -178,6 +179,17 @@ export function createDeferred<T>() {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
+}
+
+export async function captureReviewSyncError(operation: () => Promise<unknown>) {
+  let captured: unknown
+  try {
+    await operation()
+  } catch (error) {
+    captured = error
+  }
+  expect(captured).toBeInstanceOf(UserError)
+  return captured as UserError
 }
 
 export async function runGit(cwd: string, args: string[]) {

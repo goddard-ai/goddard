@@ -7,18 +7,13 @@ import { resolveRef } from "../git.ts"
 import { createRuntimeContext } from "../runtime.ts"
 import { inferSession } from "../session.ts"
 import { countPatchFiles, resolveSessionDir } from "../state.ts"
-import type { RuntimeContext, StatusReviewSyncInput } from "../types.ts"
+import type { StatusReviewSyncInput } from "../types.ts"
 import { runCommandSafely } from "./shared.ts"
 
 /** Returns session state, patch counts, and refs without mutating Git or durable state. */
 export async function statusReviewSession(input: StatusReviewSyncInput) {
-  return await runCommandSafely("status", () =>
-    statusReviewSessionOperation(input.json ?? false, createRuntimeContext(input.cwd)),
-  )
-}
-
-/** Performs the status workflow after CLI parsing and command-level error handling. */
-async function statusReviewSessionOperation(json: boolean, context: RuntimeContext) {
+  const context = createRuntimeContext(input.cwd)
+  const json = input.json ?? false
   const session = await inferSession(context)
   const sessionDir = resolveSessionDir(session.repoCommonDir, session.sessionId)
   const acceptedCount = await countPatchFiles(join(sessionDir, "patches", "accepted"))
@@ -80,6 +75,6 @@ export function createStatusCommand(cwd: string) {
         description: "Print status as JSON for machine consumers",
       }),
     },
-    handler: ({ json }) => statusReviewSession({ cwd, json }),
+    handler: ({ json }) => runCommandSafely("status", () => statusReviewSession({ cwd, json })),
   })
 }

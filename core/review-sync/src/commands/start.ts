@@ -19,22 +19,13 @@ import { runCommandSafely } from "./shared.ts"
 
 /** Creates or reuses one durable review-sync session and runs the first refresh. */
 export async function startReviewSync(input: StartReviewSyncInput) {
-  return await runCommandSafely("start", () =>
-    startReviewSyncOperation(input.agentBranch, createRuntimeContext(input.cwd)),
-  )
-}
-
-/** Performs the start workflow after CLI parsing and command-level error handling. */
-async function startReviewSyncOperation(agentBranch: string, context: RuntimeContext) {
-  const { result } = await startReviewSyncOperationWithSession(agentBranch, context)
+  const context = createRuntimeContext(input.cwd)
+  const { result } = await startReviewSyncWithSession(input.agentBranch, context)
   return result
 }
 
 /** Performs the start workflow and keeps the loaded session for command composition. */
-export async function startReviewSyncOperationWithSession(
-  agentBranch: string,
-  context: RuntimeContext,
-) {
+export async function startReviewSyncWithSession(agentBranch: string, context: RuntimeContext) {
   const session = await createSessionForStart(agentBranch, context)
   return await startLoadedReviewSyncSession(session, context)
 }
@@ -172,9 +163,10 @@ export function createStartCommand(cwd: string) {
     },
     handler: async ({ agentBranch }) => {
       const context = createRuntimeContext(cwd)
-      return await runCommandSafely("start", async () =>
-        startReviewSyncOperation(agentBranch ?? (await promptForAgentBranch(context)), context),
-      )
+      return await runCommandSafely("start", async () => {
+        const resolvedAgentBranch = agentBranch ?? (await promptForAgentBranch(context))
+        return await startReviewSync({ cwd, agentBranch: resolvedAgentBranch })
+      })
     },
   })
 }
