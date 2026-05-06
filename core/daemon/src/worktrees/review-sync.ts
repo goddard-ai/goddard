@@ -10,7 +10,19 @@ import {
 import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 
 import { runCommand } from "./process.ts"
-import type { WorktreeSyncSessionState } from "./sync.ts"
+
+/** Mounted daemon host state, shaped around review-sync's native status payload. */
+export interface ReviewSyncWorktreeSessionState extends ReviewSyncStatusData {
+  daemonSessionId: DaemonSessionId
+  mountStatus: "mounted"
+  mountedAt: number
+  primaryRestore: {
+    originalHeadOid: string
+    originalSymbolicRef: string | null
+    originalBranchTipOid: string | null
+    preMountSnapshotOid: string | null
+  }
+}
 
 type ReviewSyncHostMetadata = {
   schemaVersion: 1
@@ -154,22 +166,17 @@ async function createStateFromMetadata(metadata: ReviewSyncHostMetadata) {
   }
 
   return {
-    sessionId: metadata.sessionId,
-    status: "mounted",
-    conflictPreference: "worktree",
-    primaryDir: status.reviewWorktree,
-    worktreeDir: status.agentWorktree,
-    commonDir: metadata.commonDir,
-    baseOid: metadata.baseOid,
-    primaryOriginalHeadOid: metadata.primaryOriginalHeadOid,
-    primaryOriginalSymbolicRef: metadata.primaryOriginalSymbolicRef,
-    primaryOriginalBranchTipOid: metadata.primaryOriginalBranchTipOid,
-    primaryLatestSnapshotOid: status.renderedSnapshot,
-    worktreeLatestSnapshotOid: status.agentSnapshot,
-    resultSnapshotOid: status.renderedSnapshot,
-    primaryRecoverySnapshotOid: null,
-    lastSyncAt: null,
-  } satisfies WorktreeSyncSessionState
+    ...status,
+    daemonSessionId: metadata.sessionId,
+    mountStatus: "mounted",
+    mountedAt: metadata.mountedAt,
+    primaryRestore: {
+      originalHeadOid: metadata.primaryOriginalHeadOid,
+      originalSymbolicRef: metadata.primaryOriginalSymbolicRef,
+      originalBranchTipOid: metadata.primaryOriginalBranchTipOid,
+      preMountSnapshotOid: metadata.primaryPreMountSnapshotOid,
+    },
+  } satisfies ReviewSyncWorktreeSessionState
 }
 
 async function loadReviewSyncStatus(metadata: ReviewSyncHostMetadata) {
