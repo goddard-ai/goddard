@@ -6,6 +6,8 @@ import {
   startReviewSync,
   statusReviewSession,
   stopReviewSession,
+  syncReviewSession as syncReviewSyncSession,
+  type ReviewSyncResult,
   type ReviewSyncStatusData,
 } from "@goddard-ai/review-sync"
 
@@ -46,6 +48,27 @@ export async function mountReviewSession(input: ReviewSessionInput) {
   return state
 }
 
+/** Runs one review session sync cycle and maps recoverable human-patch rejection to warnings. */
+export async function syncReviewSessionOnce(input: ReviewSessionInput) {
+  const existing = await loadReviewSessionState(input)
+  if (!existing) {
+    throw new Error(`Mounted review session is missing for ${input.worktreeDir}.`)
+  }
+
+  const result = await syncReviewSyncSession({
+    cwd: input.worktreeDir,
+  })
+  const state = await loadReviewSessionState(input)
+  if (!state) {
+    throw new Error("review session did not create readable state after sync")
+  }
+
+  return {
+    state,
+    warnings: createSyncWarnings(result),
+  }
+}
+
 /** Stops review session ownership while leaving checkout semantics to the sync implementation. */
 export async function unmountReviewSession(input: ReviewSessionInput) {
   await stopReviewSession({
@@ -56,6 +79,14 @@ export async function unmountReviewSession(input: ReviewSessionInput) {
     state: null,
     warnings: [],
   }
+}
+
+function createSyncWarnings(result: ReviewSyncResult) {
+  if (result.status !== "rejected-human-patch") {
+    return []
+  }
+
+  return [result.message]
 }
 
 async function loadReviewSessionState(input: ReviewSessionInput) {

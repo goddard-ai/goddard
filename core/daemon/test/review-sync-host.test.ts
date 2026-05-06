@@ -9,6 +9,7 @@ import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
 import {
   findMountedReviewSessionByPrimaryDir,
   mountReviewSession,
+  syncReviewSessionOnce,
   unmountReviewSession,
 } from "../src/worktrees/review-sync.ts"
 
@@ -68,6 +69,136 @@ test("review session adapter mounts, rehydrates, and unmounts through review-syn
   expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("worktree dirty\n")
   expect(await findMountedReviewSessionByPrimaryDir(repoDir)).toBeNull()
 
+  await deleteWorktree({
+    cwd: repoDir,
+    worktreeDir: created.worktreeDir,
+    branchName: created.branchName,
+    poweredBy: created.poweredBy,
+  })
+})
+
+test("review session sync accepts repeated review checkout edits", async () => {
+  const repoDir = await createRepoFixture({
+    "shared.txt": "base\n",
+  })
+  const created = await createWorktree({
+    cwd: repoDir,
+    branchName: "goddard-review-sync-review-edits",
+  })
+  cleanup.push(created.worktreeDir)
+
+  const sessionInput = {
+    primaryDir: repoDir,
+    worktreeDir: created.worktreeDir,
+    agentBranch: created.branchName,
+  }
+
+  await mountReviewSession(sessionInput)
+  await writeFile(join(repoDir, "shared.txt"), "review tracked edit\n", "utf-8")
+  await writeFile(join(repoDir, "review-untracked.txt"), "review untracked\n", "utf-8")
+
+  const first = await syncReviewSessionOnce(sessionInput)
+  expect(first.warnings).toEqual([])
+  expect(first.state.lastSync.status).toBe("synced")
+  expect(await readFile(join(created.worktreeDir, "shared.txt"), "utf-8")).toBe(
+    "review tracked edit\n",
+  )
+  expect(await readFile(join(created.worktreeDir, "review-untracked.txt"), "utf-8")).toBe(
+    "review untracked\n",
+  )
+
+  await writeFile(join(repoDir, "review-committed.txt"), "review commit\n", "utf-8")
+  await runGit(repoDir, ["add", "review-committed.txt"])
+  await runGit(repoDir, ["commit", "-m", "human review commit"])
+
+  const second = await syncReviewSessionOnce(sessionInput)
+  expect(second.warnings).toEqual([])
+  expect(second.state.lastSync.status).toBe("synced")
+  expect(await readFile(join(created.worktreeDir, "review-committed.txt"), "utf-8")).toBe(
+    "review commit\n",
+  )
+
+  await unmountReviewSession(sessionInput)
+  await deleteWorktree({
+    cwd: repoDir,
+    worktreeDir: created.worktreeDir,
+    branchName: created.branchName,
+    poweredBy: created.poweredBy,
+  })
+})
+
+test("review session sync refreshes the review checkout from repeated session worktree edits", async () => {
+  const repoDir = await createRepoFixture({
+    "shared.txt": "base\n",
+  })
+  const created = await createWorktree({
+    cwd: repoDir,
+    branchName: "goddard-review-sync-agent-edits",
+  })
+  cleanup.push(created.worktreeDir)
+
+  const sessionInput = {
+    primaryDir: repoDir,
+    worktreeDir: created.worktreeDir,
+    agentBranch: created.branchName,
+  }
+
+  await mountReviewSession(sessionInput)
+  await writeFile(join(created.worktreeDir, "shared.txt"), "agent tracked edit\n", "utf-8")
+  await writeFile(join(created.worktreeDir, "agent-untracked.txt"), "agent untracked\n", "utf-8")
+
+  const first = await syncReviewSessionOnce(sessionInput)
+  expect(first.warnings).toEqual([])
+  expect(first.state.lastSync.status).toBe("synced")
+  expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("agent tracked edit\n")
+  expect(await readFile(join(repoDir, "agent-untracked.txt"), "utf-8")).toBe("agent untracked\n")
+
+  await writeFile(join(created.worktreeDir, "agent-committed.txt"), "agent commit\n", "utf-8")
+  await runGit(created.worktreeDir, ["add", "agent-committed.txt"])
+  await runGit(created.worktreeDir, ["commit", "-m", "agent worktree commit"])
+
+  const second = await syncReviewSessionOnce(sessionInput)
+  expect(second.warnings).toEqual([])
+  expect(second.state.lastSync.status).toBe("synced")
+  expect(await readFile(join(repoDir, "agent-committed.txt"), "utf-8")).toBe("agent commit\n")
+
+  await unmountReviewSession(sessionInput)
+  await deleteWorktree({
+    cwd: repoDir,
+    worktreeDir: created.worktreeDir,
+    branchName: created.branchName,
+    poweredBy: created.poweredBy,
+  })
+})
+
+test("review session sync reports rejected review patches as warnings", async () => {
+  const repoDir = await createRepoFixture({
+    "shared.txt": "base\n",
+  })
+  const created = await createWorktree({
+    cwd: repoDir,
+    branchName: "goddard-review-sync-rejected",
+  })
+  cleanup.push(created.worktreeDir)
+
+  const sessionInput = {
+    primaryDir: repoDir,
+    worktreeDir: created.worktreeDir,
+    agentBranch: created.branchName,
+  }
+
+  await mountReviewSession(sessionInput)
+  await writeFile(join(repoDir, "shared.txt"), "review conflict\n", "utf-8")
+  await writeFile(join(created.worktreeDir, "shared.txt"), "agent conflict\n", "utf-8")
+
+  const synced = await syncReviewSessionOnce(sessionInput)
+  expect(synced.warnings).toHaveLength(1)
+  expect(synced.warnings[0]).toContain("Human patch rejected")
+  expect(synced.state.lastSync.status).toBe("rejected-human-patch")
+  expect(await readFile(join(repoDir, "shared.txt"), "utf-8")).toBe("agent conflict\n")
+  expect(await readFile(join(created.worktreeDir, "shared.txt"), "utf-8")).toBe("agent conflict\n")
+
+  await unmountReviewSession(sessionInput)
   await deleteWorktree({
     cwd: repoDir,
     worktreeDir: created.worktreeDir,
