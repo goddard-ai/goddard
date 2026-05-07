@@ -58,6 +58,65 @@ function createTurns(
   return [createTurn({ messages, ...overrides })]
 }
 
+function createPermissionRequestMessage(
+  requestId: string,
+  input: {
+    optionKind: "allow_once" | "reject_once"
+    optionName: string
+    rawInput?: unknown
+  },
+) {
+  const optionId = `${input.optionKind}:${requestId}`
+
+  return {
+    jsonrpc: "2.0" as const,
+    id: requestId,
+    method: "session/request_permission" as const,
+    params: {
+      sessionId: "ses_session-1-acp",
+      options: [
+        {
+          optionId,
+          name: input.optionName,
+          kind: input.optionKind,
+        },
+      ],
+      toolCall: {
+        toolCallId: `tool-${requestId}`,
+        title: "Edit app/src/session-chat/view.tsrx",
+        kind: "edit" as const,
+        status: "pending" as const,
+        locations: [{ path: "/repo-a/app/src/session-chat/view.tsrx", line: 42 }],
+        rawInput: input.rawInput,
+      },
+    },
+  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+}
+
+function createPermissionSelectedResponseMessage(requestId: string, optionId: string) {
+  return {
+    jsonrpc: "2.0" as const,
+    id: requestId,
+    result: {
+      outcome: {
+        outcome: "selected" as const,
+        optionId,
+      },
+    },
+  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+}
+
+function createPermissionFailedResponseMessage(requestId: string) {
+  return {
+    jsonrpc: "2.0" as const,
+    id: requestId,
+    error: {
+      code: -32_000,
+      message: "Permission response failed",
+    },
+  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+}
+
 function createTranscriptMessages(
   session: DaemonSession,
   turns: GetSessionHistoryResponse["turns"],
@@ -258,6 +317,174 @@ test("buildSessionChatTranscript merges tool_call updates into one stable tool r
           line: 12,
         },
       ],
+    },
+  ])
+})
+
+test("buildSessionChatTranscript renders permission requests and their response states", () => {
+  const session = createSession(null)
+  const pendingRequest = createPermissionRequestMessage("permission-pending", {
+    optionKind: "allow_once",
+    optionName: "Allow this edit",
+    rawInput: "Replace the session chat header.",
+  })
+  const allowedRequest = createPermissionRequestMessage("permission-allowed", {
+    optionKind: "allow_once",
+    optionName: "Allow once",
+  })
+  const deniedRequest = createPermissionRequestMessage("permission-denied", {
+    optionKind: "reject_once",
+    optionName: "Reject once",
+  })
+  const failedRequest = createPermissionRequestMessage("permission-failed", {
+    optionKind: "allow_once",
+    optionName: "Allow once",
+  })
+  const messages = createTranscriptMessages(session, [
+    createTurn({
+      turnId: "turn-pending",
+      sequence: 1,
+      promptRequestId: "prompt-pending",
+      completedAt: null,
+      completionKind: null,
+      messages: [pendingRequest],
+    }),
+    createTurn({
+      turnId: "turn-allowed",
+      sequence: 2,
+      promptRequestId: "prompt-allowed",
+      messages: [
+        allowedRequest,
+        createPermissionSelectedResponseMessage(
+          "permission-allowed",
+          "allow_once:permission-allowed",
+        ),
+      ],
+    }),
+    createTurn({
+      turnId: "turn-denied",
+      sequence: 3,
+      promptRequestId: "prompt-denied",
+      messages: [
+        deniedRequest,
+        createPermissionSelectedResponseMessage(
+          "permission-denied",
+          "reject_once:permission-denied",
+        ),
+      ],
+    }),
+    createTurn({
+      turnId: "turn-failed",
+      sequence: 4,
+      promptRequestId: "prompt-failed",
+      messages: [failedRequest, createPermissionFailedResponseMessage("permission-failed")],
+    }),
+  ])
+
+  expect(messages.filter((message) => message.kind === "permissionRequest")).toEqual([
+    {
+      kind: "permissionRequest",
+      id: "turn-pending:permission:permission-pending:0",
+      requestId: "permission-pending",
+      authorName: "pi",
+      timestampLabel: "Permission",
+      title: "Edit app/src/session-chat/view.tsrx",
+      toolKind: "edit",
+      status: "pending",
+      context: "Replace the session chat header.",
+      locations: [
+        {
+          path: "/repo-a/app/src/session-chat/view.tsrx",
+          line: 42,
+        },
+      ],
+      options: [
+        {
+          optionId: "allow_once:permission-pending",
+          name: "Allow this edit",
+          kind: "allow_once",
+        },
+      ],
+      selectedOptionId: null,
+      error: null,
+    },
+    {
+      kind: "permissionRequest",
+      id: "turn-allowed:permission:permission-allowed:0",
+      requestId: "permission-allowed",
+      authorName: "pi",
+      timestampLabel: "Permission",
+      title: "Edit app/src/session-chat/view.tsrx",
+      toolKind: "edit",
+      status: "allowed",
+      context: null,
+      locations: [
+        {
+          path: "/repo-a/app/src/session-chat/view.tsrx",
+          line: 42,
+        },
+      ],
+      options: [
+        {
+          optionId: "allow_once:permission-allowed",
+          name: "Allow once",
+          kind: "allow_once",
+        },
+      ],
+      selectedOptionId: "allow_once:permission-allowed",
+      error: null,
+    },
+    {
+      kind: "permissionRequest",
+      id: "turn-denied:permission:permission-denied:0",
+      requestId: "permission-denied",
+      authorName: "pi",
+      timestampLabel: "Permission",
+      title: "Edit app/src/session-chat/view.tsrx",
+      toolKind: "edit",
+      status: "denied",
+      context: null,
+      locations: [
+        {
+          path: "/repo-a/app/src/session-chat/view.tsrx",
+          line: 42,
+        },
+      ],
+      options: [
+        {
+          optionId: "reject_once:permission-denied",
+          name: "Reject once",
+          kind: "reject_once",
+        },
+      ],
+      selectedOptionId: "reject_once:permission-denied",
+      error: null,
+    },
+    {
+      kind: "permissionRequest",
+      id: "turn-failed:permission:permission-failed:0",
+      requestId: "permission-failed",
+      authorName: "pi",
+      timestampLabel: "Permission",
+      title: "Edit app/src/session-chat/view.tsrx",
+      toolKind: "edit",
+      status: "failed",
+      context: null,
+      locations: [
+        {
+          path: "/repo-a/app/src/session-chat/view.tsrx",
+          line: 42,
+        },
+      ],
+      options: [
+        {
+          optionId: "allow_once:permission-failed",
+          name: "Allow once",
+          kind: "allow_once",
+        },
+      ],
+      selectedOptionId: null,
+      error: "Permission response failed",
     },
   ])
 })

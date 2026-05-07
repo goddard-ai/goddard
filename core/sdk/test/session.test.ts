@@ -40,3 +40,47 @@ test("session.prompt forwards a structured ACP prompt message through session.se
     },
   })
 })
+
+test("session.respondPermission forwards a structured ACP permission response through session.send", async () => {
+  const calls: Array<{ name: string; payload: unknown }> = []
+  const sdk = new GoddardSdk({
+    client: {
+      send: async (name: string, payload: unknown) => {
+        calls.push({ name, payload })
+        return { accepted: true }
+      },
+      subscribe: async () => {
+        return () => {}
+      },
+    } as never,
+  })
+
+  await expect(
+    sdk.session.respondPermission({
+      id: "ses_daemon-session-1",
+      requestId: "permission-1",
+      outcome: {
+        outcome: "selected",
+        optionId: "allow-once",
+      },
+    }),
+  ).resolves.toEqual({
+    accepted: true,
+  })
+
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.name).toBe("session.send")
+  expect(calls[0]?.payload).toEqual({
+    id: "ses_daemon-session-1",
+    message: {
+      jsonrpc: "2.0",
+      id: "permission-1",
+      result: {
+        outcome: {
+          outcome: "selected",
+          optionId: "allow-once",
+        },
+      },
+    },
+  })
+})

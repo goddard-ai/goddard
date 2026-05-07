@@ -3,6 +3,10 @@ import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@
 import type {
   SessionTranscriptContentBlock,
   SessionTranscriptItem,
+  SessionTranscriptPermissionOption,
+  SessionTranscriptPermissionOptionKind,
+  SessionTranscriptPermissionRequest,
+  SessionTranscriptPermissionStatus,
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
   SessionTranscriptToolContent,
@@ -22,6 +26,21 @@ type ParsedToolCallUpdate = {
   content?: SessionTranscriptToolContent[]
   locations?: SessionTranscriptToolLocation[]
 }
+
+type MessageId = string | number
+
+type ParsedPermissionResponse =
+  | {
+      outcome: "selected"
+      optionId: string
+    }
+  | {
+      outcome: "cancelled"
+    }
+  | {
+      outcome: "failed"
+      error: string | null
+    }
 
 type ParsedTranscriptSessionUpdate =
   | {
@@ -66,6 +85,13 @@ const TOOL_STATUSES = new Set<SessionTranscriptToolStatus>([
   "failed",
 ])
 
+const PERMISSION_OPTION_KINDS = new Set<SessionTranscriptPermissionOptionKind>([
+  "allow_once",
+  "allow_always",
+  "reject_once",
+  "reject_always",
+])
+
 const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
   "available_commands_update",
   "config_option_update",
@@ -77,14 +103,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+function getMessageId(message: unknown) {
+  if (!isRecord(message)) {
+    return null
+  }
+
+  const id = message.id
+  return typeof id === "string" || typeof id === "number" ? id : null
+}
+
+function getMessageMethod(message: unknown) {
+  if (!isRecord(message)) {
+    return null
+  }
+
+  return typeof message.method === "string" ? message.method : null
+}
+
 function hasMethod(
   value: unknown,
-  method: "session/prompt" | "session/update",
+  method: "session/prompt" | "session/request_permission" | "session/update",
 ): value is Record<string, unknown> & {
   method: typeof method
   params?: unknown
 } {
-  return isRecord(value) && value.method === method
+  return getMessageMethod(value) === method
 }
 
 function textFromContentBlocks(blocks: unknown) {
@@ -130,6 +173,45 @@ function extractToolStatus(value: unknown) {
   return typeof value === "string" && TOOL_STATUSES.has(value as SessionTranscriptToolStatus)
     ? (value as SessionTranscriptToolStatus)
     : undefined
+}
+
+function extractPermissionOptionKind(value: unknown) {
+  return typeof value === "string" &&
+    PERMISSION_OPTION_KINDS.has(value as SessionTranscriptPermissionOptionKind)
+    ? (value as SessionTranscriptPermissionOptionKind)
+    : null
+}
+
+function extractPermissionOptions(value: unknown): SessionTranscriptPermissionOption[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const options: SessionTranscriptPermissionOption[] = []
+
+  for (const option of value) {
+    if (
+      !isRecord(option) ||
+      typeof option.optionId !== "string" ||
+      typeof option.name !== "string"
+    ) {
+      continue
+    }
+
+    const kind = extractPermissionOptionKind(option.kind)
+
+    if (!kind) {
+      continue
+    }
+
+    options.push({
+      optionId: option.optionId,
+      name: option.name,
+      kind,
+    })
+  }
+
+  return options
 }
 
 function extractToolCallLocations(value: unknown): SessionTranscriptToolLocation[] {
@@ -192,6 +274,122 @@ function extractToolCallContent(value: unknown): SessionTranscriptToolContent[] 
   }
 
   return content
+}
+
+function formatPermissionContext(value: unknown) {
+  if (value == null) {
+    return null
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim()
+    return text.length > 0 ? text : null
+  }
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function extractPermissionRequest(message: SessionHistoryMessage) {
+  if (!hasMethod(message, "session/request_permission") || !isRecord(message.params)) {
+    return null
+  }
+
+  const requestId = getMessageId(message)
+  const toolCall = isRecord(message.params.toolCall) ? message.params.toolCall : null
+
+  if (requestId === null || !toolCall || typeof toolCall.toolCallId !== "string") {
+    return null
+  }
+
+  const toolKind = extractToolKind(toolCall.kind) ?? "other"
+
+  return {
+    requestId,
+    title:
+      typeof toolCall.title === "string" && toolCall.title.trim().length > 0
+        ? toolCall.title.trim()
+        : fallbackToolTitle(toolKind),
+    toolKind,
+    context: formatPermissionContext(toolCall.rawInput),
+    locations: extractToolCallLocations(toolCall.locations),
+    options: extractPermissionOptions(message.params.options),
+  }
+}
+
+function extractPermissionResponse(
+  message: SessionHistoryMessage,
+): ParsedPermissionResponse | null {
+  if (!isRecord(message)) {
+    return null
+  }
+
+  const errorText = extractMessageErrorText(message)
+
+  if (errorText) {
+    return {
+      outcome: "failed",
+      error: errorText,
+    }
+  }
+
+  const result = "result" in message ? message.result : null
+
+  if (!isRecord(result) || !isRecord(result.outcome)) {
+    return null
+  }
+
+  const outcome = result.outcome
+
+  if (outcome.outcome === "cancelled") {
+    return {
+      outcome: "cancelled",
+    }
+  }
+
+  if (outcome.outcome === "selected" && typeof outcome.optionId === "string") {
+    return {
+      outcome: "selected",
+      optionId: outcome.optionId,
+    }
+  }
+
+  return null
+}
+
+/** Correlates ACP permission response frames to the request rows rendered for one turn. */
+function buildPermissionResponsesByRequestId(
+  messages: readonly SessionHistoryMessage[],
+): Map<MessageId, ParsedPermissionResponse> {
+  const requestIds = new Set<MessageId>()
+  const responses = new Map<MessageId, ParsedPermissionResponse>()
+
+  for (const message of messages) {
+    const request = extractPermissionRequest(message)
+
+    if (request) {
+      requestIds.add(request.requestId)
+    }
+  }
+
+  for (const message of messages) {
+    const id = getMessageId(message)
+
+    if (id === null || !requestIds.has(id)) {
+      continue
+    }
+
+    const response = extractPermissionResponse(message)
+
+    if (response) {
+      responses.set(id, response)
+    }
+  }
+
+  return responses
 }
 
 /** Extracts one structured tool-call update so the transcript can preserve ACP row identity. */
@@ -335,6 +533,50 @@ function extractMessageErrorText(message: SessionHistoryMessage) {
   return typeof error.message === "string" && error.message.trim().length > 0
     ? error.message.trim()
     : null
+}
+
+function findPermissionOption(
+  options: readonly SessionTranscriptPermissionOption[],
+  optionId: string | null,
+) {
+  if (!optionId) {
+    return null
+  }
+
+  return options.find((option) => option.optionId === optionId) ?? null
+}
+
+function resolvePermissionStatus(
+  options: readonly SessionTranscriptPermissionOption[],
+  response: ParsedPermissionResponse | null,
+): SessionTranscriptPermissionStatus {
+  if (!response) {
+    return "pending"
+  }
+
+  if (response.outcome === "failed") {
+    return "failed"
+  }
+
+  if (response.outcome === "cancelled") {
+    return "cancelled"
+  }
+
+  const option = findPermissionOption(options, response.optionId)
+
+  if (!option) {
+    return "resolved"
+  }
+
+  return option.kind.startsWith("reject_") ? "denied" : "allowed"
+}
+
+function resolvePermissionSelectedOptionId(response: ParsedPermissionResponse | null) {
+  return response?.outcome === "selected" ? response.optionId : null
+}
+
+function resolvePermissionError(response: ParsedPermissionResponse | null) {
+  return response?.outcome === "failed" ? response.error : null
 }
 
 function formatStopReason(stopReason: SessionHistoryTurn["stopReason"]) {
@@ -581,14 +823,54 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
     }
   }
 
+  function appendPermissionRequest(
+    session: DaemonSession,
+    turnId: string,
+    messageIndex: number,
+    request: NonNullable<ReturnType<typeof extractPermissionRequest>>,
+    response: ParsedPermissionResponse | null,
+  ) {
+    const permissionRow: SessionTranscriptPermissionRequest = {
+      kind: "permissionRequest",
+      id: `${turnId}:permission:${String(request.requestId)}:${messageIndex}`,
+      requestId: request.requestId,
+      authorName: session.agentName,
+      timestampLabel: "Permission",
+      title: request.title,
+      toolKind: request.toolKind,
+      status: resolvePermissionStatus(request.options, response),
+      context: request.context,
+      locations: request.locations,
+      options: request.options,
+      selectedOptionId: resolvePermissionSelectedOptionId(response),
+      error: resolvePermissionError(response),
+    }
+
+    messages.push(permissionRow)
+  }
+
   for (const [turnIndex, turn] of input.turns.entries()) {
     const isStreamingTurn = turn.completedAt === null
+    const permissionResponsesByRequestId = buildPermissionResponsesByRequestId(turn.messages)
 
     for (const [messageIndex, message] of turn.messages.entries()) {
       const promptContent = extractPromptContent(message)
 
       if (promptContent.length > 0) {
         appendUserPrompt(turn, messageIndex, promptContent)
+        continue
+      }
+
+      const permissionRequest = extractPermissionRequest(message)
+
+      if (permissionRequest) {
+        appendPermissionRequest(
+          input.session,
+          turn.turnId,
+          messageIndex,
+          permissionRequest,
+          permissionResponsesByRequestId.get(permissionRequest.requestId) ?? null,
+        )
         continue
       }
 

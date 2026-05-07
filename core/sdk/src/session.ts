@@ -58,6 +58,13 @@ export type SessionPromptRequest = {
   prompt: string | acp.ContentBlock[]
 }
 
+/** SDK input for answering one ACP permission request through a daemon session. */
+export type SessionPermissionResponseRequest = {
+  id: DaemonSessionId
+  requestId: string | number
+  outcome: acp.RequestPermissionOutcome
+}
+
 export function createSessionPromptMessage(input: SessionPromptRequest) {
   return {
     jsonrpc: "2.0",
@@ -67,6 +74,17 @@ export function createSessionPromptMessage(input: SessionPromptRequest) {
       sessionId: input.acpId,
       prompt:
         typeof input.prompt === "string" ? [{ type: "text", text: input.prompt }] : input.prompt,
+    },
+  } satisfies acp.AnyMessage
+}
+
+/** Builds the JSON-RPC response frame expected by `session/request_permission`. */
+export function createSessionPermissionResponseMessage(input: SessionPermissionResponseRequest) {
+  return {
+    jsonrpc: "2.0",
+    id: input.requestId,
+    result: {
+      outcome: input.outcome,
     },
   } satisfies acp.AnyMessage
 }

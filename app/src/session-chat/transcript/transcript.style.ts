@@ -190,6 +190,193 @@ export const toolDetailMonoClass = css({
   whiteSpace: "pre-wrap",
 })
 
+export const permissionCardClass = css({
+  display: "grid",
+  gap: "12px",
+  width: "min(100%, 760px)",
+  border: "1px solid token(colors.border)",
+  borderRadius: "8px",
+  padding: "14px",
+  backgroundColor: "surface",
+  color: "fg.default",
+})
+
+export const permissionHeaderClass = css({
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr) auto",
+  alignItems: "start",
+  gap: "10px",
+  minWidth: "0",
+})
+
+export const permissionIconClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "28px",
+  height: "28px",
+  border: "1px solid token(colors.border)",
+  borderRadius: "6px",
+  color: "accentStrong",
+})
+
+export const permissionTitleGroupClass = css({
+  display: "grid",
+  gap: "2px",
+  minWidth: "0",
+})
+
+export const permissionTitleClass = css({
+  margin: "0",
+  color: "fg.default",
+  fontSize: "0.92rem",
+  fontWeight: "700",
+  lineHeight: "1.4",
+  overflowWrap: "anywhere",
+})
+
+export const permissionMetaClass = css({
+  color: "fg.muted",
+  fontSize: "0.78rem",
+  fontWeight: "560",
+  lineHeight: "1.45",
+})
+
+export const permissionStatusBadgeClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "5px",
+  maxWidth: "100%",
+  border: "1px solid token(colors.border)",
+  borderRadius: "999px",
+  paddingBlock: "4px",
+  paddingInline: "8px",
+  color: "fg.muted",
+  fontSize: "0.74rem",
+  fontWeight: "700",
+  lineHeight: "1.3",
+  whiteSpace: "nowrap",
+  '&[data-status="pending"]': {
+    borderColor: "accent",
+    color: "accentStrong",
+  },
+  '&[data-status="allowed"]': {
+    color: "fg.default",
+  },
+  '&[data-status="denied"]': {
+    borderColor: "danger",
+    color: "danger",
+  },
+  '&[data-status="failed"]': {
+    borderColor: "danger",
+    color: "danger",
+  },
+})
+
+export const permissionDetailGridClass = css({
+  display: "grid",
+  gap: "8px",
+  minWidth: "0",
+})
+
+export const permissionDetailBlockClass = css({
+  display: "grid",
+  gap: "4px",
+  minWidth: "0",
+})
+
+export const permissionDetailLabelClass = css({
+  color: "fg.default",
+  fontSize: "0.78rem",
+  fontWeight: "700",
+  lineHeight: "1.4",
+})
+
+export const permissionDetailTextClass = css({
+  color: "fg.muted",
+  fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
+  fontSize: "0.84rem",
+  lineHeight: "1.55",
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
+})
+
+export const permissionDetailMonoClass = css({
+  color: "fg.default",
+  fontFamily: '"SF Mono", "Monaco", monospace',
+  fontSize: "0.8rem",
+  lineHeight: "1.55",
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
+})
+
+export const permissionActionRowClass = css({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "8px",
+  minWidth: "0",
+})
+
+export const permissionOptionButtonClass = css({
+  display: "inline-grid",
+  gap: "1px",
+  minWidth: "112px",
+  maxWidth: "100%",
+  border: "1px solid token(colors.border)",
+  borderRadius: "6px",
+  paddingBlock: "7px",
+  paddingInline: "10px",
+  backgroundColor: "bg.panel",
+  color: "fg.default",
+  textAlign: "left",
+  _hover: {
+    backgroundColor: "bg.hover",
+  },
+  _disabled: {
+    cursor: "default",
+    opacity: "0.55",
+    pointerEvents: "none",
+  },
+  '&[data-intent="allow"]': {
+    borderColor: "accent",
+  },
+  '&[data-intent="reject"]': {
+    color: "danger",
+  },
+})
+
+export const permissionOptionNameClass = css({
+  minWidth: "0",
+  fontSize: "0.84rem",
+  fontWeight: "700",
+  lineHeight: "1.35",
+  overflowWrap: "anywhere",
+})
+
+export const permissionOptionKindClass = css({
+  color: "fg.muted",
+  fontSize: "0.72rem",
+  fontWeight: "620",
+  lineHeight: "1.3",
+})
+
+export const permissionResolutionClass = css({
+  color: "fg.muted",
+  fontSize: "0.84rem",
+  lineHeight: "1.5",
+})
+
+export const permissionErrorClass = css({
+  border: "1px solid token(colors.danger)",
+  borderRadius: "6px",
+  paddingBlock: "7px",
+  paddingInline: "9px",
+  color: "danger",
+  fontSize: "0.82rem",
+  fontWeight: "620",
+  lineHeight: "1.45",
+})
+
 export const turnStopPillClass = css({
   display: "inline-flex",
   flexWrap: "wrap",

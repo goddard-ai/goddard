@@ -1,4 +1,9 @@
-import type { CreateSessionRequest, DaemonSession, SessionPromptRequest } from "@goddard-ai/sdk"
+import type {
+  CreateSessionRequest,
+  DaemonSession,
+  SessionPermissionResponseRequest,
+  SessionPromptRequest,
+} from "@goddard-ai/sdk"
 
 import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
@@ -25,6 +30,14 @@ export async function createSession(input: CreateSessionRequest) {
  */
 export async function submitSessionPrompt(props: SessionPromptRequest) {
   await goddardSdk.session.prompt(props)
+  refreshSessionViews(props.id)
+}
+
+/**
+ * Responds to one ACP permission request and refreshes the affected session views.
+ */
+export async function respondSessionPermission(props: SessionPermissionResponseRequest) {
+  await goddardSdk.session.respondPermission(props)
   refreshSessionViews(props.id)
 }
 

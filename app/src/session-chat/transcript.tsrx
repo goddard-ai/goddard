@@ -3,6 +3,7 @@ import { useMemo } from "preact/hooks"
 
 import type {
   SessionTranscriptItem,
+  SessionTranscriptPermissionRequest,
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
   SessionTranscriptTurnStop,
@@ -18,6 +19,7 @@ import {
   transcriptViewportClass,
   VIRTUAL_OVERSCAN_PX,
 } from "./transcript/transcript.style.ts"
+import { PermissionRequestTranscriptRow } from "./transcript/permission-request-row.tsrx"
 import { TextTranscriptRow } from "./transcript/text-row.tsrx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsrx"
 import { TurnStopTranscriptRow } from "./transcript/turn-stop-row.tsrx"
@@ -30,6 +32,10 @@ export type TranscriptProps = {
   messages: readonly TranscriptMessage[];
   class?: string;
   initialScrollPosition?: "top" | "bottom";
+  onSelectPermissionOption?: (input: {
+    optionId: string;
+    requestId: SessionTranscriptPermissionRequest["requestId"];
+  }) => Promise<void> | void;
   scrollCacheKey?: string;
 }
 
@@ -39,7 +45,7 @@ type CoalescedToolTranscriptRow = {
   toolCalls: readonly SessionTranscriptToolCall[];
 }
 
-type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop
+type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest
 
 function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   const renderItems: RenderTranscriptItem[] = []
@@ -68,7 +74,7 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
 
     flushToolCalls()
 
-    if (message.kind === "turnStop") {
+    if (message.kind === "turnStop" || message.kind === "permissionRequest") {
       renderItems.push(message)
       continue
     }
@@ -98,9 +104,20 @@ function estimateToolGroupRowHeight(
 }
 
 /** Renders one transcript row using the row-specific presentation path. */
-component TranscriptRow(props: { row: MessageListRow<RenderTranscriptItem> }) {
+component TranscriptRow(props: {
+  row: MessageListRow<RenderTranscriptItem>;
+  onSelectPermissionOption?: TranscriptProps["onSelectPermissionOption"];
+}) {
   if (props.row.item.kind === "toolGroup") {
     <ToolTranscriptRow groupId={props.row.item.id} toolCalls={props.row.item.toolCalls} />
+    return
+  }
+
+  if (props.row.item.kind === "permissionRequest") {
+    <PermissionRequestTranscriptRow
+      message={props.row.item}
+      onSelectOption={props.onSelectPermissionOption}
+    />
     return
   }
 
@@ -136,7 +153,9 @@ export component Transcript(props: TranscriptProps) {
         </div>
       </>}
       overscanPx={VIRTUAL_OVERSCAN_PX}
-      renderRow={(row) => <><TranscriptRow row={row} /></>}
+      renderRow={(row) => <>
+        <TranscriptRow row={row} onSelectPermissionOption={props.onSelectPermissionOption} />
+      </>}
       scrollCacheKey={props.scrollCacheKey}
     />
   </div>

@@ -248,6 +248,46 @@ function findNewestRunningTurn(turns: readonly SessionChatTurn[]) {
   return null
 }
 
+function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
+  const fingerprint = buildMessageFingerprint(message)
+
+  return turns.some((turn) =>
+    turn.messages.some(
+      (existingMessage) => buildMessageFingerprint(existingMessage) === fingerprint,
+    ),
+  )
+}
+
+/** Finds the turn waiting on one ACP permission request id so its response stays in-row. */
+function findTurnWithPendingPermissionRequest(
+  turns: readonly SessionChatTurn[],
+  requestId: MessageId,
+) {
+  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const turn = turns[turnIndex]
+    let hasRequest = false
+    let hasResponse = false
+
+    for (const message of turn.messages) {
+      if (getMessageId(message) !== requestId) {
+        continue
+      }
+
+      if (isPermissionRequestMessage(message)) {
+        hasRequest = true
+      } else if (getMessageResult(message) || getMessageError(message)) {
+        hasResponse = true
+      }
+    }
+
+    if (hasRequest && !hasResponse) {
+      return turn
+    }
+  }
+
+  return null
+}
+
 function extractStopReason(message: acp.AnyMessage) {
   const result = getMessageResult(message)
   return typeof result?.stopReason === "string"
@@ -394,11 +434,21 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #mergeMessage(message: acp.AnyMessage, receivedAt: string) {
+    if (hasTurnMessage(this.turns, message)) {
+      return
+    }
+
+    const messageId = getMessageId(message)
     const promptRequestId = resolvePromptRequestId(message)
+    const permissionTurn =
+      messageId !== null && (getMessageResult(message) || getMessageError(message))
+        ? findTurnWithPendingPermissionRequest(this.turns, messageId)
+        : null
     const existingTurn =
-      promptRequestId === null
+      permissionTurn ??
+      (promptRequestId === null
         ? findNewestRunningTurn(this.turns)
-        : (this.turns.find((turn) => turn.promptRequestId === promptRequestId) ?? null)
+        : (this.turns.find((turn) => turn.promptRequestId === promptRequestId) ?? null))
 
     if (existingTurn) {
       this.#applyMessageToTurn(existingTurn, message, receivedAt)

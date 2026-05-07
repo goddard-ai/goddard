@@ -49,8 +49,10 @@ import type {
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
 import {
+  createSessionPermissionResponseMessage,
   createSessionPromptMessage,
   type SessionParams,
+  type SessionPermissionResponseRequest,
   type SessionPromptRequest,
 } from "./session.ts"
 
@@ -210,6 +212,12 @@ function createSessionNamespace(client: DaemonIpcClient) {
     steer: async (input: SteerSessionRequest) => client.send("session.steer", input),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
     send: async (input: SendSessionMessageRequest) => client.send("session.send", input),
+    /** Sends one ACP permission response through the daemon-managed session transport. */
+    respondPermission: async (input: SessionPermissionResponseRequest) =>
+      client.send("session.send", {
+        id: input.id,
+        message: createSessionPermissionResponseMessage(input),
+      }),
     /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
     prompt: async (input: SessionPromptRequest) =>
       client.send("session.send", {

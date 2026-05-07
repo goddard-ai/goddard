@@ -76,6 +76,46 @@ export type SessionTranscriptToolCall = {
   locations: readonly SessionTranscriptToolLocation[]
 }
 
+/** ACP permission option kinds the session transcript can present back to the agent. */
+export type SessionTranscriptPermissionOptionKind =
+  | "allow_once"
+  | "allow_always"
+  | "reject_once"
+  | "reject_always"
+
+/** One selectable ACP permission option attached to a permission request row. */
+export type SessionTranscriptPermissionOption = {
+  optionId: string
+  name: string
+  kind: SessionTranscriptPermissionOptionKind
+}
+
+/** UI-facing resolution state for one ACP permission request row. */
+export type SessionTranscriptPermissionStatus =
+  | "pending"
+  | "allowed"
+  | "denied"
+  | "resolved"
+  | "cancelled"
+  | "failed"
+
+/** One transcript row that asks the user to resolve an ACP permission request. */
+export type SessionTranscriptPermissionRequest = {
+  kind: "permissionRequest"
+  id: string
+  requestId: string | number
+  authorName: string
+  timestampLabel: string
+  title: string
+  toolKind: SessionTranscriptToolKind
+  status: SessionTranscriptPermissionStatus
+  context: string | null
+  locations: readonly SessionTranscriptToolLocation[]
+  options: readonly SessionTranscriptPermissionOption[]
+  selectedOptionId: string | null
+  error: string | null
+}
+
 /** Terminal lifecycle states shown after a turn stops producing transcript content. */
 export type SessionTranscriptTurnStopStatus =
   | "completed"
@@ -98,4 +138,5 @@ export type SessionTranscriptTurnStop = {
 export type SessionTranscriptItem =
   | SessionTranscriptTextMessage
   | SessionTranscriptToolCall
+  | SessionTranscriptPermissionRequest
   | SessionTranscriptTurnStop

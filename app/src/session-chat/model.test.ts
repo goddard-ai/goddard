@@ -111,6 +111,37 @@ function promptResult(id = "prompt-1") {
   } satisfies acp.AnyMessage
 }
 
+function permissionRequestMessage() {
+  return {
+    jsonrpc: "2.0",
+    id: "permission-1",
+    method: acp.CLIENT_METHODS.session_request_permission,
+    params: {
+      sessionId: "acp-session-1",
+      options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+      toolCall: {
+        toolCallId: "tool-1",
+        title: "Write file",
+        kind: "edit",
+        status: "pending",
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
+function permissionResponseMessage() {
+  return {
+    jsonrpc: "2.0",
+    id: "permission-1",
+    result: {
+      outcome: {
+        outcome: "selected",
+        optionId: "allow",
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
 test("SessionChat normalizes history turns into deterministic order and statuses", () => {
   const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
@@ -267,6 +298,69 @@ test("SessionChat exposes pending permission and plan events", () => {
     "prompt",
     "permissionRequest",
     "planUpdate",
+  ])
+})
+
+test("SessionChat clears pending permission after the matching response", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+  const permissionRequest = permissionRequestMessage()
+  const permissionResponse = permissionResponseMessage()
+
+  chat.applyMessage(permissionRequest)
+  expect(chat.summary.status).toBe("blocked")
+  expect(chat.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
+
+  chat.applyMessage(permissionResponse)
+
+  expect(chat.summary.pendingPermissionRequest).toBeNull()
+  expect(chat.summary.status).toBe("running")
+  expect(chat.turns[0].events.map((event) => event.kind)).toEqual([
+    "prompt",
+    "permissionRequest",
+    "permissionResponse",
+  ])
+})
+
+test("SessionChat does not duplicate a permission response after refreshed history includes it", () => {
+  const permissionRequest = permissionRequestMessage()
+  const permissionResponse = permissionResponseMessage()
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessage(permissionRequest)
+  chat.applyMessage(permissionResponse)
+  chat.syncLoadedData({
+    session: createSession(),
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage(), permissionRequest, permissionResponse],
+      }),
+    ]),
+  })
+
+  expect(chat.turns).toHaveLength(1)
+  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.turns[0].events.map((event) => event.kind)).toEqual([
+    "prompt",
+    "permissionRequest",
+    "permissionResponse",
   ])
 })
 

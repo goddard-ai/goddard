@@ -8,6 +8,7 @@ import {
 
 import type {
   SessionTranscriptItem,
+  SessionTranscriptPermissionRequest,
   SessionTranscriptTextMessage,
   SessionTranscriptToolContent,
 } from "~/sessions/models.ts"
@@ -189,6 +190,37 @@ function getToolContentPreview(content: SessionTranscriptToolContent) {
   return `Terminal: ${content.terminalId}`
 }
 
+function estimatePermissionRequestRowHeight(
+  message: SessionTranscriptPermissionRequest,
+  maxWidth: number,
+) {
+  let approximateLineCount = 3 + estimateLineCount(message.title, maxWidth)
+
+  if (message.context) {
+    approximateLineCount += 1 + estimateLineCount(message.context, maxWidth)
+  }
+
+  if (message.locations.length > 0) {
+    approximateLineCount += 1
+    for (const location of message.locations) {
+      approximateLineCount += estimateLineCount(
+        `${location.path}${location.line != null ? `:${location.line}` : ""}`,
+        maxWidth,
+      )
+    }
+  }
+
+  if (message.status === "pending") {
+    approximateLineCount += Math.max(1, message.options.length)
+  }
+
+  if (message.error) {
+    approximateLineCount += estimateLineCount(message.error, maxWidth)
+  }
+
+  return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 36
+}
+
 /** Rough row estimate used by Virtuoso before the real transcript row is measured. */
 export function estimateTranscriptRowHeight(message: SessionTranscriptItem, viewportWidth: number) {
   const textWidth = getTranscriptTextWidth(message, viewportWidth)
@@ -209,6 +241,10 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
 
   if (message.kind === "turnStop") {
     return TURN_STOP_ROW_HEIGHT
+  }
+
+  if (message.kind === "permissionRequest") {
+    return estimatePermissionRequestRowHeight(message, textWidth)
   }
 
   let approximateLineCount = 2

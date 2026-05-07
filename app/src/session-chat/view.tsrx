@@ -23,7 +23,12 @@ import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { cancelSessionTurn, reconnectSession, submitSessionPrompt } from "~/sessions/mutations.ts"
+import {
+  cancelSessionTurn,
+  reconnectSession,
+  respondSessionPermission,
+  submitSessionPrompt,
+} from "~/sessions/mutations.ts"
 
 export component SessionChatView(props: {
   projectPath: string | null;
@@ -361,6 +366,18 @@ component LoadedSessionChatView(props: {
         class={styles.transcript}
         initialScrollPosition="bottom"
         messages={chat.transcriptMessages}
+        onSelectPermissionOption={async (input) => {
+          await respondSessionPermission(
+            {
+              id: chat.session.id,
+              requestId: input.requestId,
+              outcome: {
+                outcome: "selected",
+                optionId: input.optionId,
+              },
+            },
+          )
+        }}
         scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
       />
     }
