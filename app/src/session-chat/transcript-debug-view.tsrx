@@ -1,48 +1,16 @@
 import { useState } from "preact/hooks"
 
-import {
-  createSessionChatQaChat,
-  createSessionChatQaPermissionResponse,
-  createSessionChatQaStatusSummary,
-  findSessionChatQaOlderHistoryPage,
-} from "./transcript-debug-data.ts"
+import { createSessionChatDebugController } from "./transcript-debug-data.ts"
 import styles from "./transcript-debug-view.style.ts"
 import { Transcript } from "./transcript.tsrx"
 
-const qaStatusSummary = createSessionChatQaStatusSummary()
-
 /** Renders the standalone transcript-debug surface used by the native development menu. */
 export component TranscriptDebugView() {
-  const [chat, setChat] = useState(() => createSessionChatQaChat())
+  const [controller] = useState(() => createSessionChatDebugController())
   const [renderVersion, setRenderVersion] = useState(0)
-  const [olderHistoryError, setOlderHistoryError] = useState<string | null>(null)
-  const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
   function refreshTranscript() {
-    setRenderVersion((version) => version + 1)
-  }
-
-  function resetScenario() {
-    setChat(createSessionChatQaChat())
-    setOlderHistoryError(null)
-    setRenderVersion((version) => version + 1)
-  }
-
-  function loadOlderHistory() {
-    if (!canLoadOlderHistory) {
-      return
-    }
-
-    const page = findSessionChatQaOlderHistoryPage(chat.nextCursor)
-
-    if (!page) {
-      setOlderHistoryError(`No generated page exists for ${chat.nextCursor}.`)
-      return
-    }
-
-    chat.prependOlderHistory(page)
-    setOlderHistoryError(null)
-    refreshTranscript()
+    setRenderVersion(controller.version)
   }
 
   <div class={styles.page}>
@@ -53,19 +21,36 @@ export component TranscriptDebugView() {
         {"This debug-only surface generates deterministic ACP messages and feeds them through the session chat state model. Use it to inspect transcript rows, permission responses, status summaries, and older-history pagination without starting a real agent."}
       </p>
       <div class={styles.actions}>
-        <button class={styles.button} type="button" onClick={loadOlderHistory}>
-          {canLoadOlderHistory ? "Load older generated page" : "All generated history loaded"}
+        <button
+          class={styles.button}
+          type="button"
+          onClick={() => {
+            controller.loadOlderHistory()
+            refreshTranscript()
+          }}
+        >
+          {controller.canLoadOlderHistory
+            ? "Load older generated page"
+            : "All generated history loaded"}
         </button>
         <button
           class={styles.button}
           type="button"
           onClick={() => {
-            setOlderHistoryError("Generated history request failed.")
+            controller.showPagingError()
+            refreshTranscript()
           }}
         >
           {"Show paging error"}
         </button>
-        <button class={styles.button} type="button" onClick={resetScenario}>
+        <button
+          class={styles.button}
+          type="button"
+          onClick={() => {
+            controller.reset()
+            refreshTranscript()
+          }}
+        >
           {"Reset scenario"}
         </button>
       </div>
@@ -82,7 +67,7 @@ export component TranscriptDebugView() {
         </ol>
       </div>
       <div class={styles.statusGrid}>
-        for (const item of qaStatusSummary) {
+        for (const item of controller.statusSummary) {
           <article class={styles.statusItem} key={item.label}>
             <strong>{item.label}</strong>
             <span>{item.status}</span>
@@ -96,17 +81,18 @@ export component TranscriptDebugView() {
     </section>
     <section class={styles.canvas}>
       <Transcript
-        messages={chat.transcriptMessages}
+        messages={controller.chat.transcriptMessages}
         olderHistory={{
-          canLoad: canLoadOlderHistory,
-          error: olderHistoryError,
+          canLoad: controller.canLoadOlderHistory,
+          error: controller.olderHistoryError,
           loading: false,
-          onLoad: loadOlderHistory,
+          onLoad: () => {
+            controller.loadOlderHistory()
+            refreshTranscript()
+          },
         }}
         onSelectPermissionOption={async (input) => {
-          chat.applyMessage(createSessionChatQaPermissionResponse(input), {
-            receivedAt: "2026-04-14T15:12:00.000Z",
-          })
+          controller.resolvePermission(input)
           refreshTranscript()
         }}
         scrollCacheKey={`debug:session-chat-acp-qa:${renderVersion}`}

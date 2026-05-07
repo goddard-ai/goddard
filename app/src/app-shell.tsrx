@@ -77,7 +77,7 @@ export component AppShell() {
 
   useListener(globalEventHub, "debugMenu", ({ surface }) => {
     switch (surface) {
-      case "SessionChatQA":
+      case "SessionChatDebug":
         workbenchTabSet.openOrFocusTab(
           {
             id: "debug:session-chat-transcript",

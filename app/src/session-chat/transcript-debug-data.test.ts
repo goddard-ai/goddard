@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test"
 
-import {
-  createSessionChatQaChatWithAllHistory,
-  createSessionChatQaStatusSummary,
-} from "./transcript-debug-data.ts"
+import { createSessionChatDebugController } from "./transcript-debug-data.ts"
 
 test("session chat QA scenario covers every generated transcript row family", () => {
-  const messages = createSessionChatQaChatWithAllHistory().transcriptMessages
+  const controller = createSessionChatDebugController()
+  controller.loadAllHistory()
+
+  const messages = controller.chat.transcriptMessages
   const rowKinds = new Set(messages.map((message) => message.kind))
   const textRoles = new Set(
     messages.flatMap((message) => (message.kind === "message" ? [message.role] : [])),
@@ -42,7 +42,7 @@ test("session chat QA scenario covers every generated transcript row family", ()
 })
 
 test("session chat QA status matrix covers header-relevant session states", () => {
-  const statusSummary = createSessionChatQaStatusSummary()
+  const statusSummary = createSessionChatDebugController().statusSummary
 
   expect(new Set(statusSummary.map((status) => status.status))).toEqual(
     new Set(["idle", "running", "blocked", "completed", "failed", "cancelled"]),
