@@ -1,8 +1,8 @@
 /** Debug surfaces that the native development menu can request inside the webview. */
-export type DebugMenuSurface = "SessionChatTranscript" | "Terminal"
+export type DebugMenuSurface = "SessionChatQA" | "Terminal"
 
 /** Complete debug surface table used by the native development menu. */
 export const DebugMenuSurfaces = {
-  SessionChatTranscript: "SessionChatTranscript",
+  SessionChatQA: "SessionChatQA",
   Terminal: "Terminal",
 } as const satisfies Record<DebugMenuSurface, DebugMenuSurface>

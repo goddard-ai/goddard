@@ -77,12 +77,12 @@ export component AppShell() {
 
   useListener(globalEventHub, "debugMenu", ({ surface }) => {
     switch (surface) {
-      case "SessionChatTranscript":
+      case "SessionChatQA":
         workbenchTabSet.openOrFocusTab(
           {
             id: "debug:session-chat-transcript",
             kind: "sessionChatTranscriptDebug",
-            title: "Transcript Debug",
+            title: "Session Chat QA",
             payload: {},
             dirty: false,
           },
