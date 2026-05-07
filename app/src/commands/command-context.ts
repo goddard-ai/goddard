@@ -1,9 +1,10 @@
 import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
-import { hasOpenModalDialog, hasTopmostModalSessionInput } from "~/lib/modal-stack.ts"
+import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
+import { activeCommandLayerHandlerContext, withCommandLayerWhen } from "./command-layer.tsrx"
 
 const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchTabKind>("main")
@@ -19,17 +20,10 @@ const sessionInputHasThinkingLevel = signal(false)
 const hasCloseTarget = computed(() => {
   return hasClosableActiveTab.value || hasOpenModalDialog.value
 })
-const sessionInputInCurrentLayer = computed(() => {
-  if (hasOpenModalDialog.value) {
-    return hasTopmostModalSessionInput.value
-  }
-
-  return activeTabKind.value === "sessionChat"
-})
 
 const whenContext = computed(() => {
   return {
-    "sessionInput.isInCurrentLayer": sessionInputInCurrentLayer.value,
+    ...activeCommandLayerHandlerContext.value,
     "sessionInput.hasAdapterSelector": sessionInputHasAdapterSelector.value,
     "sessionInput.hasBranchSelector": sessionInputHasBranchSelector.value,
     "sessionInput.hasLocationSelector": sessionInputHasLocationSelector.value,
@@ -52,7 +46,6 @@ export const commandContext = {
   hasClosableActiveTab,
   hasOpenModalDialog,
   selectedNavId,
-  sessionInputInCurrentLayer,
   sessionInputHasAdapterSelector,
   sessionInputHasBranchSelector,
   sessionInputHasLocationSelector,
@@ -70,6 +63,7 @@ const commandAvailabilitySnapshot = computed(() => ({
 
 /** Reads the reactive command-context inputs before delegating to the runtime. */
 export function isCommandAvailable(runtime: ShortcutRuntime, input: RunnableInput) {
-  void commandAvailabilitySnapshot.value
-  return runtime.isAvailable(input)
+  const snapshot = commandAvailabilitySnapshot.value
+  runtime.batchContext(snapshot.whenContext)
+  return runtime.isAvailable(withCommandLayerWhen(input))
 }

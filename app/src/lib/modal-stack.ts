@@ -5,7 +5,6 @@ import { useEffect, useRef } from "preact/hooks"
 export type ModalStackEntry = {
   id: string
   close: () => void
-  hasSessionInput?: boolean
 }
 
 type ModalStackRecord = ModalStackEntry & {
@@ -17,7 +16,6 @@ export function createModalStack() {
   const entries = signal<readonly ModalStackRecord[]>([])
   let nextToken = 0
   const hasOpenModal = computed(() => entries.value.length > 0)
-  const topmostHasSessionInput = computed(() => entries.value.at(-1)?.hasSessionInput === true)
 
   function register(entry: ModalStackEntry) {
     const token = nextToken++
@@ -48,14 +46,12 @@ export function createModalStack() {
     closeTopmost,
     hasOpenModal,
     register,
-    topmostHasSessionInput,
   }
 }
 
 const appModalStack = createModalStack()
 
 export const hasOpenModalDialog = appModalStack.hasOpenModal
-export const hasTopmostModalSessionInput = appModalStack.topmostHasSessionInput
 export const registerModalStackEntry = appModalStack.register
 export const closeTopmostModal = appModalStack.closeTopmost
 
@@ -71,7 +67,6 @@ export function useModalStackEntry(entry: ModalStackEntry & { open: boolean }) {
 
     return registerModalStackEntry({
       id: entry.id,
-      hasSessionInput: entry.hasSessionInput,
       close() {
         closeRef.current()
       },

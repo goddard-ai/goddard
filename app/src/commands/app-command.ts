@@ -1,8 +1,16 @@
 import type { RunnableInput, ShortcutMatch } from "powerkeys"
 import { listen, SigmaTarget, useListener } from "preact-sigma"
+import { useEffect } from "preact/hooks"
 import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
+import {
+  hasActiveCommandLayerHandler,
+  isCommandLayerActive,
+  registerCommandLayerHandler,
+  rootCommandLayerId,
+  useCommandLayerId,
+} from "./command-layer.tsrx"
 
 /** Event map for command invocations; event names are generated app command ids. */
 type AppCommandEvents = Record<string, ShortcutMatch | undefined>
@@ -49,6 +57,10 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
       const id = `${namespaceKey as string}.${commandKey as string}`
       return Object.assign(
         function (match?: ShortcutMatch) {
+          if (!hasActiveCommandLayerHandler(id as AppCommandId)) {
+            return
+          }
+
           appCommandBus.emit(id, match)
         },
         command,
@@ -77,7 +89,6 @@ export const AppCommand = defineAppCommands({
     },
     openCommandPalette: {
       label: "Open Command Menu",
-      when: "!sessionInput.isInCurrentLayer",
     },
     openKeyboardShortcuts: {
       label: "Open Keyboard Shortcuts",
@@ -113,31 +124,31 @@ export const AppCommand = defineAppCommands({
   sessionInput: {
     openProjectSelector: {
       label: "Session Input: Open Project Selector",
-      when: "sessionInput.isInCurrentLayer && sessionInput.hasProjectSelector",
+      when: "sessionInput.hasProjectSelector",
     },
     openAdapterSelector: {
       label: "Session Input: Open Adapter Selector",
-      when: "sessionInput.isInCurrentLayer && sessionInput.hasAdapterSelector",
+      when: "sessionInput.hasAdapterSelector",
     },
     openLocationSelector: {
       label: "Session Input: Open Launch Location Selector",
-      when: "sessionInput.isInCurrentLayer && sessionInput.hasLocationSelector",
+      when: "sessionInput.hasLocationSelector",
     },
     openBranchSelector: {
       label: "Session Input: Open Branch Selector",
-      when: "sessionInput.isInCurrentLayer && sessionInput.hasBranchSelector",
+      when: "sessionInput.hasBranchSelector",
     },
     openModelSelector: {
       label: "Session Input: Open Model Selector",
-      when: "sessionInput.isInCurrentLayer && sessionInput.hasModelSelector",
+      when: "sessionInput.hasModelSelector",
     },
     openThinkingLevelSelector: {
       label: "Session Input: Open Thinking Level Selector",
-      when: "sessionInput.isInCurrentLayer && sessionInput.hasThinkingLevel",
+      when: "sessionInput.hasThinkingLevel",
     },
     submit: {
       label: "Session Input: Submit",
-      when: "sessionInput.isInCurrentLayer && sessionInput.canSubmit",
+      when: "sessionInput.canSubmit",
     },
   },
 })
@@ -152,12 +163,50 @@ export const appCommandList = Object.values(AppCommand).flatMap(
   (commands) => Object.values(commands) as AppCommand[],
 )
 
-export function onAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
-  return listen(appCommandBus, command.id, listener)
+export function onAppCommand(
+  command: AppCommand,
+  listener: (match?: ShortcutMatch) => void,
+  options?: { layerId?: string },
+) {
+  const layerId = options?.layerId ?? rootCommandLayerId
+  const unregisterHandler = registerCommandLayerHandler(layerId, command.id as AppCommandId)
+  const stopListening = listen(appCommandBus, command.id, (match) => {
+    if (isCommandLayerActive(layerId)) {
+      listener(match)
+    }
+  })
+
+  return () => {
+    stopListening()
+    unregisterHandler()
+  }
 }
 
-export function useAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
-  useListener(appCommandBus, command.id, listener)
+export function useAppCommand(
+  command: AppCommand,
+  listener: (match?: ShortcutMatch) => void,
+  options?: {
+    active?: boolean
+    layerId?: string
+  },
+) {
+  const contextLayerId = useCommandLayerId()
+  const layerId = options?.layerId ?? contextLayerId
+  const active = options?.active ?? true
+
+  useEffect(() => {
+    if (!active) {
+      return
+    }
+
+    return registerCommandLayerHandler(layerId, command.id as AppCommandId)
+  }, [active, command.id, layerId])
+
+  useListener(appCommandBus, command.id, (match) => {
+    if (active && isCommandLayerActive(layerId)) {
+      listener(match)
+    }
+  })
 }
 
 export function resolveAppCommand(id: AppCommandId): AppCommand | null {

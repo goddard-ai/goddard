@@ -4,6 +4,7 @@ import { Sigma } from "preact-sigma"
 
 import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
+import { withCommandLayerWhen } from "~/commands/command-layer.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
   createShortcutBinding,
@@ -231,10 +232,12 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       }
 
       for (const expression of expressions) {
+        const layeredCommand = withCommandLayerWhen(command)
+
         if (typeof expression !== "string") {
           nextBindings.push({
-            scope: command.scope,
-            when: command.when,
+            scope: layeredCommand.scope,
+            when: layeredCommand.when,
             preventDefault: true,
             ...expression,
             handler: command,
@@ -242,16 +245,16 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
         } else if (expression.includes(" ")) {
           nextBindings.push({
             sequence: expression,
-            scope: command.scope,
-            when: command.when,
+            scope: layeredCommand.scope,
+            when: layeredCommand.when,
             handler: command,
             preventDefault: true,
           })
         } else {
           nextBindings.push({
             combo: expression,
-            scope: command.scope,
-            when: command.when,
+            scope: layeredCommand.scope,
+            when: layeredCommand.when,
             handler: command,
             preventDefault: true,
           })

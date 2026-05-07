@@ -7,7 +7,9 @@ import { concat } from "radashi"
 import { useModalStackEntry } from "~/lib/modal-stack.ts"
 import { menuPortalId } from "~/lib/menu-portal.tsrx"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
-import { useAppCommand, type AppCommand } from "./app-command.ts"
+import { AppCommand, useAppCommand } from "./app-command.ts"
+import type { AppCommand as AppCommandType } from "./app-command.ts"
+import { CommandLayerProvider } from "./command-layer.tsrx"
 
 type CommandDialogContentModule = {
   default: preact.FunctionComponent<{ dialog: UseDialogReturn }>;
@@ -15,10 +17,9 @@ type CommandDialogContentModule = {
 
 /** Props for one command-driven dialog wrapper. */
 export type CommandDialogProps = {
-  command: AppCommand;
+  command: AppCommandType;
   content: () => Promise<CommandDialogContentModule>;
   dialogProps?: UseDialogProps;
-  hasSessionInput?: boolean;
 }
 
 /** Provides one Ark dialog controller for a lazily loaded command-dialog surface. */
@@ -46,7 +47,6 @@ export component CommandDialog(props: CommandDialogProps) {
   useModalStackEntry(
     {
       id: `command-dialog:${dialogId}`,
-      hasSessionInput: props.hasSessionInput,
       open: dialog.open,
       close() {
         dialog.setOpen(false)
@@ -64,9 +64,18 @@ export component CommandDialog(props: CommandDialogProps) {
     dialog.setOpen(true)
   })
 
-  <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
-    <Suspense fallback={null}>
-      <Content {dialog} />
-    </Suspense>
-  </Dialog.RootProvider>
+  useAppCommand(AppCommand.workbench.closeActiveTab, () => {
+    dialog.setOpen(false)
+  }, {
+    active: dialog.open,
+    layerId: dialogId,
+  })
+
+  <CommandLayerProvider active={dialog.open} id={dialogId}>
+    <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
+      <Suspense fallback={null}>
+        <Content {dialog} />
+      </Suspense>
+    </Dialog.RootProvider>
+  </CommandLayerProvider>
 }

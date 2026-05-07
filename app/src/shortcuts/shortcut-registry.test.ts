@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 
 import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
+import { registerActiveCommandLayer } from "~/commands/command-layer.tsrx"
 import { registerModalStackEntry } from "~/lib/modal-stack.ts"
 import { ShortcutRegistry } from "./shortcut-registry.ts"
 
@@ -213,6 +214,7 @@ test("command-owned when clauses gate both dispatch and palette availability", (
 
 test("modal or closable tab drives runtime availability for closeActiveTab", () => {
   const { registry, cleanup } = createTestRegistry()
+  const unsubscribe = onAppCommand(AppCommand.workbench.closeActiveTab, () => {})
 
   try {
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
@@ -234,6 +236,7 @@ test("modal or closable tab drives runtime availability for closeActiveTab", () 
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
   } finally {
+    unsubscribe()
     cleanup()
   }
 })
@@ -260,9 +263,8 @@ test("session input context lets launch-dialog selectors override the global pal
   const stopPalette = onAppCommand(AppCommand.navigation.openCommandPalette, (match) => {
     paletteMatches.push(match)
   })
-  const stopProject = onAppCommand(AppCommand.sessionInput.openProjectSelector, (match) => {
-    projectMatches.push(match)
-  })
+  let stopProject: (() => void) | null = null
+  let unregisterDialogLayer: (() => void) | null = null
 
   try {
     registry.applyKeymapSnapshot("goddard", {})
@@ -276,11 +278,15 @@ test("session input context lets launch-dialog selectors override the global pal
     expect(paletteMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(0)
 
-    const unregisterSessionInputModal = registerModalStackEntry({
-      id: "shortcut-registry-test:session-input",
-      hasSessionInput: true,
-      close() {},
-    })
+    const dialogLayerId = "shortcut-registry-test:session-dialog"
+    unregisterDialogLayer = registerActiveCommandLayer(dialogLayerId)
+    stopProject = onAppCommand(
+      AppCommand.sessionInput.openProjectSelector,
+      (match) => {
+        projectMatches.push(match)
+      },
+      { layerId: dialogLayerId },
+    )
     commandContext.sessionInputHasProjectSelector.value = true
 
     dispatchKeydown(runtimeDocument, {
@@ -291,19 +297,18 @@ test("session input context lets launch-dialog selectors override the global pal
 
     expect(paletteMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(1)
-
-    unregisterSessionInputModal()
   } finally {
+    unregisterDialogLayer?.()
+    stopProject?.()
     stopPalette()
-    stopProject()
     cleanup()
   }
 })
 
-test("session input commands require session input in the current UI layer", () => {
+test("session input commands require a handler in the active command layer", () => {
   const { registry, cleanup } = createTestRegistry()
-  let unregisterPlainModal: (() => void) | null = null
-  let unregisterSessionInputModal: (() => void) | null = null
+  let unregisterDialogLayer: (() => void) | null = null
+  let stopProject: (() => void) | null = null
 
   try {
     commandContext.sessionInputHasProjectSelector.value = true
@@ -312,33 +317,30 @@ test("session input commands require session input in the current UI layer", () 
       false,
     )
 
-    commandContext.activeTabKind.value = "sessionChat"
+    stopProject = onAppCommand(AppCommand.sessionInput.openProjectSelector, () => {})
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
 
-    unregisterPlainModal = registerModalStackEntry({
-      id: "shortcut-registry-test:plain-modal",
-      close() {},
-    })
+    const dialogLayerId = "shortcut-registry-test:plain-dialog"
+    unregisterDialogLayer = registerActiveCommandLayer(dialogLayerId)
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       false,
     )
 
-    unregisterSessionInputModal = registerModalStackEntry({
-      id: "shortcut-registry-test:session-input-modal",
-      hasSessionInput: true,
-      close() {},
+    stopProject()
+    stopProject = onAppCommand(AppCommand.sessionInput.openProjectSelector, () => {}, {
+      layerId: dialogLayerId,
     })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
   } finally {
-    unregisterSessionInputModal?.()
-    unregisterPlainModal?.()
+    stopProject?.()
+    unregisterDialogLayer?.()
     cleanup()
   }
 })
