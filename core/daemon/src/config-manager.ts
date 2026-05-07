@@ -15,6 +15,8 @@ import { readMergedRootConfig } from "./resolvers/config.ts"
 const WATCH_RELOAD_SETTLE_MS = 50
 const WATCH_RELOAD_RETRY_MS = 50
 const MAX_WATCH_RELOAD_RETRIES = 2
+// Parent directory watches can miss the single event that reports a config root was created.
+const WATCH_ROOT_DISCOVERY_PROBE_MS = 250
 
 /** One validated merged root-config snapshot owned by the daemon config manager. */
 export type RootConfigSnapshot = {
@@ -44,6 +46,7 @@ type WatchedConfigState = {
   watchMode: WatchMode | null
   watchedDir: string | null
   watcher: FSWatcher | null
+  rootDiscoveryProbe: ReturnType<typeof setTimeout> | null
 }
 
 type CachedRootConfigEntry = {
@@ -80,6 +83,7 @@ export function createConfigManager() {
       watchMode: null,
       watchedDir: null,
       watcher: null,
+      rootDiscoveryProbe: null,
     } satisfies WatchedConfigState
   }
 
@@ -98,6 +102,11 @@ export function createConfigManager() {
   }
 
   function closeWatchTarget(state: WatchedConfigState) {
+    if (state.rootDiscoveryProbe) {
+      clearTimeout(state.rootDiscoveryProbe)
+      state.rootDiscoveryProbe = null
+    }
+
     if (!state.watcher || !state.watchedDir) {
       return
     }
@@ -116,6 +125,30 @@ export function createConfigManager() {
     state.watcher = null
     state.watchedDir = null
     state.watchMode = null
+  }
+
+  function ensureRootDiscoveryProbe(state: WatchedConfigState, onChange: () => void) {
+    if (state.watchMode !== "parent" || state.rootDiscoveryProbe) {
+      return
+    }
+
+    state.rootDiscoveryProbe = setTimeout(() => {
+      state.rootDiscoveryProbe = null
+
+      if (closed || state.watchMode !== "parent") {
+        return
+      }
+
+      ensureWatchTarget(state, onChange)
+
+      if (state.watchMode === "parent") {
+        ensureRootDiscoveryProbe(state, onChange)
+        return
+      }
+
+      onChange()
+    }, WATCH_ROOT_DISCOVERY_PROBE_MS)
+    state.rootDiscoveryProbe.unref?.()
   }
 
   function shouldHandleWatchEvent(
@@ -188,6 +221,7 @@ export function createConfigManager() {
     state.watcher = watcher
     state.watchedDir = nextTarget.watchedDir
     state.watchMode = nextTarget.watchMode
+    ensureRootDiscoveryProbe(state, onChange)
 
     logger.log("config.watcher_started", {
       watchScope: state.scope,
