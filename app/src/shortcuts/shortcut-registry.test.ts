@@ -14,7 +14,6 @@ function createTestRegistry() {
   commandContext.activeTabKind.value = "main"
   commandContext.hasClosableActiveTab.value = false
   commandContext.selectedNavId.value = "inbox"
-  commandContext.sessionInputActive.value = false
   commandContext.sessionInputHasAdapterSelector.value = false
   commandContext.sessionInputHasBranchSelector.value = false
   commandContext.sessionInputHasLocationSelector.value = false
@@ -277,7 +276,11 @@ test("session input context lets launch-dialog selectors override the global pal
     expect(paletteMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(0)
 
-    commandContext.sessionInputActive.value = true
+    const unregisterSessionInputModal = registerModalStackEntry({
+      id: "shortcut-registry-test:session-input",
+      hasSessionInput: true,
+      close() {},
+    })
     commandContext.sessionInputHasProjectSelector.value = true
 
     dispatchKeydown(runtimeDocument, {
@@ -288,6 +291,8 @@ test("session input context lets launch-dialog selectors override the global pal
 
     expect(paletteMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(1)
+
+    unregisterSessionInputModal()
   } finally {
     stopPalette()
     stopProject()
@@ -295,8 +300,10 @@ test("session input context lets launch-dialog selectors override the global pal
   }
 })
 
-test("session input commands require active session input context", () => {
+test("session input commands require session input in the current UI layer", () => {
   const { registry, cleanup } = createTestRegistry()
+  let unregisterPlainModal: (() => void) | null = null
+  let unregisterSessionInputModal: (() => void) | null = null
 
   try {
     commandContext.sessionInputHasProjectSelector.value = true
@@ -305,12 +312,33 @@ test("session input commands require active session input context", () => {
       false,
     )
 
-    commandContext.sessionInputActive.value = true
+    commandContext.activeTabKind.value = "sessionChat"
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
+      true,
+    )
+
+    unregisterPlainModal = registerModalStackEntry({
+      id: "shortcut-registry-test:plain-modal",
+      close() {},
+    })
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
+      false,
+    )
+
+    unregisterSessionInputModal = registerModalStackEntry({
+      id: "shortcut-registry-test:session-input-modal",
+      hasSessionInput: true,
+      close() {},
+    })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
   } finally {
+    unregisterSessionInputModal?.()
+    unregisterPlainModal?.()
     cleanup()
   }
 })

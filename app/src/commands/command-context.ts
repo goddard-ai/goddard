@@ -1,7 +1,7 @@
 import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
-import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
+import { hasOpenModalDialog, hasTopmostModalSessionInput } from "~/lib/modal-stack.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
 
@@ -9,7 +9,6 @@ const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchTabKind>("main")
 const hasClosableActiveTab = signal(false)
 const selectedNavId = signal<NavigationItemId>("inbox")
-const sessionInputActive = signal(false)
 const sessionInputHasAdapterSelector = signal(false)
 const sessionInputHasBranchSelector = signal(false)
 const sessionInputHasLocationSelector = signal(false)
@@ -20,10 +19,17 @@ const sessionInputHasThinkingLevel = signal(false)
 const hasCloseTarget = computed(() => {
   return hasClosableActiveTab.value || hasOpenModalDialog.value
 })
+const sessionInputInCurrentLayer = computed(() => {
+  if (hasOpenModalDialog.value) {
+    return hasTopmostModalSessionInput.value
+  }
+
+  return activeTabKind.value === "sessionChat"
+})
 
 const whenContext = computed(() => {
   return {
-    "sessionInput.isActive": sessionInputActive.value,
+    "sessionInput.isInCurrentLayer": sessionInputInCurrentLayer.value,
     "sessionInput.hasAdapterSelector": sessionInputHasAdapterSelector.value,
     "sessionInput.hasBranchSelector": sessionInputHasBranchSelector.value,
     "sessionInput.hasLocationSelector": sessionInputHasLocationSelector.value,
@@ -46,7 +52,7 @@ export const commandContext = {
   hasClosableActiveTab,
   hasOpenModalDialog,
   selectedNavId,
-  sessionInputActive,
+  sessionInputInCurrentLayer,
   sessionInputHasAdapterSelector,
   sessionInputHasBranchSelector,
   sessionInputHasLocationSelector,

@@ -24,14 +24,16 @@ component SessionLaunchDialog(props: {
   const activeProjectPath = projectContext.activeProjectPath
   const isDialogOpen = props.dialog.open
   const projects = projectRegistry.projectList
-  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
+  const hasAdapterSelector = isDialogOpen && (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
-    form.draftLocation.value === "worktree" && (form.launchPreview.value?.branches.length ?? 0) > 0
-  const hasLocationSelector = form.launchPreview.value !== null
-  const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
-  const hasProjectSelector = projects.length > 0
-  const hasThinkingLevel = form.thinkingOption.value !== null
-  const canSubmit = form.canSubmit.value
+    isDialogOpen && form.draftLocation.value === "worktree" &&
+      (form.launchPreview.value?.branches.length ?? 0) > 0
+  const hasLocationSelector = isDialogOpen && form.launchPreview.value !== null
+  const hasModelSelector =
+    isDialogOpen && (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
+  const hasProjectSelector = isDialogOpen && projects.length > 0
+  const hasThinkingLevel = isDialogOpen && form.thinkingOption.value !== null
+  const canSubmit = isDialogOpen && form.canSubmit.value
 
   async function launchSession() {
     const sessionInput = form.sessionInput.value
@@ -81,7 +83,6 @@ component SessionLaunchDialog(props: {
   }, [activeProjectPath, form, isDialogOpen])
 
   useEffect(() => {
-    commandContext.sessionInputActive.value = isDialogOpen
     commandContext.sessionInputHasAdapterSelector.value = hasAdapterSelector
     commandContext.sessionInputHasBranchSelector.value = hasBranchSelector
     commandContext.sessionInputHasLocationSelector.value = hasLocationSelector
@@ -91,7 +92,6 @@ component SessionLaunchDialog(props: {
     commandContext.sessionInputHasThinkingLevel.value = hasThinkingLevel
 
     return () => {
-      commandContext.sessionInputActive.value = false
       commandContext.sessionInputHasAdapterSelector.value = false
       commandContext.sessionInputHasBranchSelector.value = false
       commandContext.sessionInputHasLocationSelector.value = false

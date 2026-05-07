@@ -77,7 +77,7 @@ export const AppCommand = defineAppCommands({
     },
     openCommandPalette: {
       label: "Open Command Menu",
-      when: "!sessionInput.isActive",
+      when: "!sessionInput.isInCurrentLayer",
     },
     openKeyboardShortcuts: {
       label: "Open Keyboard Shortcuts",
@@ -113,31 +113,31 @@ export const AppCommand = defineAppCommands({
   sessionInput: {
     openProjectSelector: {
       label: "Session Input: Open Project Selector",
-      when: "sessionInput.isActive && sessionInput.hasProjectSelector",
+      when: "sessionInput.isInCurrentLayer && sessionInput.hasProjectSelector",
     },
     openAdapterSelector: {
       label: "Session Input: Open Adapter Selector",
-      when: "sessionInput.isActive && sessionInput.hasAdapterSelector",
+      when: "sessionInput.isInCurrentLayer && sessionInput.hasAdapterSelector",
     },
     openLocationSelector: {
       label: "Session Input: Open Launch Location Selector",
-      when: "sessionInput.isActive && sessionInput.hasLocationSelector",
+      when: "sessionInput.isInCurrentLayer && sessionInput.hasLocationSelector",
     },
     openBranchSelector: {
       label: "Session Input: Open Branch Selector",
-      when: "sessionInput.isActive && sessionInput.hasBranchSelector",
+      when: "sessionInput.isInCurrentLayer && sessionInput.hasBranchSelector",
     },
     openModelSelector: {
       label: "Session Input: Open Model Selector",
-      when: "sessionInput.isActive && sessionInput.hasModelSelector",
+      when: "sessionInput.isInCurrentLayer && sessionInput.hasModelSelector",
     },
     openThinkingLevelSelector: {
       label: "Session Input: Open Thinking Level Selector",
-      when: "sessionInput.isActive && sessionInput.hasThinkingLevel",
+      when: "sessionInput.isInCurrentLayer && sessionInput.hasThinkingLevel",
     },
     submit: {
       label: "Session Input: Submit",
-      when: "sessionInput.isActive && sessionInput.canSubmit",
+      when: "sessionInput.isInCurrentLayer && sessionInput.canSubmit",
     },
   },
 })

@@ -110,6 +110,7 @@ export component AppShell() {
   <CommandDialog
     command={AppCommand.navigation.openNewSessionDialog}
     content={() => import("~/sessions/dialog.tsrx")}
+    hasSessionInput={true}
   />
   <GoodToaster />
 }

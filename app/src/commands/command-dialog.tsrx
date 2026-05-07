@@ -18,6 +18,7 @@ export type CommandDialogProps = {
   command: AppCommand;
   content: () => Promise<CommandDialogContentModule>;
   dialogProps?: UseDialogProps;
+  hasSessionInput?: boolean;
 }
 
 /** Provides one Ark dialog controller for a lazily loaded command-dialog surface. */
@@ -45,6 +46,7 @@ export component CommandDialog(props: CommandDialogProps) {
   useModalStackEntry(
     {
       id: `command-dialog:${dialogId}`,
+      hasSessionInput: props.hasSessionInput,
       open: dialog.open,
       close() {
         dialog.setOpen(false)
