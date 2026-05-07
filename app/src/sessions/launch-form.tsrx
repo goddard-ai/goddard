@@ -1,4 +1,3 @@
-import { Suspense } from "preact/compat"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
@@ -100,9 +99,11 @@ export component SessionLaunchForm(props: {
           form.setOpenPicker(null)
         }}
       />
-      <Suspense fallback={<><SessionLaunchLoadingSelect label="Adapter" /></>}>
+      try {
         <AgentHarnessSelector {form} />
-      </Suspense>
+      } pending {
+        <SessionLaunchLoadingSelect label="Adapter" />
+      }
     </div>
     if (selectedAdapter) {
       <div class={selectorStyles.adapterCard}>
@@ -127,22 +128,20 @@ export component SessionLaunchForm(props: {
         }
       </div>
     }
-    <Suspense
-      fallback={<>
-        <div class={selectorStyles.section}>
-          <div class={selectorStyles.grid}>
-            <SessionLaunchLoadingSelect label="Launch location" />
-            <SessionLaunchLoadingSelect label="Git branch" />
-          </div>
-          <div class={selectorStyles.grid}>
-            <SessionLaunchLoadingSelect label="Model" />
-            <SessionLaunchLoadingSelect label="Thinking level" />
-          </div>
-        </div>
-      </>}
-    >
+    try {
       <SessionLaunchPreviewSelectors {form} />
-    </Suspense>
+    } pending {
+      <div class={selectorStyles.section}>
+        <div class={selectorStyles.grid}>
+          <SessionLaunchLoadingSelect label="Launch location" />
+          <SessionLaunchLoadingSelect label="Git branch" />
+        </div>
+        <div class={selectorStyles.grid}>
+          <SessionLaunchLoadingSelect label="Model" />
+          <SessionLaunchLoadingSelect label="Thinking level" />
+        </div>
+      </div>
+    }
     <SessionInput
       autoFocus={true}
       classes={launchInputClasses}

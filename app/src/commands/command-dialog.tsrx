@@ -1,6 +1,6 @@
 import { Dialog, useDialog, type UseDialogProps, type UseDialogReturn } from "@ark-ui/react/dialog"
 import { useListener } from "preact-sigma"
-import { Suspense, lazy } from "preact/compat"
+import { lazy } from "preact/compat"
 import { useId, useMemo } from "preact/hooks"
 import { concat } from "radashi"
 
@@ -70,9 +70,11 @@ export component CommandDialog(props: CommandDialogProps) {
     })
 
     <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
-      <Suspense fallback={null}>
+      try {
         <Content {dialog} />
-      </Suspense>
+      } pending {
+        <></>
+      }
     </Dialog.RootProvider>
   </CommandLayerProvider>
 }

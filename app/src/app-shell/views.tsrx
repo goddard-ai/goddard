@@ -1,6 +1,5 @@
 /** Workbench content surfaces rendered inside the merged app shell chrome. */
 import { css } from "@goddard-ai/styled-system/css"
-import { Suspense } from "preact/compat"
 import { useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -15,7 +14,7 @@ export component AppShellWorkbenchContent() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
 
-  <Suspense fallback={null}>
+  try {
     if (workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id) {
       <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
         <MainWorkbenchView />
@@ -25,7 +24,9 @@ export component AppShellWorkbenchContent() {
         <WorkbenchTabPanel />
       </WorkbenchScrollPanel>
     }
-  </Suspense>
+  } pending {
+    <></>
+  }
 }
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
