@@ -1,7 +1,16 @@
-import type { BulkUpdateInboxItemsRequest, UpdateInboxItemRequest } from "@goddard-ai/schema/daemon"
+import type {
+  BulkUpdateInboxItemsRequest,
+  InboxItem,
+  UpdateInboxItemRequest,
+} from "@goddard-ai/schema/daemon"
 
+import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
+
+export const InboxPageMutations = createMutationsProvider<{
+  openInboxItem: (item: InboxItem) => void
+}>("InboxPageMutations")
 
 /** Invalidates every cached daemon inbox list, regardless of filter or cursor. */
 export function invalidateInboxQueries() {

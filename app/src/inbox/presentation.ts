@@ -1,3 +1,4 @@
+import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type {
   InboxEntityId,
   InboxItem,
@@ -5,6 +6,7 @@ import type {
   InboxReason,
   InboxStatus,
 } from "@goddard-ai/schema/daemon"
+import * as fuzzysort from "fuzzysort2"
 
 export const DEFAULT_INBOX_FILTER_ID = "unread"
 
@@ -64,6 +66,16 @@ export type InboxFilterId = keyof typeof inboxFilterDefinitions
 /** Entity families supported by daemon-local inbox rows. */
 export type InboxEntityKind = "session" | "pullRequest"
 
+/** Inbox row whose linked daemon entity is a session. */
+export type SessionInboxItem = InboxItem & {
+  entityId: DaemonSessionId
+}
+
+/** Inbox row whose linked daemon entity is a pull request. */
+export type PullRequestInboxItem = InboxItem & {
+  entityId: DaemonPullRequestId
+}
+
 const statusLabels = {
   unread: "Unread",
   read: "Read",
@@ -99,6 +111,16 @@ function compactText(parts: Array<string | null | undefined>) {
 /** Returns the daemon entity family for one inbox row id. */
 export function getInboxEntityKind(entityId: InboxEntityId) {
   return entityId.startsWith("ses_") ? "session" : "pullRequest"
+}
+
+/** Narrows one inbox row to the requested daemon entity family. */
+export function isInboxEntityKind(item: InboxItem, kind: "session"): item is SessionInboxItem
+export function isInboxEntityKind(
+  item: InboxItem,
+  kind: "pullRequest",
+): item is PullRequestInboxItem
+export function isInboxEntityKind(item: InboxItem, kind: InboxEntityKind) {
+  return getInboxEntityKind(item.entityId) === kind
 }
 
 /** Returns the compact user-facing label for one inbox row entity family. */
@@ -146,7 +168,7 @@ export function getInboxItemSearchText(item: InboxItem) {
   )
 }
 
-/** Filters inbox rows by human-visible row text while preserving daemon order. */
+/** Filters inbox rows by fuzzy matching human-visible row text. */
 export function filterInboxItemsBySearch(items: readonly InboxItem[], searchQuery: string) {
   const normalizedQuery = normalizeSearchText(searchQuery)
 
@@ -154,7 +176,19 @@ export function filterInboxItemsBySearch(items: readonly InboxItem[], searchQuer
     return items
   }
 
-  return items.filter((item) => getInboxItemSearchText(item).includes(normalizedQuery))
+  const searchableItems = items.map((item) => ({
+    item,
+    preparedSearchText: fuzzysort.prepare(getInboxItemSearchText(item)),
+  }))
+
+  return fuzzysort
+    .searchFields(
+      normalizedQuery,
+      searchableItems,
+      [{ key: "searchText", extract: (entry) => entry.preparedSearchText }],
+      { threshold: 0 },
+    )
+    .items.map((entry) => entry.value.item)
 }
 
 /** Formats an inbox row update timestamp for compact list display. */

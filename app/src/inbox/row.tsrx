@@ -1,29 +1,53 @@
 import type { InboxItem } from "@goddard-ai/schema/daemon"
 import { GitPullRequest, MessageSquare } from "lucide-react"
 
+import { useMutations } from "~/lib/mutations-provider.tsx"
+import { InboxPageMutations } from "./mutations.ts"
 import {
   formatInboxUpdatedTime,
-  getInboxEntityKind,
   getInboxEntityLabel,
   getInboxItemPrimaryText,
   getInboxItemSecondaryText,
   getInboxPriorityLabel,
   getInboxReasonLabel,
   getInboxStatusLabel,
+  isInboxEntityKind,
 } from "./presentation.ts"
 import styles from "./page.style.ts"
+
+function handleButtonLikeKeyDown(
+  event: preact.TargetedKeyboardEvent<HTMLElement>,
+  onPress: () => void,
+) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return
+  }
+
+  event.preventDefault()
+  onPress()
+}
 
 export component InboxRow(props: {
   item: InboxItem;
 }) {
-  const entityKind = getInboxEntityKind(props.item.entityId)
-  const EntityIcon =
-    entityKind === "session" ? MessageSquare : GitPullRequest
+  const { openInboxItem } = useMutations(InboxPageMutations)
+  const EntityIcon = isInboxEntityKind(props.item, "session") ? MessageSquare : GitPullRequest
   const priorityLabel = getInboxPriorityLabel(props.item.priority)
   const statusLabel = getInboxStatusLabel(props.item.status)
   const reasonLabel = getInboxReasonLabel(props.item.reason)
 
-  <article class={styles.row} data-inbox-row="true">
+  <div
+    class={styles.row}
+    data-inbox-row="true"
+    role="button"
+    tabIndex={0}
+    onClick={() => {
+      openInboxItem(props.item)
+    }}
+    onKeyDown={(event) => {
+      handleButtonLikeKeyDown(event, () => openInboxItem(props.item))
+    }}
+  >
     <span class={styles.entityIcon} aria-hidden="true">
       <EntityIcon size={16} strokeWidth={2.1} />
     </span>
@@ -65,5 +89,5 @@ export component InboxRow(props: {
         {formatInboxUpdatedTime(props.item.updatedAt)}
       </time>
     </div>
-  </article>
+  </div>
 }

@@ -12,6 +12,7 @@ import {
   getInboxReasonLabel,
   getInboxStatusLabel,
   inboxFilterDefinitions,
+  isInboxEntityKind,
 } from "./presentation.ts"
 import { getInboxListRequest } from "./queries.ts"
 
@@ -46,6 +47,8 @@ test("inbox filters split saved, replied, completed, and archived states", () =>
 test("presentation labels expose daemon inbox terms without changing state", () => {
   expect(getInboxEntityKind("ses_123")).toBe("session")
   expect(getInboxEntityKind("pr_123")).toBe("pullRequest")
+  expect(isInboxEntityKind(baseItem, "session")).toBe(true)
+  expect(isInboxEntityKind(baseItem, "pullRequest")).toBe(false)
   expect(getInboxStatusLabel("replied")).toBe("Replied")
   expect(getInboxPriorityLabel("low")).toBe("Low priority")
   expect(getInboxReasonLabel("pull_request.updated")).toBe("Pull request updated")
@@ -69,7 +72,7 @@ test("inbox row text prefers scope and headline with daemon reason fallback", ()
   ).toBe("Session turn ended")
 })
 
-test("inbox search matches human-visible row text and preserves daemon order", () => {
+test("inbox search fuzzy matches human-visible row text", () => {
   const pullRequestItem = {
     ...baseItem,
     id: "inb_2",
@@ -82,10 +85,16 @@ test("inbox search matches human-visible row text and preserves daemon order", (
   expect(filterInboxItemsBySearch([baseItem, pullRequestItem], "pull request")).toEqual([
     pullRequestItem,
   ])
-  expect(filterInboxItemsBySearch([baseItem, pullRequestItem], "normal priority")).toEqual([
-    baseItem,
+  expect(filterInboxItemsBySearch([baseItem, pullRequestItem], "rvw syc")).toEqual([
     pullRequestItem,
   ])
+  expect(
+    new Set(
+      filterInboxItemsBySearch([baseItem, pullRequestItem], "normal priority").map(
+        (item) => item.id,
+      ),
+    ),
+  ).toEqual(new Set([baseItem.id, pullRequestItem.id]))
 })
 
 test("compact updated time labels use minutes, hours, days, and dates", () => {

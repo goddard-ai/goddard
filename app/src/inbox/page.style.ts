@@ -209,6 +209,18 @@ export default {
     paddingBlock: "10px",
     borderBottom: "1px solid",
     borderColor: "border",
+    cursor: "pointer",
+    outline: "none",
+    "@media (hover: hover) and (pointer: fine)": {
+      _hover: {
+        backgroundColor: "surface",
+      },
+    },
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "-2px",
+    },
     "@media (max-width: 760px)": {
       gridTemplateColumns: "24px minmax(0, 1fr)",
       alignItems: "start",

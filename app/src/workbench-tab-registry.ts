@@ -66,6 +66,10 @@ export const workbenchTabComponents = {
     component: lazy(() => import("~/session-changes/view.tsrx")),
     icon: "tabs/changes",
   },
+  pullRequest: {
+    component: lazy(() => import("~/pull-requests/view.tsrx")),
+    icon: "tabs/pull-request",
+  },
   sessionChatTranscriptDebug: {
     component: lazy(() => import("~/session-chat/transcript-debug-view.tsrx")),
     icon: "tabs/sessions",
