@@ -1,23 +1,7 @@
 import { CheckCircle2, Circle, ListChecks, LoaderCircle } from "lucide-react"
 
 import type { SessionTranscriptPlanEntry, SessionTranscriptPlanUpdate } from "~/sessions/models.ts"
-import {
-  planCardClass,
-  planEmptyClass,
-  planEntryContentClass,
-  planEntryItemClass,
-  planEntryListClass,
-  planEntryMetaClass,
-  planEntryStatusClass,
-  planEntryTextClass,
-  planHeaderClass,
-  planIconClass,
-  planMetaClass,
-  planTitleClass,
-  planTitleGroupClass,
-  rowClass,
-  rowInnerClass,
-} from "./transcript.style.ts"
+import styles from "./transcript.style.ts"
 
 function formatPlanEntryStatus(status: SessionTranscriptPlanEntry["status"]) {
   switch (status) {
@@ -64,38 +48,38 @@ function buildPlanSummary(entries: readonly SessionTranscriptPlanEntry[]) {
 export component PlanUpdateTranscriptRow(props: {
   message: SessionTranscriptPlanUpdate;
 }) {
-  <article class={rowClass}>
-    <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
-      <section class={planCardClass} aria-label={props.message.title}>
-        <header class={planHeaderClass}>
-          <span class={planIconClass} aria-hidden="true">
+  <article class={styles.row}>
+    <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
+      <section class={styles.planCard} aria-label={props.message.title}>
+        <header class={styles.planHeader}>
+          <span class={styles.planIcon} aria-hidden="true">
             <ListChecks size={16} strokeWidth={2.2} />
           </span>
-          <div class={planTitleGroupClass}>
-            <h3 class={planTitleClass}>{props.message.title}</h3>
-            <div class={planMetaClass}>
+          <div class={styles.planTitleGroup}>
+            <h3 class={styles.planTitle}>{props.message.title}</h3>
+            <div class={styles.planMeta}>
               {buildPlanSummary(props.message.entries)}
             </div>
           </div>
         </header>
 
         if (props.message.entries.length === 0) {
-          <div class={planEmptyClass}>{"The agent cleared its plan."}</div>
+          <div class={styles.planEmpty}>{"The agent cleared its plan."}</div>
         } else {
-          <ol class={planEntryListClass}>
+          <ol class={styles.planEntryList}>
             for (const entry of props.message.entries; index index) {
               const StatusIcon = getPlanEntryStatusIcon(entry.status)
 
               <li
-                class={planEntryItemClass}
+                class={styles.planEntryItem}
                 key={`${entry.status}:${entry.priority}:${entry.content}:${index}`}
               >
-                <span class={planEntryStatusClass} data-status={entry.status} aria-hidden="true">
+                <span class={styles.planEntryStatus} data-status={entry.status} aria-hidden="true">
                   <StatusIcon size={13} strokeWidth={2.2} />
                 </span>
-                <div class={planEntryContentClass}>
-                  <div class={planEntryTextClass}>{entry.content}</div>
-                  <div class={planEntryMetaClass}>
+                <div class={styles.planEntryContent}>
+                  <div class={styles.planEntryText}>{entry.content}</div>
+                  <div class={styles.planEntryMeta}>
                     <span>{formatPlanEntryStatus(entry.status)}</span>
                     <span>{formatPlanEntryPriority(entry.priority)}</span>
                   </div>

@@ -5,28 +5,7 @@ import type {
   SessionTranscriptPermissionOption,
   SessionTranscriptPermissionRequest,
 } from "~/sessions/models.ts"
-import {
-  permissionActionRowClass,
-  permissionCardClass,
-  permissionDetailBlockClass,
-  permissionDetailGridClass,
-  permissionDetailLabelClass,
-  permissionDetailMonoClass,
-  permissionDetailTextClass,
-  permissionErrorClass,
-  permissionHeaderClass,
-  permissionIconClass,
-  permissionMetaClass,
-  permissionOptionButtonClass,
-  permissionOptionKindClass,
-  permissionOptionNameClass,
-  permissionResolutionClass,
-  permissionStatusBadgeClass,
-  permissionTitleClass,
-  permissionTitleGroupClass,
-  rowClass,
-  rowInnerClass,
-} from "./transcript.style.ts"
+import styles from "./transcript.style.ts"
 
 function getPermissionStatusIcon(status: SessionTranscriptPermissionRequest["status"]) {
   switch (status) {
@@ -128,13 +107,13 @@ component PermissionTargets(props: {
     return
   }
 
-  <div class={permissionDetailGridClass}>
+  <div class={styles.permissionDetailGrid}>
     if (props.message.locations.length > 0) {
-      <div class={permissionDetailBlockClass}>
-        <div class={permissionDetailLabelClass}>{"Target"}</div>
+      <div class={styles.permissionDetailBlock}>
+        <div class={styles.permissionDetailLabel}>{"Target"}</div>
         for (const location of props.message.locations; index index) {
           <div
-            class={permissionDetailMonoClass}
+            class={styles.permissionDetailMono}
             key={`${location.path}:${location.line ?? "none"}:${index}`}
           >
             {location.path}
@@ -144,9 +123,9 @@ component PermissionTargets(props: {
       </div>
     }
     if (props.message.context) {
-      <div class={permissionDetailBlockClass}>
-        <div class={permissionDetailLabelClass}>{"Context"}</div>
-        <div class={permissionDetailTextClass}>
+      <div class={styles.permissionDetailBlock}>
+        <div class={styles.permissionDetailLabel}>{"Context"}</div>
+        <div class={styles.permissionDetailText}>
           {props.message.context}
         </div>
       </div>
@@ -168,20 +147,20 @@ export component PermissionRequestTranscriptRow(props: {
   const hasActions =
     props.message.status === "pending" && props.message.options.length > 0 && props.onSelectOption
 
-  <article class={rowClass}>
-    <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
-      <div class={permissionCardClass}>
-        <header class={permissionHeaderClass}>
-          <span class={permissionIconClass} aria-hidden="true">
+  <article class={styles.row}>
+    <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
+      <div class={styles.permissionCard}>
+        <header class={styles.permissionHeader}>
+          <span class={styles.permissionIcon} aria-hidden="true">
             <ShieldAlert size={16} strokeWidth={2.2} />
           </span>
-          <div class={permissionTitleGroupClass}>
-            <h3 class={permissionTitleClass}>{props.message.title}</h3>
-            <div class={permissionMetaClass}>
+          <div class={styles.permissionTitleGroup}>
+            <h3 class={styles.permissionTitle}>{props.message.title}</h3>
+            <div class={styles.permissionMeta}>
               {formatPermissionToolKind(props.message.toolKind)}
             </div>
           </div>
-          <span class={permissionStatusBadgeClass} data-status={props.message.status}>
+          <span class={styles.permissionStatusBadge} data-status={props.message.status}>
             <StatusIcon size={12} strokeWidth={2.2} />
             {formatPermissionStatusLabel(props.message.status)}
           </span>
@@ -190,11 +169,11 @@ export component PermissionRequestTranscriptRow(props: {
         <PermissionTargets message={props.message} />
 
         if (hasActions) {
-          <div class={permissionActionRowClass}>
+          <div class={styles.permissionActionRow}>
             for (const option of props.message.options) {
               <button
                 aria-label={`${formatPermissionOptionKind(option.kind)}: ${option.name}`}
-                class={permissionOptionButtonClass}
+                class={styles.permissionOptionButton}
                 data-intent={resolvePermissionOptionIntent(option.kind)}
                 disabled={pendingOptionId !== null}
                 key={option.optionId}
@@ -220,8 +199,8 @@ export component PermissionRequestTranscriptRow(props: {
                   })()
                 }}
               >
-                <span class={permissionOptionNameClass}>{option.name}</span>
-                <span class={permissionOptionKindClass}>
+                <span class={styles.permissionOptionName}>{option.name}</span>
+                <span class={styles.permissionOptionKind}>
                   {pendingOptionId === option.optionId
                     ? "Sending"
                     : formatPermissionOptionKind(option.kind)}
@@ -230,13 +209,13 @@ export component PermissionRequestTranscriptRow(props: {
             }
           </div>
         } else {
-          <div class={permissionResolutionClass}>
+          <div class={styles.permissionResolution}>
             {formatPermissionResolution(props.message)}
           </div>
         }
 
         if (error && props.message.status === "pending") {
-          <div class={permissionErrorClass} role="alert">
+          <div class={styles.permissionError} role="alert">
             {error}
           </div>
         }

@@ -8,20 +8,7 @@ import type {
 import { MarkdownMessage } from "../markdown-message.tsrx"
 import type { MessageListRow } from "../message-list.tsrx"
 import { getBubbleMaxWidth } from "./layout.ts"
-import {
-  assistantMessageClass,
-  assistantBubbleClass,
-  attachmentCardClass,
-  attachmentDetailClass,
-  attachmentHeadingClass,
-  attachmentIconClass,
-  bubbleFrameClass,
-  rowClass,
-  rowColumnClass,
-  rowInnerClass,
-  transcriptContentClass,
-  userBubbleClass,
-} from "./transcript.style.ts"
+import styles from "./transcript.style.ts"
 
 function isSkillResourceLink(block: Extract<SessionTranscriptContentBlock, {
   type: "resource_link";
@@ -54,9 +41,9 @@ component TranscriptContentBlock(props: {
   message: SessionTranscriptTextMessage;
 }) {
   if (props.block.type === "resource_link") {
-    <div class={attachmentCardClass}>
-      <div class={attachmentHeadingClass}>
-        <span class={attachmentIconClass} aria-hidden="true">
+    <div class={styles.attachmentCard}>
+      <div class={styles.attachmentHeading}>
+        <span class={styles.attachmentIcon} aria-hidden="true">
           if (isSkillResourceLink(props.block)) {
             <BookOpen size={14} strokeWidth={2.2} />
           } else {
@@ -67,7 +54,7 @@ component TranscriptContentBlock(props: {
           {props.block.name}
         </span>
       </div>
-      <div class={attachmentDetailClass}>
+      <div class={styles.attachmentDetail}>
         {getResourceLinkDetail(props.block)}
       </div>
     </div>
@@ -100,10 +87,10 @@ export component TextTranscriptRow(props: {
     return
   }
 
-  <article class={rowClass}>
-    <div class={rowInnerClass} style={alignmentStyle}>
+  <article class={styles.row}>
+    <div class={styles.rowInner} style={alignmentStyle}>
       <div
-        class={rowColumnClass}
+        class={styles.rowColumn}
         style={{
           width: isUserMessage
             ? `${getBubbleMaxWidth(props.row.viewportWidth, message)}px`
@@ -112,10 +99,10 @@ export component TextTranscriptRow(props: {
       >
         <div
           class={isUserMessage
-            ? cx(bubbleFrameClass, userBubbleClass)
-            : cx(assistantMessageClass, assistantBubbleClass)}
+            ? cx(styles.bubbleFrame, styles.userBubble)
+            : cx(styles.assistantMessage, styles.assistantBubble)}
         >
-          <div class={transcriptContentClass}>
+          <div class={styles.transcriptContent}>
             for (const block of message.content; index blockIndex) {
               <TranscriptContentBlock
                 key={`${message.id}:block:${blockIndex}`}

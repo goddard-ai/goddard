@@ -2,14 +2,7 @@ import { AlertCircle, CheckCircle2, PauseCircle, XCircle } from "lucide-react"
 
 import type { SessionTranscriptTurnStop } from "~/sessions/models.ts"
 import type { MessageListRow } from "../message-list.tsrx"
-import {
-  rowClass,
-  rowInnerClass,
-  turnStopIconClass,
-  turnStopMetaClass,
-  turnStopPillClass,
-  turnStopTitleClass,
-} from "./transcript.style.ts"
+import styles from "./transcript.style.ts"
 
 function getTurnStopIcon(status: SessionTranscriptTurnStop["status"]) {
   switch (status) {
@@ -47,18 +40,18 @@ export component TurnStopTranscriptRow(props: {
   const timestampLabel =
     message.timestamp ? formatTurnStopTimestamp(message.timestamp) : null
 
-  <article class={rowClass}>
-    <div class={rowInnerClass} style={{ justifyContent: "center" }}>
-      <div class={turnStopPillClass} data-status={message.status}>
-        <span class={turnStopIconClass} aria-hidden="true">
+  <article class={styles.row}>
+    <div class={styles.rowInner} style={{ justifyContent: "center" }}>
+      <div class={styles.turnStopPill} data-status={message.status}>
+        <span class={styles.turnStopIcon} aria-hidden="true">
           <StatusIcon size={13} strokeWidth={2.2} />
         </span>
-        <span class={turnStopTitleClass}>{message.title}</span>
+        <span class={styles.turnStopTitle}>{message.title}</span>
         if (message.reason) {
-          <span class={turnStopMetaClass}>{message.reason}</span>
+          <span class={styles.turnStopMeta}>{message.reason}</span>
         }
         if (message.timestamp && timestampLabel) {
-          <time class={turnStopMetaClass} dateTime={message.timestamp}>
+          <time class={styles.turnStopMeta} dateTime={message.timestamp}>
             {timestampLabel}
           </time>
         }

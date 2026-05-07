@@ -1,605 +1,607 @@
 import { css } from "@goddard-ai/styled-system/css"
 
-export const transcriptViewportClass = css({
-  position: "relative",
-  minHeight: "100%",
-  paddingInline: "20px",
-  paddingTop: "24px",
-  paddingBottom: "32px",
-})
+export default {
+  transcriptViewport: css({
+    position: "relative",
+    minHeight: "100%",
+    paddingInline: "20px",
+    paddingTop: "24px",
+    paddingBottom: "32px",
+  }),
 
-export const loadingStateClass = css({
-  position: "absolute",
-  inset: "0",
-  display: "grid",
-  placeItems: "center",
-  color: "fg.muted",
-  fontSize: "0.94rem",
-  letterSpacing: "0.01em",
-  pointerEvents: "none",
-})
-
-export const historyPagerClass = css({
-  display: "grid",
-  justifyItems: "center",
-  gap: "8px",
-  paddingBottom: "18px",
-})
-
-export const historyLoadButtonClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "7px",
-  minHeight: "30px",
-  border: "1px solid token(colors.border)",
-  borderRadius: "6px",
-  paddingBlock: "5px",
-  paddingInline: "11px",
-  backgroundColor: "surface",
-  color: "fg.default",
-  fontSize: "0.82rem",
-  fontWeight: "650",
-  lineHeight: "1.3",
-  _hover: {
-    backgroundColor: "bg.hover",
-  },
-  _disabled: {
-    cursor: "default",
+  loadingState: css({
+    position: "absolute",
+    inset: "0",
+    display: "grid",
+    placeItems: "center",
     color: "fg.muted",
-    opacity: "0.72",
-  },
-})
-
-export const historyLoadButtonIconClass = css({
-  animation: "spin 1s linear infinite",
-})
-
-export const historyLoadErrorClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "7px",
-  maxWidth: "min(100%, 560px)",
-  border: "1px solid token(colors.danger)",
-  borderRadius: "6px",
-  paddingBlock: "6px",
-  paddingInline: "10px",
-  backgroundColor: "surface",
-  color: "danger",
-  fontSize: "0.8rem",
-  fontWeight: "620",
-  lineHeight: "1.4",
-})
-
-export const rowClass = css({
-  paddingBottom: "16px",
-})
-
-export const rowInnerClass = css({
-  display: "flex",
-  width: "100%",
-})
-
-export const rowColumnClass = css({
-  display: "grid",
-  gap: "0",
-})
-
-export const bubbleFrameClass = css({
-  display: "inline-flex",
-  flexDirection: "column",
-  borderRadius: "22px",
-  border: "1px solid",
-  padding: "14px 16px",
-})
-
-export const assistantMessageClass = css({
-  display: "grid",
-  width: "100%",
-  color: "fg.default",
-})
-
-export const assistantBubbleClass = css({
-  color: "fg.default",
-})
-
-export const userBubbleClass = css({
-  borderColor: "transcript.userBubble.border",
-  backgroundColor: "transcript.userBubble.end",
-  color: "fg.default",
-})
-
-export const transcriptContentClass = css({
-  display: "grid",
-  gap: "10px",
-  minWidth: 0,
-})
-
-export const attachmentCardClass = css({
-  display: "grid",
-  gap: "6px",
-  minWidth: 0,
-  padding: "2px 0",
-})
-
-export const attachmentHeadingClass = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  color: "fg.default",
-  fontSize: "0.86rem",
-  fontWeight: "680",
-  lineHeight: "1.35",
-})
-
-export const attachmentIconClass = css({
-  display: "inline-flex",
-  color: "fg.muted",
-})
-
-export const attachmentDetailClass = css({
-  color: "fg.muted",
-  fontSize: "0.8rem",
-  lineHeight: "1.45",
-  overflowWrap: "anywhere",
-  wordBreak: "break-word",
-})
-
-export const toolDisclosureClass = css({
-  display: "grid",
-  gap: "10px",
-  width: "100%",
-})
-
-export const toolSummaryClass = css({
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "baseline",
-  gap: "8px",
-  width: "100%",
-  color: "fg.muted",
-  listStyle: "none",
-  outline: "none",
-  textAlign: "left",
-  cursor: "pointer",
-  "&::marker": {
-    content: '""',
-  },
-  "&::-webkit-details-marker": {
-    display: "none",
-  },
-})
-
-export const toolSummaryTextClass = css({
-  color: "fg.default",
-  fontSize: "0.9rem",
-  fontWeight: "580",
-  lineHeight: "1.5",
-})
-
-export const toolInlineMetaClass = css({
-  display: "inline-flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "6px",
-})
-
-export const toolInlineSeparatorClass = css({
-  display: "inline-flex",
-  width: "4px",
-  height: "4px",
-  flexShrink: 0,
-  borderRadius: "999px",
-  backgroundColor: "currentColor",
-  opacity: "0.55",
-})
-
-export const toolToggleHintClass = css({
-  color: "fg.muted",
-  fontSize: "0.82rem",
-  lineHeight: "1.5",
-  textDecoration: "underline",
-  textUnderlineOffset: "0.18em",
-})
-
-export const toolDetailListClass = css({
-  display: "grid",
-  gap: "12px",
-  margin: "0",
-  padding: "0",
-  listStyle: "none",
-})
-
-export const toolDetailItemClass = css({
-  display: "grid",
-  gap: "6px",
-  paddingInlineStart: "12px",
-  listStyle: "none",
-})
-
-export const toolDetailHeadingClass = css({
-  color: "fg.default",
-  fontSize: "0.86rem",
-  fontWeight: "620",
-  lineHeight: "1.5",
-})
-
-export const toolDetailTextClass = css({
-  color: "fg.muted",
-  fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
-  fontSize: "0.84rem",
-  fontWeight: "450",
-  lineHeight: "1.6",
-  letterSpacing: "0.01em",
-  whiteSpace: "pre-wrap",
-})
-
-export const toolDetailMonoClass = css({
-  color: "fg.default",
-  fontFamily: '"SF Mono", "Monaco", monospace',
-  fontSize: "0.83rem",
-  lineHeight: "1.6",
-  whiteSpace: "pre-wrap",
-})
-
-export const permissionCardClass = css({
-  display: "grid",
-  gap: "12px",
-  width: "min(100%, 760px)",
-  border: "1px solid token(colors.border)",
-  borderRadius: "8px",
-  padding: "14px",
-  backgroundColor: "surface",
-  color: "fg.default",
-})
-
-export const permissionHeaderClass = css({
-  display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr) auto",
-  alignItems: "start",
-  gap: "10px",
-  minWidth: "0",
-})
-
-export const permissionIconClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "28px",
-  height: "28px",
-  border: "1px solid token(colors.border)",
-  borderRadius: "6px",
-  color: "accentStrong",
-})
-
-export const permissionTitleGroupClass = css({
-  display: "grid",
-  gap: "2px",
-  minWidth: "0",
-})
-
-export const permissionTitleClass = css({
-  margin: "0",
-  color: "fg.default",
-  fontSize: "0.92rem",
-  fontWeight: "700",
-  lineHeight: "1.4",
-  overflowWrap: "anywhere",
-})
-
-export const permissionMetaClass = css({
-  color: "fg.muted",
-  fontSize: "0.78rem",
-  fontWeight: "560",
-  lineHeight: "1.45",
-})
-
-export const permissionStatusBadgeClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "5px",
-  maxWidth: "100%",
-  border: "1px solid token(colors.border)",
-  borderRadius: "999px",
-  paddingBlock: "4px",
-  paddingInline: "8px",
-  color: "fg.muted",
-  fontSize: "0.74rem",
-  fontWeight: "700",
-  lineHeight: "1.3",
-  whiteSpace: "nowrap",
-  '&[data-status="pending"]': {
-    borderColor: "accent",
-    color: "accentStrong",
-  },
-  '&[data-status="allowed"]': {
-    color: "fg.default",
-  },
-  '&[data-status="denied"]': {
-    borderColor: "danger",
-    color: "danger",
-  },
-  '&[data-status="failed"]': {
-    borderColor: "danger",
-    color: "danger",
-  },
-})
-
-export const permissionDetailGridClass = css({
-  display: "grid",
-  gap: "8px",
-  minWidth: "0",
-})
-
-export const permissionDetailBlockClass = css({
-  display: "grid",
-  gap: "4px",
-  minWidth: "0",
-})
-
-export const permissionDetailLabelClass = css({
-  color: "fg.default",
-  fontSize: "0.78rem",
-  fontWeight: "700",
-  lineHeight: "1.4",
-})
-
-export const permissionDetailTextClass = css({
-  color: "fg.muted",
-  fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
-  fontSize: "0.84rem",
-  lineHeight: "1.55",
-  overflowWrap: "anywhere",
-  whiteSpace: "pre-wrap",
-})
-
-export const permissionDetailMonoClass = css({
-  color: "fg.default",
-  fontFamily: '"SF Mono", "Monaco", monospace',
-  fontSize: "0.8rem",
-  lineHeight: "1.55",
-  overflowWrap: "anywhere",
-  whiteSpace: "pre-wrap",
-})
-
-export const permissionActionRowClass = css({
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "8px",
-  minWidth: "0",
-})
-
-export const permissionOptionButtonClass = css({
-  display: "inline-grid",
-  gap: "1px",
-  minWidth: "112px",
-  maxWidth: "100%",
-  border: "1px solid token(colors.border)",
-  borderRadius: "6px",
-  paddingBlock: "7px",
-  paddingInline: "10px",
-  backgroundColor: "bg.panel",
-  color: "fg.default",
-  textAlign: "left",
-  _hover: {
-    backgroundColor: "bg.hover",
-  },
-  _disabled: {
-    cursor: "default",
-    opacity: "0.55",
+    fontSize: "0.94rem",
+    letterSpacing: "0.01em",
     pointerEvents: "none",
-  },
-  '&[data-intent="allow"]': {
-    borderColor: "accent",
-  },
-  '&[data-intent="reject"]': {
-    color: "danger",
-  },
-})
+  }),
 
-export const permissionOptionNameClass = css({
-  minWidth: "0",
-  fontSize: "0.84rem",
-  fontWeight: "700",
-  lineHeight: "1.35",
-  overflowWrap: "anywhere",
-})
+  historyPager: css({
+    display: "grid",
+    justifyItems: "center",
+    gap: "8px",
+    paddingBottom: "18px",
+  }),
 
-export const permissionOptionKindClass = css({
-  color: "fg.muted",
-  fontSize: "0.72rem",
-  fontWeight: "620",
-  lineHeight: "1.3",
-})
-
-export const permissionResolutionClass = css({
-  color: "fg.muted",
-  fontSize: "0.84rem",
-  lineHeight: "1.5",
-})
-
-export const permissionErrorClass = css({
-  border: "1px solid token(colors.danger)",
-  borderRadius: "6px",
-  paddingBlock: "7px",
-  paddingInline: "9px",
-  color: "danger",
-  fontSize: "0.82rem",
-  fontWeight: "620",
-  lineHeight: "1.45",
-})
-
-export const planCardClass = css({
-  display: "grid",
-  gap: "12px",
-  width: "min(100%, 760px)",
-  border: "1px solid token(colors.border)",
-  borderRadius: "8px",
-  padding: "14px",
-  backgroundColor: "surface",
-  color: "fg.default",
-})
-
-export const planHeaderClass = css({
-  display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr)",
-  alignItems: "start",
-  gap: "10px",
-  minWidth: "0",
-})
-
-export const planIconClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "28px",
-  height: "28px",
-  border: "1px solid token(colors.border)",
-  borderRadius: "6px",
-  color: "accentStrong",
-})
-
-export const planTitleGroupClass = css({
-  display: "grid",
-  gap: "2px",
-  minWidth: "0",
-})
-
-export const planTitleClass = css({
-  margin: "0",
-  color: "fg.default",
-  fontSize: "0.92rem",
-  fontWeight: "700",
-  lineHeight: "1.4",
-  overflowWrap: "anywhere",
-})
-
-export const planMetaClass = css({
-  color: "fg.muted",
-  fontSize: "0.78rem",
-  fontWeight: "560",
-  lineHeight: "1.45",
-})
-
-export const planEntryListClass = css({
-  display: "grid",
-  gap: "8px",
-  margin: "0",
-  padding: "0",
-  listStyle: "none",
-})
-
-export const planEntryItemClass = css({
-  display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr)",
-  alignItems: "start",
-  gap: "8px",
-  minWidth: "0",
-})
-
-export const planEntryStatusClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "22px",
-  height: "22px",
-  border: "1px solid token(colors.border)",
-  borderRadius: "999px",
-  color: "fg.muted",
-  '&[data-status="in_progress"]': {
-    borderColor: "accent",
-    color: "accentStrong",
-  },
-  '&[data-status="completed"]': {
+  historyLoadButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "7px",
+    minHeight: "30px",
+    border: "1px solid token(colors.border)",
+    borderRadius: "6px",
+    paddingBlock: "5px",
+    paddingInline: "11px",
+    backgroundColor: "surface",
     color: "fg.default",
-  },
-})
+    fontSize: "0.82rem",
+    fontWeight: "650",
+    lineHeight: "1.3",
+    _hover: {
+      backgroundColor: "bg.hover",
+    },
+    _disabled: {
+      cursor: "default",
+      color: "fg.muted",
+      opacity: "0.72",
+    },
+  }),
 
-export const planEntryContentClass = css({
-  display: "grid",
-  gap: "2px",
-  minWidth: "0",
-})
+  historyLoadButtonIcon: css({
+    animation: "spin 1s linear infinite",
+  }),
 
-export const planEntryTextClass = css({
-  color: "fg.default",
-  fontSize: "0.86rem",
-  fontWeight: "560",
-  lineHeight: "1.5",
-  overflowWrap: "anywhere",
-})
+  historyLoadError: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "7px",
+    maxWidth: "min(100%, 560px)",
+    border: "1px solid token(colors.danger)",
+    borderRadius: "6px",
+    paddingBlock: "6px",
+    paddingInline: "10px",
+    backgroundColor: "surface",
+    color: "danger",
+    fontSize: "0.8rem",
+    fontWeight: "620",
+    lineHeight: "1.4",
+  }),
 
-export const planEntryMetaClass = css({
-  display: "inline-flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "6px",
-  color: "fg.muted",
-  fontSize: "0.74rem",
-  fontWeight: "650",
-  lineHeight: "1.35",
-})
+  row: css({
+    paddingBottom: "16px",
+  }),
 
-export const planEmptyClass = css({
-  color: "fg.muted",
-  fontSize: "0.84rem",
-  lineHeight: "1.5",
-})
+  rowInner: css({
+    display: "flex",
+    width: "100%",
+  }),
 
-export const turnStopPillClass = css({
-  display: "inline-flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "6px",
-  maxWidth: "100%",
-  border: "1px solid token(colors.border)",
-  borderRadius: "999px",
-  paddingBlock: "5px",
-  paddingInline: "10px",
-  backgroundColor: "surface",
-  color: "fg.muted",
-  fontSize: "0.8rem",
-  fontWeight: "620",
-  lineHeight: "1.35",
-  '&[data-status="completed"]': {
+  rowColumn: css({
+    display: "grid",
+    gap: "0",
+  }),
+
+  bubbleFrame: css({
+    display: "inline-flex",
+    flexDirection: "column",
+    borderRadius: "22px",
+    border: "1px solid",
+    padding: "14px 16px",
+  }),
+
+  assistantMessage: css({
+    display: "grid",
+    width: "100%",
+    color: "fg.default",
+  }),
+
+  assistantBubble: css({
+    color: "fg.default",
+  }),
+
+  userBubble: css({
+    borderColor: "transcript.userBubble.border",
+    backgroundColor: "transcript.userBubble.end",
+    color: "fg.default",
+  }),
+
+  transcriptContent: css({
+    display: "grid",
+    gap: "10px",
+    minWidth: 0,
+  }),
+
+  attachmentCard: css({
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+    padding: "2px 0",
+  }),
+
+  attachmentHeading: css({
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: "fg.default",
+    fontSize: "0.86rem",
+    fontWeight: "680",
+    lineHeight: "1.35",
+  }),
+
+  attachmentIcon: css({
+    display: "inline-flex",
     color: "fg.muted",
-  },
-  '&[data-status="stopped"]': {
-    borderColor: "accent",
+  }),
+
+  attachmentDetail: css({
+    color: "fg.muted",
+    fontSize: "0.8rem",
+    lineHeight: "1.45",
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+  }),
+
+  toolDisclosure: css({
+    display: "grid",
+    gap: "10px",
+    width: "100%",
+  }),
+
+  toolSummary: css({
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    gap: "8px",
+    width: "100%",
+    color: "fg.muted",
+    listStyle: "none",
+    outline: "none",
+    textAlign: "left",
+    cursor: "pointer",
+    "&::marker": {
+      content: '""',
+    },
+    "&::-webkit-details-marker": {
+      display: "none",
+    },
+  }),
+
+  toolSummaryText: css({
+    color: "fg.default",
+    fontSize: "0.9rem",
+    fontWeight: "580",
+    lineHeight: "1.5",
+  }),
+
+  toolInlineMeta: css({
+    display: "inline-flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "6px",
+  }),
+
+  toolInlineSeparator: css({
+    display: "inline-flex",
+    width: "4px",
+    height: "4px",
+    flexShrink: 0,
+    borderRadius: "999px",
+    backgroundColor: "currentColor",
+    opacity: "0.55",
+  }),
+
+  toolToggleHint: css({
+    color: "fg.muted",
+    fontSize: "0.82rem",
+    lineHeight: "1.5",
+    textDecoration: "underline",
+    textUnderlineOffset: "0.18em",
+  }),
+
+  toolDetailList: css({
+    display: "grid",
+    gap: "12px",
+    margin: "0",
+    padding: "0",
+    listStyle: "none",
+  }),
+
+  toolDetailItem: css({
+    display: "grid",
+    gap: "6px",
+    paddingInlineStart: "12px",
+    listStyle: "none",
+  }),
+
+  toolDetailHeading: css({
+    color: "fg.default",
+    fontSize: "0.86rem",
+    fontWeight: "620",
+    lineHeight: "1.5",
+  }),
+
+  toolDetailText: css({
+    color: "fg.muted",
+    fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
+    fontSize: "0.84rem",
+    fontWeight: "450",
+    lineHeight: "1.6",
+    letterSpacing: "0.01em",
+    whiteSpace: "pre-wrap",
+  }),
+
+  toolDetailMono: css({
+    color: "fg.default",
+    fontFamily: '"SF Mono", "Monaco", monospace',
+    fontSize: "0.83rem",
+    lineHeight: "1.6",
+    whiteSpace: "pre-wrap",
+  }),
+
+  permissionCard: css({
+    display: "grid",
+    gap: "12px",
+    width: "min(100%, 760px)",
+    border: "1px solid token(colors.border)",
+    borderRadius: "8px",
+    padding: "14px",
+    backgroundColor: "surface",
+    color: "fg.default",
+  }),
+
+  permissionHeader: css({
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "start",
+    gap: "10px",
+    minWidth: "0",
+  }),
+
+  permissionIcon: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "28px",
+    height: "28px",
+    border: "1px solid token(colors.border)",
+    borderRadius: "6px",
     color: "accentStrong",
-  },
-  '&[data-status="failed"]': {
-    borderColor: "danger",
-    color: "danger",
-  },
-  '&[data-status="cancelled"]': {
+  }),
+
+  permissionTitleGroup: css({
+    display: "grid",
+    gap: "2px",
+    minWidth: "0",
+  }),
+
+  permissionTitle: css({
+    margin: "0",
+    color: "fg.default",
+    fontSize: "0.92rem",
+    fontWeight: "700",
+    lineHeight: "1.4",
+    overflowWrap: "anywhere",
+  }),
+
+  permissionMeta: css({
     color: "fg.muted",
-  },
-  '&[data-status="interrupted"]': {
-    borderColor: "danger",
-    borderStyle: "dashed",
+    fontSize: "0.78rem",
+    fontWeight: "560",
+    lineHeight: "1.45",
+  }),
+
+  permissionStatusBadge: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    maxWidth: "100%",
+    border: "1px solid token(colors.border)",
+    borderRadius: "999px",
+    paddingBlock: "4px",
+    paddingInline: "8px",
+    color: "fg.muted",
+    fontSize: "0.74rem",
+    fontWeight: "700",
+    lineHeight: "1.3",
+    whiteSpace: "nowrap",
+    '&[data-status="pending"]': {
+      borderColor: "accent",
+      color: "accentStrong",
+    },
+    '&[data-status="allowed"]': {
+      color: "fg.default",
+    },
+    '&[data-status="denied"]': {
+      borderColor: "danger",
+      color: "danger",
+    },
+    '&[data-status="failed"]': {
+      borderColor: "danger",
+      color: "danger",
+    },
+  }),
+
+  permissionDetailGrid: css({
+    display: "grid",
+    gap: "8px",
+    minWidth: "0",
+  }),
+
+  permissionDetailBlock: css({
+    display: "grid",
+    gap: "4px",
+    minWidth: "0",
+  }),
+
+  permissionDetailLabel: css({
+    color: "fg.default",
+    fontSize: "0.78rem",
+    fontWeight: "700",
+    lineHeight: "1.4",
+  }),
+
+  permissionDetailText: css({
+    color: "fg.muted",
+    fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
+    fontSize: "0.84rem",
+    lineHeight: "1.55",
+    overflowWrap: "anywhere",
+    whiteSpace: "pre-wrap",
+  }),
+
+  permissionDetailMono: css({
+    color: "fg.default",
+    fontFamily: '"SF Mono", "Monaco", monospace',
+    fontSize: "0.8rem",
+    lineHeight: "1.55",
+    overflowWrap: "anywhere",
+    whiteSpace: "pre-wrap",
+  }),
+
+  permissionActionRow: css({
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px",
+    minWidth: "0",
+  }),
+
+  permissionOptionButton: css({
+    display: "inline-grid",
+    gap: "1px",
+    minWidth: "112px",
+    maxWidth: "100%",
+    border: "1px solid token(colors.border)",
+    borderRadius: "6px",
+    paddingBlock: "7px",
+    paddingInline: "10px",
+    backgroundColor: "bg.panel",
+    color: "fg.default",
+    textAlign: "left",
+    _hover: {
+      backgroundColor: "bg.hover",
+    },
+    _disabled: {
+      cursor: "default",
+      opacity: "0.55",
+      pointerEvents: "none",
+    },
+    '&[data-intent="allow"]': {
+      borderColor: "accent",
+    },
+    '&[data-intent="reject"]': {
+      color: "danger",
+    },
+  }),
+
+  permissionOptionName: css({
+    minWidth: "0",
+    fontSize: "0.84rem",
+    fontWeight: "700",
+    lineHeight: "1.35",
+    overflowWrap: "anywhere",
+  }),
+
+  permissionOptionKind: css({
+    color: "fg.muted",
+    fontSize: "0.72rem",
+    fontWeight: "620",
+    lineHeight: "1.3",
+  }),
+
+  permissionResolution: css({
+    color: "fg.muted",
+    fontSize: "0.84rem",
+    lineHeight: "1.5",
+  }),
+
+  permissionError: css({
+    border: "1px solid token(colors.danger)",
+    borderRadius: "6px",
+    paddingBlock: "7px",
+    paddingInline: "9px",
     color: "danger",
-  },
-})
+    fontSize: "0.82rem",
+    fontWeight: "620",
+    lineHeight: "1.45",
+  }),
 
-export const turnStopIconClass = css({
-  display: "inline-flex",
-  alignItems: "center",
-  flexShrink: "0",
-})
+  planCard: css({
+    display: "grid",
+    gap: "12px",
+    width: "min(100%, 760px)",
+    border: "1px solid token(colors.border)",
+    borderRadius: "8px",
+    padding: "14px",
+    backgroundColor: "surface",
+    color: "fg.default",
+  }),
 
-export const turnStopTitleClass = css({
-  color: "fg.default",
-  fontWeight: "700",
-})
+  planHeader: css({
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    alignItems: "start",
+    gap: "10px",
+    minWidth: "0",
+  }),
 
-export const turnStopMetaClass = css({
-  minWidth: "0",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-})
+  planIcon: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "28px",
+    height: "28px",
+    border: "1px solid token(colors.border)",
+    borderRadius: "6px",
+    color: "accentStrong",
+  }),
+
+  planTitleGroup: css({
+    display: "grid",
+    gap: "2px",
+    minWidth: "0",
+  }),
+
+  planTitle: css({
+    margin: "0",
+    color: "fg.default",
+    fontSize: "0.92rem",
+    fontWeight: "700",
+    lineHeight: "1.4",
+    overflowWrap: "anywhere",
+  }),
+
+  planMeta: css({
+    color: "fg.muted",
+    fontSize: "0.78rem",
+    fontWeight: "560",
+    lineHeight: "1.45",
+  }),
+
+  planEntryList: css({
+    display: "grid",
+    gap: "8px",
+    margin: "0",
+    padding: "0",
+    listStyle: "none",
+  }),
+
+  planEntryItem: css({
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    alignItems: "start",
+    gap: "8px",
+    minWidth: "0",
+  }),
+
+  planEntryStatus: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "22px",
+    height: "22px",
+    border: "1px solid token(colors.border)",
+    borderRadius: "999px",
+    color: "fg.muted",
+    '&[data-status="in_progress"]': {
+      borderColor: "accent",
+      color: "accentStrong",
+    },
+    '&[data-status="completed"]': {
+      color: "fg.default",
+    },
+  }),
+
+  planEntryContent: css({
+    display: "grid",
+    gap: "2px",
+    minWidth: "0",
+  }),
+
+  planEntryText: css({
+    color: "fg.default",
+    fontSize: "0.86rem",
+    fontWeight: "560",
+    lineHeight: "1.5",
+    overflowWrap: "anywhere",
+  }),
+
+  planEntryMeta: css({
+    display: "inline-flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "6px",
+    color: "fg.muted",
+    fontSize: "0.74rem",
+    fontWeight: "650",
+    lineHeight: "1.35",
+  }),
+
+  planEmpty: css({
+    color: "fg.muted",
+    fontSize: "0.84rem",
+    lineHeight: "1.5",
+  }),
+
+  turnStopPill: css({
+    display: "inline-flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "6px",
+    maxWidth: "100%",
+    border: "1px solid token(colors.border)",
+    borderRadius: "999px",
+    paddingBlock: "5px",
+    paddingInline: "10px",
+    backgroundColor: "surface",
+    color: "fg.muted",
+    fontSize: "0.8rem",
+    fontWeight: "620",
+    lineHeight: "1.35",
+    '&[data-status="completed"]': {
+      color: "fg.muted",
+    },
+    '&[data-status="stopped"]': {
+      borderColor: "accent",
+      color: "accentStrong",
+    },
+    '&[data-status="failed"]': {
+      borderColor: "danger",
+      color: "danger",
+    },
+    '&[data-status="cancelled"]': {
+      color: "fg.muted",
+    },
+    '&[data-status="interrupted"]': {
+      borderColor: "danger",
+      borderStyle: "dashed",
+      color: "danger",
+    },
+  }),
+
+  turnStopIcon: css({
+    display: "inline-flex",
+    alignItems: "center",
+    flexShrink: "0",
+  }),
+
+  turnStopTitle: css({
+    color: "fg.default",
+    fontWeight: "700",
+  }),
+
+  turnStopMeta: css({
+    minWidth: "0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  }),
+}
 
 export const BODY_FONT = '450 15px "SF Pro Text", "Segoe UI", sans-serif'
 export const BODY_LINE_HEIGHT = 24

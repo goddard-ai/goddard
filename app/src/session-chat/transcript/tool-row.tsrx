@@ -4,22 +4,7 @@ import type {
   SessionTranscriptToolStatus,
 } from "~/sessions/models.ts"
 import { buildToolDiffPreview } from "./layout.ts"
-import {
-  rowClass,
-  rowColumnClass,
-  rowInnerClass,
-  toolDisclosureClass,
-  toolDetailHeadingClass,
-  toolInlineMetaClass,
-  toolInlineSeparatorClass,
-  toolDetailItemClass,
-  toolDetailListClass,
-  toolDetailMonoClass,
-  toolDetailTextClass,
-  toolSummaryClass,
-  toolSummaryTextClass,
-  toolToggleHintClass,
-} from "./transcript.style.ts"
+import styles from "./transcript.style.ts"
 
 function formatToolKindLabel(toolKind: SessionTranscriptToolCall["toolKind"]) {
   return toolKind === "switch_mode"
@@ -72,7 +57,7 @@ component ToolMetaParts(props: {
       <span
         key={`${props.keyPrefix}:separator:${index}`}
         aria-hidden="true"
-        class={toolInlineSeparatorClass}
+        class={styles.toolInlineSeparator}
       />
     }
 
@@ -86,23 +71,23 @@ component ToolContentDetail(props: {
   content: SessionTranscriptToolContent;
 }) {
   if (props.content.type === "content") {
-    <div class={toolDetailTextClass}>
+    <div class={styles.toolDetailText}>
       {props.content.text?.trim() || "Structured tool output."}
     </div>
   } else if (props.content.type === "diff") {
-    <div class={toolDetailListClass}>
+    <div class={styles.toolDetailList}>
       if (props.content.path) {
-        <div class={toolDetailMonoClass}>
+        <div class={styles.toolDetailMono}>
           {props.content.path}
         </div>
       }
 
-      <div class={toolDetailMonoClass}>
+      <div class={styles.toolDetailMono}>
         {buildToolDiffPreview(props.content)}
       </div>
     </div>
   } else {
-    <div class={toolDetailMonoClass}>
+    <div class={styles.toolDetailMono}>
       {"Terminal session "}
       {props.content.terminalId}
     </div>
@@ -116,9 +101,12 @@ component ToolLocationsList(props: {
     return
   }
 
-  <div class={toolDetailListClass}>
+  <div class={styles.toolDetailList}>
     for (const location of props.locations; index index) {
-      <div class={toolDetailMonoClass} key={`${location.path}:${location.line ?? "none"}:${index}`}>
+      <div
+        class={styles.toolDetailMono}
+        key={`${location.path}:${location.line ?? "none"}:${index}`}
+      >
         {location.path}
         {location.line != null ? `:${location.line}` : ""}
       </div>
@@ -135,24 +123,24 @@ export component ToolTranscriptRow(props: {
   const statusSummary = buildToolStatusSummary(props.toolCalls)
   const summaryMetaParts = statusSummary ? [...summaryParts, statusSummary] : summaryParts
 
-  <article class={rowClass}>
-    <div class={rowInnerClass} style={{ justifyContent: "flex-start" }}>
-      <div class={rowColumnClass} style={{ width: "100%" }}>
-        <details class={toolDisclosureClass}>
-          <summary class={toolSummaryClass}>
-            <span class={toolSummaryTextClass}>
-              <span class={toolInlineMetaClass}>
+  <article class={styles.row}>
+    <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
+      <div class={styles.rowColumn} style={{ width: "100%" }}>
+        <details class={styles.toolDisclosure}>
+          <summary class={styles.toolSummary}>
+            <span class={styles.toolSummaryText}>
+              <span class={styles.toolInlineMeta}>
                 <ToolMetaParts parts={summaryMetaParts} keyPrefix={`${props.groupId}:summary`} />
               </span>
             </span>
-            <span class={toolToggleHintClass}>{"Details"}</span>
+            <span class={styles.toolToggleHint}>{"Details"}</span>
           </summary>
-          <ol class={toolDetailListClass}>
+          <ol class={styles.toolDetailList}>
             for (const toolCall of props.toolCalls) {
-              <li class={toolDetailItemClass} key={`${props.groupId}:${toolCall.id}`}>
+              <li class={styles.toolDetailItem} key={`${props.groupId}:${toolCall.id}`}>
                 <article>
-                  <div class={toolDetailHeadingClass}>
-                    <span class={toolInlineMetaClass}>
+                  <div class={styles.toolDetailHeading}>
+                    <span class={styles.toolInlineMeta}>
                       <ToolMetaParts
                         parts={[
                           toolCall.title,
@@ -170,7 +158,7 @@ export component ToolTranscriptRow(props: {
 
                   <ToolLocationsList locations={toolCall.locations} />
                   if (toolCall.content.length === 0 && toolCall.locations.length === 0) {
-                    <div class={toolDetailTextClass}>
+                    <div class={styles.toolDetailText}>
                       {"No tool output was attached to this call."}
                     </div>
                   }

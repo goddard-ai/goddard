@@ -12,17 +12,11 @@ import type {
 } from "~/sessions/models.ts"
 import { MessageList, type MessageListRow } from "./message-list.tsrx"
 import { estimateTranscriptRowHeight } from "./transcript/layout.ts"
-import {
+import styles, {
   BODY_LINE_HEIGHT,
   DEFAULT_ROW_HEIGHT,
-  loadingStateClass,
   ROW_GAP,
-  historyLoadButtonClass,
-  historyLoadButtonIconClass,
-  historyLoadErrorClass,
-  historyPagerClass,
   TURN_STOP_ROW_HEIGHT,
-  transcriptViewportClass,
   VIRTUAL_OVERSCAN_PX,
 } from "./transcript/transcript.style.ts"
 import { PermissionRequestTranscriptRow } from "./transcript/permission-request-row.tsrx"
@@ -164,10 +158,10 @@ component OlderHistoryPager(props: {
     return
   }
 
-  <div class={historyPagerClass}>
+  <div class={styles.historyPager}>
     if (props.olderHistory.canLoad || props.olderHistory.loading) {
       <button
-        class={historyLoadButtonClass}
+        class={styles.historyLoadButton}
         disabled={props.olderHistory.loading}
         type="button"
         onClick={() => {
@@ -175,7 +169,7 @@ component OlderHistoryPager(props: {
         }}
       >
         if (props.olderHistory.loading) {
-          <LoaderCircle class={historyLoadButtonIconClass} size={14} strokeWidth={2.2} />
+          <LoaderCircle class={styles.historyLoadButtonIcon} size={14} strokeWidth={2.2} />
           {"Loading older messages"}
         } else {
           <ChevronUp size={14} strokeWidth={2.2} />
@@ -184,7 +178,7 @@ component OlderHistoryPager(props: {
       </button>
     }
     if (props.olderHistory.error) {
-      <div class={historyLoadErrorClass} role="alert">
+      <div class={styles.historyLoadError} role="alert">
         <AlertCircle size={14} strokeWidth={2.2} />
         <span>{props.olderHistory.error}</span>
       </div>
@@ -202,7 +196,7 @@ export component Transcript(props: TranscriptProps) {
     ? <><OlderHistoryPager olderHistory={props.olderHistory} /></>
     : undefined
 
-  <div class={cx(transcriptViewportClass, props.class)}>
+  <div class={cx(styles.transcriptViewport, props.class)}>
     <MessageList
       defaultRowHeight={DEFAULT_ROW_HEIGHT}
       estimateRowHeight={(message, _index, viewportWidth) => message.kind === "toolGroup"
@@ -215,7 +209,7 @@ export component Transcript(props: TranscriptProps) {
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
       loadingFallback={<>
-        <div class={loadingStateClass}>
+        <div class={styles.loadingState}>
           {"Preparing transcript layout..."}
         </div>
       </>}
