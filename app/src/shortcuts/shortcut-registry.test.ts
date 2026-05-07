@@ -295,6 +295,26 @@ test("session input context lets launch-dialog selectors override the global pal
   }
 })
 
+test("session input commands require active session input context", () => {
+  const { registry, cleanup } = createTestRegistry()
+
+  try {
+    commandContext.sessionInputHasProjectSelector.value = true
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
+      false,
+    )
+
+    commandContext.sessionInputActive.value = true
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
+      true,
+    )
+  } finally {
+    cleanup()
+  }
+})
+
 test("addCommandBinding updates overrides for commands without built-in defaults", async () => {
   const { registry, cleanup } = createTestRegistry()
 

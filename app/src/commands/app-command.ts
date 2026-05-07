@@ -113,31 +113,31 @@ export const AppCommand = defineAppCommands({
   sessionInput: {
     openProjectSelector: {
       label: "Session Input: Open Project Selector",
-      when: "sessionInput.hasProjectSelector",
+      when: "sessionInput.isActive && sessionInput.hasProjectSelector",
     },
     openAdapterSelector: {
       label: "Session Input: Open Adapter Selector",
-      when: "sessionInput.hasAdapterSelector",
+      when: "sessionInput.isActive && sessionInput.hasAdapterSelector",
     },
     openLocationSelector: {
       label: "Session Input: Open Launch Location Selector",
-      when: "sessionInput.hasLocationSelector",
+      when: "sessionInput.isActive && sessionInput.hasLocationSelector",
     },
     openBranchSelector: {
       label: "Session Input: Open Branch Selector",
-      when: "sessionInput.hasBranchSelector",
+      when: "sessionInput.isActive && sessionInput.hasBranchSelector",
     },
     openModelSelector: {
       label: "Session Input: Open Model Selector",
-      when: "sessionInput.hasModelSelector",
+      when: "sessionInput.isActive && sessionInput.hasModelSelector",
     },
     openThinkingLevelSelector: {
       label: "Session Input: Open Thinking Level Selector",
-      when: "sessionInput.hasThinkingLevel",
+      when: "sessionInput.isActive && sessionInput.hasThinkingLevel",
     },
     submit: {
       label: "Session Input: Submit",
-      when: "sessionInput.canSubmit",
+      when: "sessionInput.isActive && sessionInput.canSubmit",
     },
   },
 })

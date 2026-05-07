@@ -24,17 +24,14 @@ component SessionLaunchDialog(props: {
   const activeProjectPath = projectContext.activeProjectPath
   const isDialogOpen = props.dialog.open
   const projects = projectRegistry.projectList
-  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0 && isDialogOpen
+  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
-    form.draftLocation.value === "worktree" &&
-      (form.launchPreview.value?.branches.length ?? 0) > 0 &&
-      isDialogOpen
-  const hasLocationSelector = form.launchPreview.value !== null && isDialogOpen
-  const hasModelSelector =
-    (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0 && isDialogOpen
-  const hasProjectSelector = projects.length > 0 && isDialogOpen
-  const hasThinkingLevel = form.thinkingOption.value !== null && isDialogOpen
-  const canSubmit = form.canSubmit.value && isDialogOpen
+    form.draftLocation.value === "worktree" && (form.launchPreview.value?.branches.length ?? 0) > 0
+  const hasLocationSelector = form.launchPreview.value !== null
+  const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
+  const hasProjectSelector = projects.length > 0
+  const hasThinkingLevel = form.thinkingOption.value !== null
+  const canSubmit = form.canSubmit.value
 
   async function launchSession() {
     const sessionInput = form.sessionInput.value
@@ -77,62 +74,6 @@ component SessionLaunchDialog(props: {
     }
   }
 
-  function openProjectSelector() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    form.setOpenPicker("project")
-  }
-
-  function openAdapterSelector() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    form.setOpenPicker("adapter")
-  }
-
-  function openLocationSelector() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    form.setOpenPicker("location")
-  }
-
-  function openBranchSelector() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    form.setOpenPicker("branch")
-  }
-
-  function openModelSelector() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    form.setOpenPicker("model")
-  }
-
-  function openThinkingLevelSelector() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    form.setOpenPicker("thinking")
-  }
-
-  function submitSessionLaunch() {
-    if (!isDialogOpen) {
-      return
-    }
-
-    void launchSession()
-  }
-
   useEffect(() => {
     if (isDialogOpen) {
       form.reset(activeProjectPath)
@@ -170,13 +111,27 @@ component SessionLaunchDialog(props: {
     isDialogOpen,
   ])
 
-  useAppCommand(AppCommand.sessionInput.openProjectSelector, openProjectSelector)
-  useAppCommand(AppCommand.sessionInput.openAdapterSelector, openAdapterSelector)
-  useAppCommand(AppCommand.sessionInput.openLocationSelector, openLocationSelector)
-  useAppCommand(AppCommand.sessionInput.openBranchSelector, openBranchSelector)
-  useAppCommand(AppCommand.sessionInput.openModelSelector, openModelSelector)
-  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, openThinkingLevelSelector)
-  useAppCommand(AppCommand.sessionInput.submit, submitSessionLaunch)
+  useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
+    form.setOpenPicker("project")
+  })
+  useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
+    form.setOpenPicker("adapter")
+  })
+  useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
+    form.setOpenPicker("location")
+  })
+  useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
+    form.setOpenPicker("branch")
+  })
+  useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
+    form.setOpenPicker("model")
+  })
+  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
+    form.setOpenPicker("thinking")
+  })
+  useAppCommand(AppCommand.sessionInput.submit, () => {
+    void launchSession()
+  })
 
   <DialogPortal>
     <Dialog.Backdrop class={styles.backdrop} />
