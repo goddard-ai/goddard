@@ -30,6 +30,7 @@
   - Keep event logic close to the event target. Do not hoist single-use UI event handlers into shell-level components unless coordination outside the local subtree requires it.
   - Prefer derived render values over sync effects when the next value can be computed during render.
   - TSRX allows Preact hooks anywhere in the component render scope, including after early returns, inside `if`/`for` blocks, and inside JSX children. Keep hook calls near their natural use site instead of hoisting them solely for React-style hook ordering.
+  - Avoid `<Suspense>` elements in TSRX components. Prefer TSRX try-pending blocks for pending UI.
   - When a dialog component accepts `dialog: UseDialogReturn`, treat it as content rendered under a parent `Dialog.RootProvider`; do not nest `Dialog.Root` inside that component.
   - Keep custom Preact hooks for state management local to the component that uses them.
   - Do not extract single-use state hooks into shared modules.
