@@ -33,6 +33,8 @@
 ## Code Style And Patch Discipline
 
 - Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task requires refactoring.
+- Do not add code until it is needed by the current change. Avoid speculative helpers, abstractions, options, and extension points.
+- Do not export a symbol unless the current change imports it from another module. Keep single-module implementation details private.
 - Prefer readability and local reasoning over new abstractions.
 - Avoid extracting local helpers that are only used once; prefer inline logic until reuse or a clear readability win justifies abstraction.
 - Name helper functions like actions or questions instead of variables. Prefer clear prefixes such as `find`, `build`, `resolve`, `parse`, `create`, `is`, `has`, or `get`; avoid a `From` infix unless needed to distinguish two otherwise identical names.
