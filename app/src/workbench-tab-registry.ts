@@ -19,7 +19,7 @@ function PlaceholderWorkbenchTab() {
 /** Runtime registry for every non-primary workbench tab component. */
 export const workbenchTabComponents = {
   inbox: {
-    component: PlaceholderWorkbenchTab,
+    component: lazy(() => import("~/inbox/page.tsrx")),
     icon: "tabs/inbox",
   },
   projects: {
