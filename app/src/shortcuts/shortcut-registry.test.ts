@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test"
+import { Fragment, h, render } from "preact"
 
-import { AppCommand, onAppCommand } from "~/commands/app-command.ts"
+import { AppCommand, onAppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
-import { registerActiveCommandLayer } from "~/commands/command-layer.tsrx"
+import { CommandLayerProvider } from "~/commands/command-layer.tsrx"
 import { registerModalStackEntry } from "~/lib/modal-stack.ts"
 import { ShortcutRegistry } from "./shortcut-registry.ts"
 
@@ -38,6 +39,41 @@ function dispatchKeydown(target: EventTarget, init: KeyboardEventInit) {
       cancelable: true,
       ...init,
     }),
+  )
+}
+
+async function flushRenderEffects() {
+  await Promise.resolve()
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, 0)
+  })
+}
+
+function TestCommandHandler(props: { command: AppCommand; onMatch: (match?: unknown) => void }) {
+  useAppCommand(props.command, props.onMatch)
+  return null
+}
+
+function TestLayeredCommands(props: {
+  dialogActive: boolean
+  onPalette: (match?: unknown) => void
+  onProject: (match?: unknown) => void
+}) {
+  return h(
+    Fragment,
+    {},
+    h(TestCommandHandler, {
+      command: AppCommand.navigation.openCommandPalette,
+      onMatch: props.onPalette,
+    }),
+    h(
+      CommandLayerProvider,
+      { active: props.dialogActive },
+      h(TestCommandHandler, {
+        command: AppCommand.sessionInput.openProjectSelector,
+        onMatch: props.onProject,
+      }),
+    ),
   )
 }
 
@@ -255,18 +291,27 @@ test("active shortcut scopes drive availability checks", () => {
   }
 })
 
-test("session input context lets launch-dialog selectors override the global palette binding", () => {
+test("session input context lets launch-dialog selectors override the global palette binding", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const paletteMatches: unknown[] = []
   const projectMatches: unknown[] = []
-
-  const stopPalette = onAppCommand(AppCommand.navigation.openCommandPalette, (match) => {
-    paletteMatches.push(match)
-  })
-  let stopProject: (() => void) | null = null
-  let unregisterDialogLayer: (() => void) | null = null
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
 
   try {
+    render(
+      h(TestLayeredCommands, {
+        dialogActive: false,
+        onPalette(match) {
+          paletteMatches.push(match)
+        },
+        onProject(match) {
+          projectMatches.push(match)
+        },
+      }),
+      container,
+    )
+    await flushRenderEffects()
     registry.applyKeymapSnapshot("goddard", {})
 
     dispatchKeydown(runtimeDocument, {
@@ -278,15 +323,19 @@ test("session input context lets launch-dialog selectors override the global pal
     expect(paletteMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(0)
 
-    const dialogLayerId = "shortcut-registry-test:session-dialog"
-    unregisterDialogLayer = registerActiveCommandLayer(dialogLayerId)
-    stopProject = onAppCommand(
-      AppCommand.sessionInput.openProjectSelector,
-      (match) => {
-        projectMatches.push(match)
-      },
-      { layerId: dialogLayerId },
+    render(
+      h(TestLayeredCommands, {
+        dialogActive: true,
+        onPalette(match) {
+          paletteMatches.push(match)
+        },
+        onProject(match) {
+          projectMatches.push(match)
+        },
+      }),
+      container,
     )
+    await flushRenderEffects()
     commandContext.sessionInputHasProjectSelector.value = true
 
     dispatchKeydown(runtimeDocument, {
@@ -298,17 +347,15 @@ test("session input context lets launch-dialog selectors override the global pal
     expect(paletteMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(1)
   } finally {
-    unregisterDialogLayer?.()
-    stopProject?.()
-    stopPalette()
+    render(null, container)
     cleanup()
   }
 })
 
-test("session input commands require a handler in the active command layer", () => {
+test("session input commands require a handler in the active command layer", async () => {
   const { registry, cleanup } = createTestRegistry()
-  let unregisterDialogLayer: (() => void) | null = null
-  let stopProject: (() => void) | null = null
+  const container = document.createElement("div")
+  document.body.append(container)
 
   try {
     commandContext.sessionInputHasProjectSelector.value = true
@@ -317,30 +364,63 @@ test("session input commands require a handler in the active command layer", () 
       false,
     )
 
-    stopProject = onAppCommand(AppCommand.sessionInput.openProjectSelector, () => {})
+    render(
+      h(TestCommandHandler, {
+        command: AppCommand.sessionInput.openProjectSelector,
+        onMatch() {},
+      }),
+      container,
+    )
+    await flushRenderEffects()
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
 
-    const dialogLayerId = "shortcut-registry-test:plain-dialog"
-    unregisterDialogLayer = registerActiveCommandLayer(dialogLayerId)
+    render(
+      h(
+        Fragment,
+        {},
+        h(TestCommandHandler, {
+          command: AppCommand.sessionInput.openProjectSelector,
+          onMatch() {},
+        }),
+        h(CommandLayerProvider, { active: true }, null),
+      ),
+      container,
+    )
+    await flushRenderEffects()
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       false,
     )
 
-    stopProject()
-    stopProject = onAppCommand(AppCommand.sessionInput.openProjectSelector, () => {}, {
-      layerId: dialogLayerId,
-    })
+    render(
+      h(
+        Fragment,
+        {},
+        h(TestCommandHandler, {
+          command: AppCommand.sessionInput.openProjectSelector,
+          onMatch() {},
+        }),
+        h(
+          CommandLayerProvider,
+          { active: true },
+          h(TestCommandHandler, {
+            command: AppCommand.sessionInput.openProjectSelector,
+            onMatch() {},
+          }),
+        ),
+      ),
+      container,
+    )
+    await flushRenderEffects()
 
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
   } finally {
-    stopProject?.()
-    unregisterDialogLayer?.()
+    render(null, container)
     cleanup()
   }
 })

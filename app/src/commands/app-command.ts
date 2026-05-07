@@ -1,21 +1,16 @@
 import type { RunnableInput, ShortcutMatch } from "powerkeys"
 import { listen, SigmaTarget, useListener } from "preact-sigma"
-import { useEffect } from "preact/hooks"
+import { useLayoutEffect } from "preact/hooks"
 import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
-import {
-  hasActiveCommandLayerHandler,
-  isCommandLayerActive,
-  registerCommandLayerHandler,
-  rootCommandLayerId,
-  useCommandLayerId,
-} from "./command-layer.tsrx"
+import { useCommandLayerActive } from "./command-layer.tsrx"
 
 /** Event map for command invocations; event names are generated app command ids. */
 type AppCommandEvents = Record<string, ShortcutMatch | undefined>
 
 const appCommandBus = new SigmaTarget<AppCommandEvents>()
+const appCommandHandlerCounts = new Map<AppCommandId, number>()
 
 type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
@@ -57,7 +52,7 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
       const id = `${namespaceKey as string}.${commandKey as string}`
       return Object.assign(
         function (match?: ShortcutMatch) {
-          if (!hasActiveCommandLayerHandler(id as AppCommandId)) {
+          if (!hasActiveAppCommandHandler(id as AppCommandId)) {
             return
           }
 
@@ -163,18 +158,31 @@ export const appCommandList = Object.values(AppCommand).flatMap(
   (commands) => Object.values(commands) as AppCommand[],
 )
 
-export function onAppCommand(
-  command: AppCommand,
-  listener: (match?: ShortcutMatch) => void,
-  options?: { layerId?: string },
-) {
-  const layerId = options?.layerId ?? rootCommandLayerId
-  const unregisterHandler = registerCommandLayerHandler(layerId, command.id as AppCommandId)
-  const stopListening = listen(appCommandBus, command.id, (match) => {
-    if (isCommandLayerActive(layerId)) {
-      listener(match)
+function hasActiveAppCommandHandler(commandId: AppCommandId) {
+  return (appCommandHandlerCounts.get(commandId) ?? 0) > 0
+}
+
+function registerActiveAppCommandHandler(commandId: AppCommandId) {
+  appCommandHandlerCounts.set(commandId, (appCommandHandlerCounts.get(commandId) ?? 0) + 1)
+
+  return () => {
+    const nextCount = (appCommandHandlerCounts.get(commandId) ?? 0) - 1
+
+    if (nextCount > 0) {
+      appCommandHandlerCounts.set(commandId, nextCount)
+    } else {
+      appCommandHandlerCounts.delete(commandId)
     }
-  })
+  }
+}
+
+export function isAppCommandHandled(commandId: AppCommandId) {
+  return hasActiveAppCommandHandler(commandId)
+}
+
+export function onAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
+  const unregisterHandler = registerActiveAppCommandHandler(command.id as AppCommandId)
+  const stopListening = listen(appCommandBus, command.id, listener)
 
   return () => {
     stopListening()
@@ -187,23 +195,21 @@ export function useAppCommand(
   listener: (match?: ShortcutMatch) => void,
   options?: {
     active?: boolean
-    layerId?: string
   },
 ) {
-  const contextLayerId = useCommandLayerId()
-  const layerId = options?.layerId ?? contextLayerId
-  const active = options?.active ?? true
+  const layerActive = useCommandLayerActive()
+  const active = (options?.active ?? true) && layerActive
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!active) {
       return
     }
 
-    return registerCommandLayerHandler(layerId, command.id as AppCommandId)
-  }, [active, command.id, layerId])
+    return registerActiveAppCommandHandler(command.id as AppCommandId)
+  }, [active, command.id])
 
   useListener(appCommandBus, command.id, (match) => {
-    if (active && isCommandLayerActive(layerId)) {
+    if (active) {
       listener(match)
     }
   })

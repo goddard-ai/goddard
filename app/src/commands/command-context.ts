@@ -1,11 +1,11 @@
 import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
+import { isAppCommandHandled } from "~/commands/app-command.ts"
 import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
 import type { NavigationItemId } from "~/navigation.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
-import { hasActiveCommandLayerHandler } from "./command-layer.tsrx"
 
 const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchTabKind>("main")
@@ -68,7 +68,7 @@ export function isCommandAvailable(runtime: ShortcutRuntime, input: RunnableInpu
 
   const commandId = "id" in input ? (input.id as AppCommandId) : null
 
-  if (commandId && !hasActiveCommandLayerHandler(commandId)) {
+  if (commandId && !isAppCommandHandled(commandId)) {
     return false
   }
 
