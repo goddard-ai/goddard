@@ -148,7 +148,8 @@ export function createConfigManager() {
 
       onChange()
     }, WATCH_ROOT_DISCOVERY_PROBE_MS)
-    state.rootDiscoveryProbe.unref?.()
+
+    state.rootDiscoveryProbe.unref()
   }
 
   function shouldHandleWatchEvent(
