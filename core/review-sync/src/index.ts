@@ -18,4 +18,5 @@ export type {
   StartReviewSyncInput,
   StatusReviewSyncInput,
   WatchReviewSyncInput,
+  WatchSyncReadyReason,
 } from "./types.ts"

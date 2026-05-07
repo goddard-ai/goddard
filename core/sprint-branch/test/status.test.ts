@@ -8,8 +8,10 @@ import {
   createSprintRepo,
   diagnosticCodes,
   git,
+  pathExists,
   readState,
   runCli,
+  writeSprintLock,
   writeState,
 } from "./support"
 
@@ -109,6 +111,30 @@ describe("sprint-branch status", () => {
     expect(status.ok).toBe(false)
     expect(status.workingTree.clean).toBe(false)
     expect(diagnosticCodes(status)).toContain("dirty_approved_worktree")
+  })
+
+  test("removes stale sprint locks without blocking status", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+    })
+    const lockPath = await writeSprintLock(repo, "example", {
+      command: "start",
+      createdAt: "1970-01-01T00:00:00.000Z",
+      pid: process.pid,
+    })
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      diagnostics: Array<{ code: string }>
+    }
+
+    expect(result.exitCode).toBe(0)
+    expect(status.ok).toBe(true)
+    expect(diagnosticCodes(status)).toContain("stale_lock_removed")
+    expect(await pathExists(lockPath)).toBe(false)
   })
 
   // Branch state is canonical, but active task files are the human-readable recovery surface.

@@ -17,6 +17,7 @@ import {
   git,
   runCli,
   spawnCli,
+  writeSprintLock,
 } from "./support"
 
 type SyncOutput = SprintSyncReport & {
@@ -122,6 +123,152 @@ describe("sprint-branch sync", () => {
     expect(sync.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "sprint_selection_required",
     )
+  })
+
+  test("waits for a live sprint lock before initial watch", async () => {
+    const { repo, reviewWorktree } = await createSprintSyncFixture()
+    const lockPath = await writeSprintLock(repo, "example", { command: "start" })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort("sprint sync test timeout"), 5000)
+    const waiting = createDeferred<void>()
+    const watching = createDeferred<void>()
+    let waitingResolved = false
+    let watchingResolved = false
+    const syncPromise = runSprintSync({
+      cwd: reviewWorktree,
+      sprint: "example",
+      signal: controller.signal,
+      onResult: async (result) => {
+        if (result.message.includes("Waiting for sprint branch operation")) {
+          waitingResolved = true
+          waiting.resolve()
+        }
+        if (result.command === "watch" && result.reviewBranch) {
+          watchingResolved = true
+          watching.resolve()
+          controller.abort()
+        }
+      },
+    })
+
+    try {
+      await Promise.race([
+        waiting.promise,
+        syncPromise.then((sync) => {
+          if (!waitingResolved) {
+            throw new Error(`sync stopped before waiting: ${sync.reviewSync?.message}`)
+          }
+        }),
+      ])
+      expect(await currentBranch(reviewWorktree)).not.toBe("review-sync/sprint/example/review")
+
+      await fs.rm(lockPath, { force: true })
+      await Promise.race([
+        watching.promise,
+        syncPromise.then((sync) => {
+          if (!watchingResolved) {
+            throw new Error(`sync stopped before watching: ${sync.reviewSync?.message}`)
+          }
+        }),
+      ])
+      const sync = await syncPromise
+
+      expect(sync.ok).toBe(true)
+      expect(sync.reviewSync?.command).toBe("watch")
+      expect(sync.reviewSync?.status).toBe("paused")
+      expect(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")).toBe(
+        "agent review work\n",
+      )
+    } finally {
+      clearTimeout(timeout)
+      controller.abort()
+      await fs.rm(lockPath, { force: true })
+    }
+  })
+
+  test("defers watch-triggered sync while a sprint lock is live", async () => {
+    const { repo, reviewWorktree } = await createSprintSyncFixture()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort("sprint sync test timeout"), 5000)
+    const watching = createDeferred<void>()
+    const waiting = createDeferred<void>()
+    const synced = createDeferred<void>()
+    let watchingResolved = false
+    let waitingResolved = false
+    let syncedResolved = false
+    const syncPromise = runSprintSync({
+      cwd: reviewWorktree,
+      sprint: "example",
+      signal: controller.signal,
+      onResult: async (result) => {
+        if (result.command === "watch" && result.reviewBranch && !watchingResolved) {
+          watchingResolved = true
+          watching.resolve()
+        }
+        if (result.message.includes("Waiting for sprint branch operation") && !waitingResolved) {
+          waitingResolved = true
+          waiting.resolve()
+        }
+        if (result.command === "sync" && result.status === "ok" && !syncedResolved) {
+          syncedResolved = true
+          synced.resolve()
+          controller.abort()
+        }
+      },
+    })
+
+    let lockPath: string | null = null
+    try {
+      await Promise.race([
+        watching.promise,
+        syncPromise.then((sync) => {
+          if (!watchingResolved) {
+            throw new Error(`sync stopped before watching: ${sync.reviewSync?.message}`)
+          }
+        }),
+      ])
+      expect(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")).toBe(
+        "agent review work\n",
+      )
+
+      lockPath = await writeSprintLock(repo, "example", { command: "approve" })
+      await fs.writeFile(path.join(repo, "feature.txt"), "agent changed while locked\n")
+      await Promise.race([
+        waiting.promise,
+        syncPromise.then((sync) => {
+          if (!waitingResolved) {
+            throw new Error(`sync stopped before waiting: ${sync.reviewSync?.message}`)
+          }
+        }),
+      ])
+      await Bun.sleep(250)
+      expect(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")).toBe(
+        "agent review work\n",
+      )
+
+      await fs.rm(lockPath, { force: true })
+      lockPath = null
+      await Promise.race([
+        synced.promise,
+        syncPromise.then((sync) => {
+          if (!syncedResolved) {
+            throw new Error(`sync stopped before syncing: ${sync.reviewSync?.message}`)
+          }
+        }),
+      ])
+      const sync = await syncPromise
+
+      expect(sync.ok).toBe(true)
+      expect(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")).toBe(
+        "agent changed while locked\n",
+      )
+    } finally {
+      clearTimeout(timeout)
+      controller.abort()
+      if (lockPath) {
+        await fs.rm(lockPath, { force: true })
+      }
+    }
   })
 
   test("stop-sync stops a sync process started in the same working directory", async () => {

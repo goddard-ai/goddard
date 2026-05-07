@@ -11,6 +11,9 @@ export type ReviewSyncCommand =
 /** Stable top-level status values returned to callers. */
 export type ReviewSyncStatus = "ok" | "rejected-human-patch" | "paused" | "error"
 
+/** Watch phases where callers may need to delay a mutating refresh or sync. */
+export type WatchSyncReadyReason = "start" | "sync" | "branch-ref-refresh"
+
 /** Last-sync statuses stored in durable session state. */
 export type LastSyncStatus = "synced" | "rejected-human-patch" | "paused" | "error"
 
@@ -53,6 +56,7 @@ export type WatchReviewSyncInput = ReviewSyncWorktreeInput & {
   signal?: AbortSignal
   verbose?: boolean
   onResult?: (result: ReviewSyncResult) => void | Promise<void>
+  waitForSyncReady?: (reason: WatchSyncReadyReason) => boolean | void | Promise<boolean | void>
 }
 
 /** Normalized runtime context passed through internal operations. */

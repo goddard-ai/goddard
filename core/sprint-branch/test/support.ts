@@ -114,6 +114,30 @@ export async function stateFileExists(repo: string, sprint: string) {
   return pathExists(await sprintStatePath(repo, sprint))
 }
 
+/** Writes a test-only sprint operation lock into the Git common directory. */
+export async function writeSprintLock(
+  repo: string,
+  sprint: string,
+  lock: { command: string; createdAt?: string; pid?: number },
+) {
+  const commonDir = (await git(repo, ["rev-parse", "--git-common-dir"])).trim()
+  const lockPath = path.resolve(repo, commonDir, "sprint-branch", `${sprint}.lock`)
+  await fs.mkdir(path.dirname(lockPath), { recursive: true })
+  await fs.writeFile(
+    lockPath,
+    `${JSON.stringify(
+      {
+        command: lock.command,
+        createdAt: lock.createdAt ?? new Date().toISOString(),
+        pid: lock.pid ?? process.pid,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  return lockPath
+}
+
 export async function workingTreePorcelain(repo: string) {
   return git(repo, ["status", "--porcelain"])
 }
@@ -280,7 +304,8 @@ function registerTemplateCleanup() {
   })
 }
 
-async function pathExists(pathname: string) {
+/** Checks whether a test path exists without hiding non-ENOENT filesystem errors. */
+export async function pathExists(pathname: string) {
   try {
     await fs.access(pathname)
     return true

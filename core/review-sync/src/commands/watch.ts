@@ -39,6 +39,7 @@ import {
   type RuntimeContext,
   type SessionState,
   type WatchReviewSyncInput,
+  type WatchSyncReadyReason,
 } from "../types.ts"
 import { reviewBranchHasHumanCommits } from "./history.ts"
 import { pauseSession } from "./pause.ts"
@@ -113,6 +114,26 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
     }
   }
 
+  if (!(await waitForWatchSyncReady(input, "start", emitVerbose, session))) {
+    const cleanup = await cleanupWatchExit({
+      session,
+      context,
+      startedWorktree,
+      startedBranch,
+    })
+    return createReviewSyncResult({
+      exitCode:
+        cleanup.failures.length > 0
+          ? getWatchCleanupFailureExitCode(input.signal)
+          : getWatchExitCode(input.signal),
+      command: "watch",
+      status: cleanup.failures.length > 0 ? "error" : "paused",
+      sessionId: cleanup.latest.sessionId,
+      reviewBranch: cleanup.latest.reviewBranch,
+      message: formatWatchStoppedMessage(cleanup),
+    })
+  }
+
   await emitVerbose(`preparing ${session.reviewBranch} in ${session.reviewWorktree}.`, session)
   await prepareReviewBranchForStart(session, context)
   let fingerprint = await createWatchFingerprint(session, context)
@@ -123,6 +144,7 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
   const warningState = { pendingHumanPatchWarningSent: false }
   const events = createWatchEventQueue(input.signal)
   const watchers = await createReviewSyncWatchers(session, context, events, emitVerbose)
+  let keepWatching = true
   let watchError: unknown
 
   try {
@@ -147,18 +169,22 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
         `refreshing ${session.reviewBranch} from ${session.agentBranch} branch ref because the recorded agent checkout is unavailable.`,
         session,
       )
-      await refreshReviewWorktreeFromAgentBranchRefForWatch(
+      const refreshed = await refreshReviewWorktreeFromAgentBranchRefForWatch(
         session,
         context,
-        input.onResult,
+        input,
         warningState,
         emitVerbose,
       )
-      fingerprint = await createWatchFingerprint(await readSessionState(session), context)
-      await emitVerbose("updated fingerprint after branch-ref refresh.", session)
+      if (!refreshed) {
+        keepWatching = false
+      } else {
+        fingerprint = await createWatchFingerprint(await readSessionState(session), context)
+        await emitVerbose("updated fingerprint after branch-ref refresh.", session)
+      }
     }
 
-    while (await events.waitForEvent()) {
+    while (keepWatching && (await events.waitForEvent())) {
       if (!(await waitForWatchQuietPeriod(events, input.signal))) {
         break
       }
@@ -180,8 +206,7 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
         latest,
         context,
         events,
-        input.signal,
-        input.onResult,
+        input,
         warningState,
         emitVerbose,
       )
@@ -755,17 +780,41 @@ async function isRecordedAgentCheckoutUnavailable(session: SessionState, context
   return (await resolveCurrentBranch(session.agentWorktree, context)) !== session.agentBranch
 }
 
+/** Lets watch callers delay mutating refreshes while external state is moving. */
+async function waitForWatchSyncReady(
+  input: WatchReviewSyncInput,
+  reason: WatchSyncReadyReason,
+  emitVerbose: WatchVerboseEmitter,
+  session: WatchVerboseSession,
+) {
+  if (!input.waitForSyncReady) {
+    return true
+  }
+
+  await emitVerbose(`waiting for caller readiness before ${reason}.`, session)
+  const ready = await input.waitForSyncReady(reason)
+  if (ready === false || isAbortSignalAborted(input.signal)) {
+    await emitVerbose(`caller readiness stopped ${reason}.`, session)
+    return false
+  }
+
+  return true
+}
+
 /** Runs watch-triggered syncs once the agent returns to the recorded branch. */
 async function syncForWatchWhenAgentCheckoutReady(
   session: SessionState,
   context: RuntimeContext,
   events: WatchEventQueue,
-  signal: AbortSignal | undefined,
-  onResult: WatchReviewSyncInput["onResult"],
+  input: WatchReviewSyncInput,
   warningState: { pendingHumanPatchWarningSent: boolean },
   emitVerbose: WatchVerboseEmitter,
 ) {
-  while (!isAbortSignalAborted(signal)) {
+  while (!isAbortSignalAborted(input.signal)) {
+    if (!(await waitForWatchSyncReady(input, "sync", emitVerbose, session))) {
+      return null
+    }
+
     try {
       return await syncLoadedReviewSyncSession(session, context)
     } catch (error) {
@@ -778,8 +827,7 @@ async function syncForWatchWhenAgentCheckoutReady(
           error,
           context,
           events,
-          signal,
-          onResult,
+          input,
           warningState,
           emitVerbose,
         ))
@@ -798,12 +846,11 @@ async function waitForExpectedAgentCheckout(
   mismatch: AgentWorktreeCheckoutMismatchError,
   context: RuntimeContext,
   events: WatchEventQueue,
-  signal: AbortSignal | undefined,
-  onResult: WatchReviewSyncInput["onResult"],
+  input: WatchReviewSyncInput,
   warningState: { pendingHumanPatchWarningSent: boolean },
   emitVerbose: WatchVerboseEmitter,
 ) {
-  while (!isAbortSignalAborted(signal)) {
+  while (!isAbortSignalAborted(input.signal)) {
     const branch = await resolveCurrentBranch(mismatch.worktree, context)
     if (branch === mismatch.expectedBranch) {
       await emitVerbose(
@@ -817,15 +864,18 @@ async function waitForExpectedAgentCheckout(
       `agent worktree ${mismatch.worktree} is on ${branch ?? "detached HEAD"}; waiting for ${mismatch.expectedBranch}.`,
       session,
     )
-    await refreshReviewWorktreeFromAgentBranchRefForWatch(
+    const refreshed = await refreshReviewWorktreeFromAgentBranchRefForWatch(
       session,
       context,
-      onResult,
+      input,
       warningState,
       emitVerbose,
     )
+    if (!refreshed) {
+      return false
+    }
 
-    if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, signal))) {
+    if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, input.signal))) {
       return false
     }
     await emitQueuedWatchEvents(emitVerbose, events, session)
@@ -838,10 +888,14 @@ async function waitForExpectedAgentCheckout(
 async function refreshReviewWorktreeFromAgentBranchRefForWatch(
   session: SessionState,
   context: RuntimeContext,
-  onResult: WatchReviewSyncInput["onResult"],
+  input: WatchReviewSyncInput,
   warningState: { pendingHumanPatchWarningSent: boolean },
   emitVerbose: WatchVerboseEmitter,
 ) {
+  if (!(await waitForWatchSyncReady(input, "branch-ref-refresh", emitVerbose, session))) {
+    return false
+  }
+
   await emitVerbose(
     `checking whether ${session.reviewBranch} can refresh from ${session.agentBranch} branch ref.`,
     session,
@@ -861,7 +915,7 @@ async function refreshReviewWorktreeFromAgentBranchRefForWatch(
     !warningState.pendingHumanPatchWarningSent
   ) {
     warningState.pendingHumanPatchWarningSent = true
-    await onResult?.(
+    await input.onResult?.(
       createReviewSyncResult({
         exitCode: 0,
         command: "watch",
@@ -872,6 +926,8 @@ async function refreshReviewWorktreeFromAgentBranchRefForWatch(
       }),
     )
   }
+
+  return true
 }
 
 /** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */

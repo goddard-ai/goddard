@@ -11,6 +11,8 @@
   - Resolves the active sprint.
   - Validates sprint status.
   - Starts a `review-sync` watch session for the sprint's review branch.
+  - If another sprint branch operation is active, waits for that operation to
+    release the sprint lock before starting the initial review-sync watch.
   - Surfaces `review-sync` results while running.
   - Exits with the review-sync outcome.
   - Can be stopped from another shell by running `sprint-branch stop-sync` in
@@ -29,6 +31,9 @@
     starting the watch.
   - Without `--replace`, refuses to start when another `sync` process is already
     registered for the same resolved working directory.
+  - While watching, defers review-sync refreshes triggered during an active
+    sprint branch operation and performs one refresh after the lock is released.
+  - Stale sprint branch locks are removed instead of blocking sync forever.
   - The sprint review branch is the agent branch passed into `review-sync`.
   - The command exits with the `review-sync` outcome when the watch session
     starts.

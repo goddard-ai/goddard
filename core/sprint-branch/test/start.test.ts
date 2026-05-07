@@ -9,9 +9,11 @@ import {
   createSprintRepo,
   currentBranch,
   diagnosticCodes,
+  pathExists,
   readState,
   runCli,
   workingTreePorcelain,
+  writeSprintLock,
   writeState,
   type MutationOutput,
 } from "./support"
@@ -199,5 +201,29 @@ describe("sprint-branch start", () => {
     expect(diagnosticCodes(start)).toContain("dirty_worktree")
     expect(await currentBranch(repo)).toBe("main")
     expect((await readState(repo, "example")).tasks.review).toBeNull()
+  })
+
+  // A failed lock acquisition must not clean up a lock owned by another in-flight command.
+  test("keeps a live sprint lock when refusing to start", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: [],
+    })
+    const lockPath = await writeSprintLock(repo, "example", { command: "approve" })
+
+    const result = await runCli(repo, [
+      "start",
+      "--sprint",
+      "example",
+      "--task",
+      "010-task-name",
+      "--json",
+    ])
+    const start = JSON.parse(result.stdout) as MutationOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(start)).toContain("lock_exists")
+    expect(await pathExists(lockPath)).toBe(true)
   })
 })

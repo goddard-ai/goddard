@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 
 import { branchExists, getBranchHead, isAncestor } from "./git/refs"
-import { resolveGitCommonPath } from "./git/repository"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
 import { writeSprintLastActedAt } from "./state/activity"
@@ -14,12 +13,13 @@ import type {
   SprintStatusReport,
   SprintTaskQueueItem,
 } from "./types"
+import { reclaimStaleSprintLock, sprintLockDisplayPath } from "./workflow/lock"
 import { listTaskFiles } from "./workflow/tasks"
 
 const sprintRoles: SprintBranchRole[] = ["review", "approved", "next"]
 
 /** Builds the read-only sprint branch status report used by status, diff, and doctor. */
-export async function buildStatusReport(input: SprintInferenceInput) {
+export async function buildStatusReport(input: SprintInferenceInput & { sprintLock?: "defer" }) {
   const context = await inferSprintContext(input)
   const parsed = await readSprintStateFile(context.statePath, {
     defaultSprintWorktreeRoot: context.rootDir,
@@ -33,11 +33,6 @@ export async function buildStatusReport(input: SprintInferenceInput) {
       diagnostics,
     }
   }
-
-  const lockFilePath = await resolveGitCommonPath(
-    context.rootDir,
-    `sprint-branch/${context.sprint}.lock`,
-  )
 
   const branches = {
     review: await inspectBranch(context.rootDir, parsed.state.branches.review),
@@ -53,12 +48,18 @@ export async function buildStatusReport(input: SprintInferenceInput) {
   const missingTaskFiles = sprintFolderExists ? await findMissingTaskFiles(parsed.state) : []
   const taskQueue = sprintFolderExists ? await buildTaskQueue(parsed.state) : []
 
-  const lockFileExists = await pathExists(lockFilePath)
-  if (lockFileExists) {
+  const sprintLock = await reclaimStaleSprintLock(context)
+  if (sprintLock.status === "stale") {
+    diagnostics.push({
+      severity: "info",
+      code: "stale_lock_removed",
+      message: `Removed stale lock file ${sprintLock.displayPath}: ${sprintLock.staleReason}.`,
+    })
+  } else if (sprintLock.status === "active" && input.sprintLock !== "defer") {
     diagnostics.push({
       severity: "error",
       code: "lock_file_exists",
-      message: `Lock file ${path.join(".git", "sprint-branch", `${context.sprint}.lock`)} exists.`,
+      message: `Lock file ${sprintLockDisplayPath(context.sprint)} exists.`,
       suggestion: "Confirm no sprint-branch command is running before removing the lock.",
     })
   }
@@ -217,7 +218,7 @@ export async function buildStatusReport(input: SprintInferenceInput) {
     diagnostics,
   }
 
-  if (!lockFileExists) {
+  if (sprintLock.status !== "active") {
     await writeSprintLastActedAt(context.rootDir, report.state)
   }
 

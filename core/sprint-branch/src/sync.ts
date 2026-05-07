@@ -3,6 +3,7 @@ import { watchReviewSession, type ReviewSyncResult } from "@goddard-ai/review-sy
 import { SprintInferenceError } from "./state/inference"
 import { buildStatusReport } from "./status"
 import type { SprintDiagnostic, SprintSyncReport } from "./types"
+import { waitForSprintLockRelease, type ActiveSprintLock } from "./workflow/lock"
 
 /** Resolves the active sprint and watches review-sync for its review branch. */
 export async function runSprintSync(input: {
@@ -15,7 +16,7 @@ export async function runSprintSync(input: {
 }) {
   let status: Awaited<ReturnType<typeof buildStatusReport>>
   try {
-    status = await buildStatusReport(input)
+    status = await buildStatusReport({ ...input, sprintLock: "defer" })
   } catch (error) {
     if (error instanceof SprintInferenceError) {
       return {
@@ -63,11 +64,45 @@ export async function runSprintSync(input: {
     } satisfies SprintSyncReport
   }
 
+  const ready = await waitForSprintLockRelease({
+    context: status.context,
+    signal: input.signal,
+    onWait: async (lock) => {
+      await input.onResult?.(createSprintLockWaitResult(lock))
+    },
+  })
+  if (!ready) {
+    return {
+      ok: true,
+      command: "sync",
+      sprint: report.sprint,
+      currentBranch: report.currentBranch,
+      inferredFrom: report.inferredFrom,
+      agentBranch: report.state.branches.review,
+      reviewBranch: null,
+      diagnostics: report.diagnostics,
+      reviewSync: {
+        exitCode: 0,
+        command: "watch",
+        status: "paused",
+        message: "Stopped waiting for the sprint branch operation to finish.",
+      },
+    } satisfies SprintSyncReport
+  }
+
   const reviewSync = await watchReviewSession({
     cwd: input.cwd,
     agentBranch: report.state.branches.review,
     signal: input.signal,
     onResult: input.onResult,
+    waitForSyncReady: async () =>
+      waitForSprintLockRelease({
+        context: status.context,
+        signal: input.signal,
+        onWait: async (lock) => {
+          await input.onResult?.(createSprintLockWaitResult(lock))
+        },
+      }),
   })
 
   return {
@@ -81,6 +116,28 @@ export async function runSprintSync(input: {
     diagnostics: report.diagnostics,
     reviewSync,
   } satisfies SprintSyncReport
+}
+
+function createSprintLockWaitResult(lock: ActiveSprintLock) {
+  return {
+    exitCode: 0,
+    command: "watch",
+    status: "ok",
+    message: formatSprintLockWaitMessage(lock),
+  } satisfies ReviewSyncResult
+}
+
+function formatSprintLockWaitMessage(lock: ActiveSprintLock) {
+  const owner = [
+    lock.command ? `command ${lock.command}` : null,
+    typeof lock.pid === "number" ? `pid ${lock.pid}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ")
+
+  return `Waiting for sprint branch operation to finish before syncing; ${lock.displayPath} is active${
+    owner ? ` (${owner})` : ""
+  }.`
 }
 
 /** Formats the sprint sync wrapper without hiding review-sync's own message. */
