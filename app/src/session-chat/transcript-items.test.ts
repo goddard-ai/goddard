@@ -117,6 +117,26 @@ function createPermissionFailedResponseMessage(requestId: string) {
   } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
 }
 
+function createPlanUpdateMessage(
+  entries: Array<{
+    content: string
+    priority: "high" | "medium" | "low"
+    status: "pending" | "in_progress" | "completed"
+  }>,
+) {
+  return {
+    jsonrpc: "2.0" as const,
+    method: "session/update" as const,
+    params: {
+      sessionId: "ses_session-1-acp",
+      update: {
+        sessionUpdate: "plan" as const,
+        entries,
+      },
+    },
+  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+}
+
 function createTranscriptMessages(
   session: DaemonSession,
   turns: GetSessionHistoryResponse["turns"],
@@ -485,6 +505,89 @@ test("buildSessionChatTranscript renders permission requests and their response 
       ],
       selectedOptionId: null,
       error: "Permission response failed",
+    },
+  ])
+})
+
+test("buildSessionChatTranscript renders distinct plan updates in order and skips repeated snapshots", () => {
+  const session = createSession(null)
+  const firstPlan = createPlanUpdateMessage([
+    {
+      content: "Inspect transcript rows",
+      priority: "high",
+      status: "completed",
+    },
+    {
+      content: "Render plan update panel",
+      priority: "high",
+      status: "in_progress",
+    },
+  ])
+  const secondPlan = createPlanUpdateMessage([
+    {
+      content: "Inspect transcript rows",
+      priority: "high",
+      status: "completed",
+    },
+    {
+      content: "Render plan update panel",
+      priority: "high",
+      status: "completed",
+    },
+    {
+      content: "Validate plan rows",
+      priority: "medium",
+      status: "pending",
+    },
+  ])
+  const messages = createTranscriptMessages(
+    session,
+    createTurns([firstPlan, firstPlan, secondPlan]),
+  )
+
+  expect(messages.filter((message) => message.kind === "planUpdate")).toEqual([
+    {
+      kind: "planUpdate",
+      id: "turn-1:plan:0",
+      authorName: "pi",
+      timestampLabel: "Plan",
+      title: "Plan updated · 1/2 complete",
+      entries: [
+        {
+          content: "Inspect transcript rows",
+          priority: "high",
+          status: "completed",
+        },
+        {
+          content: "Render plan update panel",
+          priority: "high",
+          status: "in_progress",
+        },
+      ],
+    },
+    {
+      kind: "planUpdate",
+      id: "turn-1:plan:2",
+      authorName: "pi",
+      timestampLabel: "Plan",
+      title: "Plan updated · 2/3 complete",
+      entries: [
+        {
+          content: "Inspect transcript rows",
+          priority: "high",
+          status: "completed",
+        },
+        {
+          content: "Render plan update panel",
+          priority: "high",
+          status: "completed",
+        },
+        {
+          content: "Validate plan rows",
+          priority: "medium",
+          status: "pending",
+        },
+      ],
     },
   ])
 })

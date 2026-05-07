@@ -377,6 +377,123 @@ export const permissionErrorClass = css({
   lineHeight: "1.45",
 })
 
+export const planCardClass = css({
+  display: "grid",
+  gap: "12px",
+  width: "min(100%, 760px)",
+  border: "1px solid token(colors.border)",
+  borderRadius: "8px",
+  padding: "14px",
+  backgroundColor: "surface",
+  color: "fg.default",
+})
+
+export const planHeaderClass = css({
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
+  alignItems: "start",
+  gap: "10px",
+  minWidth: "0",
+})
+
+export const planIconClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "28px",
+  height: "28px",
+  border: "1px solid token(colors.border)",
+  borderRadius: "6px",
+  color: "accentStrong",
+})
+
+export const planTitleGroupClass = css({
+  display: "grid",
+  gap: "2px",
+  minWidth: "0",
+})
+
+export const planTitleClass = css({
+  margin: "0",
+  color: "fg.default",
+  fontSize: "0.92rem",
+  fontWeight: "700",
+  lineHeight: "1.4",
+  overflowWrap: "anywhere",
+})
+
+export const planMetaClass = css({
+  color: "fg.muted",
+  fontSize: "0.78rem",
+  fontWeight: "560",
+  lineHeight: "1.45",
+})
+
+export const planEntryListClass = css({
+  display: "grid",
+  gap: "8px",
+  margin: "0",
+  padding: "0",
+  listStyle: "none",
+})
+
+export const planEntryItemClass = css({
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
+  alignItems: "start",
+  gap: "8px",
+  minWidth: "0",
+})
+
+export const planEntryStatusClass = css({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "22px",
+  height: "22px",
+  border: "1px solid token(colors.border)",
+  borderRadius: "999px",
+  color: "fg.muted",
+  '&[data-status="in_progress"]': {
+    borderColor: "accent",
+    color: "accentStrong",
+  },
+  '&[data-status="completed"]': {
+    color: "fg.default",
+  },
+})
+
+export const planEntryContentClass = css({
+  display: "grid",
+  gap: "2px",
+  minWidth: "0",
+})
+
+export const planEntryTextClass = css({
+  color: "fg.default",
+  fontSize: "0.86rem",
+  fontWeight: "560",
+  lineHeight: "1.5",
+  overflowWrap: "anywhere",
+})
+
+export const planEntryMetaClass = css({
+  display: "inline-flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "6px",
+  color: "fg.muted",
+  fontSize: "0.74rem",
+  fontWeight: "650",
+  lineHeight: "1.35",
+})
+
+export const planEmptyClass = css({
+  color: "fg.muted",
+  fontSize: "0.84rem",
+  lineHeight: "1.5",
+})
+
 export const turnStopPillClass = css({
   display: "inline-flex",
   flexWrap: "wrap",

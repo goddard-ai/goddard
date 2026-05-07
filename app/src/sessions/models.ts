@@ -116,6 +116,29 @@ export type SessionTranscriptPermissionRequest = {
   error: string | null
 }
 
+/** ACP plan step priorities the session transcript currently renders. */
+export type SessionTranscriptPlanEntryPriority = "high" | "medium" | "low"
+
+/** ACP plan step statuses the session transcript currently renders. */
+export type SessionTranscriptPlanEntryStatus = "pending" | "in_progress" | "completed"
+
+/** One normalized ACP plan step shown inside a plan update row. */
+export type SessionTranscriptPlanEntry = {
+  content: string
+  priority: SessionTranscriptPlanEntryPriority
+  status: SessionTranscriptPlanEntryStatus
+}
+
+/** One transcript row that shows the current complete ACP plan state. */
+export type SessionTranscriptPlanUpdate = {
+  kind: "planUpdate"
+  id: string
+  authorName: string
+  timestampLabel: string
+  title: string
+  entries: readonly SessionTranscriptPlanEntry[]
+}
+
 /** Terminal lifecycle states shown after a turn stops producing transcript content. */
 export type SessionTranscriptTurnStopStatus =
   | "completed"
@@ -139,4 +162,5 @@ export type SessionTranscriptItem =
   | SessionTranscriptTextMessage
   | SessionTranscriptToolCall
   | SessionTranscriptPermissionRequest
+  | SessionTranscriptPlanUpdate
   | SessionTranscriptTurnStop

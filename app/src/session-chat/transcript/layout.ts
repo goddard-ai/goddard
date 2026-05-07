@@ -9,6 +9,7 @@ import {
 import type {
   SessionTranscriptItem,
   SessionTranscriptPermissionRequest,
+  SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
   SessionTranscriptToolContent,
 } from "~/sessions/models.ts"
@@ -221,6 +222,20 @@ function estimatePermissionRequestRowHeight(
   return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 36
 }
 
+function estimatePlanUpdateRowHeight(message: SessionTranscriptPlanUpdate, maxWidth: number) {
+  let approximateLineCount = 3 + estimateLineCount(message.title, maxWidth)
+
+  for (const entry of message.entries) {
+    approximateLineCount += 1 + estimateLineCount(entry.content, maxWidth)
+  }
+
+  if (message.entries.length === 0) {
+    approximateLineCount += 1
+  }
+
+  return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 32
+}
+
 /** Rough row estimate used by Virtuoso before the real transcript row is measured. */
 export function estimateTranscriptRowHeight(message: SessionTranscriptItem, viewportWidth: number) {
   const textWidth = getTranscriptTextWidth(message, viewportWidth)
@@ -245,6 +260,10 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
 
   if (message.kind === "permissionRequest") {
     return estimatePermissionRequestRowHeight(message, textWidth)
+  }
+
+  if (message.kind === "planUpdate") {
+    return estimatePlanUpdateRowHeight(message, textWidth)
   }
 
   let approximateLineCount = 2

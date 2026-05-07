@@ -4,6 +4,7 @@ import { useMemo } from "preact/hooks"
 import type {
   SessionTranscriptItem,
   SessionTranscriptPermissionRequest,
+  SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
   SessionTranscriptTurnStop,
@@ -20,6 +21,7 @@ import {
   VIRTUAL_OVERSCAN_PX,
 } from "./transcript/transcript.style.ts"
 import { PermissionRequestTranscriptRow } from "./transcript/permission-request-row.tsrx"
+import { PlanUpdateTranscriptRow } from "./transcript/plan-update-row.tsrx"
 import { TextTranscriptRow } from "./transcript/text-row.tsrx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsrx"
 import { TurnStopTranscriptRow } from "./transcript/turn-stop-row.tsrx"
@@ -45,7 +47,7 @@ type CoalescedToolTranscriptRow = {
   toolCalls: readonly SessionTranscriptToolCall[];
 }
 
-type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest
+type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate
 
 function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   const renderItems: RenderTranscriptItem[] = []
@@ -74,7 +76,17 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
 
     flushToolCalls()
 
-    if (message.kind === "turnStop" || message.kind === "permissionRequest") {
+    if (message.kind === "turnStop") {
+      renderItems.push(message)
+      continue
+    }
+
+    if (message.kind === "permissionRequest") {
+      renderItems.push(message)
+      continue
+    }
+
+    if (message.kind === "planUpdate") {
       renderItems.push(message)
       continue
     }
@@ -118,6 +130,11 @@ component TranscriptRow(props: {
       message={props.row.item}
       onSelectOption={props.onSelectPermissionOption}
     />
+    return
+  }
+
+  if (props.row.item.kind === "planUpdate") {
+    <PlanUpdateTranscriptRow message={props.row.item} />
     return
   }
 

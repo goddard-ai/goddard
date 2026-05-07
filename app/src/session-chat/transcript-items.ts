@@ -1,4 +1,5 @@
 import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@goddard-ai/sdk"
+import hashSum from "hash-sum"
 
 import type {
   SessionTranscriptContentBlock,
@@ -7,6 +8,10 @@ import type {
   SessionTranscriptPermissionOptionKind,
   SessionTranscriptPermissionRequest,
   SessionTranscriptPermissionStatus,
+  SessionTranscriptPlanEntry,
+  SessionTranscriptPlanEntryPriority,
+  SessionTranscriptPlanEntryStatus,
+  SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
   SessionTranscriptToolContent,
@@ -25,6 +30,11 @@ type ParsedToolCallUpdate = {
   status?: SessionTranscriptToolStatus
   content?: SessionTranscriptToolContent[]
   locations?: SessionTranscriptToolLocation[]
+}
+
+type ParsedPlanUpdate = {
+  entries: SessionTranscriptPlanEntry[]
+  fingerprint: string
 }
 
 type MessageId = string | number
@@ -50,6 +60,10 @@ type ParsedTranscriptSessionUpdate =
   | {
       kind: "toolCall"
       toolCallUpdate: ParsedToolCallUpdate
+    }
+  | {
+      kind: "planUpdate"
+      planUpdate: ParsedPlanUpdate
     }
   | {
       kind: "ignored"
@@ -90,6 +104,14 @@ const PERMISSION_OPTION_KINDS = new Set<SessionTranscriptPermissionOptionKind>([
   "allow_always",
   "reject_once",
   "reject_always",
+])
+
+const PLAN_ENTRY_PRIORITIES = new Set<SessionTranscriptPlanEntryPriority>(["high", "medium", "low"])
+
+const PLAN_ENTRY_STATUSES = new Set<SessionTranscriptPlanEntryStatus>([
+  "pending",
+  "in_progress",
+  "completed",
 ])
 
 const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
@@ -180,6 +202,70 @@ function extractPermissionOptionKind(value: unknown) {
     PERMISSION_OPTION_KINDS.has(value as SessionTranscriptPermissionOptionKind)
     ? (value as SessionTranscriptPermissionOptionKind)
     : null
+}
+
+function extractPlanEntryPriority(value: unknown) {
+  return typeof value === "string" &&
+    PLAN_ENTRY_PRIORITIES.has(value as SessionTranscriptPlanEntryPriority)
+    ? (value as SessionTranscriptPlanEntryPriority)
+    : null
+}
+
+function extractPlanEntryStatus(value: unknown) {
+  return typeof value === "string" &&
+    PLAN_ENTRY_STATUSES.has(value as SessionTranscriptPlanEntryStatus)
+    ? (value as SessionTranscriptPlanEntryStatus)
+    : null
+}
+
+function buildPlanFingerprint(entries: readonly SessionTranscriptPlanEntry[]) {
+  return hashSum(entries)
+}
+
+function extractPlanEntries(value: unknown): SessionTranscriptPlanEntry[] | null {
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const entries: SessionTranscriptPlanEntry[] = []
+
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.content !== "string") {
+      return null
+    }
+
+    const priority = extractPlanEntryPriority(entry.priority)
+    const status = extractPlanEntryStatus(entry.status)
+
+    if (!priority || !status) {
+      return null
+    }
+
+    entries.push({
+      content: entry.content,
+      priority,
+      status,
+    })
+  }
+
+  return entries
+}
+
+function extractPlanUpdate(update: Record<string, unknown>): ParsedPlanUpdate | null {
+  if (update.sessionUpdate !== "plan") {
+    return null
+  }
+
+  const entries = extractPlanEntries(update.entries)
+
+  if (!entries) {
+    return null
+  }
+
+  return {
+    entries,
+    fingerprint: buildPlanFingerprint(entries),
+  }
 }
 
 function extractPermissionOptions(value: unknown): SessionTranscriptPermissionOption[] {
@@ -489,6 +575,22 @@ function parseTranscriptSessionUpdate(
     }
   }
 
+  if (update.sessionUpdate === "plan") {
+    const planUpdate = extractPlanUpdate(update)
+
+    if (!planUpdate) {
+      return {
+        kind: "unsupported",
+        reason: "plan update is missing valid plan entries.",
+      }
+    }
+
+    return {
+      kind: "planUpdate",
+      planUpdate,
+    }
+  }
+
   if (TRANSCRIPT_IGNORED_SESSION_UPDATES.has(update.sessionUpdate)) {
     return {
       kind: "ignored",
@@ -675,6 +777,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
 export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
   const agentRowIndexes = new Map<string, number>()
   const toolRowIndexes = new Map<string, number>()
+  let previousPlanFingerprint: string | null = null
   const messages: SessionTranscriptItem[] = [
     createTextRow({
       id: `${input.session.id}:context`,
@@ -849,6 +952,34 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
     messages.push(permissionRow)
   }
 
+  function appendPlanUpdate(
+    session: DaemonSession,
+    turnId: string,
+    messageIndex: number,
+    planUpdate: ParsedPlanUpdate,
+  ) {
+    if (previousPlanFingerprint === planUpdate.fingerprint) {
+      return
+    }
+
+    previousPlanFingerprint = planUpdate.fingerprint
+
+    const completedCount = planUpdate.entries.filter((entry) => entry.status === "completed").length
+    const planRow: SessionTranscriptPlanUpdate = {
+      kind: "planUpdate",
+      id: `${turnId}:plan:${messageIndex}`,
+      authorName: session.agentName,
+      timestampLabel: "Plan",
+      title:
+        planUpdate.entries.length === 0
+          ? "Plan cleared"
+          : `Plan updated · ${completedCount}/${planUpdate.entries.length} complete`,
+      entries: planUpdate.entries,
+    }
+
+    messages.push(planRow)
+  }
+
   for (const [turnIndex, turn] of input.turns.entries()) {
     const isStreamingTurn = turn.completedAt === null
     const permissionResponsesByRequestId = buildPermissionResponsesByRequestId(turn.messages)
@@ -889,6 +1020,11 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
             text: sessionUpdate.text,
             turnId: turn.turnId,
           })
+          continue
+        }
+
+        if (sessionUpdate.kind === "planUpdate") {
+          appendPlanUpdate(input.session, turn.turnId, messageIndex, sessionUpdate.planUpdate)
           continue
         }
 
