@@ -385,8 +385,15 @@ export class SessionChat extends Sigma<SessionChatState> {
     return getSessionDisplayTitle(this.session)
   }
 
-  /** Applies refreshed query data while preserving live messages already received locally. */
+  /** Applies refreshed query data while preserving loaded older pages and local live messages. */
   syncLoadedData(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
+    const preservedLoadedTurns = this.turns.filter((turn) => turn.source !== "live")
+    const refreshedTurnIds = new Set(input.history.turns.map((turn) => turn.turnId))
+    const hasPreservedOlderTurns = preservedLoadedTurns.some(
+      (turn) => !refreshedTurnIds.has(turn.turnId),
+    )
+    const preservedHasMore = this.hasMore
+    const preservedNextCursor = this.nextCursor
     const localMessages: { message: acp.AnyMessage; receivedAt: string }[] = []
 
     for (const turn of this.turns) {
@@ -403,17 +410,34 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
 
     this.connection = input.history.connection
-    this.hasMore = input.history.hasMore
-    this.nextCursor = input.history.nextCursor
+    this.hasMore = hasPreservedOlderTurns ? preservedHasMore : input.history.hasMore
+    this.nextCursor = hasPreservedOlderTurns ? preservedNextCursor : input.history.nextCursor
     this.session = input.session
     this.turns.length = 0
 
     for (const turn of input.history.turns) {
-      this.turns.push(this.#normalizeTurn(turn, "history"))
+      this.#mergeHistoryTurn(turn)
+    }
+
+    for (const turn of preservedLoadedTurns) {
+      this.#mergeHistoryTurn(turn)
     }
 
     for (const localMessage of localMessages) {
       this.#mergeMessage(localMessage.message, localMessage.receivedAt)
+    }
+
+    this.#refreshTranscriptState()
+  }
+
+  /** Merges one older history page ahead of the currently loaded transcript. */
+  prependOlderHistory(history: GetSessionHistoryResponse) {
+    this.connection = history.connection
+    this.hasMore = history.hasMore
+    this.nextCursor = history.nextCursor
+
+    for (const turn of history.turns) {
+      this.#mergeHistoryTurn(turn)
     }
 
     this.#refreshTranscriptState()
@@ -475,6 +499,35 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.#completeTurnWithMessage(turn, message, receivedAt)
     this.#rebuildTurnEvents(turn)
     turn.status = resolveTurnStatus(turn)
+  }
+
+  #mergeHistoryTurn(turn: SessionHistoryTurn) {
+    const existingTurn = this.turns.find((currentTurn) => currentTurn.turnId === turn.turnId)
+
+    if (!existingTurn) {
+      this.turns.push(this.#normalizeTurn(turn, "history"))
+      return
+    }
+
+    if (existingTurn.source === "live") {
+      existingTurn.source = "merged"
+    }
+
+    existingTurn.sequence = turn.sequence
+    existingTurn.promptRequestId = turn.promptRequestId
+    existingTurn.startedAt = turn.startedAt
+    existingTurn.completedAt ??= turn.completedAt
+    existingTurn.completionKind ??= turn.completionKind
+    existingTurn.stopReason ??= turn.stopReason
+    existingTurn.inboxScope ??= turn.inboxScope
+    existingTurn.inboxHeadline ??= turn.inboxHeadline
+
+    for (const message of turn.messages) {
+      this.#insertTurnMessage(existingTurn, message)
+    }
+
+    this.#rebuildTurnEvents(existingTurn)
+    existingTurn.status = resolveTurnStatus(existingTurn)
   }
 
   #insertTurnMessage(turn: SessionChatTurn, message: acp.AnyMessage) {

@@ -5,6 +5,7 @@ import { useTabViewport } from "~/tab-viewport.tsrx"
 import styles from "./message-list.style.ts"
 
 const messageListStateCache = new Map<string, StateSnapshot>()
+const prependAnchorFirstItemIndex = 1000000
 
 /** One visible message row handed to the row renderer. */
 export type MessageListRow<Item> = {
@@ -18,12 +19,18 @@ export type MessageListProps<Item> = {
   items: readonly Item[];
   overscanPx?: number;
   initialScrollPosition?: "top" | "bottom";
+  header?: preact.ComponentChild;
   scrollCacheKey?: string;
+  preserveScrollOnPrepend?: boolean;
   loadingFallback?: preact.ComponentChild;
   defaultRowHeight?: number;
   getItemKey?: (item: Item, index: number) => string;
   estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number;
   renderRow: (row: MessageListRow<Item>) => preact.ComponentChild;
+}
+
+type MessageListContext = {
+  header: preact.ComponentChild;
 }
 
 /** Returns the first mount position for a list that should open from the top or bottom. */
@@ -46,9 +53,38 @@ function getInitialTopMostItemIndex<Item>(
   return 0
 }
 
+function buildItemKeys<Item>(
+  items: readonly Item[],
+  getItemKey: MessageListProps<Item>["getItemKey"],
+) {
+  return items.map((item, index) => String(getItemKey?.(item, index) ?? index))
+}
+
+function resolvePrependedItemCount(previousKeys: readonly string[], nextKeys: readonly string[]) {
+  for (const [previousIndex, previousKey] of previousKeys.entries()) {
+    const nextIndex = nextKeys.indexOf(previousKey)
+
+    if (nextIndex >= 0) {
+      return Math.max(0, nextIndex - previousIndex)
+    }
+  }
+
+  return 0
+}
+
+component MessageListHeader(props: { context: MessageListContext }) {
+  <>{props.context.header}</>
+}
+
+const messageListComponents = {
+  Header: MessageListHeader,
+}
+
 /** Renders the transcript's Virtuoso message list inside the nearest tab viewport provider. */
 export component MessageList<Item>(props: MessageListProps<Item>) {
   const virtuosoHandleRef = useRef<VirtuosoHandle | null>(null)
+  const firstItemIndexRef = useRef(prependAnchorFirstItemIndex)
+  const previousItemKeysRef = useRef<readonly string[]>([])
 
   const viewport = useTabViewport()
   const scrollCacheKey = props.scrollCacheKey
@@ -61,6 +97,27 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     effectiveInitialScroll,
     restoreState,
   )
+  const itemKeys = useMemo(() => buildItemKeys(props.items, props.getItemKey), [
+    props.getItemKey,
+    props.items,
+  ])
+  const headerContext = useMemo(
+    () => ({
+      header: props.header,
+    }),
+    [props.header],
+  )
+
+  if (props.preserveScrollOnPrepend) {
+    const prependedItemCount = resolvePrependedItemCount(previousItemKeysRef.current, itemKeys)
+
+    firstItemIndexRef.current = Math.max(1, firstItemIndexRef.current - prependedItemCount)
+    previousItemKeysRef.current = itemKeys
+  } else {
+    firstItemIndexRef.current = prependAnchorFirstItemIndex
+    previousItemKeysRef.current = itemKeys
+  }
+  const effectiveFirstItemIndex = props.preserveScrollOnPrepend ? firstItemIndexRef.current : 0
 
   useEffect(() => {
     return () => {
@@ -99,15 +156,19 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   <Virtuoso
     {ref virtuosoHandleRef}
     alignToBottom={effectiveInitialScroll === "bottom"}
-    computeItemKey={(index, item) => props.getItemKey?.(item, index) ?? index}
+    components={props.header ? messageListComponents : undefined}
+    computeItemKey={(index, item) => props.getItemKey?.(item, index - effectiveFirstItemIndex) ??
+      index}
+    context={headerContext}
     customScrollParent={viewport.viewportRef.current}
     data={props.items}
     defaultItemHeight={props.defaultRowHeight}
+    firstItemIndex={props.preserveScrollOnPrepend ? effectiveFirstItemIndex : undefined}
     {heightEstimates}
     itemContent={(index, item) => props.renderRow(
       {
         item,
-        index,
+        index: index - effectiveFirstItemIndex,
         viewportWidth: viewport.width,
       },
     )}

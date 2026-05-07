@@ -53,7 +53,10 @@ function createTurn(overrides: Partial<SessionHistoryTurn> = {}) {
   } satisfies SessionHistoryTurn
 }
 
-function createHistory(turns: SessionHistoryTurn[]): GetSessionHistoryResponse {
+function createHistory(
+  turns: SessionHistoryTurn[],
+  overrides: Partial<GetSessionHistoryResponse> = {},
+): GetSessionHistoryResponse {
   return {
     id: "ses_session-1" as DaemonSession["id"],
     acpSessionId: "acp-session-1",
@@ -65,6 +68,7 @@ function createHistory(turns: SessionHistoryTurn[]): GetSessionHistoryResponse {
     turns,
     nextCursor: null,
     hasMore: false,
+    ...overrides,
   }
 }
 
@@ -159,6 +163,112 @@ test("SessionChat normalizes history turns into deterministic order and statuses
     activeTurnId: "turn-2",
     status: "running",
   })
+})
+
+test("SessionChat prepends older history pages and advances pagination", () => {
+  const chat = createChat({
+    history: createHistory(
+      [
+        createTurn({ turnId: "turn-2", sequence: 2, promptRequestId: "prompt-2" }),
+        createTurn({ turnId: "turn-3", sequence: 3, promptRequestId: "prompt-3" }),
+      ],
+      {
+        hasMore: true,
+        nextCursor: "cursor-older",
+      },
+    ),
+  })
+
+  chat.prependOlderHistory(
+    createHistory(
+      [
+        createTurn({ turnId: "turn-0", sequence: 0, promptRequestId: "prompt-0" }),
+        createTurn({ turnId: "turn-1", sequence: 1, promptRequestId: "prompt-1" }),
+      ],
+      {
+        hasMore: false,
+        nextCursor: null,
+      },
+    ),
+  )
+
+  expect(chat.hasMore).toBe(false)
+  expect(chat.nextCursor).toBeNull()
+  expect(chat.turns.map((turn) => turn.turnId)).toEqual(["turn-0", "turn-1", "turn-2", "turn-3"])
+})
+
+test("SessionChat skips duplicate turns when older history overlaps the loaded page", () => {
+  const chat = createChat({
+    history: createHistory(
+      [
+        createTurn({
+          turnId: "turn-2",
+          sequence: 2,
+          promptRequestId: "prompt-2",
+          messages: [promptMessage("prompt-2")],
+        }),
+      ],
+      {
+        hasMore: true,
+        nextCursor: "cursor-older",
+      },
+    ),
+  })
+
+  chat.prependOlderHistory(
+    createHistory(
+      [
+        createTurn({ turnId: "turn-1", sequence: 1, promptRequestId: "prompt-1" }),
+        createTurn({
+          turnId: "turn-2",
+          sequence: 2,
+          promptRequestId: "prompt-2",
+          messages: [promptMessage("prompt-2")],
+        }),
+      ],
+      {
+        hasMore: false,
+        nextCursor: null,
+      },
+    ),
+  )
+
+  expect(chat.turns.map((turn) => turn.turnId)).toEqual(["turn-1", "turn-2"])
+  expect(chat.turns[1].messages).toHaveLength(1)
+})
+
+test("SessionChat preserves loaded older history across refreshed latest history", () => {
+  const chat = createChat({
+    history: createHistory(
+      [createTurn({ turnId: "turn-2", sequence: 2, promptRequestId: "prompt-2" })],
+      {
+        hasMore: true,
+        nextCursor: "cursor-older",
+      },
+    ),
+  })
+
+  chat.prependOlderHistory(
+    createHistory([createTurn({ turnId: "turn-1", sequence: 1, promptRequestId: "prompt-1" })], {
+      hasMore: false,
+      nextCursor: null,
+    }),
+  )
+  chat.syncLoadedData({
+    session: createSession({ title: "Updated title" }),
+    history: createHistory(
+      [createTurn({ turnId: "turn-2", sequence: 2, promptRequestId: "prompt-2" })],
+      {
+        hasMore: true,
+        nextCursor: "cursor-older",
+      },
+    ),
+  })
+
+  expect(chat.session.title).toBe("Updated title")
+  expect(chat.turns.map((turn) => turn.turnId)).toEqual(["turn-1", "turn-2"])
+  expect(chat.hasMore).toBe(false)
+  expect(chat.nextCursor).toBeNull()
 })
 
 test("SessionChat creates one live turn and ignores repeated messages", () => {

@@ -1,4 +1,5 @@
 import { cx } from "@goddard-ai/styled-system/css"
+import { AlertCircle, ChevronUp, LoaderCircle } from "lucide-react"
 import { useMemo } from "preact/hooks"
 
 import type {
@@ -16,6 +17,10 @@ import {
   DEFAULT_ROW_HEIGHT,
   loadingStateClass,
   ROW_GAP,
+  historyLoadButtonClass,
+  historyLoadButtonIconClass,
+  historyLoadErrorClass,
+  historyPagerClass,
   TURN_STOP_ROW_HEIGHT,
   transcriptViewportClass,
   VIRTUAL_OVERSCAN_PX,
@@ -38,6 +43,12 @@ export type TranscriptProps = {
     optionId: string;
     requestId: SessionTranscriptPermissionRequest["requestId"];
   }) => Promise<void> | void;
+  olderHistory?: {
+    canLoad: boolean;
+    error: string | null;
+    loading: boolean;
+    onLoad: () => Promise<void> | void;
+  };
   scrollCacheKey?: string;
 }
 
@@ -146,12 +157,50 @@ component TranscriptRow(props: {
   <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
 }
 
+component OlderHistoryPager(props: {
+  olderHistory: NonNullable<TranscriptProps["olderHistory"]>;
+}) {
+  if (!props.olderHistory.canLoad && !props.olderHistory.loading && !props.olderHistory.error) {
+    return
+  }
+
+  <div class={historyPagerClass}>
+    if (props.olderHistory.canLoad || props.olderHistory.loading) {
+      <button
+        class={historyLoadButtonClass}
+        disabled={props.olderHistory.loading}
+        type="button"
+        onClick={() => {
+          void props.olderHistory.onLoad()
+        }}
+      >
+        if (props.olderHistory.loading) {
+          <LoaderCircle class={historyLoadButtonIconClass} size={14} strokeWidth={2.2} />
+          {"Loading older messages"}
+        } else {
+          <ChevronUp size={14} strokeWidth={2.2} />
+          {"Load older messages"}
+        }
+      </button>
+    }
+    if (props.olderHistory.error) {
+      <div class={historyLoadErrorClass} role="alert">
+        <AlertCircle size={14} strokeWidth={2.2} />
+        <span>{props.olderHistory.error}</span>
+      </div>
+    }
+  </div>
+}
+
 /** Renders one chat transcript inside the shared message-list virtualizer. */
 export component Transcript(props: TranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
   const renderItems = useMemo(() => coalesceTranscriptItems(props.messages), [
     props.messages,
   ])
+  const olderHistoryHeader = props.olderHistory
+    ? <><OlderHistoryPager olderHistory={props.olderHistory} /></>
+    : undefined
 
   <div class={cx(transcriptViewportClass, props.class)}>
     <MessageList
@@ -162,6 +211,7 @@ export component Transcript(props: TranscriptProps) {
           ? TURN_STOP_ROW_HEIGHT
           : estimateTranscriptRowHeight(message, viewportWidth)}
       getItemKey={(message) => message.id}
+      header={olderHistoryHeader}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
       loadingFallback={<>
@@ -170,6 +220,7 @@ export component Transcript(props: TranscriptProps) {
         </div>
       </>}
       overscanPx={VIRTUAL_OVERSCAN_PX}
+      preserveScrollOnPrepend={Boolean(props.olderHistory)}
       renderRow={(row) => <>
         <TranscriptRow row={row} onSelectPermissionOption={props.onSelectPermissionOption} />
       </>}

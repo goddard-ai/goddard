@@ -141,7 +141,7 @@ function getSessionChatStatusPresentation(status: SessionChatStatus) {
   }
 }
 
-function formatSessionActionError(error: unknown) {
+function formatSessionRequestError(error: unknown) {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message
   }
@@ -156,6 +156,9 @@ component LoadedSessionChatView(props: {
 }) {
   const [submitError, setSubmitError] = useState<unknown>(null)
   const [activeHeaderAction, setActiveHeaderAction] = useState<"cancel" | "reconnect" | null>(null)
+  const [olderHistoryState, setOlderHistoryState] = useState<
+    { status: "idle" } | { status: "loading" } | { message: string; status: "error" }
+  >({ status: "idle" })
   const [headerActionError, setHeaderActionError] = useState<
     {
       description: string;
@@ -194,6 +197,7 @@ component LoadedSessionChatView(props: {
     chat.connection.reconnectable && !chat.session.activeDaemonSession &&
       chat.session.connectionMode === "live"
   const canOpenSessionChanges = chat.session.cwd.trim().length > 0
+  const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
   useReportTabProject(resolvedProjectPath)
 
@@ -213,7 +217,7 @@ component LoadedSessionChatView(props: {
       setHeaderActionError(
         {
           title: "Reconnect failed",
-          description: formatSessionActionError(error),
+          description: formatSessionRequestError(error),
         },
       )
     } finally {
@@ -248,7 +252,7 @@ component LoadedSessionChatView(props: {
       setHeaderActionError(
         {
           title: "Stop failed",
-          description: formatSessionActionError(error),
+          description: formatSessionRequestError(error),
         },
       )
     } finally {
@@ -275,6 +279,34 @@ component LoadedSessionChatView(props: {
         dirty: false,
       },
     )
+  }
+
+  async function loadOlderHistory() {
+    if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
+      return
+    }
+
+    setOlderHistoryState({ status: "loading" })
+
+    try {
+      const history = await goddardSdk.session.history(
+        {
+          id: chat.session.id,
+          cursor: chat.nextCursor,
+        },
+      )
+
+      chat.prependOlderHistory(history)
+      setOlderHistoryState({ status: "idle" })
+    } catch (error) {
+      console.error("Failed to load older session history.", error)
+      setOlderHistoryState(
+        {
+          status: "error",
+          message: formatSessionRequestError(error),
+        },
+      )
+    }
   }
 
   <main class={styles.root}>
@@ -366,6 +398,12 @@ component LoadedSessionChatView(props: {
         class={styles.transcript}
         initialScrollPosition="bottom"
         messages={chat.transcriptMessages}
+        olderHistory={{
+          canLoad: canLoadOlderHistory,
+          error: olderHistoryState.status === "error" ? olderHistoryState.message : null,
+          loading: olderHistoryState.status === "loading",
+          onLoad: loadOlderHistory,
+        }}
         onSelectPermissionOption={async (input) => {
           await respondSessionPermission(
             {
