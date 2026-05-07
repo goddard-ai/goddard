@@ -3,8 +3,9 @@ import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
 import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
 import type { NavigationItemId } from "~/navigation.ts"
+import type { AppCommandId } from "~/shared/app-commands.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
-import { activeCommandLayerHandlerContext, withCommandLayerWhen } from "./command-layer.tsrx"
+import { hasActiveCommandLayerHandler } from "./command-layer.tsrx"
 
 const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchTabKind>("main")
@@ -23,7 +24,6 @@ const hasCloseTarget = computed(() => {
 
 const whenContext = computed(() => {
   return {
-    ...activeCommandLayerHandlerContext.value,
     "sessionInput.hasAdapterSelector": sessionInputHasAdapterSelector.value,
     "sessionInput.hasBranchSelector": sessionInputHasBranchSelector.value,
     "sessionInput.hasLocationSelector": sessionInputHasLocationSelector.value,
@@ -65,5 +65,12 @@ const commandAvailabilitySnapshot = computed(() => ({
 export function isCommandAvailable(runtime: ShortcutRuntime, input: RunnableInput) {
   const snapshot = commandAvailabilitySnapshot.value
   runtime.batchContext(snapshot.whenContext)
-  return runtime.isAvailable(withCommandLayerWhen(input))
+
+  const commandId = "id" in input ? (input.id as AppCommandId) : null
+
+  if (commandId && !hasActiveCommandLayerHandler(commandId)) {
+    return false
+  }
+
+  return runtime.isAvailable(input)
 }

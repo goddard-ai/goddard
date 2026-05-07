@@ -15,54 +15,6 @@ const activeCommandLayerId = computed(() => {
   return activeCommandLayerEntries.value.at(-1)?.id ?? rootCommandLayerId
 })
 
-export const activeCommandLayerHandlerContext = computed(() => {
-  const activeLayerId = activeCommandLayerId.value
-  const commandIds = new Set(Object.values(commandLayerHandlerCounts.value).flatMap(
-    (handlers) => Object.keys(handlers),
-  ))
-
-  return Object.fromEntries(
-    Array.from(
-      commandIds,
-      (commandId) => [
-        getCommandLayerHandlerWhenKey(commandId as AppCommandId),
-        (commandLayerHandlerCounts.value[activeLayerId]?.[commandId] ?? 0) > 0,
-      ],
-    ),
-  )
-})
-
-function getCommandLayerHandlerWhenKey(commandId: AppCommandId) {
-  return `command.${commandId}.isHandledInActiveLayer`
-}
-
-function normalizeWhenClause(whenClause: string | null | undefined) {
-  const trimmedWhenClause = whenClause?.trim()
-  return trimmedWhenClause ? trimmedWhenClause : undefined
-}
-
-/** Returns the powerkeys context key that tracks active-layer handlers for one command. */
-export function getCommandLayerHandlerWhen(commandId: AppCommandId) {
-  return getCommandLayerHandlerWhenKey(commandId)
-}
-
-/** Adds the active-layer handler requirement to one runnable command input. */
-export function withCommandLayerWhen<TInput extends { id?: string; when?: string }>(input: TInput) {
-  const commandId = input.id as AppCommandId | undefined
-
-  if (!commandId) {
-    return input
-  }
-
-  const handlerWhen = getCommandLayerHandlerWhen(commandId)
-  const inputWhen = normalizeWhenClause(input.when)
-
-  return {
-    ...input,
-    when: inputWhen ? `${handlerWhen} && (${inputWhen})` : handlerWhen,
-  }
-}
-
 /** Checks whether one command layer is currently allowed to receive command events. */
 export function isCommandLayerActive(layerId: string) {
   return activeCommandLayerId.peek() === layerId
