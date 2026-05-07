@@ -133,6 +133,10 @@ export async function buildStatusReport(input: SprintInferenceInput & { sprintLo
     branches.next.exists && branches.review.exists
       ? await isAncestor(context.rootDir, parsed.state.branches.review, parsed.state.branches.next)
       : null
+  const dormantNextIsAncestorOfReview =
+    !parsed.state.tasks.next && nextDescendsFromReview === false
+      ? await isAncestor(context.rootDir, parsed.state.branches.next, parsed.state.branches.review)
+      : null
   if (reviewDescendsFromApproved === false) {
     diagnostics.push({
       severity: "error",
@@ -141,7 +145,15 @@ export async function buildStatusReport(input: SprintInferenceInput & { sprintLo
       suggestion: "Manual recovery is required before sprint-branch can safely continue.",
     })
   }
-  if (nextDescendsFromReview === false) {
+  if (nextDescendsFromReview === false && dormantNextIsAncestorOfReview === true) {
+    diagnostics.push({
+      severity: "info",
+      code: "next_branch_behind_review",
+      message: `${parsed.state.branches.next} is stale behind ${parsed.state.branches.review} and has no commits outside review.`,
+      suggestion:
+        "It is safe to continue; the next branch can be reset when new work-ahead starts.",
+    })
+  } else if (nextDescendsFromReview === false) {
     diagnostics.push({
       severity: "warning",
       code: "next_not_based_on_review",

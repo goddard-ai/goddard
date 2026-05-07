@@ -33,6 +33,8 @@
   - Already approved historical tasks are archival metadata:
     - Their local task files are useful context.
     - Missing local files do not create task-file diagnostics.
+  - A dormant `next` branch that is only behind `review` is reported as stale
+    and safe, not as blocked work.
   - When the sprint is blocked:
     - The report identifies why.
     - The next safe command is included when one can be determined.

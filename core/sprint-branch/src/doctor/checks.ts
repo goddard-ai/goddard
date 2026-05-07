@@ -1,4 +1,4 @@
-import { branchExists, refExists } from "../git/refs"
+import { branchExists, isAncestor, refExists } from "../git/refs"
 import { getStashRefs } from "../git/stash"
 import { readTaskReviewReport } from "../review-report"
 import type {
@@ -138,7 +138,18 @@ async function checkBranchDrift(report: SprintStatusReport, context: DoctorConte
       message: `Review task ${state.tasks.review} is recorded, but review and approved point at the same commit.`,
     })
   }
-  if (!state.tasks.next && nextHead && reviewHead && nextHead !== reviewHead) {
+  const nextHasUniqueCommits =
+    !state.tasks.next && nextHead && reviewHead
+      ? !(await isAncestor(report.rootDir, state.branches.next, state.branches.review))
+      : false
+
+  if (
+    !state.tasks.next &&
+    nextHead &&
+    reviewHead &&
+    nextHead !== reviewHead &&
+    nextHasUniqueCommits
+  ) {
     diagnostics.push({
       severity: "error",
       code: "next_branch_has_unrecorded_work",

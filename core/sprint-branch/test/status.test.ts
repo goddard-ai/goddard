@@ -190,6 +190,40 @@ describe("sprint-branch status", () => {
     expect(diagnostic?.severity).toBe("warning")
   })
 
+  // A dormant next branch can be behind review after review advances. Because it
+  // has no commits outside review, status should not treat it as blocked work.
+  test("reports stale dormant next as safe when it is behind review", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "review.txt"), "review work\n")
+    await commitAll(repo, "advance review")
+    await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      blocked: { reasons: string[] }
+      diagnostics: Array<{ code: string; message: string; severity: string }>
+    }
+    const diagnostic = status.diagnostics.find((item) => item.code === "next_branch_behind_review")
+
+    expect(result.exitCode).toBe(0)
+    expect(status.ok).toBe(true)
+    expect(status.blocked.reasons).toEqual([])
+    expect(diagnostic?.severity).toBe("info")
+    expect(diagnostic?.message).toContain("stale")
+    expect(diagnostic?.message).toContain("no commits outside review")
+    expect(diagnosticCodes(status)).not.toContain("next_not_based_on_review")
+  })
+
   test("does not warn when an approved task file is missing", async () => {
     const repo = await createSprintRepo("example", {
       review: null,

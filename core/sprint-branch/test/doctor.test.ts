@@ -55,6 +55,87 @@ describe("sprint-branch doctor", () => {
     expect(diagnosticCodes(doctor)).toContain("review_branch_has_unrecorded_work")
   })
 
+  // A dormant next branch that is only behind review has no hidden commits.
+  // Doctor should surface the stale branch without blocking recovery or review flow.
+  test("does not report unrecorded next work when dormant next is behind review", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "review.txt"), "review work\n")
+    await commitAll(repo, "advance review")
+    await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
+
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+    const diagnostic = doctor.diagnostics.find((item) => item.code === "next_branch_behind_review")
+
+    expect(result.exitCode).toBe(0)
+    expect(doctor.ok).toBe(true)
+    expect(diagnosticCodes(doctor)).toContain("next_branch_behind_review")
+    expect(diagnosticCodes(doctor)).not.toContain("next_branch_has_unrecorded_work")
+    expect(diagnostic?.message).toContain("stale")
+    expect(diagnostic?.message).toContain("no commits outside review")
+  })
+
+  // Unique commits on a dormant next branch are still unrecorded work, even when
+  // the branch cleanly descends from review.
+  test("reports unrecorded next work when dormant next is ahead of review", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "next.txt"), "next work\n")
+    await commitAll(repo, "add next work")
+
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(doctor.ok).toBe(false)
+    expect(diagnosticCodes(doctor)).toContain("next_branch_has_unrecorded_work")
+  })
+
+  // Divergence is unsafe only when next has unique commits; those commits would
+  // otherwise be disconnected from a recorded next task.
+  test("reports unrecorded next work when dormant next diverges from review", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: [],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "next.txt"), "next work\n")
+    await commitAll(repo, "add next work")
+    await git(repo, ["checkout", "sprint/example/review"])
+    await fs.writeFile(path.join(repo, "review.txt"), "review work\n")
+    await commitAll(repo, "advance review")
+    await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
+
+    const result = await runCli(repo, ["doctor", "--sprint", "example", "--json"])
+    const doctor = JSON.parse(result.stdout) as DoctorOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(doctor.ok).toBe(false)
+    expect(diagnosticCodes(doctor)).toContain("next_branch_has_unrecorded_work")
+  })
+
   // Task role bugs are subtle because the branches may still exist and be well-formed.
   // Doctor checks the logical queue so one task cannot occupy multiple workflow states.
   test("reports duplicate task assignments and task order drift", async () => {
@@ -322,7 +403,7 @@ describe("sprint-branch doctor", () => {
 type DoctorOutput = {
   ok: boolean
   nextSafeCommand?: string
-  diagnostics: Array<{ code: string }>
+  diagnostics: Array<{ code: string; message?: string }>
 }
 
 function diagnosticCodes(doctor: DoctorOutput) {

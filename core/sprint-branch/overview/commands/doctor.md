@@ -12,6 +12,8 @@
     - Missing branch roles.
     - Unexpected branch ancestry.
     - Unrecorded branch work.
+    - Dormant `next` branches that are stale behind `review` but contain no
+      unique commits.
     - Dirty working trees that make branch movement unsafe.
     - Task ordering problems.
     - Duplicate task assignments.
