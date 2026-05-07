@@ -1218,6 +1218,7 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
         id?: string
         method?: string
         params?: {
+          prompt?: Array<{ type?: string; text?: string }>
           update?: {
             content?: { text?: string }
             sessionUpdate?: string
@@ -1235,6 +1236,13 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
         if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
           events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
         }
+      } else if (message.method === "session/prompt") {
+        const promptText =
+          message.params?.prompt
+            ?.map((block) => (block.type === "text" ? (block.text ?? "") : ""))
+            .filter(Boolean)
+            .join("\n") ?? ""
+        events.push(`prompt:${promptText}`)
       } else if (message.result?.stopReason && message.id) {
         events.push(`result:${message.id}:${message.result.stopReason}`)
       }
@@ -1270,11 +1278,14 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
   expect(events.indexOf("tool_call_update:cancel_boundary:hold:update-boundary")).toBeGreaterThan(
     events.indexOf("chunk:cancel_notice:hold:update-boundary"),
   )
-  expect(events.indexOf("chunk:prompt_started:replacement")).toBeGreaterThan(
+  expect(events.indexOf("prompt:replacement")).toBeGreaterThan(
     events.indexOf("tool_call_update:cancel_boundary:hold:update-boundary"),
   )
-  expect(events.indexOf("chunk:prompt_started:replacement")).toBeLessThan(
+  expect(events.indexOf("prompt:replacement")).toBeLessThan(
     events.indexOf("result:prompt-1:cancelled"),
+  )
+  expect(events.indexOf("chunk:prompt_started:replacement")).toBeGreaterThan(
+    events.indexOf("prompt:replacement"),
   )
 })
 
