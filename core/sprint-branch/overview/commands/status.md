@@ -12,6 +12,8 @@
   - The private state location in human-readable terms.
   - Sprint visibility.
   - Branch roles, existence, and ancestry.
+    - Machine-readable ancestry uses explicit states for `descends`,
+      `does_not_descend`, or `not_applicable` when a branch is missing.
   - Working tree cleanliness.
   - Task assignments and task queue.
   - Finished-but-unreviewed tasks.

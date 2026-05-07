@@ -74,6 +74,12 @@ export type SprintBranchStatus = {
   head: string | null
 }
 
+/** Explicit Git ancestry state reported when a missing branch makes comparison unavailable. */
+export type SprintBranchAncestryStatus =
+  | { state: "descends" }
+  | { state: "does_not_descend" }
+  | { state: "not_applicable"; reason: "missing_branch"; missingBranches: SprintBranchRole[] }
+
 /** Current working tree state from git status --porcelain. */
 export type SprintWorkingTreeStatus = {
   clean: boolean
@@ -101,8 +107,8 @@ export type SprintStatusReport = {
   visibility: SprintVisibility
   branches: Record<SprintBranchRole, SprintBranchStatus>
   ancestry: {
-    reviewDescendsFromApproved: boolean | null
-    nextDescendsFromReview: boolean | null
+    reviewDescendsFromApproved: SprintBranchAncestryStatus
+    nextDescendsFromReview: SprintBranchAncestryStatus
   }
   workingTree: SprintWorkingTreeStatus
   taskQueue: SprintTaskQueueItem[]

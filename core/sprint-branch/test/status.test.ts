@@ -32,6 +32,14 @@ describe("sprint-branch status", () => {
       sprint: string
       state: { tasks: { finishedUnreviewed: string[] } }
       branches: { review: { exists: boolean }; approved: { exists: boolean } }
+      ancestry: {
+        reviewDescendsFromApproved: { state: string }
+        nextDescendsFromReview: {
+          state: string
+          reason?: string
+          missingBranches?: string[]
+        }
+      }
       blocked: { review: boolean }
       review: { currentTask: string | null }
       taskQueue: Array<{ id: string; state: string }>
@@ -41,6 +49,12 @@ describe("sprint-branch status", () => {
     expect(status.state.tasks.finishedUnreviewed).toEqual([])
     expect(status.branches.review.exists).toBe(true)
     expect(status.branches.approved.exists).toBe(true)
+    expect(status.ancestry.reviewDescendsFromApproved).toEqual({ state: "descends" })
+    expect(status.ancestry.nextDescendsFromReview).toEqual({
+      state: "not_applicable",
+      reason: "missing_branch",
+      missingBranches: ["next"],
+    })
     expect(status.review.currentTask).toBe("010-task-name")
     expect(status.taskQueue.map((task) => [task.id, task.state])).toEqual([
       ["010-task-name", "review"],
@@ -159,6 +173,29 @@ describe("sprint-branch status", () => {
     expect(diagnosticCodes(status)).toContain("task_file_missing")
   })
 
+  test("reports broken review ancestry as an explicit state", async () => {
+    const repo = await createSprintRepo("example", {
+      review: "010-task-name",
+      next: null,
+      approved: [],
+    })
+    await git(repo, ["checkout", "sprint/example/approved"])
+    await fs.writeFile(path.join(repo, "approved.txt"), "approved-only work\n")
+    await commitAll(repo, "advance approved")
+
+    const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
+    const status = JSON.parse(result.stdout) as {
+      ok: boolean
+      ancestry: { reviewDescendsFromApproved: { state: string } }
+      diagnostics: Array<{ code: string }>
+    }
+
+    expect(result.exitCode).toBe(1)
+    expect(status.ok).toBe(false)
+    expect(status.ancestry.reviewDescendsFromApproved).toEqual({ state: "does_not_descend" })
+    expect(diagnosticCodes(status)).toContain("review_not_based_on_approved")
+  })
+
   // Review feedback can legitimately advance review while next still carries
   // work-ahead commits based on the older review head.
   test("warns without blocking when next is not based on review", async () => {
@@ -181,12 +218,14 @@ describe("sprint-branch status", () => {
     const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
     const status = JSON.parse(result.stdout) as {
       ok: boolean
+      ancestry: { nextDescendsFromReview: { state: string } }
       diagnostics: Array<{ code: string; severity: string }>
     }
     const diagnostic = status.diagnostics.find((item) => item.code === "next_not_based_on_review")
 
     expect(result.exitCode).toBe(0)
     expect(status.ok).toBe(true)
+    expect(status.ancestry.nextDescendsFromReview).toEqual({ state: "does_not_descend" })
     expect(diagnostic?.severity).toBe("warning")
   })
 
@@ -210,6 +249,7 @@ describe("sprint-branch status", () => {
     const result = await runCli(repo, ["status", "--sprint", "example", "--json"])
     const status = JSON.parse(result.stdout) as {
       ok: boolean
+      ancestry: { nextDescendsFromReview: { state: string } }
       blocked: { reasons: string[] }
       diagnostics: Array<{ code: string; message: string; severity: string }>
     }
@@ -217,6 +257,7 @@ describe("sprint-branch status", () => {
 
     expect(result.exitCode).toBe(0)
     expect(status.ok).toBe(true)
+    expect(status.ancestry.nextDescendsFromReview).toEqual({ state: "does_not_descend" })
     expect(status.blocked.reasons).toEqual([])
     expect(diagnostic?.severity).toBe("info")
     expect(diagnostic?.message).toContain("stale")

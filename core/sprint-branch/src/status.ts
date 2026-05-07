@@ -8,6 +8,7 @@ import { writeSprintLastActedAt } from "./state/activity"
 import { inferSprintContext, type SprintInferenceInput } from "./state/inference"
 import { readSprintStateFile } from "./state/io"
 import type {
+  SprintBranchAncestryStatus,
   SprintBranchRole,
   SprintBranchState,
   SprintStatusReport,
@@ -121,23 +122,21 @@ export async function buildStatusReport(input: SprintInferenceInput & { sprintLo
     })
   }
 
-  const reviewDescendsFromApproved =
-    branches.approved.exists && branches.review.exists
-      ? await isAncestor(
-          context.rootDir,
-          parsed.state.branches.approved,
-          parsed.state.branches.review,
-        )
-      : null
-  const nextDescendsFromReview =
-    branches.next.exists && branches.review.exists
-      ? await isAncestor(context.rootDir, parsed.state.branches.review, parsed.state.branches.next)
-      : null
-  const dormantNextIsAncestorOfReview =
-    !parsed.state.tasks.next && nextDescendsFromReview === false
-      ? await isAncestor(context.rootDir, parsed.state.branches.next, parsed.state.branches.review)
-      : null
-  if (reviewDescendsFromApproved === false) {
+  const reviewDescendsFromApproved = await inspectBranchAncestry({
+    rootDir: context.rootDir,
+    ancestor: parsed.state.branches.approved,
+    descendant: parsed.state.branches.review,
+    branches,
+    requiredRoles: ["approved", "review"],
+  })
+  const nextDescendsFromReview = await inspectBranchAncestry({
+    rootDir: context.rootDir,
+    ancestor: parsed.state.branches.review,
+    descendant: parsed.state.branches.next,
+    branches,
+    requiredRoles: ["review", "next"],
+  })
+  if (reviewDescendsFromApproved.state === "does_not_descend") {
     diagnostics.push({
       severity: "error",
       code: "review_not_based_on_approved",
@@ -145,22 +144,38 @@ export async function buildStatusReport(input: SprintInferenceInput & { sprintLo
       suggestion: "Manual recovery is required before sprint-branch can safely continue.",
     })
   }
-  if (nextDescendsFromReview === false && dormantNextIsAncestorOfReview === true) {
-    diagnostics.push({
-      severity: "info",
-      code: "next_branch_behind_review",
-      message: `${parsed.state.branches.next} is stale behind ${parsed.state.branches.review} and has no commits outside review.`,
-      suggestion:
-        "It is safe to continue; the next branch can be reset when new work-ahead starts.",
-    })
-  } else if (nextDescendsFromReview === false) {
-    diagnostics.push({
-      severity: "warning",
+  if (nextDescendsFromReview.state === "does_not_descend") {
+    const nextNotBasedOnReviewDiagnostic = {
+      severity: "warning" as const,
       code: "next_not_based_on_review",
       message: `${parsed.state.branches.next} does not descend from ${parsed.state.branches.review}.`,
       suggestion:
         "Continue review work; run sprint-branch resume --dry-run before returning to work-ahead changes.",
-    })
+    }
+
+    if (!parsed.state.tasks.next) {
+      const dormantNextIsAncestorOfReview = await inspectBranchAncestry({
+        rootDir: context.rootDir,
+        ancestor: parsed.state.branches.next,
+        descendant: parsed.state.branches.review,
+        branches,
+        requiredRoles: ["next", "review"],
+      })
+
+      if (dormantNextIsAncestorOfReview.state === "descends") {
+        diagnostics.push({
+          severity: "info",
+          code: "next_branch_behind_review",
+          message: `${parsed.state.branches.next} is stale behind ${parsed.state.branches.review} and has no commits outside review.`,
+          suggestion:
+            "It is safe to continue; the next branch can be reset when new work-ahead starts.",
+        })
+      } else {
+        diagnostics.push(nextNotBasedOnReviewDiagnostic)
+      }
+    } else {
+      diagnostics.push(nextNotBasedOnReviewDiagnostic)
+    }
   }
 
   for (const stash of parsed.state.activeStashes) {
@@ -264,8 +279,8 @@ export function formatStatusReport(report: SprintStatusReport) {
   lines.push(
     "",
     "Ancestry:",
-    `  review descends from approved: ${formatNullableBoolean(report.ancestry.reviewDescendsFromApproved)}`,
-    `  next descends from review: ${formatNullableBoolean(report.ancestry.nextDescendsFromReview)}`,
+    `  review descends from approved: ${formatBranchAncestryStatus(report.ancestry.reviewDescendsFromApproved)}`,
+    `  next descends from review: ${formatBranchAncestryStatus(report.ancestry.nextDescendsFromReview)}`,
     "",
     "Tasks:",
     `  review: ${report.state.tasks.review ?? "none"}`,
@@ -309,6 +324,31 @@ async function inspectBranch(rootDir: string, name: string) {
     exists,
     head: exists ? await getBranchHead(rootDir, name) : null,
   }
+}
+
+/** Resolves one branch ancestry relationship, preserving why it cannot be checked. */
+async function inspectBranchAncestry(input: {
+  rootDir: string
+  ancestor: string
+  descendant: string
+  branches: Record<SprintBranchRole, Awaited<ReturnType<typeof inspectBranch>>>
+  requiredRoles: SprintBranchRole[]
+}) {
+  const missingBranches = input.requiredRoles.filter((role) => !input.branches[role].exists)
+
+  if (missingBranches.length > 0) {
+    return {
+      state: "not_applicable",
+      reason: "missing_branch",
+      missingBranches,
+    } satisfies SprintBranchAncestryStatus
+  }
+
+  if (await isAncestor(input.rootDir, input.ancestor, input.descendant)) {
+    return { state: "descends" } satisfies SprintBranchAncestryStatus
+  }
+
+  return { state: "does_not_descend" } satisfies SprintBranchAncestryStatus
 }
 
 async function findMissingTaskFiles(state: SprintBranchState) {
@@ -416,11 +456,15 @@ function resolveNextSafeCommand(
   return "sprint-branch start --task <task-file> --dry-run"
 }
 
-function formatNullableBoolean(value: boolean | null) {
-  if (value === null) {
-    return "not applicable"
+function formatBranchAncestryStatus(status: SprintBranchAncestryStatus) {
+  switch (status.state) {
+    case "descends":
+      return "yes"
+    case "does_not_descend":
+      return "no"
+    case "not_applicable":
+      return "not applicable"
   }
-  return value ? "yes" : "no"
 }
 
 function isMissingFileError(error: unknown) {

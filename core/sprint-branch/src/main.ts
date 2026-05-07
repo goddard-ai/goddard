@@ -606,7 +606,7 @@ function validateDiffState(report: SprintStatusReport) {
       message: `Review branch ${report.state.branches.review} does not exist.`,
     })
   }
-  if (report.ancestry.reviewDescendsFromApproved === false) {
+  if (report.ancestry.reviewDescendsFromApproved.state === "does_not_descend") {
     diagnostics.push({
       severity: "error" as const,
       code: "review_not_based_on_approved",

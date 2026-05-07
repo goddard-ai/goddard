@@ -41,6 +41,7 @@ export {
 export { buildSprintReviewView, formatSprintReviewView } from "./view"
 export type {
   SprintActiveStash,
+  SprintBranchAncestryStatus,
   SprintBranchNames,
   SprintBranchRole,
   SprintBranchState,
