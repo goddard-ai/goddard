@@ -102,10 +102,6 @@ export component SwitchProjectDropdown() {
     setIsOpen(true)
   })
 
-  useAppCommand(AppCommand.projects.openFolder, async () => {
-    await openFolderFromSwitcher()
-  })
-
   <button
     aria-expanded={isOpen ? "true" : "false"}
     aria-haspopup="dialog"

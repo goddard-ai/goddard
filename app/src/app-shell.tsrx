@@ -1,12 +1,14 @@
 import { useListener } from "preact-sigma"
 import { useEffect } from "preact/hooks"
 
-import { AppCommand, resolveAppCommand } from "~/commands/app-command.ts"
+import { AppCommand, resolveAppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
 import { GoodToaster } from "~/lib/good-toaster.tsrx"
 import { findNearestProjectPath } from "~/projects/project-context.ts"
+import { openProjectFromFilesystem } from "~/projects/mutations.ts"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsrx"
+import { AppShellOnboarding } from "./app-shell/onboarding.tsrx"
 import {
   useNavigation,
   useProjectContext,
@@ -113,14 +115,29 @@ export component AppShell() {
     }
   })
 
-  <CommandDialog
-    command={AppCommand.navigation.openCommandPalette}
-    content={() => import("~/command-palette.tsrx")}
-  />
-  <AppShellChrome />
-  <CommandDialog
-    command={AppCommand.navigation.openNewSessionDialog}
-    content={() => import("~/sessions/dialog.tsrx")}
-  />
+  useAppCommand(AppCommand.projects.openFolder, async () => {
+    await openProjectFromFilesystem(
+      {
+        projectContext,
+        projectRegistry,
+        workbenchTabSet,
+      },
+    )
+  })
+
+  if (projects.length === 0) {
+    <AppShellOnboarding />
+  } else {
+    <CommandDialog
+      command={AppCommand.navigation.openCommandPalette}
+      content={() => import("~/command-palette.tsrx")}
+    />
+    <AppShellChrome />
+    <CommandDialog
+      command={AppCommand.navigation.openNewSessionDialog}
+      content={() => import("~/sessions/dialog.tsrx")}
+    />
+  }
+
   <GoodToaster />
 }
