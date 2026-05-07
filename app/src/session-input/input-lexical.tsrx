@@ -3,6 +3,7 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin"
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
 import type { LexicalEditor, LexicalNode, NodeKey } from "lexical"
 import {
+  $createLineBreakNode,
   $createParagraphNode,
   $createTextNode,
   $getNodeByKey,
@@ -227,6 +228,71 @@ export function clearSessionInputEditor(editor: LexicalEditor) {
     const root = $getRoot()
     root.clear()
     root.append($createParagraphNode())
+  }, { discrete: true })
+}
+
+function createComposerChipFromPromptBlock(block: SessionInputPromptBlocks[number]) {
+  if (block.type !== "resource_link") {
+    return null
+  }
+
+  if (block.title?.endsWith(" skill")) {
+    const chip: ComposerChipData = {
+      kind: "skill",
+      label: block.name,
+      path: block.uri,
+      uri: block.uri,
+      detail: block.description ?? block.uri,
+      source: "local",
+    }
+
+    return chip
+  }
+
+  const chip: ComposerChipData = {
+    kind: "file",
+    label: block.name,
+    path: block.uri,
+    uri: block.uri,
+    detail: block.description ?? block.uri,
+  }
+
+  return chip
+}
+
+/** Rehydrates one saved prompt block draft so a dismissed launch dialog can show it again. */
+export function setSessionInputEditorPrompt(
+  editor: LexicalEditor,
+  blocks: SessionInputPromptBlocks,
+) {
+  editor.update(() => {
+    const root = $getRoot()
+    const paragraph = $createParagraphNode()
+
+    root.clear()
+    root.append(paragraph)
+
+    for (const block of blocks) {
+      if (block.type === "text") {
+        for (const [index, textSegment] of block.text.split("\n").entries()) {
+          if (index > 0) {
+            paragraph.append($createLineBreakNode())
+          }
+
+          if (textSegment.length > 0) {
+            paragraph.append($createTextNode(textSegment))
+          }
+        }
+
+        continue
+      }
+
+      const chip = createComposerChipFromPromptBlock(block)
+
+      if (chip) {
+        paragraph.append($createComposerChipNode(chip), $createTextNode(" "))
+      }
+    }
   }, { discrete: true })
 }
 

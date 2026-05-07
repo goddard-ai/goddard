@@ -74,10 +74,10 @@ component SessionLaunchDialog(props: {
   }
 
   useEffect(() => {
-    if (isDialogOpen) {
+    if (isDialogOpen && form.draftProjectPath.value === null) {
       form.reset(activeProjectPath)
     }
-  }, [activeProjectPath, form, isDialogOpen])
+  }, [activeProjectPath, form, form.draftProjectPath.value, isDialogOpen])
 
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")

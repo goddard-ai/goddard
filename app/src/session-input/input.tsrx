@@ -12,6 +12,7 @@ import { hasPromptContent } from "~/session-chat/composer-content.ts"
 import {
   clearSessionInputEditor,
   insertSessionInputSuggestion,
+  setSessionInputEditorPrompt,
   SessionInputPlugins,
   sessionInputInitialConfig,
   type SessionInputMenuState,
@@ -46,13 +47,16 @@ export component SessionInput(props: {
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: string;
+  initialPrompt?: SessionInputPromptBlocks;
   submitLabel?: string;
 }) {
   const formElementRef = useRef<HTMLFormElement>(null)
   const menuElementRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
   const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
-  const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>([])
+  const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>(
+    () => props.initialPrompt ?? [],
+  )
   const [menu, setMenu] = useState<SessionInputMenuState | null>(null)
   const [suggestions, setSuggestions] = useState<SessionInputSuggestion[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -210,6 +214,7 @@ export component SessionInput(props: {
 
   function registerEditor(editor: LexicalEditor) {
     editorRef.current = editor
+    setSessionInputEditorPrompt(editor, promptBlocks)
 
     if (props.autoFocus) {
       focusEditor()

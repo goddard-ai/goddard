@@ -145,6 +145,7 @@ export component SessionLaunchForm(props: {
       autoFocus={true}
       classes={launchInputClasses}
       helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
+      initialPrompt={form.draftPromptBlocks.value}
       loadSuggestions={async (input) => {
         const cwd = form.draftProjectPath.value
 
