@@ -239,22 +239,19 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       }
 
       for (const expression of expressions) {
-        const when =
-          typeof expression === "string" ? command.when : (expression.when ?? command.when)
-
         if (typeof expression !== "string") {
           nextBindings.push({
             scope: command.scope,
             preventDefault: true,
             ...expression,
-            when,
+            when: expression.when ?? command.when,
             handler: command,
           })
         } else if (expression.includes(" ")) {
           nextBindings.push({
             sequence: expression,
             scope: command.scope,
-            when,
+            when: command.when,
             handler: command,
             preventDefault: true,
           })
@@ -262,7 +259,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
           nextBindings.push({
             combo: expression,
             scope: command.scope,
-            when,
+            when: command.when,
             handler: command,
             preventDefault: true,
           })
