@@ -192,9 +192,14 @@ export component Transcript(props: TranscriptProps) {
   const renderItems = useMemo(() => coalesceTranscriptItems(props.messages), [
     props.messages,
   ])
-  const olderHistoryHeader = props.olderHistory
-    ? <><OlderHistoryPager olderHistory={props.olderHistory} /></>
-    : undefined
+  let olderHistoryHeader: preact.ComponentChild
+  if (props.olderHistory) {
+    olderHistoryHeader = <tsrx><OlderHistoryPager olderHistory={props.olderHistory} /></tsrx>
+  }
+  const loadingFallback = <tsrx><div class={styles.loadingState}>"Preparing transcript layout..."</div></tsrx>
+  const renderRow = (row: MessageListRow<RenderTranscriptItem>) => <tsrx>
+    <TranscriptRow row={row} onSelectPermissionOption={props.onSelectPermissionOption} />
+  </tsrx>
 
   <div class={cx(styles.transcriptViewport, props.class)}>
     <MessageList
@@ -208,12 +213,10 @@ export component Transcript(props: TranscriptProps) {
       header={olderHistoryHeader}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
-      loadingFallback={<><div class={styles.loadingState}>"Preparing transcript layout..."</div></>}
+      loadingFallback={loadingFallback}
       overscanPx={VIRTUAL_OVERSCAN_PX}
       preserveScrollOnPrepend={Boolean(props.olderHistory)}
-      renderRow={(row) => <>
-        <TranscriptRow row={row} onSelectPermissionOption={props.onSelectPermissionOption} />
-      </>}
+      renderRow={renderRow}
       scrollCacheKey={props.scrollCacheKey}
     />
   </div>

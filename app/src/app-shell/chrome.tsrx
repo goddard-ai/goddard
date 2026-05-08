@@ -198,6 +198,8 @@ export component AppShellChrome() {
       },
     )
   })
+  const proposeTaskIcon = <tsrx><InlineSvgIcon icon="what-next" size="17px 12px" /></tsrx>
+  const newSessionIcon = <tsrx><InlineSvgIcon icon="new-session" size="16px 16px" /></tsrx>
 
   <div class={styles.root}>
     <header
@@ -228,13 +230,13 @@ export component AppShellChrome() {
         <div class={styles.actionGroup}>
           <ActionButton
             ariaLabel="Propose task"
-            icon={<><InlineSvgIcon icon="what-next" size="17px 12px" /></>}
+            icon={proposeTaskIcon}
             onAction={AppCommand.navigation.openProposeTaskDialog}
           />
           <span class={styles.actionDivider} />
           <ActionButton
             ariaLabel="New session"
-            icon={<><InlineSvgIcon icon="new-session" size="16px 16px" /></>}
+            icon={newSessionIcon}
             onAction={AppCommand.navigation.openNewSessionDialog}
           />
         </div>

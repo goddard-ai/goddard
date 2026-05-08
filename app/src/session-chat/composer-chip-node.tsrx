@@ -232,7 +232,7 @@ export class ComposerChipNode extends ComposerChipDecoratorNode {
   }
 
   decorate() {
-    return <><ComposerChipView chip={this.getChip()} /></>
+    return <tsrx><ComposerChipView chip={this.getChip()} /></tsrx>
   }
 }
 

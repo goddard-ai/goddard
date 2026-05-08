@@ -1,0 +1,22 @@
+diff --git a/src/plugin.js b/src/plugin.js
+index 03fba3d7f996074f5b23da9678b10ae0807de1d2..773ece66b53fdbe81ac2f8255a80563a884d61f7 100644
+--- a/src/plugin.js
++++ b/src/plugin.js
+@@ -2576,6 +2576,17 @@ export function tsrx(options = {}) {
+ 					if (this.value === '/' || this.type === tt.slash) {
+ 						// Consume '/'
+ 						this.next();
++
++						const activeElement = this.#path[this.#path.length - 1];
++						if (activeElement?.type === 'Tsrx' && this.input.startsWith('tsrx>', this.start)) {
++							this.pos = this.start + 5;
++							this.#path.pop();
++							this.#popTsxTokenContextBeforeTemplateExpressionChild();
++							this.exprAllowed = true;
++							skipWhitespace(this);
++							this.next();
++							return;
++						}
+ 
+ 						const closingElement =
+ 							/** @type {ESTreeJSX.JSXClosingElement & AST.NodeWithLocation} */ (

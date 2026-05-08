@@ -47,6 +47,16 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
+  const tooltipContent = <tsrx>
+    <span class={styles.tooltipContent}>
+      <span>
+        {props.label}
+      </span>
+      <span class={styles.tooltipShortcut}>
+        {shortcutLabel}
+      </span>
+    </span>
+  </tsrx>
 
   <Popover.Root
     autoFocus={true}
@@ -73,16 +83,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
     <div class={styles.field}>
       <GoodTooltip
         ariaLabel={props.label}
-        content={<>
-          <span class={styles.tooltipContent}>
-            <span>
-              {props.label}
-            </span>
-            <span class={styles.tooltipShortcut}>
-              {shortcutLabel}
-            </span>
-          </span>
-        </>}
+        content={tooltipContent}
       >
         <span class={styles.tooltipTrigger}>
           <Popover.Trigger asChild>
