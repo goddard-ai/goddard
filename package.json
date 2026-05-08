@@ -28,6 +28,7 @@
     "postcommit:restore-stash": "bun run ./scripts/post-commit-restore-stash.mjs",
     "prepush:check": "bun run ./scripts/pre-push.ts",
     "dev": "bun run ./scripts/dev.ts",
+    "scaffold:feature": "bun run ./scripts/scaffold-feature-package.ts",
     "build": "turbo run build",
     "fmt": "turbo run fmt",
     "typecheck": "turbo run typecheck --output-logs=errors-only",
