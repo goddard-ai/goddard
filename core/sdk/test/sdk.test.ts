@@ -151,7 +151,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("session worktree sync helpers forward the expected daemon requests", async () => {
+  test("session review session helpers forward the expected daemon requests", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
@@ -164,7 +164,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         worktreeDir: "/repo/wt",
         branchName: "goddard-ses_1",
         poweredBy: "default",
-        sync: null,
+        reviewSession: null,
       },
       warnings: [],
     })
@@ -178,7 +178,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         worktreeDir: "/repo/wt",
         branchName: "goddard-ses_1",
         poweredBy: "default",
-        sync: null,
+        reviewSession: null,
       },
       warnings: [],
     })
@@ -192,22 +192,22 @@ describe("@goddard-ai/sdk session namespace", () => {
         worktreeDir: "/repo/wt",
         branchName: "goddard-ses_1",
         poweredBy: "default",
-        sync: null,
+        reviewSession: null,
       },
       warnings: [],
     })
 
-    await sdk.session.mountWorktreeSync({ id: "ses_1" })
-    await sdk.session.syncWorktree({ id: "ses_1" })
-    await sdk.session.unmountWorktree({ id: "ses_1" })
+    await sdk.session.mountReviewSession({ id: "ses_1" })
+    await sdk.session.syncReviewSession({ id: "ses_1" })
+    await sdk.session.unmountReviewSession({ id: "ses_1" })
 
-    expect(send).toHaveBeenNthCalledWith(1, "session.worktreeSync.mount", {
+    expect(send).toHaveBeenNthCalledWith(1, "session.reviewSession.mount", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(2, "session.worktreeSync.run", {
+    expect(send).toHaveBeenNthCalledWith(2, "session.reviewSession.run", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(3, "session.worktreeSync.unmount", {
+    expect(send).toHaveBeenNthCalledWith(3, "session.reviewSession.unmount", {
       id: "ses_1",
     })
   })

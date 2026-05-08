@@ -8,7 +8,6 @@ The Goddard Daemon is a local background process that executes autonomous coding
 - [Daemon IPC Server Concepts](./src/ipc/server.md)
 - [Session Manager Domain Concepts](./src/session/manager.md)
 - [Session Turn History Design](./src/session/turn-history-design.md)
-- [Worktree Sync Session Design](./src/worktrees/sync-session.md)
 - [Workforce Runtime Domain Concepts](./src/workforce/runtime.md)
 
 ## Launch Contract
@@ -37,7 +36,7 @@ When the daemon launches agent sessions, it prepends the resolved agent-bin dire
 
 Direct daemon session creation keeps the original `cwd` by default, even inside git repositories. Callers can opt into isolated session worktrees with `worktree: { enabled: true }`. The session manager provisions linked Git worktrees during `newSession()` and persists the resulting worktree metadata on the session. `loadSession()` can reuse the persisted worktree for that session id. Worktree cleanup is not automatic on session exit or daemon restart; it is managed explicitly by separate cleanup flows. Higher-level daemon-owned lifecycles such as PR feedback runs can enable worktrees automatically when isolation is required.
 
-Fresh linked worktrees created by the built-in `default` plugin can also be prepared automatically before the agent starts. Repositories may declare repo-local `worktrees.bootstrap` settings in `.goddard/config.json` to control untracked seeding and daemon-owned package-manager bootstrap. Sync-enabled worktree sessions apply the same preparation flow before the sync mount is established.
+Fresh linked worktrees created by the built-in `default` plugin can also be prepared automatically before the agent starts. Repositories may declare repo-local `worktrees.bootstrap` settings in `.goddard/config.json` to control untracked seeding and daemon-owned package-manager bootstrap. Review-session-enabled worktrees apply the same preparation flow before the review session is mounted.
 
 Custom worktree plugins are loaded from the global Goddard config only. The daemon accepts `worktrees.plugins` entries that point at either a module path relative to `~/.goddard` or a package specifier imported directly by the runtime. Repository-local config cannot declare custom worktree plugins.
 

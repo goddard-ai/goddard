@@ -1785,13 +1785,13 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
   const created = await client.send("session.create", {
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: repoDir,
-    worktree: { enabled: true, sync: { enabled: true } },
+    worktree: { enabled: true, reviewSession: { enabled: true } },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
   const worktree = (await client.send("session.worktree.get", { id: created.session.id })).worktree
-  expect(worktree?.sync?.status).toBe("mounted")
+  expect(worktree?.reviewSession?.status).toBe("mounted")
   expect(await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8")).toBe(
     "install\n",
   )

@@ -6,7 +6,7 @@ import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
 import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
-import { WorktreeSyncSessionHost } from "../src/worktrees/sync.ts"
+import { ReviewSessionHost } from "../src/worktrees/review-session.ts"
 
 const cleanup: string[] = []
 
@@ -31,7 +31,7 @@ test("mount sync mirrors the worktree and unmount restores primary pre-mount sta
   await writeFile(join(created.worktreeDir, "shared.txt"), "worktree dirty\n", "utf-8")
   await writeFile(join(created.worktreeDir, "worktree-note.txt"), "mirror me\n", "utf-8")
 
-  const host = new WorktreeSyncSessionHost({
+  const host = new ReviewSessionHost({
     sessionId: "ses_mount_restore",
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
@@ -66,7 +66,7 @@ test("syncOnce mirrors one-sided untracked files from the worktree to the primar
   })
   cleanup.push(created.worktreeDir)
 
-  const host = new WorktreeSyncSessionHost({
+  const host = new ReviewSessionHost({
     sessionId: "ses_untracked_one_sided",
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
@@ -103,7 +103,7 @@ test("syncOnce preserves non-conflicting changes and prefers the worktree on con
   })
   cleanup.push(created.worktreeDir)
 
-  const host = new WorktreeSyncSessionHost({
+  const host = new ReviewSessionHost({
     sessionId: "ses_merge",
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
@@ -149,7 +149,7 @@ test("syncOnce keeps distinct untracked files from both sides and prefers the wo
   })
   cleanup.push(created.worktreeDir)
 
-  const host = new WorktreeSyncSessionHost({
+  const host = new ReviewSessionHost({
     sessionId: "ses_untracked_merge",
     primaryDir: repoDir,
     worktreeDir: created.worktreeDir,
@@ -200,7 +200,7 @@ test("syncOnce keeps distinct untracked files from both sides and prefers the wo
 })
 
 async function createRepoFixture(files: Record<string, string>) {
-  const repoDir = await mkdtemp(join(tmpdir(), "goddard-worktree-sync-repo-"))
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-review-session-repo-"))
   cleanup.push(repoDir)
 
   for (const [relativePath, content] of Object.entries(files)) {

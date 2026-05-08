@@ -38,7 +38,7 @@ import {
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   ListSessionsRequest,
-  MountSessionWorktreeSyncRequest as MountSessionWorktreeSyncRequestSchema,
+  MountSessionReviewSessionRequest as MountSessionReviewSessionRequestSchema,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
@@ -48,8 +48,8 @@ import {
   SessionLaunchPreviewRequest,
   SessionMessageEvent,
   SteerSessionRequest,
-  SyncSessionWorktreeRequest as SyncSessionWorktreeRequestSchema,
-  UnmountSessionWorktreeSyncRequest as UnmountSessionWorktreeSyncRequestSchema,
+  SyncSessionReviewSessionRequest as SyncSessionReviewSessionRequestSchema,
+  UnmountSessionReviewSessionRequest as UnmountSessionReviewSessionRequestSchema,
   type CancelSessionResponse,
   type CompleteSessionResponse,
   type CreateSessionResponse,
@@ -60,7 +60,7 @@ import {
   type GetSessionWorkforceResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
-  type MutateSessionWorktreeResponse,
+  type MutateSessionReviewSessionResponse,
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
@@ -174,17 +174,17 @@ export const daemonIpcSchema = {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionWorktreeResponse>(),
     },
-    "session.worktreeSync.mount": {
-      payload: MountSessionWorktreeSyncRequestSchema,
-      response: $type<MutateSessionWorktreeResponse>(),
+    "session.reviewSession.mount": {
+      payload: MountSessionReviewSessionRequestSchema,
+      response: $type<MutateSessionReviewSessionResponse>(),
     },
-    "session.worktreeSync.run": {
-      payload: SyncSessionWorktreeRequestSchema,
-      response: $type<MutateSessionWorktreeResponse>(),
+    "session.reviewSession.run": {
+      payload: SyncSessionReviewSessionRequestSchema,
+      response: $type<MutateSessionReviewSessionResponse>(),
     },
-    "session.worktreeSync.unmount": {
-      payload: UnmountSessionWorktreeSyncRequestSchema,
-      response: $type<MutateSessionWorktreeResponse>(),
+    "session.reviewSession.unmount": {
+      payload: UnmountSessionReviewSessionRequestSchema,
+      response: $type<MutateSessionReviewSessionResponse>(),
     },
     "session.workforce.get": {
       payload: DaemonSessionIdParams,

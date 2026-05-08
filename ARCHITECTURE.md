@@ -54,7 +54,7 @@ privileged daemon and OS access behind its trusted host boundary.
 | Workforce CLI | [`workforce`](./workforce/) | Headless operator surface for repository-scoped multi-agent orchestration | Thin daemon-backed client, not runtime owner |
 | Config | [`core/config`](./core/config/) | JSON-safe persisted config merge helpers and precedence | Does not load prompt frontmatter or own runtime effects |
 | Paths | [`core/paths`](./core/paths/) | Pure Goddard path names and path resolution | Does not read, write, persist tokens, or open databases |
-| Review sync | [`core/review-sync`](./core/review-sync/) | Git-only local review branch synchronization for agent-owned branches | Separate from daemon worktree sync |
+| Review sync | [`core/review-sync`](./core/review-sync/) | Git-only local review branch synchronization for agent-owned branches | Owns review-session Git semantics |
 | Sprint branch | [`core/sprint-branch`](./core/sprint-branch/) | Git-private sprint branch state and safe sprint branch transitions | Human landing remains interactive and explicit |
 | Worktree plugins | [`core/worktree-plugin`](./core/worktree-plugin/) | Shared plugin contract for linked Git worktree providers | Plugins must provide real linked worktrees |
 

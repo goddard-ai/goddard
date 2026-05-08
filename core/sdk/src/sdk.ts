@@ -19,7 +19,7 @@ import type {
   ListAdaptersRequest,
   ListInboxRequest,
   ListSessionsRequest,
-  MountSessionWorktreeSyncRequest,
+  MountSessionReviewSessionRequest,
   ReplyPrRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
@@ -38,9 +38,9 @@ import type {
   SubmitPrRequest,
   SubscribeWorkforceEventsRequest,
   SuspendWorkforceRequest,
-  SyncSessionWorktreeRequest,
+  SyncSessionReviewSessionRequest,
   TruncateWorkforceRequest,
-  UnmountSessionWorktreeSyncRequest,
+  UnmountSessionReviewSessionRequest,
   UpdateInboxItemRequest,
   UpdateWorkforceRequest,
   WorkforceEventEnvelope,
@@ -173,17 +173,17 @@ function createSessionNamespace(client: DaemonIpcClient) {
     /** Reads persisted worktree metadata attached to one daemon-managed session. */
     worktree: async (input: DaemonSessionIdParams) => client.send("session.worktree.get", input),
 
-    /** Mounts sync for one daemon-managed session worktree. */
-    mountWorktreeSync: async (input: MountSessionWorktreeSyncRequest) =>
-      client.send("session.worktreeSync.mount", input),
+    /** Mounts a review session for one daemon-managed session worktree. */
+    mountReviewSession: async (input: MountSessionReviewSessionRequest) =>
+      client.send("session.reviewSession.mount", input),
 
-    /** Asks the daemon to run its normal worktree sync cycle immediately for one mounted worktree. */
-    syncWorktree: async (input: SyncSessionWorktreeRequest) =>
-      client.send("session.worktreeSync.run", input),
+    /** Asks the daemon to run its normal review session cycle immediately for one mounted worktree. */
+    syncReviewSession: async (input: SyncSessionReviewSessionRequest) =>
+      client.send("session.reviewSession.run", input),
 
-    /** Unmounts sync for one daemon-managed session worktree. */
-    unmountWorktree: async (input: UnmountSessionWorktreeSyncRequest) =>
-      client.send("session.worktreeSync.unmount", input),
+    /** Unmounts a review session from one daemon-managed session worktree. */
+    unmountReviewSession: async (input: UnmountSessionReviewSessionRequest) =>
+      client.send("session.reviewSession.unmount", input),
 
     /** Reads persisted workforce metadata attached to one daemon-managed session. */
     workforce: async (input: DaemonSessionIdParams) => client.send("session.workforce.get", input),

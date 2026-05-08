@@ -1,4 +1,4 @@
-/** Git-backed sync-session host for one primary checkout and one linked session worktree. */
+/** Git-backed review-session host for one primary checkout and one linked session worktree. */
 import { randomUUID } from "node:crypto"
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -8,16 +8,16 @@ import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import { runCommand } from "./process.ts"
 
 /** Conflict preference used when one sync cycle merges both sides. */
-export type WorktreeSyncConflictPreference = "worktree"
+export type ReviewSessionConflictPreference = "worktree"
 
-/** Current mounted sync status reported to daemon clients. */
-export type WorktreeSyncStatus = "mounted"
+/** Current mounted review session status reported to daemon clients. */
+export type ReviewSessionStatus = "mounted"
 
-/** Live sync-session state merged into one daemon worktree response. */
-export interface WorktreeSyncSessionState {
+/** Live review-session state merged into one daemon worktree response. */
+export interface ReviewSessionState {
   sessionId: DaemonSessionId
-  status: WorktreeSyncStatus
-  conflictPreference: WorktreeSyncConflictPreference
+  status: ReviewSessionStatus
+  conflictPreference: ReviewSessionConflictPreference
   primaryDir: string
   worktreeDir: string
   commonDir: string
@@ -32,14 +32,14 @@ export interface WorktreeSyncSessionState {
   lastSyncAt: number | null
 }
 
-type WorktreeSyncMetadata = {
+type ReviewSessionMetadata = {
   sessionId: DaemonSessionId
   primaryDir: string
   worktreeDir: string
   commonDir: string
   baseOid: string
-  status: WorktreeSyncStatus
-  conflictPreference: WorktreeSyncConflictPreference
+  status: ReviewSessionStatus
+  conflictPreference: ReviewSessionConflictPreference
   primaryOriginalHeadOid: string
   primaryOriginalSymbolicRef: string | null
   primaryOriginalBranchTipOid: string | null
@@ -47,29 +47,29 @@ type WorktreeSyncMetadata = {
   lastSyncAt: number | null
 }
 
-const syncRefNames = {
-  base: (sessionId: DaemonSessionId) => `refs/goddard/worktree-sync/${sessionId}/base`,
+const reviewSessionRefNames = {
+  base: (sessionId: DaemonSessionId) => `refs/goddard/review-session/${sessionId}/base`,
   primaryPreMount: (sessionId: DaemonSessionId) =>
-    `refs/goddard/worktree-sync/${sessionId}/primary/pre_mount`,
+    `refs/goddard/review-session/${sessionId}/primary/pre_mount`,
   primaryLatest: (sessionId: DaemonSessionId) =>
-    `refs/goddard/worktree-sync/${sessionId}/primary/latest`,
+    `refs/goddard/review-session/${sessionId}/primary/latest`,
   worktreeLatest: (sessionId: DaemonSessionId) =>
-    `refs/goddard/worktree-sync/${sessionId}/worktree/latest`,
+    `refs/goddard/review-session/${sessionId}/worktree/latest`,
   resultLatest: (sessionId: DaemonSessionId) =>
-    `refs/goddard/worktree-sync/${sessionId}/result/latest`,
+    `refs/goddard/review-session/${sessionId}/result/latest`,
   primaryRecoveryLatest: (sessionId: DaemonSessionId) =>
-    `refs/goddard/worktree-sync/${sessionId}/primary/recovery/latest`,
+    `refs/goddard/review-session/${sessionId}/primary/recovery/latest`,
 }
 
-/** Scans the shared Git metadata directory for one mounted sync session targeting the primary checkout. */
-export async function findMountedWorktreeSyncSessionByPrimaryDir(primaryDir: string) {
+/** Scans the shared Git metadata directory for one mounted review session targeting the primary checkout. */
+export async function findMountedReviewSessionByPrimaryDir(primaryDir: string) {
   const normalizedPrimaryDir = await normalizePath(primaryDir)
   const commonDir = await resolveGitCommonDir(normalizedPrimaryDir)
   if (!commonDir) {
     return null
   }
 
-  const metadataDir = resolveSyncMetadataDir(commonDir)
+  const metadataDir = resolveReviewSessionMetadataDir(commonDir)
   try {
     const entries = await readdir(metadataDir)
     for (const entry of entries) {
@@ -93,8 +93,8 @@ export async function findMountedWorktreeSyncSessionByPrimaryDir(primaryDir: str
   return null
 }
 
-/** Rehydrates one daemon-owned sync session from Git metadata and shared refs on demand. */
-export class WorktreeSyncSessionHost {
+/** Rehydrates one daemon-owned review session from Git metadata and shared refs on demand. */
+export class ReviewSessionHost {
   readonly #sessionId
   readonly #primaryDir
   readonly #worktreeDir
@@ -105,7 +105,7 @@ export class WorktreeSyncSessionHost {
     this.#worktreeDir = input.worktreeDir
   }
 
-  /** Returns the current mounted sync state when the session is mounted. */
+  /** Returns the current mounted review session state when the session is mounted. */
   async inspect() {
     const commonDir = await resolveGitCommonDir(this.#primaryDir)
     if (!commonDir) {
@@ -120,7 +120,7 @@ export class WorktreeSyncSessionHost {
     return await createStateFromMetadata(metadata)
   }
 
-  /** Mounts one worktree sync session and materializes the initial mirrored result. */
+  /** Mounts one review session and materializes the initial mirrored result. */
   async mount() {
     const primaryDir = await normalizePath(this.#primaryDir)
     const worktreeDir = await normalizePath(this.#worktreeDir)
@@ -132,10 +132,10 @@ export class WorktreeSyncSessionHost {
         return existing
       }
 
-      const conflictingSession = await findMountedWorktreeSyncSessionByPrimaryDir(primaryDir)
+      const conflictingSession = await findMountedReviewSessionByPrimaryDir(primaryDir)
       if (conflictingSession && conflictingSession.sessionId !== this.#sessionId) {
         throw new Error(
-          `Another mounted sync session already owns ${primaryDir}: ${conflictingSession.sessionId}`,
+          `Another mounted review session already owns ${primaryDir}: ${conflictingSession.sessionId}`,
         )
       }
 
@@ -145,7 +145,7 @@ export class WorktreeSyncSessionHost {
       const primaryBranchTipOid = primarySymbolicRef
         ? await resolveRefOid(primaryDir, primarySymbolicRef)
         : null
-      const metadata: WorktreeSyncMetadata = {
+      const metadata: ReviewSessionMetadata = {
         sessionId: this.#sessionId,
         primaryDir,
         worktreeDir,
@@ -160,16 +160,16 @@ export class WorktreeSyncSessionHost {
         lastSyncAt: null,
       }
 
-      await setRef(primaryDir, syncRefNames.base(this.#sessionId), metadata.baseOid)
+      await setRef(primaryDir, reviewSessionRefNames.base(this.#sessionId), metadata.baseOid)
       await setRef(
         primaryDir,
-        syncRefNames.primaryPreMount(this.#sessionId),
+        reviewSessionRefNames.primaryPreMount(this.#sessionId),
         await captureSnapshot(primaryDir, `${this.#sessionId}:primary:pre-mount`),
       )
-      await setRef(primaryDir, syncRefNames.primaryLatest(this.#sessionId), null)
-      await setRef(primaryDir, syncRefNames.worktreeLatest(this.#sessionId), null)
-      await setRef(primaryDir, syncRefNames.resultLatest(this.#sessionId), null)
-      await setRef(primaryDir, syncRefNames.primaryRecoveryLatest(this.#sessionId), null)
+      await setRef(primaryDir, reviewSessionRefNames.primaryLatest(this.#sessionId), null)
+      await setRef(primaryDir, reviewSessionRefNames.worktreeLatest(this.#sessionId), null)
+      await setRef(primaryDir, reviewSessionRefNames.resultLatest(this.#sessionId), null)
+      await setRef(primaryDir, reviewSessionRefNames.primaryRecoveryLatest(this.#sessionId), null)
       await writeMetadata(metadata)
       await detachAndResetCheckout(primaryDir, metadata.baseOid)
       const result = await syncOnceLocked(metadata)
@@ -191,7 +191,7 @@ export class WorktreeSyncSessionHost {
     })
   }
 
-  /** Restores the primary checkout and removes all Git-owned sync state for the session. */
+  /** Restores the primary checkout and removes all Git-owned review session state for the session. */
   async unmount() {
     const commonDir = await resolveGitCommonDir(this.#primaryDir)
     if (!commonDir) {
@@ -213,7 +213,7 @@ export class WorktreeSyncSessionHost {
   }
 }
 
-async function syncOnceLocked(metadata: WorktreeSyncMetadata) {
+async function syncOnceLocked(metadata: ReviewSessionMetadata) {
   await verifyMountedHeads(metadata)
 
   const primaryLatestSnapshotOid = await captureSnapshot(
@@ -227,12 +227,12 @@ async function syncOnceLocked(metadata: WorktreeSyncMetadata) {
 
   await setRef(
     metadata.primaryDir,
-    syncRefNames.primaryLatest(metadata.sessionId),
+    reviewSessionRefNames.primaryLatest(metadata.sessionId),
     primaryLatestSnapshotOid,
   )
   await setRef(
     metadata.primaryDir,
-    syncRefNames.worktreeLatest(metadata.sessionId),
+    reviewSessionRefNames.worktreeLatest(metadata.sessionId),
     worktreeLatestSnapshotOid,
   )
 
@@ -243,12 +243,12 @@ async function syncOnceLocked(metadata: WorktreeSyncMetadata) {
 
   await setRef(
     metadata.primaryDir,
-    syncRefNames.resultLatest(metadata.sessionId),
+    reviewSessionRefNames.resultLatest(metadata.sessionId),
     computation.resultSnapshotOid,
   )
   await setRef(
     metadata.primaryDir,
-    syncRefNames.primaryRecoveryLatest(metadata.sessionId),
+    reviewSessionRefNames.primaryRecoveryLatest(metadata.sessionId),
     computation.primaryRecoverySnapshotOid,
   )
 
@@ -264,7 +264,7 @@ async function syncOnceLocked(metadata: WorktreeSyncMetadata) {
   }
 }
 
-async function unmountLocked(metadata: WorktreeSyncMetadata) {
+async function unmountLocked(metadata: ReviewSessionMetadata) {
   const warnings: string[] = []
 
   await resetCheckoutToBase(metadata.primaryDir, metadata.baseOid)
@@ -277,7 +277,7 @@ async function unmountLocked(metadata: WorktreeSyncMetadata) {
 
   const preMountSnapshotOid = await resolveRefOid(
     metadata.primaryDir,
-    syncRefNames.primaryPreMount(metadata.sessionId),
+    reviewSessionRefNames.primaryPreMount(metadata.sessionId),
   )
   if (preMountSnapshotOid) {
     await applySnapshot(metadata.primaryDir, preMountSnapshotOid)
@@ -291,7 +291,7 @@ async function unmountLocked(metadata: WorktreeSyncMetadata) {
 }
 
 async function computeResultSnapshot(
-  metadata: WorktreeSyncMetadata,
+  metadata: ReviewSessionMetadata,
   input: {
     primarySnapshotOid: string | null
     worktreeSnapshotOid: string | null
@@ -473,7 +473,7 @@ async function restoreConflictToWorktreeVersion(
   })
 }
 
-async function restorePrimaryHead(metadata: WorktreeSyncMetadata) {
+async function restorePrimaryHead(metadata: ReviewSessionMetadata) {
   if (!metadata.primaryOriginalSymbolicRef) {
     await runGit(metadata.primaryDir, ["checkout", "--detach", metadata.primaryOriginalHeadOid])
     return { warning: null }
@@ -498,7 +498,7 @@ async function restorePrimaryHead(metadata: WorktreeSyncMetadata) {
   }
 }
 
-async function verifyMountedHeads(metadata: WorktreeSyncMetadata) {
+async function verifyMountedHeads(metadata: ReviewSessionMetadata) {
   const [primaryHead, worktreeHead] = await Promise.all([
     resolveRequiredHeadOid(metadata.primaryDir),
     resolveRequiredHeadOid(metadata.worktreeDir),
@@ -546,7 +546,7 @@ async function captureSnapshot(cwd: string, label: string) {
   return nextTop
 }
 
-async function createStateFromMetadata(metadata: WorktreeSyncMetadata) {
+async function createStateFromMetadata(metadata: ReviewSessionMetadata) {
   return {
     sessionId: metadata.sessionId,
     status: metadata.status,
@@ -560,32 +560,32 @@ async function createStateFromMetadata(metadata: WorktreeSyncMetadata) {
     primaryOriginalBranchTipOid: metadata.primaryOriginalBranchTipOid,
     primaryLatestSnapshotOid: await resolveRefOid(
       metadata.primaryDir,
-      syncRefNames.primaryLatest(metadata.sessionId),
+      reviewSessionRefNames.primaryLatest(metadata.sessionId),
     ),
     worktreeLatestSnapshotOid: await resolveRefOid(
       metadata.primaryDir,
-      syncRefNames.worktreeLatest(metadata.sessionId),
+      reviewSessionRefNames.worktreeLatest(metadata.sessionId),
     ),
     resultSnapshotOid: await resolveRefOid(
       metadata.primaryDir,
-      syncRefNames.resultLatest(metadata.sessionId),
+      reviewSessionRefNames.resultLatest(metadata.sessionId),
     ),
     primaryRecoverySnapshotOid: await resolveRefOid(
       metadata.primaryDir,
-      syncRefNames.primaryRecoveryLatest(metadata.sessionId),
+      reviewSessionRefNames.primaryRecoveryLatest(metadata.sessionId),
     ),
     lastSyncAt: metadata.lastSyncAt,
-  } satisfies WorktreeSyncSessionState
+  } satisfies ReviewSessionState
 }
 
 async function deleteSessionRefs(primaryDir: string, sessionId: DaemonSessionId) {
   await Promise.all([
-    deleteRef(primaryDir, syncRefNames.base(sessionId)),
-    deleteRef(primaryDir, syncRefNames.primaryPreMount(sessionId)),
-    deleteRef(primaryDir, syncRefNames.primaryLatest(sessionId)),
-    deleteRef(primaryDir, syncRefNames.worktreeLatest(sessionId)),
-    deleteRef(primaryDir, syncRefNames.resultLatest(sessionId)),
-    deleteRef(primaryDir, syncRefNames.primaryRecoveryLatest(sessionId)),
+    deleteRef(primaryDir, reviewSessionRefNames.base(sessionId)),
+    deleteRef(primaryDir, reviewSessionRefNames.primaryPreMount(sessionId)),
+    deleteRef(primaryDir, reviewSessionRefNames.primaryLatest(sessionId)),
+    deleteRef(primaryDir, reviewSessionRefNames.worktreeLatest(sessionId)),
+    deleteRef(primaryDir, reviewSessionRefNames.resultLatest(sessionId)),
+    deleteRef(primaryDir, reviewSessionRefNames.primaryRecoveryLatest(sessionId)),
   ])
 }
 
@@ -602,8 +602,8 @@ async function deleteRef(cwd: string, refName: string) {
   await runGit(cwd, ["update-ref", "-d", refName], { allowFailure: true })
 }
 
-async function writeMetadata(metadata: WorktreeSyncMetadata) {
-  const metadataDir = resolveSyncMetadataDir(metadata.commonDir)
+async function writeMetadata(metadata: ReviewSessionMetadata) {
+  const metadataDir = resolveReviewSessionMetadataDir(metadata.commonDir)
   await mkdir(metadataDir, { recursive: true })
   await writeFile(
     resolveMetadataPath(metadata.commonDir, metadata.sessionId),
@@ -614,7 +614,7 @@ async function writeMetadata(metadata: WorktreeSyncMetadata) {
 async function readRequiredMetadata(metadataPath: string) {
   const metadata = await readMetadata(metadataPath)
   if (!metadata) {
-    throw new Error(`Mounted sync metadata is missing: ${metadataPath}`)
+    throw new Error(`Mounted review session metadata is missing: ${metadataPath}`)
   }
 
   return metadata
@@ -623,7 +623,7 @@ async function readRequiredMetadata(metadataPath: string) {
 async function readMetadata(metadataPath: string) {
   try {
     const content = await readFile(metadataPath, "utf-8")
-    const parsed = JSON.parse(content) as WorktreeSyncMetadata
+    const parsed = JSON.parse(content) as ReviewSessionMetadata
     if (!parsed || typeof parsed.sessionId !== "string" || typeof parsed.baseOid !== "string") {
       return null
     }
@@ -688,20 +688,20 @@ async function normalizePath(value: string) {
   return await realpath(resolve(value))
 }
 
-function resolveSyncMetadataDir(commonDir: string) {
-  return join(commonDir, "goddard", "worktree-sync")
+function resolveReviewSessionMetadataDir(commonDir: string) {
+  return join(commonDir, "goddard", "review-session")
 }
 
 function resolveMetadataPath(commonDir: string, sessionId: DaemonSessionId) {
-  return join(resolveSyncMetadataDir(commonDir), `${sessionId}.json`)
+  return join(resolveReviewSessionMetadataDir(commonDir), `${sessionId}.json`)
 }
 
 function resolveLockDir(commonDir: string) {
-  return join(resolveSyncMetadataDir(commonDir), "lock")
+  return join(resolveReviewSessionMetadataDir(commonDir), "lock")
 }
 
 function resolveScratchDir(sessionId: DaemonSessionId) {
-  return join(tmpdir(), `goddard-worktree-sync-${sessionId}-${randomUUID()}`)
+  return join(tmpdir(), `goddard-review-session-${sessionId}-${randomUUID()}`)
 }
 
 async function withRepoLock<T>(commonDir: string, work: () => Promise<T>) {
@@ -714,7 +714,7 @@ async function withRepoLock<T>(commonDir: string, work: () => Promise<T>) {
 }
 
 async function acquireRepoLock(commonDir: string) {
-  const metadataDir = resolveSyncMetadataDir(commonDir)
+  const metadataDir = resolveReviewSessionMetadataDir(commonDir)
   const lockDir = resolveLockDir(commonDir)
   await mkdir(metadataDir, { recursive: true })
 
@@ -742,7 +742,7 @@ async function acquireRepoLock(commonDir: string) {
     }
   }
 
-  throw new Error(`Timed out waiting for worktree sync lock in ${commonDir}`)
+  throw new Error(`Timed out waiting for review session lock in ${commonDir}`)
 }
 
 async function isLockStale(lockDir: string) {

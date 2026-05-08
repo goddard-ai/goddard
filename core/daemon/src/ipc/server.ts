@@ -366,14 +366,14 @@ export async function startDaemonServer(
     "session.worktree.get": async ({ id }) => {
       return sessionManager.getWorktree(id)
     },
-    "session.worktreeSync.mount": async ({ id }) => {
-      return sessionManager.mountWorktreeSync(id)
+    "session.reviewSession.mount": async ({ id }) => {
+      return sessionManager.mountReviewSession(id)
     },
-    "session.worktreeSync.run": async ({ id }) => {
-      return sessionManager.syncWorktree(id)
+    "session.reviewSession.run": async ({ id }) => {
+      return sessionManager.syncReviewSession(id)
     },
-    "session.worktreeSync.unmount": async ({ id }) => {
-      return sessionManager.unmountWorktreeSync(id)
+    "session.reviewSession.unmount": async ({ id }) => {
+      return sessionManager.unmountReviewSession(id)
     },
     "session.workforce.get": async ({ id }) => {
       return sessionManager.getWorkforce(id)

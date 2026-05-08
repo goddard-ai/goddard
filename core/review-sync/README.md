@@ -11,9 +11,8 @@ snapshot, tries to apply the resulting human patch to the agent worktree, saves 
 patch as accepted or rejected, then refreshes the review branch from the agent
 snapshot.
 
-This package is separate from daemon worktree sync. The existing daemon feature
-continues to own mounted live synchronization between a primary checkout and a
-daemon session worktree.
+Daemon review sessions use this package as the owner of review branch and sync
+semantics.
 
 ## CLI
 

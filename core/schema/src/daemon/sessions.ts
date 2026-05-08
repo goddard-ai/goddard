@@ -20,18 +20,18 @@ export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.Con
 
 export type InitialPromptOption = z.infer<typeof InitialPromptOption>
 
-/** Worktree options accepted by the daemon session API. */
-export const SessionWorktreeSyncParams = z.strictObject({
+/** Review-session options accepted by the daemon session API. */
+export const SessionReviewSessionParams = z.strictObject({
   enabled: z.boolean().optional(),
 })
 
-export type SessionWorktreeSyncParams = z.infer<typeof SessionWorktreeSyncParams>
+export type SessionReviewSessionParams = z.infer<typeof SessionReviewSessionParams>
 
 /** Worktree options accepted by the daemon session API. */
 export const SessionWorktreeParams = z.strictObject({
   enabled: z.boolean().optional(),
   baseBranchName: z.string().optional(),
-  sync: SessionWorktreeSyncParams.optional(),
+  reviewSession: SessionReviewSessionParams.optional(),
 })
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
@@ -45,8 +45,8 @@ export const SessionWorkforceParams = z.strictObject({
 
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
 
-/** Live sync-session state merged into one daemon worktree response. */
-export const SessionWorktreeSyncState = z.strictObject({
+/** Live review-session state merged into one daemon worktree response. */
+export const SessionReviewSessionState = z.strictObject({
   status: z.literal("mounted"),
   conflictPreference: z.literal("worktree"),
   baseOid: z.string(),
@@ -57,7 +57,7 @@ export const SessionWorktreeSyncState = z.strictObject({
   lastSyncAt: z.number().int().nullable(),
 })
 
-export type SessionWorktreeSyncState = z.infer<typeof SessionWorktreeSyncState>
+export type SessionReviewSessionState = z.infer<typeof SessionReviewSessionState>
 
 /** Response payload fragment returned after one daemon-managed session worktree fetch. */
 export const SessionWorktree = z.strictObject({
@@ -67,7 +67,7 @@ export const SessionWorktree = z.strictObject({
   worktreeDir: z.string(),
   branchName: z.string(),
   poweredBy: z.string(),
-  sync: SessionWorktreeSyncState.nullable(),
+  reviewSession: SessionReviewSessionState.nullable(),
 })
 
 export type SessionWorktree = z.infer<typeof SessionWorktree>
@@ -440,23 +440,23 @@ export type GetSessionWorktreeResponse = SessionIdentity & {
   worktree: SessionWorktree | null
 }
 
-/** Request payload used to mount sync on one daemon-managed session worktree. */
-export const MountSessionWorktreeSyncRequest = DaemonSessionIdParams
+/** Request payload used to mount a review session for one daemon-managed session worktree. */
+export const MountSessionReviewSessionRequest = DaemonSessionIdParams
 
-export type MountSessionWorktreeSyncRequest = z.infer<typeof MountSessionWorktreeSyncRequest>
+export type MountSessionReviewSessionRequest = z.infer<typeof MountSessionReviewSessionRequest>
 
-/** Request payload used to ask the daemon to run its normal worktree sync cycle immediately. */
-export const SyncSessionWorktreeRequest = DaemonSessionIdParams
+/** Request payload used to ask the daemon to run its normal review session cycle immediately. */
+export const SyncSessionReviewSessionRequest = DaemonSessionIdParams
 
-export type SyncSessionWorktreeRequest = z.infer<typeof SyncSessionWorktreeRequest>
+export type SyncSessionReviewSessionRequest = z.infer<typeof SyncSessionReviewSessionRequest>
 
-/** Request payload used to unmount sync from one daemon-managed session worktree. */
-export const UnmountSessionWorktreeSyncRequest = DaemonSessionIdParams
+/** Request payload used to unmount a review session from one daemon-managed session worktree. */
+export const UnmountSessionReviewSessionRequest = DaemonSessionIdParams
 
-export type UnmountSessionWorktreeSyncRequest = z.infer<typeof UnmountSessionWorktreeSyncRequest>
+export type UnmountSessionReviewSessionRequest = z.infer<typeof UnmountSessionReviewSessionRequest>
 
-/** Response payload returned after one daemon-managed worktree sync mutation. */
-export type MutateSessionWorktreeResponse = SessionIdentity & {
+/** Response payload returned after one daemon-managed review session mutation. */
+export type MutateSessionReviewSessionResponse = SessionIdentity & {
   worktree: SessionWorktree | null
   warnings: string[]
 }
