@@ -486,7 +486,7 @@ test("inactive command layer bindings do not prevent default", async () => {
   }
 })
 
-test("handler availability changes update shortcut context without rebinding", async () => {
+test("handler availability changes do not rebind shortcuts", async () => {
   const { registry, cleanup } = createTestRegistry()
   const container = document.createElement("div")
   document.body.append(container)

@@ -2,13 +2,7 @@ import { effect } from "@preact/signals"
 import { createShortcuts, type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
 import { Sigma } from "preact-sigma"
 
-import {
-  appCommandHandledContext,
-  appCommandList,
-  getAppCommandHandledContextKey,
-  resolveAppCommand,
-  type AppCommand,
-} from "~/commands/app-command.ts"
+import { appCommandList, isAppCommandHandled, resolveAppCommand } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
@@ -40,22 +34,6 @@ function normalizeWhenClause(whenClause: string | null | undefined) {
   return trimmedWhenClause ? trimmedWhenClause : undefined
 }
 
-function combineWhenClauses(...whenClauses: Array<string | null | undefined>) {
-  const normalizedWhenClauses = whenClauses.flatMap((whenClause) => {
-    const normalizedWhenClause = normalizeWhenClause(whenClause)
-    return normalizedWhenClause ? [`(${normalizedWhenClause})`] : []
-  })
-
-  return normalizedWhenClauses.length > 0 ? normalizedWhenClauses.join(" && ") : undefined
-}
-
-function getRuntimeWhenClause(command: AppCommand, binding: ShortcutBinding) {
-  const bindingWhen = typeof binding === "string" ? undefined : binding.when
-  const commandWhen = bindingWhen ?? command.when
-
-  return combineWhenClauses(getAppCommandHandledContextKey(command.id), commandWhen)
-}
-
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
 export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
   /** Imperative powerkeys runtime that owns document listeners outside persisted shortcut state. */
@@ -73,6 +51,14 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       target,
       editablePolicy: "ignore-editable",
       getActiveScopes: () => commandContext.activeScopes.peek(),
+      canDispatch: (candidate) => {
+        const commandId =
+          "id" in candidate.handler && typeof candidate.handler.id === "string"
+            ? (candidate.handler.id as AppCommandId)
+            : null
+
+        return commandId === null || isAppCommandHandled(commandId)
+      },
       onError: (error, info) => {
         console.error("Shortcut runtime error.", error, info)
       },
@@ -253,19 +239,22 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
       }
 
       for (const expression of expressions) {
+        const when =
+          typeof expression === "string" ? command.when : (expression.when ?? command.when)
+
         if (typeof expression !== "string") {
           nextBindings.push({
             scope: command.scope,
             preventDefault: true,
             ...expression,
-            when: getRuntimeWhenClause(command, expression),
+            when,
             handler: command,
           })
         } else if (expression.includes(" ")) {
           nextBindings.push({
             sequence: expression,
             scope: command.scope,
-            when: getRuntimeWhenClause(command, expression),
+            when,
             handler: command,
             preventDefault: true,
           })
@@ -273,7 +262,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
           nextBindings.push({
             combo: expression,
             scope: command.scope,
-            when: getRuntimeWhenClause(command, expression),
+            when,
             handler: command,
             preventDefault: true,
           })
@@ -286,10 +275,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
 
   onSetup() {
     const disposeContextSync = effect(() => {
-      this.#runtime.batchContext({
-        ...commandContext.whenContext.value,
-        ...appCommandHandledContext.value,
-      })
+      this.#runtime.batchContext(commandContext.whenContext.value)
     })
 
     this.rebindRuntime()
