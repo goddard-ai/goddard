@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxEntityId, InboxItem } from "@goddard-ai/schema/daemon"
 
 import { inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 import { InboxRow } from "./row.tsrx"
@@ -9,7 +9,9 @@ export component InboxList(props: {
   filterId: InboxFilterId;
   items: readonly InboxItem[];
   listStatus?: "idle" | "loading" | "ready" | "error";
+  selectedEntityIds?: ReadonlySet<InboxEntityId>;
   searchQuery: string;
+  onItemSelectionChange?: (item: InboxItem, isSelected: boolean) => void;
 }) {
   const filter = inboxFilterDefinitions[props.filterId]
   const hasSearchQuery = props.searchQuery.trim().length > 0
@@ -49,8 +51,19 @@ export component InboxList(props: {
 
   <ul class={styles.list} aria-label={`${filter.label} inbox items`}>
     for (const item of props.items) {
+      const onSelectionChange =
+        props.onItemSelectionChange
+          ? (isSelected: boolean) => {
+              props.onItemSelectionChange?.(item, isSelected)
+            }
+          : undefined
+
       <li key={item.id}>
-        <InboxRow {item} />
+        <InboxRow
+          {item}
+          isSelected={props.selectedEntityIds?.has(item.entityId) ?? false}
+          {onSelectionChange}
+        />
       </li>
     }
   </ul>

@@ -1,5 +1,9 @@
 import { useMemo, useState } from "preact/hooks"
-import type { InboxItem } from "@goddard-ai/schema/daemon"
+import type {
+  BulkUpdateInboxItemsRequest,
+  InboxEntityId,
+  InboxItem,
+} from "@goddard-ai/schema/daemon"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
@@ -9,6 +13,7 @@ import { findNearestProjectPath } from "~/projects/project-context.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
 import { getSessionDisplayTitle } from "~/sessions/display.ts"
 import { isInboxEntityKind } from "./entity-kind.ts"
+import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
 import {
   allInboxStatuses,
   DEFAULT_INBOX_FILTER_ID,
@@ -17,6 +22,7 @@ import {
 } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import {
+  bulkUpdateInboxItems,
   completeSessionInboxItem,
   InboxPageMutations,
   invalidateInboxQueries,
@@ -43,6 +49,8 @@ function getErrorMessage(error: unknown) {
 component InboxQueryContent(props: {
   filterId: InboxFilterId;
   searchQuery: string;
+  selectedEntityIds: ReadonlySet<InboxEntityId>;
+  onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
 }) {
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
   const { items } = useQuery(goddardSdk.inbox.list, [
@@ -56,7 +64,13 @@ component InboxQueryContent(props: {
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
   const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
 
-  <InboxList filterId={props.filterId} items={visibleItems} searchQuery={props.searchQuery} />
+  <InboxList
+    filterId={props.filterId}
+    items={visibleItems}
+    selectedEntityIds={props.selectedEntityIds}
+    searchQuery={props.searchQuery}
+    onItemSelectionChange={props.onItemSelectionChange}
+  />
 }
 
 component InboxPage() {
@@ -64,6 +78,65 @@ component InboxPage() {
   const workbenchTabSet = useWorkbenchTabSet()
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
+  const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
+    () => new Set(),
+  )
+
+  function clearSelectedInboxItems() {
+    setSelectedEntityIds(new Set())
+  }
+
+  function setInboxItemSelected(item: InboxItem, isSelected: boolean) {
+    setSelectedEntityIds((currentIds) => {
+      const nextIds = new Set(currentIds)
+      if (isSelected) {
+        nextIds.add(item.entityId)
+      } else {
+        nextIds.delete(item.entityId)
+      }
+      return nextIds
+    })
+  }
+
+  async function runBulkInboxAction(
+    label: string,
+    input: Omit<BulkUpdateInboxItemsRequest, "entityIds">,
+  ) {
+    const entityIds = [...selectedEntityIds]
+    if (entityIds.length === 0) {
+      return
+    }
+
+    try {
+      const result = await bulkUpdateInboxItems(
+        {
+          entityIds,
+          ...input,
+        },
+      )
+      clearSelectedInboxItems()
+      if (result.missingEntityIds.length > 0) {
+        appToaster.create(
+          {
+            description: `${result.missingEntityIds.length} selected rows could not be found.`,
+            duration: 3600,
+            title: "Some inbox items were missing",
+            type: "error",
+          },
+        )
+      }
+    } catch (error) {
+      console.error(`Failed to run bulk inbox action: ${label}`, error)
+      appToaster.create(
+        {
+          description: "The selected inbox rows could not be updated.",
+          duration: 3200,
+          title: `Couldn't ${label.toLowerCase()}`,
+          type: "error",
+        },
+      )
+    }
+  }
 
   async function openInboxItem(item: InboxItem) {
     try {
@@ -126,6 +199,7 @@ component InboxPage() {
 
   <InboxPageMutations
     mutations={{
+      bulkUpdateInboxItems,
       completeSessionInboxItem,
       openInboxItem,
       updateInboxItem,
@@ -136,6 +210,7 @@ component InboxPage() {
         {filterId}
         {searchQuery}
         onFilterSelect={(id) => {
+          clearSelectedInboxItems()
           if (searchQuery.trim().length > 0) {
             setSearchQuery(
               replaceInboxSearchStatusFilters(searchQuery, inboxFilterDefinitions[id].statuses),
@@ -145,17 +220,55 @@ component InboxPage() {
           }
         }}
         onRefresh={() => {
+          clearSelectedInboxItems()
           invalidateInboxQueries()
         }}
         onSearchInput={(value) => {
+          clearSelectedInboxItems()
           setSearchQuery(value)
+        }}
+      />
+      <InboxBulkToolbar
+        selectedCount={selectedEntityIds.size}
+        onArchive={() => {
+          void runBulkInboxAction("Archive selected", { status: "archived" })
+        }}
+        onClear={() => {
+          clearSelectedInboxItems()
+        }}
+        onMarkRead={() => {
+          void runBulkInboxAction("Mark selected read", { status: "read" })
+        }}
+        onMarkUnread={() => {
+          void runBulkInboxAction("Mark selected unread", { status: "unread" })
+        }}
+        onSave={() => {
+          void runBulkInboxAction("Save selected", { status: "saved" })
+        }}
+        onSetLowPriority={() => {
+          void runBulkInboxAction("Set selected low priority", { priority: "low" })
+        }}
+        onSetNormalPriority={() => {
+          void runBulkInboxAction("Set selected normal priority", { priority: "normal" })
         }}
       />
       <div class={styles.listBody}>
         try {
-          <InboxQueryContent {filterId} {searchQuery} />
+          <InboxQueryContent
+            {filterId}
+            {searchQuery}
+            {selectedEntityIds}
+            onItemSelectionChange={setInboxItemSelected}
+          />
         } pending {
-          <InboxList {filterId} items={[]} listStatus="loading" {searchQuery} />
+          <InboxList
+            {filterId}
+            items={[]}
+            listStatus="loading"
+            {searchQuery}
+            {selectedEntityIds}
+            onItemSelectionChange={setInboxItemSelected}
+          />
         } catch (error) {
           <InboxList
             errorMessage={getErrorMessage(error)}
@@ -163,6 +276,8 @@ component InboxPage() {
             items={[]}
             listStatus="error"
             {searchQuery}
+            {selectedEntityIds}
+            onItemSelectionChange={setInboxItemSelected}
           />
         }
       </div>

@@ -10,6 +10,7 @@ import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 
 export const InboxPageMutations = createMutationsProvider<{
+  bulkUpdateInboxItems: (input: BulkUpdateInboxItemsRequest) => Promise<unknown> | unknown
   completeSessionInboxItem: (input: CompleteSessionRequest) => Promise<unknown> | unknown
   openInboxItem: (item: InboxItem) => void
   updateInboxItem: (input: UpdateInboxItemRequest) => Promise<unknown> | unknown

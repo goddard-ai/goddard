@@ -1,12 +1,15 @@
 import { useMemo, useState } from "preact/hooks"
 import type {
+  BulkUpdateInboxItemsRequest,
   CompleteSessionRequest,
+  InboxEntityId,
   InboxItem,
   InboxStatus,
   UpdateInboxItemRequest,
 } from "@goddard-ai/schema/daemon"
 
 import { getInboxEntityKind, isInboxEntityKind } from "./entity-kind.ts"
+import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
 import { DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import { InboxPageMutations } from "./mutations.ts"
@@ -68,6 +71,26 @@ function applyDebugSessionCompletion(
   return nextItem
 }
 
+function applyDebugBulkInboxUpdate(
+  item: InboxItem,
+  input: BulkUpdateInboxItemsRequest,
+  timestamp: number,
+) {
+  if (!input.entityIds.includes(item.entityId)) {
+    return item
+  }
+
+  return applyDebugInboxUpdate(
+    item,
+    {
+      entityId: item.entityId,
+      priority: input.priority,
+      status: input.status,
+    },
+    timestamp,
+  )
+}
+
 export type InboxDebugViewProps = {
   items?: readonly InboxItem[];
 }
@@ -76,6 +99,9 @@ export component InboxDebugView(props: InboxDebugViewProps) {
   const [items, setItems] = useState<readonly InboxItem[]>(props.items ?? INBOX_DEBUG_ITEMS)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
+  const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
+    () => new Set(),
+  )
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null)
   const parsedSearch = parseInboxSearchQuery(searchQuery)
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
@@ -83,8 +109,52 @@ export component InboxDebugView(props: InboxDebugViewProps) {
     parsedSearch.isActive ? preparedItems : filterDebugItemsByStatus(preparedItems, filterId)
   const visibleItems = filterPreparedInboxItemsBySearch(filteredItems, parsedSearch)
 
+  function clearSelectedInboxItems() {
+    setSelectedEntityIds(new Set())
+  }
+
+  function setInboxItemSelected(item: InboxItem, isSelected: boolean) {
+    setSelectedEntityIds((currentIds) => {
+      const nextIds = new Set(currentIds)
+      if (isSelected) {
+        nextIds.add(item.entityId)
+      } else {
+        nextIds.delete(item.entityId)
+      }
+      return nextIds
+    })
+  }
+
+  function bulkUpdateDebugInboxItems(input: BulkUpdateInboxItemsRequest) {
+    const timestamp = Date.now()
+    setItems(
+      (currentItems) => currentItems.map(
+        (item) => applyDebugBulkInboxUpdate(item, input, timestamp),
+      ),
+    )
+    setSelectedItem((item) => item ? applyDebugBulkInboxUpdate(item, input, timestamp) : null)
+    clearSelectedInboxItems()
+  }
+
+  function runDebugBulkAction(input: Omit<BulkUpdateInboxItemsRequest, "entityIds">) {
+    const entityIds = [...selectedEntityIds]
+    if (entityIds.length === 0) {
+      return
+    }
+
+    bulkUpdateDebugInboxItems(
+      {
+        entityIds,
+        ...input,
+      },
+    )
+  }
+
   <InboxPageMutations
     mutations={{
+      bulkUpdateInboxItems(input) {
+        bulkUpdateDebugInboxItems(input)
+      },
       completeSessionInboxItem(input) {
         const timestamp = Date.now()
         setItems(
@@ -136,19 +206,52 @@ export component InboxDebugView(props: InboxDebugViewProps) {
               } else {
                 setFilterId(id)
               }
+              clearSelectedInboxItems()
               setSelectedItem(null)
             }}
             onRefresh={() => {
               setItems(props.items ?? INBOX_DEBUG_ITEMS)
+              clearSelectedInboxItems()
               setSearchQuery("")
               setSelectedItem(null)
             }}
             onSearchInput={(value) => {
               setSearchQuery(value)
+              clearSelectedInboxItems()
               setSelectedItem(null)
             }}
           />
-          <InboxList {filterId} items={visibleItems} {searchQuery} />
+          <InboxBulkToolbar
+            selectedCount={selectedEntityIds.size}
+            onArchive={() => {
+              runDebugBulkAction({ status: "archived" })
+            }}
+            onClear={() => {
+              clearSelectedInboxItems()
+            }}
+            onMarkRead={() => {
+              runDebugBulkAction({ status: "read" })
+            }}
+            onMarkUnread={() => {
+              runDebugBulkAction({ status: "unread" })
+            }}
+            onSave={() => {
+              runDebugBulkAction({ status: "saved" })
+            }}
+            onSetLowPriority={() => {
+              runDebugBulkAction({ priority: "low" })
+            }}
+            onSetNormalPriority={() => {
+              runDebugBulkAction({ priority: "normal" })
+            }}
+          />
+          <InboxList
+            {filterId}
+            items={visibleItems}
+            {searchQuery}
+            {selectedEntityIds}
+            onItemSelectionChange={setInboxItemSelected}
+          />
         </div>
         <div class={styles.selectedPanel}>
           <h2 class={styles.selectedTitle}>{"Selected fixture item"}</h2>

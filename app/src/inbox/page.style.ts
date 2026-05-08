@@ -194,7 +194,7 @@ export default {
   }),
   row: css({
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gridTemplateColumns: "28px minmax(0, 1fr) auto",
     alignItems: "center",
     gap: "8px",
     minWidth: "0",
@@ -203,6 +203,24 @@ export default {
     borderBottom: "1px solid {colors.border}",
     "li:last-child > &": {
       borderBottom: "none",
+    },
+  }),
+  rowSelect: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "28px",
+    height: "28px",
+  }),
+  rowCheckbox: css({
+    width: "15px",
+    height: "15px",
+    accentColor: "accentStrong",
+    cursor: "pointer",
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
     },
   }),
   rowOpenButton: css({
@@ -424,5 +442,65 @@ export default {
   }),
   srOnly: css({
     srOnly: true,
+  }),
+  bulkToolbar: css({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    minHeight: "44px",
+    paddingInline: "16px",
+    paddingBlock: "6px",
+    borderBottom: "1px solid {colors.border}",
+    backgroundColor: "surface",
+    "@media (max-width: 760px)": {
+      alignItems: "stretch",
+      flexDirection: "column",
+      gap: "8px",
+    },
+  }),
+  bulkCount: css({
+    color: "text",
+    fontSize: "0.82rem",
+    fontWeight: "700",
+    whiteSpace: "nowrap",
+  }),
+  bulkActionGroup: css({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "4px",
+    minWidth: "0",
+    "@media (max-width: 760px)": {
+      justifyContent: "flex-start",
+      overflowX: "auto",
+    },
+  }),
+  bulkActionButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: "0",
+    width: "30px",
+    height: "30px",
+    padding: "0",
+    border: "1px solid {colors.border}",
+    borderRadius: "7px",
+    backgroundColor: "background",
+    color: "text",
+    cursor: "pointer",
+    transition:
+      "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+    "@media (hover: hover) and (pointer: fine)": {
+      _hover: {
+        borderColor: "accent",
+        backgroundColor: "panel",
+      },
+    },
   }),
 }

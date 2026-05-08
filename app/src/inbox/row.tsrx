@@ -64,6 +64,8 @@ function handleRowOpenKeyDown(
 
 export component InboxRow(props: {
   item: InboxItem;
+  isSelected?: boolean;
+  onSelectionChange?: (isSelected: boolean) => void;
 }) {
   const mutations = useMutations(InboxPageMutations)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
@@ -109,6 +111,17 @@ export component InboxRow(props: {
   }
 
   <div class={cx(styles.row, "group")}>
+    <label class={styles.rowSelect}>
+      <input
+        aria-label={`Select ${getInboxItemPrimaryText(props.item)}`}
+        checked={props.isSelected}
+        class={styles.rowCheckbox}
+        type="checkbox"
+        onChange={(event) => {
+          props.onSelectionChange?.(event.currentTarget.checked)
+        }}
+      />
+    </label>
     <div
       class={styles.rowOpenButton}
       role="button"
@@ -162,7 +175,11 @@ export component InboxRow(props: {
         </time>
       </div>
     </div>
-    <div class={styles.rowActions} aria-label={`${getInboxItemPrimaryText(props.item)} actions`}>
+    <div
+      class={styles.rowActions}
+      aria-label={`${getInboxItemPrimaryText(props.item)} actions`}
+      role="group"
+    >
       <InboxRowActionButton
         ariaLabel={readLabel}
         disabled={hasPendingAction}
