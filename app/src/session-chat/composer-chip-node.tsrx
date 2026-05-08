@@ -118,22 +118,20 @@ const ComposerChipDecoratorNode = DecoratorNode as ComposerChipDecoratorNodeCons
 
 /** Renders the shared icon used by one visible composer chip. */
 component ChipIcon(props: { chip: ComposerChipData }) {
-  if (props.chip.kind === "folder") {
-    <Folder size={14} strokeWidth={2.2} />
-    return
+  switch (props.chip.kind) {
+    case "folder":
+      <Folder size={14} strokeWidth={2.2} />
+      break
+    case "file":
+      <File size={14} strokeWidth={2.2} />
+      break
+    case "skill":
+      <BookOpen size={14} strokeWidth={2.2} />
+      break
+    case "slash_command":
+      <Command size={14} strokeWidth={2.2} />
+      break
   }
-
-  if (props.chip.kind === "file") {
-    <File size={14} strokeWidth={2.2} />
-    return
-  }
-
-  if (props.chip.kind === "skill") {
-    <BookOpen size={14} strokeWidth={2.2} />
-    return
-  }
-
-  <Command size={14} strokeWidth={2.2} />
 }
 
 /** Visual chip surface rendered inline by the Lexical decorator node. */
