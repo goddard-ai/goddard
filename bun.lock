@@ -173,6 +173,9 @@
     "core/daemon-plugin": {
       "name": "@goddard-ai/daemon-plugin",
       "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/ipc": "workspace:^",
+      },
     },
     "core/daemon/client": {
       "name": "@goddard-ai/daemon-client",

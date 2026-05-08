@@ -29,6 +29,38 @@ export type IpcSchema = {
   streams: Record<string, StreamSchema>
 }
 
+/** Preserves the exact IPC schema object for composition-time type inference. */
+export function defineIpcSchema<const TSchema extends IpcSchema>(schema: TSchema) {
+  return schema
+}
+
+/** Combines IPC schema fragments and rejects ambiguous request or stream ownership. */
+export function composeIpcSchemas<const TSchemas extends readonly IpcSchema[]>(schemas: TSchemas) {
+  const requests: IpcSchema["requests"] = {}
+  const streams: IpcSchema["streams"] = {}
+
+  for (const schema of schemas) {
+    for (const [name, definition] of Object.entries(schema.requests)) {
+      if (requests[name]) {
+        throw new Error(`Duplicate IPC request: ${name}`)
+      }
+      requests[name] = definition
+    }
+
+    for (const [name, definition] of Object.entries(schema.streams)) {
+      if (streams[name]) {
+        throw new Error(`Duplicate IPC stream: ${name}`)
+      }
+      streams[name] = definition
+    }
+  }
+
+  return {
+    requests,
+    streams,
+  } satisfies IpcSchema
+}
+
 /** Resolves one stream definition into its payload marker. */
 type StreamPayloadMarker<T extends StreamSchema> = T extends TypeMarker
   ? T
