@@ -5,24 +5,21 @@ import { useContext, useId, useLayoutEffect } from "preact/hooks"
 const rootCommandLayerId = "root"
 
 const commandLayerContext = createContext(rootCommandLayerId)
-const activeCommandLayerEntries = signal<readonly { id: string; token: number }[]>([])
-let nextCommandLayerToken = 0
+const activeCommandLayerIds = signal<readonly string[]>([])
 
 const activeCommandLayerId = computed(() => {
-  return activeCommandLayerEntries.value.at(-1)?.id ?? rootCommandLayerId
+  return activeCommandLayerIds.value.at(-1) ?? rootCommandLayerId
 })
 
 function registerActiveCommandLayer(layerId: string) {
-  const token = nextCommandLayerToken++
-
-  activeCommandLayerEntries.value = [
-    ...activeCommandLayerEntries.value.filter((entry) => entry.id !== layerId),
-    { id: layerId, token },
+  activeCommandLayerIds.value = [
+    ...activeCommandLayerIds.value.filter((activeLayerId) => activeLayerId !== layerId),
+    layerId,
   ]
 
   return () => {
-    activeCommandLayerEntries.value = activeCommandLayerEntries.value.filter(
-      (entry) => entry.token !== token,
+    activeCommandLayerIds.value = activeCommandLayerIds.value.filter(
+      (activeLayerId) => activeLayerId !== layerId,
     )
   }
 }
