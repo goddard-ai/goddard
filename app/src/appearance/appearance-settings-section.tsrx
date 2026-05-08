@@ -45,11 +45,17 @@ export component AppearanceSettingsSection() {
 
   <SettingsSection aria-labelledby="settings-appearance-heading">
     <SettingsSectionHeader>
-      <SettingsSectionTitle id="settings-appearance-heading">"Appearance"</SettingsSectionTitle>
-      <SettingsSectionDescription>"Choose how the workbench resolves theme and contrast."</SettingsSectionDescription>
+      <SettingsSectionTitle id="settings-appearance-heading">
+        "Appearance"
+      </SettingsSectionTitle>
+      <SettingsSectionDescription>
+        "Choose how the workbench resolves theme and contrast."
+      </SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
-      <SettingsLegend>"Color mode"</SettingsLegend>
+      <SettingsLegend>
+        "Color mode"
+      </SettingsLegend>
       <SettingsHelperText>
         "Current effective theme: "
         {appearance.effectiveTheme}
@@ -81,11 +87,17 @@ export component AppearanceSettingsSection() {
       </SettingsChoiceList>
     </SettingsFieldset>
     <SettingsFieldset>
-      <SettingsLegend>"Contrast"</SettingsLegend>
-      <SettingsHelperText>"Tightens muted text and border separation across the app."</SettingsHelperText>
+      <SettingsLegend>
+        "Contrast"
+      </SettingsLegend>
+      <SettingsHelperText>
+        "Tightens muted text and border separation across the app."
+      </SettingsHelperText>
       <SettingsControlRowLabel>
         <SettingsChoiceBody>
-          <SettingsChoiceTitle>"High contrast"</SettingsChoiceTitle>
+          <SettingsChoiceTitle>
+            "High contrast"
+          </SettingsChoiceTitle>
           <SettingsChoiceDescription>
             {appearance.highContrast ? "Enabled" : "Disabled"}
           </SettingsChoiceDescription>

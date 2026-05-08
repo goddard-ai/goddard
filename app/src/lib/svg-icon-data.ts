@@ -2,9 +2,9 @@
 
 export const svgIconSymbolIds = {
   "close-tab": "close-tab",
-  "logo": "logo",
+  logo: "logo",
   "new-session": "new-session",
-  "settings": "settings",
+  settings: "settings",
   "tabs/changes": "tabs-changes",
   "tabs/extensions": "tabs-extensions",
   "tabs/home": "tabs-home",

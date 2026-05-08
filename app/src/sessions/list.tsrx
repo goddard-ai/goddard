@@ -10,14 +10,18 @@ export component SessionsList(props: {
   sessions: readonly DaemonSession[];
 }) {
   if (props.listStatus === "loading" && props.sessions.length === 0) {
-    <div class={styles.loading}>"Loading sessions..."</div>
+    <div class={styles.loading}>
+      "Loading sessions..."
+    </div>
     return
   }
 
   if (props.listStatus === "error" && props.sessions.length === 0) {
     <div class={styles.error}>
       <div class={styles.errorContent}>
-        <h2 class={styles.title}>"Couldn't load sessions"</h2>
+        <h2 class={styles.title}>
+          "Couldn't load sessions"
+        </h2>
         <p class={styles.body}>
           {props.errorMessage ?? "The daemon-backed session list request failed."}
         </p>

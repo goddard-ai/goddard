@@ -189,7 +189,9 @@ export component SwitchProjectDropdown() {
 
   <div class={styles.content}>
     <label class={styles.searchField}>
-      <span class={styles.srOnly}>"Search projects"</span>
+      <span class={styles.srOnly}>
+        "Search projects"
+      </span>
       <Search aria-hidden={true} size={16} strokeWidth={2.1} />
       <input
         {ref inputElementRef}
@@ -241,8 +243,12 @@ export component SwitchProjectDropdown() {
             >
               <span class={styles.itemBody}>
                 if (item.kind === "open-folder") {
-                  <span class={styles.itemTitle}>"Open folder…"</span>
-                  <span class={styles.itemDetail}>"Add a local project from your filesystem."</span>
+                  <span class={styles.itemTitle}>
+                    "Open folder…"
+                  </span>
+                  <span class={styles.itemDetail}>
+                    "Add a local project from your filesystem."
+                  </span>
                 } else {
                   <span class={styles.itemTitleEllipsis}>
                     {item.project.name}
@@ -253,14 +259,18 @@ export component SwitchProjectDropdown() {
                 }
               </span>
               if (item.kind === "project" && activeProject?.path === item.project.path) {
-                <span class={styles.activeBadge}>"Active"</span>
+                <span class={styles.activeBadge}>
+                  "Active"
+                </span>
               }
             </button>
           </li>
         }
       </ul>
     } else {
-      <p class={styles.empty}>"No matching projects."</p>
+      <p class={styles.empty}>
+        "No matching projects."
+      </p>
     }
   </div>
 }

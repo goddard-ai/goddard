@@ -7,7 +7,9 @@ export component ListToolbar(props: {
   onSearchInput: (value: string) => void;
 }) {
   <label class={styles.searchField}>
-    <span class={styles.srOnly}>"Search session titles"</span>
+    <span class={styles.srOnly}>
+      "Search session titles"
+    </span>
     <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
     <input
       class={styles.searchInput}
