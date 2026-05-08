@@ -38,6 +38,8 @@
 - Prefer readability and local reasoning over new abstractions.
 - Avoid extracting local helpers that are only used once; prefer inline logic until reuse or a clear readability win justifies abstraction.
 - Name helper functions like actions or questions instead of variables. Prefer clear prefixes such as `find`, `build`, `resolve`, `parse`, `create`, `is`, `has`, or `get`; avoid a `From` infix unless needed to distinguish two otherwise identical names.
+- Prefer feature-local modules with sharp names and focused ownership over broad catch-all files. Split helpers by concern when a module starts mixing filters, type guards, search, formatting, data shaping, or actions.
+- Use broad filenames like `presentation.ts` only when the contents are truly a small, cohesive presentation layer; otherwise choose narrower names such as `filters.ts`, `entity-kind.ts`, `search.ts`, or `format.ts`.
 - Do not declare explicit function return types.
 - Add human-readable `/** ... */` description comments to:
   - exported modules
