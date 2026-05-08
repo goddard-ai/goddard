@@ -92,7 +92,7 @@ Avoid package-level cycles such as:
   -> @goddard-ai/sdk
 ```
 
-When a feature app entrypoint needs SDK behavior, it should declare the SDK namespace or feature service it requires. The app composition root should inject the composed SDK namespace at registration time instead of the feature package importing `@goddard-ai/sdk`.
+When a feature app entrypoint needs SDK behavior, it should provide type-level SDK requirements that describe the SDK namespace or feature service shape it expects. The static app composition root already owns the composed SDK instance; composition should verify that the app context satisfies each feature's SDK requirements without the feature package importing `@goddard-ai/sdk`.
 
 The same principle applies across layers: a feature package may import local feature entrypoints, shared schemas, daemon IPC contracts, and plugin support contracts, but it should not import the public package that will later bundle that same feature.
 
@@ -109,7 +109,7 @@ import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 export const defaultSdkPlugins = [sessionSdkPlugin, workforceSdkPlugin]
 ```
 
-Feature entrypoints receive layer-owned services through explicit context objects. They should not import global clients, singleton SDK instances, daemon URLs, app state, or host-specific defaults.
+Feature entrypoints receive layer-owned services through explicit context objects selected by the static composition root. They should not import global clients, singleton SDK instances, daemon URLs, app state, or host-specific defaults.
 
 ## Feature Contributions And System Responsibilities
 

@@ -10,7 +10,7 @@ This document is generic. It should guide the eventual shape of `@goddard-ai/app
 
 ## Likely Feature Inputs
 
-App feature entrypoints will likely need injected access to app-owned services:
+App feature entrypoints will likely receive statically composed access to app-owned services:
 
 - SDK instance or a narrowed feature SDK namespace
 - route registration
@@ -27,7 +27,9 @@ Feature packages should not import singleton app state, create their own daemon 
 
 Feature app entrypoints should not depend on `@goddard-ai/sdk` directly, even when the same feature package contributes an SDK plugin. Importing the public SDK package from a feature package would create a package-level cycle once `@goddard-ai/sdk` imports that feature's SDK entrypoint.
 
-Instead, app plugins should declare the SDK namespace or feature service they need, and the app composition root should inject the composed SDK namespace at registration time. A feature app entrypoint may import local types from its own `sdk.ts` entrypoint or shared feature schemas, but it should receive the runtime SDK object through app-layer dependency injection.
+Instead, app plugins should provide type-level SDK requirements that describe the SDK namespace or feature service shape they expect. The static app composition root already owns the composed SDK instance and should verify that the app context satisfies those requirements. A feature app entrypoint may import local types from its own `sdk.ts` entrypoint or shared feature schemas, but it should receive the runtime SDK object through the statically composed app context.
+
+The `@goddard-ai/app-plugin` support package should remain SDK-agnostic. It can model generic app plugin requirements and context typing, but it should not import or know about `@goddard-ai/sdk`.
 
 ## Likely Feature Contributions
 
