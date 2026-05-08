@@ -337,20 +337,35 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("session.reportBlocker", {
-    id: "ses_inbox",
-    reason: "Need product decision",
-    scope: "Checkout flow",
-    headline: "Decision blocks final step",
+  const inboxEvents: Array<{
+    mutation: string
+    status: string
+  }> = []
+  const unsubscribe = await client.subscribe("inbox.item", ({ item, mutation }) => {
+    if (item.entityId === "ses_inbox") {
+      inboxEvents.push({
+        mutation,
+        status: item.status,
+      })
+    }
+  })
+  cleanup.push(async () => {
+    unsubscribe()
   })
 
-  const blockedItem = db.inboxItems.first({ where: { entityId: "ses_inbox" } })
-  expect(blockedItem).toMatchObject({
+  await client.send("session.reportTurnEnded", {
+    id: "ses_inbox",
+    scope: "Checkout flow",
+    headline: "Decision ready for review",
+  })
+
+  const turnEndedItem = db.inboxItems.first({ where: { entityId: "ses_inbox" } })
+  expect(turnEndedItem).toMatchObject({
     entityId: "ses_inbox",
-    reason: "session.blocked",
+    reason: "session.turn_ended",
     status: "unread",
     scope: "Checkout flow",
-    headline: "Decision blocks final step",
+    headline: "Decision ready for review",
   })
 
   await client.send("inbox.update", {
@@ -360,6 +375,12 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
   await client.send("session.complete", { id: "ses_inbox" })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
+  await waitFor(async () => inboxEvents.length >= 3)
+  expect(inboxEvents).toEqual([
+    { mutation: "touched", status: "unread" },
+    { mutation: "updated", status: "read" },
+    { mutation: "completed", status: "completed" },
+  ])
 })
 
 test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {
@@ -650,4 +671,16 @@ async function captureLogs(
   } finally {
     restoreLogging()
   }
+}
+
+async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 2_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (await check()) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+
+  throw new Error("Timed out waiting for condition")
 }

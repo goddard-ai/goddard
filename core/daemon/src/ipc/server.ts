@@ -55,7 +55,12 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
 
   const registryService = createACPRegistryService()
-  const inboxManager = createInboxManager()
+  let publishInboxItemEvent: Parameters<typeof createInboxManager>[0]["publishEvent"] = () => {}
+  const inboxManager = createInboxManager({
+    publishEvent: (payload) => {
+      publishInboxItemEvent(payload)
+    },
+  })
 
   let sessionManager!: SessionManager
   let loopManager!: LoopManager
@@ -648,6 +653,10 @@ export async function startDaemonServer(
       }
     },
   })
+
+  publishInboxItemEvent = (payload) => {
+    ipcServer.publish("inbox.item", payload)
+  }
 
   await once(ipcServer.server, "listening")
   const port = readBoundTcpPort(ipcServer.server)

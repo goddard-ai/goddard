@@ -11,8 +11,10 @@ afterEach(() => {
   resetDb({ filename: ":memory:" })
 })
 
+const publishNoInboxEvent = () => {}
+
 test("daemon attention creates and refreshes one inbox row per entity", () => {
-  const inbox = createInboxManager()
+  const inbox = createInboxManager({ publishEvent: publishNoInboxEvent })
   const sessionId = db.sessions.newId()
 
   const created = inbox.touchInboxItem({
@@ -46,7 +48,7 @@ test("daemon attention creates and refreshes one inbox row per entity", () => {
 })
 
 test("bulk inbox updates dedupe ids, report missing ids, and share one timestamp", () => {
-  const inbox = createInboxManager()
+  const inbox = createInboxManager({ publishEvent: publishNoInboxEvent })
   const firstSessionId = db.sessions.newId()
   const secondSessionId = db.sessions.newId()
   const missingSessionId = db.sessions.newId()
@@ -79,7 +81,7 @@ test("bulk inbox updates dedupe ids, report missing ids, and share one timestamp
 })
 
 test("session replies move non-archived rows to replied but preserve archived rows", () => {
-  const inbox = createInboxManager()
+  const inbox = createInboxManager({ publishEvent: publishNoInboxEvent })
   const savedSessionId = db.sessions.newId()
   const completedSessionId = db.sessions.newId()
   const archivedSessionId = db.sessions.newId()
@@ -116,7 +118,7 @@ test("session replies move non-archived rows to replied but preserve archived ro
 })
 
 test("generic inbox updates reject entity-specific completion", () => {
-  const inbox = createInboxManager()
+  const inbox = createInboxManager({ publishEvent: publishNoInboxEvent })
   const sessionId = db.sessions.newId()
   inbox.touchInboxItem({
     entityId: sessionId,
@@ -129,4 +131,55 @@ test("generic inbox updates reject entity-specific completion", () => {
     /entity-specific/i,
   )
   expect(inbox.completeSession(sessionId)?.status).toBe("completed")
+})
+
+test("inbox manager emits one event per changed item", () => {
+  const events: Array<{
+    entityId: string
+    mutation: string
+    status: string
+  }> = []
+  const inbox = createInboxManager({
+    publishEvent: ({ item, mutation }) => {
+      events.push({
+        entityId: item.entityId,
+        mutation,
+        status: item.status,
+      })
+    },
+  })
+  const firstSessionId = db.sessions.newId()
+  const secondSessionId = db.sessions.newId()
+
+  inbox.touchInboxItem({
+    entityId: firstSessionId,
+    reason: "session.turn_ended",
+    scope: "Search ranking",
+    headline: "Review needed",
+  })
+  inbox.touchInboxItem({
+    entityId: secondSessionId,
+    reason: "session.turn_ended",
+    scope: "SSO login",
+    headline: "Review needed",
+  })
+  inbox.updateInboxItem({ entityId: firstSessionId, status: "read" })
+  inbox.bulkUpdateInboxItems({
+    entityIds: [firstSessionId, secondSessionId],
+    priority: "low",
+  })
+  inbox.markSessionReplied(firstSessionId)
+  inbox.completeSession(secondSessionId)
+
+  expect(events).toEqual([
+    { entityId: firstSessionId, mutation: "touched", status: "unread" },
+    { entityId: secondSessionId, mutation: "touched", status: "unread" },
+    { entityId: firstSessionId, mutation: "updated", status: "read" },
+    { entityId: firstSessionId, mutation: "bulk_updated", status: "read" },
+    { entityId: secondSessionId, mutation: "bulk_updated", status: "unread" },
+    { entityId: firstSessionId, mutation: "replied", status: "replied" },
+    { entityId: secondSessionId, mutation: "completed", status: "completed" },
+  ])
+  expect(db.inboxItems.findMany({ where: { entityId: firstSessionId } })).toHaveLength(1)
+  expect(db.inboxItems.findMany({ where: { entityId: secondSessionId } })).toHaveLength(1)
 })

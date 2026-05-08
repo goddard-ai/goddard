@@ -23,6 +23,57 @@ function createSdkWithClient() {
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
+  test("inbox.subscribe passes the daemon inbox stream through", async () => {
+    const { sdk, subscribe } = createSdkWithClient()
+    const unsubscribe = vi.fn()
+    const onItem = vi.fn()
+
+    subscribe.mockImplementationOnce(
+      async (
+        target: Parameters<GoddardClient["subscribe"]>[0],
+        handler: Parameters<GoddardClient["subscribe"]>[1],
+      ) => {
+        expect(target).toBe("inbox.item")
+        handler({
+          item: {
+            id: "inb_1",
+            entityId: "ses_1",
+            reason: "session.turn_ended",
+            status: "unread",
+            priority: "normal",
+            updatedAt: 1,
+            readAt: null,
+            scope: "Checkout flow",
+            headline: "Review needed",
+            turnId: "turn-1",
+          },
+          mutation: "touched",
+        })
+        return unsubscribe
+      },
+    )
+
+    const result = await sdk.inbox.subscribe(onItem)
+
+    expect(subscribe).toHaveBeenCalledWith("inbox.item", expect.any(Function))
+    expect(onItem).toHaveBeenCalledWith({
+      item: {
+        id: "inb_1",
+        entityId: "ses_1",
+        reason: "session.turn_ended",
+        status: "unread",
+        priority: "normal",
+        updatedAt: 1,
+        readAt: null,
+        scope: "Checkout flow",
+        headline: "Review needed",
+        turnId: "turn-1",
+      },
+      mutation: "touched",
+    })
+    expect(result).toBe(unsubscribe)
+  })
+
   test("adapter.list forwards to adapter.list", async () => {
     const { sdk, send } = createSdkWithClient()
 

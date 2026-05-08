@@ -68,6 +68,25 @@ export const InboxItem = z.strictObject({
 
 export type InboxItem = z.infer<typeof InboxItem>
 
+/** Coarse mutation source for one daemon-published inbox item update. */
+export const InboxItemEventMutation = z.enum([
+  "touched",
+  "updated",
+  "bulk_updated",
+  "replied",
+  "completed",
+])
+
+export type InboxItemEventMutation = z.infer<typeof InboxItemEventMutation>
+
+/** Stream payload emitted whenever the daemon changes one inbox item. */
+export const InboxItemEvent = z.strictObject({
+  item: InboxItem,
+  mutation: InboxItemEventMutation,
+})
+
+export type InboxItemEvent = z.infer<typeof InboxItemEvent>
+
 /** Request payload used to list one page of daemon-local inbox rows. */
 export const ListInboxRequest = z.strictObject({
   statuses: z.array(InboxStatus).optional(),

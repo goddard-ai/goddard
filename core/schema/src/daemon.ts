@@ -6,6 +6,8 @@ export {
   InboxEntityId,
   InboxHeadline,
   InboxItem,
+  InboxItemEvent,
+  InboxItemEventMutation,
   InboxItemId,
   InboxPriority,
   InboxReason,

@@ -10,6 +10,7 @@ import {
   ListInboxRequest,
   UpdateInboxItemRequest,
   type BulkUpdateInboxItemsResponse,
+  type InboxItemEvent,
   type ListInboxResponse,
   type UpdateInboxItemResponse,
 } from "./daemon/inbox.ts"
@@ -312,6 +313,9 @@ export const daemonIpcSchema = {
     },
   },
   streams: {
+    "inbox.item": {
+      payload: $type<InboxItemEvent>(),
+    },
     "session.message": {
       payload: $type<SessionMessageEvent>(),
       filter: DaemonSessionIdParams,

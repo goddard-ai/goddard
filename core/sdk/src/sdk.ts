@@ -15,6 +15,7 @@ import type {
   GetSessionChangesRequest,
   GetSessionHistoryRequest,
   GetWorkforceRequest,
+  InboxItemEvent,
   InitializeWorkforceRequest,
   ListAdaptersRequest,
   ListInboxRequest,
@@ -129,6 +130,11 @@ function createInboxNamespace(client: DaemonIpcClient) {
     /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
     bulkUpdate: async (input: BulkUpdateInboxItemsRequest) =>
       client.send("inbox.bulkUpdate", input),
+
+    /** Subscribes to daemon-published inbox item updates. */
+    subscribe: async (onItem: (event: InboxItemEvent) => void): Promise<() => void> => {
+      return client.subscribe("inbox.item", onItem)
+    },
   }
 }
 

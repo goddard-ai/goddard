@@ -12,6 +12,7 @@ import type {
   ListInboxRequest,
   UpdateInboxItemRequest,
 } from "@goddard-ai/schema/daemon"
+import type { InboxItemEventMutation } from "@goddard-ai/schema/daemon/inbox"
 import type { KindInput } from "kindstore"
 
 import { db } from "../persistence/store.ts"
@@ -35,6 +36,15 @@ type TouchInboxItemInput = {
   scope?: InboxScope | null
   headline?: InboxHeadline | null
   turnId?: string | null
+}
+
+type InboxItemEventPublisher = (payload: {
+  item: InboxItem
+  mutation: InboxItemEventMutation
+}) => void
+
+type InboxManagerOptions = {
+  publishEvent: InboxItemEventPublisher
 }
 
 function now() {
@@ -93,7 +103,20 @@ function toInboxItem(item: InboxItem): InboxItem {
 }
 
 /** Creates the daemon-owned inbox manager that centralizes all inbox writes. */
-export function createInboxManager() {
+export function createInboxManager(options: InboxManagerOptions) {
+  function publishItem(item: InboxItem, mutation: InboxItemEventMutation) {
+    options.publishEvent({ item, mutation })
+    return item
+  }
+
+  function publishNullableItem(item: InboxItem | null, mutation: InboxItemEventMutation) {
+    if (!item) {
+      return item
+    }
+
+    return publishItem(item, mutation)
+  }
+
   function listInboxItems(params: ListInboxRequest) {
     const pageSize = normalizeInboxPageSize(params.limit)
     const statuses = params.statuses ?? ["unread"]
@@ -143,7 +166,10 @@ export function createInboxManager() {
       turnId: input.turnId ?? existing?.turnId ?? null,
     }
 
-    return toInboxItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem))
+    return publishItem(
+      toInboxItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem)),
+      "touched",
+    )
   }
 
   function updateInboxItem(input: UpdateInboxItemRequest) {
@@ -167,7 +193,7 @@ export function createInboxManager() {
       throw new IpcClientError("Inbox item not found")
     }
 
-    return { item: toInboxItem(item) }
+    return { item: publishItem(toInboxItem(item), "updated") }
   }
 
   function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
@@ -202,7 +228,7 @@ export function createInboxManager() {
           updatedAt: timestamp,
         })
         if (item) {
-          items.push(toInboxItem(item))
+          items.push(publishItem(toInboxItem(item), "bulk_updated"))
         }
       }
     })
@@ -222,11 +248,14 @@ export function createInboxManager() {
       return null
     }
 
-    return toInboxItem(
-      db.inboxItems.update(existing.id, {
-        status: "replied",
-        updatedAt: now(),
-      })!,
+    return publishNullableItem(
+      toInboxItem(
+        db.inboxItems.update(existing.id, {
+          status: "replied",
+          updatedAt: now(),
+        })!,
+      ),
+      "replied",
     )
   }
 
@@ -239,11 +268,14 @@ export function createInboxManager() {
       return null
     }
 
-    return toInboxItem(
-      db.inboxItems.update(existing.id, {
-        status: "completed",
-        updatedAt: now(),
-      })!,
+    return publishNullableItem(
+      toInboxItem(
+        db.inboxItems.update(existing.id, {
+          status: "completed",
+          updatedAt: now(),
+        })!,
+      ),
+      "completed",
     )
   }
 
