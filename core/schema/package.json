@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",
     "ai-sdk-json-schema": "catalog:",
     "rouzer": "catalog:",

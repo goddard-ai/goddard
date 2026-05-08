@@ -3,6 +3,7 @@ import { once } from "node:events"
 import type { Server } from "node:http"
 import * as acp from "@agentclientprotocol/sdk"
 import { resolveDefaultAgent } from "@goddard-ai/config"
+import { createInboxRequestHandlers } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
@@ -430,9 +431,7 @@ export async function startDaemonServer(
         id,
       }
     },
-    "inbox.list": async (payload) => inboxManager.listInboxItems(payload),
-    "inbox.update": async (payload) => inboxManager.updateInboxItem(payload),
-    "inbox.bulkUpdate": async (payload) => inboxManager.bulkUpdateInboxItems(payload),
+    ...createInboxRequestHandlers({ inboxManager }),
     "action.run": async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionManager.newSession({

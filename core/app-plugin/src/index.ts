@@ -4,8 +4,8 @@
 export type AppPluginDefinition = {
   readonly name: string
   readonly sdk?: unknown
-  readonly routes?: readonly unknown[]
-  readonly commands?: readonly unknown[]
+  readonly routes?: unknown
+  readonly commands?: unknown
   readonly register?: (...args: never[]) => void | Promise<void>
 }
 

@@ -45,6 +45,7 @@
     "@b9g/async-context": "^0.2.1",
     "@goddard-ai/config": "workspace:^",
     "@goddard-ai/daemon-client": "workspace:^",
+    "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/paths": "workspace:^",
     "@goddard-ai/review-sync": "workspace:^",

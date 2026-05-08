@@ -1,3 +1,4 @@
+import { inboxAppPlugin } from "@goddard-ai/inbox/app"
 import { lazy } from "preact/compat"
 
 import type { SvgIconName } from "./lib/good-icon.tsrx"
@@ -21,7 +22,7 @@ function PlaceholderWorkbenchTab() {
 export const workbenchTabComponents = {
   inbox: {
     component: lazy(() => import("~/inbox/page.tsrx")),
-    icon: "tabs/inbox",
+    icon: inboxAppPlugin.workbenchTab.icon,
   },
   projects: {
     component: lazy(() => import("~/projects/projects-page.tsrx")),

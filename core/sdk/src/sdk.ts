@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
+import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import {
   InferStreamFilter,
   InferStreamPayload,
@@ -69,45 +70,6 @@ function defineRequest<S extends IpcSchema, K extends ValidRequestName<S>>(
   name: K,
 ) {
   return (...args: RequestArguments<S, K>) => client.send(name, ...args)
-}
-
-function defineSubscription<S extends IpcSchema, K extends ValidStreamName<S>>(
-  client: IpcClient<S>,
-  name: K,
-) {
-  type SubscribeOverload =
-    | ((onMessage: (payload: InferStreamPayload<S, K>) => void) => Promise<() => void>)
-    | ((
-        onMessage: (payload: InferStreamPayload<S, K>) => void,
-        onError: (error: unknown) => void,
-      ) => () => void)
-    | ((
-        onMessage: (payload: InferStreamPayload<S, K>) => void,
-        onError?: (error: unknown) => void,
-      ) => (() => void) | Promise<() => void>)
-
-  return function subscribe(
-    filter: InferStreamFilter<S, K> | ((payload: InferStreamPayload<S, K>) => void),
-    onMessage?: ((payload: InferStreamPayload<S, K>) => void) | ((error: unknown) => void),
-    onError?: (error: unknown) => void,
-  ) {
-    if (typeof filter === "function") {
-      return client.subscribe(name as StreamTarget<S, K>, filter, onMessage)
-    }
-    return client.subscribe(
-      { name, filter } as StreamTarget<S, K>,
-      onMessage as (payload: InferStreamPayload<S, K>) => void,
-      onError,
-    )
-  } as UnionToIntersection<
-    [InferStreamFilter<S, K>] extends [void]
-      ? SubscribeOverload
-      : SubscribeOverload extends infer TOverload
-        ? TOverload extends (...args: infer TArgs) => infer TResult
-          ? (filter: InferStreamFilter<S, K>, ...args: TArgs) => TResult
-          : never
-        : never
-  >
 }
 
 function defineUnwrappedSubscription<S extends IpcSchema, K extends ValidStreamName<S>, Payload>(
@@ -187,19 +149,7 @@ export class GoddardSdk {
 
   @lazy
   get inbox() {
-    return {
-      /** Lists daemon-local inbox rows using daemon ordering and filtering. */
-      list: defineRequest(this.#client, "inbox.list"),
-
-      /** Updates one daemon-local inbox row by entity id. */
-      update: defineRequest(this.#client, "inbox.update"),
-
-      /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
-      bulkUpdate: defineRequest(this.#client, "inbox.bulkUpdate"),
-
-      /** Subscribes to daemon-published inbox item updates. */
-      subscribe: defineSubscription(this.#client, "inbox.item"),
-    }
+    return inboxSdkPlugin.create({ client: this.#client })
   }
 
   @lazy

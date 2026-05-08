@@ -1,3 +1,4 @@
+import { inboxAppPlugin } from "@goddard-ai/inbox/app"
 import { useInbox } from "~/app-state-context.tsrx"
 import type { NavigationItemId } from "~/navigation-items.ts"
 
@@ -15,7 +16,7 @@ export const appShellDefaultSidebarDot: AppShellSidebarDot = {
 
 /** Optional dot predicates keyed by sidebar navigation item. */
 export const appShellSidebarDots: Partial<Record<NavigationItemId, AppShellSidebarDot>> = {
-  inbox: {
+  [inboxAppPlugin.navigation.id]: {
     getAriaLabel: (label) => `${label}, unread items`,
     usePredicate: () => {
       const inbox = useInbox()

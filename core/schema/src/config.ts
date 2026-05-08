@@ -283,18 +283,19 @@ export const WorktreesConfig = z
 
 export type WorktreesConfig = z.infer<typeof WorktreesConfig>
 
+/** Persisted session-title generation defaults loaded from JSON. */
+export type SessionTitlesConfig = {
+  generator?: ModelConfig
+}
+
 /** Schema for persisted session-title generation defaults loaded from JSON. */
-export const SessionTitlesConfig = z
+export const SessionTitlesConfig: z.ZodType<SessionTitlesConfig> = z
   .strictObject({
     generator: textModelConfigSchema
       .optional()
       .describe("Text model selection used for background session title generation."),
   })
   .describe("Persisted session title-generation defaults loaded from JSON.")
-
-export type SessionTitlesConfig = z.infer<typeof SessionTitlesConfig> & {
-  generator?: ModelConfig
-}
 
 /** Schema for package-boundary discovery settings used by the launch-session flow. */
 export const SubpackagesConfig = z

@@ -1,19 +1,11 @@
-import { $type, IpcSchema } from "@goddard-ai/ipc"
+import { inboxIpcSchema } from "@goddard-ai/inbox/daemon-ipc"
+import { $type, composeIpcSchemas, defineIpcSchema, IpcSchema } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { DaemonSessionIdParams } from "./common/params.ts"
 import { ListAdaptersRequest, type ListAdaptersResponse } from "./daemon-adapters.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
-import {
-  BulkUpdateInboxItemsRequest,
-  ListInboxRequest,
-  UpdateInboxItemRequest,
-  type BulkUpdateInboxItemsResponse,
-  type InboxItemEvent,
-  type ListInboxResponse,
-  type UpdateInboxItemResponse,
-} from "./daemon/inbox.ts"
 import {
   GetLoopRequest,
   ShutdownLoopRequest,
@@ -93,8 +85,7 @@ import {
   type WorkforceEventEnvelope,
 } from "./workforce/requests.ts"
 
-/** IPC contract map shared by the daemon client and server. */
-export const daemonIpcSchema = {
+const coreDaemonIpcSchema = defineIpcSchema({
   requests: {
     "daemon.health": {
       response: $type<{ ok: boolean }>(),
@@ -233,18 +224,6 @@ export const daemonIpcSchema = {
       payload: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
     },
-    "inbox.list": {
-      payload: ListInboxRequest,
-      response: $type<ListInboxResponse>(),
-    },
-    "inbox.update": {
-      payload: UpdateInboxItemRequest,
-      response: $type<UpdateInboxItemResponse>(),
-    },
-    "inbox.bulkUpdate": {
-      payload: BulkUpdateInboxItemsRequest,
-      response: $type<BulkUpdateInboxItemsResponse>(),
-    },
     "action.run": {
       payload: RunNamedActionRequest,
       response: $type<CreateSessionResponse>(),
@@ -313,9 +292,6 @@ export const daemonIpcSchema = {
     },
   },
   streams: {
-    "inbox.item": {
-      payload: $type<InboxItemEvent>(),
-    },
     "session.message": {
       payload: $type<SessionMessageEvent>(),
       filter: DaemonSessionIdParams,
@@ -325,4 +301,10 @@ export const daemonIpcSchema = {
       filter: SubscribeWorkforceEventsRequest,
     },
   },
-} satisfies IpcSchema
+})
+
+/** IPC contract map shared by the daemon client and server. */
+export const daemonIpcSchema = composeIpcSchemas([
+  coreDaemonIpcSchema,
+  inboxIpcSchema,
+]) satisfies IpcSchema

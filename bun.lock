@@ -41,6 +41,7 @@
         "@ark-ui/react": "^5.36.2",
         "@chenglou/pretext": "^0.0.4",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
@@ -143,6 +144,7 @@
         "@b9g/async-context": "^0.2.1",
         "@goddard-ai/config": "workspace:^",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/review-sync": "workspace:^",
@@ -224,6 +226,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "ai-sdk-json-schema": "catalog:",
         "rouzer": "catalog:",
@@ -236,6 +239,7 @@
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
       },
@@ -265,6 +269,18 @@
     "core/worktree-plugin": {
       "name": "@goddard-ai/worktree-plugin",
       "version": "0.1.0",
+    },
+    "features/inbox": {
+      "name": "@goddard-ai/inbox",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/daemon-client": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+      },
     },
     "workforce": {
       "name": "@goddard-ai/workforce",
@@ -594,6 +610,8 @@
     "@goddard-ai/daemon-client": ["@goddard-ai/daemon-client@workspace:core/daemon/client"],
 
     "@goddard-ai/daemon-plugin": ["@goddard-ai/daemon-plugin@workspace:core/daemon-plugin"],
+
+    "@goddard-ai/inbox": ["@goddard-ai/inbox@workspace:features/inbox"],
 
     "@goddard-ai/ipc": ["@goddard-ai/ipc@workspace:core/ipc"],
 

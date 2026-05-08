@@ -4,7 +4,7 @@
 export type SdkPluginDefinition = {
   readonly name: string
   readonly namespace: string
-  readonly create: (...args: never[]) => object
+  readonly create: (...args: any[]) => object
 }
 
 /** Preserves the exact SDK plugin object for composition-time type inference. */

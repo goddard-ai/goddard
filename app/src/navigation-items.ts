@@ -1,8 +1,14 @@
+import { inboxAppPlugin } from "@goddard-ai/inbox/app"
+
 export type NavigationItemGroup = "primary" | "secondary"
 
 /** Static workbench navigation metadata shared by the model and app shell. */
 export const defaultNavigationItems = [
-  { id: "inbox", label: "Inbox", group: "primary" },
+  {
+    id: inboxAppPlugin.navigation.id,
+    label: inboxAppPlugin.navigation.label,
+    group: "primary",
+  },
   { id: "sessions", label: "Sessions", group: "primary" },
   { id: "search", label: "Search", group: "primary" },
   { id: "specs", label: "Specs", group: "secondary" },

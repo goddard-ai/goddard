@@ -29,6 +29,23 @@ export type IpcSchema = {
   streams: Record<string, StreamSchema>
 }
 
+type UnionToIntersection<TUnion> = (
+  TUnion extends unknown ? (value: TUnion) => void : never
+) extends (value: infer TIntersection) => void
+  ? TIntersection
+  : never
+
+type ComposeIpcSchemaRecord<
+  TSchemas extends readonly IpcSchema[],
+  TKey extends keyof IpcSchema,
+> = UnionToIntersection<TSchemas[number][TKey]>
+
+/** Infers the exact route map produced by composing IPC schema fragments. */
+export type ComposeIpcSchemas<TSchemas extends readonly IpcSchema[]> = {
+  requests: ComposeIpcSchemaRecord<TSchemas, "requests">
+  streams: ComposeIpcSchemaRecord<TSchemas, "streams">
+}
+
 /** Preserves the exact IPC schema object for composition-time type inference. */
 export function defineIpcSchema<const TSchema extends IpcSchema>(schema: TSchema) {
   return schema
@@ -58,7 +75,7 @@ export function composeIpcSchemas<const TSchemas extends readonly IpcSchema[]>(s
   return {
     requests,
     streams,
-  } satisfies IpcSchema
+  } as ComposeIpcSchemas<TSchemas>
 }
 
 /** Resolves one stream definition into its payload marker. */

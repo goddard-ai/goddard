@@ -22,6 +22,7 @@
     "@ark-ui/react": "^5.36.2",
     "@chenglou/pretext": "^0.0.4",
     "@goddard-ai/daemon-client": "workspace:^",
+    "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",
     "@goddard-ai/paths": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
