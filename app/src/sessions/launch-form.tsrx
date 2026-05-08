@@ -109,14 +109,14 @@ export component SessionLaunchForm(props: {
       <div class={selectorStyles.adapterCard}>
         <p class={styles.adapterMeta}>
           <span class={styles.mutedMeta}>
-            {"Adapter"}
-            {" · "}
+            "Adapter"
+            " · "
           </span>
           <span>
             {selectedAdapter.name}
           </span>
           <span class={styles.mutedMeta}>
-            {" · "}
+            " · "
             {selectedAdapter.id}
             {selectedAdapter.unofficial ? " · Unofficial" : ""}
           </span>

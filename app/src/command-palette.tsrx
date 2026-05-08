@@ -57,7 +57,7 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
     <Dialog.Backdrop class={styles.backdrop} />
     <Dialog.Positioner class={styles.positioner}>
       <Dialog.Content class={styles.content}>
-        <Dialog.Title class={styles.title}>{"Command menu"}</Dialog.Title>
+        <Dialog.Title class={styles.title}>"Command menu"</Dialog.Title>
         <Command.Root
           class={styles.root}
           filter={() => 1}
@@ -79,11 +79,7 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
           </div>
           <Command.List
             class={styles.list}
-            empty={<>
-              <div class={styles.empty}>
-                {"No matching commands."}
-              </div>
-            </>}
+            empty={<><div class={styles.empty}>"No matching commands."</div></>}
             children={(item, state) => {
               const command = item as AppCommand
               const Icon = command.icon

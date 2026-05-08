@@ -106,11 +106,11 @@ export component SessionInputMenu(props: {
               )}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              {"Loading suggestions..."}
+              "Loading suggestions..."
             </span>
           </div>
         } else if (props.suggestions.length === 0) {
-          <div class={inputMenuEmptyClass}>{"No matches for this trigger yet."}</div>
+          <div class={inputMenuEmptyClass}>"No matches for this trigger yet."</div>
         } else {
           for (const suggestion of props.suggestions; index index) {
             <button

@@ -10,10 +10,10 @@ export component ProjectPage(props: { projectPath: string }) {
   if (!project) {
     <div class={styles.page}>
       <section class={styles.card}>
-        <h1 class={styles.title}>{"Project unavailable"}</h1>
-        <p class={styles.body}>
-          {"The project record for this tab is no longer in the machine-wide project registry."}
-        </p>
+        <h1 class={styles.title}>"Project unavailable"</h1>
+        <p
+          class={styles.body}
+        >"The project record for this tab is no longer in the machine-wide project registry."</p>
       </section>
     </div>
     return
@@ -25,16 +25,16 @@ export component ProjectPage(props: { projectPath: string }) {
         <span class={styles.icon}>
           <GoodIcon name="tabs/projects" height="14px" width="14px" />
         </span>
-        {"Tab"}
+        "Tab"
       </div>
       <h1 class={styles.title}>
         {project.name}
       </h1>
+      <p
+        class={styles.body}
+      >"This project tab keeps the primary workbench view and closable tabs alive side by side. It can later be replaced with richer project-scoped surfaces such as sessions, specs, tasks, and pull requests."</p>
       <p class={styles.body}>
-        {"This project tab keeps the primary workbench view and closable tabs alive side by side. It can later be replaced with richer project-scoped surfaces such as sessions, specs, tasks, and pull requests."}
-      </p>
-      <p class={styles.body}>
-        {"Path: "}
+        "Path: "
         {project.path}
       </p>
     </section>

@@ -137,7 +137,7 @@ component SessionLaunchDialog(props: {
     <Dialog.Backdrop class={styles.backdrop} />
     <Dialog.Positioner class={styles.positioner}>
       <Dialog.Content class={styles.content}>
-        <Dialog.Title class={styles.title}>{"Launch session"}</Dialog.Title>
+        <Dialog.Title class={styles.title}>"Launch session"</Dialog.Title>
         <Dialog.CloseTrigger asChild>
           <button class={styles.closeButton} type="button">
             <X size={16} strokeWidth={2.2} />

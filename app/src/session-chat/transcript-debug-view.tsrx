@@ -15,11 +15,11 @@ export component TranscriptDebugView() {
 
   <div class={styles.page}>
     <section class={styles.header}>
-      <div class={styles.eyebrow}>{"Debug Surface"}</div>
-      <h1 class={styles.title}>{"Session Chat ACP QA"}</h1>
-      <p class={styles.body}>
-        {"This debug-only surface generates deterministic ACP messages and feeds them through the session chat state model. Use it to inspect transcript rows, permission responses, status summaries, and older-history pagination without starting a real agent."}
-      </p>
+      <div class={styles.eyebrow}>"Debug Surface"</div>
+      <h1 class={styles.title}>"Session Chat ACP QA"</h1>
+      <p
+        class={styles.body}
+      >"This debug-only surface generates deterministic ACP messages and feeds them through the session chat state model. Use it to inspect transcript rows, permission responses, status summaries, and older-history pagination without starting a real agent."</p>
       <div class={styles.actions}>
         <button
           class={styles.button}
@@ -40,9 +40,7 @@ export component TranscriptDebugView() {
             controller.showPagingError()
             refreshTranscript()
           }}
-        >
-          {"Show paging error"}
-        </button>
+        >"Show paging error"</button>
         <button
           class={styles.button}
           type="button"
@@ -50,20 +48,14 @@ export component TranscriptDebugView() {
             controller.reset()
             refreshTranscript()
           }}
-        >
-          {"Reset scenario"}
-        </button>
+        >"Reset scenario"</button>
       </div>
       <div class={styles.checklist}>
-        <span>{"Manual checks"}</span>
+        <span>"Manual checks"</span>
         <ol>
-          <li>
-            {"Scroll to the top, load both older pages, and confirm the current row does not jump."}
-          </li>
-          <li>{"Click the pending permission option and confirm that row resolves in-place."}</li>
-          <li>
-            {"Use a real session detail tab to confirm reconnect, stop, and changes header actions."}
-          </li>
+          <li>"Scroll to the top, load both older pages, and confirm the current row does not jump."</li>
+          <li>"Click the pending permission option and confirm that row resolves in-place."</li>
+          <li>"Use a real session detail tab to confirm reconnect, stop, and changes header actions."</li>
         </ol>
       </div>
       <div class={styles.statusGrid}>

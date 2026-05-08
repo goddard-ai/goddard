@@ -170,10 +170,10 @@ component OlderHistoryPager(props: {
       >
         if (props.olderHistory.loading) {
           <LoaderCircle class={styles.historyLoadButtonIcon} size={14} strokeWidth={2.2} />
-          {"Loading older messages"}
+          "Loading older messages"
         } else {
           <ChevronUp size={14} strokeWidth={2.2} />
-          {"Load older messages"}
+          "Load older messages"
         }
       </button>
     }
@@ -208,11 +208,7 @@ export component Transcript(props: TranscriptProps) {
       header={olderHistoryHeader}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
-      loadingFallback={<>
-        <div class={styles.loadingState}>
-          {"Preparing transcript layout..."}
-        </div>
-      </>}
+      loadingFallback={<><div class={styles.loadingState}>"Preparing transcript layout..."</div></>}
       overscanPx={VIRTUAL_OVERSCAN_PX}
       preserveScrollOnPrepend={Boolean(props.olderHistory)}
       renderRow={(row) => <>

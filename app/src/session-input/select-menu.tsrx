@@ -324,11 +324,11 @@ component SelectMenuContainer(props: {
               )}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              {"Loading options..."}
+              "Loading options..."
             </span>
           </div>
         } else if (filteredItems.length === 0) {
-          <div class={styles.menuEmpty}>{"No matching options."}</div>
+          <div class={styles.menuEmpty}>"No matching options."</div>
         } else {
           <ul class={styles.menuList}>
             for (const item of filteredItems; index index) {
