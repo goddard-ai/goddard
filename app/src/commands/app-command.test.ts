@@ -485,3 +485,43 @@ test("inactive command layer bindings do not prevent default", async () => {
     cleanup()
   }
 })
+
+test("handler availability changes update shortcut context without rebinding", async () => {
+  const { registry, cleanup } = createTestRegistry()
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  try {
+    registry.applyKeymapSnapshot("goddard", {})
+    const bindingIds = registry.runtime.getBindings().map((binding) => binding.id)
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.navigation.openCommandPalette)).toBe(
+      false,
+    )
+
+    render(
+      h(TestCommandHandler, {
+        command: AppCommand.navigation.openCommandPalette,
+        onMatch() {},
+      }),
+      container,
+    )
+    await flushRenderEffects()
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.navigation.openCommandPalette)).toBe(
+      true,
+    )
+    expect(registry.runtime.getBindings().map((binding) => binding.id)).toEqual(bindingIds)
+
+    render(null, container)
+    await flushRenderEffects()
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.navigation.openCommandPalette)).toBe(
+      false,
+    )
+    expect(registry.runtime.getBindings().map((binding) => binding.id)).toEqual(bindingIds)
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})

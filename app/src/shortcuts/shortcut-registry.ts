@@ -3,13 +3,13 @@ import { createShortcuts, type BindingSet, type BindingSpec, type ShortcutRuntim
 import { Sigma } from "preact-sigma"
 
 import {
-  appCommandHandlerSnapshot,
+  appCommandHandledContext,
   appCommandList,
-  isAppCommandHandled,
+  getAppCommandHandledContextKey,
   resolveAppCommand,
+  type AppCommand,
 } from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
-import { getActiveCommandLayerId } from "~/commands/command-layer.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
   createShortcutBinding,
@@ -38,6 +38,22 @@ function areBindingsEqual(
 function normalizeWhenClause(whenClause: string | null | undefined) {
   const trimmedWhenClause = whenClause?.trim()
   return trimmedWhenClause ? trimmedWhenClause : undefined
+}
+
+function combineWhenClauses(...whenClauses: Array<string | null | undefined>) {
+  const normalizedWhenClauses = whenClauses.flatMap((whenClause) => {
+    const normalizedWhenClause = normalizeWhenClause(whenClause)
+    return normalizedWhenClause ? [`(${normalizedWhenClause})`] : []
+  })
+
+  return normalizedWhenClauses.length > 0 ? normalizedWhenClauses.join(" && ") : undefined
+}
+
+function getRuntimeWhenClause(command: AppCommand, binding: ShortcutBinding) {
+  const bindingWhen = typeof binding === "string" ? undefined : binding.when
+  const commandWhen = bindingWhen ?? command.when
+
+  return combineWhenClauses(getAppCommandHandledContextKey(command.id), commandWhen)
 }
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
@@ -231,10 +247,6 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
     const nextBindings: BindingSpec[] = []
 
     for (const command of appCommandList) {
-      if (!isAppCommandHandled(command.id)) {
-        continue
-      }
-
       const expressions = this.resolvedBindings[command.id]
       if (!expressions) {
         continue
@@ -244,16 +256,16 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
         if (typeof expression !== "string") {
           nextBindings.push({
             scope: command.scope,
-            when: command.when,
             preventDefault: true,
             ...expression,
+            when: getRuntimeWhenClause(command, expression),
             handler: command,
           })
         } else if (expression.includes(" ")) {
           nextBindings.push({
             sequence: expression,
             scope: command.scope,
-            when: command.when,
+            when: getRuntimeWhenClause(command, expression),
             handler: command,
             preventDefault: true,
           })
@@ -261,7 +273,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
           nextBindings.push({
             combo: expression,
             scope: command.scope,
-            when: command.when,
+            when: getRuntimeWhenClause(command, expression),
             handler: command,
             preventDefault: true,
           })
@@ -274,11 +286,13 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
 
   onSetup() {
     const disposeContextSync = effect(() => {
-      void appCommandHandlerSnapshot.value
-      void getActiveCommandLayerId()
-      this.#runtime.batchContext(commandContext.whenContext.value)
-      this.rebindRuntime()
+      this.#runtime.batchContext({
+        ...commandContext.whenContext.value,
+        ...appCommandHandledContext.value,
+      })
     })
+
+    this.rebindRuntime()
 
     return [
       () => {

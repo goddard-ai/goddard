@@ -12,7 +12,6 @@ type AppCommandEvents = Record<string, ShortcutMatch | undefined>
 
 const appCommandBus = new SigmaTarget<AppCommandEvents>()
 const appCommandHandlerCounts = signal<Record<string, Partial<Record<AppCommandId, number>>>>({})
-export const appCommandHandlerSnapshot = computed(() => appCommandHandlerCounts.value)
 
 type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
@@ -152,6 +151,23 @@ export type AppCommand = (typeof AppCommand)[keyof typeof AppCommand] extends in
 export const appCommandList = Object.values(AppCommand).flatMap(
   (commands) => Object.values(commands) as AppCommand[],
 )
+
+/** Runtime shortcut context that marks which commands have handlers in the active layer. */
+export const appCommandHandledContext = computed(() => {
+  const activeLayerCounts = appCommandHandlerCounts.value[getActiveCommandLayerId()] ?? {}
+
+  return Object.fromEntries(
+    appCommandList.map((command) => [
+      getAppCommandHandledContextKey(command.id),
+      (activeLayerCounts[command.id] ?? 0) > 0,
+    ]),
+  )
+})
+
+/** Builds the shortcut `when` context key for a command's active-layer handler state. */
+export function getAppCommandHandledContextKey(commandId: AppCommandId) {
+  return `appCommand.handled.${commandId}`
+}
 
 function hasActiveAppCommandHandler(commandId: AppCommandId) {
   return (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[commandId] ?? 0) > 0
