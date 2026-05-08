@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { constants as fsConstants, watch, type Dirent, type FSWatcher } from "node:fs"
-import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { constants as fsConstants, type Dirent } from "node:fs"
+import { access, mkdir, mkdtemp, readdir, realpath, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { Readable, Writable } from "node:stream"
@@ -11,6 +11,16 @@ import treeKill, { type ProcessLike } from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
+import {
+  listReviewSessions,
+  startReviewSync,
+  statusReviewSession,
+  stopReviewSession,
+  syncReviewSession as runReviewSyncSession,
+  watchReviewSession,
+  type ReviewSyncResult,
+  type ReviewSyncStatusData,
+} from "@goddard-ai/review-sync"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import {
   agentBinaryPlatforms,
@@ -72,11 +82,6 @@ import { prepareFreshWorktree } from "../worktrees/bootstrap.ts"
 import { createWorktree } from "../worktrees/index.ts"
 import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
 import { defaultPlugin } from "../worktrees/plugins/default.ts"
-import {
-  findMountedReviewSessionByPrimaryDir,
-  ReviewSessionHost,
-  type ReviewSessionState,
-} from "../worktrees/review-session.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -728,12 +733,8 @@ type ActiveSession = {
 }
 
 type ReviewSessionRuntime = {
-  host: ReviewSessionHost
-  watchers: FSWatcher[]
-  timer: ReturnType<typeof setTimeout> | null
-  running: boolean
-  rerunRequested: boolean
-  closed: boolean
+  abortController: AbortController
+  running: Promise<void>
 }
 
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
@@ -2236,24 +2237,13 @@ export function createSessionManager(input: {
 
   function toSessionWorktreeValue(
     record: SessionWorktreeDoc,
-    reviewSession: ReviewSessionState | null,
+    reviewSession: ReviewSyncStatusData | null,
   ) {
     const { id: _id, sessionId: _sessionId, ...worktree } = record
     return {
       ...worktree,
       reviewSession,
     }
-  }
-
-  function createReviewSessionHost(
-    sessionId: SessionId,
-    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
-  ) {
-    return new ReviewSessionHost({
-      sessionId,
-      primaryDir: worktreeRecord.repoRoot,
-      worktreeDir: worktreeRecord.worktreeDir,
-    })
   }
 
   async function resolvePersistedWorktreeRecord(id: SessionId) {
@@ -2264,15 +2254,103 @@ export function createSessionManager(input: {
     )
   }
 
-  async function resolveReviewSessionState(
-    id: SessionId,
-    worktreeRecord: SessionWorktreeDoc | null,
-  ) {
+  async function resolveReviewSessionState(worktreeRecord: SessionWorktreeDoc | null) {
     if (!worktreeRecord) {
       return null
     }
 
-    return await createReviewSessionHost(id, worktreeRecord).inspect()
+    return await readReviewSessionState(worktreeRecord)
+  }
+
+  async function readReviewSessionState(worktreeRecord: SessionWorktreeDoc | SessionWorktreeState) {
+    try {
+      const result = await statusReviewSession({
+        cwd: worktreeRecord.worktreeDir,
+        json: true,
+      })
+      return result.data ?? null
+    } catch (error) {
+      if (isMissingReviewSessionError(error)) {
+        return null
+      }
+      throw error
+    }
+  }
+
+  async function readRequiredReviewSessionState(
+    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
+  ) {
+    const state = await readReviewSessionState(worktreeRecord)
+    if (!state) {
+      throw new Error(`Review session is missing for ${worktreeRecord.worktreeDir}.`)
+    }
+    return state
+  }
+
+  async function findMountedReviewSessionByPrimaryDir(primaryDir: string) {
+    const normalizedPrimaryDir = await normalizeExistingPath(primaryDir)
+    const sessions = await listReviewSessions({ cwd: normalizedPrimaryDir })
+    return sessions.find((session) => session.reviewWorktree === normalizedPrimaryDir) ?? null
+  }
+
+  function findPersistedWorktreeRecordByDir(worktreeDir: string) {
+    return (
+      db.worktrees.findMany().find((record) => record.worktreeDir === worktreeDir) ?? null
+    )
+  }
+
+  function createReviewSessionWarnings(result: ReviewSyncResult) {
+    return result.status === "rejected-human-patch" ? [result.message] : []
+  }
+
+  function emitReviewSessionWarnings(
+    id: SessionId,
+    reason: string,
+    result: ReviewSyncResult,
+    diagnosticLogger: ReturnType<typeof createLogger>,
+  ) {
+    for (const warning of createReviewSessionWarnings(result)) {
+      emitDiagnostic(
+        id,
+        "review_session.warning",
+        {
+          reason,
+          warning,
+          acceptedPatchPath: result.acceptedPatchPath,
+          rejectedPatchPath: result.rejectedPatchPath,
+        },
+        diagnosticLogger,
+      )
+    }
+  }
+
+  function emitReviewSessionResult(
+    id: SessionId,
+    reason: string,
+    result: ReviewSyncResult,
+    diagnosticLogger: ReturnType<typeof createLogger>,
+  ) {
+    if (result.status === "error") {
+      emitDiagnostic(
+        id,
+        "review_session.warning",
+        { reason, errorMessage: result.message },
+        diagnosticLogger,
+      )
+      return
+    }
+    emitReviewSessionWarnings(id, reason, result, diagnosticLogger)
+  }
+
+  function isMissingReviewSessionError(error: unknown) {
+    return (
+      error instanceof Error &&
+      error.message.includes("No review-sync session matches the current worktree.")
+    )
+  }
+
+  async function normalizeExistingPath(value: string) {
+    return await realpath(resolve(value))
   }
 
   async function stopReviewSessionRuntime(id: SessionId) {
@@ -2281,17 +2359,9 @@ export function createSessionManager(input: {
       return
     }
 
-    runtime.closed = true
-    if (runtime.timer) {
-      clearTimeout(runtime.timer)
-      runtime.timer = null
-    }
-
-    for (const watcher of runtime.watchers) {
-      watcher.close()
-    }
-
+    runtime.abortController.abort()
     reviewSessionRuntimes.delete(id)
+    await runtime.running.catch(() => {})
   }
 
   /** Returns how many `session.message` stream subscribers are currently attached to one session id. */
@@ -2402,142 +2472,76 @@ export function createSessionManager(input: {
 
   async function runReviewSessionCycle(
     id: SessionId,
-    host: ReviewSessionHost,
+    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
     reason: string,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     emitDiagnostic(id, "review_session.started", { reason }, diagnosticLogger)
-    const result = await host.syncOnce()
-    for (const warning of result.warnings) {
-      emitDiagnostic(id, "review_session.warning", { reason, warning }, diagnosticLogger)
-    }
+    const result = await runReviewSyncSession({ cwd: worktreeRecord.worktreeDir })
+    emitReviewSessionWarnings(id, reason, result, diagnosticLogger)
+    const state = await readRequiredReviewSessionState(worktreeRecord)
     emitDiagnostic(
       id,
       "review_session.completed",
       {
         reason,
-        warningCount: result.warnings.length,
-        lastSyncAt: result.state.lastSyncAt,
+        warningCount: createReviewSessionWarnings(result).length,
+        lastSync: state.lastSync,
       },
       diagnosticLogger,
     )
-    return result
+    return {
+      state,
+      warnings: createReviewSessionWarnings(result),
+    }
   }
 
   async function startReviewSessionRuntime(
     id: SessionId,
-    host: ReviewSessionHost,
+    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     await stopReviewSessionRuntime(id)
 
-    const state = await host.inspect()
+    const state = await readReviewSessionState(worktreeRecord)
     if (!state || !activeSessions.has(id)) {
       return
     }
 
-    const runtime: ReviewSessionRuntime = {
-      host,
-      watchers: [],
-      timer: null,
-      running: false,
-      rerunRequested: false,
-      closed: false,
-    }
-
-    const schedule = (reason: string, immediate = false) => {
-      if (runtime.closed) {
-        return
-      }
-
-      if (runtime.running) {
-        runtime.rerunRequested = true
-        return
-      }
-
-      if (runtime.timer) {
-        clearTimeout(runtime.timer)
-      }
-
-      runtime.timer = setTimeout(
-        () => {
-          runtime.timer = null
-          void runScheduled(reason)
-        },
-        immediate ? 0 : 75,
-      )
-    }
-
-    const runScheduled = async (reason: string) => {
-      if (runtime.closed || runtime.running) {
-        return
-      }
-
-      runtime.running = true
-      try {
-        await runReviewSessionCycle(id, host, reason, diagnosticLogger)
-      } catch (error) {
+    const abortController = new AbortController()
+    const running = watchReviewSession({
+      cwd: worktreeRecord.worktreeDir,
+      agentBranch: worktreeRecord.branchName,
+      signal: abortController.signal,
+      onResult: (result) => {
+        emitReviewSessionResult(id, "watch", result, diagnosticLogger)
+      },
+    })
+      .then((result) => {
+        emitReviewSessionResult(id, "watch", result, diagnosticLogger)
+      })
+      .catch((error) => {
+        if (abortController.signal.aborted) {
+          return
+        }
         emitDiagnostic(
           id,
           "review_session.warning",
           {
-            reason,
+            reason: "watch",
             errorMessage: getErrorMessage(error),
           },
           diagnosticLogger,
         )
-      } finally {
-        runtime.running = false
-        if (runtime.rerunRequested) {
-          runtime.rerunRequested = false
-          schedule("rerun", true)
-        }
-      }
-    }
+      })
 
-    const attachWatcher = (cwd: string, side: "primary" | "worktree") => {
-      try {
-        const watcher = watch(cwd, { persistent: false }, (_eventType, filename) => {
-          if (runtime.closed) {
-            return
-          }
-
-          const changedPath = filename?.toString() ?? ""
-          if (changedPath.startsWith(".git")) {
-            return
-          }
-
-          schedule(`${side}:${changedPath || "*"}`)
-        })
-        watcher.on("error", (error) => {
-          emitDiagnostic(
-            id,
-            "review_session.watcher_degraded",
-            {
-              side,
-              errorMessage: getErrorMessage(error),
-            },
-            diagnosticLogger,
-          )
-          void stopReviewSessionRuntime(id)
-        })
-        runtime.watchers.push(watcher)
-      } catch (error) {
-        emitDiagnostic(
-          id,
-          "review_session.watcher_degraded",
-          {
-            side,
-            errorMessage: getErrorMessage(error),
-          },
-          diagnosticLogger,
-        )
-      }
-    }
-
-    attachWatcher(state.primaryDir, "primary")
-    attachWatcher(state.worktreeDir, "worktree")
-    reviewSessionRuntimes.set(id, runtime)
+    reviewSessionRuntimes.set(id, { abortController, running })
+    emitDiagnostic(
+      id,
+      "review_session.watcher_started",
+      { agentBranch: state.agentBranch, reviewBranch: state.reviewBranch },
+      diagnosticLogger,
+    )
   }
 
   async function replaceMountedReviewSessionIfNeeded(
@@ -2546,79 +2550,61 @@ export function createSessionManager(input: {
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     const mounted = await findMountedReviewSessionByPrimaryDir(worktreeRecord.repoRoot)
-    if (!mounted || mounted.sessionId === id) {
+    const previousWorktreeRecord = mounted
+      ? findPersistedWorktreeRecordByDir(mounted.agentWorktree)
+      : null
+    if (!mounted || previousWorktreeRecord?.sessionId === id) {
       return
     }
 
-    await stopReviewSessionRuntime(mounted.sessionId)
-    const previousLogger = activeSessions.get(mounted.sessionId)?.logger ?? logger
-    const previousHost = new ReviewSessionHost({
-      sessionId: mounted.sessionId,
-      primaryDir: mounted.primaryDir,
-      worktreeDir: mounted.worktreeDir,
-    })
-    const unmounted = await previousHost.unmount()
+    if (previousWorktreeRecord) {
+      await stopReviewSessionRuntime(previousWorktreeRecord.sessionId)
+    }
+    await stopReviewSession({ cwd: mounted.agentWorktree })
 
-    emitDiagnostic(
-      mounted.sessionId,
-      "review_session.replaced",
-      {
-        replacedBySessionId: id,
-        warningCount: unmounted.warnings.length,
-      },
-      previousLogger,
-    )
-    for (const warning of unmounted.warnings) {
+    if (previousWorktreeRecord) {
       emitDiagnostic(
-        mounted.sessionId,
-        "review_session.warning",
-        { reason: "replaced", warning },
-        previousLogger,
+        previousWorktreeRecord.sessionId,
+        "review_session.replaced",
+        { replacedBySessionId: id },
+        activeSessions.get(previousWorktreeRecord.sessionId)?.logger ?? logger,
       )
     }
 
     emitDiagnostic(
       id,
       "review_session.replaced",
-      { previousSessionId: mounted.sessionId },
+      {
+        previousSessionId: previousWorktreeRecord?.sessionId ?? null,
+        previousReviewSyncSessionId: mounted.sessionId,
+      },
       diagnosticLogger,
     )
   }
 
-  async function mountReviewSessionHost(
+  async function mountReviewSessionForWorktree(
     id: SessionId,
     worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
-    const host = createReviewSessionHost(id, worktreeRecord)
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        await replaceMountedReviewSessionIfNeeded(id, worktreeRecord, diagnosticLogger)
-        const state = await host.mount()
-        emitDiagnostic(
-          id,
-          "review_session.mounted",
-          {
-            baseOid: state.baseOid,
-          },
-          diagnosticLogger,
-        )
-        return host
-      } catch (error) {
-        if (
-          attempt === 0 &&
-          error instanceof Error &&
-          error.message.includes("Another mounted review session already owns")
-        ) {
-          continue
-        }
-
-        throw error
-      }
-    }
-
-    return host
+    await replaceMountedReviewSessionIfNeeded(id, worktreeRecord, diagnosticLogger)
+    const result = await startReviewSync({
+      cwd: worktreeRecord.repoRoot,
+      agentBranch: worktreeRecord.branchName,
+    })
+    emitReviewSessionResult(id, "mount", result, diagnosticLogger)
+    const state = await readRequiredReviewSessionState(worktreeRecord)
+    emitDiagnostic(
+      id,
+      "review_session.mounted",
+      {
+        reviewSyncSessionId: state.sessionId,
+        agentBranch: state.agentBranch,
+        reviewBranch: state.reviewBranch,
+      },
+      diagnosticLogger,
+    )
+    return state
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
@@ -2649,14 +2635,15 @@ export function createSessionManager(input: {
 
         const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
         if (worktreeRecord) {
-          const reviewSessionHost = createReviewSessionHost(session.id, worktreeRecord)
-          const mountedReviewSessionState = await reviewSessionHost.inspect().catch(() => null)
+          const mountedReviewSessionState = await readReviewSessionState(worktreeRecord).catch(
+            () => null,
+          )
           if (mountedReviewSessionState) {
             try {
-              const unmounted = await reviewSessionHost.unmount()
+              const stopped = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
               emitDiagnostic(session.id, "review_session.unmounted", {
                 reason: "daemon_reconciliation",
-                warningCount: unmounted.warnings.length,
+                reviewSyncSessionId: stopped.sessionId,
               })
             } catch (error) {
               emitDiagnostic(session.id, "review_session.warning", {
@@ -3230,17 +3217,18 @@ export function createSessionManager(input: {
 
       const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
       if (worktreeRecord) {
-        const reviewSessionHost = createReviewSessionHost(activeSession.id, worktreeRecord)
-        const mountedReviewSessionState = await reviewSessionHost.inspect().catch(() => null)
+        const mountedReviewSessionState = await readReviewSessionState(worktreeRecord).catch(
+          () => null,
+        )
         if (mountedReviewSessionState) {
           try {
-            const unmounted = await reviewSessionHost.unmount()
+            const stopped = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
             emitDiagnostic(
               activeSession.id,
               "review_session.unmounted",
               {
                 reason: "agent_process_exit",
-                warningCount: unmounted.warnings.length,
+                reviewSyncSessionId: stopped.sessionId,
               },
               activeSession.logger,
             )
@@ -3386,7 +3374,7 @@ export function createSessionManager(input: {
 
     let sessionLogger = logger
     sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
-    let mountedReviewSessionHost: ReviewSessionHost | null = null
+    let mountedReviewSessionState: ReviewSyncStatusData | null = null
     let spawnedAgentProcess: AgentProcessHandle | null = null
 
     try {
@@ -3440,7 +3428,11 @@ export function createSessionManager(input: {
       }
 
       if (worktree && reviewSessionEnabled) {
-        mountedReviewSessionHost = await mountReviewSessionHost(id, worktree.state, sessionLogger)
+        mountedReviewSessionState = await mountReviewSessionForWorktree(
+          id,
+          worktree.state,
+          sessionLogger,
+        )
       }
 
       const agentProcess = await spawnAgentProcess({
@@ -3542,8 +3534,8 @@ export function createSessionManager(input: {
           sessionLogger,
           supportsLoadSession: sessionSupportsLoad,
         })
-        if (mountedReviewSessionHost) {
-          await mountedReviewSessionHost.unmount().catch(() => {})
+        if (mountedReviewSessionState && worktree) {
+          await stopReviewSession({ cwd: worktree.state.worktreeDir }).catch(() => {})
         }
         return completedSession
       }
@@ -3558,8 +3550,8 @@ export function createSessionManager(input: {
         sessionLogger,
         systemPrompt: params.request.systemPrompt,
       })
-      if (mountedReviewSessionHost) {
-        await startReviewSessionRuntime(id, mountedReviewSessionHost, sessionLogger)
+      if (mountedReviewSessionState && worktree) {
+        await startReviewSessionRuntime(id, worktree.state, sessionLogger)
       }
       return liveSession
     } catch (error) {
@@ -3572,9 +3564,9 @@ export function createSessionManager(input: {
         await treeKill(spawnedAgentProcess).catch(() => {})
         await waitForAgentProcessExit(spawnedAgentProcess).catch(() => {})
       }
-      if (mountedReviewSessionHost) {
+      if (mountedReviewSessionState && worktree) {
         await stopReviewSessionRuntime(id)
-        await mountedReviewSessionHost.unmount().catch(() => {})
+        await stopReviewSession({ cwd: worktree.state.worktreeDir }).catch(() => {})
       }
       if (!existingSession) {
         for (const turnRecord of db.sessionTurns.findMany({
@@ -3946,7 +3938,7 @@ export function createSessionManager(input: {
       id: session.id,
       acpSessionId: session.acpSessionId,
       worktree: worktreeRecord
-        ? toSessionWorktreeValue(worktreeRecord, await resolveReviewSessionState(id, worktreeRecord))
+        ? toSessionWorktreeValue(worktreeRecord, await resolveReviewSessionState(worktreeRecord))
         : null,
     }
   }
@@ -3960,9 +3952,9 @@ export function createSessionManager(input: {
     }
 
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    const host = await mountReviewSessionHost(id, worktreeRecord, diagnosticLogger)
+    await mountReviewSessionForWorktree(id, worktreeRecord, diagnosticLogger)
     if (activeSessions.has(id)) {
-      await startReviewSessionRuntime(id, host, diagnosticLogger)
+      await startReviewSessionRuntime(id, worktreeRecord, diagnosticLogger)
     }
 
     const response = await getWorktree(id)
@@ -3982,10 +3974,9 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${id} does not have a daemon worktree`)
     }
 
-    const host = createReviewSessionHost(id, worktreeRecord)
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
     emitDiagnostic(id, "review_session.requested", { reason: "manual" }, diagnosticLogger)
-    const result = await runReviewSessionCycle(id, host, "manual", diagnosticLogger)
+    const result = await runReviewSessionCycle(id, worktreeRecord, "manual", diagnosticLogger)
     const response = await getWorktree(id)
     return {
       id: session.id,
@@ -4004,28 +3995,25 @@ export function createSessionManager(input: {
     }
 
     await stopReviewSessionRuntime(id)
-    const host = createReviewSessionHost(id, worktreeRecord)
     const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    const result = await host.unmount()
+    const state = await readReviewSessionState(worktreeRecord)
+    const result = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
     emitDiagnostic(
       id,
       "review_session.unmounted",
       {
         reason: "manual",
-        warningCount: result.warnings.length,
+        reviewSyncSessionId: result.sessionId ?? state?.sessionId,
       },
       diagnosticLogger,
     )
-    for (const warning of result.warnings) {
-      emitDiagnostic(id, "review_session.warning", { reason: "manual", warning }, diagnosticLogger)
-    }
 
     const response = await getWorktree(id)
     return {
       id: session.id,
       acpSessionId: session.acpSessionId,
       worktree: response.worktree,
-      warnings: result.warnings,
+      warnings: [],
     }
   }
 
@@ -4293,17 +4281,19 @@ export function createSessionManager(input: {
     emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     if (worktreeRecord) {
-      const reviewSessionHost = createReviewSessionHost(id, worktreeRecord)
-      if (await reviewSessionHost.inspect().catch(() => null)) {
+      const mountedReviewSessionState = await readReviewSessionState(worktreeRecord).catch(
+        () => null,
+      )
+      if (mountedReviewSessionState) {
         try {
           await stopReviewSessionRuntime(id)
-          const result = await reviewSessionHost.unmount()
+          const result = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
           emitDiagnostic(
             id,
             "review_session.unmounted",
             {
               reason: "session_shutdown",
-              warningCount: result.warnings.length,
+              reviewSyncSessionId: result.sessionId ?? mountedReviewSessionState.sessionId,
             },
             active.logger,
           )
@@ -4346,9 +4336,8 @@ export function createSessionManager(input: {
       await stopReviewSessionRuntime(session.id)
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
       if (worktreeRecord) {
-        const reviewSessionHost = createReviewSessionHost(session.id, worktreeRecord)
-        if (await reviewSessionHost.inspect().catch(() => null)) {
-          await reviewSessionHost.unmount().catch(() => {})
+        if (await readReviewSessionState(worktreeRecord).catch(() => null)) {
+          await stopReviewSession({ cwd: worktreeRecord.worktreeDir }).catch(() => {})
         }
       }
       emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)

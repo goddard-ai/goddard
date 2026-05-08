@@ -47,14 +47,32 @@ export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
 
 /** Live review-session state merged into one daemon worktree response. */
 export const SessionReviewSessionState = z.strictObject({
-  status: z.literal("mounted"),
-  conflictPreference: z.literal("worktree"),
-  baseOid: z.string(),
-  primaryLatestSnapshotOid: z.string().nullable(),
-  worktreeLatestSnapshotOid: z.string().nullable(),
-  resultSnapshotOid: z.string().nullable(),
-  primaryRecoverySnapshotOid: z.string().nullable(),
-  lastSyncAt: z.number().int().nullable(),
+  sessionId: z.string(),
+  agentWorktree: z.string(),
+  reviewWorktree: z.string(),
+  agentBranch: z.string(),
+  reviewBranch: z.string(),
+  paused: z.boolean(),
+  refs: z.strictObject({
+    agentSnapshot: z.string(),
+    renderedSnapshot: z.string(),
+  }),
+  agentSnapshot: z.string().nullable(),
+  renderedSnapshot: z.string().nullable(),
+  lastSync: z.strictObject({
+    status: z.union([
+      z.literal("synced"),
+      z.literal("rejected-human-patch"),
+      z.literal("paused"),
+      z.literal("error"),
+    ]),
+    acceptedPatch: z.string().nullable(),
+    rejectedPatch: z.string().nullable(),
+  }),
+  patchCounts: z.strictObject({
+    accepted: z.number().int(),
+    rejected: z.number().int(),
+  }),
 })
 
 export type SessionReviewSessionState = z.infer<typeof SessionReviewSessionState>
