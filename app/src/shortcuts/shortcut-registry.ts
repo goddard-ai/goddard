@@ -2,8 +2,14 @@ import { effect } from "@preact/signals"
 import { createShortcuts, type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
 import { Sigma } from "preact-sigma"
 
-import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
+import {
+  appCommandHandlerSnapshot,
+  appCommandList,
+  isAppCommandHandled,
+  resolveAppCommand,
+} from "~/commands/app-command.ts"
 import { commandContext } from "~/commands/command-context.ts"
+import { getActiveCommandLayerId } from "~/commands/command-layer.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
   createShortcutBinding,
@@ -225,6 +231,10 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
     const nextBindings: BindingSpec[] = []
 
     for (const command of appCommandList) {
+      if (!isAppCommandHandled(command.id)) {
+        continue
+      }
+
       const expressions = this.resolvedBindings[command.id]
       if (!expressions) {
         continue
@@ -264,10 +274,11 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
 
   onSetup() {
     const disposeContextSync = effect(() => {
+      void appCommandHandlerSnapshot.value
+      void getActiveCommandLayerId()
       this.#runtime.batchContext(commandContext.whenContext.value)
+      this.rebindRuntime()
     })
-
-    this.rebindRuntime()
 
     return [
       () => {

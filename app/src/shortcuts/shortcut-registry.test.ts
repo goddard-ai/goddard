@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { Fragment, h, render } from "preact"
 
-import { AppCommand, onAppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
 import { CommandLayerProvider } from "~/commands/command-layer.tsrx"
 import { registerModalStackEntry } from "~/lib/modal-stack.ts"
@@ -16,13 +16,6 @@ function createTestRegistry() {
   commandContext.activeTabKind.value = "main"
   commandContext.hasClosableActiveTab.value = false
   commandContext.selectedNavId.value = "inbox"
-  commandContext.sessionInputHasAdapterSelector.value = false
-  commandContext.sessionInputHasBranchSelector.value = false
-  commandContext.sessionInputHasLocationSelector.value = false
-  commandContext.sessionInputCanSubmit.value = false
-  commandContext.sessionInputHasModelSelector.value = false
-  commandContext.sessionInputHasProjectSelector.value = false
-  commandContext.sessionInputHasThinkingLevel.value = false
 
   return {
     registry,
@@ -33,13 +26,14 @@ function createTestRegistry() {
 
 /** Dispatches one synthetic keydown event through the test shortcut boundary. */
 function dispatchKeydown(target: EventTarget, init: KeyboardEventInit) {
-  target.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      bubbles: true,
-      cancelable: true,
-      ...init,
-    }),
-  )
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  })
+
+  target.dispatchEvent(event)
+  return event
 }
 
 async function flushRenderEffects() {
@@ -47,10 +41,17 @@ async function flushRenderEffects() {
   await new Promise((resolve) => {
     window.setTimeout(resolve, 0)
   })
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, 0)
+  })
 }
 
-function TestCommandHandler(props: { command: AppCommand; onMatch: (match?: unknown) => void }) {
-  useAppCommand(props.command, props.onMatch)
+function TestCommandHandler(props: {
+  active?: boolean
+  command: AppCommand
+  onMatch: (match?: unknown) => void
+}) {
+  useAppCommand(props.command, props.onMatch, { active: props.active })
   return null
 }
 
@@ -58,6 +59,7 @@ function TestLayeredCommands(props: {
   dialogActive: boolean
   onPalette: (match?: unknown) => void
   onProject: (match?: unknown) => void
+  projectActive: boolean
 }) {
   return h(
     Fragment,
@@ -70,6 +72,7 @@ function TestLayeredCommands(props: {
       CommandLayerProvider,
       { active: props.dialogActive },
       h(TestCommandHandler, {
+        active: props.projectActive,
         command: AppCommand.sessionInput.openProjectSelector,
         onMatch: props.onProject,
       }),
@@ -77,18 +80,28 @@ function TestLayeredCommands(props: {
   )
 }
 
-test("keydown dispatches one typed app command event", () => {
+test("keydown dispatches one typed app command event", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
 
-  const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, (match) => {
-    matches.push(match)
-  })
-  registry.applyKeymapSnapshot("goddard", {
-    "navigation.openNewSessionDialog": ["Alt+n"],
-  })
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.navigation.openNewSessionDialog,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
 
   try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {
+      "navigation.openNewSessionDialog": ["Alt+n"],
+    })
+
     dispatchKeydown(runtimeDocument, {
       key: "n",
       code: "KeyN",
@@ -106,20 +119,29 @@ test("keydown dispatches one typed app command event", () => {
       },
     })
   } finally {
-    unsubscribe()
+    render(null, container)
     cleanup()
   }
 })
 
-test("default keymap dispatches switch-project from Mod+o", () => {
+test("default keymap dispatches switch-project from Mod+o", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
 
-  const unsubscribe = onAppCommand(AppCommand.navigation.openSwitchProject, (match) => {
-    matches.push(match)
-  })
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.navigation.openSwitchProject,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
 
   try {
+    await flushRenderEffects()
     registry.applyKeymapSnapshot("goddard", {})
 
     dispatchKeydown(runtimeDocument, {
@@ -139,20 +161,29 @@ test("default keymap dispatches switch-project from Mod+o", () => {
       },
     })
   } finally {
-    unsubscribe()
+    render(null, container)
     cleanup()
   }
 })
 
-test("applyKeymapSnapshot replaces previous bindings instead of accumulating them", () => {
+test("applyKeymapSnapshot replaces previous bindings instead of accumulating them", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
 
-  const unsubscribe = onAppCommand(AppCommand.navigation.openNewSessionDialog, (match) => {
-    matches.push(match)
-  })
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.navigation.openNewSessionDialog,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
 
   try {
+    await flushRenderEffects()
     registry.applyKeymapSnapshot("goddard", {
       "navigation.openNewSessionDialog": ["Alt+n"],
     })
@@ -182,7 +213,7 @@ test("applyKeymapSnapshot replaces previous bindings instead of accumulating the
     expect(matches).toHaveLength(2)
     expect(matches.map((match) => (match as { combo: string }).combo)).toEqual(["Alt+n", "Shift+n"])
   } finally {
-    unsubscribe()
+    render(null, container)
     cleanup()
   }
 })
@@ -203,15 +234,24 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
   }
 })
 
-test("command-owned when clauses gate both dispatch and palette availability", () => {
+test("command-owned when clauses gate both dispatch and palette availability", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
 
-  const unsubscribe = onAppCommand(AppCommand.workbench.closeActiveTab, (match) => {
-    matches.push(match)
-  })
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.workbench.closeActiveTab,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
 
   try {
+    await flushRenderEffects()
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
 
     dispatchKeydown(runtimeDocument, {
@@ -243,16 +283,26 @@ test("command-owned when clauses gate both dispatch and palette availability", (
       },
     })
   } finally {
-    unsubscribe()
+    render(null, container)
     cleanup()
   }
 })
 
-test("modal or closable tab drives runtime availability for closeActiveTab", () => {
+test("modal or closable tab drives runtime availability for closeActiveTab", async () => {
   const { registry, cleanup } = createTestRegistry()
-  const unsubscribe = onAppCommand(AppCommand.workbench.closeActiveTab, () => {})
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.workbench.closeActiveTab,
+      onMatch() {},
+    }),
+    container,
+  )
 
   try {
+    await flushRenderEffects()
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
 
     const unregisterModal = registerModalStackEntry({
@@ -272,7 +322,7 @@ test("modal or closable tab drives runtime availability for closeActiveTab", () 
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
   } finally {
-    unsubscribe()
+    render(null, container)
     cleanup()
   }
 })
@@ -291,7 +341,7 @@ test("active shortcut scopes drive availability checks", () => {
   }
 })
 
-test("session input context lets launch-dialog selectors override the global palette binding", async () => {
+test("active dialog layer lets launch-dialog selectors override the global palette binding", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const paletteMatches: unknown[] = []
   const projectMatches: unknown[] = []
@@ -308,6 +358,7 @@ test("session input context lets launch-dialog selectors override the global pal
         onProject(match) {
           projectMatches.push(match)
         },
+        projectActive: true,
       }),
       container,
     )
@@ -332,11 +383,15 @@ test("session input context lets launch-dialog selectors override the global pal
         onProject(match) {
           projectMatches.push(match)
         },
+        projectActive: true,
       }),
       container,
     )
     await flushRenderEffects()
-    commandContext.sessionInputHasProjectSelector.value = true
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
+      true,
+    )
 
     dispatchKeydown(runtimeDocument, {
       key: "p",
@@ -358,8 +413,6 @@ test("session input commands require a handler in the active command layer", asy
   document.body.append(container)
 
   try {
-    commandContext.sessionInputHasProjectSelector.value = true
-
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       false,
     )
@@ -419,6 +472,44 @@ test("session input commands require a handler in the active command layer", asy
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
+test("inactive command layer bindings do not prevent default", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  try {
+    render(
+      h(
+        Fragment,
+        {},
+        h(TestCommandHandler, {
+          command: AppCommand.navigation.openCommandPalette,
+          onMatch(match) {
+            matches.push(match)
+          },
+        }),
+        h(CommandLayerProvider, { active: true }, null),
+      ),
+      container,
+    )
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    const event = dispatchKeydown(runtimeDocument, {
+      key: "p",
+      code: "KeyP",
+      ctrlKey: true,
+    })
+
+    expect(matches).toEqual([])
+    expect(event.defaultPrevented).toBe(false)
   } finally {
     render(null, container)
     cleanup()

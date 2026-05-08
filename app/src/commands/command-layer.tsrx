@@ -27,11 +27,19 @@ function registerActiveCommandLayer(layerId: string) {
   }
 }
 
-/** Returns whether command handlers rendered in the current layer should be enabled. */
-export function useCommandLayerActive() {
+/** Reads the currently active command layer for reactive command binding updates. */
+export function getActiveCommandLayerId() {
+  return activeCommandLayerId.value
+}
+
+/** Reads the command layer owned by the nearest command layer provider. */
+export function useCommandLayer() {
   const layerId = useContext(commandLayerContext)
 
-  return activeCommandLayerId.value === layerId
+  return {
+    active: activeCommandLayerId.value === layerId,
+    id: layerId,
+  }
 }
 
 /** Provides a command layer for command handlers rendered inside one UI surface. */

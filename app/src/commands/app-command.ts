@@ -1,16 +1,18 @@
+import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutMatch } from "powerkeys"
-import { listen, SigmaTarget, useListener } from "preact-sigma"
+import { SigmaTarget, useListener } from "preact-sigma"
 import { useLayoutEffect } from "preact/hooks"
 import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
-import { useCommandLayerActive } from "./command-layer.tsrx"
+import { getActiveCommandLayerId, useCommandLayer } from "./command-layer.tsrx"
 
 /** Event map for command invocations; event names are generated app command ids. */
 type AppCommandEvents = Record<string, ShortcutMatch | undefined>
 
 const appCommandBus = new SigmaTarget<AppCommandEvents>()
-const appCommandHandlerCounts = new Map<AppCommandId, number>()
+const appCommandHandlerCounts = signal<Record<string, Partial<Record<AppCommandId, number>>>>({})
+export const appCommandHandlerSnapshot = computed(() => appCommandHandlerCounts.value)
 
 type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
@@ -119,31 +121,24 @@ export const AppCommand = defineAppCommands({
   sessionInput: {
     openProjectSelector: {
       label: "Session Input: Open Project Selector",
-      when: "sessionInput.hasProjectSelector",
     },
     openAdapterSelector: {
       label: "Session Input: Open Adapter Selector",
-      when: "sessionInput.hasAdapterSelector",
     },
     openLocationSelector: {
       label: "Session Input: Open Launch Location Selector",
-      when: "sessionInput.hasLocationSelector",
     },
     openBranchSelector: {
       label: "Session Input: Open Branch Selector",
-      when: "sessionInput.hasBranchSelector",
     },
     openModelSelector: {
       label: "Session Input: Open Model Selector",
-      when: "sessionInput.hasModelSelector",
     },
     openThinkingLevelSelector: {
       label: "Session Input: Open Thinking Level Selector",
-      when: "sessionInput.hasThinkingLevel",
     },
     submit: {
       label: "Session Input: Submit",
-      when: "sessionInput.canSubmit",
     },
   },
 })
@@ -159,35 +154,44 @@ export const appCommandList = Object.values(AppCommand).flatMap(
 )
 
 function hasActiveAppCommandHandler(commandId: AppCommandId) {
-  return (appCommandHandlerCounts.get(commandId) ?? 0) > 0
+  return (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[commandId] ?? 0) > 0
 }
 
-function registerActiveAppCommandHandler(commandId: AppCommandId) {
-  appCommandHandlerCounts.set(commandId, (appCommandHandlerCounts.get(commandId) ?? 0) + 1)
+function registerAppCommandHandler(layerId: string, commandId: AppCommandId) {
+  const currentCounts = appCommandHandlerCounts.value
+  const currentLayerCounts = currentCounts[layerId] ?? {}
+
+  appCommandHandlerCounts.value = {
+    ...currentCounts,
+    [layerId]: {
+      ...currentLayerCounts,
+      [commandId]: (currentLayerCounts[commandId] ?? 0) + 1,
+    },
+  }
 
   return () => {
-    const nextCount = (appCommandHandlerCounts.get(commandId) ?? 0) - 1
+    const nextCounts = { ...appCommandHandlerCounts.value }
+    const nextLayerCounts = { ...nextCounts[layerId] }
+    const nextCount = (nextLayerCounts[commandId] ?? 0) - 1
 
     if (nextCount > 0) {
-      appCommandHandlerCounts.set(commandId, nextCount)
+      nextLayerCounts[commandId] = nextCount
     } else {
-      appCommandHandlerCounts.delete(commandId)
+      delete nextLayerCounts[commandId]
     }
+
+    if (Object.keys(nextLayerCounts).length > 0) {
+      nextCounts[layerId] = nextLayerCounts
+    } else {
+      delete nextCounts[layerId]
+    }
+
+    appCommandHandlerCounts.value = nextCounts
   }
 }
 
 export function isAppCommandHandled(commandId: AppCommandId) {
   return hasActiveAppCommandHandler(commandId)
-}
-
-export function onAppCommand(command: AppCommand, listener: (match?: ShortcutMatch) => void) {
-  const unregisterHandler = registerActiveAppCommandHandler(command.id as AppCommandId)
-  const stopListening = listen(appCommandBus, command.id, listener)
-
-  return () => {
-    stopListening()
-    unregisterHandler()
-  }
 }
 
 export function useAppCommand(
@@ -197,19 +201,19 @@ export function useAppCommand(
     active?: boolean
   },
 ) {
-  const layerActive = useCommandLayerActive()
-  const active = (options?.active ?? true) && layerActive
+  const layer = useCommandLayer()
+  const active = options?.active ?? true
 
   useLayoutEffect(() => {
     if (!active) {
       return
     }
 
-    return registerActiveAppCommandHandler(command.id as AppCommandId)
-  }, [active, command.id])
+    return registerAppCommandHandler(layer.id, command.id as AppCommandId)
+  }, [active, command.id, layer.id])
 
   useListener(appCommandBus, command.id, (match) => {
-    if (active) {
+    if (active && layer.active) {
       listener(match)
     }
   })

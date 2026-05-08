@@ -5,7 +5,6 @@ import { useEffect } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { commandContext } from "~/commands/command-context.ts"
 import { DialogPortal } from "~/lib/dialog-portal.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { createSession } from "./mutations.ts"
@@ -24,16 +23,14 @@ component SessionLaunchDialog(props: {
   const activeProjectPath = projectContext.activeProjectPath
   const isDialogOpen = props.dialog.open
   const projects = projectRegistry.projectList
-  const hasAdapterSelector = isDialogOpen && (form.adapterCatalog.value?.adapters.length ?? 0) > 0
+  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
-    isDialogOpen && form.draftLocation.value === "worktree" &&
-      (form.launchPreview.value?.branches.length ?? 0) > 0
-  const hasLocationSelector = isDialogOpen && form.launchPreview.value !== null
-  const hasModelSelector =
-    isDialogOpen && (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
-  const hasProjectSelector = isDialogOpen && projects.length > 0
-  const hasThinkingLevel = isDialogOpen && form.thinkingOption.value !== null
-  const canSubmit = isDialogOpen && form.canSubmit.value
+    form.draftLocation.value === "worktree" && (form.launchPreview.value?.branches.length ?? 0) > 0
+  const hasLocationSelector = form.launchPreview.value !== null
+  const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
+  const hasProjectSelector = projects.length > 0
+  const hasThinkingLevel = form.thinkingOption.value !== null
+  const canSubmit = form.canSubmit.value
 
   async function launchSession() {
     const sessionInput = form.sessionInput.value
@@ -82,56 +79,27 @@ component SessionLaunchDialog(props: {
     }
   }, [activeProjectPath, form, isDialogOpen])
 
-  useEffect(() => {
-    commandContext.sessionInputHasAdapterSelector.value = hasAdapterSelector
-    commandContext.sessionInputHasBranchSelector.value = hasBranchSelector
-    commandContext.sessionInputHasLocationSelector.value = hasLocationSelector
-    commandContext.sessionInputCanSubmit.value = canSubmit
-    commandContext.sessionInputHasModelSelector.value = hasModelSelector
-    commandContext.sessionInputHasProjectSelector.value = hasProjectSelector
-    commandContext.sessionInputHasThinkingLevel.value = hasThinkingLevel
-
-    return () => {
-      commandContext.sessionInputHasAdapterSelector.value = false
-      commandContext.sessionInputHasBranchSelector.value = false
-      commandContext.sessionInputHasLocationSelector.value = false
-      commandContext.sessionInputCanSubmit.value = false
-      commandContext.sessionInputHasModelSelector.value = false
-      commandContext.sessionInputHasProjectSelector.value = false
-      commandContext.sessionInputHasThinkingLevel.value = false
-    }
-  }, [
-    canSubmit,
-    hasAdapterSelector,
-    hasBranchSelector,
-    hasLocationSelector,
-    hasModelSelector,
-    hasProjectSelector,
-    hasThinkingLevel,
-    isDialogOpen,
-  ])
-
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")
-  })
+  }, { active: hasProjectSelector })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
     form.setOpenPicker("adapter")
-  })
+  }, { active: hasAdapterSelector })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
     form.setOpenPicker("location")
-  })
+  }, { active: hasLocationSelector })
   useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
     form.setOpenPicker("branch")
-  })
+  }, { active: hasBranchSelector })
   useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
     form.setOpenPicker("model")
-  })
+  }, { active: hasModelSelector })
   useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
     form.setOpenPicker("thinking")
-  })
+  }, { active: hasThinkingLevel })
   useAppCommand(AppCommand.sessionInput.submit, () => {
     void launchSession()
-  })
+  }, { active: canSubmit })
 
   <DialogPortal>
     <Dialog.Backdrop class={styles.backdrop} />

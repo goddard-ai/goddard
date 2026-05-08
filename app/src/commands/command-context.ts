@@ -11,26 +11,12 @@ const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchTabKind>("main")
 const hasClosableActiveTab = signal(false)
 const selectedNavId = signal<NavigationItemId>("inbox")
-const sessionInputHasAdapterSelector = signal(false)
-const sessionInputHasBranchSelector = signal(false)
-const sessionInputHasLocationSelector = signal(false)
-const sessionInputCanSubmit = signal(false)
-const sessionInputHasModelSelector = signal(false)
-const sessionInputHasProjectSelector = signal(false)
-const sessionInputHasThinkingLevel = signal(false)
 const hasCloseTarget = computed(() => {
   return hasClosableActiveTab.value || hasOpenModalDialog.value
 })
 
 const whenContext = computed(() => {
   return {
-    "sessionInput.hasAdapterSelector": sessionInputHasAdapterSelector.value,
-    "sessionInput.hasBranchSelector": sessionInputHasBranchSelector.value,
-    "sessionInput.hasLocationSelector": sessionInputHasLocationSelector.value,
-    "sessionInput.canSubmit": sessionInputCanSubmit.value,
-    "sessionInput.hasModelSelector": sessionInputHasModelSelector.value,
-    "sessionInput.hasProjectSelector": sessionInputHasProjectSelector.value,
-    "sessionInput.hasThinkingLevel": sessionInputHasThinkingLevel.value,
     "workbench.activeTabKind": activeTabKind.value,
     "workbench.hasCloseTarget": hasCloseTarget.value,
     "workbench.hasClosableActiveTab": hasClosableActiveTab.value,
@@ -46,13 +32,6 @@ export const commandContext = {
   hasClosableActiveTab,
   hasOpenModalDialog,
   selectedNavId,
-  sessionInputHasAdapterSelector,
-  sessionInputHasBranchSelector,
-  sessionInputHasLocationSelector,
-  sessionInputCanSubmit,
-  sessionInputHasModelSelector,
-  sessionInputHasProjectSelector,
-  sessionInputHasThinkingLevel,
   whenContext,
 } as const
 
