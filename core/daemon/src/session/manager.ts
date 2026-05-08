@@ -13,13 +13,13 @@ import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import {
   listReviewSessions,
-  startReviewSync as startReviewSession,
+  startReviewSync,
   statusReviewSession,
   stopReviewSession,
-  syncReviewSession as runReviewSessionCommand,
+  syncReviewSession,
   watchReviewSession,
-  type ReviewSyncResult as ReviewSessionCommandResult,
-  type ReviewSyncStatusData as ReviewSessionState,
+  type ReviewSyncResult,
+  type ReviewSyncStatusData,
 } from "@goddard-ai/review-sync"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import {
@@ -2237,7 +2237,7 @@ export function createSessionManager(input: {
 
   function toSessionWorktreeValue(
     record: SessionWorktreeDoc,
-    reviewSession: ReviewSessionState | null,
+    reviewSession: ReviewSyncStatusData | null,
   ) {
     const { id: _id, sessionId: _sessionId, ...worktree } = record
     return {
@@ -2299,14 +2299,14 @@ export function createSessionManager(input: {
     )
   }
 
-  function createReviewSessionWarnings(result: ReviewSessionCommandResult) {
+  function createReviewSessionWarnings(result: ReviewSyncResult) {
     return result.status === "rejected-human-patch" ? [result.message] : []
   }
 
   function emitReviewSessionWarnings(
     id: SessionId,
     reason: string,
-    result: ReviewSessionCommandResult,
+    result: ReviewSyncResult,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     for (const warning of createReviewSessionWarnings(result)) {
@@ -2327,7 +2327,7 @@ export function createSessionManager(input: {
   function emitReviewSessionResult(
     id: SessionId,
     reason: string,
-    result: ReviewSessionCommandResult,
+    result: ReviewSyncResult,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     if (result.status === "error") {
@@ -2477,7 +2477,7 @@ export function createSessionManager(input: {
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     emitDiagnostic(id, "review_session.started", { reason }, diagnosticLogger)
-    const result = await runReviewSessionCommand({ cwd: worktreeRecord.worktreeDir })
+    const result = await syncReviewSession({ cwd: worktreeRecord.worktreeDir })
     emitReviewSessionWarnings(id, reason, result, diagnosticLogger)
     const state = await readRequiredReviewSessionState(worktreeRecord)
     emitDiagnostic(
@@ -2588,7 +2588,7 @@ export function createSessionManager(input: {
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     await replaceMountedReviewSessionIfNeeded(id, worktreeRecord, diagnosticLogger)
-    const result = await startReviewSession({
+    const result = await startReviewSync({
       cwd: worktreeRecord.repoRoot,
       agentBranch: worktreeRecord.branchName,
     })
@@ -3374,7 +3374,7 @@ export function createSessionManager(input: {
 
     let sessionLogger = logger
     sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
-    let mountedReviewSessionState: ReviewSessionState | null = null
+    let mountedReviewSessionState: ReviewSyncStatusData | null = null
     let spawnedAgentProcess: AgentProcessHandle | null = null
 
     try {
