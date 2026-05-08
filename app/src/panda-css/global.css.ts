@@ -121,7 +121,7 @@ export const globalCss = defineGlobalStyles({
 
   ":where(hr)": {
     marginBlock: "0.75rem",
-    borderTopColor: "border",
+    borderTop: "1px solid {colors.border}",
   },
 
   ":where(a, button, input, select, textarea, summary, [tabindex], [data-scope][data-part]):focus-visible":

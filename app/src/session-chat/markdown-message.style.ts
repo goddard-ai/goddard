@@ -43,14 +43,12 @@ export default {
     "& blockquote": {
       margin: "0",
       paddingInlineStart: "14px",
-      borderLeft: "3px solid",
-      borderLeftColor: "border",
+      borderLeft: "3px solid {colors.border}",
       color: "fg.muted",
     },
     "& hr": {
       border: "0",
-      borderTop: "1px solid",
-      borderTopColor: "border",
+      borderTop: "1px solid {colors.border}",
       margin: "2px 0",
     },
     "& a": {
@@ -97,8 +95,7 @@ export default {
     },
     "& th, & td": {
       padding: "8px 10px",
-      border: "1px solid",
-      borderColor: "border",
+      border: "1px solid {colors.border}",
       textAlign: "left",
       verticalAlign: "top",
     },

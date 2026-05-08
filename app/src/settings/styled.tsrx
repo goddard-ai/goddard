@@ -69,15 +69,13 @@ export const SettingsChoiceList = styled("ul", {
     listStyle: "none",
     margin: "0",
     padding: "0",
-    borderTop: "1px solid",
-    borderColor: "border",
+    borderTop: "1px solid {colors.border}",
   },
 })
 
 export const SettingsChoiceItem = styled("li", {
   base: {
-    borderBottom: "1px solid",
-    borderColor: "border",
+    borderBottom: "1px solid {colors.border}",
   },
 })
 
@@ -133,9 +131,8 @@ export const SettingsControlRowLabel = styled("label", {
     alignItems: "start",
     gap: "12px",
     paddingBlock: "12px",
-    borderTop: "1px solid",
-    borderBottom: "1px solid",
-    borderColor: "border",
+    borderTop: "1px solid {colors.border}",
+    borderBottom: "1px solid {colors.border}",
     cursor: "pointer",
   },
 })

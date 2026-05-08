@@ -17,8 +17,7 @@ export default {
     gap: "4px",
     padding: "12px",
     borderRadius: "14px",
-    border: "1px solid",
-    borderColor: "border",
+    border: "1px solid {colors.border}",
     backgroundColor: "background",
   }),
 }

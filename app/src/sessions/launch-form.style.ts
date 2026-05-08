@@ -9,8 +9,7 @@ export default {
   editorFrame: css({
     position: "relative",
     borderRadius: "14px",
-    border: "1px solid",
-    borderColor: "border",
+    border: "1px solid {colors.border}",
     backgroundColor: "background",
     transition:
       "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1)",
@@ -58,8 +57,7 @@ export default {
     height: "40px",
     paddingInline: "14px",
     borderRadius: "12px",
-    border: "1px solid",
-    borderColor: "accent",
+    border: "1px solid {colors.accent}",
     backgroundColor: "surface",
     color: "text",
     fontSize: "0.88rem",
