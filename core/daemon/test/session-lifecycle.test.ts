@@ -6,7 +6,7 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import {
   getAcpRegistryCacheDir,
   getGlobalConfigPath,
@@ -225,6 +225,64 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
   expect(reconnected.session.activeDaemonSession).toBe(true)
   expect(promptStarts).toContain("after-shutdown")
 
+  await client.send("session.shutdown", { id: created.session.id })
+})
+
+test("session completion hides from the default list but stays interactive", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("session.create", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await client.send("session.reportTurnEnded", {
+    id: created.session.id,
+    scope: "Checkout flow",
+    headline: "Ready for review",
+  })
+  expect(await listSessionIds(client)).toContain(created.session.id)
+
+  await client.send("session.complete", { id: created.session.id })
+  expect(db.sessions.get(created.session.id)?.completedHidden).toBe(true)
+  expect(db.inboxItems.first({ where: { entityId: created.session.id } })?.status).toBe("completed")
+  expect(await listSessionIds(client)).not.toContain(created.session.id)
+
+  await expect(client.send("session.get", { id: created.session.id })).resolves.toMatchObject({
+    session: { id: created.session.id, completedHidden: true },
+  })
+  await expect(
+    client.send("session.history", {
+      id: created.session.id,
+    }),
+  ).resolves.toMatchObject({
+    id: created.session.id,
+  })
+
+  await client.send("session.send", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-after-complete", "wait:5"),
+  })
+  expect(db.sessions.get(created.session.id)?.completedHidden).toBe(false)
+  expect(db.inboxItems.first({ where: { entityId: created.session.id } })?.status).toBe("replied")
+  expect(await listSessionIds(client)).toContain(created.session.id)
+
+  await client.send("session.send", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "held-prompt", "hold:final-only"),
+  })
+  await waitFor(async () => {
+    const history = await client.send("session.history", { id: created.session.id })
+    return history.turns.some((turn) => turn.completedAt === null)
+  })
+  await expect(client.send("session.complete", { id: created.session.id })).rejects.toThrow(
+    /active turn/i,
+  )
+
+  await client.send("session.cancel", { id: created.session.id })
   await client.send("session.shutdown", { id: created.session.id })
 })
 
@@ -588,6 +646,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     connectionMode: "live",
     supportsLoadSession: false,
     activeDaemonSession: true,
+    completedHidden: false,
     errorMessage: null,
     blockedReason: null,
     initiative: null,
@@ -672,6 +731,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     connectionMode: "live",
     supportsLoadSession: false,
     activeDaemonSession: true,
+    completedHidden: false,
     errorMessage: null,
     blockedReason: null,
     initiative: null,
@@ -1591,6 +1651,7 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
     connectionMode: "history",
     supportsLoadSession: false,
     activeDaemonSession: false,
+    completedHidden: false,
     errorMessage: null,
     blockedReason: null,
     initiative: null,
@@ -2088,6 +2149,11 @@ function buildPromptMessage(sessionId: string, id: string, text: string) {
       prompt: [{ type: "text", text }],
     },
   }
+}
+
+async function listSessionIds(client: DaemonIpcClient) {
+  const { sessions } = await client.send("session.list", { limit: 50 })
+  return sessions.map((session) => session.id)
 }
 
 function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>) {

@@ -92,6 +92,7 @@ export const DaemonSession = z.strictObject({
   connectionMode: DaemonSessionConnectionMode.default("none"),
   supportsLoadSession: z.boolean().default(false),
   activeDaemonSession: z.boolean().default(false),
+  completedHidden: z.boolean().default(false),
   errorMessage: z.string().nullable().default(null),
   blockedReason: z.string().nullable().default(null),
   initiative: z.string().nullable().default(null),

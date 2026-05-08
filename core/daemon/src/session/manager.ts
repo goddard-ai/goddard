@@ -1480,6 +1480,7 @@ function createSessionRecordUpdate(params: {
     connectionMode,
     supportsLoadSession: params.supportsLoadSession,
     activeDaemonSession: !params.exitAfterInitialPrompt,
+    completedHidden: false,
     repository: params.scope.repository,
     prNumber: params.scope.prNumber,
     token: params.token,
@@ -3626,6 +3627,9 @@ export function createSessionManager(input: {
 
     try {
       page = db.sessions.findPage({
+        where: {
+          completedHidden: false,
+        },
         orderBy: {
           updatedAt: "desc",
           id: "desc",
@@ -4054,6 +4058,7 @@ export function createSessionManager(input: {
     requireSessionDocument(id)
     updateSession(id, {
       status: "active",
+      completedHidden: false,
       initiative: title,
       blockedReason: null,
     })
@@ -4078,6 +4083,7 @@ export function createSessionManager(input: {
     })
     updateSession(id, {
       status: "blocked",
+      completedHidden: false,
       blockedReason: reason,
     })
     input.inboxManager.touchInboxItem({
@@ -4103,6 +4109,7 @@ export function createSessionManager(input: {
     })
     updateSession(id, {
       status: "done",
+      completedHidden: false,
       initiative: null,
       blockedReason: null,
     })
@@ -4146,6 +4153,14 @@ export function createSessionManager(input: {
   async function completeSession(id: SessionId) {
     await ready
     requireSessionDocument(id)
+    const active = activeSessions.get(id) ?? null
+    if (active?.activeTurn) {
+      throw new IpcClientError("Cannot complete a session while the agent has an active turn")
+    }
+
+    updateSession(id, {
+      completedHidden: true,
+    })
     return input.inboxManager.completeSession(id)
   }
 
@@ -4170,6 +4185,9 @@ export function createSessionManager(input: {
         requestId: message.id,
         prompt: [...message.params.prompt],
         source: "client",
+      })
+      updateSession(id, {
+        completedHidden: false,
       })
       input.inboxManager.markSessionReplied(id)
       refreshIdleShutdownState(active.id, "prompt_enqueued")

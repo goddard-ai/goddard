@@ -37,6 +37,11 @@ const schema = {
     .multi("updatedAt_id", {
       updatedAt: "desc",
       id: "desc",
+    })
+    .multi("completedHidden_updatedAt_id", {
+      completedHidden: "asc",
+      updatedAt: "desc",
+      id: "desc",
     }),
 
   sessionTurns: kind("trn", DaemonSessionTurn)
