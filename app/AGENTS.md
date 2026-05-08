@@ -60,6 +60,7 @@
 - Prefer the `class` JSX prop over `className`.
 - Prefer the global `preact.` namespace for Preact types such as `preact.ComponentChildren` instead of importing those types directly.
 - Prefix reusable, pre-styled UI primitives with `Good` (for example `GoodTooltip`). Reserve that prefix for opinionated design-system components, not feature/domain modules or state.
+- In Panda style objects, prefer tokenized border shorthands such as `border: "1px solid {colors.border}"` over split declarations like `border: "1px solid"` plus `borderColor: "border"` when the border width, style, and token color are fixed together.
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.
 - Never destructure component props. Define component prop types inline instead of creating `Props` aliases or interfaces.
 - Avoid assigning JSX/TSRX elements to local `const` variables. Prefer inlining elements at the use site, including inline `<tsrx>` expression blocks when needed.
