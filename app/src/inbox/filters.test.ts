@@ -1,11 +1,18 @@
 import { expect, test } from "bun:test"
 
-import { DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions } from "./filters.ts"
+import { allInboxStatuses, DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions } from "./filters.ts"
 import { getInboxListRequest } from "./queries.ts"
 
 test("default inbox list request asks the daemon for unread and read active items", () => {
-  expect(getInboxListRequest(DEFAULT_INBOX_FILTER_ID)).toEqual({
+  expect(getInboxListRequest({ filterId: DEFAULT_INBOX_FILTER_ID })).toEqual({
     statuses: ["unread", "read"],
+    limit: 50,
+  })
+})
+
+test("search inbox list request can ask the daemon for every status", () => {
+  expect(getInboxListRequest({ statuses: allInboxStatuses })).toEqual({
+    statuses: ["unread", "read", "saved", "replied", "completed", "archived"],
     limit: 50,
   })
 })

@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks"
+import { useMemo, useState } from "preact/hooks"
 import type { InboxItem, InboxStatus } from "@goddard-ai/schema/daemon"
 
 import { getInboxEntityKind } from "./entity-kind.ts"
@@ -6,13 +6,22 @@ import { DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions, type InboxFilterId } f
 import { InboxList } from "./list.tsrx"
 import { InboxPageMutations } from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
-import { filterInboxItemsBySearch } from "./search.ts"
+import {
+  filterPreparedInboxItemsBySearch,
+  parseInboxSearchQuery,
+  prepareInboxSearchItems,
+  replaceInboxSearchStatusFilters,
+  type PreparedInboxSearchItem,
+} from "./search.ts"
 import { INBOX_DEBUG_ITEMS } from "./debug-data.ts"
 import styles from "./debug-view.style.ts"
 
-function filterDebugItemsByStatus(items: readonly InboxItem[], filterId: InboxFilterId) {
+function filterDebugItemsByStatus(
+  items: readonly PreparedInboxSearchItem[],
+  filterId: InboxFilterId,
+) {
   const statuses = new Set<InboxStatus>(inboxFilterDefinitions[filterId].statuses)
-  return items.filter((item) => statuses.has(item.status))
+  return items.filter((entry) => statuses.has(entry.item.status))
 }
 
 export type InboxDebugViewProps = {
@@ -24,8 +33,11 @@ export component InboxDebugView(props: InboxDebugViewProps) {
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null)
-  const filteredItems = filterDebugItemsByStatus(items, filterId)
-  const visibleItems = filterInboxItemsBySearch(filteredItems, searchQuery)
+  const parsedSearch = parseInboxSearchQuery(searchQuery)
+  const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
+  const filteredItems =
+    parsedSearch.isActive ? preparedItems : filterDebugItemsByStatus(preparedItems, filterId)
+  const visibleItems = filterPreparedInboxItemsBySearch(filteredItems, parsedSearch)
 
   <InboxPageMutations
     mutations={{
@@ -55,7 +67,13 @@ export component InboxDebugView(props: InboxDebugViewProps) {
             {filterId}
             {searchQuery}
             onFilterSelect={(id) => {
-              setFilterId(id)
+              if (searchQuery.trim().length > 0) {
+                setSearchQuery(
+                  replaceInboxSearchStatusFilters(searchQuery, inboxFilterDefinitions[id].statuses),
+                )
+              } else {
+                setFilterId(id)
+              }
               setSelectedItem(null)
             }}
             onRefresh={() => {

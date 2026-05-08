@@ -1,6 +1,7 @@
 import { RefreshCcw, Search } from "lucide-react"
 
 import { inboxFilterDefinitions, inboxFilterOrder, type InboxFilterId } from "./filters.ts"
+import { getInboxSearchActiveFilterIds } from "./search.ts"
 import styles from "./page.style.ts"
 
 export component InboxToolbar(props: {
@@ -10,18 +11,23 @@ export component InboxToolbar(props: {
   onRefresh: () => void;
   onSearchInput: (value: string) => void;
 }) {
+  const hasSearchQuery = props.searchQuery.trim().length > 0
+  const activeSearchFilterIds = new Set(getInboxSearchActiveFilterIds(props.searchQuery))
+
   <div class={styles.toolbar}>
     <div class={styles.headingGroup}>
       <h1 class={styles.heading}>{"Inbox"}</h1>
       <div class={styles.filterGroup} aria-label="Inbox filters">
         for (const id of inboxFilterOrder) {
           const filter = inboxFilterDefinitions[id]
+          const isSelected =
+            hasSearchQuery ? activeSearchFilterIds.has(id) : props.filterId === id
 
           <button
             key={id}
-            aria-pressed={props.filterId === id}
+            aria-pressed={isSelected}
             class={styles.filterButton}
-            data-selected={props.filterId === id ? "true" : undefined}
+            data-selected={isSelected ? "true" : undefined}
             type="button"
             onClick={() => {
               props.onFilterSelect(id)

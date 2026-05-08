@@ -2,6 +2,15 @@ import type { InboxStatus } from "@goddard-ai/schema/daemon"
 
 export const DEFAULT_INBOX_FILTER_ID = "unread"
 
+export const allInboxStatuses = [
+  "unread",
+  "read",
+  "saved",
+  "replied",
+  "completed",
+  "archived",
+] as const satisfies readonly InboxStatus[]
+
 export const inboxFilterDefinitions = {
   unread: {
     label: "Unread",

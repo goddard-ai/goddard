@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks"
+import { useMemo, useState } from "preact/hooks"
 import type { InboxItem } from "@goddard-ai/schema/daemon"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -9,12 +9,22 @@ import { findNearestProjectPath } from "~/projects/project-context.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
 import { getSessionDisplayTitle } from "~/sessions/display.ts"
 import { isInboxEntityKind } from "./entity-kind.ts"
-import { DEFAULT_INBOX_FILTER_ID, type InboxFilterId } from "./filters.ts"
+import {
+  allInboxStatuses,
+  DEFAULT_INBOX_FILTER_ID,
+  inboxFilterDefinitions,
+  type InboxFilterId,
+} from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import { InboxPageMutations, invalidateInboxQueries } from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
 import { getInboxListRequest } from "./queries.ts"
-import { filterInboxItemsBySearch } from "./search.ts"
+import {
+  filterPreparedInboxItemsBySearch,
+  parseInboxSearchQuery,
+  prepareInboxSearchItems,
+  replaceInboxSearchStatusFilters,
+} from "./search.ts"
 import styles from "./page.style.ts"
 
 function getErrorMessage(error: unknown) {
@@ -29,8 +39,17 @@ component InboxQueryContent(props: {
   filterId: InboxFilterId;
   searchQuery: string;
 }) {
-  const { items } = useQuery(goddardSdk.inbox.list, [getInboxListRequest(props.filterId)])
-  const visibleItems = filterInboxItemsBySearch(items, props.searchQuery)
+  const parsedSearch = parseInboxSearchQuery(props.searchQuery)
+  const { items } = useQuery(goddardSdk.inbox.list, [
+    getInboxListRequest(
+      {
+        filterId: props.filterId,
+        statuses: parsedSearch.isActive ? parsedSearch.statuses ?? allInboxStatuses : undefined,
+      },
+    ),
+  ])
+  const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
+  const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
 
   <InboxList filterId={props.filterId} items={visibleItems} searchQuery={props.searchQuery} />
 }
@@ -110,7 +129,13 @@ component InboxPage() {
         {filterId}
         {searchQuery}
         onFilterSelect={(id) => {
-          setFilterId(id)
+          if (searchQuery.trim().length > 0) {
+            setSearchQuery(
+              replaceInboxSearchStatusFilters(searchQuery, inboxFilterDefinitions[id].statuses),
+            )
+          } else {
+            setFilterId(id)
+          }
         }}
         onRefresh={() => {
           invalidateInboxQueries()

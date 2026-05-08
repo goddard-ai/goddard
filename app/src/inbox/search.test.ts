@@ -1,7 +1,13 @@
 import type { InboxItem } from "@goddard-ai/schema/daemon"
 import { expect, test } from "bun:test"
 
-import { filterInboxItemsBySearch } from "./search.ts"
+import {
+  filterPreparedInboxItemsBySearch,
+  getInboxSearchActiveFilterIds,
+  parseInboxSearchQuery,
+  prepareInboxSearchItems,
+  replaceInboxSearchStatusFilters,
+} from "./search.ts"
 
 const baseItem = {
   id: "inb_1",
@@ -22,21 +28,61 @@ test("inbox search fuzzy matches human-visible row text", () => {
     id: "inb_2",
     entityId: "pr_1",
     reason: "pull_request.created",
+    status: "saved",
     scope: "Review sync",
     headline: "Pull request opened",
   } satisfies InboxItem
 
-  expect(filterInboxItemsBySearch([baseItem, pullRequestItem], "pull request")).toEqual([
-    pullRequestItem,
-  ])
-  expect(filterInboxItemsBySearch([baseItem, pullRequestItem], "rvw syc")).toEqual([
-    pullRequestItem,
-  ])
+  const items = prepareInboxSearchItems([baseItem, pullRequestItem])
+
+  expect(filterPreparedInboxItemsBySearch(items, "pull request")).toEqual([pullRequestItem])
+  expect(filterPreparedInboxItemsBySearch(items, "rvw syc")).toEqual([pullRequestItem])
   expect(
-    new Set(
-      filterInboxItemsBySearch([baseItem, pullRequestItem], "normal priority").map(
-        (item) => item.id,
-      ),
-    ),
+    new Set(filterPreparedInboxItemsBySearch(items, "normal priority").map((item) => item.id)),
   ).toEqual(new Set([baseItem.id, pullRequestItem.id]))
+})
+
+test("inbox search supports status filters without fuzzy matching filter tokens", () => {
+  const savedPullRequestItem = {
+    ...baseItem,
+    id: "inb_2",
+    entityId: "pr_1",
+    reason: "pull_request.created",
+    status: "saved",
+    scope: "Review sync",
+    headline: "Pull request opened",
+  } satisfies InboxItem
+  const completedItem = {
+    ...baseItem,
+    id: "inb_3",
+    status: "completed",
+    scope: "Review sync",
+  } satisfies InboxItem
+  const items = prepareInboxSearchItems([baseItem, savedPullRequestItem, completedItem])
+  const parsedSearch = parseInboxSearchQuery("is:saved rvw syc")
+
+  expect(parsedSearch).toEqual({
+    fuzzyQuery: "rvw syc",
+    isActive: true,
+    statuses: ["saved"],
+  })
+  expect(filterPreparedInboxItemsBySearch(items, parsedSearch)).toEqual([savedPullRequestItem])
+  expect(filterPreparedInboxItemsBySearch(items, "status:completed")).toEqual([completedItem])
+})
+
+test("inbox search filter replacement swaps inline status filters", () => {
+  expect(replaceInboxSearchStatusFilters("rvw syc status:archived", ["saved"])).toBe(
+    "is:saved rvw syc",
+  )
+  expect(replaceInboxSearchStatusFilters("is:unread status:read blocked", ["unread", "read"])).toBe(
+    "is:unread is:read blocked",
+  )
+})
+
+test("inbox search reports active filters represented by status filters", () => {
+  expect(getInboxSearchActiveFilterIds("review sync")).toEqual([])
+  expect(getInboxSearchActiveFilterIds("is:saved review sync")).toEqual(["saved"])
+  expect(getInboxSearchActiveFilterIds("status:read blocked")).toEqual(["unread"])
+  expect(getInboxSearchActiveFilterIds("is:unread status:read blocked")).toEqual(["unread"])
+  expect(getInboxSearchActiveFilterIds("is:saved status:archived")).toEqual(["saved", "archived"])
 })

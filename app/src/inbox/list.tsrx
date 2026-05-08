@@ -39,7 +39,7 @@ export component InboxList(props: {
         </h2>
         <p class={styles.messageBody}>
           {hasSearchQuery
-            ? "Try a shorter search or another inbox filter."
+            ? "Try a shorter search or a status filter like is:unread."
             : filter.emptyDescription}
         </p>
       </div>
