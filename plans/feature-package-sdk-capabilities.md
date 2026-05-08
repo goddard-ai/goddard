@@ -14,6 +14,7 @@ SDK feature entrypoints will likely need a small injected context:
 
 - daemon IPC client for request/response calls
 - daemon stream subscription function for live updates
+- feature-owned daemon IPC contract for route names, stream names, and payload types
 - namespace registration utility or return contract
 - shared SDK error normalization when the SDK owns any error shape
 - optional access to SDK-owned helper factories for long-lived wrappers
@@ -38,11 +39,14 @@ export const sessionSdkPlugin = defineSdkPlugin({
 Likely contribution types:
 
 - thin daemon IPC method wrappers
+- methods generated from or checked against feature-owned daemon IPC contracts
 - stream helpers that apply daemon-side filters and unwrap payloads
 - object-backed wrappers for long-lived daemon resources
 - SDK-owned convenience message builders when raw protocol frames should stay hidden
 - type exports for feature-specific request and response shapes
 - feature-local helper exports that are stable enough for SDK consumers
+
+SDK plugins that call daemon-backed behavior should consume the feature's shared daemon IPC contract instead of duplicating route or stream names locally. The SDK plugin owns the user-facing namespace shape; the daemon IPC contract owns the transport names and validation shapes.
 
 ## Likely Type Needs
 
@@ -67,6 +71,8 @@ import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 
 export const defaultSdkPlugins = [sessionSdkPlugin, workforceSdkPlugin]
 ```
+
+The public SDK composition root should compose against the same feature-owned daemon IPC contracts that the daemon composition root uses. This keeps `@goddard-ai/sdk` as the supported public surface while avoiding drift between SDK method wiring and daemon IPC registration.
 
 The default `GoddardSdk` constructor should preserve the current user-facing ergonomics:
 

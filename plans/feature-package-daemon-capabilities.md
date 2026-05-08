@@ -13,6 +13,7 @@ This document is generic. It should guide the eventual shape of `@goddard-ai/dae
 Daemon feature entrypoints will likely need injected access to daemon-owned services:
 
 - IPC route or handler registration
+- feature-owned daemon IPC contract for request and stream validation
 - stream publication and subscription coordination
 - daemon-local persistence access when the feature owns local state
 - resolved daemon configuration
@@ -31,6 +32,7 @@ A daemon feature will usually contribute one or more of:
 
 - IPC request handlers
 - IPC stream publishers
+- feature-owned daemon IPC contracts consumed by both daemon and SDK plugins
 - daemon startup hooks
 - daemon shutdown hooks
 - background runtime registrations
@@ -45,12 +47,15 @@ Example shape:
 ```ts
 export const sessionDaemonPlugin = defineDaemonPlugin({
   name: "session",
+  ipc: sessionDaemonIpc,
   register(context) {
     context.ipc.handle("session.create", createSession)
     context.streams.publish("session.message", publishSessionMessage)
   },
 })
 ```
+
+The daemon plugin should consume the feature's daemon IPC contract for route and stream registration. Handler implementation stays in the daemon plugin; transport names and validation contracts stay in the shared daemon IPC contract.
 
 ## State And Defaults
 
@@ -74,6 +79,8 @@ import { workforceDaemonPlugin } from "@goddard-ai/workforce/daemon"
 
 registerDaemonPlugins([sessionDaemonPlugin, workforceDaemonPlugin])
 ```
+
+The daemon composition root should also compose feature-owned daemon IPC contracts into the daemon IPC schema that clients use. The SDK composition root should consume those same feature-owned contracts through the feature SDK plugins.
 
 Registration should fail fast for duplicate IPC handlers, duplicate stream names, or incompatible lifecycle ownership.
 

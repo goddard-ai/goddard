@@ -12,6 +12,7 @@ Each feature package should gather the layer-specific entrypoints for one produc
 - SDK entrypoint for public SDK namespace contribution
 - app entrypoint for UI composition
 - schema entrypoint for validation and shared wire shapes when needed
+- daemon IPC contract entrypoint for feature-owned daemon request and stream contracts when the feature has daemon/SDK communication
 - backend entrypoint only when the feature has worker-hosted API behavior, persistence, webhooks, or real-time fan-out
 - docs and glossary entries for local feature concepts
 - tests scoped to the feature contracts
@@ -39,6 +40,7 @@ features/
       daemon.ts
       app.tsx
       schema.ts
+      daemon-ipc.ts
 ```
 
 Example package name:
@@ -89,6 +91,44 @@ export const defaultSdkPlugins = [sessionSdkPlugin, workforceSdkPlugin]
 
 Feature entrypoints receive layer-owned services through explicit context objects. They should not import global clients, singleton SDK instances, daemon URLs, app state, or host-specific defaults.
 
+## Shared Daemon IPC Contracts
+
+Feature packages that expose daemon-backed SDK behavior should own a shared daemon IPC contract entrypoint, such as `src/daemon-ipc.ts`.
+
+The daemon IPC contract defines transport-level names and validation contracts:
+
+- daemon request names
+- daemon request payload schemas
+- daemon response schemas
+- daemon stream names
+- stream filter schemas
+- stream payload schemas
+
+The daemon IPC contract should import feature data shapes from `schema.ts` when shared schemas are needed. Keep `schema.ts` focused on data shapes and TypeScript types; keep `daemon-ipc.ts` focused on transport contracts.
+
+Route contracts live with the feature; route handling lives in the daemon plugin; route calling lives in the SDK plugin.
+
+Example:
+
+```ts
+export const sessionDaemonIpc = defineDaemonIpcContract({
+  requests: {
+    "session.create": {
+      input: createSessionRequestSchema,
+      output: createSessionResponseSchema,
+    },
+  },
+  streams: {
+    "session.message": {
+      filter: daemonSessionIdParamsSchema,
+      payload: sessionMessageEnvelopeSchema,
+    },
+  },
+})
+```
+
+The public daemon and SDK composition roots should consume the same feature-owned daemon IPC contract so route names, stream names, request schemas, and response schemas do not drift across layers.
+
 ## Non-Goals
 
 This is not a public plugin platform.
@@ -134,10 +174,11 @@ The scaffold should create:
 - `features/<name>/src/daemon.ts` when daemon behavior is requested
 - `features/<name>/src/app.tsx` when app UI is requested
 - `features/<name>/src/schema.ts` when shared validation or wire shapes are requested
+- `features/<name>/src/daemon-ipc.ts` when daemon and SDK entrypoints communicate through daemon IPC
 - `features/<name>/src/backend.ts` only when backend behavior is requested
 - placeholder tests that match the selected layer entrypoints
 
-The scaffold should prefer explicit options over guessing. It should default to daemon, SDK, and app entrypoints for common local features, with schema and backend entrypoints added only when requested. It should not register the feature in public composition roots unless asked, because registration is the point where the feature becomes part of a supported product surface.
+The scaffold should prefer explicit options over guessing. It should default to daemon, SDK, and app entrypoints for common local features, add a daemon IPC contract when both daemon and SDK entrypoints are selected, and add schema and backend entrypoints only when requested. It should not register the feature in public composition roots unless asked, because registration is the point where the feature becomes part of a supported product surface.
 
 ## Feature README Template
 
@@ -149,6 +190,7 @@ Required sections:
 - `Entrypoints`: which stack layers the feature contributes to
 - `Composition`: which public composition roots import the feature
 - `Boundaries`: what the feature owns and must not bypass
+- `IPC Contracts`: daemon request and stream contracts the feature owns, when applicable
 - `Related Docs`: nearby glossary, spec, or concept documents when they exist
 
 ## Implementation Planning Questions
