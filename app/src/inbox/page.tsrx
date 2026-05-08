@@ -16,7 +16,12 @@ import {
   type InboxFilterId,
 } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
-import { InboxPageMutations, invalidateInboxQueries } from "./mutations.ts"
+import {
+  completeSessionInboxItem,
+  InboxPageMutations,
+  invalidateInboxQueries,
+  updateInboxItem,
+} from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
 import { getInboxListRequest } from "./queries.ts"
 import {
@@ -121,7 +126,9 @@ component InboxPage() {
 
   <InboxPageMutations
     mutations={{
+      completeSessionInboxItem,
       openInboxItem,
+      updateInboxItem,
     }}
   >
     <div class={styles.root}>

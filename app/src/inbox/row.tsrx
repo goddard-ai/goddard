@@ -1,6 +1,19 @@
 import type { InboxItem } from "@goddard-ai/schema/daemon"
-import { GitPullRequest, MessageSquare } from "lucide-react"
+import { useState } from "preact/hooks"
+import {
+  Archive,
+  ArrowDown,
+  ArrowUp,
+  Bookmark,
+  CheckCircle2,
+  GitPullRequest,
+  Mail,
+  MailOpen,
+  MessageSquare,
+} from "lucide-react"
 
+import { appToaster } from "~/lib/good-toaster.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { getInboxEntityLabel, isInboxEntityKind } from "./entity-kind.ts"
 import { formatInboxUpdatedTime } from "./format.ts"
@@ -9,7 +22,34 @@ import { InboxPageMutations } from "./mutations.ts"
 import styles from "./page.style.ts"
 import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "./text.ts"
 
-function handleButtonLikeKeyDown(
+component InboxRowActionButton(props: {
+  ariaLabel: string;
+  disabled?: boolean;
+  icon: typeof Archive;
+  isActive?: boolean;
+  onPress: () => void;
+}) {
+  const Icon = props.icon
+
+  <GoodTooltip content={props.ariaLabel}>
+    <button
+      aria-label={props.ariaLabel}
+      class={styles.rowActionButton}
+      data-active={props.isActive ? "true" : undefined}
+      disabled={props.disabled}
+      title={props.ariaLabel}
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation()
+        props.onPress()
+      }}
+    >
+      <Icon aria-hidden={true} size={14} strokeWidth={2.2} />
+    </button>
+  </GoodTooltip>
+}
+
+function handleRowOpenKeyDown(
   event: preact.TargetedKeyboardEvent<HTMLElement>,
   onPress: () => void,
 ) {
@@ -24,64 +64,189 @@ function handleButtonLikeKeyDown(
 export component InboxRow(props: {
   item: InboxItem;
 }) {
-  const { openInboxItem } = useMutations(InboxPageMutations)
-  const EntityIcon = isInboxEntityKind(props.item, "session") ? MessageSquare : GitPullRequest
+  const mutations = useMutations(InboxPageMutations)
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const sessionItem = isInboxEntityKind(props.item, "session") ? props.item : null
+  const EntityIcon = sessionItem ? MessageSquare : GitPullRequest
   const priorityLabel = getInboxPriorityLabel(props.item.priority)
+  const readStatus =
+    props.item.status === "unread" ? "read" : "unread"
+  const readLabel =
+    props.item.status === "unread" ? "Mark read" : "Mark unread"
+  const priority =
+    props.item.priority === "low" ? "normal" : "low"
+  const priorityActionLabel =
+    props.item.priority === "low" ? "Set normal priority" : "Set low priority"
+  const hasPendingAction = pendingAction !== null
+  const isArchived = props.item.status === "archived"
+  const isCompleted = props.item.status === "completed"
+  const isSaved = props.item.status === "saved"
   const statusLabel = getInboxStatusLabel(props.item.status)
   const reasonLabel = getInboxReasonLabel(props.item.reason)
 
-  <div
-    class={styles.row}
-    data-inbox-row="true"
-    role="button"
-    tabIndex={0}
-    onClick={() => {
-      openInboxItem(props.item)
-    }}
-    onKeyDown={(event) => {
-      handleButtonLikeKeyDown(event, () => openInboxItem(props.item))
-    }}
-  >
-    <span class={styles.entityIcon} aria-hidden="true">
-      <EntityIcon size={16} strokeWidth={2.1} />
-    </span>
-    <div class={styles.rowMain}>
-      <div class={styles.rowMeta}>
-        <span class={styles.entityLabel}>
-          {getInboxEntityLabel(props.item.entityId)}
-        </span>
-        <span class={styles.reasonLabel}>
-          {reasonLabel}
-        </span>
+  async function performRowAction(label: string, action: () => Promise<unknown> | unknown) {
+    if (pendingAction !== null) {
+      return
+    }
+
+    setPendingAction(label)
+    try {
+      await action()
+    } catch (error) {
+      console.error(`Failed to run inbox row action: ${label}`, error)
+      appToaster.create(
+        {
+          description: "The daemon-backed inbox row could not be updated.",
+          duration: 3200,
+          title: `Couldn't ${label.toLowerCase()}`,
+          type: "error",
+        },
+      )
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  <div class={styles.row} data-inbox-row="true">
+    <div
+      class={styles.rowOpenButton}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        mutations.openInboxItem(props.item)
+      }}
+      onKeyDown={(event) => {
+        handleRowOpenKeyDown(event, () => mutations.openInboxItem(props.item))
+      }}
+    >
+      <span class={styles.entityIcon} aria-hidden="true">
+        <EntityIcon size={16} strokeWidth={2.1} />
+      </span>
+      <div class={styles.rowMain}>
+        <div class={styles.rowMeta}>
+          <span class={styles.entityLabel}>
+            {getInboxEntityLabel(props.item.entityId)}
+          </span>
+          <span class={styles.reasonLabel}>
+            {reasonLabel}
+          </span>
+        </div>
+        <div class={styles.rowCopy}>
+          <h2 class={styles.rowTitle}>
+            {getInboxItemPrimaryText(props.item)}
+          </h2>
+          <p class={styles.rowDescription}>
+            {getInboxItemSecondaryText(props.item)}
+          </p>
+        </div>
       </div>
-      <div class={styles.rowCopy}>
-        <h2 class={styles.rowTitle}>
-          {getInboxItemPrimaryText(props.item)}
-        </h2>
-        <p class={styles.rowDescription}>
-          {getInboxItemSecondaryText(props.item)}
-        </p>
+      <div class={styles.rowState}>
+        <div class={styles.badgeRow}>
+          <span class={styles.statusBadge} data-status={props.item.status}>
+            {statusLabel}
+          </span>
+          <span class={styles.priorityBadge} data-priority={props.item.priority}>
+            {priorityLabel}
+          </span>
+        </div>
+        <time
+          class={styles.updated}
+          dateTime={new Date(props.item.updatedAt).toISOString()}
+          title={new Intl.DateTimeFormat(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date(props.item.updatedAt))}
+        >
+          {formatInboxUpdatedTime(props.item.updatedAt)}
+        </time>
       </div>
     </div>
-    <div class={styles.rowState}>
-      <div class={styles.badgeRow}>
-        <span class={styles.statusBadge} data-status={props.item.status}>
-          {statusLabel}
-        </span>
-        <span class={styles.priorityBadge} data-priority={props.item.priority}>
-          {priorityLabel}
-        </span>
-      </div>
-      <time
-        class={styles.updated}
-        dateTime={new Date(props.item.updatedAt).toISOString()}
-        title={new Intl.DateTimeFormat(undefined, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(new Date(props.item.updatedAt))}
-      >
-        {formatInboxUpdatedTime(props.item.updatedAt)}
-      </time>
+    <div class={styles.rowActions} aria-label={`${getInboxItemPrimaryText(props.item)} actions`}>
+      <InboxRowActionButton
+        ariaLabel={readLabel}
+        disabled={hasPendingAction}
+        icon={props.item.status === "unread" ? MailOpen : Mail}
+        onPress={() => {
+          void performRowAction(
+            readLabel,
+            () => mutations.updateInboxItem(
+              {
+                entityId: props.item.entityId,
+                status: readStatus,
+              },
+            ),
+          )
+        }}
+      />
+      <InboxRowActionButton
+        ariaLabel={isSaved ? "Saved" : "Save"}
+        disabled={hasPendingAction || isSaved}
+        icon={Bookmark}
+        isActive={isSaved}
+        onPress={() => {
+          void performRowAction(
+            "Save",
+            () => mutations.updateInboxItem(
+              {
+                entityId: props.item.entityId,
+                status: "saved",
+              },
+            ),
+          )
+        }}
+      />
+      <InboxRowActionButton
+        ariaLabel={priorityActionLabel}
+        disabled={hasPendingAction}
+        icon={props.item.priority === "low" ? ArrowUp : ArrowDown}
+        isActive={props.item.priority === "low"}
+        onPress={() => {
+          void performRowAction(
+            priorityActionLabel,
+            () => mutations.updateInboxItem(
+              {
+                entityId: props.item.entityId,
+                priority,
+              },
+            ),
+          )
+        }}
+      />
+      if (sessionItem) {
+        <InboxRowActionButton
+          ariaLabel={isCompleted ? "Completed" : "Complete"}
+          disabled={hasPendingAction || isCompleted}
+          icon={CheckCircle2}
+          isActive={isCompleted}
+          onPress={() => {
+            void performRowAction(
+              "Complete",
+              () => mutations.completeSessionInboxItem(
+                {
+                  id: sessionItem.entityId,
+                },
+              ),
+            )
+          }}
+        />
+      }
+      <InboxRowActionButton
+        ariaLabel={isArchived ? "Archived" : "Archive"}
+        disabled={hasPendingAction || isArchived}
+        icon={Archive}
+        isActive={isArchived}
+        onPress={() => {
+          void performRowAction(
+            "Archive",
+            () => mutations.updateInboxItem(
+              {
+                entityId: props.item.entityId,
+                status: "archived",
+              },
+            ),
+          )
+        }}
+      />
     </div>
   </div>
 }
