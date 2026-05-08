@@ -1,5 +1,7 @@
 # SDK Feature Package Capabilities
 
+Product ambiguity status: resolved.
+
 ## Purpose
 
 Explore the SDK-level capabilities that feature packages are very likely to need when contributing to Goddard's public SDK surface.
@@ -73,19 +75,23 @@ const sdk = new GoddardSdk({ client })
 await sdk.session.create(...)
 ```
 
-Custom SDK construction can exist for internal tests or specialized hosts, but it should not imply a public plugin ecosystem.
+Custom SDK plugin composition is internal-only for now. It can be used by Goddard's own SDK bundle and tests, but it is not a supported public API for SDK consumers. Public consumers should rely on composed SDK entrypoints such as `new GoddardSdk({ client })`, not on assembling feature plugins themselves.
+
+The SDK plugin support package should remain internal infrastructure. It can provide type inference and shared plugin contracts for feature packages, but it should not imply third-party SDK plugin support.
+
+Individual feature SDK namespace subpaths should remain internal for now. The public SDK surface is the composed `@goddard-ai/sdk` and `@goddard-ai/sdk/node` entrypoints, not per-feature imports such as `@goddard-ai/sdk/session`.
 
 ## Non-Goals
 
 - runtime plugin discovery
 - feature package publication as standalone public SDK plugins
+- public per-feature SDK namespace imports
 - host-specific transport setup inside feature packages
 - app-only state helpers inside SDK features
 - daemon behavior implemented in the SDK layer
 
-## Open Questions
+## Implementation Planning Questions
 
 - Should SDK feature plugins return a namespace object, or should they receive a registry and call `registerNamespace()`?
 - Should stream helpers be part of the generic SDK context or just use the daemon client directly?
 - Should object-backed wrappers be feature-owned, SDK-kernel-owned, or split by feature?
-- Should the SDK expose optional subpath imports for individual feature namespaces?

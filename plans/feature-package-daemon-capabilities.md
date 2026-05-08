@@ -1,5 +1,7 @@
 # Daemon Feature Package Capabilities
 
+Product ambiguity status: resolved.
+
 ## Purpose
 
 Explore the daemon-level capabilities that feature packages are very likely to need when contributing local runtime behavior, IPC handlers, background work, and daemon-owned state.
@@ -75,6 +77,8 @@ registerDaemonPlugins([sessionDaemonPlugin, workforceDaemonPlugin])
 
 Registration should fail fast for duplicate IPC handlers, duplicate stream names, or incompatible lifecycle ownership.
 
+Invalid daemon feature registration should block daemon startup in both development and packaged runtime. Registration conflicts are product-integrity failures; starting with a silently disabled or partially registered feature would make daemon behavior harder to trust.
+
 ## Non-Goals
 
 - runtime loading of external daemon plugins
@@ -83,7 +87,7 @@ Registration should fail fast for duplicate IPC handlers, duplicate stream names
 - ad hoc persistence paths outside shared path resolvers
 - feature-specific logging systems
 
-## Open Questions
+## Implementation Planning Questions
 
 - Should daemon plugins declare the IPC names and stream names they own as metadata?
 - Should daemon plugins provide migrations, or should migrations stay in a separate persistence layer?

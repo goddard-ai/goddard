@@ -1,10 +1,14 @@
 # Backend Feature Package Capabilities
 
+Product ambiguity status: resolved.
+
 ## Purpose
 
 Explore the backend-level capabilities that feature packages are very likely to need when contributing worker-hosted API behavior, persistence, webhooks, and real-time fan-out.
 
 This document is generic. It should guide the eventual shape of `@goddard-ai/backend-plugin`, not define one feature's concrete backend behavior.
+
+Backend entrypoints are optional. Most Goddard feature packages are expected to work through daemon, SDK, and app entrypoints only; backend plugins are for features that need backend-owned authority, persistence, webhook handling, or real-time fan-out.
 
 ## Likely Feature Inputs
 
@@ -74,6 +78,8 @@ registerBackendPlugins([authBackendPlugin, pullRequestBackendPlugin])
 
 Registration should fail fast for duplicate routes, duplicate webhook handlers where exclusivity is required, or conflicting event names.
 
+Multiple backend features may handle the same webhook event. Webhook dispatch should use deterministic ordering and isolate handler failures so one feature's failure does not silently prevent other interested features from receiving the same platform signal.
+
 ## Non-Goals
 
 - runtime loading of external backend plugins
@@ -83,9 +89,8 @@ Registration should fail fast for duplicate routes, duplicate webhook handlers w
 - bypassing shared auth/session validation
 - backend APIs that are not reflected in shared schema where clients depend on them
 
-## Open Questions
+## Implementation Planning Questions
 
 - Should backend plugins own database table definitions, repository modules, or both?
 - How should backend plugins declare migrations without coupling feature package layout to one migration tool?
 - Should SSE event names be globally registered through backend plugins or schema plugins?
-- How should webhook handlers compose when multiple features care about the same GitHub event?

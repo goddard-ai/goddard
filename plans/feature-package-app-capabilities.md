@@ -1,5 +1,7 @@
 # App Feature Package Capabilities
 
+Product ambiguity status: resolved.
+
 ## Purpose
 
 Explore the app-level capabilities that feature packages are very likely to need when contributing UI, navigation, state integration, and user workflows.
@@ -15,7 +17,7 @@ App feature entrypoints will likely need injected access to app-owned services:
 - navigation and deep-link helpers
 - command or action registration
 - global search registration
-- sidebar, toolbar, or page-slot registration where the app has stable slots
+- named navigation, sidebar, toolbar, or page-slot registration where the app has stable slots
 - app-state persistence helpers for app-only state
 - desktop host bridge for native capabilities that are already exposed to browser code
 - notification or inbox attention surfaces where the app owns presentation
@@ -83,6 +85,10 @@ registerAppPlugins([sessionAppPlugin, workforceAppPlugin])
 
 The app plugin system should be static and boring. It should make UI contribution points explicit, not create a runtime plugin marketplace.
 
+App features may contribute top-level navigation only through named app-owned slots and reviewable metadata. The app shell owns placement, labels, ordering, and conflict handling so feature packages can add user-visible destinations without fragmenting the product's information architecture.
+
+Keyboard shortcut conflicts must be tolerated. User-defined shortcuts take precedence over default shortcuts, and the active app context can decide which commands are enabled at any given moment. Feature shortcut metadata should therefore support conflict-aware defaults without treating overlap as a startup or registration failure.
+
 ## Non-Goals
 
 - runtime plugin loading in the desktop app
@@ -91,9 +97,7 @@ The app plugin system should be static and boring. It should make UI contributio
 - direct access to privileged host APIs outside app-approved bridges
 - unconstrained arbitrary UI injection points
 
-## Open Questions
+## Implementation Planning Questions
 
-- Which app contribution slots should be stable enough for feature packages?
 - Should routes be declared as data, components, or both?
 - Should feature packages own their data hooks, or should hooks stay in app composition code?
-- How should app features register keyboard shortcuts without making conflicts hard to detect?
