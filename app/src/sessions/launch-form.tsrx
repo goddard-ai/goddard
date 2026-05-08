@@ -78,7 +78,6 @@ export component SessionLaunchForm(props: {
     form.draftProjectPath.value = nextProjectPath
     form.launchPreview.value = null
   }, [form, props.projects])
-
   <div class={selectorStyles.section}>
     <div class={selectorStyles.grid}>
       <SessionInputSelect

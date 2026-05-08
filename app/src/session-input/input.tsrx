@@ -68,15 +68,6 @@ export component SessionInput(props: {
 
   const canSubmit = hasPromptContent(promptBlocks) && menu === null && !isSubmitting
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
-  const sessionInputPlaceholder = <tsrx>
-    <div class={classes.placeholder}>
-      {placeholder}
-    </div>
-  </tsrx>
-  const contentEditable = <tsrx>
-    <ContentEditable aria-placeholder={placeholder} class={classes.contentEditable} placeholder={sessionInputPlaceholder} />
-  </tsrx>
-
   function clearMenuState() {
     setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
     setSuggestions(
@@ -328,8 +319,22 @@ export component SessionInput(props: {
       <div class={classes.editorFrame}>
         <PlainTextPlugin
           ErrorBoundary={LexicalErrorBoundary}
-          contentEditable={contentEditable}
-          placeholder={sessionInputPlaceholder}
+          contentEditable={<tsrx>
+            <ContentEditable
+              aria-placeholder={placeholder}
+              class={classes.contentEditable}
+              placeholder={<tsrx>
+                <div class={classes.placeholder}>
+                  {placeholder}
+                </div>
+              </tsrx>}
+            />
+          </tsrx>}
+          placeholder={<tsrx>
+            <div class={classes.placeholder}>
+              {placeholder}
+            </div>
+          </tsrx>}
         />
         <SessionInputPlugins
           {menu}

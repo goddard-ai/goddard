@@ -142,10 +142,9 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       (item, index) => Math.max(1, Math.round(estimateRowHeight(item, index, viewport.width))),
     )
   }, [props.estimateRowHeight, props.items, viewport.width])
-  const defaultLoadingFallback = <tsrx><div class={styles.loading}>"Preparing paragraph layout..."</div></tsrx>
-
   if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
-    {props.loadingFallback ?? defaultLoadingFallback}
+    {props.loadingFallback ??
+      <tsrx><div class={styles.loading}>"Preparing paragraph layout..."</div></tsrx>}
     return
   }
 

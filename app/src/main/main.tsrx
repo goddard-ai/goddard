@@ -12,13 +12,11 @@ startQueryWindowReactivationRefetch()
 // Expose the desktop bridge for manual smoke checks until real flows consume it.
 window.__goddardDesktop = desktopHost
 
-const appRoot = <tsrx>
-  <AppStateProvider>
-    <AppShell />
-  </AppStateProvider>
-</tsrx>
-
 render(
-  appRoot,
+  <tsrx>
+    <AppStateProvider>
+      <AppShell />
+    </AppStateProvider>
+  </tsrx>,
   document.getElementById("root")!,
 )

@@ -198,9 +198,6 @@ export component AppShellChrome() {
       },
     )
   })
-  const proposeTaskIcon = <tsrx><InlineSvgIcon icon="what-next" size="17px 12px" /></tsrx>
-  const newSessionIcon = <tsrx><InlineSvgIcon icon="new-session" size="16px 16px" /></tsrx>
-
   <div class={styles.root}>
     <header
       class={cx(styles.header, "electrobun-webkit-app-region-drag")}
@@ -230,13 +227,13 @@ export component AppShellChrome() {
         <div class={styles.actionGroup}>
           <ActionButton
             ariaLabel="Propose task"
-            icon={proposeTaskIcon}
+            icon={<tsrx><InlineSvgIcon icon="what-next" size="17px 12px" /></tsrx>}
             onAction={AppCommand.navigation.openProposeTaskDialog}
           />
           <span class={styles.actionDivider} />
           <ActionButton
             ariaLabel="New session"
-            icon={newSessionIcon}
+            icon={<tsrx><InlineSvgIcon icon="new-session" size="16px 16px" /></tsrx>}
             onAction={AppCommand.navigation.openNewSessionDialog}
           />
         </div>

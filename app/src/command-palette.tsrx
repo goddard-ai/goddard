@@ -52,38 +52,6 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
       { threshold: 0 },
     ).items.map((entry) => entry.value.command)
   })()
-  const emptyListContent = <tsrx><div class={styles.empty}>"No matching commands."</div></tsrx>
-  const renderCommandItem = (item: unknown, state: { active: boolean }) => {
-    const command = item as AppCommand
-    const Icon = command.icon
-    const shortcutBinding = shortcutRegistry.resolvedBindings[command.id]?.[0]
-    const shortcut =
-      typeof shortcutBinding === "string"
-        ? shortcutBinding
-        : shortcutBinding?.combo ?? shortcutBinding?.sequence
-
-    return <tsrx>
-      <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
-        gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
-      }}>
-        if (Icon) {
-          const CommandIcon = Icon
-          <CommandIcon aria-hidden={true} size={16} strokeWidth={2} style={{
-              color: state.active ? token.var("colors.text") : token.var("colors.muted"),
-            }} />
-        }
-        <span class={styles.itemLabel}>
-          {command.label}
-        </span>
-        if (shortcut) {
-          <span class={styles.shortcut}>
-            {shortcut}
-          </span>
-        }
-      </div>
-    </tsrx>
-  }
-
   <DialogPortal>
     <Dialog.Backdrop class={styles.backdrop} />
     <Dialog.Positioner class={styles.positioner}>
@@ -110,8 +78,37 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
           </div>
           <Command.List
             class={styles.list}
-            empty={emptyListContent}
-            children={renderCommandItem}
+            empty={<tsrx><div class={styles.empty}>"No matching commands."</div></tsrx>}
+            children={(item, state) => {
+              const command = item as AppCommand
+              const Icon = command.icon
+              const shortcutBinding = shortcutRegistry.resolvedBindings[command.id]?.[0]
+              const shortcut =
+                typeof shortcutBinding === "string"
+                  ? shortcutBinding
+                  : shortcutBinding?.combo ?? shortcutBinding?.sequence
+
+              return <tsrx>
+                <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
+                  gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+                }}>
+                  if (Icon) {
+                    const CommandIcon = Icon
+                    <CommandIcon aria-hidden={true} size={16} strokeWidth={2} style={{
+                        color: state.active ? token.var("colors.text") : token.var("colors.muted"),
+                      }} />
+                  }
+                  <span class={styles.itemLabel}>
+                    {command.label}
+                  </span>
+                  if (shortcut) {
+                    <span class={styles.shortcut}>
+                      {shortcut}
+                    </span>
+                  }
+                </div>
+              </tsrx>
+            }}
           />
         </Command.Root>
       </Dialog.Content>
