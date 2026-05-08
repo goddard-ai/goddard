@@ -370,7 +370,7 @@ export async function startDaemonServer(
       return sessionManager.mountReviewSession(id)
     },
     "session.reviewSession.run": async ({ id }) => {
-      return sessionManager.syncReviewSession(id)
+      return sessionManager.runReviewSession(id)
     },
     "session.reviewSession.unmount": async ({ id }) => {
       return sessionManager.unmountReviewSession(id)

@@ -13,13 +13,13 @@ import { IpcClientError } from "@goddard-ai/ipc"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import {
   listReviewSessions,
-  startReviewSync,
+  startReviewSync as startReviewSession,
   statusReviewSession,
   stopReviewSession,
-  syncReviewSession as runReviewSyncSession,
+  syncReviewSession as runReviewSessionCommand,
   watchReviewSession,
-  type ReviewSyncResult,
-  type ReviewSyncStatusData,
+  type ReviewSyncResult as ReviewSessionCommandResult,
+  type ReviewSyncStatusData as ReviewSessionState,
 } from "@goddard-ai/review-sync"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import {
@@ -777,7 +777,7 @@ export type SessionManager = {
   getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
   getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
   mountReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
-  syncReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
+  runReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
   unmountReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
   getWorkforce: (id: SessionId) => Promise<GetSessionWorkforceResponse>
   declareInitiative: (id: SessionId, title: string) => Promise<DaemonSession>
@@ -2237,7 +2237,7 @@ export function createSessionManager(input: {
 
   function toSessionWorktreeValue(
     record: SessionWorktreeDoc,
-    reviewSession: ReviewSyncStatusData | null,
+    reviewSession: ReviewSessionState | null,
   ) {
     const { id: _id, sessionId: _sessionId, ...worktree } = record
     return {
@@ -2299,14 +2299,14 @@ export function createSessionManager(input: {
     )
   }
 
-  function createReviewSessionWarnings(result: ReviewSyncResult) {
+  function createReviewSessionWarnings(result: ReviewSessionCommandResult) {
     return result.status === "rejected-human-patch" ? [result.message] : []
   }
 
   function emitReviewSessionWarnings(
     id: SessionId,
     reason: string,
-    result: ReviewSyncResult,
+    result: ReviewSessionCommandResult,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     for (const warning of createReviewSessionWarnings(result)) {
@@ -2327,7 +2327,7 @@ export function createSessionManager(input: {
   function emitReviewSessionResult(
     id: SessionId,
     reason: string,
-    result: ReviewSyncResult,
+    result: ReviewSessionCommandResult,
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     if (result.status === "error") {
@@ -2477,7 +2477,7 @@ export function createSessionManager(input: {
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     emitDiagnostic(id, "review_session.started", { reason }, diagnosticLogger)
-    const result = await runReviewSyncSession({ cwd: worktreeRecord.worktreeDir })
+    const result = await runReviewSessionCommand({ cwd: worktreeRecord.worktreeDir })
     emitReviewSessionWarnings(id, reason, result, diagnosticLogger)
     const state = await readRequiredReviewSessionState(worktreeRecord)
     emitDiagnostic(
@@ -2576,7 +2576,7 @@ export function createSessionManager(input: {
       "review_session.replaced",
       {
         previousSessionId: previousWorktreeRecord?.sessionId ?? null,
-        previousReviewSyncSessionId: mounted.sessionId,
+        previousReviewSessionId: mounted.sessionId,
       },
       diagnosticLogger,
     )
@@ -2588,7 +2588,7 @@ export function createSessionManager(input: {
     diagnosticLogger: ReturnType<typeof createLogger>,
   ) {
     await replaceMountedReviewSessionIfNeeded(id, worktreeRecord, diagnosticLogger)
-    const result = await startReviewSync({
+    const result = await startReviewSession({
       cwd: worktreeRecord.repoRoot,
       agentBranch: worktreeRecord.branchName,
     })
@@ -2598,7 +2598,7 @@ export function createSessionManager(input: {
       id,
       "review_session.mounted",
       {
-        reviewSyncSessionId: state.sessionId,
+        reviewSessionId: state.sessionId,
         agentBranch: state.agentBranch,
         reviewBranch: state.reviewBranch,
       },
@@ -2643,7 +2643,7 @@ export function createSessionManager(input: {
               const stopped = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
               emitDiagnostic(session.id, "review_session.unmounted", {
                 reason: "daemon_reconciliation",
-                reviewSyncSessionId: stopped.sessionId,
+                reviewSessionId: stopped.sessionId,
               })
             } catch (error) {
               emitDiagnostic(session.id, "review_session.warning", {
@@ -3228,7 +3228,7 @@ export function createSessionManager(input: {
               "review_session.unmounted",
               {
                 reason: "agent_process_exit",
-                reviewSyncSessionId: stopped.sessionId,
+                reviewSessionId: stopped.sessionId,
               },
               activeSession.logger,
             )
@@ -3374,7 +3374,7 @@ export function createSessionManager(input: {
 
     let sessionLogger = logger
     sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
-    let mountedReviewSessionState: ReviewSyncStatusData | null = null
+    let mountedReviewSessionState: ReviewSessionState | null = null
     let spawnedAgentProcess: AgentProcessHandle | null = null
 
     try {
@@ -3966,7 +3966,7 @@ export function createSessionManager(input: {
     }
   }
 
-  async function syncReviewSession(id: SessionId): Promise<MutateSessionReviewSessionResponse> {
+  async function runReviewSession(id: SessionId): Promise<MutateSessionReviewSessionResponse> {
     await ready
     const session = await getSession(id)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -4003,7 +4003,7 @@ export function createSessionManager(input: {
       "review_session.unmounted",
       {
         reason: "manual",
-        reviewSyncSessionId: result.sessionId ?? state?.sessionId,
+        reviewSessionId: result.sessionId ?? state?.sessionId,
       },
       diagnosticLogger,
     )
@@ -4293,7 +4293,7 @@ export function createSessionManager(input: {
             "review_session.unmounted",
             {
               reason: "session_shutdown",
-              reviewSyncSessionId: result.sessionId ?? mountedReviewSessionState.sessionId,
+              reviewSessionId: result.sessionId ?? mountedReviewSessionState.sessionId,
             },
             active.logger,
           )
@@ -4370,7 +4370,7 @@ export function createSessionManager(input: {
     getDiagnostics,
     getWorktree,
     mountReviewSession,
-    syncReviewSession,
+    runReviewSession,
     unmountReviewSession,
     getWorkforce,
     declareInitiative,

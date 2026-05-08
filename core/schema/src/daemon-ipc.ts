@@ -42,13 +42,13 @@ import {
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
+  RunSessionReviewSessionRequest as RunSessionReviewSessionRequestSchema,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
   SessionMessageEvent,
   SteerSessionRequest,
-  SyncSessionReviewSessionRequest as SyncSessionReviewSessionRequestSchema,
   UnmountSessionReviewSessionRequest as UnmountSessionReviewSessionRequestSchema,
   type CancelSessionResponse,
   type CompleteSessionResponse,
@@ -179,7 +179,7 @@ export const daemonIpcSchema = {
       response: $type<MutateSessionReviewSessionResponse>(),
     },
     "session.reviewSession.run": {
-      payload: SyncSessionReviewSessionRequestSchema,
+      payload: RunSessionReviewSessionRequestSchema,
       response: $type<MutateSessionReviewSessionResponse>(),
     },
     "session.reviewSession.unmount": {

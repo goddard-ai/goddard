@@ -45,7 +45,7 @@ export const SessionWorkforceParams = z.strictObject({
 
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
 
-/** Live review-session state merged into one daemon worktree response. */
+/** Live review-session state returned exactly as the review session engine reports it. */
 export const SessionReviewSessionState = z.strictObject({
   sessionId: z.string(),
   agentWorktree: z.string(),
@@ -463,10 +463,10 @@ export const MountSessionReviewSessionRequest = DaemonSessionIdParams
 
 export type MountSessionReviewSessionRequest = z.infer<typeof MountSessionReviewSessionRequest>
 
-/** Request payload used to ask the daemon to run its normal review session cycle immediately. */
-export const SyncSessionReviewSessionRequest = DaemonSessionIdParams
+/** Request payload used to run one mounted review session immediately. */
+export const RunSessionReviewSessionRequest = DaemonSessionIdParams
 
-export type SyncSessionReviewSessionRequest = z.infer<typeof SyncSessionReviewSessionRequest>
+export type RunSessionReviewSessionRequest = z.infer<typeof RunSessionReviewSessionRequest>
 
 /** Request payload used to unmount a review session from one daemon-managed session worktree. */
 export const UnmountSessionReviewSessionRequest = DaemonSessionIdParams

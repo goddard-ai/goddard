@@ -24,6 +24,7 @@ import type {
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
+  RunSessionReviewSessionRequest,
   RespondWorkforceRequest,
   RunNamedActionRequest,
   SendSessionMessageRequest,
@@ -38,7 +39,6 @@ import type {
   SubmitPrRequest,
   SubscribeWorkforceEventsRequest,
   SuspendWorkforceRequest,
-  SyncSessionReviewSessionRequest,
   TruncateWorkforceRequest,
   UnmountSessionReviewSessionRequest,
   UpdateInboxItemRequest,
@@ -177,8 +177,8 @@ function createSessionNamespace(client: DaemonIpcClient) {
     mountReviewSession: async (input: MountSessionReviewSessionRequest) =>
       client.send("session.reviewSession.mount", input),
 
-    /** Asks the daemon to run its normal review session cycle immediately for one mounted worktree. */
-    syncReviewSession: async (input: SyncSessionReviewSessionRequest) =>
+    /** Runs one mounted review session immediately. */
+    runReviewSession: async (input: RunSessionReviewSessionRequest) =>
       client.send("session.reviewSession.run", input),
 
     /** Unmounts a review session from one daemon-managed session worktree. */
