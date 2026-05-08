@@ -41,6 +41,11 @@
       "sourceType": "local",
       "computedHash": "0ad8839072da56a0ce9e13544c328a5d51059cf03da4e7a337d624c404b6d901"
     },
+    "tsrx-preact": {
+      "source": "/Users/alec/dev/skills/packages",
+      "sourceType": "local",
+      "computedHash": "86aef03df9325c940a7e019cdf8ee27b4f5b2943e5c75fc6afc7381468f9a8ac"
+    },
     "tsrx-react": {
       "source": "/Users/alec/dev/skills/packages/tsrx-react",
       "sourceType": "local",
