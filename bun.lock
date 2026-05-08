@@ -94,6 +94,10 @@
         "@pandacss/dev": "catalog:",
       },
     },
+    "core/app-plugin": {
+      "name": "@goddard-ai/app-plugin",
+      "version": "0.1.0",
+    },
     "core/backend": {
       "name": "@goddard-ai/backend",
       "version": "0.1.0",
@@ -166,6 +170,10 @@
         "@types/unbzip2-stream": "^1.4.3",
       },
     },
+    "core/daemon-plugin": {
+      "name": "@goddard-ai/daemon-plugin",
+      "version": "0.1.0",
+    },
     "core/daemon/client": {
       "name": "@goddard-ai/daemon-client",
       "version": "0.1.0",
@@ -231,6 +239,10 @@
       "devDependencies": {
         "@goddard-ai/daemon": "workspace:^",
       },
+    },
+    "core/sdk-plugin": {
+      "name": "@goddard-ai/sdk-plugin",
+      "version": "0.1.0",
     },
     "core/sprint-branch": {
       "name": "@goddard-ai/sprint-branch",
@@ -568,6 +580,8 @@
 
     "@goddard-ai/app": ["@goddard-ai/app@workspace:app"],
 
+    "@goddard-ai/app-plugin": ["@goddard-ai/app-plugin@workspace:core/app-plugin"],
+
     "@goddard-ai/backend": ["@goddard-ai/backend@workspace:core/backend"],
 
     "@goddard-ai/config": ["@goddard-ai/config@workspace:core/config"],
@@ -575,6 +589,8 @@
     "@goddard-ai/daemon": ["@goddard-ai/daemon@workspace:core/daemon"],
 
     "@goddard-ai/daemon-client": ["@goddard-ai/daemon-client@workspace:core/daemon/client"],
+
+    "@goddard-ai/daemon-plugin": ["@goddard-ai/daemon-plugin@workspace:core/daemon-plugin"],
 
     "@goddard-ai/ipc": ["@goddard-ai/ipc@workspace:core/ipc"],
 
@@ -585,6 +601,8 @@
     "@goddard-ai/schema": ["@goddard-ai/schema@workspace:core/schema"],
 
     "@goddard-ai/sdk": ["@goddard-ai/sdk@workspace:core/sdk"],
+
+    "@goddard-ai/sdk-plugin": ["@goddard-ai/sdk-plugin@workspace:core/sdk-plugin"],
 
     "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 

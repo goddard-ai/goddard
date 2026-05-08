@@ -1,0 +1,24 @@
+{
+  "name": "@goddard-ai/daemon-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "bun": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test --pass-with-no-tests --dots"
+  }
+}
