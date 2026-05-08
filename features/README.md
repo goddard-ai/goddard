@@ -18,10 +18,12 @@ feature becomes part of a supported product surface.
 ## Boundaries
 
 - Feature packages own product-specific schemas, daemon IPC contracts, daemon
-  handlers, SDK namespace factories, app metadata, and feature-owned helpers.
+  handlers, SDK namespace factories, app metadata, feature-owned helpers, and
+  feature-specific JSON config schemas.
 - Layer packages own the substrate that composes and runs those contributions:
   SDK construction, daemon process and persistence substrate, app shell
-  placement, backend authority, and shared diagnostics.
+  placement, backend authority, JSON config file loading/persistence, and
+  shared diagnostics.
 - Feature packages import thin plugin support packages such as
   `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and
   `@goddard-ai/app-plugin`, not public composition roots such as
@@ -29,5 +31,9 @@ feature becomes part of a supported product surface.
 - Feature packages must not circularly depend on other feature packages.
   Daemon feature interop goes through explicit `consumes` declarations and
   first-class `context.<feature>` extensions.
+- JSON configuration is not a feature package. Daemon plugins may contribute
+  namespaced config fragments, but daemon/core packages own
+  `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
+  precedence, validation, persistence, and hot reload.
 
 `features/inbox` is the current reference daemon + SDK + app feature package.

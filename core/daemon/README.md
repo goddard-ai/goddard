@@ -26,6 +26,11 @@ Consumed feature extensions are typed as first-class setup context fields, such
 as `context.session`, so methods and event channels can share one feature-owned
 extension surface without a generic service locator.
 
+The daemon also owns JSON configuration substrate. Feature packages can
+contribute namespaced config schemas through daemon plugins, but config files,
+scope precedence, validation errors, persistence, and hot reload remain daemon
+or core config responsibilities.
+
 `features/inbox` is the current reference daemon feature package. It owns the
 inbox IPC contract and request-handler factory while the daemon composition root
 still injects the daemon-owned inbox manager until inbox state is fully moved

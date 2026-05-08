@@ -177,6 +177,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@goddard-ai/ipc": "workspace:^",
+        "zod": "catalog:",
       },
     },
     "core/daemon/client": {
