@@ -41,12 +41,14 @@ Likely contribution types:
 - thin daemon IPC method wrappers
 - methods generated from or checked against feature-owned daemon IPC contracts
 - stream helpers that apply daemon-side filters and unwrap payloads
-- object-backed wrappers for long-lived daemon resources
-- SDK-owned convenience message builders when raw protocol frames should stay hidden
-- type exports for feature-specific request and response shapes
-- feature-local helper exports that are stable enough for SDK consumers
+- feature-specific wrapper factories for long-lived daemon resources
+- feature-specific convenience builders when raw protocol frames should stay hidden
+- internal type exports for feature-specific request and response shapes
+- feature-local helper exports that the composed SDK may choose to expose publicly
 
 SDK plugins that call daemon-backed behavior should consume the feature's shared daemon IPC contract instead of duplicating route or stream names locally. The SDK plugin owns the user-facing namespace shape; the daemon IPC contract owns the transport names and validation shapes.
+
+The SDK system, not individual features, owns SDK construction, transport injection, namespace composition, public export policy, and shared wrapper conventions. Feature packages can contribute namespace surfaces and feature-specific helpers, but the composed `@goddard-ai/sdk` package decides which helpers and types become public SDK API.
 
 ## Likely Type Needs
 
@@ -58,6 +60,8 @@ The SDK plugin support package is mostly a type-inference boundary. It likely ne
 - namespace-name typing
 - namespace-surface typing
 - duplicate namespace detection for default composition if TypeScript can support it cleanly
+
+`defineSdkPlugin()` should use `const` type parameters so the plugin value preserves the exact namespace, method surface, and metadata needed for composition-time type inference.
 
 The support package should avoid becoming a runtime framework. Runtime composition can live in `@goddard-ai/sdk` if that keeps the plugin package thinner.
 

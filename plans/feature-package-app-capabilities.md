@@ -25,12 +25,16 @@ App feature entrypoints will likely need injected access to app-owned services:
 
 Feature packages should not import singleton app state, create their own daemon clients, call daemon IPC directly when SDK coverage exists, or bypass the trusted desktop host boundary.
 
+Feature app entrypoints should not depend on `@goddard-ai/sdk` directly, even when the same feature package contributes an SDK plugin. Importing the public SDK package from a feature package would create a package-level cycle once `@goddard-ai/sdk` imports that feature's SDK entrypoint.
+
+Instead, app plugins should declare the SDK namespace or feature service they need, and the app composition root should inject the composed SDK namespace at registration time. A feature app entrypoint may import local types from its own `sdk.ts` entrypoint or shared feature schemas, but it should receive the runtime SDK object through app-layer dependency injection.
+
 ## Likely Feature Contributions
 
 An app feature will usually contribute one or more of:
 
 - route definitions
-- navigation items
+- navigation metadata for app-owned slots
 - page components
 - detail views or panels
 - dialogs
@@ -38,8 +42,8 @@ An app feature will usually contribute one or more of:
 - command palette actions
 - global search providers
 - keyboard shortcut registrations
-- empty, loading, error, and permission states
-- app-only persistence for UI preferences
+- local empty, loading, error, and permission states
+- app-only preference declarations for UI preferences
 - feature-specific data hooks backed by the SDK
 
 Example shape:
@@ -59,6 +63,8 @@ export const sessionAppPlugin = defineAppPlugin({
   },
 })
 ```
+
+The app system, not individual features, owns shell layout, top-level navigation placement, command routing, shortcut conflict semantics, desktop bridge boundaries, query-cache conventions, app-state persistence mechanics, and design-system rules. Feature packages contribute UI components, metadata, local states, and feature-specific helpers that plug into those app-owned systems.
 
 ## UI Boundary Rules
 
@@ -99,5 +105,7 @@ Keyboard shortcut conflicts must be tolerated. User-defined shortcuts take prece
 
 ## Implementation Planning Questions
 
+- Should `defineAppPlugin()` use one `const` type parameter for the full plugin object, or separate `const` parameters for name, routes, slots, commands, and dependency metadata?
+- Should `@goddard-ai/app-plugin` re-export stable design-system primitives, or should feature packages import `@goddard-ai/styled-system` directly when they need styling?
 - Should routes be declared as data, components, or both?
 - Should feature packages own their data hooks, or should hooks stay in app composition code?

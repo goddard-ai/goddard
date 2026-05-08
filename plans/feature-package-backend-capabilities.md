@@ -34,13 +34,13 @@ A backend feature will usually contribute one or more of:
 - authenticated API routes
 - unauthenticated callback or webhook routes
 - webhook event handlers
-- database table definitions or repository modules
+- database table declarations or repository modules
 - backend event producers
 - SSE topic or event definitions
-- auth policy checks
+- auth policy requirements or policy checks through injected helpers
 - backend-owned integrations with GitHub or other external services
-- scheduled worker tasks if the platform supports them
-- diagnostics endpoints or health contributors
+- scheduled task handlers if the platform supports them
+- diagnostics or health contributors
 
 Example shape:
 
@@ -53,6 +53,8 @@ export const pullRequestBackendPlugin = defineBackendPlugin({
   },
 })
 ```
+
+The backend system, not individual features, owns Worker entrypoint composition, auth/session enforcement, database connection lifecycle, transaction boundaries, migration execution, webhook verification, SSE fan-out, scheduler execution, and diagnostics exposure. Feature packages contribute route handlers, webhook handlers, event producers, persistence declarations, repository modules, policy requirements, and scheduled task handlers that the backend system runs.
 
 ## Data And Authority Rules
 
@@ -91,6 +93,7 @@ Multiple backend features may handle the same webhook event. Webhook dispatch sh
 
 ## Implementation Planning Questions
 
+- Should `defineBackendPlugin()` use one `const` type parameter for the full plugin object, or separate `const` parameters for routes, webhooks, events, and scheduled tasks?
 - Should backend plugins own database table definitions, repository modules, or both?
 - How should backend plugins declare migrations without coupling feature package layout to one migration tool?
 - Should SSE event names be globally registered through backend plugins or schema plugins?

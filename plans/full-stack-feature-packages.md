@@ -64,6 +64,8 @@ Examples:
 
 For the SDK layer, `@goddard-ai/sdk-plugin` should have close to zero runtime code. Its primary job is to expose types and a `defineSdkPlugin()` helper that exists for type inference.
 
+All plugin support package `define*` helpers should use `const` type parameters so plugin values are exactly typed by what they define. This exact typing is required for composition roots to infer contributed namespaces, routes, slots, lifecycle participants, and other plugin metadata from the plugin list.
+
 Feature packages import plugin support packages, not public composition roots:
 
 ```txt
@@ -75,6 +77,24 @@ Feature packages import plugin support packages, not public composition roots:
 This keeps the dependency graph acyclic while allowing `@goddard-ai/sdk` to bundle every feature package with an SDK entrypoint.
 
 Plugin support packages are internal infrastructure packages. They may be imported by feature packages and public composition roots, but they are not the product-facing extension surface.
+
+Plugin support packages should expose layer capability contracts and may re-export stable layer primitives when that prevents feature packages from importing broad internal packages. They should not become generic service locators or hide access to unrelated layer internals.
+
+## Feature Package Dependency Rules
+
+Feature packages should depend on plugin support packages and shared contract packages, not public composition roots.
+
+Avoid package-level cycles such as:
+
+```txt
+@goddard-ai/sdk
+  -> @goddard-ai/session
+  -> @goddard-ai/sdk
+```
+
+When a feature app entrypoint needs SDK behavior, it should declare the SDK namespace or feature service it requires. The app composition root should inject the composed SDK namespace at registration time instead of the feature package importing `@goddard-ai/sdk`.
+
+The same principle applies across layers: a feature package may import local feature entrypoints, shared schemas, daemon IPC contracts, and plugin support contracts, but it should not import the public package that will later bundle that same feature.
 
 ## Static Dependency Injection
 
@@ -90,6 +110,19 @@ export const defaultSdkPlugins = [sessionSdkPlugin, workforceSdkPlugin]
 ```
 
 Feature entrypoints receive layer-owned services through explicit context objects. They should not import global clients, singleton SDK instances, daemon URLs, app state, or host-specific defaults.
+
+## Feature Contributions And System Responsibilities
+
+Feature packages contribute product-specific declarations, contracts, handlers, UI components, and feature-owned helpers.
+
+Layer systems implement the generic substrate that composes, executes, secures, observes, and exposes those contributions:
+
+- SDK system owns SDK construction, transport injection, namespace composition, public exports, and shared wrapper conventions.
+- Daemon system owns IPC server mechanics, lifecycle orchestration, stream fan-out, persistence substrate, scheduling, diagnostics aggregation, and startup failure policy.
+- App system owns shell layout, navigation placement, command routing, shortcut conflict semantics, desktop bridge boundaries, query-cache conventions, and design-system rules.
+- Backend system owns Worker entrypoint composition, auth/session enforcement, database connection lifecycle, migration execution, webhook verification, SSE fan-out, scheduling, and diagnostics exposure.
+
+Feature packages must not implement their own mini SDK runtime, daemon runtime, app shell, or backend platform. When a feature needs a shared mechanism, the layer's plugin support package or composition root should provide the capability through dependency injection.
 
 ## Shared Daemon IPC Contracts
 
@@ -165,6 +198,8 @@ Add a small repository-local scaffolding tool for AI agents and humans to create
 
 The scaffold's default should create an inert internal feature package that is not part of any public product surface until a composition root imports and registers one of its entrypoints.
 
+The scaffold should use `@clack/prompts` to ask which layers are needed before it writes files or updates package dependencies. Layer selection should drive generated entrypoints and common dependencies so app-only dependencies such as `@goddard-ai/styled-system` are added only when the selected feature layers need them.
+
 The scaffold should create:
 
 - `features/<name>/package.json`
@@ -179,6 +214,8 @@ The scaffold should create:
 - placeholder tests that match the selected layer entrypoints
 
 The scaffold should prefer explicit options over guessing. It should default to daemon, SDK, and app entrypoints for common local features, add a daemon IPC contract when both daemon and SDK entrypoints are selected, and add schema and backend entrypoints only when requested. It should not register the feature in public composition roots unless asked, because registration is the point where the feature becomes part of a supported product surface.
+
+When a plugin support package re-exports stable primitives for its layer, the scaffold should prefer those imports over broad internal package imports. If a feature still needs a direct dependency such as `@goddard-ai/styled-system`, the scaffold should add it only for feature packages with an app entrypoint that actually imports it.
 
 ## Feature README Template
 

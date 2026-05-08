@@ -31,16 +31,15 @@ Feature packages should not construct global daemon clients, read host environme
 A daemon feature will usually contribute one or more of:
 
 - IPC request handlers
-- IPC stream publishers
+- feature event producers for daemon-owned stream fan-out
 - feature-owned daemon IPC contracts consumed by both daemon and SDK plugins
-- daemon startup hooks
-- daemon shutdown hooks
-- background runtime registrations
-- local persistence stores or repositories
+- daemon lifecycle participants
+- background runtime definitions or handlers
+- feature-owned repositories or store modules
 - config resolvers or config consumers, when the feature owns daemon behavior
-- diagnostics providers
+- diagnostics contributors
 - health check contributors
-- cleanup or migration hooks for feature-owned daemon-local data
+- cleanup or migration declarations for feature-owned daemon-local data
 
 Example shape:
 
@@ -56,6 +55,8 @@ export const sessionDaemonPlugin = defineDaemonPlugin({
 ```
 
 The daemon plugin should consume the feature's daemon IPC contract for route and stream registration. Handler implementation stays in the daemon plugin; transport names and validation contracts stay in the shared daemon IPC contract.
+
+The daemon system, not individual features, owns IPC server mechanics, stream subscription tracking, stream filtering, fan-out delivery, lifecycle phase ordering, scheduler supervision, persistence substrate, migration execution, diagnostics aggregation, and startup failure policy. Feature packages contribute the domain-specific handlers and declarations that the daemon system executes.
 
 ## State And Defaults
 
@@ -96,6 +97,7 @@ Invalid daemon feature registration should block daemon startup in both developm
 
 ## Implementation Planning Questions
 
+- Should `defineDaemonPlugin()` use one `const` type parameter for the full plugin object, or separate `const` parameters for name, IPC contract, lifecycle metadata, and registrations?
 - Should daemon plugins declare the IPC names and stream names they own as metadata?
 - Should daemon plugins provide migrations, or should migrations stay in a separate persistence layer?
 - How should daemon plugins contribute to health checks without making health output noisy?
