@@ -110,9 +110,7 @@ component PermissionTargets(props: {
   <div class={styles.permissionDetailGrid}>
     if (props.message.locations.length > 0) {
       <div class={styles.permissionDetailBlock}>
-        <div class={styles.permissionDetailLabel}>
-          "Target"
-        </div>
+        <div class={styles.permissionDetailLabel}>"Target"</div>
         for (const location of props.message.locations; index index) {
           <div
             class={styles.permissionDetailMono}
@@ -126,9 +124,7 @@ component PermissionTargets(props: {
     }
     if (props.message.context) {
       <div class={styles.permissionDetailBlock}>
-        <div class={styles.permissionDetailLabel}>
-          "Context"
-        </div>
+        <div class={styles.permissionDetailLabel}>"Context"</div>
         <div class={styles.permissionDetailText}>
           {props.message.context}
         </div>

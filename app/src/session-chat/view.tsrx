@@ -422,12 +422,10 @@ component LoadedSessionChatView(props: {
     <footer class={styles.composerDock}>
       if (submitError) {
         <div class={styles.composerError} role="alert">
-          <strong class={styles.composerErrorTitle}>
-            "Prompt wasn't sent"
-          </strong>
-          <span class={styles.composerErrorDescription}>
-            "Your draft is still here. Try again when the session is available."
-          </span>
+          <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
+          <span
+            class={styles.composerErrorDescription}
+          >"Your draft is still here. Try again when the session is available."</span>
         </div>
       }
       <Composer

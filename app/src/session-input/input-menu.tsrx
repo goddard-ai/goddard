@@ -110,9 +110,7 @@ export component SessionInputMenu(props: {
             </span>
           </div>
         } else if (props.suggestions.length === 0) {
-          <div class={inputMenuEmptyClass}>
-            "No matches for this trigger yet."
-          </div>
+          <div class={inputMenuEmptyClass}>"No matches for this trigger yet."</div>
         } else {
           for (const suggestion of props.suggestions; index index) {
             <button

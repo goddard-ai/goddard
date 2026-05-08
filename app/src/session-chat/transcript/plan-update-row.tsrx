@@ -64,9 +64,7 @@ export component PlanUpdateTranscriptRow(props: {
         </header>
 
         if (props.message.entries.length === 0) {
-          <div class={styles.planEmpty}>
-            "The agent cleared its plan."
-          </div>
+          <div class={styles.planEmpty}>"The agent cleared its plan."</div>
         } else {
           <ol class={styles.planEntryList}>
             for (const entry of props.message.entries; index index) {

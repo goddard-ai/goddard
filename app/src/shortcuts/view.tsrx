@@ -242,9 +242,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
 
   <section class={cx(styles.page, props.class)}>
     <label class={styles.searchField}>
-      <span class={styles.srOnly}>
-        "Search shortcuts"
-      </span>
+      <span class={styles.srOnly}>"Search shortcuts"</span>
       <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
       <input
         {ref searchInputRef}
@@ -308,21 +306,15 @@ component KeyboardShortcutsView(props: { class?: string }) {
               style={{
                 width: "44%",
               }}
-            >
-              "Command"
-            </th>
+            >"Command"</th>
             <th
               class={styles.headerCell}
               scope="col"
               style={{
                 width: "23%",
               }}
-            >
-              "Shortcut"
-            </th>
-            <th class={styles.headerCell} scope="col">
-              "When"
-            </th>
+            >"Shortcut"</th>
+            <th class={styles.headerCell} scope="col">"When"</th>
           </tr>
         </thead>
         <tbody>
@@ -372,9 +364,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                 },
                               )
                             }}
-                          >
-                            "Add shortcut"
-                          </Menu.Item>
+                          >"Add shortcut"</Menu.Item>
                           <Menu.Item
                             class={styles.menuItem}
                             disabled={row.bindingIndex === null}
@@ -386,9 +376,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
 
                               openCaptureDialog(row)
                             }}
-                          >
-                            "Change shortcut"
-                          </Menu.Item>
+                          >"Change shortcut"</Menu.Item>
                           <Menu.Item
                             class={cx(styles.menuItem, styles.menuItemDanger)}
                             disabled={row.bindingIndex === null}
@@ -404,9 +392,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                 row.bindingIndex,
                               )
                             }}
-                          >
-                            "Remove shortcut"
-                          </Menu.Item>
+                          >"Remove shortcut"</Menu.Item>
                           <Menu.Item
                             class={styles.menuItem}
                             disabled={!row.shortcut}
@@ -421,9 +407,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                               setSearchText(formatShortcutSearch(row.shortcut))
                               searchInputRef.current?.focus()
                             }}
-                          >
-                            "Show commands with same shortcut"
-                          </Menu.Item>
+                          >"Show commands with same shortcut"</Menu.Item>
                         </Menu.Content>
                       </Menu.Positioner>
                     </MenuPortal>
@@ -484,9 +468,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
           } else {
             <tr>
               <td class={styles.cell} colSpan={3}>
-                <div class={styles.empty}>
-                  "No matching shortcuts."
-                </div>
+                <div class={styles.empty}>"No matching shortcuts."</div>
               </td>
             </tr>
           }

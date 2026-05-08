@@ -202,16 +202,22 @@ export component Transcript(props: TranscriptProps) {
           : estimateTranscriptRowHeight(message, viewportWidth)}
       getItemKey={(message) => message.id}
       header={props.olderHistory
-        ? <tsrx><OlderHistoryPager olderHistory={props.olderHistory} /></tsrx>
+        ? <tsrx>
+            <OlderHistoryPager olderHistory={props.olderHistory} />
+          </tsrx>
         : undefined}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
-      loadingFallback={<tsrx><div class={styles.loadingState}>"Preparing transcript layout..."</div></tsrx>}
+      loadingFallback={<tsrx>
+        <div class={styles.loadingState}>"Preparing transcript layout..."</div>
+      </tsrx>}
       overscanPx={VIRTUAL_OVERSCAN_PX}
       preserveScrollOnPrepend={Boolean(props.olderHistory)}
-      renderRow={(row) => <tsrx>
-        <TranscriptRow row={row} onSelectPermissionOption={props.onSelectPermissionOption} />
-      </tsrx>}
+      renderRow={(row) => (
+        <tsrx>
+          <TranscriptRow {row} onSelectPermissionOption={props.onSelectPermissionOption} />
+        </tsrx>
+      )}
       scrollCacheKey={props.scrollCacheKey}
     />
   </div>

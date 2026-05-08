@@ -73,7 +73,9 @@ function resolvePrependedItemCount(previousKeys: readonly string[], nextKeys: re
 }
 
 component MessageListHeader(props: { context: MessageListContext }) {
-  <tsrx>{props.context.header}</tsrx>
+  <tsrx>
+    {props.context.header}
+  </tsrx>
 }
 
 const messageListComponents = {
@@ -144,7 +146,9 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   }, [props.estimateRowHeight, props.items, viewport.width])
   if (!viewport.fontsReady || viewport.width <= 0 || !viewport.viewportRef.current) {
     {props.loadingFallback ??
-      <tsrx><div class={styles.loading}>"Preparing paragraph layout..."</div></tsrx>}
+      <tsrx>
+        <div class={styles.loading}>"Preparing paragraph layout..."</div>
+      </tsrx>}
     return
   }
 

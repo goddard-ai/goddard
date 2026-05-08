@@ -111,9 +111,7 @@ export component KeyboardShortcutCaptureDialog(props: {
         <dl class={styles.metaList}>
           if (props.currentExpression) {
             <div class={styles.metaRow}>
-              <dt class={styles.metaTerm}>
-                "Current shortcut"
-              </dt>
+              <dt class={styles.metaTerm}>"Current shortcut"</dt>
               <dd class={styles.metaDetail}>
                 {props.currentExpression}
               </dd>
@@ -121,9 +119,7 @@ export component KeyboardShortcutCaptureDialog(props: {
           }
           if (props.whenClause) {
             <div class={styles.metaRow}>
-              <dt class={styles.metaTerm}>
-                "When"
-              </dt>
+              <dt class={styles.metaTerm}>"When"</dt>
               <dd class={styles.metaDetail}>
                 {props.whenClause}
               </dd>
@@ -132,30 +128,22 @@ export component KeyboardShortcutCaptureDialog(props: {
         </dl>
         <section class={styles.captureSection}>
           <div class={styles.captureHeading}>
-            <span class={styles.captureLabel}>
-              "Press the shortcut you want to use"
-            </span>
+            <span class={styles.captureLabel}>"Press the shortcut you want to use"</span>
             if (isRecording) {
-              <span class={styles.captureStatus}>
-                "Listening…"
-              </span>
+              <span class={styles.captureStatus}>"Listening…"</span>
             }
           </div>
           <div class={styles.captureValue}>
             if (draftExpression) {
               {draftExpression}
             } else {
-              <span class={styles.capturePlaceholder}>
-                "Type a key combination or sequence"
-              </span>
+              <span class={styles.capturePlaceholder}>"Type a key combination or sequence"</span>
             }
           </div>
         </section>
         <div class={styles.actionRow}>
           <Dialog.CloseTrigger asChild>
-            <button class={styles.actionButton} type="button">
-              "Cancel"
-            </button>
+            <button class={styles.actionButton} type="button">"Cancel"</button>
           </Dialog.CloseTrigger>
           if (props.onRemove) {
             <button
@@ -164,9 +152,7 @@ export component KeyboardShortcutCaptureDialog(props: {
               onClick={() => {
                 void props.onRemove?.()
               }}
-            >
-              "Remove shortcut"
-            </button>
+            >"Remove shortcut"</button>
           }
           <button
             class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
@@ -175,9 +161,7 @@ export component KeyboardShortcutCaptureDialog(props: {
             onClick={() => {
               void props.onSave(draftExpression.trim())
             }}
-          >
-            "Save shortcut"
-          </button>
+          >"Save shortcut"</button>
         </div>
       </Dialog.Content>
     </Dialog.Positioner>

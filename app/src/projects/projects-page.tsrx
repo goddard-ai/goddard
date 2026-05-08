@@ -73,12 +73,10 @@ export component ProjectsPage() {
         <section class={styles.panel}>
           <header class={styles.sectionHeader}>
             <div class={styles.sectionCopy}>
-              <h1 class={styles.title}>
-                "Projects"
-              </h1>
-              <p class={styles.body}>
-                "Keep an explicit set of local roots available to the workbench."
-              </p>
+              <h1 class={styles.title}>"Projects"</h1>
+              <p
+                class={styles.body}
+              >"Keep an explicit set of local roots available to the workbench."</p>
             </div>
             <Dialog.Trigger asChild>
               <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
@@ -90,12 +88,10 @@ export component ProjectsPage() {
           if (projects.length === 0) {
             <div class={styles.empty}>
               <div class={styles.emptyCopy}>
-                <h2 class={styles.title}>
-                  "No projects yet"
-                </h2>
-                <p class={styles.body}>
-                  "Add a local directory to establish the app's explicit working set."
-                </p>
+                <h2 class={styles.title}>"No projects yet"</h2>
+                <p
+                  class={styles.body}
+                >"Add a local directory to establish the app's explicit working set."</p>
                 <div>
                   <Dialog.Trigger asChild>
                     <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
@@ -113,9 +109,7 @@ export component ProjectsPage() {
         <aside class={styles.panel}>
           <div class={styles.asideBody}>
             <div class={styles.intro}>
-              <h2 class={styles.subheading}>
-                "Project details"
-              </h2>
+              <h2 class={styles.subheading}>"Project details"</h2>
               <p class={styles.body}>
                 {selectedProject
                   ? "Selected project metadata for the current workspace."
@@ -181,9 +175,7 @@ component ProjectListRow(props: {
           {props.project.name}
         </h3>
         if (props.isSelected) {
-          <span class={styles.selectedBadge}>
-            "Selected"
-          </span>
+          <span class={styles.selectedBadge}>"Selected"</span>
         }
       </div>
       <p class={styles.path}>
@@ -320,12 +312,10 @@ component AddProjectDialog(props: {
         >
           <header class={styles.dialogHeader}>
             <div class={styles.dialogHeaderCopy}>
-              <Dialog.Title class={styles.title}>
-                "Add project"
-              </Dialog.Title>
-              <Dialog.Description class={styles.body}>
-                "Choose one local root and optionally adjust the display name."
-              </Dialog.Description>
+              <Dialog.Title class={styles.title}>"Add project"</Dialog.Title>
+              <Dialog.Description
+                class={styles.body}
+              >"Choose one local root and optionally adjust the display name."</Dialog.Description>
             </div>
             <Dialog.CloseTrigger asChild>
               <button class={styles.closeButton} type="button">
@@ -334,9 +324,7 @@ component AddProjectDialog(props: {
             </Dialog.CloseTrigger>
           </header>
           <label class={styles.field}>
-            <span class={styles.label}>
-              "Project path"
-            </span>
+            <span class={styles.label}>"Project path"</span>
             <input
               class={styles.textInput}
               placeholder="/Users/alec/dev/goddard-ai/app"
@@ -360,9 +348,7 @@ component AddProjectDialog(props: {
             </button>
           </div>
           <label class={styles.field}>
-            <span class={styles.label}>
-              "Display name"
-            </span>
+            <span class={styles.label}>"Display name"</span>
             <input
               class={styles.textInput}
               placeholder="Derived from folder name"
@@ -375,9 +361,10 @@ component AddProjectDialog(props: {
           </label>
           <div class={styles.dialogActions}>
             <Dialog.CloseTrigger asChild>
-              <button class={cx(styles.buttonBase, styles.secondaryButton)} type="button">
-                "Cancel"
-              </button>
+              <button
+                class={cx(styles.buttonBase, styles.secondaryButton)}
+                type="button"
+              >"Cancel"</button>
             </Dialog.CloseTrigger>
             <button
               class={cx(styles.buttonBase, styles.primaryButton)}

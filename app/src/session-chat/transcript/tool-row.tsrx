@@ -133,9 +133,7 @@ export component ToolTranscriptRow(props: {
                 <ToolMetaParts parts={summaryMetaParts} keyPrefix={`${props.groupId}:summary`} />
               </span>
             </span>
-            <span class={styles.toolToggleHint}>
-              "Details"
-            </span>
+            <span class={styles.toolToggleHint}>"Details"</span>
           </summary>
           <ol class={styles.toolDetailList}>
             for (const toolCall of props.toolCalls) {
@@ -160,9 +158,9 @@ export component ToolTranscriptRow(props: {
 
                   <ToolLocationsList locations={toolCall.locations} />
                   if (toolCall.content.length === 0 && toolCall.locations.length === 0) {
-                    <div class={styles.toolDetailText}>
-                      "No tool output was attached to this call."
-                    </div>
+                    <div
+                      class={styles.toolDetailText}
+                    >"No tool output was attached to this call."</div>
                   }
                 </article>
               </li>
