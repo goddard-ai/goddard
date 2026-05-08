@@ -33,8 +33,6 @@ Example:
 features/
   session/
     package.json
-    README.md
-    glossary.md
     src/
       sdk.ts
       daemon.ts
@@ -111,6 +109,8 @@ export const defaultSdkPlugins = [sessionSdkPlugin, workforceSdkPlugin]
 
 Feature entrypoints receive layer-owned services through explicit context objects selected by the static composition root. They should not import global clients, singleton SDK instances, daemon URLs, app state, or host-specific defaults.
 
+Daemon feature interop uses first-class feature extensions. A daemon plugin can expose a named `provides` map and list other daemon plugin definitions in `consumes`; `setup(context)` receives the consumed feature extensions as direct `context.<feature>` fields, such as `context.session`. Methods and events share this feature-owned extension surface. Feature packages must not circularly depend on other feature packages.
+
 ## Feature Contributions And System Responsibilities
 
 Feature packages contribute product-specific declarations, contracts, handlers, UI components, and feature-owned helpers.
@@ -144,17 +144,17 @@ Route contracts live with the feature; route handling lives in the daemon plugin
 Example:
 
 ```ts
-export const sessionDaemonIpc = defineDaemonIpcContract({
+export const sessionDaemonIpc = defineIpcSchema({
   requests: {
     "session.create": {
-      input: createSessionRequestSchema,
-      output: createSessionResponseSchema,
+      payload: CreateSessionRequest,
+      response: $type<CreateSessionResponse>(),
     },
   },
   streams: {
     "session.message": {
       filter: daemonSessionIdParamsSchema,
-      payload: sessionMessageEnvelopeSchema,
+      payload: $type<SessionMessageEvent>(),
     },
   },
 })
@@ -183,7 +183,7 @@ The goal is plugin-shaped internal modularity, not an external ecosystem.
 - Product changes become easier to localize across daemon, SDK, app, schema, docs, and tests.
 - SDK growth moves out of one central monolith and into feature-owned SDK entrypoints.
 - Shared behavior parity becomes easier to review because a feature package can show which layers it contributes to.
-- AI agents can inspect one feature package and its README before touching unrelated system areas.
+- AI agents can inspect one feature package and the shared feature-package guidance before touching unrelated system areas.
 - Internal scaffolding can make the correct structure faster than ad hoc file placement.
 
 ## Migration Sequence
@@ -203,11 +203,14 @@ The scaffold should use `@clack/prompts` to ask which layers are needed before i
 The scaffold should create:
 
 - `features/<name>/package.json`
-- `features/<name>/README.md`
-- `features/<name>/glossary.md` when the feature introduces domain terminology
+- `features/<name>/tsconfig.json`
+- `features/<name>/test/tsconfig.json`
+- `features/<name>/tsdown.config.ts`
+- `features/<name>/test/feature.test.ts`
 - `features/<name>/src/sdk.ts` when SDK behavior is requested
 - `features/<name>/src/daemon.ts` when daemon behavior is requested
 - `features/<name>/src/app.tsx` when app UI is requested
+- `features/<name>/src/app.style.ts` only when app styling is explicitly requested
 - `features/<name>/src/schema.ts` when shared validation or wire shapes are requested
 - `features/<name>/src/daemon-ipc.ts` when daemon and SDK entrypoints communicate through daemon IPC
 - `features/<name>/src/backend.ts` only when backend behavior is requested
@@ -217,22 +220,28 @@ The scaffold should prefer explicit options over guessing. It should default to 
 
 When a plugin support package re-exports stable primitives for its layer, the scaffold should prefer those imports over broad internal package imports. If a feature still needs a direct dependency such as `@goddard-ai/styled-system`, the scaffold should add it only for feature packages with an app entrypoint that actually imports it.
 
-## Feature README Template
+Use the scaffold from the workspace root:
 
-Each feature package README should be short and consistent so agents can recover the feature's purpose without reading the whole implementation.
+```sh
+bun run scaffold:feature
+bun run scaffold:feature --name inbox --layers daemon,sdk,app --schema --daemon-ipc --dry-run
+```
 
-Required sections:
+The implemented scaffold uses `@clack/prompts` for interactive selection and `cmd-ts` for noninteractive CLI parsing. It uses `radashi`'s `dedent` tagged template for generated file content.
 
-- `Purpose`: the product capability the feature owns
-- `Entrypoints`: which stack layers the feature contributes to
-- `Composition`: which public composition roots import the feature
-- `Boundaries`: what the feature owns and must not bypass
-- `IPC Contracts`: daemon request and stream contracts the feature owns, when applicable
-- `Related Docs`: nearby glossary, spec, or concept documents when they exist
+## Reference Feature
+
+`features/inbox` is the first daemon + SDK + app reference feature. It demonstrates:
+
+- feature-owned schema and daemon IPC entrypoints
+- SDK namespace contribution without importing `@goddard-ai/sdk`
+- app contribution metadata without importing `@goddard-ai/sdk`
+- daemon request handler contribution imported by the daemon composition root
+- shared daemon IPC schema composition through `composeIpcSchemas()`
 
 ## Implementation Planning Questions
 
-- What is the minimum SDK plugin contract needed to preserve the current `new GoddardSdk({ client })` ergonomics?
 - How should feature package tests be split between layer-local tests and public composition-root tests?
+- What daemon substrate API is needed before feature packages can own persistence-backed manager state such as the inbox manager and inbox item store?
 
 These remaining questions are implementation-planning concerns rather than unresolved product ambiguity for the feature package direction.

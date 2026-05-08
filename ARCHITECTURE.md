@@ -47,6 +47,7 @@ privileged daemon and OS access behind its trusted host boundary.
 | Backend control plane | [`core/backend`](./core/backend/) | GitHub OAuth sessions, managed pull request state, webhooks, SSE fan-out, backend persistence | No separate shared backend-client package; daemon consumes backend route modules through `rouzer` |
 | Shared schemas | [`core/schema`](./core/schema/) | Zod schemas for backend, daemon IPC, config, and workforce contracts | Does not own runtime behavior |
 | IPC helpers | [`core/ipc`](./core/ipc/) | Typed IPC schema declarations, clients, transports, and server helpers | Does not decide daemon capability shape |
+| Feature packages | [`features`](./features/) | Internal full-stack product capability packages with selected daemon, SDK, app, schema, and IPC entrypoints | Not published packages or a runtime plugin platform |
 | Daemon client | [`core/daemon/client`](./core/daemon/client/) | Low-level daemon URL, TCP transport, and injected daemon IPC client helpers | Use the SDK for stable daemon actions |
 | SDK | [`core/sdk`](./core/sdk/) | Stable daemon-backed auth, PR, session, action, loop, and workforce methods | Not a general backend real-time client |
 | Daemon | [`core/daemon`](./core/daemon/) | Local background runtime, sessions, PR feedback handling, loop runtime, workforce runtime, IPC server | Clients observe and control daemon-owned runtimes; they do not own parallel runtime state |
@@ -93,6 +94,25 @@ Read more: [`spec/daemon/pr-feedback.md`](./spec/daemon/pr-feedback.md).
 Read more: [`spec/adr/001-sdk-first-architecture.md`](./spec/adr/001-sdk-first-architecture.md)
 and [`core/sdk/README.md`](./core/sdk/README.md).
 
+### Feature Composition
+
+New cross-layer product capabilities are organized as internal packages under
+`features/<name>`. A feature package gathers the layer entrypoints it needs,
+such as `src/daemon.ts`, `src/sdk.ts`, `src/app.tsx`, `src/schema.ts`, and
+`src/daemon-ipc.ts`.
+
+The public packages remain the composition roots. For example, `core/sdk`
+imports a feature's SDK entrypoint, the daemon imports a feature's daemon
+entrypoint or handler factory, and the app imports app contribution metadata.
+Feature packages import thin support packages such as
+`@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and
+`@goddard-ai/app-plugin`; they do not import the public package that later
+bundles them.
+
+`features/inbox` is the reference daemon + SDK + app feature package. Use it
+when adding a new feature that needs shared daemon IPC, SDK methods, and app
+composition metadata.
+
 ### Workforce Orchestration
 
 1. An operator initializes repository-local workforce intent.
@@ -116,6 +136,8 @@ Read more: [`spec/daemon/workforce.md`](./spec/daemon/workforce.md) and
   Electrobun host boundary.
 - Backend-owned real-time delivery is separate from SDK daemon-control concerns.
 - The daemon owns lifecycle and recovery for daemon-managed local runtimes.
+- Feature packages own product-specific contributions; layer systems own the
+  substrate that composes and runs those contributions.
 - Workforce orchestration and PR feedback handling are separate daemon runtime
   domains, even when hosted by the same daemon process.
 - Shared schemas and typed IPC contracts exist to prevent drift between hosts.

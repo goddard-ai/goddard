@@ -8,6 +8,11 @@ Core packages included here:
 - `config`: Shared configuration definitions.
 - `review-sync`: Git-only review branch synchronization for agent-owned worktrees.
 
+Internal full-stack product features live in the repository root
+[`features/`](../features/) directory instead of under `core/`. Core packages
+remain the public composition roots and shared substrate packages that import
+selected feature entrypoints.
+
 ## Issues & Feature Requests
 
 Please direct bug reports and feature requests to the [Issue Tracker](https://github.com/goddard-ai/core/issues).

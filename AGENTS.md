@@ -18,6 +18,8 @@
 - UI-only behavior does not require `core/sdk/` parity. Do not replicate presentation-only features, interaction affordances, or UI configuration in the SDK.
 - Do not ship `app/` ahead of `core/sdk/` when the feature depends on shared data or system configuration. If `core/sdk/` cannot support that behavior yet, treat the `app/` work as incomplete.
 - When adding new UI components or interactive elements in `app/`, use the local `pandark-ui` skill to align Panda CSS and Ark UI composition with the existing design system.
+- New cross-layer product capabilities should normally start as internal feature packages under `features/<name>`. Use `bun run scaffold:feature` for a consistent package shape, then wire selected entrypoints into the public composition roots.
+- Feature packages must import thin plugin support packages such as `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and `@goddard-ai/app-plugin` instead of the public packages that bundle them.
 - `spec/` is the canonical source of product behavior and intent.
 - Do not edit `spec/` unless explicitly asked.
 - Do not knowingly let code, docs, or tests diverge from `spec/`.

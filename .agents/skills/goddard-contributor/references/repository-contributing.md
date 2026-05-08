@@ -33,6 +33,17 @@ Use this reference for repository-wide contribution guidance that intentionally 
 - Do not add dependencies lightly. Prefer existing platform APIs, workspace packages, and project utilities.
 - If a new dependency is truly warranted, choose the smallest one that fits the repository style and explain why it is needed.
 
+## Feature Package Policy
+
+- Internal full-stack feature packages live under `features/<name>` and use the package name `@goddard-ai/<name>` without a `feature-` prefix.
+- Start new feature packages with `bun run scaffold:feature`. In noninteractive agent workflows, use flags such as `--name`, `--layers daemon,sdk,app`, `--schema`, `--daemon-ipc`, `--styled-system`, `--skip-install`, or `--dry-run`.
+- Scaffolded packages are inert until a public composition root imports one of their entrypoints. Do not register a feature in `core/sdk`, `core/daemon`, or `app` unless the task includes making that feature part of the supported product surface.
+- Feature packages import plugin support packages and shared contract packages, not the public composition roots that bundle the feature. For example, import `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, `@goddard-ai/app-plugin`, `@goddard-ai/ipc`, and shared schema packages instead of importing `@goddard-ai/sdk` from the feature package.
+- App feature entrypoints must stay SDK-agnostic at the package level. Express SDK needs as type-level app plugin requirements or app composition metadata, and let the static app composition root provide the actual SDK instance.
+- Daemon feature dependencies are explicit. A daemon plugin may expose a named `provides` map and list other daemon plugins in `consumes`; consumed feature extensions appear as direct `context.<feature>` fields in `setup(context)`. Do not introduce package-level cycles between feature packages.
+- Shared daemon IPC contracts belong in `src/daemon-ipc.ts` and use `defineIpcSchema()` from `@goddard-ai/ipc`; public composition roots combine fragments with `composeIpcSchemas()`.
+- `features/inbox` is the current reference package for a low-risk daemon + SDK + app feature. Inspect it before adding a new feature package with similar layers.
+
 ## Testing Policy
 
 - Add or update tests when behavior changes, unless a deeper `AGENTS.md` narrows that subtree.

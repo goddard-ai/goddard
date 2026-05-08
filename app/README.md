@@ -51,6 +51,22 @@ Unless stated otherwise, commands below are run from `./app`.
 - Browser code talks to the host through Electrobun RPC rather than Tauri APIs.
 - Read the relevant upstream platform docs directly when app work depends on third-party APIs or platform constraints.
 
+## Feature Composition
+
+App feature entrypoints live in internal feature packages under
+`features/<name>/src/app.tsx` and use `@goddard-ai/app-plugin` for static
+metadata. The app composition root owns shell placement, navigation slots,
+command routing, shortcut conflict semantics, desktop bridge boundaries, and the
+actual SDK instance.
+
+Feature app entrypoints should not import `@goddard-ai/sdk`. When a feature
+also contributes an SDK namespace, the app entrypoint can express type-level SDK
+requirements from its own SDK plugin while staying package-acyclic.
+
+`features/inbox` is the current reference app feature package. It contributes
+Inbox navigation, workbench tab, and command metadata while the app shell keeps
+ownership of primary navigation placement.
+
 ## License
 
 This project is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](./LICENSE-AGPLv3).

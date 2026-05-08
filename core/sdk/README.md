@@ -42,6 +42,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 ## API Shape
 
 - The SDK mirrors the daemon IPC contract through namespace getters.
+- Feature-owned SDK namespaces are contributed by internal packages under `features/<name>/src/sdk.ts` and then bundled by this public SDK composition root.
 - `sdk.session.run(...)` is the object-backed exception used for live agent session interaction.
 - `sdk.session.subscribe(...)` is the callback-based exception used for live daemon session updates.
 - Each namespace method takes one plain object payload.
@@ -53,10 +54,22 @@ Namespaces:
 - `sdk.daemon`
 - `sdk.auth`
 - `sdk.pr`
+- `sdk.inbox`
 - `sdk.session`
 - `sdk.action`
 - `sdk.loop`
 - `sdk.workforce`
+
+## Feature Composition
+
+Feature packages do not import `@goddard-ai/sdk`. They import
+`@goddard-ai/sdk-plugin` and export a feature SDK plugin, usually from
+`features/<name>/src/sdk.ts`. This package imports those feature SDK plugins and
+attaches their namespaces to `GoddardSdk`.
+
+`features/inbox` is the reference SDK feature package. Its `inboxSdkPlugin`
+preserves the existing `sdk.inbox` namespace while moving the namespace factory
+out of the central SDK file.
 
 ## Examples
 
