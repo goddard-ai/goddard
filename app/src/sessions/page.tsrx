@@ -1,6 +1,7 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { useState } from "preact/hooks"
 
+import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
 import { SessionsPageMutations } from "./mutations.ts"
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
@@ -10,11 +11,7 @@ import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 import { ListToolbar } from "./list-toolbar.tsrx"
 import { SessionsList } from "./list.tsrx"
 import styles from "./page.style.ts"
-import {
-  filterSessionsByTitle,
-  getSessionDisplayTitle,
-  getSessionRepositoryLabel,
-} from "./presentation.ts"
+import { filterSessionsByTitle } from "./title-search.ts"
 
 component SessionsPage() {
   const projectRegistry = useProjectRegistry()

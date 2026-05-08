@@ -1,10 +1,6 @@
 import type { ListInboxRequest } from "@goddard-ai/schema/daemon"
 
-import {
-  DEFAULT_INBOX_FILTER_ID,
-  inboxFilterDefinitions,
-  type InboxFilterId,
-} from "./presentation.ts"
+import { DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 
 export const INBOX_LIST_LIMIT = 50
 

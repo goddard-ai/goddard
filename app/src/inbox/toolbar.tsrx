@@ -1,6 +1,6 @@
 import { RefreshCcw, Search } from "lucide-react"
 
-import { inboxFilterDefinitions, inboxFilterOrder, type InboxFilterId } from "./presentation.ts"
+import { inboxFilterDefinitions, inboxFilterOrder, type InboxFilterId } from "./filters.ts"
 import styles from "./page.style.ts"
 
 export component InboxToolbar(props: {

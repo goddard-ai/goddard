@@ -6,7 +6,8 @@ import { isPromise } from "radashi"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { getPullRequestDisplayTitle, getPullRequestUrl } from "./presentation.ts"
+import { getPullRequestDisplayTitle } from "./display.ts"
+import { getPullRequestUrl } from "./links.ts"
 import styles from "./view.style.ts"
 
 function retryPullRequestLoad(pullRequestId: DaemonPullRequestId) {

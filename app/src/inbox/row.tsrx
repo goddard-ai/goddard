@@ -2,18 +2,12 @@ import type { InboxItem } from "@goddard-ai/schema/daemon"
 import { GitPullRequest, MessageSquare } from "lucide-react"
 
 import { useMutations } from "~/lib/mutations-provider.tsx"
+import { getInboxEntityLabel, isInboxEntityKind } from "./entity-kind.ts"
+import { formatInboxUpdatedTime } from "./format.ts"
+import { getInboxPriorityLabel, getInboxReasonLabel, getInboxStatusLabel } from "./labels.ts"
 import { InboxPageMutations } from "./mutations.ts"
-import {
-  formatInboxUpdatedTime,
-  getInboxEntityLabel,
-  getInboxItemPrimaryText,
-  getInboxItemSecondaryText,
-  getInboxPriorityLabel,
-  getInboxReasonLabel,
-  getInboxStatusLabel,
-  isInboxEntityKind,
-} from "./presentation.ts"
 import styles from "./page.style.ts"
+import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "./text.ts"
 
 function handleButtonLikeKeyDown(
   event: preact.TargetedKeyboardEvent<HTMLElement>,

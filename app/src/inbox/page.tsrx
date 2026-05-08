@@ -6,18 +6,15 @@ import { appToaster } from "~/lib/good-toaster.tsrx"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
 import { findNearestProjectPath } from "~/projects/project-context.ts"
-import { getPullRequestDisplayTitle } from "~/pull-requests/presentation.ts"
-import { getSessionDisplayTitle } from "~/sessions/presentation.ts"
+import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
+import { getSessionDisplayTitle } from "~/sessions/display.ts"
+import { isInboxEntityKind } from "./entity-kind.ts"
+import { DEFAULT_INBOX_FILTER_ID, type InboxFilterId } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import { InboxPageMutations, invalidateInboxQueries } from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
 import { getInboxListRequest } from "./queries.ts"
-import {
-  DEFAULT_INBOX_FILTER_ID,
-  filterInboxItemsBySearch,
-  isInboxEntityKind,
-  type InboxFilterId,
-} from "./presentation.ts"
+import { filterInboxItemsBySearch } from "./search.ts"
 import styles from "./page.style.ts"
 
 function getErrorMessage(error: unknown) {

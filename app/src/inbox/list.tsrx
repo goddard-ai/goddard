@@ -1,7 +1,7 @@
 import type { InboxItem } from "@goddard-ai/schema/daemon"
 
+import { inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 import { InboxRow } from "./row.tsrx"
-import { inboxFilterDefinitions, type InboxFilterId } from "./presentation.ts"
 import styles from "./page.style.ts"
 
 export component InboxList(props: {

@@ -4,7 +4,7 @@ import hashSum from "hash-sum"
 import { Sigma } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
-import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/presentation.ts"
+import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
 import { buildSessionChatTranscript } from "./transcript-items.ts"
 
 /** UI-facing lifecycle for one prompt turn in the session chat state model. */

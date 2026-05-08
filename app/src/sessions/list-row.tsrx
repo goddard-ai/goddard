@@ -12,9 +12,9 @@ import {
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
+import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
 import { SessionsPageMutations } from "./mutations.ts"
 import styles from "./list-row.style.ts"
-import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./presentation.ts"
 
 function handleButtonLikeKeyDown(
   event: preact.TargetedKeyboardEvent<HTMLDivElement>,

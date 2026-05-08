@@ -11,7 +11,7 @@ import { createSession } from "./mutations.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
 import { SessionLaunchForm } from "./launch-form.tsrx"
-import { getSessionDisplayTitle } from "./presentation.ts"
+import { getSessionDisplayTitle } from "./display.ts"
 
 component SessionLaunchDialog(props: {
   dialog: UseDialogReturn;
