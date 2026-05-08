@@ -65,19 +65,14 @@ export component CommandDialog(props: CommandDialogProps) {
   })
 
   <CommandLayerProvider active={dialog.open}>
-    <CommandDialogLayerCommands {dialog} />
+    useAppCommand(AppCommand.workbench.closeActiveTab, () => {
+      dialog.setOpen(false)
+    })
+
     <Dialog.RootProvider value={dialog} lazyMount unmountOnExit>
       <Suspense fallback={null}>
         <Content {dialog} />
       </Suspense>
     </Dialog.RootProvider>
   </CommandLayerProvider>
-}
-
-component CommandDialogLayerCommands(props: { dialog: UseDialogReturn }) {
-  useAppCommand(AppCommand.workbench.closeActiveTab, () => {
-    props.dialog.setOpen(false)
-  })
-
-  <></>
 }
