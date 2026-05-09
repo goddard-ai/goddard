@@ -118,6 +118,7 @@ import {
   type SessionTurnPromptRequestId,
 } from "./turn-history.ts"
 import {
+  inspectWorktreeCompletionState,
   resolveGitRepoRoot,
   reuseExistingWorktree,
   toPreparedSessionWorktree,
@@ -4156,6 +4157,30 @@ export function createSessionManager(input: {
     const active = activeSessions.get(id) ?? null
     if (active?.activeTurn) {
       throw new IpcClientError("Cannot complete a session while the agent has an active turn")
+    }
+
+    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
+    if (worktreeRecord) {
+      let completionState: Awaited<ReturnType<typeof inspectWorktreeCompletionState>>
+      try {
+        completionState = await inspectWorktreeCompletionState(worktreeRecord)
+      } catch {
+        throw new IpcClientError(
+          "Cannot complete a worktree session because its git state could not be inspected",
+        )
+      }
+
+      if (completionState.dirty) {
+        throw new IpcClientError(
+          "Cannot complete a worktree session while its working tree has uncommitted changes",
+        )
+      }
+
+      if (completionState.unmergedCommits) {
+        throw new IpcClientError(
+          "Cannot complete a worktree session while it has commits that have not been merged into the primary checkout",
+        )
+      }
     }
 
     updateSession(id, {

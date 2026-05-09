@@ -1492,6 +1492,84 @@ test("session.changes reads tracked and untracked diff content from the session 
   await client.send("session.shutdown", { id: created.session.id })
 })
 
+test("session completion enforces worktree cleanliness without blocking local dirty repos", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+
+  const localRepoDir = await createRepoFixture()
+  const local = await client.send("session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: localRepoDir,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  await client.send("session.reportTurnEnded", { id: local.session.id })
+  await writeFile(join(localRepoDir, "local-note.txt"), "local dirty work\n", "utf-8")
+  await expect(client.send("session.complete", { id: local.session.id })).resolves.toMatchObject({
+    item: { status: "completed" },
+  })
+  await client.send("session.shutdown", { id: local.session.id })
+
+  const cleanRepoDir = await createRepoFixture()
+  const clean = await client.send("session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: cleanRepoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  await client.send("session.reportTurnEnded", { id: clean.session.id })
+  await expect(client.send("session.complete", { id: clean.session.id })).resolves.toMatchObject({
+    item: { status: "completed" },
+  })
+  await client.send("session.shutdown", { id: clean.session.id })
+
+  const dirtyRepoDir = await createRepoFixture()
+  const dirty = await client.send("session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: dirtyRepoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  const dirtyWorktree = (await client.send("session.worktree.get", { id: dirty.session.id }))
+    .worktree
+  expect(dirtyWorktree).toBeTruthy()
+  await client.send("session.reportTurnEnded", { id: dirty.session.id })
+  await writeFile(join(dirtyWorktree!.worktreeDir, "dirty-note.txt"), "uncommitted\n", "utf-8")
+  await expect(client.send("session.complete", { id: dirty.session.id })).rejects.toThrow(
+    /uncommitted changes/i,
+  )
+  await client.send("session.shutdown", { id: dirty.session.id })
+
+  const committedRepoDir = await createRepoFixture()
+  const committed = await client.send("session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: committedRepoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  const committedWorktree = (
+    await client.send("session.worktree.get", { id: committed.session.id })
+  ).worktree
+  expect(committedWorktree).toBeTruthy()
+  await client.send("session.reportTurnEnded", { id: committed.session.id })
+  await writeFile(
+    join(committedWorktree!.worktreeDir, "committed-note.txt"),
+    "committed\n",
+    "utf-8",
+  )
+  runGit(committedWorktree!.worktreeDir, ["add", "committed-note.txt"])
+  runGit(committedWorktree!.worktreeDir, ["commit", "-m", "session work"])
+  await expect(client.send("session.complete", { id: committed.session.id })).rejects.toThrow(
+    /not been merged/i,
+  )
+  await client.send("session.shutdown", { id: committed.session.id })
+})
+
 test("session worktree launch branches from the selected base branch", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

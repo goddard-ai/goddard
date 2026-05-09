@@ -17,6 +17,12 @@ export interface PreparedSessionWorktree {
   logContext: Record<string, unknown>
 }
 
+/** User-facing completion blockers detected from one daemon-managed worktree. */
+export type SessionWorktreeCompletionState = {
+  dirty: boolean
+  unmergedCommits: boolean
+}
+
 /**
  * Reuses one persisted worktree by validating its plugin dependency and refreshing its branch metadata.
  */
@@ -92,6 +98,39 @@ export function toPreparedSessionWorktree(state: SessionWorktreeState): Prepared
       worktreeDir: state.worktreeDir,
       worktreePoweredBy: state.poweredBy,
     },
+  }
+}
+
+/**
+ * Inspects whether one daemon-managed worktree has user work that should block completion.
+ */
+export async function inspectWorktreeCompletionState(
+  worktree: SessionWorktreeState,
+): Promise<SessionWorktreeCompletionState> {
+  const [status, primaryHead] = await Promise.all([
+    runGit(worktree.worktreeDir, ["status", "--porcelain=v1", "--untracked-files=normal"]),
+    runGit(worktree.repoRoot, ["rev-parse", "--verify", "HEAD"]),
+  ])
+  if (!status.success) {
+    throw new Error("Unable to inspect worktree status")
+  }
+
+  if (!primaryHead.success) {
+    throw new Error("Unable to inspect primary checkout HEAD")
+  }
+
+  const ahead = await runGit(worktree.worktreeDir, [
+    "rev-list",
+    "--count",
+    `${primaryHead.stdout.trim()}..HEAD`,
+  ])
+  if (!ahead.success) {
+    throw new Error("Unable to inspect worktree commits")
+  }
+
+  return {
+    dirty: status.stdout.trim().length > 0,
+    unmergedCommits: Number(ahead.stdout.trim()) > 0,
   }
 }
 
