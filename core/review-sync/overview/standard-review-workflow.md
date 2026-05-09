@@ -29,12 +29,14 @@
 - **Watch mode**
   - `watch` keeps the review loop active by syncing after agent, review, or agent-branch changes.
   - With an explicit agent branch, `watch` can start or reuse the session before watching.
+  - Run `watch` from the review worktree, starting from a non-`review-sync/*` branch or detached HEAD.
   - If the agent branch is temporarily not checked out, `watch` waits instead of
     failing the whole review loop.
   - While waiting, `watch` may show the review branch from the agent branch ref
     when doing so will not discard human work.
   - When stopped, `watch` pauses the session and tries to restore the review
-    worktree to the branch that was active when watching began.
+    worktree checkout that was active when watching began.
+  - The disposable `review-sync/*` branch is deleted before `watch` exits.
 
 - **Pause and resume**
   - Use `pause` when sync mutations should temporarily stop.

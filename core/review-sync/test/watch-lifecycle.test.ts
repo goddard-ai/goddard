@@ -4,12 +4,14 @@ import { afterEach, expect, test } from "bun:test"
 
 import { pauseReviewSession, statusReviewSession, watchReviewSession } from "../src/index.ts"
 import {
+  captureReviewSyncError,
   cleanupReviewSyncFixtures,
   cliPath,
   createDeferred,
   createFixture,
   createStartedFixture,
   currentBranch,
+  refExists,
   runGit,
   runProcessUntilOutput,
   runWatchUntilNextSync,
@@ -32,7 +34,9 @@ test("cli watch accepts an agent branch from the review worktree", async () => {
 
   expect(result.stdout).toContain("Started review sync")
   expect(result.stdout).toContain("Watching review sync")
-  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+  expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+    false,
+  )
 })
 
 test("cli watch --verbose explains watcher setup", async () => {
@@ -53,6 +57,35 @@ test("cli watch --verbose explains watcher setup", async () => {
   expect(output).toContain("Watching review sync")
 })
 
+test("watch fails when started from a review-sync branch", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  const error = await captureReviewSyncError(() =>
+    watchReviewSession({
+      cwd: fixture.reviewDir,
+      agentBranch: "codex/review-sync-test",
+    }),
+  )
+
+  expect(error.message).toContain("must start from a non-review branch")
+})
+
+test("watch fails when started from the agent worktree", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  const error = await captureReviewSyncError(() =>
+    watchReviewSession({
+      cwd: fixture.agentDir,
+    }),
+  )
+
+  expect(error.message).toContain("must run from the review worktree")
+})
+
 test("watch starts a session from an agent branch before syncing", async () => {
   const fixture = await createFixture({
     "shared.txt": "base\n",
@@ -68,7 +101,9 @@ test("watch starts a session from an agent branch before syncing", async () => {
   expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(true)
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
-  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+  expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+    false,
+  )
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
 
@@ -80,6 +115,7 @@ test("watch restarts a paused session before syncing", async () => {
     cwd: fixture.reviewDir,
   })
   expect(pause.status).toBe("paused")
+  await runGit(fixture.reviewDir, ["checkout", "main"])
 
   const { results, stopped } = await runWatchUntilNextSync(
     fixture.reviewDir,
@@ -92,9 +128,7 @@ test("watch restarts a paused session before syncing", async () => {
   expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(true)
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
-  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe(
-    "agent edit after pause\n",
-  )
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("base\n")
 })
 
 test("watch can start another session after the previous watch exits", async () => {
@@ -122,7 +156,9 @@ test("watch can start another session after the previous watch exits", async () 
   expect(first.results.some((result) => result.command === "start" && result.status === "ok")).toBe(
     true,
   )
-  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+  expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+    false,
+  )
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("first human edit\n")
 
   const second = await runWatchUntilNextSync(
@@ -138,7 +174,9 @@ test("watch can start another session after the previous watch exits", async () 
     second.results.some((result) => result.command === "start" && result.status === "ok"),
   ).toBe(true)
   expect(second.stopped.reviewBranch).toBe("review-sync/codex/second-review-sync-test")
-  expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+  expect(
+    await refExists(fixture.agentDir, "refs/heads/review-sync/codex/second-review-sync-test"),
+  ).toBe(false)
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("first human edit\n")
   expect(await readFile(join(secondAgentDir, "shared.txt"), "utf-8")).toBe("second human edit\n")
 })
@@ -230,7 +268,9 @@ test("watch explains when restoring the starting review branch fails", async () 
     expect(stopped.message).toContain("Could not check out review-base")
     expect(stopped.message).toContain("pathspec")
     expect(controller.signal.reason).not.toBe(timeoutReason)
-    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+    expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+      true,
+    )
     expect((await statusReviewSession({ cwd: fixture.reviewDir })).status).toBe("paused")
   } finally {
     clearTimeout(timeout)

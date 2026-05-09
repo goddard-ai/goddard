@@ -9,6 +9,7 @@ import {
   createFixture,
   createStartedFixture,
   currentBranch,
+  refExists,
   runGit,
   sleep,
   waitForFileContent,
@@ -83,7 +84,9 @@ test("watch waits for an agent branch to get checked out before starting", async
     expect(results.some((result) => result.command === "start" && result.status === "ok")).toBe(
       true,
     )
-    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
+    expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+      false,
+    )
   } finally {
     clearTimeout(timeout)
   }
@@ -131,8 +134,10 @@ test("watch prepares the review branch from the branch ref while waiting", async
     expect(stopped.status).toBe("ok")
     expect(controller.signal.reason).not.toBe(timeoutReason)
     expect(await currentBranch(fixture.agentDir)).toBe("codex/temporary")
-    expect(await currentBranch(fixture.reviewDir)).toBe("review-sync/codex/review-sync-test")
-    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("branch ref edit\n")
+    expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+      false,
+    )
+    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("base\n")
   } finally {
     clearTimeout(timeout)
   }
@@ -252,7 +257,7 @@ test("watch syncs human commits made while waiting for agent checkout", async ()
     expect(controller.signal.reason).not.toBe(timeoutReason)
     expect(startResult.acceptedPatchPath).toBeTruthy()
     expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human commit\n")
-    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human commit\n")
+    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("base\n")
   } finally {
     clearTimeout(timeout)
   }
@@ -310,6 +315,7 @@ test("watch refreshes the review worktree from the target branch ref while waiti
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
   const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
@@ -351,6 +357,7 @@ test("watch reuses an existing session when the agent branch is not checked out"
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
 
   const branchWriterDir = join(fixture.rootDir, "branch-writer")
@@ -408,6 +415,7 @@ test("watch refreshes a paused session from the branch ref while agent checkout 
   await pauseReviewSession({
     cwd: fixture.reviewDir,
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
 
   const branchWriterDir = join(fixture.rootDir, "branch-writer")
@@ -464,6 +472,7 @@ test("watch warns when branch ref refresh is blocked by human edits", async () =
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
   const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)

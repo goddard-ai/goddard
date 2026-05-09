@@ -76,6 +76,10 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
 
   const startedWorktree = await resolveRequiredRepoRoot(context.cwd, context)
   const startedBranch = await resolveCurrentBranch(startedWorktree, context)
+  const startedHead = await resolveRef(startedWorktree, "HEAD", context)
+  if (startedBranch?.startsWith(reviewBranchPrefix)) {
+    throw new UserError(`watch must start from a non-review branch; currently on ${startedBranch}.`)
+  }
   await emitVerbose(
     startedBranch
       ? `started from ${startedWorktree} on ${startedBranch}.`
@@ -88,12 +92,14 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
     emitVerbose,
     startedWorktree,
     startedBranch,
+    startedHead,
   )
   if (resolution.kind === "stopped") {
     return resolution.result
   }
 
   let { session, startResult, refreshFromBranchRefOnStart } = resolution
+  assertWatchStartedInReviewWorktree(session, startedWorktree)
   if (!startResult && session.paused) {
     if (await isRecordedAgentCheckoutUnavailable(session, context)) {
       session = await resumeSession(session, "watch")
@@ -120,6 +126,7 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
       context,
       startedWorktree,
       startedBranch,
+      startedHead,
     })
     return createReviewSyncResult({
       exitCode:
@@ -238,6 +245,7 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
     context,
     startedWorktree,
     startedBranch,
+    startedHead,
   })
   await emitVerbose(
     cleanup.failures.length > 0
@@ -272,12 +280,13 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
   })
 }
 
-/** Pauses watch state and restores the review worktree branch that launched watch. */
+/** Pauses watch state and restores the review worktree checkout that launched watch. */
 async function cleanupWatchExit(input: {
   session: SessionState
   context: RuntimeContext
   startedWorktree: string
   startedBranch: string | null
+  startedHead: string | null
 }) {
   const failures: string[] = []
   const notes: string[] = []
@@ -308,16 +317,47 @@ async function cleanupWatchExit(input: {
           await git(latest.reviewWorktree, ["checkout", input.startedBranch], input.context, {
             stdin: "ignore",
           })
+          notes.push(`Checked out ${input.startedBranch}.`)
         }
-        notes.push(`Checked out ${input.startedBranch}.`)
       } catch (error) {
         failures.push(
           `Could not check out ${input.startedBranch} in ${latest.reviewWorktree}: ${formatThrownError(error)}`,
         )
       }
     } else {
-      notes.push("No starting branch was checked out, so no branch was restored.")
+      try {
+        if (input.startedHead) {
+          await git(
+            latest.reviewWorktree,
+            ["checkout", "--detach", input.startedHead],
+            input.context,
+            {
+              stdin: "ignore",
+            },
+          )
+          notes.push("Restored detached HEAD.")
+        } else {
+          notes.push("No starting branch was checked out, so no branch was restored.")
+        }
+      } catch (error) {
+        failures.push(
+          `Could not restore detached HEAD in ${latest.reviewWorktree}: ${formatThrownError(error)}`,
+        )
+      }
     }
+  }
+
+  try {
+    const deleteNote = await deleteReviewBranchForWatchExit({
+      reviewWorktree: latest.reviewWorktree,
+      reviewBranch: latest.reviewBranch,
+      context: input.context,
+    })
+    if (deleteNote) {
+      notes.push(deleteNote)
+    }
+  } catch (error) {
+    failures.push(`Could not delete ${latest.reviewBranch}: ${formatThrownError(error)}`)
   }
 
   return { latest, notes, failures }
@@ -351,6 +391,7 @@ async function resolveSessionForWatch(
   emitVerbose: WatchVerboseEmitter,
   startedWorktree: string,
   startedBranch: string | null,
+  startedHead: string | null,
 ) {
   if (input.agentBranch) {
     return await resolveAgentBranchSessionForWatch(
@@ -362,6 +403,7 @@ async function resolveSessionForWatch(
       emitVerbose,
       startedWorktree,
       startedBranch,
+      startedHead,
     )
   }
 
@@ -383,6 +425,7 @@ async function resolveAgentBranchSessionForWatch(
   emitVerbose: WatchVerboseEmitter,
   startedWorktree: string,
   startedBranch: string | null,
+  startedHead: string | null,
 ) {
   const events = createWatchEventQueue(input.signal)
   const watchers = await createRepositoryMetadataWatchers(context, events, emitVerbose)
@@ -510,6 +553,7 @@ async function resolveAgentBranchSessionForWatch(
         context,
         startedWorktree,
         startedBranch,
+        startedHead,
         preparedReviewBranch,
         emitVerbose,
       })
@@ -688,25 +732,53 @@ async function discardSelfGeneratedWatchEvents(
   )
 }
 
-/** Restores the starting branch if watch stops before a durable session exists. */
+/** Restores the starting checkout if watch stops before a durable session exists. */
 async function restorePreparedBranchRefPreviewForWatch(input: {
   context: RuntimeContext
   startedWorktree: string
   startedBranch: string | null
+  startedHead: string | null
   preparedReviewBranch: string
   emitVerbose: WatchVerboseEmitter
 }) {
   if (!input.startedBranch) {
-    return "No starting branch was checked out, so no branch was restored."
+    if (input.startedHead) {
+      await git(input.startedWorktree, ["checkout", "--detach", input.startedHead], input.context, {
+        stdin: "ignore",
+      })
+    }
+    const deleteNote = await deleteReviewBranchForWatchExit({
+      reviewWorktree: input.startedWorktree,
+      reviewBranch: input.preparedReviewBranch,
+      context: input.context,
+    })
+    const restoreNote = input.startedHead
+      ? "Restored detached HEAD."
+      : "No starting branch was checked out, so no branch was restored."
+    return [restoreNote, deleteNote].filter(Boolean).join(" ")
   }
 
   const currentBranch = await resolveCurrentBranch(input.startedWorktree, input.context)
   if (currentBranch !== input.preparedReviewBranch) {
-    return null
+    return await deleteReviewBranchForWatchExit({
+      reviewWorktree: input.startedWorktree,
+      reviewBranch: input.preparedReviewBranch,
+      context: input.context,
+    })
   }
 
   if (!(await isWorktreeClean(input.startedWorktree, input.context))) {
-    return `Left ${input.preparedReviewBranch} checked out because the review worktree has local changes.`
+    const deleteNote = await deleteReviewBranchForWatchExit({
+      reviewWorktree: input.startedWorktree,
+      reviewBranch: input.preparedReviewBranch,
+      context: input.context,
+    })
+    return [
+      `Left review worktree content in place because ${input.preparedReviewBranch} has local changes.`,
+      deleteNote,
+    ]
+      .filter(Boolean)
+      .join(" ")
   }
 
   await git(input.startedWorktree, ["checkout", input.startedBranch], input.context, {
@@ -715,7 +787,35 @@ async function restorePreparedBranchRefPreviewForWatch(input: {
   await input.emitVerbose(
     `restored ${input.startedBranch} after stopping before a session was ready.`,
   )
-  return `Checked out ${input.startedBranch}.`
+  const deleteNote = await deleteReviewBranchForWatchExit({
+    reviewWorktree: input.startedWorktree,
+    reviewBranch: input.preparedReviewBranch,
+    context: input.context,
+  })
+  return [`Checked out ${input.startedBranch}.`, deleteNote].filter(Boolean).join(" ")
+}
+
+/** Removes the disposable review branch at the end of watch cleanup. */
+async function deleteReviewBranchForWatchExit(input: {
+  reviewWorktree: string
+  reviewBranch: string
+  context: RuntimeContext
+}) {
+  if (!(await branchExists(input.reviewWorktree, input.reviewBranch, input.context))) {
+    return null
+  }
+
+  await git(input.reviewWorktree, ["branch", "-D", input.reviewBranch], input.context)
+  return `Deleted ${input.reviewBranch}.`
+}
+
+/** Ensures watch only operates from the human review worktree. */
+function assertWatchStartedInReviewWorktree(session: SessionState, startedWorktree: string) {
+  if (startedWorktree !== session.reviewWorktree) {
+    throw new UserError(
+      `watch must run from the review worktree ${session.reviewWorktree}; started from ${startedWorktree}.`,
+    )
+  }
 }
 
 /** Describes the safe branch-ref preparation state in the first waiting message. */

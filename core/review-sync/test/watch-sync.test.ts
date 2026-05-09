@@ -7,6 +7,7 @@ import {
   cleanupReviewSyncFixtures,
   createDeferred,
   createStartedFixture,
+  refExists,
   runGit,
   runWatchUntilNextSync,
   sleep,
@@ -19,6 +20,7 @@ test("watch syncs when the review worktree changes", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
     await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
   })
@@ -26,25 +28,30 @@ test("watch syncs when the review worktree changes", async () => {
   expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+  expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+    false,
+  )
 })
 
 test("watch syncs when the agent worktree changes", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
     await writeText(join(fixture.agentDir, "shared.txt"), "agent edit\n")
   })
 
   expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
-  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("base\n")
 })
 
 test("watch syncs when the agent branch HEAD changes", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
     await runGit(fixture.agentDir, ["commit", "--allow-empty", "-m", "empty"])
   })
@@ -57,6 +64,7 @@ test("watch waits for the expected agent checkout before syncing", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
   const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
@@ -92,7 +100,7 @@ test("watch waits for the expected agent checkout before syncing", async () => {
     expect(controller.signal.reason).not.toBe(timeoutReason)
     expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
     expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
-    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("base\n")
   } finally {
     clearTimeout(timeout)
   }

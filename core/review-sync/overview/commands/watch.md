@@ -5,9 +5,11 @@
     review changes continue?
 
 - **Inputs and selection**
+  - `watch` runs from the human review worktree, not the agent worktree.
+  - If the starting checkout is attached to a branch, that branch must not be a `review-sync/*` branch.
   - With `[agent-branch]`, `watch` starts or reuses the session for that branch before watching.
   - Without an agent branch, `watch` infers an existing session from the current
-    worktree or checked-out branch.
+    review worktree.
   - `--verbose` adds progress diagnostics about session resolution, watched
     changes, sync decisions, and cleanup.
 
@@ -45,8 +47,8 @@
 
 - **Exit behavior**
   - When stopped after a session is active, `watch` pauses the session.
-  - If `watch` started from the review worktree on another branch, it tries to
-    restore that starting branch.
+  - It tries to restore the review worktree checkout that was active at startup.
+  - Immediately before exit, it deletes the disposable `review-sync/*` review branch.
   - If cleanup cannot fully complete, the final result reports what remains for the user to handle.
   - If watch stops before a durable session is ready, it tries to undo any safe
     review-branch preview checkout.
