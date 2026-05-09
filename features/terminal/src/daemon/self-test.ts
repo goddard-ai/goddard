@@ -1,7 +1,7 @@
 /** Daemon terminal PTY smoke check used by tests and standalone diagnostics. */
 import type { TerminalDaemonEvent } from "@goddard-ai/schema/daemon/terminals"
 
-import { DaemonTerminalManager } from "./runtime.ts"
+import { DaemonTerminalConnection } from "./runtime.ts"
 
 const DEFAULT_TIMEOUT_MS = 5_000
 const MARKER = "__goddard_terminal_runtime_ok__"
@@ -15,10 +15,10 @@ export type TerminalRuntimeCheckResult = {
   remainingTerminals: number
 }
 
-/** Runs spawn, write, resize, and close through the daemon terminal manager. */
+/** Runs spawn, write, resize, and close through one daemon terminal connection. */
 export async function runTerminalRuntimeCheck() {
   const events: TerminalDaemonEvent[] = []
-  const manager = new DaemonTerminalManager({
+  const connection = new DaemonTerminalConnection({
     connectionId: "terminal-runtime-check-connection",
     onEvent: (event) => {
       events.push(event)
@@ -28,7 +28,7 @@ export async function runTerminalRuntimeCheck() {
   const instanceId = "terminal-runtime-check"
 
   try {
-    manager.create({
+    connection.create({
       connectionId,
       instanceId,
       options: {
@@ -39,7 +39,7 @@ export async function runTerminalRuntimeCheck() {
         },
       },
     })
-    manager.resize({
+    connection.resize({
       connectionId,
       instanceId,
       dimensions: {
@@ -47,21 +47,21 @@ export async function runTerminalRuntimeCheck() {
         rows: 30,
       },
     })
-    manager.write({
+    connection.write({
       connectionId,
       instanceId,
       data: buildMarkerCommand(),
     })
 
     await waitFor(() => collectOutput(events).includes(MARKER), DEFAULT_TIMEOUT_MS)
-    manager.close({
+    connection.close({
       connectionId,
       instanceId,
     })
 
-    return buildResult(events, manager.size)
+    return buildResult(events, connection.size)
   } finally {
-    manager.closeAll()
+    connection.closeAll()
   }
 }
 

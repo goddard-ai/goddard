@@ -1,4 +1,4 @@
-/** Daemon-owned terminal runtime wrappers around `bun-pty`. */
+/** Daemon-owned terminal wrappers around `bun-pty`. */
 import type {
   TerminalCloseRequest,
   TerminalConnectionId,
@@ -21,13 +21,13 @@ const DEFAULT_TERMINAL_DIMENSIONS = {
   rows: 24,
 }
 
-/** Options used to connect the daemon terminal manager to its owning terminal event stream. */
-export type DaemonTerminalManagerOptions = {
+/** Options used to connect one daemon terminal connection to its owning event stream. */
+export type DaemonTerminalConnectionOptions = {
   connectionId: TerminalConnectionId
   onEvent?: (event: TerminalDaemonEvent) => void
 }
 
-/** Error raised when a terminal control request cannot be applied to daemon runtime state. */
+/** Error raised when a terminal control request cannot be applied to daemon terminal state. */
 export class DaemonTerminalError extends Error {
   readonly code: TerminalErrorCode
   readonly connectionId: TerminalConnectionId | undefined
@@ -48,23 +48,23 @@ export class DaemonTerminalError extends Error {
 }
 
 /** Daemon-side owner for the PTYs created by one terminal stream connection. */
-export class DaemonTerminalManager {
-  readonly #runtimes = new Map<TerminalInstanceId, DaemonTerminalRuntime>()
+export class DaemonTerminalConnection {
+  readonly #terminals = new Map<TerminalInstanceId, DaemonTerminal>()
   readonly #connectionId: TerminalConnectionId
   readonly #onEvent: (event: TerminalDaemonEvent) => void
 
-  constructor(options: DaemonTerminalManagerOptions) {
+  constructor(options: DaemonTerminalConnectionOptions) {
     this.#connectionId = options.connectionId
     this.#onEvent = options.onEvent ?? (() => {})
   }
 
   get size() {
-    return this.#runtimes.size
+    return this.#terminals.size
   }
 
   create(request: TerminalCreateRequest) {
     this.#assertConnection(request.connectionId)
-    if (this.#runtimes.has(request.instanceId)) {
+    if (this.#terminals.has(request.instanceId)) {
       throw new DaemonTerminalError(
         "duplicate-instance",
         `Terminal instance ${request.instanceId} already exists on this connection.`,
@@ -73,15 +73,15 @@ export class DaemonTerminalManager {
       )
     }
 
-    let runtime: DaemonTerminalRuntime
+    let terminal: DaemonTerminal
     try {
-      runtime = new DaemonTerminalRuntime(
+      terminal = new DaemonTerminal(
         this.#connectionId,
         request.instanceId,
         request.options ?? {},
         (event) => {
           if (event.type === "terminal.exit") {
-            this.#runtimes.delete(event.instanceId)
+            this.#terminals.delete(event.instanceId)
           }
           this.#onEvent(event)
         },
@@ -96,31 +96,31 @@ export class DaemonTerminalManager {
         request.instanceId,
       )
     }
-    this.#runtimes.set(request.instanceId, runtime)
+    this.#terminals.set(request.instanceId, terminal)
     this.#onEvent({
       type: "terminal.created",
       connectionId: this.#connectionId,
-      terminal: runtime.metadata,
+      terminal: terminal.metadata,
     })
-    return runtime.metadata
+    return terminal.metadata
   }
 
   write(request: TerminalInputRequest) {
     this.#assertConnection(request.connectionId)
-    this.#getRuntime(request.instanceId).write(request.data)
+    this.#getTerminal(request.instanceId).write(request.data)
   }
 
   resize(request: TerminalResizeRequest) {
     this.#assertConnection(request.connectionId)
-    this.#getRuntime(request.instanceId).resize(request.dimensions)
+    this.#getTerminal(request.instanceId).resize(request.dimensions)
   }
 
   restart(request: TerminalRestartRequest) {
     this.#assertConnection(request.connectionId)
-    const existing = this.#getRuntime(request.instanceId)
+    const existing = this.#getTerminal(request.instanceId)
     const options = request.options ?? existing.options
     existing.close()
-    this.#runtimes.delete(request.instanceId)
+    this.#terminals.delete(request.instanceId)
     return this.create({
       connectionId: this.#connectionId,
       instanceId: request.instanceId,
@@ -130,22 +130,22 @@ export class DaemonTerminalManager {
 
   close(request: TerminalCloseRequest) {
     this.#assertConnection(request.connectionId)
-    const runtime = this.#getRuntime(request.instanceId)
-    runtime.close()
-    this.#runtimes.delete(request.instanceId)
+    const terminal = this.#getTerminal(request.instanceId)
+    terminal.close()
+    this.#terminals.delete(request.instanceId)
   }
 
   closeAll() {
-    const runtimes = [...this.#runtimes.values()]
-    this.#runtimes.clear()
-    for (const runtime of runtimes) {
-      runtime.close()
+    const terminals = [...this.#terminals.values()]
+    this.#terminals.clear()
+    for (const terminal of terminals) {
+      terminal.close()
     }
   }
 
-  #getRuntime(instanceId: TerminalInstanceId) {
-    const runtime = this.#runtimes.get(instanceId)
-    if (!runtime) {
+  #getTerminal(instanceId: TerminalInstanceId) {
+    const terminal = this.#terminals.get(instanceId)
+    if (!terminal) {
       throw new DaemonTerminalError(
         "unknown-instance",
         `Terminal instance ${instanceId} does not exist on this connection.`,
@@ -153,22 +153,22 @@ export class DaemonTerminalManager {
         instanceId,
       )
     }
-    return runtime
+    return terminal
   }
 
   #assertConnection(connectionId: TerminalConnectionId) {
     if (connectionId !== this.#connectionId) {
       throw new DaemonTerminalError(
         "unknown-connection",
-        `Terminal connection ${connectionId} is not owned by this manager.`,
+        `Terminal connection ${connectionId} does not match this terminal connection.`,
         connectionId,
       )
     }
   }
 }
 
-/** Runtime wrapper for one live `bun-pty` instance. */
-class DaemonTerminalRuntime {
+/** Wrapper for one live `bun-pty` terminal. */
+class DaemonTerminal {
   readonly connectionId: TerminalConnectionId
   readonly instanceId: TerminalInstanceId
   readonly options: TerminalSpawnOptions

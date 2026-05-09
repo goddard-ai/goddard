@@ -1,4 +1,4 @@
-/** Connection-scoped daemon terminal manager registry for IPC request and stream handlers. */
+/** Connection-scoped daemon terminal registry for IPC request and stream handlers. */
 import { randomUUID } from "node:crypto"
 import type {
   TerminalCloseRequest,
@@ -15,7 +15,7 @@ import type {
   TerminalRestartRequest,
 } from "@goddard-ai/schema/daemon/terminals"
 
-import { DaemonTerminalError, DaemonTerminalManager } from "./runtime.ts"
+import { DaemonTerminalConnection, DaemonTerminalError } from "./runtime.ts"
 
 /** Options that connect terminal connection state to the daemon IPC stream publisher. */
 export type DaemonTerminalConnectionRegistryOptions = {
@@ -24,8 +24,8 @@ export type DaemonTerminalConnectionRegistryOptions = {
 
 /** Tracks active terminal connections and enforces connection-local instance ownership. */
 export class DaemonTerminalConnectionRegistry {
-  readonly #managers = new Map<TerminalConnectionId, DaemonTerminalManager>()
-  readonly #streamConnections = new Set<TerminalConnectionId>()
+  readonly #terminalConnections = new Map<TerminalConnectionId, DaemonTerminalConnection>()
+  readonly #subscribedConnections = new Set<TerminalConnectionId>()
   readonly #publishEvent: (event: TerminalDaemonEvent) => void
 
   constructor(options: DaemonTerminalConnectionRegistryOptions) {
@@ -33,14 +33,14 @@ export class DaemonTerminalConnectionRegistry {
   }
 
   get size() {
-    return this.#managers.size
+    return this.#terminalConnections.size
   }
 
   connect(_request: TerminalConnectRequest = {}): TerminalConnectResponse {
     const connectionId = `term-${randomUUID()}`
-    this.#managers.set(
+    this.#terminalConnections.set(
       connectionId,
-      new DaemonTerminalManager({
+      new DaemonTerminalConnection({
         connectionId,
         onEvent: (event) => this.#publishEvent(event),
       }),
@@ -50,26 +50,26 @@ export class DaemonTerminalConnectionRegistry {
 
   create(request: TerminalCreateRequest): TerminalCreateResponse {
     return {
-      terminal: this.#getManager(request.connectionId).create(request),
+      terminal: this.#getConnection(request.connectionId).create(request),
     }
   }
 
   write(request: TerminalInputRequest) {
-    this.#getManager(request.connectionId).write(request)
+    this.#getConnection(request.connectionId).write(request)
   }
 
   resize(request: TerminalResizeRequest) {
-    this.#getManager(request.connectionId).resize(request)
+    this.#getConnection(request.connectionId).resize(request)
   }
 
   restart(request: TerminalRestartRequest): TerminalCreateResponse {
     return {
-      terminal: this.#getManager(request.connectionId).restart(request),
+      terminal: this.#getConnection(request.connectionId).restart(request),
     }
   }
 
   close(request: TerminalCloseRequest) {
-    this.#getManager(request.connectionId).close(request)
+    this.#getConnection(request.connectionId).close(request)
   }
 
   disconnect(request: TerminalDisconnectRequest) {
@@ -83,7 +83,7 @@ export class DaemonTerminalConnectionRegistry {
         "Terminal event stream filter is missing.",
       )
     }
-    this.#getManager(filter.connectionId)
+    this.#getConnection(filter.connectionId)
   }
 
   streamConnected(filter: TerminalEventStreamFilter | undefined) {
@@ -93,15 +93,15 @@ export class DaemonTerminalConnectionRegistry {
         "Terminal event stream filter is missing.",
       )
     }
-    this.#getManager(filter.connectionId)
-    if (this.#streamConnections.has(filter.connectionId)) {
+    this.#getConnection(filter.connectionId)
+    if (this.#subscribedConnections.has(filter.connectionId)) {
       throw new DaemonTerminalError(
         "duplicate-instance",
         `Terminal connection ${filter.connectionId} already has an active event stream.`,
         filter.connectionId,
       )
     }
-    this.#streamConnections.add(filter.connectionId)
+    this.#subscribedConnections.add(filter.connectionId)
   }
 
   streamDisconnected(filter: TerminalEventStreamFilter | undefined) {
@@ -112,8 +112,8 @@ export class DaemonTerminalConnectionRegistry {
   }
 
   closeAll() {
-    while (this.#managers.size > 0) {
-      const connectionId = this.#managers.keys().next().value
+    while (this.#terminalConnections.size > 0) {
+      const connectionId = this.#terminalConnections.keys().next().value
       if (!connectionId) {
         return
       }
@@ -136,21 +136,21 @@ export class DaemonTerminalConnectionRegistry {
     })
   }
 
-  #getManager(connectionId: TerminalConnectionId) {
-    const manager = this.#managers.get(connectionId)
-    if (!manager) {
+  #getConnection(connectionId: TerminalConnectionId) {
+    const connection = this.#terminalConnections.get(connectionId)
+    if (!connection) {
       throw new DaemonTerminalError(
         "unknown-connection",
         `Terminal connection ${connectionId} is not active.`,
         connectionId,
       )
     }
-    return manager
+    return connection
   }
 
   #disconnect(connectionId: TerminalConnectionId, requireActive: boolean) {
-    const manager = this.#managers.get(connectionId)
-    if (!manager) {
+    const connection = this.#terminalConnections.get(connectionId)
+    if (!connection) {
       if (requireActive) {
         throw new DaemonTerminalError(
           "unknown-connection",
@@ -161,8 +161,8 @@ export class DaemonTerminalConnectionRegistry {
       return
     }
 
-    this.#streamConnections.delete(connectionId)
-    this.#managers.delete(connectionId)
-    manager.closeAll()
+    this.#subscribedConnections.delete(connectionId)
+    this.#terminalConnections.delete(connectionId)
+    connection.closeAll()
   }
 }
