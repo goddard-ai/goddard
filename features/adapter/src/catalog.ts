@@ -1,15 +1,13 @@
-/** Shared ACP registry catalog parsing helpers used by both runtime and code generation. */
+/** Shared ACP adapter catalog parsing and merge helpers for the adapter feature. */
 import { access, readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
   AgentDistribution as AgentDistributionSchema,
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
-import {
-  AdapterCatalogEntry,
-  type AdapterCatalogEntry as AdapterCatalogEntryType,
-} from "@goddard-ai/schema/daemon"
 import { z } from "zod"
+
+import { AdapterCatalogEntry, type AdapterCatalogEntryType } from "./schema.ts"
 
 const UpstreamRegistryAgent = AgentDistributionSchema.extend({
   website: z.url().optional(),
@@ -74,9 +72,7 @@ export function mergeAdapterCatalogEntries(
 }
 
 /** Reads one registry-like directory tree into the shared adapter catalog shape. */
-export async function readAdapterCatalogFromRegistryDir(
-  rootDir: string,
-): Promise<AdapterCatalogEntry[]> {
+export async function readAdapterCatalogFromRegistryDir(rootDir: string) {
   const entries = await readdir(rootDir, { withFileTypes: true })
   const adapters = await Promise.all(
     entries
@@ -90,13 +86,15 @@ export async function readAdapterCatalogFromRegistryDir(
 }
 
 /** Parses one registry adapter directory, including its sibling icon asset when present. */
-async function readRegistryAgent(agentDir: string): Promise<AdapterCatalogEntry | null> {
+async function readRegistryAgent(agentDir: string) {
   const manifestPath = join(agentDir, "agent.json")
   if ((await pathExists(manifestPath)) === false) {
     return null
   }
 
-  const parsed = UpstreamRegistryAgent.parse(JSON.parse(await readFile(manifestPath, "utf8")))
+  const parsed: UpstreamRegistryAgent = UpstreamRegistryAgent.parse(
+    JSON.parse(await readFile(manifestPath, "utf8")),
+  )
   return AdapterCatalogEntry.parse({
     ...parsed,
     icon: (await readSvgIconDataUrl(agentDir)) ?? parsed.icon,

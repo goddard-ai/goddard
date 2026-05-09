@@ -1,6 +1,5 @@
+import { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { z } from "zod"
-
-import { AgentDistribution } from "./agent-distribution.ts"
 
 /** Request payload used to list adapters available to one project or global session launch flow. */
 export const ListAdaptersRequest = z.strictObject({
@@ -8,6 +7,7 @@ export const ListAdaptersRequest = z.strictObject({
 })
 
 export type ListAdaptersRequest = z.infer<typeof ListAdaptersRequest>
+export type ListAdaptersRequestType = ListAdaptersRequest
 
 /** One adapter entry surfaced to SDK and app consumers for launch selection and install flows. */
 export const AdapterCatalogEntry = AgentDistribution.extend({
@@ -25,6 +25,7 @@ export const AdapterCatalogEntry = AgentDistribution.extend({
 })
 
 export type AdapterCatalogEntry = z.infer<typeof AdapterCatalogEntry>
+export type AdapterCatalogEntryType = AdapterCatalogEntry
 
 /** Response payload returned after reading the effective adapter catalog for one launch context. */
 export type ListAdaptersResponse = {

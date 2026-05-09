@@ -39,6 +39,7 @@ Use this reference for repository-wide contribution guidance that intentionally 
 - Start new feature packages with `bun run scaffold:feature`. In noninteractive agent workflows, use flags such as `--name`, `--layers daemon,sdk,app`, `--schema`, `--daemon-ipc`, `--styled-system`, `--skip-install`, or `--dry-run`.
 - Scaffolded packages are inert until a public composition root imports one of their entrypoints. Do not register a feature in `core/sdk`, `core/daemon`, or `app` unless the task includes making that feature part of the supported product surface.
 - Feature packages import plugin support packages and shared contract packages, not the public composition roots that bundle the feature. For example, import `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, `@goddard-ai/app-plugin`, `@goddard-ai/ipc`, and shared schema packages instead of importing `@goddard-ai/sdk` from the feature package.
+- Feature packages self-declare product schemas from their own `src/schema.ts` and package `./schema` entrypoint. Do not add feature-owned schemas to `@goddard-ai/schema`; that package is reserved for core daemon/backend/shared substrate schemas.
 - App feature entrypoints must stay SDK-agnostic at the package level. Express SDK needs as type-level app plugin requirements or app composition metadata, and let the static app composition root provide the actual SDK instance.
 - Daemon feature dependencies are explicit. A daemon plugin may expose a named `provides` map and list other daemon plugins in `consumes`; consumed feature extensions appear as direct `context.<feature>` fields in `setup(context)`. Do not introduce package-level cycles between feature packages.
 - Shared daemon IPC contracts belong in `src/daemon-ipc.ts` and use `defineIpcSchema()` from `@goddard-ai/ipc`; public composition roots combine fragments with `composeIpcSchemas()`.
@@ -47,6 +48,7 @@ Use this reference for repository-wide contribution guidance that intentionally 
 ## Testing Policy
 
 - Add or update tests when behavior changes, unless a deeper `AGENTS.md` narrows that subtree.
+- Do not test feature-package plugin seams directly. If feature logic is complex or critical enough to test, keep that logic in a clearly named module separate from the plugin entrypoint and test the logic module directly.
 - Prefer small tests around observable behavior. Do not rewrite tests solely to match refactors or introduce a large new testing pattern in a narrow area.
 - Keep the rest of the test suite lean and intentional.
 - Do not use repository-local `bun:test` mocking or stubbing APIs such as `vi.mock`, `vi.doMock`, `vi.hoisted`, `vi.fn`, `vi.spyOn`, `vi.mocked`, `vi.stubGlobal`, `vi.stubEnv`, `vi.unstubAllGlobals`, or `vi.unstubAllEnvs`, or similar helper methods such as `mockImplementation`, `mockResolvedValue`, or `mockReturnValue`, except at explicit non-local third-party integration boundaries.

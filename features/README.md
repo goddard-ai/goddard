@@ -20,6 +20,9 @@ feature becomes part of a supported product surface.
 - Feature packages own product-specific schemas, daemon IPC contracts, daemon
   handlers, SDK namespace factories, app metadata, feature-owned helpers, and
   feature-specific JSON config schemas.
+- Feature schemas are self-declared from the package's own `./schema`
+  entrypoint. `@goddard-ai/schema` is reserved for core
+  daemon/backend/shared substrate schemas, not feature-owned product schemas.
 - Layer packages own the substrate that composes and runs those contributions:
   SDK construction, daemon process and persistence substrate, app shell
   placement, backend authority, JSON config file loading/persistence, and
@@ -35,5 +38,9 @@ feature becomes part of a supported product surface.
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
   precedence, validation, persistence, and hot reload.
+
+`features/adapter` owns adapter catalog IPC, SDK namespace construction, and
+catalog merge/parsing helpers. Daemon-owned registry cache and JSON config
+loading remain in core packages.
 
 `features/inbox` is the current reference daemon + SDK + app feature package.

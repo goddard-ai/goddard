@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import {
@@ -127,10 +128,7 @@ export class GoddardSdk {
 
   @lazy
   get adapter() {
-    return {
-      /** Lists adapters available for one project or global launch flow. */
-      list: defineRequest(this.#client, "adapter.list"),
-    }
+    return adapterSdkPlugin.create({ client: this.#client })
   }
 
   @lazy

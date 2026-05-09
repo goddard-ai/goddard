@@ -2,7 +2,7 @@
  * This file is auto-generated. Do not edit manually.
  */
 
-import type { AdapterCatalogEntry } from "@goddard-ai/schema/daemon"
+import type { AdapterCatalogEntry } from "@goddard-ai/adapter/schema"
 
 export const ACPRegistryFallbackCatalog: AdapterCatalogEntry[] = [
   {

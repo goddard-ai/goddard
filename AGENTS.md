@@ -20,6 +20,7 @@
 - When adding new UI components or interactive elements in `app/`, use the local `pandark-ui` skill to align Panda CSS and Ark UI composition with the existing design system.
 - New cross-layer product capabilities should normally start as internal feature packages under `features/<name>`. Use `bun run scaffold:feature` for a consistent package shape, then wire selected entrypoints into the public composition roots.
 - Feature packages must import thin plugin support packages such as `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and `@goddard-ai/app-plugin` instead of the public packages that bundle them.
+- Feature packages self-declare their schemas from their own `schema` entrypoint. Do not add feature-owned schemas to `@goddard-ai/schema`; that package is reserved for core daemon/backend/shared substrate schemas.
 - `spec/` is the canonical source of product behavior and intent.
 - Do not edit `spec/` unless explicitly asked.
 - Do not knowingly let code, docs, or tests diverge from `spec/`.
@@ -76,6 +77,7 @@
 - When in doubt, do not commit the test; extract only the smallest stable regression assertion worth preserving.
 - When running the full workspace test suite from the repository root, use `bun run test`.
 - Do not use `bun test` at the repository root; it bypasses the workspace package test scripts and monorepo orchestration.
+- Do not test feature-package plugin seams directly. If feature logic is complex or critical enough to test, put it in a clearly named module outside the plugin entrypoint and test that module directly.
 
 ## Documentation Routing
 

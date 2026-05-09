@@ -1,5 +1,3 @@
-export { AdapterCatalogEntry, ListAdaptersRequest } from "./daemon-adapters.ts"
-export type * from "./daemon-adapters.ts"
 export type * from "./daemon/actions.ts"
 export {
   BulkUpdateInboxItemsRequest,

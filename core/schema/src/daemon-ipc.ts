@@ -1,10 +1,10 @@
+import { adapterIpcSchema } from "@goddard-ai/adapter/daemon-ipc"
 import { inboxIpcSchema } from "@goddard-ai/inbox/daemon-ipc"
 import { $type, composeIpcSchemas, defineIpcSchema, IpcSchema } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { DaemonSessionIdParams } from "./common/params.ts"
-import { ListAdaptersRequest, type ListAdaptersResponse } from "./daemon-adapters.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
   GetLoopRequest,
@@ -103,10 +103,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
     },
     "auth.logout": {
       response: $type<{ success: true }>(),
-    },
-    "adapter.list": {
-      payload: ListAdaptersRequest,
-      response: $type<ListAdaptersResponse>(),
     },
     "pr.submit": {
       payload: SubmitPrRequest.extend({
@@ -306,5 +302,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
 /** IPC contract map shared by the daemon client and server. */
 export const daemonIpcSchema = composeIpcSchemas([
   coreDaemonIpcSchema,
+  adapterIpcSchema,
   inboxIpcSchema,
 ]) satisfies IpcSchema

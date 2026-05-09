@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
 import * as acp from "@agentclientprotocol/sdk"
-import { resolveDefaultAgent } from "@goddard-ai/config"
+import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { createInboxRequestHandlers } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
@@ -21,10 +21,6 @@ import { db } from "../persistence/store.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createSessionManager, type SessionManager } from "../session/manager.ts"
-import {
-  createConfigAdapterCatalogEntries,
-  mergeAdapterCatalogEntries,
-} from "../session/registry-catalog.ts"
 import { createACPRegistryService } from "../session/registry.ts"
 import {
   discoverWorkforceInitCandidates,
@@ -189,6 +185,7 @@ export async function startDaemonServer(
 
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),
+    ...adapterPlugin.createRequestHandlers({ registryService, configManager }),
     "auth.device.start": async (payload) => client.auth.startDeviceFlow(payload),
     "auth.device.complete": async (payload) => {
       const session = await client.auth.completeDeviceFlow(payload)
@@ -200,27 +197,6 @@ export async function startDaemonServer(
       await client.auth.logout()
       db.metadata.delete("authToken")
       return { success: true as const }
-    },
-    "adapter.list": async ({ cwd }) => {
-      const [registrySnapshot, resolvedConfig] = await Promise.all([
-        registryService.listAdapters(),
-        cwd ? configManager.getRootConfig(cwd).then((snapshot) => snapshot.config) : undefined,
-      ])
-      const mergedAdapters = mergeAdapterCatalogEntries(
-        registrySnapshot.adapters,
-        createConfigAdapterCatalogEntries(resolvedConfig?.registry),
-      )
-      const defaultAgent = await resolveDefaultAgent(resolvedConfig)
-
-      return {
-        ...registrySnapshot,
-        adapters: mergedAdapters,
-        defaultAdapterId:
-          typeof defaultAgent === "string" &&
-          mergedAdapters.some((adapter) => adapter.id === defaultAgent)
-            ? defaultAgent
-            : null,
-      }
     },
     "pr.submit": async (payload) => {
       const session = await getSessionByToken(payload.token)

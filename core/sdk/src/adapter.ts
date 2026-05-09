@@ -2,4 +2,4 @@ export type {
   AdapterCatalogEntry,
   ListAdaptersRequest,
   ListAdaptersResponse,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/adapter/schema"
