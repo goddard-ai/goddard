@@ -191,9 +191,6 @@ export default {
     listStyle: "none",
     margin: "0",
     padding: "0",
-    "& > li:last-child [data-inbox-row='true']": {
-      borderBottom: "none",
-    },
   }),
   row: css({
     display: "grid",
@@ -204,6 +201,9 @@ export default {
     paddingInline: "8px",
     paddingBlock: "8px",
     borderBottom: "1px solid {colors.border}",
+    "li:last-child > &": {
+      borderBottom: "none",
+    },
   }),
   rowOpenButton: css({
     display: "grid",
@@ -374,12 +374,12 @@ export default {
     transform: "translateX(4px)",
     transition:
       "opacity 140ms cubic-bezier(0.23, 1, 0.32, 1), transform 140ms cubic-bezier(0.23, 1, 0.32, 1)",
-    "[data-inbox-row='true']:hover &": {
+    _groupHover: {
       opacity: "1",
       pointerEvents: "auto",
       transform: "translateX(0)",
     },
-    "[data-inbox-row='true']:focus-within &": {
+    _groupFocusWithin: {
       opacity: "1",
       pointerEvents: "auto",
       transform: "translateX(0)",

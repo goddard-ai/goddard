@@ -1,4 +1,5 @@
 import type { InboxItem } from "@goddard-ai/schema/daemon"
+import { cx } from "@goddard-ai/styled-system/css"
 import { useState } from "preact/hooks"
 import {
   Archive,
@@ -107,7 +108,7 @@ export component InboxRow(props: {
     }
   }
 
-  <div class={styles.row} data-inbox-row="true">
+  <div class={cx(styles.row, "group")}>
     <div
       class={styles.rowOpenButton}
       role="button"
