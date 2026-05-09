@@ -18,7 +18,7 @@ import { SessionChat } from "./model.ts"
 import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
-import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
@@ -166,6 +166,7 @@ component LoadedSessionChatView(props: {
     } | null
   >(null)
   const [cancelRequestedTurnId, setCancelRequestedTurnId] = useState<string | null>(null)
+  const inbox = useInbox()
   const workbenchTabSet = useWorkbenchTabSet()
   const chat = useSigma(
     () => new SessionChat({
@@ -200,6 +201,10 @@ component LoadedSessionChatView(props: {
   const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
   useReportTabProject(resolvedProjectPath)
+
+  useEffect(() => {
+    void inbox.markSessionVisited(props.session.id)
+  }, [inbox, props.session.id])
 
   async function reconnectCurrentSession() {
     if (!canReconnect || activeHeaderAction) {

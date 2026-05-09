@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 
 import {
-  createRestoredAppModels,
+  createAppState,
   observeAppStateSnapshot,
   type PersistedAppStateSnapshot,
 } from "./app-state-persistence.ts"
@@ -40,10 +40,10 @@ test("navigation omits projects from the primary workbench items", () => {
 
 test("app state persistence observes captured navigation snapshots", async () => {
   ensureMatchMedia()
-  const appModels = createRestoredAppModels()
+  const appState = createAppState()
   const snapshots: PersistedAppStateSnapshot[] = []
   const observer = observeAppStateSnapshot(
-    appModels,
+    appState,
     async (snapshot) => {
       snapshots.push(snapshot)
     },
@@ -53,7 +53,7 @@ test("app state persistence observes captured navigation snapshots", async () =>
   )
 
   try {
-    appModels.navigation.selectNavItem("sessions")
+    appState.navigation.selectNavItem("sessions")
     await observer.flush()
 
     expect(snapshots).toHaveLength(1)
@@ -67,10 +67,10 @@ test("app state persistence observes captured navigation snapshots", async () =>
 
 test("app state persistence does not observe shortcut registry changes", async () => {
   ensureMatchMedia()
-  const appModels = createRestoredAppModels()
+  const appState = createAppState()
   const snapshots: PersistedAppStateSnapshot[] = []
   const observer = observeAppStateSnapshot(
-    appModels,
+    appState,
     async (snapshot) => {
       snapshots.push(snapshot)
     },

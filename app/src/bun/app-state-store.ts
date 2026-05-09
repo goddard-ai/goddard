@@ -11,10 +11,11 @@ export async function loadAppStateSnapshot() {
 
 /** Atomically writes the latest app-state snapshot to the Bun-host JSON file. */
 export async function writeAppStateSnapshot(snapshot: AppStateSnapshot) {
-  await writeJsonFile(getAppStatePath(), {
+  const file = AppStateFile.parse({
     version: APP_STATE_FILE_VERSION,
     savedAt: Date.now(),
     value: snapshot,
-  } satisfies AppStateFile)
+  })
+  await writeJsonFile(getAppStatePath(), file)
   return snapshot
 }
