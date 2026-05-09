@@ -1,6 +1,7 @@
 import path from "node:path"
 import { autocomplete, isCancel } from "@clack/prompts"
 
+import { getBranchHead } from "../git/refs"
 import {
   latestActedSprint,
   pushMissingLastSprintDiagnostic,
@@ -12,12 +13,18 @@ import { sprintStateDisplayPath, sprintStatePath } from "../state/paths"
 import type { SprintDiagnostic } from "../types"
 import type { HumanCommandInput, SprintCandidate } from "./types"
 
+type SprintSelectionOptions = {
+  finalizedPromptOnly?: boolean
+  finalizedOutputOnly?: boolean
+}
+
 /** Resolves the sprint state a human landing command should operate on. */
 export async function resolveSprintCandidate(
   rootDir: string,
   input: HumanCommandInput,
   currentBranch: string | null,
   diagnostics: SprintDiagnostic[],
+  options: SprintSelectionOptions = {},
 ) {
   if (input.sprint) {
     return readExplicitCandidate(rootDir, input.sprint, diagnostics)
@@ -37,11 +44,17 @@ export async function resolveSprintCandidate(
   if (inferred) {
     return inferred
   }
-  if (activeCandidates.length === 0) {
+  const promptCandidates = options.finalizedPromptOnly
+    ? await filterFinalizedCandidates(rootDir, activeCandidates)
+    : activeCandidates
+
+  if (promptCandidates.length === 0) {
     diagnostics.push({
       severity: "error",
       code: "missing_sprint_state",
-      message: "No active Git metadata sprint-branch/*/state.json files were found.",
+      message: options.finalizedPromptOnly
+        ? "No finalized active Git metadata sprint-branch/*/state.json files were found."
+        : "No active Git metadata sprint-branch/*/state.json files were found.",
     })
     return null
   }
@@ -58,7 +71,7 @@ export async function resolveSprintCandidate(
   const selected = await autocomplete({
     message: "Select sprint",
     placeholder: "Type to filter sprints...",
-    options: activeCandidates.map((candidate) => ({
+    options: promptCandidates.map((candidate) => ({
       value: candidate.sprint,
       label: candidate.sprint,
       hint: candidate.reviewBranch,
@@ -74,12 +87,17 @@ export async function resolveSprintCandidate(
     return null
   }
 
-  return activeCandidates.find((candidate) => candidate.sprint === selected) ?? null
+  return promptCandidates.find((candidate) => candidate.sprint === selected) ?? null
 }
 
 /** Lists available sprint candidates for non-interactive diagnostics. */
-export async function candidatesForOutput(rootDir: string) {
-  return (await readSprintCandidates(rootDir)).map((candidate) => ({
+export async function candidatesForOutput(rootDir: string, options: SprintSelectionOptions = {}) {
+  const candidates = await readSprintCandidates(rootDir)
+  const outputCandidates = options.finalizedOutputOnly
+    ? await filterFinalizedCandidates(rootDir, candidates)
+    : candidates
+
+  return outputCandidates.map((candidate) => ({
     sprint: candidate.sprint,
     statePath: candidate.stateRelativePath,
     reviewBranch: candidate.reviewBranch,
@@ -176,6 +194,39 @@ function statePathForDisplay(rootDir: string, statePath: string) {
     return path.join(".git", ...parts.slice(rootIndex))
   }
   return path.relative(rootDir, statePath)
+}
+
+async function filterFinalizedCandidates(rootDir: string, candidates: SprintCandidate[]) {
+  const checked = await Promise.all(
+    candidates.map(async (candidate) => ({
+      candidate,
+      finalized: await isFinalizedCandidate(rootDir, candidate),
+    })),
+  )
+  return checked.filter((entry) => entry.finalized).map((entry) => entry.candidate)
+}
+
+async function isFinalizedCandidate(rootDir: string, candidate: SprintCandidate) {
+  const { state } = candidate
+  if (
+    state.conflict ||
+    state.tasks.review ||
+    state.tasks.next ||
+    state.tasks.finishedUnreviewed.length > 0 ||
+    state.activeStashes.length > 0
+  ) {
+    return false
+  }
+
+  const reviewCommit = await getBranchHead(rootDir, state.branches.review)
+  const approvedCommit = await getBranchHead(rootDir, state.branches.approved)
+  const nextCommit = await getBranchHead(rootDir, state.branches.next)
+  return Boolean(
+    reviewCommit &&
+    approvedCommit &&
+    reviewCommit === approvedCommit &&
+    (!nextCommit || nextCommit === reviewCommit),
+  )
 }
 
 function inferSprintFromPath(rootDir: string, cwd: string) {

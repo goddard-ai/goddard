@@ -7,6 +7,7 @@
   - `<target>` is the branch that should receive finalized sprint content.
   - Uses [standard sprint selection](../sprint-selection.md).
   - The optional `name` argument is this command's explicit sprint selector.
+  - When prompting interactively, only finalized active sprints are listed.
 
 - **What it does**
   - Fast-forwards a human-selected target branch to finalized sprint review
