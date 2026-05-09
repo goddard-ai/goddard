@@ -204,10 +204,6 @@ export default {
     paddingInline: "8px",
     paddingBlock: "8px",
     borderBottom: "1px solid {colors.border}",
-    "@media (max-width: 760px)": {
-      gridTemplateColumns: "minmax(0, 1fr)",
-      alignItems: "start",
-    },
   }),
   rowOpenButton: css({
     display: "grid",
@@ -370,11 +366,23 @@ export default {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
+    flexWrap: "nowrap",
     gap: "4px",
     minWidth: "0",
-    "@media (max-width: 760px)": {
-      justifyContent: "flex-start",
-      paddingInlineStart: "34px",
+    opacity: "0",
+    pointerEvents: "none",
+    transform: "translateX(4px)",
+    transition:
+      "opacity 140ms cubic-bezier(0.23, 1, 0.32, 1), transform 140ms cubic-bezier(0.23, 1, 0.32, 1)",
+    "[data-inbox-row='true']:hover &": {
+      opacity: "1",
+      pointerEvents: "auto",
+      transform: "translateX(0)",
+    },
+    "[data-inbox-row='true']:focus-within &": {
+      opacity: "1",
+      pointerEvents: "auto",
+      transform: "translateX(0)",
     },
   }),
   rowActionButton: css({
