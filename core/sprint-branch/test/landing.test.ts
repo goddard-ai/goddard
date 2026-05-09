@@ -3,12 +3,13 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { executeCleanupOperations } from "../src/landing"
+import { executeCleanupOperations, executeLandOperations } from "../src/landing"
 import {
   branchExists,
   branchHead,
   cleanupTestRepos,
   commitAll,
+  createLinkedWorktree,
   createSprintRepo,
   currentBranch,
   diagnosticCodes,
@@ -193,6 +194,19 @@ describe("sprint-branch human landing commands", () => {
     expect(await branchExists(repo, "sprint/example/review")).toBe(false)
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
     expect(await branchExists(repo, "sprint/example/next")).toBe(false)
+  })
+
+  // Git refuses to check out a branch that another linked worktree already owns.
+  // Landing should recover by applying the fast-forward in that target worktree.
+  test("lands in target worktree when target branch is already checked out elsewhere", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+    const linkedWorktree = await createLinkedWorktree(repo, "sprint/example/review")
+    const reviewHead = await branchHead(repo, "sprint/example/review")
+
+    await executeLandOperations(linkedWorktree, "main", "sprint/example/review")
+
+    expect(await branchHead(repo, "main")).toBe(reviewHead)
+    expect(await currentBranch(repo)).toBe("main")
   })
 
   // Cleanup is destructive, so target containment is the key proof that deleting

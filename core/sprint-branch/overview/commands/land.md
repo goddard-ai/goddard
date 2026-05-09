@@ -12,6 +12,8 @@
   - Fast-forwards a human-selected target branch to finalized sprint review
     content.
   - Common target: `main`.
+  - If the target branch is already checked out in another linked worktree,
+    landing runs the fast-forward merge in that target worktree.
 
 - **What it changes**
   - The target branch moves to the finalized sprint content.

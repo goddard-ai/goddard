@@ -66,7 +66,7 @@ export async function associatedWorktrees(
   return worktrees
 }
 
-async function listWorktrees(rootDir: string) {
+export async function listWorktrees(rootDir: string) {
   const output = await runGit(rootDir, ["worktree", "list", "--porcelain"])
   const entries: WorktreeEntry[] = []
   let current: WorktreeEntry | null = null

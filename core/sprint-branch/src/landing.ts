@@ -1,10 +1,10 @@
 import * as fs from "node:fs/promises"
 
-import { runGit } from "./git/command"
+import { GitCommandError, runGit } from "./git/command"
 import { getBranchHead } from "./git/refs"
 import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
 import { confirmHumanAction } from "./landing/confirmation"
-import { formatHumanCommandReport, handleHumanGitError } from "./landing/report"
+import { handleHumanGitError } from "./landing/report"
 import { candidatesForOutput, resolveSprintCandidate } from "./landing/selection"
 import type {
   AssociatedWorktree,
@@ -14,7 +14,7 @@ import type {
   SprintLandReport,
 } from "./landing/types"
 import { pushCleanupDiagnostics, pushLandingDiagnostics } from "./landing/validation"
-import { associatedWorktrees, cleanupBranches } from "./landing/worktrees"
+import { associatedWorktrees, cleanupBranches, listWorktrees } from "./landing/worktrees"
 import { writeSprintLastActedAt } from "./state/activity"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
 import type { SprintBranchState, SprintDiagnostic } from "./types"
@@ -65,13 +65,40 @@ export async function runLand(input: LandInput) {
   }
 
   try {
-    await runGit(rootDir, ["checkout", input.target])
-    await runGit(rootDir, ["merge", "--ff-only", state.branches.review])
+    await executeLandOperations(rootDir, input.target, state.branches.review)
     await writeSprintLastActedAt(rootDir, state)
     return { ...report, executed: true } satisfies SprintLandReport
   } catch (error) {
     return handleHumanGitError(report, error)
   }
+}
+
+/** Executes an already-confirmed landing merge in the worktree that can own the target. */
+export async function executeLandOperations(
+  rootDir: string,
+  targetBranch: string,
+  reviewBranch: string,
+) {
+  try {
+    await runGit(rootDir, ["checkout", targetBranch])
+    await runGit(rootDir, ["merge", "--ff-only", reviewBranch])
+    return
+  } catch (error) {
+    if (!isTargetBranchUsedByAnotherWorktree(error, targetBranch)) {
+      throw error
+    }
+  }
+
+  const targetWorktree = (await listWorktrees(rootDir)).find(
+    (worktree) => worktree.branch === targetBranch,
+  )
+  if (!targetWorktree) {
+    throw new GitCommandError(["checkout", targetBranch], {
+      stderr: `Target branch ${targetBranch} is already checked out, but its worktree could not be found.`,
+      code: 1,
+    })
+  }
+  await runGit(targetWorktree.path, ["merge", "--ff-only", reviewBranch])
 }
 
 /** Deletes landed sprint branches and clean associated worktrees after review is on target. */
@@ -155,4 +182,13 @@ export async function executeCleanupOperations(
     await runGit(rootDir, ["branch", "-d", branch])
   }
   await fs.rm(await sprintStatePath(rootDir, state.sprint), { force: true })
+}
+
+function isTargetBranchUsedByAnotherWorktree(error: unknown, targetBranch: string) {
+  return (
+    error instanceof GitCommandError &&
+    error.args[0] === "checkout" &&
+    error.args[1] === targetBranch &&
+    error.stderr.includes(`'${targetBranch}' is already used by worktree`)
+  )
 }
