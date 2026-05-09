@@ -31,6 +31,7 @@ import type {
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
+  SessionSubpackagesRequest,
   ShutdownLoopRequest,
   ShutdownWorkforceRequest,
   StartLoopRequest,
@@ -166,6 +167,10 @@ function createSessionNamespace(client: DaemonIpcClient) {
     /** Loads launch-time adapter and repository capabilities before a session is created. */
     launchPreview: async (input: SessionLaunchPreviewRequest) =>
       client.send("session.launchPreview", input),
+
+    /** Discovers launchable subpackage working directories under one project cwd. */
+    subpackages: async (input: SessionSubpackagesRequest) =>
+      client.send("session.subpackages", input),
 
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: async (input: DaemonSessionIdParams) => client.send("session.diagnostics", input),

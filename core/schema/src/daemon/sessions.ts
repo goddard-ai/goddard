@@ -254,6 +254,26 @@ export const SessionLaunchPreviewRequest = z.strictObject({
 
 export type SessionLaunchPreviewRequest = z.infer<typeof SessionLaunchPreviewRequest>
 
+/** Request payload used to discover launchable subpackage directories under one project cwd. */
+export const SessionSubpackagesRequest = z.strictObject({
+  cwd: z.string(),
+})
+
+export type SessionSubpackagesRequest = z.infer<typeof SessionSubpackagesRequest>
+
+/** One package-boundary directory selectable as a session working directory. */
+export type SessionSubpackage = {
+  path: string
+  relativePath: string
+  name: string
+  manifestPath: string
+}
+
+/** Response payload returned after discovering launchable subpackage directories. */
+export type SessionSubpackagesResponse = {
+  subpackages: SessionSubpackage[]
+}
+
 /** Response payload returned after loading launch-time adapter and repository capabilities. */
 export type SessionLaunchPreviewResponse = {
   repoRoot: string | null

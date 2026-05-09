@@ -1716,6 +1716,97 @@ test("session.launchPreview loads adapter capabilities and repository branches f
   })
 })
 
+test("session.subpackages discovers package manifests breadth-first while skipping ignored directories", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  await mkdir(join(repoDir, "apps", "web", "nested", "tool"), { recursive: true })
+  await mkdir(join(repoDir, "packages", "api"), { recursive: true })
+  await mkdir(join(repoDir, "node_modules", "dep"), { recursive: true })
+  await mkdir(join(repoDir, ".hidden", "pkg"), { recursive: true })
+  await mkdir(join(repoDir, "dist", "pkg"), { recursive: true })
+  await mkdir(join(repoDir, "ignored", "pkg"), { recursive: true })
+  await writeFile(join(repoDir, "apps", "web", "package.json"), "{}", "utf-8")
+  await writeFile(join(repoDir, "packages", "api", "pyproject.toml"), "", "utf-8")
+  await writeFile(join(repoDir, "apps", "web", "nested", "tool", "go.mod"), "", "utf-8")
+  await writeFile(join(repoDir, "node_modules", "dep", "package.json"), "{}", "utf-8")
+  await writeFile(join(repoDir, ".hidden", "pkg", "package.json"), "{}", "utf-8")
+  await writeFile(join(repoDir, "dist", "pkg", "package.json"), "{}", "utf-8")
+  await writeFile(join(repoDir, "ignored", "pkg", "package.json"), "{}", "utf-8")
+  await writeFile(join(repoDir, ".gitignore"), "ignored/\n", "utf-8")
+
+  const response = await client.send("session.subpackages", {
+    cwd: repoDir,
+  })
+
+  expect(response.subpackages).toEqual([
+    {
+      path: join(repoDir, "apps", "web"),
+      relativePath: join("apps", "web"),
+      name: "web",
+      manifestPath: join(repoDir, "apps", "web", "package.json"),
+    },
+    {
+      path: join(repoDir, "packages", "api"),
+      relativePath: join("packages", "api"),
+      name: "api",
+      manifestPath: join(repoDir, "packages", "api", "pyproject.toml"),
+    },
+    {
+      path: join(repoDir, "apps", "web", "nested", "tool"),
+      relativePath: join("apps", "web", "nested", "tool"),
+      name: "tool",
+      manifestPath: join(repoDir, "apps", "web", "nested", "tool", "go.mod"),
+    },
+  ])
+})
+
+test("session.subpackages extends built-in manifests from local Goddard config", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const localConfigPath = getLocalConfigPath(repoDir)
+
+  await mkdir(dirname(localConfigPath), { recursive: true })
+  await writeFile(
+    localConfigPath,
+    JSON.stringify(
+      {
+        subpackages: {
+          manifests: ["project.toml", "meta/package.cfg"],
+        },
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+  await mkdir(join(repoDir, "services", "worker"), { recursive: true })
+  await mkdir(join(repoDir, "plugins", "tool", "meta"), { recursive: true })
+  await writeFile(join(repoDir, "services", "worker", "project.toml"), "", "utf-8")
+  await writeFile(join(repoDir, "plugins", "tool", "meta", "package.cfg"), "", "utf-8")
+
+  const response = await client.send("session.subpackages", {
+    cwd: repoDir,
+  })
+
+  expect(response.subpackages).toEqual([
+    {
+      path: join(repoDir, "plugins", "tool"),
+      relativePath: join("plugins", "tool"),
+      name: "tool",
+      manifestPath: join(repoDir, "plugins", "tool", "meta", "package.cfg"),
+    },
+    {
+      path: join(repoDir, "services", "worker"),
+      relativePath: join("services", "worker"),
+      name: "worker",
+      manifestPath: join(repoDir, "services", "worker", "project.toml"),
+    },
+  ])
+})
+
 test("session.create applies initial model and thinking configuration before the first prompt", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

@@ -432,6 +432,40 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session.subpackages forwards launch working directory discovery requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      subpackages: [
+        {
+          path: "/repo/packages/app",
+          relativePath: "packages/app",
+          name: "app",
+          manifestPath: "/repo/packages/app/package.json",
+        },
+      ],
+    })
+
+    await expect(
+      sdk.session.subpackages({
+        cwd: "/repo",
+      }),
+    ).resolves.toEqual({
+      subpackages: [
+        {
+          path: "/repo/packages/app",
+          relativePath: "packages/app",
+          name: "app",
+          manifestPath: "/repo/packages/app/package.json",
+        },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("session.subpackages", {
+      cwd: "/repo",
+    })
+  })
+
   test("deriveSessionLaunchModelConfig folds thinking suffixes into one selector", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
       models: {

@@ -296,6 +296,20 @@ export type SessionTitlesConfig = z.infer<typeof SessionTitlesConfig> & {
   generator?: ModelConfig
 }
 
+/** Schema for package-boundary discovery settings used by the launch-session flow. */
+export const SubpackagesConfig = z
+  .strictObject({
+    manifests: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        "Additional manifest filenames or relative manifest paths that mark subpackage directories.",
+      ),
+  })
+  .describe("Persisted subpackage discovery settings loaded from JSON.")
+
+export type SubpackagesConfig = z.infer<typeof SubpackagesConfig>
+
 /** Schema for the shared root config document. */
 export const UserConfig = z
   .strictObject({
@@ -308,6 +322,9 @@ export const UserConfig = z
     ),
     session: StaticSessionParams.optional().describe(
       "Default session settings applied to all sessions.",
+    ),
+    subpackages: SubpackagesConfig.optional().describe(
+      "Package-boundary discovery settings for launch-session subpackage selection.",
     ),
     actions: ActionConfig.optional().describe("Default settings for agent actions."),
     loops: LoopConfig.optional().describe("Default settings for long-running agent loops."),
@@ -373,5 +390,6 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   z.globalRegistry.add(WorktreeBootstrapConfig, { id: "WorktreeBootstrapConfig" })
   z.globalRegistry.add(WorktreesConfig, { id: "WorktreesConfig" })
   z.globalRegistry.add(SessionTitlesConfig, { id: "SessionTitlesConfig" })
+  z.globalRegistry.add(SubpackagesConfig, { id: "SubpackagesConfig" })
   z.globalRegistry.add(UserConfig, { id: "RootConfig" })
 }

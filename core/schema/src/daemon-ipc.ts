@@ -48,6 +48,7 @@ import {
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
   SessionMessageEvent,
+  SessionSubpackagesRequest,
   SteerSessionRequest,
   UnmountSessionReviewSessionRequest as UnmountSessionReviewSessionRequestSchema,
   type CancelSessionResponse,
@@ -64,6 +65,7 @@ import {
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
+  type SessionSubpackagesResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
 } from "./daemon/sessions.ts"
@@ -165,6 +167,10 @@ export const daemonIpcSchema = {
     "session.launchPreview": {
       payload: SessionLaunchPreviewRequest,
       response: $type<SessionLaunchPreviewResponse>(),
+    },
+    "session.subpackages": {
+      payload: SessionSubpackagesRequest,
+      response: $type<SessionSubpackagesResponse>(),
     },
     "session.diagnostics": {
       payload: DaemonSessionIdParams,

@@ -60,6 +60,8 @@ import type {
   SessionLaunchBranch,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
+  SessionSubpackagesRequest,
+  SessionSubpackagesResponse,
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
@@ -98,6 +100,7 @@ import {
 } from "./archive.ts"
 import { readSessionChanges } from "./changes.ts"
 import type { ACPRegistryService } from "./registry.ts"
+import { discoverSessionSubpackages } from "./subpackages.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
   appendSessionHistoryMessage,
@@ -774,6 +777,7 @@ export type SessionManager = {
     params: SessionDraftSuggestionsRequest,
   ) => Promise<SessionComposerSuggestionsResponse>
   getLaunchPreview: (params: SessionLaunchPreviewRequest) => Promise<SessionLaunchPreviewResponse>
+  getSubpackages: (params: SessionSubpackagesRequest) => Promise<SessionSubpackagesResponse>
   getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
   getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
   mountReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
@@ -2294,9 +2298,7 @@ export function createSessionManager(input: {
   }
 
   function findPersistedWorktreeRecordByDir(worktreeDir: string) {
-    return (
-      db.worktrees.findMany().find((record) => record.worktreeDir === worktreeDir) ?? null
-    )
+    return db.worktrees.findMany().find((record) => record.worktreeDir === worktreeDir) ?? null
   }
 
   function createReviewSessionWarnings(result: ReviewSyncResult) {
@@ -3908,6 +3910,21 @@ export function createSessionManager(input: {
     }
   }
 
+  async function getSubpackages(
+    params: SessionSubpackagesRequest,
+  ): Promise<SessionSubpackagesResponse> {
+    await ready
+
+    const config = await input.configManager.getRootConfig(params.cwd).then((root) => root.config)
+
+    return {
+      subpackages: await discoverSessionSubpackages({
+        cwd: params.cwd,
+        configuredManifests: config?.subpackages?.manifests,
+      }),
+    }
+  }
+
   async function getDiagnostics(id: SessionId): Promise<GetSessionDiagnosticsResponse> {
     await ready
     const session = await getSession(id)
@@ -4367,6 +4384,7 @@ export function createSessionManager(input: {
     getComposerSuggestions,
     getDraftSuggestions,
     getLaunchPreview,
+    getSubpackages,
     getDiagnostics,
     getWorktree,
     mountReviewSession,

@@ -360,6 +360,9 @@ export async function startDaemonServer(
     "session.launchPreview": async (payload) => {
       return sessionManager.getLaunchPreview(payload)
     },
+    "session.subpackages": async (payload) => {
+      return sessionManager.getSubpackages(payload)
+    },
     "session.diagnostics": async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },
