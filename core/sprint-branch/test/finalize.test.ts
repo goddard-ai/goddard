@@ -97,6 +97,40 @@ describe("sprint-branch finalize", () => {
     expect(await currentBranch(repo)).toBe("sprint/example/next")
   })
 
+  test("allows finalizing when only a dormant next branch is ignored", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: ["010-task-name"],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "next.txt"), "stale rewritten next\n")
+    await commitAll(repo, "add divergent next work")
+
+    const result = await runCli(repo, [
+      "finalize",
+      "--sprint",
+      "example",
+      "--ignore-next-branch",
+      "--json",
+    ])
+    const finalize = JSON.parse(result.stdout) as Omit<MutationOutput, "diagnostics"> & {
+      diagnostics: Array<{ code: string; severity: string }>
+    }
+    const diagnostic = finalize.diagnostics.find(
+      (item) => item.code === "active_next_branch_exists",
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(finalize.ok).toBe(true)
+    expect(diagnostic?.severity).toBe("warning")
+    expect(await currentBranch(repo)).toBe("sprint/example/review")
+  })
+
   // The final rebase is intentionally the last Git rewrite before human merge.
   // If it conflicts, canonical sprint state must stay unchanged so Git can continue cleanly.
   test("keeps sprint state unchanged when final rebase stops", async () => {

@@ -359,15 +359,20 @@ export async function main(argv: string[]) {
             description: "Sprint name to land",
           }),
           lastSprint: lastSprintFlag(),
+          ignoreNextBranch: flag({
+            long: "ignore-next-branch",
+            description: "Ignore a dormant next branch that differs from finalized review",
+          }),
           dryRun: dryRunFlag(),
           json: jsonFlag(),
         },
-        handler: async ({ target, name, lastSprint, dryRun, json }) => {
+        handler: async ({ target, name, lastSprint, ignoreNextBranch, dryRun, json }) => {
           const report = await runLand({
             cwd: process.cwd(),
             target,
             sprint: name,
             lastSprint,
+            ignoreNextBranch,
             dryRun,
             json,
           })
@@ -574,6 +579,10 @@ export async function main(argv: string[]) {
             type: optional(string),
             long: "override-base",
             description: "Explicit base branch override for recovery",
+          }),
+          ignoreNextBranch: flag({
+            long: "ignore-next-branch",
+            description: "Ignore a dormant next branch that differs from finalized review",
           }),
         },
         handler: async (args) => {

@@ -934,7 +934,9 @@ export async function runRebase(input: MutationInput & { target: string }) {
 }
 
 /** Rebases the completed review branch onto base for the final human merge. */
-export async function runFinalize(input: MutationInput & { overrideBase?: string }) {
+export async function runFinalize(
+  input: MutationInput & { overrideBase?: string; ignoreNextBranch?: boolean },
+) {
   const { context, state, diagnostics } = await readCommandState(input, "finalize", {
     allowOwnConflictRetry: true,
   })
@@ -984,9 +986,12 @@ export async function runFinalize(input: MutationInput & { overrideBase?: string
   }
   if (nextHead && reviewHead && nextHead !== reviewHead) {
     diagnostics.push({
-      severity: "error",
+      severity: input.ignoreNextBranch ? "warning" : "error",
       code: "active_next_branch_exists",
       message: `${state.branches.next} still points at content different from review.`,
+      suggestion: input.ignoreNextBranch
+        ? "Finalize will ignore the dormant next branch because --ignore-next-branch was provided."
+        : undefined,
     })
   }
   if (!(await refExists(context.rootDir, baseBranch))) {

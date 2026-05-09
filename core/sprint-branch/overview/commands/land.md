@@ -8,6 +8,8 @@
   - Uses [standard sprint selection](../sprint-selection.md).
   - The optional `name` argument is this command's explicit sprint selector.
   - When prompting interactively, only finalized active sprints are listed.
+  - `--ignore-next-branch` allows selecting and landing a sprint whose dormant
+    `next` branch differs from finalized `review`.
 
 - **What it does**
   - Fast-forwards a human-selected target branch to finalized sprint review
@@ -28,6 +30,7 @@
   - No interrupted sprint stash may remain active.
   - `review` and `approved` must represent the same finalized content.
   - `next`, if present, must not contain different work.
+    - `--ignore-next-branch` downgrades only this check to a warning.
   - The target branch must exist.
   - The target branch must not itself be a sprint branch.
   - The target must be able to fast-forward to the finalized review content.

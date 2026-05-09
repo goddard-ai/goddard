@@ -16,6 +16,7 @@ import type { HumanCommandInput, SprintCandidate } from "./types"
 type SprintSelectionOptions = {
   finalizedPromptOnly?: boolean
   finalizedOutputOnly?: boolean
+  ignoreNextBranch?: boolean
 }
 
 /** Resolves the sprint state a human landing command should operate on. */
@@ -45,7 +46,7 @@ export async function resolveSprintCandidate(
     return inferred
   }
   const promptCandidates = options.finalizedPromptOnly
-    ? await filterFinalizedCandidates(rootDir, activeCandidates)
+    ? await filterFinalizedCandidates(rootDir, activeCandidates, Boolean(options.ignoreNextBranch))
     : activeCandidates
 
   if (promptCandidates.length === 0) {
@@ -94,7 +95,7 @@ export async function resolveSprintCandidate(
 export async function candidatesForOutput(rootDir: string, options: SprintSelectionOptions = {}) {
   const candidates = await readSprintCandidates(rootDir)
   const outputCandidates = options.finalizedOutputOnly
-    ? await filterFinalizedCandidates(rootDir, candidates)
+    ? await filterFinalizedCandidates(rootDir, candidates, Boolean(options.ignoreNextBranch))
     : candidates
 
   return outputCandidates.map((candidate) => ({
@@ -196,17 +197,25 @@ function statePathForDisplay(rootDir: string, statePath: string) {
   return path.relative(rootDir, statePath)
 }
 
-async function filterFinalizedCandidates(rootDir: string, candidates: SprintCandidate[]) {
+async function filterFinalizedCandidates(
+  rootDir: string,
+  candidates: SprintCandidate[],
+  ignoreNextBranch: boolean,
+) {
   const checked = await Promise.all(
     candidates.map(async (candidate) => ({
       candidate,
-      finalized: await isFinalizedCandidate(rootDir, candidate),
+      finalized: await isFinalizedCandidate(rootDir, candidate, ignoreNextBranch),
     })),
   )
   return checked.filter((entry) => entry.finalized).map((entry) => entry.candidate)
 }
 
-async function isFinalizedCandidate(rootDir: string, candidate: SprintCandidate) {
+async function isFinalizedCandidate(
+  rootDir: string,
+  candidate: SprintCandidate,
+  ignoreNextBranch: boolean,
+) {
   const { state } = candidate
   if (
     state.conflict ||
@@ -225,7 +234,7 @@ async function isFinalizedCandidate(rootDir: string, candidate: SprintCandidate)
     reviewCommit &&
     approvedCommit &&
     reviewCommit === approvedCommit &&
-    (!nextCommit || nextCommit === reviewCommit),
+    (ignoreNextBranch || !nextCommit || nextCommit === reviewCommit),
   )
 }
 

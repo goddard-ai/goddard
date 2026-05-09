@@ -30,7 +30,7 @@ type HumanCommandOutput = {
   reviewBranch: string | null
   reviewCommit: string | null
   gitOperations: string[]
-  diagnostics: Array<{ code: string }>
+  diagnostics: Array<{ code: string; severity?: string }>
   candidates: Array<{ sprint: string; reviewBranch: string }>
   branchesToDelete?: string[]
   worktreesToRemove?: Array<{ path: string }>
@@ -103,6 +103,24 @@ describe("sprint-branch human landing commands", () => {
     expect(land.candidates.map((candidate) => candidate.sprint)).toEqual(["example"])
   })
 
+  test("includes sprints with divergent next branches when next is ignored", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+    await createDivergentNextBranch(repo, "example")
+
+    const result = await runCli(repo, [
+      "land",
+      "main",
+      "--ignore-next-branch",
+      "--dry-run",
+      "--json",
+    ])
+    const land = JSON.parse(result.stdout) as HumanCommandOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(diagnosticCodes(land)).toContain("sprint_selection_required")
+    expect(land.candidates.map((candidate) => candidate.sprint)).toEqual(["example"])
+  })
+
   // Landing changes the branch humans ultimately merge from, so it must never be
   // run by an unattended agent or script until an explicit automation policy exists.
   test("refuses non-interactive land mutation", async () => {
@@ -155,6 +173,26 @@ describe("sprint-branch human landing commands", () => {
 
     expect(result.exitCode).toBe(1)
     expect(diagnosticCodes(land)).toContain("active_stashes_exist")
+  })
+
+  test("allows landing when only a dormant next branch is ignored", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+    await createDivergentNextBranch(repo, "example")
+
+    const result = await runCli(repo, [
+      "land",
+      "main",
+      "example",
+      "--ignore-next-branch",
+      "--dry-run",
+      "--json",
+    ])
+    const land = JSON.parse(result.stdout) as HumanCommandOutput
+    const diagnostic = land.diagnostics.find((item) => item.code === "active_next_branch_exists")
+
+    expect(result.exitCode).toBe(0)
+    expect(land.ok).toBe(true)
+    expect(diagnostic?.severity).toBe("warning")
   })
 
   // Cleanup can remove detached human snapshots, but only when the target branch
@@ -272,4 +310,12 @@ async function createFinalizedReviewAheadOfMain() {
   await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
   await git(repo, ["checkout", "main"])
   return repo
+}
+
+async function createDivergentNextBranch(repo: string, sprint: string) {
+  await git(repo, ["branch", `sprint/${sprint}/next`, `sprint/${sprint}/review`])
+  await git(repo, ["checkout", `sprint/${sprint}/next`])
+  await fs.writeFile(path.join(repo, "next.txt"), "stale rewritten next\n")
+  await commitAll(repo, "add divergent next work")
+  await git(repo, ["checkout", "main"])
 }

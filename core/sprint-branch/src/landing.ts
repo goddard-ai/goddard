@@ -29,6 +29,7 @@ export async function runLand(input: LandInput) {
   const diagnostics: SprintDiagnostic[] = []
   const candidate = await resolveSprintCandidate(rootDir, input, currentBranch, diagnostics, {
     finalizedPromptOnly: true,
+    ignoreNextBranch: input.ignoreNextBranch,
   })
   const state = candidate?.state ?? null
   const reviewBranch = state?.branches.review ?? null
@@ -52,7 +53,12 @@ export async function runLand(input: LandInput) {
     reviewCommit,
     gitOperations,
     diagnostics,
-    candidates: candidate ? [] : await candidatesForOutput(rootDir, { finalizedOutputOnly: true }),
+    candidates: candidate
+      ? []
+      : await candidatesForOutput(rootDir, {
+          finalizedOutputOnly: true,
+          ignoreNextBranch: input.ignoreNextBranch,
+        }),
   } satisfies SprintLandReport
 
   if (input.dryRun || !report.ok || !state) {

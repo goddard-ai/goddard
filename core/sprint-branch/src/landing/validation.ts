@@ -174,9 +174,12 @@ async function pushSharedFinalizedDiagnostics(
   }
   if (nextCommit && reviewCommit && nextCommit !== reviewCommit) {
     diagnostics.push({
-      severity: "error",
+      severity: input.ignoreNextBranch ? "warning" : "error",
       code: "active_next_branch_exists",
       message: `${state.branches.next} still points at content different from review.`,
+      suggestion: input.ignoreNextBranch
+        ? "Landing will ignore the dormant next branch because --ignore-next-branch was provided."
+        : undefined,
     })
   }
   if (!targetCommit) {

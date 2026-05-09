@@ -5,6 +5,7 @@ export type HumanCommandInput = {
   cwd: string
   sprint?: string
   lastSprint?: boolean
+  ignoreNextBranch?: boolean
   dryRun: boolean
   json: boolean
 }
