@@ -13,7 +13,15 @@ import { isEmptyQuery } from "~/lib/search-query.ts"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
-type LaunchPickerId = "project" | "adapter" | "location" | "branch" | "model" | "thinking" | null
+type LaunchPickerId =
+  | "project"
+  | "subpackage"
+  | "adapter"
+  | "location"
+  | "branch"
+  | "model"
+  | "thinking"
+  | null
 /** One slash-command suggestion shown in the session launch composer. */
 type SlashCommandSuggestion = SessionLaunchPreviewResponse["slashCommands"][number]
 /** One prepared slash-command suggestion cached by source array identity. */
@@ -119,6 +127,7 @@ export const SessionLaunchFormState = createModel(function () {
   const draftModelId = signal<string | null>(null)
   const draftProjectPath = signal<string | null>(null)
   const draftPromptBlocks = signal<ComposerPromptBlocks>([])
+  const draftSubpackagePath = signal<string | null>(null)
   const draftThinkingValue = signal<string | boolean | null>(null)
   const launchPreview = signal<SessionLaunchPreviewResponse | null>(null)
   const openPicker = signal<LaunchPickerId>(null)
@@ -138,10 +147,11 @@ export const SessionLaunchFormState = createModel(function () {
       launchModelConfig.value.configOptions.find((option) => option.category === "thought_level") ??
       null,
   )
+  const effectiveCwd = computed(() => draftSubpackagePath.value ?? draftProjectPath.value)
 
   const sessionInput = computed<CreateSessionRequest | null>(() => {
     const agent = draftAdapterId.value
-    const cwd = draftProjectPath.value
+    const cwd = effectiveCwd.value
     const initialPrompt = draftPromptBlocks.value
 
     if (!agent || !cwd || !hasPromptContent(initialPrompt)) {
@@ -296,7 +306,9 @@ export const SessionLaunchFormState = createModel(function () {
     draftModelId,
     draftProjectPath,
     draftPromptBlocks,
+    draftSubpackagePath,
     draftThinkingValue,
+    effectiveCwd,
     launchModelConfig,
     launchPreview,
     openPicker,
@@ -308,6 +320,7 @@ export const SessionLaunchFormState = createModel(function () {
       draftModelId.value = null
       draftProjectPath.value = preferredProjectPath
       draftPromptBlocks.value = []
+      draftSubpackagePath.value = null
       draftThinkingValue.value = null
       launchPreview.value = null
       openPicker.value = null

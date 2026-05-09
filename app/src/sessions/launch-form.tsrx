@@ -11,6 +11,7 @@ import {
   AgentHarnessSelector,
   SessionLaunchLoadingSelect,
   SessionLaunchPreviewSelectors,
+  SessionSubpackageSelector,
 } from "./launch-form-selectors.tsrx"
 import { filterSlashCommandSuggestions, type SessionLaunchFormState } from "./launch-form-state.ts"
 import styles from "./launch-form.style.ts"
@@ -76,6 +77,7 @@ export component SessionLaunchForm(props: {
     }
 
     form.draftProjectPath.value = nextProjectPath
+    form.draftSubpackagePath.value = null
     form.launchPreview.value = null
   }, [form, props.projects])
   <div class={selectorStyles.section}>
@@ -94,10 +96,16 @@ export component SessionLaunchForm(props: {
         }}
         onValueChange={(value) => {
           form.draftProjectPath.value = value
+          form.draftSubpackagePath.value = null
           form.launchPreview.value = null
           form.setOpenPicker(null)
         }}
       />
+      try {
+        <SessionSubpackageSelector {form} />
+      } pending {
+        <SessionLaunchLoadingSelect label="Working directory" />
+      }
       try {
         <AgentHarnessSelector {form} />
       } pending {
@@ -147,7 +155,7 @@ export component SessionLaunchForm(props: {
       helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
       initialPrompt={form.draftPromptBlocks.value}
       loadSuggestions={async (input) => {
-        const cwd = form.draftProjectPath.value
+        const cwd = form.effectiveCwd.value
 
         if (!cwd) {
           return []

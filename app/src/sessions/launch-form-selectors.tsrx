@@ -1,3 +1,4 @@
+import type { SessionSubpackage } from "@goddard-ai/sdk"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
@@ -83,20 +84,84 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   />
 }
 
+/** Builds the explicit project-root option followed by discovered package boundaries. */
+function buildSubpackageItems(projectPath: string, subpackages: readonly SessionSubpackage[]) {
+  return [
+    {
+      value: projectPath,
+      label: "Project root",
+      detail: projectPath,
+      searchText: projectPath,
+    },
+    ...subpackages.map(
+      (subpackage) => ({
+        value: subpackage.path,
+        label: subpackage.relativePath,
+        detail: subpackage.manifestPath,
+        searchText: subpackage.relativePath,
+      }),
+    ),
+  ]
+}
+
+export component SessionSubpackageSelector(props: { form: SessionLaunchFormState }) {
+  const { form } = props
+  const projectPath = form.draftProjectPath.value
+  const response = useQuery(
+    projectPath ? goddardSdk.session.subpackages : null,
+    projectPath
+      ? [
+          { cwd: projectPath },
+        ]
+      : null,
+  )
+  const subpackages = projectPath ? response.subpackages : []
+  const items =
+    projectPath ? buildSubpackageItems(projectPath, subpackages) : []
+  const selectedValue = form.draftSubpackagePath.value ?? projectPath
+
+  useEffect(() => {
+    if (!projectPath || form.draftSubpackagePath.value === null) {
+      return
+    }
+
+    if (!subpackages.some((subpackage) => subpackage.path === form.draftSubpackagePath.value)) {
+      form.draftSubpackagePath.value = null
+      form.launchPreview.value = null
+    }
+  }, [form, projectPath, subpackages])
+
+  <SessionInputSelect
+    disabled={!projectPath}
+    filterable={true}
+    {items}
+    label="Working directory"
+    open={form.openPicker.value === "subpackage"}
+    placeholder="Project root"
+    value={selectedValue}
+    onOpenChange={(open) => {
+      form.setOpenPicker(open ? "subpackage" : null)
+    }}
+    onValueChange={(value) => {
+      form.draftSubpackagePath.value = value === projectPath ? null : value
+      form.launchPreview.value = null
+      form.setOpenPicker(null)
+    }}
+  />
+}
+
 export component SessionLaunchPreviewSelectors(props: {
   form: SessionLaunchFormState;
 }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
-    form.draftProjectPath.value && form.draftAdapterId.value
-      ? goddardSdk.session.launchPreview
-      : null,
-    form.draftProjectPath.value && form.draftAdapterId.value
+    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftAdapterId.value
       ? [
           {
             agent: form.draftAdapterId.value,
-            cwd: form.draftProjectPath.value,
+            cwd: form.effectiveCwd.value,
           },
         ]
       : null,
