@@ -13,7 +13,11 @@ import type {
   SprintCleanupReport,
   SprintLandReport,
 } from "./landing/types"
-import { pushCleanupDiagnostics, pushLandingDiagnostics } from "./landing/validation"
+import {
+  pushCleanupDiagnostics,
+  pushLandingDiagnostics,
+  pushTargetBranchDiagnostics,
+} from "./landing/validation"
 import { associatedWorktrees, cleanupBranches, listWorktrees } from "./landing/worktrees"
 import { writeSprintLastActedAt } from "./state/activity"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
@@ -27,6 +31,28 @@ export async function runLand(input: LandInput) {
   const rootDir = await resolveRepositoryRoot(input.cwd)
   const currentBranch = await getCurrentBranch(rootDir)
   const diagnostics: SprintDiagnostic[] = []
+  const targetCommit = await getBranchHead(rootDir, input.target)
+  pushTargetBranchDiagnostics(input, targetCommit, diagnostics)
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return {
+      ok: false,
+      command: "land" as const,
+      dryRun: input.dryRun,
+      executed: false,
+      sprint: null,
+      targetBranch: input.target,
+      currentBranch,
+      reviewBranch: null,
+      reviewCommit: null,
+      gitOperations: [],
+      diagnostics,
+      candidates: await candidatesForOutput(rootDir, {
+        finalizedOutputOnly: true,
+        ignoreNextBranch: input.ignoreNextBranch,
+      }),
+    } satisfies SprintLandReport
+  }
+
   const candidate = await resolveSprintCandidate(rootDir, input, currentBranch, diagnostics, {
     finalizedPromptOnly: true,
     ignoreNextBranch: input.ignoreNextBranch,
@@ -34,7 +60,6 @@ export async function runLand(input: LandInput) {
   const state = candidate?.state ?? null
   const reviewBranch = state?.branches.review ?? null
   const reviewCommit = reviewBranch ? await getBranchHead(rootDir, reviewBranch) : null
-  const targetCommit = await getBranchHead(rootDir, input.target)
   const gitOperations = reviewBranch
     ? [`git checkout ${input.target}`, `git merge --ff-only ${reviewBranch}`]
     : []

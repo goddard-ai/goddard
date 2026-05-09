@@ -5,6 +5,8 @@
 
 - **Inputs and selection**
   - `<target>` is the branch that should receive finalized sprint content.
+  - The target branch is validated before sprint selection, so an invalid target
+    reports directly instead of prompting for or inferring a sprint.
   - Uses [standard sprint selection](../sprint-selection.md).
   - The optional `name` argument is this command's explicit sprint selector.
   - When prompting interactively, only finalized active sprints are listed.

@@ -121,6 +121,18 @@ describe("sprint-branch human landing commands", () => {
     expect(land.candidates.map((candidate) => candidate.sprint)).toEqual(["example"])
   })
 
+  test("validates land target before requiring sprint selection", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+
+    const result = await runCli(repo, ["land", "missing-target", "--dry-run", "--json"])
+    const land = JSON.parse(result.stdout) as HumanCommandOutput
+
+    expect(result.exitCode).toBe(1)
+    expect(land.ok).toBe(false)
+    expect(diagnosticCodes(land)).toContain("target_branch_missing")
+    expect(diagnosticCodes(land)).not.toContain("sprint_selection_required")
+  })
+
   // Landing changes the branch humans ultimately merge from, so it must never be
   // run by an unattended agent or script until an explicit automation policy exists.
   test("refuses non-interactive land mutation", async () => {

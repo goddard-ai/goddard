@@ -5,6 +5,28 @@ import { parseSprintBranchName } from "../state/branches"
 import type { SprintBranchState, SprintDiagnostic } from "../types"
 import type { CleanupInput, HumanCommandInput, LandInput } from "./types"
 
+/** Adds diagnostics for target branches before sprint selection can infer or prompt. */
+export function pushTargetBranchDiagnostics(
+  input: HumanCommandInput & { target: string },
+  targetCommit: string | null,
+  diagnostics: SprintDiagnostic[],
+) {
+  if (!targetCommit) {
+    diagnostics.push({
+      severity: "error",
+      code: "target_branch_missing",
+      message: `Target branch ${input.target} does not exist.`,
+    })
+  }
+  if (parseSprintBranchName(input.target)) {
+    diagnostics.push({
+      severity: "error",
+      code: "target_is_sprint_branch",
+      message: `${input.target} is a sprint branch and cannot be used as a landing target.`,
+    })
+  }
+}
+
 /** Adds diagnostics for the finalized-state requirements specific to land. */
 export async function pushLandingDiagnostics(
   rootDir: string,
@@ -108,20 +130,7 @@ async function pushSharedFinalizedDiagnostics(
       message: "land and cleanup require an interactive terminal.",
     })
   }
-  if (!(await getBranchHead(rootDir, input.target))) {
-    diagnostics.push({
-      severity: "error",
-      code: "target_branch_missing",
-      message: `Target branch ${input.target} does not exist.`,
-    })
-  }
-  if (parseSprintBranchName(input.target)) {
-    diagnostics.push({
-      severity: "error",
-      code: "target_is_sprint_branch",
-      message: `${input.target} is a sprint branch and cannot be used as a landing target.`,
-    })
-  }
+  pushTargetBranchDiagnostics(input, targetCommit, diagnostics)
   if (!state) {
     return
   }
