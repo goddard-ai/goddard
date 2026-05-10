@@ -65,6 +65,38 @@ test("app state persistence observes captured navigation snapshots", async () =>
   }
 })
 
+test("app state persistence observes global launch shortcut snapshots", async () => {
+  ensureMatchMedia()
+  const appModels = createRestoredAppModels()
+  const snapshots: PersistedAppStateSnapshot[] = []
+  const observer = observeAppStateSnapshot(
+    appModels,
+    async (snapshot) => {
+      snapshots.push(snapshot)
+    },
+    {
+      debounceMs: 0,
+    },
+  )
+
+  try {
+    appModels.globalSessionLaunchShortcut.enable(1)
+    await observer.flush()
+
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0].globalSessionLaunchShortcut).toEqual({
+      binding: "Command+Period",
+      enabled: true,
+      registration: {
+        status: "unregistered",
+        error: null,
+      },
+    })
+  } finally {
+    await observer.stop()
+  }
+})
+
 test("app state persistence does not observe shortcut registry changes", async () => {
   ensureMatchMedia()
   const appModels = createRestoredAppModels()

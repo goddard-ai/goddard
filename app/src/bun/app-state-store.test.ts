@@ -64,6 +64,14 @@ function createSnapshot(selectedNavId: string): AppStateSnapshot {
       mode: "system",
       highContrast: false,
     },
+    globalSessionLaunchShortcut: {
+      binding: "Command+Period",
+      enabled: false,
+      registration: {
+        status: "unregistered",
+        error: null,
+      },
+    },
     navigation: {
       selectedNavId,
     },

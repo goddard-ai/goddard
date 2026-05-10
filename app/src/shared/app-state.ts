@@ -7,6 +7,7 @@ const RequiredUnknown = z.custom<unknown>((value) => value !== undefined)
 /** App-owned persisted Sigma snapshot transported between the webview and Bun host. */
 export const AppStateSnapshot = z.strictObject({
   appearance: RequiredUnknown,
+  globalSessionLaunchShortcut: RequiredUnknown,
   navigation: RequiredUnknown,
   projectContext: RequiredUnknown,
   projectRegistry: RequiredUnknown,

@@ -27,6 +27,9 @@ function createRequiredContext<Value>(name: string): RequiredContext<Value> {
 
 const context = {
   Appearance: createRequiredContext<PersistentAppModels["appearance"]>("appearanceContext"),
+  GlobalSessionLaunchShortcut: createRequiredContext<
+    PersistentAppModels["globalSessionLaunchShortcut"]
+  >("globalSessionLaunchShortcutContext"),
   Navigation: createRequiredContext<PersistentAppModels["navigation"]>("navigationContext"),
   ProjectContext: createRequiredContext<PersistentAppModels["projectContext"]>(
     "projectContextContext",
@@ -48,21 +51,24 @@ export component AppStateProvider(props: {
   const appModels = usePersistentAppModels()
 
   <context.Appearance value={appModels.appearance}>
-    <context.Navigation value={appModels.navigation}>
-      <context.ProjectContext value={appModels.projectContext}>
-        <context.ProjectRegistry value={appModels.projectRegistry}>
-          <context.ShortcutRegistry value={appModels.shortcutRegistry}>
-            <context.WorkbenchTabSet value={appModels.workbenchTabSet}>
-              {props.children}
-            </context.WorkbenchTabSet>
-          </context.ShortcutRegistry>
-        </context.ProjectRegistry>
-      </context.ProjectContext>
-    </context.Navigation>
+    <context.GlobalSessionLaunchShortcut value={appModels.globalSessionLaunchShortcut}>
+      <context.Navigation value={appModels.navigation}>
+        <context.ProjectContext value={appModels.projectContext}>
+          <context.ProjectRegistry value={appModels.projectRegistry}>
+            <context.ShortcutRegistry value={appModels.shortcutRegistry}>
+              <context.WorkbenchTabSet value={appModels.workbenchTabSet}>
+                {props.children}
+              </context.WorkbenchTabSet>
+            </context.ShortcutRegistry>
+          </context.ProjectRegistry>
+        </context.ProjectContext>
+      </context.Navigation>
+    </context.GlobalSessionLaunchShortcut>
   </context.Appearance>
 }
 
 export const useAppearance = context.Appearance.use
+export const useGlobalSessionLaunchShortcut = context.GlobalSessionLaunchShortcut.use
 export const useNavigation = context.Navigation.use
 export const useProjectContext = context.ProjectContext.use
 export const useProjectRegistry = context.ProjectRegistry.use

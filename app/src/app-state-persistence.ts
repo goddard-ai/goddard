@@ -5,6 +5,10 @@ import { getErrorMessage } from "radashi"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { desktopHost } from "./desktop-host.ts"
+import {
+  GlobalSessionLaunchShortcut,
+  type GlobalSessionLaunchShortcutState,
+} from "./global-session-launch/global-shortcut.ts"
 import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
@@ -18,6 +22,7 @@ const APP_STATE_WRITE_DEBOUNCE_MS = 250
 /** Raw app Sigma model bundle before async daemon state restoration. */
 export type RestoredAppModels = {
   appearance: Appearance
+  globalSessionLaunchShortcut: GlobalSessionLaunchShortcut
   navigation: Navigation
   projectContext: ProjectContext
   projectRegistry: ProjectRegistry
@@ -27,6 +32,7 @@ export type RestoredAppModels = {
 /** Context-ready app model bundle produced by the persistence lifecycle hook. */
 export type PersistentAppModels = {
   appearance: Protected<Appearance>
+  globalSessionLaunchShortcut: Protected<GlobalSessionLaunchShortcut>
   navigation: Protected<Navigation>
   projectContext: Protected<ProjectContext>
   projectRegistry: Protected<ProjectRegistry>
@@ -37,6 +43,7 @@ export type PersistentAppModels = {
 /** Persisted Sigma state captured and restored through the Bun-host app state file. */
 export type PersistedAppStateSnapshot = AppStateSnapshot & {
   appearance: Immutable<AppearanceState>
+  globalSessionLaunchShortcut: Immutable<GlobalSessionLaunchShortcutState>
   navigation: Immutable<NavigationState>
   projectContext: Immutable<ProjectContextState>
   projectRegistry: Immutable<ProjectRegistryState>
@@ -68,6 +75,7 @@ export const shortcutPersistenceErrors = signal({
 export function captureAppStateSnapshot(appModels: RestoredAppModels) {
   return {
     appearance: sigma.captureState(appModels.appearance),
+    globalSessionLaunchShortcut: sigma.captureState(appModels.globalSessionLaunchShortcut),
     navigation: sigma.captureState(appModels.navigation),
     projectContext: sigma.captureState(appModels.projectContext),
     projectRegistry: sigma.captureState(appModels.projectRegistry),
@@ -77,6 +85,7 @@ export function captureAppStateSnapshot(appModels: RestoredAppModels) {
 
 function applyAppStateSnapshot(appModels: RestoredAppModels, snapshot: PersistedAppStateSnapshot) {
   sigma.replaceState(appModels.appearance, snapshot.appearance)
+  sigma.replaceState(appModels.globalSessionLaunchShortcut, snapshot.globalSessionLaunchShortcut)
   sigma.replaceState(appModels.navigation, snapshot.navigation)
   sigma.replaceState(appModels.projectContext, snapshot.projectContext)
   sigma.replaceState(appModels.projectRegistry, snapshot.projectRegistry)
@@ -206,6 +215,7 @@ export function observeAppStateSnapshot(
     writeSnapshot,
     (queueSnapshotWrite) => [
       sigma.subscribe(appModels.appearance, queueSnapshotWrite),
+      sigma.subscribe(appModels.globalSessionLaunchShortcut, queueSnapshotWrite),
       sigma.subscribe(appModels.navigation, queueSnapshotWrite),
       sigma.subscribe(appModels.projectContext, queueSnapshotWrite),
       sigma.subscribe(appModels.projectRegistry, queueSnapshotWrite),
@@ -248,6 +258,7 @@ export function createRestoredAppModels() {
     mode: "system",
     highContrast: false,
   })
+  const globalSessionLaunchShortcut = new GlobalSessionLaunchShortcut()
   const navigation = new Navigation()
   const projectContext = new ProjectContext()
   const projectRegistry = new ProjectRegistry()
@@ -257,6 +268,7 @@ export function createRestoredAppModels() {
 
   return {
     appearance,
+    globalSessionLaunchShortcut,
     navigation,
     projectContext,
     projectRegistry,
@@ -291,6 +303,10 @@ export function usePersistentAppModels() {
   const appearance = useSigma(() => appModels.appearance, {
     deps: [appModels.appearance],
   })
+  const globalSessionLaunchShortcut = useSigma(
+    () => appModels.globalSessionLaunchShortcut,
+    [appModels.globalSessionLaunchShortcut],
+  )
   const navigation = useSigma(() => appModels.navigation, [appModels.navigation])
   const projectContext = useSigma(() => appModels.projectContext, [appModels.projectContext])
   const projectRegistry = useSigma(() => appModels.projectRegistry, [appModels.projectRegistry])
@@ -401,6 +417,7 @@ export function usePersistentAppModels() {
 
   return {
     appearance,
+    globalSessionLaunchShortcut,
     navigation,
     projectContext,
     projectRegistry,
