@@ -28,9 +28,9 @@ Properties to create a background gradient based on color stops.
 ```jsx
 <div
   className={css({
-    bgGradient: "to-r",
-    gradientFrom: "red.200",
-    gradientTo: "blue.200",
+    bgGradient: 'to-r',
+    gradientFrom: 'red.200',
+    gradientTo: 'blue.200'
   })}
 />
 ```
@@ -42,18 +42,18 @@ const theme = {
   tokens: {
     gradients: {
       // string value
-      simple: { value: "linear-gradient(to right, red, blue)" },
+      simple: { value: 'linear-gradient(to right, red, blue)' },
       // composite value
       primary: {
         value: {
-          type: "linear",
-          placement: "to right",
-          stops: ["red", "blue"],
-        },
-      },
-    },
-  },
-};
+          type: 'linear',
+          placement: 'to right',
+          stops: ['red', 'blue']
+        }
+      }
+    }
+  }
+}
 ```
 
 These tokens can be used in the `bgGradient` or `textGradient` properties.
@@ -87,8 +87,8 @@ Properties for controlling the src and position of a background image.
 ```jsx
 <div
   className={css({
-    bgImage: "url(/images/bg.jpg)",
-    bgPosition: "center",
+    bgImage: 'url(/images/bg.jpg)',
+    bgPosition: 'center'
   })}
 />
 ```
@@ -107,6 +107,7 @@ Properties for controlling the src and position of a background image.
 | `bgSize`, `backgroundSize`             | `background-size`   | none           |
 
 ---
+
 
 ## Border
 
@@ -195,7 +196,7 @@ the document's writing mode.
 ### All sides
 
 ```jsx
-<div className={css({ borderWidth: "1px" })} />
+<div className={css({ borderWidth: '1px' })} />
 ```
 
 ### Specific sides
@@ -225,7 +226,7 @@ document's writing mode.
 > For example, `borderStartWidth` will map to `border-left-width` in LTR mode, and `border-right-width` in RTL mode.
 
 ```jsx
-<div className={css({ borderStartWidth: "1px" })} />
+<div className={css({ borderStartWidth: '1px' })} />
 ```
 
 | Prop                                          | CSS Property               |
@@ -240,7 +241,7 @@ The border color utilities are used to set the border color of an element. It re
 ### All sides
 
 ```jsx
-<div className={css({ borderColor: "primary" })} />
+<div className={css({ borderColor: 'primary' })} />
 ```
 
 ### Specific sides
@@ -269,7 +270,7 @@ document's writing mode.
 > mode.
 
 ```jsx
-<div className={css({ borderInlineStartColor: "red.500" })} />
+<div className={css({ borderInlineStartColor: 'red.500' })} />
 ```
 
 | Prop                                          | CSS Property               | Token Category |
@@ -281,6 +282,7 @@ document's writing mode.
 
 ---
 
+
 ## Display
 
 Panda provides style properties for styling display of an element
@@ -290,7 +292,7 @@ Panda provides utilities and style properties for styling display of an element.
 ## Display Property
 
 ```jsx
-<div className={css({ display: "flex" })} />
+<div className={css({ display: 'flex' })} />
 ```
 
 ## Hiding Elements
@@ -300,13 +302,13 @@ Panda provides shortcut properties for hiding elements from and below a specific
 ### Hide From
 
 ```jsx
-<div className={css({ display: "flex", hideFrom: "md" })} />
+<div className={css({ display: 'flex', hideFrom: 'md' })} />
 ```
 
 ### Hide Below
 
 ```jsx
-<div className={css({ display: "flex", hideBelow: "md" })} />
+<div className={css({ display: 'flex', hideBelow: 'md' })} />
 ```
 
 | Prop        | CSS Property | Token Category |
@@ -315,6 +317,7 @@ Panda provides shortcut properties for hiding elements from and below a specific
 | `hideBelow` | `display`    | `breakpoints`  |
 
 ---
+
 
 ## Divide
 
@@ -325,28 +328,29 @@ Panda provides utilities and style properties for dividing elements.
 ## Divide X
 
 ```jsx
-<div className={css({ divideX: "2px" })} />
+<div className={css({ divideX: '2px' })} />
 ```
 
 ## Divide Y
 
 ```jsx
-<div className={css({ divideY: "2px" })} />
+<div className={css({ divideY: '2px' })} />
 ```
 
 ## Divide Color
 
 ```jsx
-<div className={css({ divideColor: "red.200" })} />
+<div className={css({ divideColor: 'red.200' })} />
 ```
 
 ## Divide Style
 
 ```jsx
-<div className={css({ divideStyle: "dashed" })} />
+<div className={css({ divideStyle: 'dashed' })} />
 ```
 
 ---
+
 
 ## Effects
 
@@ -370,7 +374,7 @@ opacity, shadows, blending modes, filters, and more.
 Apply box shadows to elements.
 
 ```jsx
-<div className={css({ boxShadow: "lg" })} />
+<div className={css({ boxShadow: 'lg' })} />
 ```
 
 | Prop          | CSS Property     | Token Category |
@@ -384,7 +388,7 @@ Apply box shadows to elements.
 Control the blending mode of an element.
 
 ```jsx
-<div className={css({ mixBlendMode: "multiply" })} />
+<div className={css({ mixBlendMode: 'multiply' })} />
 ```
 
 | Prop           | CSS Property     | Token Category |
@@ -396,7 +400,7 @@ Control the blending mode of an element.
 Apply various filters to elements.
 
 ```jsx
-<div className={css({ filter: "auto", blur: "sm" })} />
+<div className={css({ filter: 'auto', blur: 'sm' })} />
 ```
 
 | Prop         | CSS Property    | Token Category |
@@ -417,7 +421,7 @@ Apply various filters to elements.
 Apply filters to the backdrop of an element.
 
 ```jsx
-<div className={css({ backdropFilter: "auto", backdropBlur: "sm" })} />
+<div className={css({ backdropFilter: 'auto', backdropBlur: 'sm' })} />
 ```
 
 | Prop                 | CSS Property            | Token Category |
@@ -434,6 +438,7 @@ Apply filters to the backdrop of an element.
 | `backdropSepia`      | `--backdrop-sepia`      | none           |
 
 ---
+
 
 ## Flex and Grid
 
@@ -452,7 +457,7 @@ The `flexBasis` utility sets the initial main size of a flex item, distributing 
 It supports `spacing` tokens and fractional literal values like “1/2”, “2/3", etc.
 
 ```jsx
-<div className={css({ basis: "1/2" })} />
+<div className={css({ basis: '1/2' })} />
 ```
 
 ### Flex
@@ -471,7 +476,7 @@ The `flex` utility defines the flexibility of a flex container or item. Supporte
 The `flexDirection` utility sets the direction of the main axis in a flex container. It's shorthand is `flexDir`.
 
 ```jsx
-<div className={css({ flexDir: "column" })} />
+<div className={css({ flexDir: 'column' })} />
 ```
 
 ## Grid
@@ -484,7 +489,7 @@ rows and columns.
 The `gridTemplateColumns` utility defines the columns of a grid container.
 
 ```jsx
-<div className={css({ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" })} />
+<div className={css({ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' })} />
 ```
 
 ### Grid Template Rows
@@ -492,10 +497,11 @@ The `gridTemplateColumns` utility defines the columns of a grid container.
 The `gridTemplateRows` utility defines the rows of a grid container.
 
 ```jsx
-<div className={css({ gridTemplateRows: "repeat(3, minmax(0, 1fr))" })} />
+<div className={css({ gridTemplateRows: 'repeat(3, minmax(0, 1fr))' })} />
 ```
 
 ---
+
 
 ## Focus Ring
 
@@ -536,9 +542,7 @@ The `focusVisibleRing` utility only applies focus styles during keyboard navigat
 `&:is(:focus-visible, [data-focus-visible])` selector:
 
 ```jsx
-<button className={css({ focusVisibleRing: "outside" })}>
-  Only shows focus ring on keyboard navigation
-</button>
+<button className={css({ focusVisibleRing: 'outside' })}>Only shows focus ring on keyboard navigation</button>
 ```
 
 ### Focus Ring vs. Focus Visible Ring
@@ -556,11 +560,11 @@ You can customize focus ring appearance with additional utilities:
 ```jsx
 <button
   className={css({
-    focusRing: "outside",
-    focusRingColor: "blue.500",
-    focusRingWidth: "3px",
-    focusRingStyle: "dashed",
-    focusRingOffset: "4px",
+    focusRing: 'outside',
+    focusRingColor: 'blue.500',
+    focusRingWidth: '3px',
+    focusRingStyle: 'dashed',
+    focusRingOffset: '4px'
   })}
 >
   Custom focus ring
@@ -581,9 +585,7 @@ You can customize focus ring appearance with additional utilities:
 To change the focus ring color for a specific component, use the `focusRingColor` prop:
 
 ```jsx
-<button className={css({ focusRing: "outside", focusRingColor: "red.500" })}>
-  Red focus ring
-</button>
+<button className={css({ focusRing: 'outside', focusRingColor: 'red.500' })}>Red focus ring</button>
 ```
 
 ## Global Ring Color
@@ -592,15 +594,15 @@ You can set a global focus ring color by defining the CSS custom property:
 
 ```ts
 // panda.config.ts
-import { defineConfig } from "@pandacss/dev";
+import { defineConfig } from '@pandacss/dev'
 
 export default defineConfig({
   globalCss: {
     html: {
-      "--global-color-focus-ring": "#3b82f6",
-    },
-  },
-});
+      '--global-color-focus-ring': '#3b82f6'
+    }
+  }
+})
 ```
 
 ### Ring Width
@@ -608,9 +610,7 @@ export default defineConfig({
 To change the focus ring width for a specific component, use the `focusRingWidth` prop:
 
 ```jsx
-<button className={css({ focusRing: "outside", focusRingWidth: "4px" })}>
-  Thick focus ring
-</button>
+<button className={css({ focusRing: 'outside', focusRingWidth: '4px' })}>Thick focus ring</button>
 ```
 
 ### Ring Style
@@ -618,9 +618,7 @@ To change the focus ring width for a specific component, use the `focusRingWidth
 To change the focus ring style for a specific component, use the `focusRingStyle` prop:
 
 ```jsx
-<button className={css({ focusRing: "outside", focusRingStyle: "dashed" })}>
-  Dashed focus ring
-</button>
+<button className={css({ focusRing: 'outside', focusRingStyle: 'dashed' })}>Dashed focus ring</button>
 ```
 
 This color will be used as the default for all focus rings unless overridden by the `focusRingColor` prop.
@@ -630,76 +628,77 @@ This color will be used as the default for all focus rings unless overridden by 
 ### Basic Focus Ring
 
 ```jsx
-import { css } from "../styled-system/css";
+import { css } from '../styled-system/css'
 
 function Button({ children }) {
   return (
     <button
       className={css({
-        px: "4",
-        py: "2",
-        bg: "blue.500",
-        color: "white",
-        rounded: "md",
-        focusRing: "outside",
+        px: '4',
+        py: '2',
+        bg: 'blue.500',
+        color: 'white',
+        rounded: 'md',
+        focusRing: 'outside'
       })}
     >
       {children}
     </button>
-  );
+  )
 }
 ```
 
 ### Keyboard-Only Focus Ring
 
 ```jsx
-import { css } from "../styled-system/css";
+import { css } from '../styled-system/css'
 
 function Input({ ...props }) {
   return (
     <input
       className={css({
-        px: "3",
-        py: "2",
-        borderWidth: "1px",
-        borderColor: "gray.300",
-        rounded: "md",
-        focusVisibleRing: "outside",
-        focusRingColor: "blue.500",
+        px: '3',
+        py: '2',
+        borderWidth: '1px',
+        borderColor: 'gray.300',
+        rounded: 'md',
+        focusVisibleRing: 'outside',
+        focusRingColor: 'blue.500'
       })}
       {...props}
     />
-  );
+  )
 }
 ```
 
 ### Custom Focus Ring
 
 ```jsx
-import { css } from "../styled-system/css";
+import { css } from '../styled-system/css'
 
 function CustomButton({ children }) {
   return (
     <button
       className={css({
-        px: "6",
-        py: "3",
-        bg: "purple.600",
-        color: "white",
-        rounded: "lg",
-        focusRing: "mixed",
-        focusRingColor: "purple.400",
-        focusRingWidth: "3px",
-        focusRingOffset: "3px",
+        px: '6',
+        py: '3',
+        bg: 'purple.600',
+        color: 'white',
+        rounded: 'lg',
+        focusRing: 'mixed',
+        focusRingColor: 'purple.400',
+        focusRingWidth: '3px',
+        focusRingOffset: '3px'
       })}
     >
       {children}
     </button>
-  );
+  )
 }
 ```
 
 ---
+
 
 ## Gradients
 
@@ -725,14 +724,14 @@ Create smooth color transitions with linear, radial, and conic gradient utilitie
 Use the `bgLinear` utility to create a linear gradient with a direction.
 
 ```tsx
-css({ bgLinear: "to-r", gradientFrom: "cyan.500", gradientTo: "blue.500" });
-css({ bgLinear: "to-t", gradientFrom: "sky.500", gradientTo: "indigo.500" });
+css({ bgLinear: 'to-r', gradientFrom: 'cyan.500', gradientTo: 'blue.500' })
+css({ bgLinear: 'to-t', gradientFrom: 'sky.500', gradientTo: 'indigo.500' })
 css({
-  bgLinear: "to-bl",
-  gradientFrom: "violet.500",
-  gradientTo: "fuchsia.500",
-});
-css({ bgLinear: "65deg", gradientFrom: "purple.500", gradientTo: "pink.500" });
+  bgLinear: 'to-bl',
+  gradientFrom: 'violet.500',
+  gradientTo: 'fuchsia.500'
+})
+css({ bgLinear: '65deg', gradientFrom: 'purple.500', gradientTo: 'pink.500' })
 ```
 
 ### Radial gradients
@@ -741,24 +740,24 @@ Build circular color transitions that radiate outward from a center point:
 
 ```tsx
 css({
-  bgRadial: "in srgb",
-  gradientFrom: "pink.400",
-  gradientFromPosition: "40%",
-  gradientTo: "fuchsia.700",
-});
+  bgRadial: 'in srgb',
+  gradientFrom: 'pink.400',
+  gradientFromPosition: '40%',
+  gradientTo: 'fuchsia.700'
+})
 css({
-  bgRadial: "at 50% 75%",
-  gradientFrom: "sky.200",
-  gradientVia: "blue.400",
-  gradientTo: "indigo.900",
-  gradientToPosition: "90%",
-});
+  bgRadial: 'at 50% 75%',
+  gradientFrom: 'sky.200',
+  gradientVia: 'blue.400',
+  gradientTo: 'indigo.900',
+  gradientToPosition: '90%'
+})
 css({
-  bgRadial: "at 25% 25%",
-  gradientFrom: "white",
-  gradientTo: "zinc.900",
-  gradientToPosition: "75%",
-});
+  bgRadial: 'at 25% 25%',
+  gradientFrom: 'white',
+  gradientTo: 'zinc.900',
+  gradientToPosition: '75%'
+})
 ```
 
 ### Conic gradients
@@ -767,29 +766,29 @@ Create sweeping color transitions that rotate around a central point:
 
 ```jsx
 css({
-  boxSize: "24",
-  rounded: "full",
-  bgConic: "in srgb",
-  gradientFrom: "blue.600",
-  gradientTo: "sky.400",
-  gradientToPosition: "50%",
-});
+  boxSize: '24',
+  rounded: 'full',
+  bgConic: 'in srgb',
+  gradientFrom: 'blue.600',
+  gradientTo: 'sky.400',
+  gradientToPosition: '50%'
+})
 css({
-  boxSize: "24",
-  rounded: "full",
-  bgConic: "from 180deg",
-  gradientFrom: "blue.600",
-  gradientVia: "blue.50",
-  gradientTo: "blue.600",
-});
+  boxSize: '24',
+  rounded: 'full',
+  bgConic: 'from 180deg',
+  gradientFrom: 'blue.600',
+  gradientVia: 'blue.50',
+  gradientTo: 'blue.600'
+})
 css({
-  boxSize: "24",
-  rounded: "full",
-  bgConic: "in oklch decreasing hue",
-  gradientFrom: "violet.700",
-  gradientVia: "lime.300",
-  gradientTo: "violet.700",
-});
+  boxSize: '24',
+  rounded: 'full',
+  bgConic: 'in oklch decreasing hue',
+  gradientFrom: 'violet.700',
+  gradientVia: 'lime.300',
+  gradientTo: 'violet.700'
+})
 ```
 
 ### Controlling color stops
@@ -798,11 +797,11 @@ Define which colors appear in your gradient using `gradientFrom`, `gradientVia`,
 
 ```jsx
 css({
-  bgLinear: "to-r",
-  gradientFrom: "indigo.500",
-  gradientVia: "purple.500",
-  gradientTo: "pink.500",
-});
+  bgLinear: 'to-r',
+  gradientFrom: 'indigo.500',
+  gradientVia: 'purple.500',
+  gradientTo: 'pink.500'
+})
 ```
 
 ### Positioning color stops
@@ -811,14 +810,14 @@ Control exactly where each color appears along the gradient using position utili
 
 ```jsx
 css({
-  bgLinear: "to-r",
-  gradientFrom: "indigo.500",
-  gradientFromPosition: "10%",
-  gradientVia: "sky.500",
-  gradientViaPosition: "30%",
-  gradientTo: "emerald.500",
-  gradientToPosition: "90%",
-});
+  bgLinear: 'to-r',
+  gradientFrom: 'indigo.500',
+  gradientFromPosition: '10%',
+  gradientVia: 'sky.500',
+  gradientViaPosition: '30%',
+  gradientTo: 'emerald.500',
+  gradientToPosition: '90%'
+})
 ```
 
 ### Text gradients
@@ -827,12 +826,12 @@ Apply colorful gradient effects to typography using `textGradient`:
 
 ```jsx
 css({
-  textGradient: "to-r",
-  gradientFrom: "purple.400",
-  gradientTo: "pink.400",
-  fontSize: "4xl",
-  fontWeight: "bold",
-});
+  textGradient: 'to-r',
+  gradientFrom: 'purple.400',
+  gradientTo: 'pink.400',
+  fontSize: '4xl',
+  fontWeight: 'bold'
+})
 ```
 
 ### Custom gradient values
@@ -841,12 +840,12 @@ Use bracket notation to create gradients with arbitrary values:
 
 ```jsx
 css({
-  bgLinear: "25deg",
-  gradientFrom: "red.50%",
-  gradientVia: "yellow.60%",
-  gradientTo: "lime.90%",
-  gradientToPosition: "teal.100%",
-});
+  bgLinear: '25deg',
+  gradientFrom: 'red.50%',
+  gradientVia: 'yellow.60%',
+  gradientTo: 'lime.90%',
+  gradientToPosition: 'teal.100%'
+})
 ```
 
 ### Responsive gradients
@@ -855,11 +854,12 @@ Apply different gradient styles at different breakpoints using responsive object
 
 ```jsx
 css({
-  gradientFrom: { base: "purple.400", md: "yellow.500" },
-});
+  gradientFrom: { base: 'purple.400', md: 'yellow.500' }
+})
 ```
 
 ---
+
 
 ## Helpers
 
@@ -887,6 +887,7 @@ development to visually inspect the layout and structure of your components.
 
 ---
 
+
 ## Interactivity
 
 Panda CSS provides a variety of utility classes to enhance interactivity and user experience on your web applications.
@@ -900,7 +901,7 @@ margins and paddings, scroll snapping, touch actions, and user selection.
 The `accentColor` utility class sets the accent color of an element. It supports `colors` tokens.
 
 ```jsx
-<div className={css({ accentColor: "blue.500" })}>Accent color applied</div>
+<div className={css({ accentColor: 'blue.500' })}>Accent color applied</div>
 ```
 
 ## Caret Color
@@ -909,7 +910,7 @@ The `caretColor` utility class sets the color of the text cursor (caret) in an i
 tokens.
 
 ```jsx
-<input className={css({ caretColor: "red.400" })} />
+<input className={css({ caretColor: 'red.400' })} />
 ```
 
 ## Scrollbar
@@ -918,7 +919,7 @@ The `scrollbar` utility allows customization of scrollbar appearance. It support
 respectively show or hide the scrollbar.
 
 ```jsx
-<div className={css({ scrollbar: "hidden" })}>Scrollbar hidden</div>
+<div className={css({ scrollbar: 'hidden' })}>Scrollbar hidden</div>
 ```
 
 ## Scroll Margin
@@ -926,9 +927,7 @@ respectively show or hide the scrollbar.
 Scroll margin utilities set margins around scroll containers.
 
 ```jsx
-<div className={css({ scrollMarginX: "2" })}>
-  Scrollbar Container with Inline padding
-</div>
+<div className={css({ scrollMarginX: '2' })}>Scrollbar Container with Inline padding</div>
 ```
 
 | Prop                                  | CSS Property                 | Token Category |
@@ -949,9 +948,7 @@ Scroll margin utilities set margins around scroll containers.
 Scroll padding utilities set padding inside scroll containers.
 
 ```jsx
-<div className={css({ scrollPaddingY: "2" })}>
-  Scrollbar Container with block padding
-</div>
+<div className={css({ scrollPaddingY: '2' })}>Scrollbar Container with block padding</div>
 ```
 
 | Prop                                     | CSS Property                  | Token Category |
@@ -986,9 +983,7 @@ Scroll snapping utilities provide control over the scroll snap behavior.
 It's values can be `mandatory` or `proximity` values, and maps to `var(--scroll-snap-strictness)`.
 
 ```jsx
-<div className={css({ scrollSnapStrictness: "proximity" })}>
-  Scroll container with proximity scroll snap
-</div>
+<div className={css({ scrollSnapStrictness: 'proximity' })}>Scroll container with proximity scroll snap</div>
 ```
 
 ### Scroll Snap Type
@@ -1004,6 +999,7 @@ Supported values
 
 ---
 
+
 ## Layout
 
 Panda provides style properties for styling layout of an element
@@ -1017,7 +1013,7 @@ Use the `aspectRatio` utilities to set the desired aspect ratio of an element.
 Values can reference the `aspectRatios` token category.
 
 ```jsx
-<div className={css({ aspectRatio: "square" })} />
+<div className={css({ aspectRatio: 'square' })} />
 ```
 
 > This uses the native CSS property `aspect-ratio` which is might not supported in all browsers. Consider using the
@@ -1039,7 +1035,7 @@ Use the `top`, `right`, `bottom` and `left` utilities to set the position of an 
 Values can reference the `spacing` token category.
 
 ```jsx
-<div className={css({ position: "absolute", top: "0", left: "0" })} />
+<div className={css({ position: 'absolute', top: '0', left: '0' })} />
 ```
 
 | Prop     | CSS Property | Token Category |
@@ -1056,7 +1052,7 @@ Use the `inset{Start|End}` utilities to set the position of an element based on 
 > For example, `insetStart` will set the `left` property in `ltr` mode and `right` in `rtl` mode.
 
 ```jsx
-<div className={css({ position: "absolute", insetStart: "0" })} />
+<div className={css({ position: 'absolute', insetStart: '0' })} />
 ```
 
 | Prop                                      | CSS Property         | Token Category |
@@ -1077,6 +1073,7 @@ You can define container names and sizes in your theme configuration and use the
 
 ---
 
+
 ## List
 
 Panda provides utilities for customizing list styles.
@@ -1092,18 +1089,19 @@ const theme = {
   tokens: {
     assets: {
       star: {
-        value: { type: "svg", value: "<svg>...</svg>" },
-      },
-    },
-  },
-};
+        value: { type: 'svg', value: '<svg>...</svg>' }
+      }
+    }
+  }
+}
 ```
 
 ```jsx
-<div className={css({ listStyleImage: "star" })} />
+<div className={css({ listStyleImage: 'star' })} />
 ```
 
 ---
+
 
 ## Outline
 
@@ -1165,6 +1163,7 @@ Adjust the space between the outline and the element.
 | `outlineOffset` | `outline-offset` | `spacing`      |
 
 ---
+
 
 ## Sizing
 
@@ -1288,7 +1287,7 @@ Use the `minHeight` or `minH` property to set the minimum height of an element.
 Use the `boxSize` property to set the width and height of an element.
 
 ```jsx
-<div className={css({ boxSize: "24" })} />
+<div className={css({ boxSize: '24' })} />
 ```
 
 | Prop      | CSS Property    | Token Category |
@@ -1296,6 +1295,7 @@ Use the `boxSize` property to set the width and height of an element.
 | `boxSize` | `width, height` | `sizes`        |
 
 ---
+
 
 ## Spacing
 
@@ -1427,6 +1427,7 @@ Use the `margin{Start|End}` properties to apply margin on the logical axis of an
 
 ---
 
+
 ## SVG
 
 Panda provides utilities for styling SVG elements.
@@ -1438,7 +1439,7 @@ Panda provides utilities for styling SVG elements.
 Change the fill color of an SVG element.
 
 ```jsx
-<svg className={css({ fill: "blue.500" })} />
+<svg className={css({ fill: 'blue.500' })} />
 ```
 
 | Prop   | CSS Property | Token Category |
@@ -1450,7 +1451,7 @@ Change the fill color of an SVG element.
 Change the stroke color of an SVG element.
 
 ```jsx
-<svg className={css({ stroke: "blue.500" })} />
+<svg className={css({ stroke: 'blue.500' })} />
 ```
 
 | Prop     | CSS Property | Token Category |
@@ -1462,7 +1463,7 @@ Change the stroke color of an SVG element.
 Change the stroke width of an SVG element.
 
 ```jsx
-<svg className={css({ strokeWidth: "1px" })} />
+<svg className={css({ strokeWidth: '1px' })} />
 ```
 
 | Prop          | CSS Property   | Token Category |
@@ -1470,6 +1471,7 @@ Change the stroke width of an SVG element.
 | `strokeWidth` | `stroke-width` | borderWidths   |
 
 ---
+
 
 ## Tables
 
@@ -1482,7 +1484,7 @@ Panda provides utilities for styling tables.
 Control the border-spacing property of a table.
 
 ```jsx
-<table className={css({ borderSpacing: "2" })} />
+<table className={css({ borderSpacing: '2' })} />
 ```
 
 | Prop            | CSS Property     | Token Category |
@@ -1494,7 +1496,7 @@ Control the border-spacing property of a table.
 Control the horizontal border-spacing property of a table.
 
 ```jsx
-<table className={css({ borderSpacingX: "2" })} />
+<table className={css({ borderSpacingX: '2' })} />
 ```
 
 | Prop             | CSS Property     | Token Category |
@@ -1506,7 +1508,7 @@ Control the horizontal border-spacing property of a table.
 Control the vertical border-spacing property of a table.
 
 ```jsx
-<table className={css({ borderSpacingY: "2" })} />
+<table className={css({ borderSpacingY: '2' })} />
 ```
 
 | Prop             | CSS Property     | Token Category |
@@ -1514,6 +1516,7 @@ Control the vertical border-spacing property of a table.
 | `borderSpacingY` | `border-spacing` | `spacing`      |
 
 ---
+
 
 ## Transforms
 
@@ -1526,7 +1529,7 @@ Panda provides utilities for transforming elements.
 Control the scale property. Supported value is `auto`
 
 ```jsx
-<div className={css({ scale: "auto" })} /> // => 'var(--scale-x) var(--scale-y)'
+<div className={css({ scale: 'auto' })} /> // => 'var(--scale-x) var(--scale-y)'
 ```
 
 ### Scale X
@@ -1534,7 +1537,7 @@ Control the scale property. Supported value is `auto`
 Control the scaleX property.
 
 ```jsx
-<div className={css({ scaleX: "1.3" })} /> // => --scale-x: 1.3;
+<div className={css({ scaleX: '1.3' })} /> // => --scale-x: 1.3;
 ```
 
 ### Scale Y
@@ -1542,7 +1545,7 @@ Control the scaleX property.
 Control the scaleY property.
 
 ```jsx
-<div className={css({ scaleY: "0.4" })} /> // => --scale-y: 0.4;
+<div className={css({ scaleY: '0.4' })} /> // => --scale-y: 0.4;
 ```
 
 ## Translate
@@ -1550,7 +1553,7 @@ Control the scaleY property.
 Control the translate property. Supported value is `auto`
 
 ```jsx
-<div className={css({ translate: "auto" })} /> // => 'var(--translate-x) var(--translate-y)'
+<div className={css({ translate: 'auto' })} /> // => 'var(--translate-x) var(--translate-y)'
 ```
 
 ### Translate X
@@ -1572,6 +1575,7 @@ Control the translateY property.
 ```
 
 ---
+
 
 ## Transitions
 
@@ -1616,6 +1620,7 @@ Control the animation property. It supports the `animations` token category.
 
 ---
 
+
 ## Typography
 
 Panda's typography utilities.
@@ -1625,7 +1630,7 @@ Panda provides utilities and style properties for styling text.
 ## Font Properties
 
 ```jsx
-<div className={css({ fontFamily: "mono" })} />
+<div className={css({ fontFamily: 'mono' })} />
 ```
 
 | Prop                  | CSS Property            | Token Category   |
@@ -1662,7 +1667,7 @@ Utilities for applying a composition of typography properties.
 ```jsx
 <h1
   className={css({
-    textStyle: "heading/marketing",
+    textStyle: 'heading/marketing'
   })}
 >
   Hello World
@@ -1674,3 +1679,5 @@ Utilities for applying a composition of typography properties.
 | `textStyle` | `textStyles` |
 
 ---
+
+

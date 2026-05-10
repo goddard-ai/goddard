@@ -1,6 +1,6 @@
 ---
 name: electrobun
-description: Build, refactor, debug, and review Electrobun desktop apps that use Bun main-process code, BrowserWindow or BrowserView, typed RPC, Electroview, electrobun-webview, menus, tray, clipboard, dialogs, sessions, global shortcuts, build config, or shutdown hooks. Use when Codex must write or inspect Electrobun-specific code and avoid Electron-specific APIs or architecture.
+description: Build or debug Electrobun desktop apps, including Bun main-process code, windows/views, typed RPC, Electroview, webviews, menus, tray, dialogs, sessions, shortcuts, builds, and shutdown.
 ---
 
 # electrobun

@@ -20,27 +20,15 @@ let eventLog: HTMLElement;
 function init() {
   trayTitleInput = document.getElementById("trayTitle") as HTMLInputElement;
   showMenuCheckbox = document.getElementById("showMenu") as HTMLInputElement;
-  hasSubmenuCheckbox = document.getElementById(
-    "hasSubmenu",
-  ) as HTMLInputElement;
+  hasSubmenuCheckbox = document.getElementById("hasSubmenu") as HTMLInputElement;
   newTitleInput = document.getElementById("newTitle") as HTMLInputElement;
   eventLog = document.getElementById("eventLog") as HTMLElement;
 
-  document
-    .getElementById("createTrayBtn")
-    ?.addEventListener("click", createTray);
-  document
-    .getElementById("updateTitleBtn")
-    ?.addEventListener("click", updateTitle);
-  document
-    .getElementById("startCounterBtn")
-    ?.addEventListener("click", startCounter);
-  document
-    .getElementById("stopCounterBtn")
-    ?.addEventListener("click", stopCounter);
-  document
-    .getElementById("removeTrayBtn")
-    ?.addEventListener("click", removeTray);
+  document.getElementById("createTrayBtn")?.addEventListener("click", createTray);
+  document.getElementById("updateTitleBtn")?.addEventListener("click", updateTitle);
+  document.getElementById("startCounterBtn")?.addEventListener("click", startCounter);
+  document.getElementById("stopCounterBtn")?.addEventListener("click", stopCounter);
+  document.getElementById("removeTrayBtn")?.addEventListener("click", removeTray);
   document.getElementById("doneBtn")?.addEventListener("click", () => {
     (electrobun.rpc as any)?.request.closeWindow({});
   });

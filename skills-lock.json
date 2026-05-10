@@ -4,7 +4,7 @@
     "agent-client-protocol": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "de68702ac1ded1902c4a6e687f6faae3032ad395573780c1b384bdbcd1b05668"
+      "computedHash": "1e0d00e39eb1e496a6ba76bf5dd36aac4d64d56e36b88c039ce4db93b3385bf7"
     },
     "comark": {
       "source": "/Users/alec/dev/skills/packages",
@@ -15,6 +15,11 @@
       "source": "alloc/kindstore",
       "sourceType": "github",
       "computedHash": "ea607f77953c0703581fde29b9802cb40c542d45785bc43643c02a5eda224838"
+    },
+    "spec-editing": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "d023dc09ba8fa5dfcd1ca06d661db1759bfa27ad69b440db3e1bfd1ac1bac7d4"
     }
   }
 }

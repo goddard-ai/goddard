@@ -1,6 +1,6 @@
 ---
 name: panda-css
-description: Build, refactor, debug, and review web UI code that uses Panda CSS for build-time styling via `css`, `styled`, JSX style props, patterns, recipes, slot recipes, theme tokens, presets, utilities, or Panda CLI/PostCSS integration. Use when Codex needs to implement or troubleshoot Panda CSS setup, static extraction, `panda.config.*`, `styled-system` output, dynamic styling workarounds, component-library packaging, or framework-specific Panda integration.
+description: Work on Panda CSS styling, setup, and extraction, including `css`, `styled`, style props, patterns, recipes, tokens, presets, utilities, `panda.config.*`, and `styled-system`.
 ---
 
 # panda-css

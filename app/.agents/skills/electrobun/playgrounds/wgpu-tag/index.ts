@@ -34,23 +34,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("toggleShaderBtn")?.addEventListener("click", () => {
     if (!wgpu || !wgpu.wgpuViewId) return;
-    (electrobun.rpc as any)?.request.wgpuTagToggleShader({
-      id: wgpu.wgpuViewId,
-    });
+    (electrobun.rpc as any)?.request.wgpuTagToggleShader({ id: wgpu.wgpuViewId });
     if (statusEl) statusEl.textContent = "Status: toggled shader";
   });
 
-  document
-    .getElementById("toggleTransparentBtn")
-    ?.addEventListener("click", () => {
-      wgpu?.toggleTransparent();
-    });
+  document.getElementById("toggleTransparentBtn")?.addEventListener("click", () => {
+    wgpu?.toggleTransparent();
+  });
 
-  document
-    .getElementById("togglePassthroughBtn")
-    ?.addEventListener("click", () => {
-      wgpu?.togglePassthrough();
-    });
+  document.getElementById("togglePassthroughBtn")?.addEventListener("click", () => {
+    wgpu?.togglePassthrough();
+  });
 
   document.getElementById("toggleHiddenBtn")?.addEventListener("click", () => {
     wgpu?.toggleHidden();

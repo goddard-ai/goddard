@@ -121,10 +121,7 @@ const rpc = Electroview.defineRPC<any>({
         role?: string;
         data?: any;
       }) => {
-        addLogEntry(
-          eventData.action || eventData.role || "unknown",
-          eventData.data,
-        );
+        addLogEntry(eventData.action || eventData.role || "unknown", eventData.data);
       },
     },
   },
@@ -160,6 +157,7 @@ function addLogEntry(action: string, data?: any) {
 function showContextMenu(menuId: string) {
   const config = menuConfigs.find((c) => c.id === menuId);
   if (!config) return;
+
   (electrobun.rpc as any)?.request.showContextMenu({ menu: config.menu });
   addLogEntry(`Showing: ${config.title}`);
 }

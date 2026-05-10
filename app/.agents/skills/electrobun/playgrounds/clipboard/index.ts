@@ -82,10 +82,7 @@ async function writeClipboard() {
   }
 }
 
-function addLog(
-  message: string,
-  type: "success" | "error" | "warn" | "info" = "info",
-) {
+function addLog(message: string, type: "success" | "error" | "warn" | "info" = "info") {
   const placeholder = eventLog.querySelector(".placeholder");
   if (placeholder) placeholder.remove();
 

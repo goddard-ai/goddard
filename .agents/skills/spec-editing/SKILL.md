@@ -1,6 +1,6 @@
 ---
 name: spec-editing
-description: Use this skill to create, update, split, or reorganize the repository's `spec/` tree. It manages product intent and constraints, keeps `spec/` canonical, and rejects code-level implementation detail.
+description: Create, update, split, or reorganize the repository `spec/` tree while preserving product intent, constraints, canonical specs, and code-free scope.
 ---
 
 # Spec Editing

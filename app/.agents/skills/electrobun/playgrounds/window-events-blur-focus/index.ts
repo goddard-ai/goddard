@@ -5,13 +5,7 @@ const rpc = Electroview.defineRPC<any>({
   handlers: {
     requests: {},
     messages: {
-      updateStatus: ({
-        blurDetected,
-        focusDetected,
-      }: {
-        blurDetected: boolean;
-        focusDetected: boolean;
-      }) => {
+      updateStatus: ({ blurDetected, focusDetected }: { blurDetected: boolean; focusDetected: boolean }) => {
         if (blurDetected) {
           document.getElementById("blur-indicator")?.classList.add("detected");
           const blurStatus = document.getElementById("blur-status");

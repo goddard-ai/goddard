@@ -1,6 +1,6 @@
 ---
 name: ark-ui
-description: Build, refactor, debug, and review React UI code that uses Ark UI via `@ark-ui/react` or `@ark-ui/react/*`. Use when Codex must choose the right React Ark component, collection helper, or utility; preserve part anatomy and accessibility contracts; compose with `asChild`, `Portal`, `Presence`, or `EnvironmentProvider`; style parts with `data-scope`, `data-part`, CSS variables, and state `data-*` attributes; wire `Field` or `Fieldset`; work with `createListCollection`, `useAsyncList`, `useListSelection`, or `createTreeCollection`; or handle React Ark surfaces such as dialogs, menus, selects, comboboxes, date pickers, file upload, image cropper, tree view, splitter, toast, tour, locale, download, focus trap, formatting, and related utilities.
+description: Work on React UI using Ark UI, including component choice, part anatomy, accessibility, `asChild`, portals, presence, styling data attributes, fields, collections, lists, trees, overlays, and forms.
 ---
 
 # ark-ui

@@ -1,6 +1,6 @@
 ---
 name: react-virtuoso
-description: Build, refactor, debug, and review React virtualization code that uses React Virtuoso for flat lists, grouped lists, responsive grids, virtualized tables, masonry layouts, grouped tables, window-scrolling views, or chat/message interfaces. Use when Codex needs to choose between `Virtuoso`, `GroupedVirtuoso`, `VirtuosoGrid`, `TableVirtuoso`, `GroupedTableVirtuoso`, `VirtuosoMasonry`, or `VirtuosoMessageList`, tune scrolling behavior, customize rendered wrappers, integrate UI libraries, or fix common measurement and remounting issues.
+description: Work on React Virtuoso virtualization for lists, groups, grids, tables, masonry, window scrolling, and chat/message views, including component choice, scrolling, wrappers, UI integration, and measurement bugs.
 ---
 
 # react-virtuoso

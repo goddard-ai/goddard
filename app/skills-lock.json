@@ -2,29 +2,39 @@
   "version": 1,
   "skills": {
     "ark-ui": {
-      "source": "/Users/alec/dev/skills/packages",
+      "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "5c2e5f457c610cd34a82a7b90526128a5dfddddb3bf91b4be86aa29d2c7d5c28"
+      "computedHash": "d425aedfda02c66ed9bbf90192e852eb713b9e1cd6c7814733f926e40e34f811"
+    },
+    "comark": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "8eeb34195599aadf9840f7733f287502f3d04ebf0153ee53a526405cae6f1272"
     },
     "electrobun": {
-      "source": "/Users/alec/dev/skills/packages",
+      "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "ebd0eb971afd1d0f3bef3005259835bd57b1d103bc38d627692710b6f54bd6e2"
+      "computedHash": "767ef696070afe1c3e22a443fc35d4d1bfd8aa406ba44a2196647285d57a66a7"
     },
     "emil-design-eng": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
       "computedHash": "9a4967818dd74e1122c871d187cca6f11b63721eae8fce6c032f77aa489c80fd"
     },
-    "panda-css": {
-      "source": "/Users/alec/dev/skills/packages",
+    "lexical": {
+      "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "58982aae9f068cfddc3fffd4cf259caa3803a36f3b921a36c1fda97f26d98515"
+      "computedHash": "ed51c3851e50c2d793252e83c8b019ab3d982b8e59f34bda7ce55533545bf4c3"
+    },
+    "panda-css": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "7fd528d24e9f7f3117dbe692d238902e969a6ced7382a2d3c41a72b5febc4d43"
     },
     "pandark-ui": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "1b54468cb14cec9e78276402a30a281c65eba0bbb43d1f908afb11929aee14de"
+      "computedHash": "8c5b90637fbb64bde1f2a1364ad3e51018b10c406b5ebcec14921fd922153e6a"
     },
     "preact-sigma": {
       "source": "/Users/alec/dev/alloc/preact-sigma/skills",
@@ -37,19 +47,24 @@
       "computedHash": "1cae67f489d4ce78c030a53a70ef62db3fb396ba3a2ac613e652dd963b706a65"
     },
     "react-virtuoso": {
-      "source": "/Users/alec/dev/skills/packages",
+      "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "0ad8839072da56a0ce9e13544c328a5d51059cf03da4e7a337d624c404b6d901"
+      "computedHash": "6a9a74f7a5621d1ef394b84a79f870a7eb80e4a5dc067b8f6b50e3a9b2512f82"
     },
     "tsrx-preact": {
-      "source": "/Users/alec/dev/skills/packages",
+      "source": "/Users/alec/dev/skills",
       "sourceType": "local",
-      "computedHash": "86aef03df9325c940a7e019cdf8ee27b4f5b2943e5c75fc6afc7381468f9a8ac"
+      "computedHash": "e3df6d35e969a119cd2d0c3d10fcd3613493948fb1c76249301309a4556f7511"
     },
     "tsrx-react": {
       "source": "/Users/alec/dev/skills/packages/tsrx-react",
       "sourceType": "local",
       "computedHash": "444462090b9127c657002ad035a0e2cf9aaaa9b701a2571f07d9e2bec37d53e4"
+    },
+    "zero-native": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "f33183c94bbea2494bb1e76dac0561e231714e538eabb4acd4c3bea38b0b0d40"
     }
   }
 }

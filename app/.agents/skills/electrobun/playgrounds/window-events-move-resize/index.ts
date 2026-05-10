@@ -13,13 +13,7 @@ const rpc = Electroview.defineRPC<any>({
         const el = document.getElementById("size");
         if (el) el.textContent = `${width} x ${height}`;
       },
-      updateStatus: ({
-        moveDetected,
-        resizeDetected,
-      }: {
-        moveDetected: boolean;
-        resizeDetected: boolean;
-      }) => {
+      updateStatus: ({ moveDetected, resizeDetected }: { moveDetected: boolean; resizeDetected: boolean }) => {
         if (moveDetected) {
           document.getElementById("move-indicator")?.classList.add("detected");
           const moveStatus = document.getElementById("move-status");
@@ -29,9 +23,7 @@ const rpc = Electroview.defineRPC<any>({
           }
         }
         if (resizeDetected) {
-          document
-            .getElementById("resize-indicator")
-            ?.classList.add("detected");
+          document.getElementById("resize-indicator")?.classList.add("detected");
           const resizeStatus = document.getElementById("resize-status");
           if (resizeStatus) {
             resizeStatus.classList.add("detected");

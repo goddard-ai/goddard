@@ -30,9 +30,7 @@ function init() {
   eventLogEl = document.getElementById("eventLog") as HTMLElement;
   clearLogBtn = document.getElementById("clearLogBtn") as HTMLButtonElement;
 
-  unregisterAllBtn = document.getElementById(
-    "unregisterAllBtn",
-  ) as HTMLButtonElement;
+  unregisterAllBtn = document.getElementById("unregisterAllBtn") as HTMLButtonElement;
 
   registerBtn.addEventListener("click", registerShortcut);
   unregisterBtn.addEventListener("click", unregisterCurrent);
@@ -45,8 +43,7 @@ function init() {
   // Setup preset buttons
   document.querySelectorAll(".preset-btn[data-accelerator]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      acceleratorInput.value =
-        (btn as HTMLElement).dataset["accelerator"] || "";
+      acceleratorInput.value = (btn as HTMLElement).dataset['accelerator'] || "";
     });
   });
 }
@@ -64,9 +61,7 @@ async function registerShortcut() {
   }
 
   try {
-    const result = await (electrobun.rpc as any)?.request.registerShortcut({
-      accelerator,
-    });
+    const result = await (electrobun.rpc as any)?.request.registerShortcut({ accelerator });
     if (result.success) {
       registeredShortcuts.set(accelerator, { count: 0 });
       addLog(`Registered: ${accelerator}`, "success");
@@ -133,15 +128,13 @@ function updateActiveShortcuts() {
   }
 
   const html = Array.from(registeredShortcuts.entries())
-    .map(
-      ([acc, data]) => `
+    .map(([acc, data]) => `
       <div class="shortcut-item">
         <span class="accelerator">${escapeHtml(acc)}</span>
         <span class="count">Triggers: ${data.count}</span>
         <button class="remove-btn" data-accelerator="${escapeHtml(acc)}">Remove</button>
       </div>
-    `,
-    )
+    `)
     .join("");
 
   activeShortcutsEl.innerHTML = html;
@@ -149,16 +142,13 @@ function updateActiveShortcuts() {
   // Add click handlers for remove buttons
   activeShortcutsEl.querySelectorAll(".remove-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const acc = (btn as HTMLElement).dataset["accelerator"];
+      const acc = (btn as HTMLElement).dataset['accelerator'];
       if (acc) unregisterByAccelerator(acc);
     });
   });
 }
 
-function addLog(
-  message: string,
-  type: "success" | "error" | "warn" | "info" | "trigger" = "info",
-) {
+function addLog(message: string, type: "success" | "error" | "warn" | "info" | "trigger" = "info") {
   const placeholder = eventLogEl.querySelector(".placeholder");
   if (placeholder) placeholder.remove();
 
@@ -194,20 +184,14 @@ function escapeHtml(str: string): string {
 }
 
 // Listen for shortcut triggers from bun
-(electrobun.rpc as any)?.addMessageListener(
-  "shortcutTriggered",
-  (data: { accelerator: string }) => {
-    const shortcut = registeredShortcuts.get(data.accelerator);
-    if (shortcut) {
-      shortcut.count++;
-      addLog(
-        `Triggered: ${data.accelerator} (count: ${shortcut.count})`,
-        "trigger",
-      );
-      updateActiveShortcuts();
-    }
-  },
-);
+(electrobun.rpc as any)?.addMessageListener("shortcutTriggered", (data: { accelerator: string }) => {
+  const shortcut = registeredShortcuts.get(data.accelerator);
+  if (shortcut) {
+    shortcut.count++;
+    addLog(`Triggered: ${data.accelerator} (count: ${shortcut.count})`, "trigger");
+    updateActiveShortcuts();
+  }
+});
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);

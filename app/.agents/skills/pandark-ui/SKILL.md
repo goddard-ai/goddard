@@ -1,6 +1,6 @@
 ---
 name: pandark-ui
-description: Implement, refactor, and review product UI in existing apps that use Panda CSS and Ark UI when the task is about composing screens, forms, lists, tables, empty states, or action areas in a compact, neutral, accessible way within an established design system. Use when Codex must choose semantic structure, reuse local components or recipes, pick Ark UI primitives for interaction, and apply minimal Panda CSS semantic-token styling. Do not use for Panda CSS setup, codegen, config, static-extraction, or token-plumbing work; for Ark UI component API troubleshooting or library-specific behavior in isolation; or when the task is primarily about introducing either library.
+description: Compose compact product UI in apps already using Panda CSS and Ark UI, including screens, forms, lists, tables, empty states, action areas, local components, recipes, and semantic-token styling.
 ---
 
 # pandark-ui

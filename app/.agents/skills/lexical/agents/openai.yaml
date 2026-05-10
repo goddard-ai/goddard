@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lexical"
+  short_description: "Build and extend Lexical editors"
+  default_prompt: "Use $lexical to build or debug a Lexical editor, plugin, node, or extension."

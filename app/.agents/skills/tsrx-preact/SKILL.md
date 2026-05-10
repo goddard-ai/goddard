@@ -1,6 +1,6 @@
 ---
 name: tsrx-preact
-description: Author and maintain Preact components in `.tsrx` files. Use when code uses TSRX `component` declarations or component arrow functions, statement-position markup, double-quoted text nodes, `<tsrx>` expression-position blocks, render props that return markup, lexical template scopes, or template control flow such as `if`, `for`, `switch`, and `try` / `pending` / `catch`.
+description: Author or maintain Preact components in `.tsrx` files, including TSRX component declarations, statement-position markup, scoped templates, render props, and template control flow.
 ---
 
 ## Overview

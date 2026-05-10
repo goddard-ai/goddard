@@ -31,21 +31,11 @@ const resultHistory: Array<{
 
 function init() {
   // Get DOM elements
-  startingFolderInput = document.getElementById(
-    "startingFolder",
-  ) as HTMLInputElement;
-  allowedFileTypesInput = document.getElementById(
-    "allowedFileTypes",
-  ) as HTMLInputElement;
-  canChooseFilesCheckbox = document.getElementById(
-    "canChooseFiles",
-  ) as HTMLInputElement;
-  canChooseDirectoryCheckbox = document.getElementById(
-    "canChooseDirectory",
-  ) as HTMLInputElement;
-  allowsMultipleSelectionCheckbox = document.getElementById(
-    "allowsMultipleSelection",
-  ) as HTMLInputElement;
+  startingFolderInput = document.getElementById("startingFolder") as HTMLInputElement;
+  allowedFileTypesInput = document.getElementById("allowedFileTypes") as HTMLInputElement;
+  canChooseFilesCheckbox = document.getElementById("canChooseFiles") as HTMLInputElement;
+  canChooseDirectoryCheckbox = document.getElementById("canChooseDirectory") as HTMLInputElement;
+  allowsMultipleSelectionCheckbox = document.getElementById("allowsMultipleSelection") as HTMLInputElement;
   openDialogBtn = document.getElementById("openDialogBtn") as HTMLButtonElement;
   doneBtn = document.getElementById("doneBtn") as HTMLButtonElement;
   resultBox = document.getElementById("result") as HTMLElement;
@@ -60,16 +50,14 @@ function init() {
   // Setup preset buttons for folders
   document.querySelectorAll(".preset-btn[data-folder]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      startingFolderInput.value =
-        (btn as HTMLElement).dataset["folder"] || "~/";
+      startingFolderInput.value = (btn as HTMLElement).dataset['folder'] || "~/";
     });
   });
 
   // Setup preset buttons for file types
   document.querySelectorAll(".preset-btn[data-types]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      allowedFileTypesInput.value =
-        (btn as HTMLElement).dataset["types"] || "*";
+      allowedFileTypesInput.value = (btn as HTMLElement).dataset['types'] || "*";
     });
   });
 }
@@ -88,9 +76,7 @@ async function openDialog() {
   openDialogBtn.textContent = "Dialog Open...";
 
   try {
-    const result = await (electrobun.rpc as any)?.request.openFileDialog(
-      options,
-    );
+    const result = await (electrobun.rpc as any)?.request.openFileDialog(options);
 
     // Store in history
     resultHistory.unshift({
@@ -137,10 +123,7 @@ function updateHistoryDisplay() {
       let resultHtml: string;
       if (item.result.length > 0 && item.result[0] !== "") {
         resultHtml = item.result
-          .map(
-            (p) =>
-              `<span class="file-path">${escapeHtml(truncatePath(p))}</span>`,
-          )
+          .map((p) => `<span class="file-path">${escapeHtml(truncatePath(p))}</span>`)
           .join("");
       } else {
         resultHtml = `<span class="cancelled">Cancelled</span>`;

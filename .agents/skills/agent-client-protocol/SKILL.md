@@ -1,6 +1,6 @@
 ---
 name: agent-client-protocol
-description: Implement, review, debug, or explain Agent Client Protocol (ACP) integrations between coding agents and editor or IDE clients. Use when Codex needs to add or validate ACP JSON-RPC methods, initialization and capability negotiation, session lifecycle handling, prompt and update streaming, tool calls and permission requests, filesystem or terminal bridges, MCP server wiring, session modes or config options, slash commands, transports, or ACP extension points.
+description: Work on Agent Client Protocol (ACP) integrations, including JSON-RPC methods, capabilities, sessions, streaming, tools, permissions, terminals, MCP wiring, transports, and editor/IDE clients.
 ---
 
 # Agent Client Protocol

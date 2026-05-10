@@ -1,6 +1,6 @@
 ---
 name: comark
-description: Implement, refactor, debug, and review code that uses Comark for Markdown parsing, component-in-Markdown authoring, AST transforms, streaming markdown, or React rendering. Use when Codex needs to wire `parse`, `createParse`, `autoCloseMarkdown`, `renderMarkdown`, `Comark`, or `ComarkRenderer`; configure built-in plugins such as `highlight`, `math`, `mermaid`, `security`, `summary`, `toc`, `headings`, `emoji`, or `task-list`; map custom React components; or split parse-time work on the server from render-time work in React.
+description: Work on Comark Markdown parsing, component syntax, AST transforms, streaming, React rendering, custom components, server/client rendering splits, and built-in plugins.
 ---
 
 # comark

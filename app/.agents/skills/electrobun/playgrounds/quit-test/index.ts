@@ -39,31 +39,23 @@ function init() {
     (electrobun.rpc as any)?.request.closeWindow({});
   });
 
-  document
-    .getElementById("utilsQuitBtn")
-    ?.addEventListener("click", async () => {
-      addLog("Requesting Utils.quit()...", "info");
-      try {
-        await (electrobun.rpc as any)?.request.triggerQuit({
-          mode: "utils-quit",
-        });
-      } catch {
-        addLog("RPC failed (app may have quit)", "info");
-      }
-    });
+  document.getElementById("utilsQuitBtn")?.addEventListener("click", async () => {
+    addLog("Requesting Utils.quit()...", "info");
+    try {
+      await (electrobun.rpc as any)?.request.triggerQuit({ mode: "utils-quit" });
+    } catch {
+      addLog("RPC failed (app may have quit)", "info");
+    }
+  });
 
-  document
-    .getElementById("processExitBtn")
-    ?.addEventListener("click", async () => {
-      addLog("Requesting process.exit(0)...", "info");
-      try {
-        await (electrobun.rpc as any)?.request.triggerQuit({
-          mode: "process-exit",
-        });
-      } catch {
-        addLog("RPC failed (app may have quit)", "info");
-      }
-    });
+  document.getElementById("processExitBtn")?.addEventListener("click", async () => {
+    addLog("Requesting process.exit(0)...", "info");
+    try {
+      await (electrobun.rpc as any)?.request.triggerQuit({ mode: "process-exit" });
+    } catch {
+      addLog("RPC failed (app may have quit)", "info");
+    }
+  });
 
   document.getElementById("clearLogBtn")?.addEventListener("click", () => {
     eventLogEl.innerHTML = `<span class="placeholder">Events will appear here...</span>`;
@@ -71,18 +63,13 @@ function init() {
 }
 
 // Listen for messages from bun (beforeQuit handler sends these)
-(electrobun.rpc as any)?.addMessageListener(
-  "beforeQuitFired",
-  (data: { message: string }) => {
-    addLog(data.message, "success");
-  },
-);
-(electrobun.rpc as any)?.addMessageListener(
-  "beforeQuitDone",
-  (data: { message: string }) => {
-    addLog(data.message, "success");
-  },
-);
+(electrobun.rpc as any)?.addMessageListener("beforeQuitFired", (data: { message: string }) => {
+  addLog(data.message, "success");
+});
+
+(electrobun.rpc as any)?.addMessageListener("beforeQuitDone", (data: { message: string }) => {
+  addLog(data.message, "success");
+});
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
