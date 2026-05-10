@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
+import { hasDiagnosticErrors } from "./diagnostics"
 import { branchExists, getBranchHead, isAncestor } from "./git/refs"
 import { getStashRefs } from "./git/stash"
 import { getWorkingTreeStatus } from "./git/worktree"
@@ -203,7 +204,7 @@ export async function buildStatusReport(input: SprintInferenceInput & { sprintLo
     workingTree.clean,
   )
   const report: SprintStatusReport = {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(diagnostics),
     rootDir: context.rootDir,
     sprint: parsed.state.sprint,
     statePath: context.statePath,

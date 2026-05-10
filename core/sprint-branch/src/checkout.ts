@@ -1,6 +1,7 @@
 import path from "node:path"
 import { autocomplete, isCancel } from "@clack/prompts"
 
+import { hasDiagnosticErrors } from "./diagnostics"
 import { GitCommandError, runGit } from "./git/command"
 import { branchExists, getBranchHead } from "./git/refs"
 import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
@@ -82,7 +83,7 @@ export async function runCheckout(input: CheckoutInput) {
   }
 
   const report = {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(diagnostics),
     command: "checkout" as const,
     dryRun: input.dryRun,
     executed: false,
@@ -242,7 +243,7 @@ async function readExplicitCandidate(
 ) {
   const validation = validateSprintName(sprint)
   diagnostics.push(...validation)
-  if (validation.some((diagnostic) => diagnostic.severity === "error")) {
+  if (hasDiagnosticErrors(validation)) {
     return null
   }
 

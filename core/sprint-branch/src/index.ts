@@ -1,5 +1,6 @@
 export { formatCheckoutReport, runCheckout } from "./checkout"
 export { buildDoctorReport, formatDoctorReport } from "./doctor"
+export { hasDiagnosticErrors } from "./diagnostics"
 export { GitCommandError, runGit } from "./git/command"
 export { formatHumanCommandReport, runCleanup, runLand } from "./landing"
 export { buildSprintList, formatSprintList } from "./listing"

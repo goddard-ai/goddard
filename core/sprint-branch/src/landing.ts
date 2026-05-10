@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises"
 
+import { hasDiagnosticErrors } from "./diagnostics"
 import { GitCommandError, runGit } from "./git/command"
 import { getBranchHead } from "./git/refs"
 import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
@@ -33,7 +34,7 @@ export async function runLand(input: LandInput) {
   const diagnostics: SprintDiagnostic[] = []
   const targetCommit = await getBranchHead(rootDir, input.target)
   pushTargetBranchDiagnostics(input, targetCommit, diagnostics)
-  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+  if (hasDiagnosticErrors(diagnostics)) {
     return {
       ok: false,
       command: "land" as const,
@@ -67,7 +68,7 @@ export async function runLand(input: LandInput) {
   await pushLandingDiagnostics(rootDir, input, state, reviewCommit, targetCommit, diagnostics)
 
   const report = {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(diagnostics),
     command: "land" as const,
     dryRun: input.dryRun,
     executed: false,
@@ -165,7 +166,7 @@ export async function runCleanup(input: CleanupInput) {
   )
 
   const report = {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(diagnostics),
     command: "cleanup" as const,
     dryRun: input.dryRun,
     executed: false,

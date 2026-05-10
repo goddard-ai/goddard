@@ -1,5 +1,6 @@
 import path from "node:path"
 
+import { hasDiagnosticErrors } from "./diagnostics"
 import { resolveRepositoryRoot } from "./git/repository"
 import {
   latestActedSprint,
@@ -73,7 +74,7 @@ export async function buildSprintList(input: {
   const listedSprints = input.lastOnly ? (lastSprint ? [lastSprint] : []) : sortedSprints
 
   return {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(diagnostics),
     rootDir,
     includeParked: input.includeParked,
     lastOnly: Boolean(input.lastOnly),

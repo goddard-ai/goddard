@@ -1,3 +1,4 @@
+import { hasDiagnosticErrors } from "../diagnostics"
 import type {
   SprintActiveStash,
   SprintBranchState,
@@ -53,7 +54,7 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
     })
   }
 
-  if (!sprint || !baseBranch || !sprintWorktreeRoot || !tasks || diagnostics.some(hasError)) {
+  if (!sprint || !baseBranch || !sprintWorktreeRoot || !tasks || hasDiagnosticErrors(diagnostics)) {
     return {
       state: null,
       diagnostics,
@@ -64,7 +65,7 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
     diagnostics.push(diagnostic)
   }
 
-  if (diagnostics.some(hasError)) {
+  if (hasDiagnosticErrors(diagnostics)) {
     return {
       state: null,
       diagnostics,
@@ -107,7 +108,7 @@ function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
       ? []
       : readStringArray(value.finishedUnreviewed, "tasks.finishedUnreviewed", diagnostics)
 
-  if (!approved || !finishedUnreviewed || diagnostics.some(hasError)) {
+  if (!approved || !finishedUnreviewed || hasDiagnosticErrors(diagnostics)) {
     return null
   }
 
@@ -228,8 +229,4 @@ function readStringArray(value: unknown, field: string, diagnostics: SprintDiagn
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function hasError(diagnostic: SprintDiagnostic) {
-  return diagnostic.severity === "error"
 }

@@ -1,3 +1,4 @@
+import { hasDiagnosticErrors } from "./diagnostics"
 import { readTaskReviewReport } from "./review-report"
 import { buildStatusReport } from "./status"
 import type { SprintDiagnostic, SprintReviewViewReport, SprintStatusReport } from "./types"
@@ -61,7 +62,7 @@ export async function buildSprintReviewView(input: {
   }
 
   const report = {
-    ok: !viewDiagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(viewDiagnostics),
     sprint: status.sprint,
     task: {
       id: task,

@@ -1,3 +1,4 @@
+import { hasDiagnosticErrors } from "../diagnostics"
 import type {
   SprintBranchState,
   SprintContext,
@@ -43,7 +44,7 @@ export function makePlan(
   input: Omit<MutationPlan, "diagnostics"> & { diagnostics: SprintDiagnostic[] },
 ) {
   return {
-    ok: !input.diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(input.diagnostics),
     command: input.command,
     dryRun: false,
     executed: false,

@@ -1,3 +1,4 @@
+import { hasDiagnosticErrors } from "./diagnostics"
 import {
   dedupeDiagnostics,
   dedupeStrings,
@@ -29,7 +30,7 @@ export async function buildDoctorReport(input: SprintInferenceInput) {
   ])
   const doctorReport: SprintStatusReport = {
     ...report,
-    ok: !doctorDiagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    ok: !hasDiagnosticErrors(doctorDiagnostics),
     diagnostics: doctorDiagnostics,
     blocked: {
       ...report.blocked,

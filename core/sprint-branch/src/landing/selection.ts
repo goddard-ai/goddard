@@ -1,6 +1,7 @@
 import path from "node:path"
 import { autocomplete, isCancel } from "@clack/prompts"
 
+import { hasDiagnosticErrors } from "../diagnostics"
 import { getBranchHead } from "../git/refs"
 import {
   latestActedSprint,
@@ -112,7 +113,7 @@ async function readExplicitCandidate(
 ) {
   const validation = validateSprintName(sprint)
   diagnostics.push(...validation)
-  if (validation.some((diagnostic) => diagnostic.severity === "error")) {
+  if (hasDiagnosticErrors(validation)) {
     return null
   }
 
