@@ -44,7 +44,7 @@
   - [`stop-sync`](./commands/stop-sync.md)
     - Ask running `sync` commands from the same working directory to stop.
     - Audience: humans reviewing agent work.
-    - Mutates: sync control only.
+    - Mutates: sync control, and may restore checkout after a stale sync.
   - [`doctor`](./commands/doctor.md)
     - Diagnose inconsistent sprint state and recovery direction.
     - Audience: agents and humans.

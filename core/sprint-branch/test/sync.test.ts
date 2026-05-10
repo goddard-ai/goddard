@@ -306,6 +306,36 @@ describe("sprint-branch sync", () => {
     }
   })
 
+  test("stop-sync restores the starting branch after removing a stale sync control", async () => {
+    const { reviewWorktree } = await createSprintSyncFixture()
+    await git(reviewWorktree, ["checkout", "-B", "review-base"])
+    const syncProcess = spawnCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])
+    let syncExited = false
+
+    try {
+      await waitForReviewSyncCheckout(reviewWorktree)
+      syncProcess.kill("SIGKILL")
+      await waitForCliExit(syncProcess, "stale sprint-branch sync")
+      syncExited = true
+
+      const result = await runCli(reviewWorktree, ["stop-sync", "--json"])
+      const stop = JSON.parse(result.stdout) as SprintSyncStopReport
+
+      expect(result.exitCode).toBe(0)
+      expect(stop.stopped).toBe(0)
+      expect(stop.diagnostics.map((diagnostic) => diagnostic.code)).toContain("stale_sync_control")
+      expect(stop.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+        "stale_sync_checkout_restored",
+      )
+      expect(await currentBranch(reviewWorktree)).toBe("review-base")
+    } finally {
+      if (!syncExited) {
+        syncProcess.kill("SIGTERM")
+        await syncProcess.exited
+      }
+    }
+  })
+
   test("stop-sync ignores sync processes from a different working directory", async () => {
     const { repo, reviewWorktree } = await createSprintSyncFixture()
     const syncProcess = spawnCli(reviewWorktree, ["sync", "--sprint", "example", "--json"])

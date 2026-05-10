@@ -5,7 +5,8 @@ import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { z } from "zod"
 
-import { resolveGitCommonPath, resolveRepositoryRoot } from "./git/repository"
+import { runGit } from "./git/command"
+import { getCurrentBranch, resolveGitCommonPath, resolveRepositoryRoot } from "./git/repository"
 import { sprintStateRoot } from "./state/paths"
 import type { SprintDiagnostic, SprintSyncStopReport } from "./types"
 
@@ -19,6 +20,8 @@ const syncRunControlFileSchema = z.object({
   runId: z.string(),
   pid: z.number().int(),
   cwd: z.string(),
+  startingBranch: z.string().nullable(),
+  startingHead: z.string(),
   startedAt: z.string(),
   stopRequestedAt: z.string().optional(),
 })
@@ -37,6 +40,8 @@ export async function createSprintSyncStopControl(input: { cwd: string; signal?:
   const controlDir = await resolveSyncControlDir(input.cwd, cwd)
   await fs.mkdir(controlDir, { recursive: true })
 
+  const startingBranch = await getCurrentBranch(cwd)
+  const startingHead = (await runGit(cwd, ["rev-parse", "HEAD"])).trim()
   const runId = `${Date.now()}-${process.pid}-${randomUUID()}`
   const controlPath = path.join(controlDir, `${runId}.json`)
   const controller = new AbortController()
@@ -48,6 +53,8 @@ export async function createSprintSyncStopControl(input: { cwd: string; signal?:
       runId,
       pid: process.pid,
       cwd,
+      startingBranch,
+      startingHead,
       startedAt: new Date().toISOString(),
     }),
   )
@@ -256,6 +263,7 @@ async function readRunningSyncControls(input: { cwd: string }) {
         code: "stale_sync_control",
         message: `Removed stale sync control for process ${control.pid}.`,
       })
+      diagnostics.push(...(await restoreStaleSyncCheckout({ cwd, control })))
       continue
     }
 
@@ -263,6 +271,68 @@ async function readRunningSyncControls(input: { cwd: string }) {
   }
 
   return { cwd, controls, diagnostics }
+}
+
+/** Restores a review worktree left on a disposable review-sync branch after a sync crash. */
+async function restoreStaleSyncCheckout(input: { cwd: string; control: SyncRunControlFile }) {
+  const diagnostics: SprintDiagnostic[] = []
+  const currentBranch = await getCurrentBranch(input.cwd)
+  if (!currentBranch?.startsWith("review-sync/")) {
+    return diagnostics
+  }
+
+  const porcelain = await runGit(input.cwd, ["status", "--porcelain"])
+  if (porcelain.length > 0) {
+    return [
+      {
+        severity: "warning" as const,
+        code: "stale_sync_checkout_not_restored",
+        message: `Left ${input.cwd} on ${currentBranch} because the worktree has local changes.`,
+        suggestion:
+          "Review or stash the local changes, then check out the intended starting branch.",
+      },
+    ]
+  }
+
+  if (input.control.startingBranch) {
+    if (input.control.startingBranch.startsWith("review-sync/")) {
+      return [
+        {
+          severity: "warning" as const,
+          code: "stale_sync_checkout_not_restored",
+          message: `Left ${input.cwd} on ${currentBranch} because the recorded starting branch is also a review-sync branch.`,
+        },
+      ]
+    }
+
+    try {
+      await runGit(input.cwd, ["checkout", input.control.startingBranch])
+      return [
+        {
+          severity: "info" as const,
+          code: "stale_sync_checkout_restored",
+          message: `Checked out ${input.control.startingBranch} after removing stale sync control.`,
+        },
+      ]
+    } catch (error) {
+      diagnostics.push(formatStaleSyncCheckoutFailure(input.cwd, currentBranch, error))
+      return diagnostics
+    }
+  }
+
+  try {
+    await runGit(input.cwd, ["checkout", "--detach", input.control.startingHead])
+    return [
+      {
+        severity: "info" as const,
+        code: "stale_sync_checkout_restored",
+        message: "Restored detached HEAD after removing stale sync control.",
+      },
+    ]
+  } catch (error) {
+    diagnostics.push(formatStaleSyncCheckoutFailure(input.cwd, currentBranch, error))
+    return diagnostics
+  }
 }
 
 /** Reads all currently registered sync control files for a working directory key. */
@@ -348,6 +418,20 @@ function formatDiagnostics(diagnostics: SprintDiagnostic[]) {
     `[${diagnostic.severity}] ${diagnostic.code}: ${diagnostic.message}`,
     ...(diagnostic.suggestion ? [`suggestion: ${diagnostic.suggestion}`] : []),
   ])
+}
+
+function formatStaleSyncCheckoutFailure(cwd: string, currentBranch: string, error: unknown) {
+  return {
+    severity: "warning" as const,
+    code: "stale_sync_checkout_not_restored",
+    message: `Left ${cwd} on ${currentBranch} because the starting checkout could not be restored: ${formatError(error)}.`,
+    suggestion:
+      "Resolve the checkout failure, then check out the intended starting branch manually.",
+  }
+}
+
+function formatError(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function isErrno(error: unknown, code: string) {

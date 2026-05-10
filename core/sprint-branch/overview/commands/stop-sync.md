@@ -22,6 +22,10 @@
   - It changes only the local control state used by running `sync` commands.
   - The running `sync` command performs its normal review-sync cleanup before it
     exits.
+  - If it removes a stale control left by a dead `sync` process and the same
+    worktree is still on a disposable `review-sync/*` branch, it restores the
+    checkout that originally launched `sync` when that can be done without
+    local changes.
   - It does not advance sprint task state or mutate sprint branches directly.
 
 - **Guardrails**
@@ -29,3 +33,5 @@
     directory.
   - It ignores stale or invalid control records instead of treating them as
     active sync processes.
+  - It leaves the current checkout untouched when the worktree has local
+    changes or the stale record does not contain the starting checkout.
