@@ -225,6 +225,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
         defaultItemHeight={props.defaultRowHeight}
         firstItemIndex={props.preserveScrollOnPrepend ? effectiveFirstItemIndex : undefined}
         {heightEstimates}
+        {initialTopMostItemIndex}
         itemContent={(index, item) => props.renderRow(
           {
             item,
@@ -236,6 +237,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
           main: overscanPx,
           reverse: overscanPx,
         }}
+        restoreStateFrom={restoreState}
         style={{
           minHeight: "100%",
         }}
