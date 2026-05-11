@@ -4,7 +4,10 @@ import { useLayoutEffect, useRef } from "preact/hooks"
 
 import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { TabContextProvider } from "~/tab-context.tsrx"
-import { getWorkbenchTabComponent } from "~/workbench-tab-registry.ts"
+import {
+  getWorkbenchTabComponent,
+  shouldRestoreWorkbenchTabScroll,
+} from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 
 const panelScrollCache = new Map<string, number>()
@@ -19,8 +22,12 @@ export component AppShellWorkbenchContent() {
       <WorkbenchScrollPanel scrollKey={`main:${navigation.selectedNavId}`}>
         <MainWorkbenchView />
       </WorkbenchScrollPanel>
-    } else {
-      <WorkbenchScrollPanel scrollKey={`detail:${workbenchTabSet.activeTabId}`}>
+    } else if (workbenchTabSet.activeTab) {
+      <WorkbenchScrollPanel
+        restoreScroll={shouldRestoreWorkbenchTabScroll(workbenchTabSet.activeTab.kind)}
+        scrollKey={`detail:${workbenchTabSet.activeTab.id}`}
+        tabId={workbenchTabSet.activeTab.id}
+      >
         <WorkbenchTabPanel />
       </WorkbenchScrollPanel>
     }
@@ -33,10 +40,17 @@ export component AppShellWorkbenchContent() {
 component WorkbenchScrollPanel(props: {
   scrollKey: string;
   children: preact.ComponentChildren;
+  restoreScroll?: boolean;
+  tabId?: string;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const shouldRestoreScroll = props.restoreScroll ?? true
 
   useLayoutEffect(() => {
+    if (!shouldRestoreScroll) {
+      return
+    }
+
     const scrollerElement = scrollerRef.current
 
     if (!scrollerElement) {
@@ -45,7 +59,7 @@ component WorkbenchScrollPanel(props: {
 
     const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
     scrollerElement.scrollTop = restoredScrollTop
-  }, [props.scrollKey])
+  }, [props.scrollKey, shouldRestoreScroll])
 
   <div
     ref={scrollerRef}
@@ -69,7 +83,13 @@ component WorkbenchScrollPanel(props: {
         },
       )}
     >
-      {props.children}
+      if (props.tabId) {
+        <TabContextProvider id={props.tabId} scrollParentRef={scrollerRef}>
+          {props.children}
+        </TabContextProvider>
+      } else {
+        {props.children}
+      }
     </div>
   </div>
 }
@@ -93,7 +113,5 @@ component WorkbenchTabPanel() {
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
-  <TabContextProvider id={activeTab.id}>
-    <ActiveTabComponent {...activeTab.payload} />
-  </TabContextProvider>
+  <ActiveTabComponent {...activeTab.payload} />
 }

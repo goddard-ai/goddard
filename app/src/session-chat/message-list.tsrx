@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
 
+import { useTabContext } from "~/tab-context.tsrx"
 import styles from "./message-list.style.ts"
 
 const messageListStateCache = new Map<string, StateSnapshot>()
@@ -33,29 +34,7 @@ type MessageListContext = {
 }
 
 type MessageListViewport = {
-  scrollParent: HTMLElement | undefined;
   width: number;
-}
-
-function isScrollableOverflow(value: string) {
-  return value === "auto" || value === "scroll" || value === "overlay"
-}
-
-/** Finds the nearest externally owned scroller so Virtuoso can share shell scroll state. */
-function findScrollParent(element: HTMLElement) {
-  let currentElement = element.parentElement
-
-  while (currentElement) {
-    const style = getComputedStyle(currentElement)
-
-    if (isScrollableOverflow(style.overflowY)) {
-      return currentElement
-    }
-
-    currentElement = currentElement.parentElement
-  }
-
-  return undefined
 }
 
 /** Returns the first mount position for a list that should open from the top or bottom. */
@@ -113,9 +92,9 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const virtuosoHandleRef = useRef<VirtuosoHandle | null>(null)
   const firstItemIndexRef = useRef(prependAnchorFirstItemIndex)
   const previousItemKeysRef = useRef<readonly string[]>([])
+  const tabContext = useTabContext()
   const [viewport, setViewport] = useState<MessageListViewport>(
     {
-      scrollParent: undefined,
       width: 0,
     },
   )
@@ -159,12 +138,9 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       return
     }
 
-    const scrollParent = findScrollParent(rootElement)
-
     function updateViewport() {
       setViewport(
         {
-          scrollParent,
           width: rootElement.clientWidth,
         },
       )
@@ -220,7 +196,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
         ) ??
           index}
         context={headerContext}
-        customScrollParent={viewport.scrollParent}
+        customScrollParent={tabContext.scrollParentRef.current ?? undefined}
         data={props.items}
         defaultItemHeight={props.defaultRowHeight}
         firstItemIndex={props.preserveScrollOnPrepend ? effectiveFirstItemIndex : undefined}

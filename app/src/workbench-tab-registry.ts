@@ -6,6 +6,7 @@ import type { SvgIconName } from "./lib/good-icon.tsrx"
 type WorkbenchTabDefinition = {
   component: preact.FunctionComponent<any>
   icon: SvgIconName
+  restoreScroll?: boolean
 }
 
 /** One loosely typed lazily rendered non-primary tab component. */
@@ -61,6 +62,7 @@ export const workbenchTabComponents = {
   sessionChat: {
     component: lazy(() => import("~/session-chat/view.tsrx")),
     icon: "tabs/sessions",
+    restoreScroll: false,
   },
   sessionChanges: {
     component: lazy(() => import("~/session-changes/view.tsrx")),
@@ -77,6 +79,7 @@ export const workbenchTabComponents = {
   sessionChatTranscriptDebug: {
     component: lazy(() => import("~/session-chat/transcript-debug-view.tsrx")),
     icon: "tabs/sessions",
+    restoreScroll: false,
   },
   terminalDebug: {
     component: lazy(() => import("~/terminal/debug-view.tsrx")),
@@ -138,6 +141,11 @@ export function getWorkbenchTabComponent(
 /** Returns the SVG icon registered for one workbench tab kind. */
 export function getWorkbenchTabIcon(kind: WorkbenchTabKind): SvgIconName {
   return kind === "main" ? "tabs/home" : workbenchTabComponents[kind].icon
+}
+
+/** Returns whether the shell should restore raw scrollTop for one tab kind. */
+export function shouldRestoreWorkbenchTabScroll(kind: WorkbenchRegisteredTabKind) {
+  return workbenchTabComponents[kind].restoreScroll ?? true
 }
 
 /** Returns whether one runtime string matches a registered closable tab kind. */
