@@ -3,7 +3,7 @@ import { css } from "@goddard-ai/styled-system/css"
 import { useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
-import { ReportedProjectTabIdContext } from "~/projects/use-tab-project.ts"
+import { TabContextProvider } from "~/tab-context.tsrx"
 import { TabViewportProvider } from "~/tab-viewport.tsrx"
 import { getWorkbenchTabComponent } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
@@ -100,7 +100,7 @@ component WorkbenchTabPanel() {
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
-  <ReportedProjectTabIdContext.Provider value={activeTab.id}>
+  <TabContextProvider id={activeTab.id}>
     <ActiveTabComponent {...activeTab.payload} />
-  </ReportedProjectTabIdContext.Provider>
+  </TabContextProvider>
 }
