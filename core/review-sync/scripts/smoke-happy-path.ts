@@ -128,8 +128,8 @@ try {
 
   // Agent commits should mirror just like uncommitted agent edits. The reviewer
   // should see the committed content after sync.
-  // TECHNICAL NOTE: The latest synthetic agent snapshot is rendered into the
-  // review index and working tree without becoming the visible review branch HEAD.
+  // TECHNICAL NOTE: Committed agent content can advance the disposable review
+  // branch to the real agent commit instead of staying staged against older HEAD.
   await runSmokeStep("agent committed change", async () => {
     await writeText(join(fixture.agentDir, "shared.txt"), "agent committed edit\n")
     await runGit(fixture.agentDir, ["add", "shared.txt"])

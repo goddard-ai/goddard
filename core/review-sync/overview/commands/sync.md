@@ -14,10 +14,13 @@
   - Saves a conflicting human patch as rejected without applying it to the agent worktree.
   - Captures the latest agent content after any accepted patch.
   - Renders the review worktree index and working tree to that latest agent content.
+  - Advances the disposable review branch to the latest real agent commit when
+    synchronized agent content includes committed work.
 
 - **What it changes**
   - The agent worktree when a human patch is accepted.
   - The review worktree index and working tree after every completed sync.
+  - The disposable review branch when sync can align it with real agent commits.
   - The saved accepted or rejected patch inventory when a human patch exists.
   - The session's last-sync outcome.
 

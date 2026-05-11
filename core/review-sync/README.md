@@ -9,7 +9,10 @@ The package derives a disposable review branch by prepending `review-sync/` to t
 full agent branch name. Each sync captures the review worktree against the last rendered
 snapshot, tries to apply the resulting human patch to the agent worktree, saves the
 patch as accepted or rejected, then renders the agent snapshot into the review
-worktree's index and working tree.
+worktree's index and working tree. When synchronized agent content includes real
+agent commits, the disposable review branch can advance to the latest real
+agent commit while any remaining uncommitted content stays rendered in the
+index and working tree.
 
 Daemon review sessions use this package as the owner of review branch and sync
 semantics.

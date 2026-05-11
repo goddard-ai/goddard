@@ -30,6 +30,71 @@ test("sync mirrors agent uncommitted changes through the review branch", async (
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
 })
 
+test("sync advances the review branch after rendered agent changes are committed", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  await writeText(join(fixture.agentDir, "shared.txt"), "agent edit\n")
+  const rendered = await syncReviewSession({
+    cwd: fixture.agentDir,
+  })
+  expect(rendered.status).toBe("ok")
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe(
+    "M  shared.txt\n",
+  )
+
+  await runGit(fixture.agentDir, ["add", "shared.txt"])
+  await runGit(fixture.agentDir, ["commit", "-m", "agent edit"])
+  const committed = await syncReviewSession({
+    cwd: fixture.agentDir,
+  })
+
+  const agentHead = (
+    await runGit(fixture.agentDir, ["rev-parse", "refs/heads/codex/review-sync-test"])
+  ).stdout.trim()
+  expect(committed.status).toBe("ok")
+  expect(committed.acceptedPatchPath).toBeUndefined()
+  expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(agentHead)
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+})
+
+test("sync preserves uncommitted agent changes after a partial agent commit", async () => {
+  const fixture = await createStartedFixture({
+    "committed.txt": "base\n",
+    "uncommitted.txt": "base\n",
+  })
+
+  await writeText(join(fixture.agentDir, "committed.txt"), "agent committed edit\n")
+  await writeText(join(fixture.agentDir, "uncommitted.txt"), "agent uncommitted edit\n")
+  const rendered = await syncReviewSession({
+    cwd: fixture.agentDir,
+  })
+  expect(rendered.status).toBe("ok")
+
+  await runGit(fixture.agentDir, ["add", "committed.txt"])
+  await runGit(fixture.agentDir, ["commit", "-m", "agent partial edit"])
+  const partiallyCommitted = await syncReviewSession({
+    cwd: fixture.agentDir,
+  })
+
+  const agentHead = (
+    await runGit(fixture.agentDir, ["rev-parse", "refs/heads/codex/review-sync-test"])
+  ).stdout.trim()
+  expect(partiallyCommitted.status).toBe("ok")
+  expect(partiallyCommitted.acceptedPatchPath).toBeUndefined()
+  expect(await readFile(join(fixture.agentDir, "uncommitted.txt"), "utf-8")).toBe(
+    "agent uncommitted edit\n",
+  )
+  expect(await readFile(join(fixture.reviewDir, "uncommitted.txt"), "utf-8")).toBe(
+    "agent uncommitted edit\n",
+  )
+  expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(agentHead)
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe(
+    "M  uncommitted.txt\n",
+  )
+})
+
 test("sync writes explanatory snapshot commit messages", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",

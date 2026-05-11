@@ -3,6 +3,7 @@ import { UserError } from "./errors.ts"
 import {
   assertSupportedGitState,
   git,
+  isWorktreeClean,
   resolveCurrentBranch,
   resolveRef,
   resolveRequiredGitCommonDir,
@@ -34,10 +35,34 @@ export async function syncSession(session: SessionState, context: RuntimeContext
       label: `${latest.sessionId}:agent`,
       context,
     })
+    const agentBranchHead = await resolveRef(
+      latest.agentWorktree,
+      `refs/heads/${latest.agentBranch}`,
+      context,
+    )
+    if (!agentBranchHead) {
+      throw new UserError(`Agent branch ${latest.agentBranch} no longer exists.`)
+    }
+    const renderTarget = (await isWorktreeClean(latest.agentWorktree, context))
+      ? {
+          branchHead: agentBranchHead,
+          content: agentBranchHead,
+          renderedSnapshot: agentBranchHead,
+        }
+      : {
+          branchHead: agentBranchHead,
+          content: agentSnapshot,
+          renderedSnapshot: agentSnapshot,
+        }
 
     await updateRef(latest.agentWorktree, latest.refs.agentSnapshot, agentSnapshot, context)
-    await renderReviewWorktreeSnapshot(latest, agentSnapshot, context)
-    await updateRef(latest.agentWorktree, latest.refs.renderedSnapshot, agentSnapshot, context)
+    await renderReviewWorktreeTarget(latest, renderTarget, context)
+    await updateRef(
+      latest.agentWorktree,
+      latest.refs.renderedSnapshot,
+      renderTarget.renderedSnapshot,
+      context,
+    )
 
     latest.updatedAt = new Date().toISOString()
     latest.lastSync = {
@@ -96,7 +121,15 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
       return { status: "skipped", reason: "pending-human-patch" } as const
     }
 
-    await renderReviewWorktreeSnapshot(latest, branchHead, context)
+    await renderReviewWorktreeTarget(
+      latest,
+      {
+        branchHead,
+        content: branchHead,
+        renderedSnapshot: branchHead,
+      },
+      context,
+    )
     await updateRef(latest.reviewWorktree, latest.refs.renderedSnapshot, branchHead, context)
     latest.updatedAt = new Date().toISOString()
     await writeSessionState(latest)
@@ -109,13 +142,23 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
   })
 }
 
-/** Renders synchronized content into the review index and worktree without moving branch HEAD. */
-async function renderReviewWorktreeSnapshot(
+/** Content source that determines whether review HEAD can move during render. */
+type ReviewWorktreeRenderTarget = {
+  branchHead: string
+  content: string
+  renderedSnapshot: string
+}
+
+/** Renders synchronized content without moving review HEAD to synthetic snapshots. */
+async function renderReviewWorktreeTarget(
   session: SessionState,
-  agentSnapshot: string,
+  target: ReviewWorktreeRenderTarget,
   context: RuntimeContext,
 ) {
-  await git(session.reviewWorktree, ["read-tree", "--reset", "-u", agentSnapshot], context)
+  await git(session.reviewWorktree, ["reset", "--hard", target.branchHead], context)
+  if (target.content !== target.branchHead) {
+    await git(session.reviewWorktree, ["read-tree", "--reset", "-u", target.content], context)
+  }
   await git(session.reviewWorktree, ["clean", "-fd"], context)
 }
 

@@ -14,8 +14,11 @@
   - Agent changes can be committed or uncommitted.
   - Non-ignored untracked files are included.
   - The review worktree index and working tree are rendered to the latest
-    synchronized agent content without moving the visible review branch to the
-    synthetic snapshot commit.
+    synchronized agent content.
+  - Committed agent changes may advance the disposable review branch to the
+    latest real agent commit while remaining uncommitted agent content stays
+    rendered in the index and working tree.
+  - Sync does not move the visible review branch to synthetic snapshot commits.
 
 - **Human-to-agent flow**
   - When the human edits the review worktree, the next sync treats those changes as a human patch.

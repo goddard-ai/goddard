@@ -45,6 +45,9 @@
   - It may appear as staged or unstaged changes relative to the visible review
     branch `HEAD` when synchronized agent content has not been committed on the
     review branch.
+  - When synchronized agent content includes real agent commits, the disposable
+    review branch may advance to the latest real agent commit while any
+    remaining uncommitted content stays rendered in the index and working tree.
   - It is not a user-facing branch role; it exists so the next sync can
     distinguish review edits from agent edits.
 
