@@ -9,7 +9,7 @@ import type {
   UpdateInboxItemResponse,
 } from "@goddard-ai/schema/daemon"
 import { Sigma } from "preact-sigma"
-import { getErrorMessage } from "radashi"
+import { getErrorMessage, objectify } from "radashi"
 
 export type InboxConnectionStatus = "loading" | "ready" | "stale" | "error"
 
@@ -66,10 +66,11 @@ export class Inbox extends Sigma<InboxState> {
 
   /** Returns all known inbox items grouped into exactly one section by current status. */
   get sections() {
-    const sections = Object.fromEntries(inboxStatuses.map((status) => [status, []])) as Record<
-      InboxSectionId,
-      InboxItem[]
-    >
+    const sections = objectify(
+      inboxStatuses,
+      (key) => key,
+      () => [] as InboxItem[],
+    )
 
     for (const item of this.items) {
       sections[item.status].push(item)
