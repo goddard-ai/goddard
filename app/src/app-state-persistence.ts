@@ -181,7 +181,7 @@ function observeSnapshot<TSnapshot>(
 /** Observes committed app Sigma changes and writes the latest combined snapshot. */
 export function observeAppStateSnapshot(
   appState: AppState,
-  writeSnapshot: SnapshotWriter<PersistedAppStateSnapshot>,
+  writeSnapshot: SnapshotWriter<AppStateSnapshot>,
   options: ObserveSnapshotOptions = {},
 ) {
   return observeSnapshot(
@@ -263,7 +263,7 @@ export function useAppState() {
         }
 
         if (snapshot) {
-          const persistedSnapshot = snapshot as PersistedAppStateSnapshot
+          const persistedSnapshot = snapshot as AppStateSnapshot
           sigma.replaceState(
             appState.appearance as unknown as Appearance,
             persistedSnapshot.appearance,

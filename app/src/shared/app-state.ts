@@ -9,4 +9,5 @@ export const AppStateFile = z.strictObject({
   value: z.record(z.string(), z.any()),
 })
 
+export type AppStateSnapshot = z.output<typeof AppStateFile>["value"]
 export type AppStateFile = z.output<typeof AppStateFile>
