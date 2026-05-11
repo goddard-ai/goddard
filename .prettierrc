@@ -31,5 +31,6 @@
     "^(?!.*(?:\\.style\\.ts|\\.css)(?:\\?.*)?$)\\.(?:/.*)?$",
     "(?:\\.style\\.ts|\\.css)(?:\\?.*)?$"
   ],
-  "importOrderTypeScriptVersion": "5.9.3"
+  "importOrderTypeScriptVersion": "5.9.3",
+  "importOrderParserPlugins": ["typescript", "jsx", "decorators"]
 }
