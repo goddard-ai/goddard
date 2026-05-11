@@ -54,6 +54,12 @@ function defineSubscription<S extends IpcSchema, K extends ValidStreamName<S>>(
         onError?: (error: unknown) => void,
       ) => (() => void) | Promise<() => void>)
 
+  type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
+    k: infer I,
+  ) => void
+    ? I
+    : never
+
   return function subscribe(
     filter: InferStreamFilter<S, K> | ((payload: InferStreamPayload<S, K>) => void),
     onMessage?: ((payload: InferStreamPayload<S, K>) => void) | ((error: unknown) => void),
@@ -67,11 +73,15 @@ function defineSubscription<S extends IpcSchema, K extends ValidStreamName<S>>(
       onMessage as (payload: InferStreamPayload<S, K>) => void,
       onError,
     )
-  } as [InferStreamFilter<S, K>] extends [void]
-    ? SubscribeOverload
-    : SubscribeOverload extends (...args: infer TArgs) => infer TResult
-      ? (filter: InferStreamFilter<S, K>, ...args: TArgs) => TResult
-      : never
+  } as UnionToIntersection<
+    [InferStreamFilter<S, K>] extends [void]
+      ? SubscribeOverload
+      : SubscribeOverload extends infer TOverload
+        ? TOverload extends (...args: infer TArgs) => infer TResult
+          ? (filter: InferStreamFilter<S, K>, ...args: TArgs) => TResult
+          : never
+        : never
+  >
 }
 
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */

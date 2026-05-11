@@ -143,6 +143,7 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
   }
 
   return {
+    schema,
     send,
     subscribe,
   }
