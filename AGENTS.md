@@ -33,6 +33,9 @@
 ## Code Style And Patch Discipline
 
 - Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task requires refactoring.
+- Counteract overengineering bias. Implement only the narrow change required by the current request.
+- Prefer private over public, local over exported, concrete implementation over abstraction, one code path over configurable behavior, existing APIs over new APIs, and existing files over new files.
+- Do not add new public exports, optional parameters, config flags, interfaces or base classes, generic utility modules, lifecycle hooks, extension/plugin systems, endpoint variants, or future-proof abstractions unless explicitly required.
 - Do not add code until it is needed by the current change. Avoid speculative helpers, abstractions, options, and extension points.
 - Do not export a symbol unless the current change imports it from another module. Keep single-module implementation details private.
 - Prefer readability and local reasoning over new abstractions.
@@ -51,6 +54,7 @@
 - Do not add comments that merely narrate the code, restate names/types, or compensate for code that should instead be renamed or simplified.
 - Minimize churn: touch as few files as possible, avoid unrelated cleanup or formatting, and do not rename or move files unless necessary.
 - If refactoring is required for correctness, keep it mechanical and separate from behavior changes when possible.
+- After implementation, perform a YAGNI pass and remove unnecessary configurability, exposure, abstraction, files, functions, classes, or unused code.
 - When uncertain, follow the existing local pattern with the lowest architectural impact.
 
 ## Git

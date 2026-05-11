@@ -15,6 +15,11 @@ Use this reference for repository-wide contribution guidance that intentionally 
 
 - Good reviewability comments usually explain hidden invariants, intentional asymmetry, protocol or wire-format constraints, external tool workarounds, or edge-case handling whose failure mode is not locally obvious.
 - Prefer clearer names or structure over comments when the issue is ordinary readability.
+- Treat minimal design as an active review step, not just an initial intent. Before finishing a change, look for anything added for a hypothetical future caller or variant.
+- Collapse any abstraction that does not serve the current requirement. Inline local helpers used once unless the helper makes non-obvious logic substantially clearer.
+- Remove configurability that is not currently needed. Hardcode the current behavior when no caller or product requirement needs a choice yet.
+- Keep implementation details private until another module in the same change needs them. Do not export symbols preemptively for imagined reuse.
+- Prefer changing an existing focused file over creating a new file. Create a new file only when the existing file would mix distinct concerns or become harder to reason about.
 
 ## Default Value Policy
 
