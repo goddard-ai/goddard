@@ -25,7 +25,11 @@ async function createHumanPatch(session: SessionState, context: RuntimeContext) 
   return await diffCommits(session.agentWorktree, renderedSnapshot, reviewSnapshot, context)
 }
 
-/** Checks whether the review worktree contains changes beyond the rendered baseline. */
+/**
+ * Checks whether the review worktree contains changes beyond the rendered baseline.
+ * Avoid this when the caller also needs the patch body; call createHumanPatch
+ * once and check for a null or empty patch instead.
+ */
 export async function hasHumanPatch(session: SessionState, context: RuntimeContext) {
   const patch = await createHumanPatch(session, context)
   return patch === null || patch.trim().length > 0
