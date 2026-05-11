@@ -93,6 +93,22 @@ test("Inbox keeps one entity item in one current section", async () => {
   expect(inbox.sections.completed.map((item) => item.entityId)).toEqual(["ses_1"])
 })
 
+test("Inbox unread indicator only counts unread session items", async () => {
+  mockInboxClient()
+  const inbox = await createInbox()
+
+  inbox.replaceItems([
+    createInboxItem({ entityId: "pr_unread", status: "unread" }),
+    createInboxItem({ entityId: "ses_read", status: "read" }),
+  ])
+
+  expect(inbox.hasUnreadItems).toBe(false)
+
+  inbox.applyItem(createInboxItem({ entityId: "ses_unread", status: "unread" }))
+
+  expect(inbox.hasUnreadItems).toBe(true)
+})
+
 test("Inbox marks only unread session items read after a successful visit", async () => {
   const client = mockInboxClient()
   const inbox = await createInbox()

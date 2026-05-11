@@ -178,6 +178,17 @@ export default {
       color: "text",
     },
   }),
+  sidebarUnreadDot: css({
+    position: "absolute",
+    top: "9px",
+    right: "8px",
+    width: "7px",
+    height: "7px",
+    border: "2px solid",
+    borderColor: "panel",
+    borderRadius: "999px",
+    backgroundColor: "accentStrong",
+  }),
   tab: css({
     position: "relative",
     display: "inline-flex",

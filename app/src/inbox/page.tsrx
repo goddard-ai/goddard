@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
+  CompleteSessionRequest,
   InboxEntityId,
   InboxItem,
+  UpdateInboxItemRequest,
 } from "@goddard-ai/schema/daemon"
 
-import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useInbox, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
@@ -22,11 +24,11 @@ import {
 } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import {
-  bulkUpdateInboxItems,
-  completeSessionInboxItem,
+  bulkUpdateInboxItems as runBulkUpdateInboxItems,
+  completeSessionInboxItem as runCompleteSessionInboxItem,
   InboxPageMutations,
   invalidateInboxQueries,
-  updateInboxItem,
+  updateInboxItem as runUpdateInboxItem,
 } from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
 import { getInboxListRequest } from "./queries.ts"
@@ -52,6 +54,7 @@ component InboxQueryContent(props: {
   selectedEntityIds: ReadonlySet<InboxEntityId>;
   onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
 }) {
+  const inbox = useInbox()
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
   const { items } = useQuery(goddardSdk.inbox.list, [
     getInboxListRequest(
@@ -64,6 +67,10 @@ component InboxQueryContent(props: {
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
   const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
 
+  useEffect(() => {
+    inbox.applyItems(items)
+  }, [inbox, items])
+
   <InboxList
     filterId={props.filterId}
     items={visibleItems}
@@ -74,6 +81,7 @@ component InboxQueryContent(props: {
 }
 
 component InboxPage() {
+  const inbox = useInbox()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
@@ -87,12 +95,13 @@ component InboxPage() {
     let active = true
     let unsubscribe: (() => void) | null = null
 
-    void goddardSdk.inbox.subscribe(() => {
+    void goddardSdk.inbox.subscribe((event) => {
       if (!active) {
         return
       }
 
       setRealtimeErrorMessage(null)
+      inbox.applyItem(event.item)
       invalidateInboxQueries()
     }).then(
       (nextUnsubscribe) => {
@@ -117,7 +126,7 @@ component InboxPage() {
       unsubscribe?.()
       unsubscribe = null
     }
-  }, [])
+  }, [inbox])
 
   function clearSelectedInboxItems() {
     setSelectedEntityIds(new Set())
@@ -173,6 +182,26 @@ component InboxPage() {
         },
       )
     }
+  }
+
+  async function updateInboxItem(input: UpdateInboxItemRequest) {
+    const result = await runUpdateInboxItem(input)
+    inbox.applyItem(result.item)
+    return result
+  }
+
+  async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
+    const result = await runBulkUpdateInboxItems(input)
+    inbox.applyItems(result.items)
+    return result
+  }
+
+  async function completeSessionInboxItem(input: CompleteSessionRequest) {
+    const result = await runCompleteSessionInboxItem(input)
+    if (result.item) {
+      inbox.applyItem(result.item)
+    }
+    return result
   }
 
   async function openInboxItem(item: InboxItem) {

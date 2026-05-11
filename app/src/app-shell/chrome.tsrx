@@ -1,8 +1,9 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
+import { useListener } from "preact-sigma"
 
-import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useInbox, useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -88,6 +89,7 @@ function useAppShellTabStrip(
 
 /** Renders the merged shell chrome and owns its local interaction wiring. */
 export component AppShellChrome() {
+  const inbox = useInbox()
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
   const navigationItems: Array<{
@@ -110,6 +112,7 @@ export component AppShellChrome() {
   })
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
+  const hasUnreadInboxItems = inbox.hasUnreadItems
   const tabStrip = useAppShellTabStrip(
     workbenchTabSet.activeTabId,
     navigation.selectedNavId,
@@ -198,6 +201,21 @@ export component AppShellChrome() {
       },
     )
   })
+
+  useEffect(() => {
+    void inbox.refresh()
+  }, [inbox])
+
+  useListener(window, "focus", () => {
+    void inbox.refresh()
+  })
+
+  useListener(document, "visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void inbox.refresh()
+    }
+  })
+
   <div class={styles.root}>
     <header
       class={cx(styles.header, "electrobun-webkit-app-region-drag")}
@@ -255,12 +273,14 @@ export component AppShellChrome() {
     </header>
     <nav aria-label="Primary" class={styles.nav}>
       <AppShellSidebarSection
+        {hasUnreadInboxItems}
         items={navigationItems.filter((item) => item.group === "primary")}
         onNavigationSelect={selectNavigationSurface}
         selectedNavigationId={navigation.selectedNavId}
       />
       <div aria-hidden="true" class={styles.navDivider} />
       <AppShellSidebarSection
+        {hasUnreadInboxItems}
         items={navigationItems.filter((item) => item.group === "secondary")}
         onNavigationSelect={selectNavigationSurface}
         selectedNavigationId={navigation.selectedNavId}
@@ -341,6 +361,7 @@ export component AppShellChrome() {
 
 /** Renders one grouped section of the left navigation rail. */
 component AppShellSidebarSection(props: {
+  hasUnreadInboxItems: boolean;
   items: Array<{
     icon: SvgIconName;
     id: NavigationItemId;
@@ -353,6 +374,7 @@ component AppShellSidebarSection(props: {
 }) {
   for (const item of props.items) {
     <SidebarItem
+      hasUnreadIndicator={item.id === "inbox" && props.hasUnreadInboxItems}
       icon={item.icon}
       isSelected={item.id === props.selectedNavigationId}
       key={item.id}
@@ -382,14 +404,17 @@ component ActionButton(props: {
 }
 
 component SidebarItem(props: {
+  hasUnreadIndicator?: boolean;
   icon: SvgIconName;
   isSelected: boolean;
   label: string;
   onSelect: (options?: { openInTab?: boolean }) => void;
 }) {
+  const ariaLabel = props.hasUnreadIndicator ? `${props.label}, unread items` : props.label
+
   <button
     aria-current={props.isSelected ? "page" : undefined}
-    aria-label={props.label}
+    aria-label={ariaLabel}
     class={styles.sidebarItem}
     style={{
       color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
@@ -400,6 +425,9 @@ component SidebarItem(props: {
     }}
   >
     <InlineSvgIcon icon={props.icon} size="22px 21px" />
+    if (props.hasUnreadIndicator) {
+      <span aria-hidden="true" class={styles.sidebarUnreadDot} />
+    }
   </button>
 }
 

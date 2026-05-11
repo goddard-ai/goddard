@@ -25,6 +25,10 @@ function isSessionEntityId(entityId: InboxEntityId) {
   return entityId.startsWith("ses_")
 }
 
+function isUnreadSessionInboxItem(item: InboxItem) {
+  return item.status === "unread" && isSessionEntityId(item.entityId)
+}
+
 /** Reactive owner for app-visible daemon inbox rows and realtime updates. */
 export class Inbox extends Sigma<InboxState> {
   /** Entity ids with an in-flight read-on-visit mutation to prevent duplicate updates. */
@@ -63,7 +67,7 @@ export class Inbox extends Sigma<InboxState> {
 
   /** Returns whether any known item is unread. */
   get hasUnreadItems() {
-    return this.sections.unread.length > 0
+    return this.items.some(isUnreadSessionInboxItem)
   }
 
   /** Loads the current inbox snapshot while preserving stale data on failure. */
@@ -97,15 +101,19 @@ export class Inbox extends Sigma<InboxState> {
 
   /** Merges one daemon-published inbox row into the app snapshot. */
   applyItem(item: InboxItem) {
-    this.itemsByEntityId[item.entityId] = item
+    this.applyItems([item])
+  }
+
+  /** Merges daemon-published inbox rows into the app snapshot. */
+  applyItems(items: readonly InboxItem[]) {
+    for (const item of items) {
+      this.itemsByEntityId[item.entityId] = item
+    }
+
     this.connectionStatus = this.loadedAt === null ? "ready" : this.connectionStatus
     this.errorMessage = null
-
-    if (item.status === "unread" && this.#visitedSessionEntityIds.has(item.entityId)) {
-      queueMicrotask(() => {
-        void this.markSessionVisited(item.entityId)
-      })
-    }
+    this.commit()
+    this.#markVisitedUnreadItemsRead(items)
   }
 
   /** Marks a session inbox item read after its associated session entity has loaded successfully. */
@@ -132,7 +140,6 @@ export class Inbox extends Sigma<InboxState> {
         status: "read",
       })
       this.applyItem(result.item)
-      this.commit()
     } catch (error) {
       this.markConnectionFailed(error)
       this.commit()
