@@ -68,6 +68,10 @@
 
 ## Testing
 
+- Use temporary tests freely to reproduce, debug, or confirm a fix during development, but delete them before commit unless intentionally promoted.
+- Before committing, classify every new test as temporary verification or permanent regression coverage.
+- Keep permanent regression tests only when they protect durable behavior that could realistically regress, cover an important edge case, or document expected behavior not already covered.
+- When in doubt, do not commit the test; extract only the smallest stable regression assertion worth preserving.
 - When running the full workspace test suite from the repository root, use `bun run test`.
 - Do not use `bun test` at the repository root; it bypasses the workspace package test scripts and monorepo orchestration.
 
