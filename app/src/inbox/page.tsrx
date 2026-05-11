@@ -291,9 +291,11 @@ component InboxPage() {
       />
       <div class={styles.listBody}>
         if (realtimeErrorMessage) {
-          <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
-            {"Realtime inbox updates are unavailable. Manual refresh still works."}
-          </div>
+          <div
+            class={styles.realtimeNotice}
+            role="status"
+            title={realtimeErrorMessage}
+          >"Realtime inbox updates are unavailable. Manual refresh still works."</div>
         }
         try {
           <InboxQueryContent
