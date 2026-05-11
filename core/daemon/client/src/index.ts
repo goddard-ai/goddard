@@ -1,5 +1,5 @@
 /** Shared daemon IPC client types used by runtime-specific daemon client modules. */
-import type { createClient } from "@goddard-ai/ipc"
+import type { IpcClient } from "@goddard-ai/ipc"
 import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 
 /** Daemon connection metadata passed to environment-specific IPC client factories. */
@@ -8,7 +8,7 @@ export type DaemonIpcClientFactoryInput = {
 }
 
 /** IPC client type shared by all daemon transport implementations. */
-export type DaemonIpcClient = ReturnType<typeof createClient<typeof daemonIpcSchema>>
+export type DaemonIpcClient = IpcClient<typeof daemonIpcSchema>
 
 /** Injectable factory for hosts that provide a custom IPC transport. */
 export type DaemonIpcClientFactory<TClient = DaemonIpcClient> = (

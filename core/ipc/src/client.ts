@@ -45,6 +45,8 @@ function normalizeStreamTarget<S extends IpcSchema>(
   }
 }
 
+export type IpcClient<S extends IpcSchema> = ReturnType<typeof createClient<S>>
+
 /**
  * Creates an IPC client for the given application schema and transport.
  *
@@ -71,10 +73,28 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
     return await transport.send(name, validPayload)
   }
 
-  async function subscribe<K extends ValidStreamName<S>>(
+  function subscribe<K extends ValidStreamName<S>>(
     target: StreamTarget<S, K>,
     onMessage: (payload: InferStreamPayload<S, K>) => void,
-  ): Promise<() => void> {
+  ): Promise<() => void>
+
+  function subscribe<K extends ValidStreamName<S>>(
+    target: StreamTarget<S, K>,
+    onMessage: (payload: InferStreamPayload<S, K>) => void,
+    onError: (error: unknown) => void,
+  ): () => void
+
+  function subscribe<K extends ValidStreamName<S>>(
+    target: StreamTarget<S, K>,
+    onMessage: (payload: InferStreamPayload<S, K>) => void,
+    onError?: (error: unknown) => void,
+  ): (() => void) | Promise<() => void>
+
+  function subscribe<K extends ValidStreamName<S>>(
+    target: StreamTarget<S, K>,
+    onMessage: (payload: InferStreamPayload<S, K>) => void,
+    onError?: (error: unknown) => void,
+  ): Promise<() => void> | (() => void) {
     const { name, filter } = normalizeStreamTarget(target)
 
     if (!Object.hasOwn(schema.streams, name)) {
@@ -96,11 +116,30 @@ export function createClient<S extends IpcSchema>(schema: S, transport: IpcTrans
       })
     }
 
-    return await Promise.resolve(
+    const subscribing = Promise.resolve(
       transport.subscribe(name, validFilter, (streamPayload) => {
         onMessage(streamPayload as InferStreamPayload<S, K>)
       }),
     )
+
+    if (onError) {
+      let subscribed = true
+      let unsubscribe: (() => void) | undefined
+
+      subscribing.then((cb) => {
+        unsubscribe = cb
+        if (!subscribed) {
+          unsubscribe()
+        }
+      }, onError)
+
+      return () => {
+        subscribed = false
+        unsubscribe?.()
+      }
+    }
+
+    return subscribing
   }
 
   return {
