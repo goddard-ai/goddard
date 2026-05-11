@@ -98,7 +98,7 @@ function buildSubpackageItems(projectPath: string, subpackages: readonly Session
         value: subpackage.path,
         label: subpackage.relativePath,
         detail: subpackage.manifestPath,
-        searchText: subpackage.relativePath,
+        searchText: subpackage.relativePath.split(/[\\/]/).at(-1) ?? subpackage.relativePath,
       }),
     ),
   ]
