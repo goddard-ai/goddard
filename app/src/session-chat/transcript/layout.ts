@@ -1,11 +1,3 @@
-import {
-  layoutWithLines,
-  prepareWithSegments,
-  type LayoutLine,
-  type PreparedTextWithSegments,
-  type PrepareOptions,
-} from "@chenglou/pretext"
-
 import type {
   SessionTranscriptItem,
   SessionTranscriptPermissionRequest,
@@ -15,7 +7,6 @@ import type {
 } from "~/sessions/models.ts"
 import {
   ATTACHMENT_ROW_HEIGHT,
-  BODY_FONT,
   BODY_LINE_HEIGHT,
   BUBBLE_PADDING_X,
   BUBBLE_PADDING_Y,
@@ -29,16 +20,6 @@ import {
   WIDE_BUBBLE_WIDTH_BREAKPOINT,
 } from "./transcript.style.ts"
 
-const preparedParagraphCache = new Map<string, PreparedTextWithSegments>()
-
-/** One measured paragraph produced from Pretext layout. */
-export type PretextParagraphMeasurement = {
-  lines: readonly LayoutLine[]
-  lineCount: number
-  height: number
-  maxLineWidth: number
-}
-
 export function isTextMessage(
   message: SessionTranscriptItem,
 ): message is SessionTranscriptTextMessage {
@@ -48,36 +29,6 @@ export function isTextMessage(
 /** Linearly interpolates one value within an inclusive range. */
 function lerp(start: number, end: number, progress: number) {
   return start + (end - start) * progress
-}
-
-/** Returns the cached prepared representation for one transcript paragraph. */
-function prepareParagraph(text: string, font: string, whiteSpace?: PrepareOptions["whiteSpace"]) {
-  const cacheKey = `${font}::${whiteSpace ?? "normal"}::${text}`
-  const cachedPrepared = preparedParagraphCache.get(cacheKey)
-
-  if (cachedPrepared) {
-    return cachedPrepared
-  }
-
-  const prepared = prepareWithSegments(text, font, {
-    whiteSpace,
-  })
-  preparedParagraphCache.set(cacheKey, prepared)
-  return prepared
-}
-
-/** Measures one transcript paragraph for the current width budget. */
-export function measureParagraph(text: string, maxWidth: number): PretextParagraphMeasurement {
-  const prepared = prepareParagraph(text, BODY_FONT, "pre-wrap")
-  const lineLayout = layoutWithLines(prepared, maxWidth, BODY_LINE_HEIGHT)
-  const maxLineWidth = lineLayout.lines.reduce((widest, line) => Math.max(widest, line.width), 0)
-
-  return {
-    lines: lineLayout.lines,
-    lineCount: lineLayout.lineCount,
-    height: lineLayout.height,
-    maxLineWidth,
-  }
 }
 
 /** Returns the maximum bubble width available for one transcript row at the current viewport width. */
@@ -119,20 +70,6 @@ export function getTranscriptTextWidth(message: SessionTranscriptItem, viewportW
   }
 
   return Math.max(MIN_TEXT_WIDTH, bubbleMaxWidth - BUBBLE_PADDING_X)
-}
-
-/** Builds the rendered transcript bubble width from one measured paragraph. */
-export function getTranscriptBubbleWidth(
-  message: SessionTranscriptTextMessage,
-  viewportWidth: number,
-  paragraph: PretextParagraphMeasurement,
-) {
-  const bubbleMaxWidth = getBubbleMaxWidth(viewportWidth, message)
-
-  return Math.max(
-    Math.min(bubbleMaxWidth, paragraph.maxLineWidth + BUBBLE_PADDING_X),
-    Math.min(bubbleMaxWidth, 196),
-  )
 }
 
 function estimateLineCount(text: string, maxWidth: number) {

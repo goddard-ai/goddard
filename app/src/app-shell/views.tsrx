@@ -1,10 +1,9 @@
 /** Workbench content surfaces rendered inside the merged app shell chrome. */
 import { css } from "@goddard-ai/styled-system/css"
-import { useLayoutEffect, useRef, useState } from "preact/hooks"
+import { useLayoutEffect, useRef } from "preact/hooks"
 
 import { useNavigation, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { TabContextProvider } from "~/tab-context.tsrx"
-import { TabViewportProvider } from "~/tab-viewport.tsrx"
 import { getWorkbenchTabComponent } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 
@@ -36,7 +35,6 @@ component WorkbenchScrollPanel(props: {
   children: preact.ComponentChildren;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const [scrollTop, setScrollTop] = useState(panelScrollCache.get(props.scrollKey) ?? 0)
 
   useLayoutEffect(() => {
     const scrollerElement = scrollerRef.current
@@ -47,38 +45,33 @@ component WorkbenchScrollPanel(props: {
 
     const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
     scrollerElement.scrollTop = restoredScrollTop
-    setScrollTop(restoredScrollTop)
   }, [props.scrollKey])
 
-  <TabViewportProvider {scrollTop} viewportRef={scrollerRef}>
+  <div
+    ref={scrollerRef}
+    class={css(
+      {
+        minHeight: "0",
+        height: "100%",
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+      },
+    )}
+    onScroll={(event) => {
+      panelScrollCache.set(props.scrollKey, event.currentTarget.scrollTop)
+    }}
+  >
     <div
-      ref={scrollerRef}
       class={css(
         {
-          minHeight: "0",
           height: "100%",
-          overflowY: "auto",
-          overscrollBehavior: "contain",
+          minHeight: "100%",
         },
       )}
-      onScroll={(event) => {
-        const nextScrollTop = event.currentTarget.scrollTop
-        panelScrollCache.set(props.scrollKey, nextScrollTop)
-        setScrollTop(nextScrollTop)
-      }}
     >
-      <div
-        class={css(
-          {
-            height: "100%",
-            minHeight: "100%",
-          },
-        )}
-      >
-        {props.children}
-      </div>
+      {props.children}
     </div>
-  </TabViewportProvider>
+  </div>
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
