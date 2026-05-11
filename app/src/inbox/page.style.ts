@@ -149,6 +149,18 @@ export default {
     minHeight: "0",
     overflowY: "auto",
   }),
+  realtimeNotice: css({
+    marginInline: "16px",
+    marginBlockStart: "12px",
+    paddingInline: "10px",
+    paddingBlock: "8px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "surface",
+    color: "muted",
+    fontSize: "0.82rem",
+    lineHeight: "1.4",
+  }),
   loading: css({
     display: "grid",
     alignContent: "start",
@@ -225,7 +237,7 @@ export default {
   }),
   rowOpenButton: css({
     display: "grid",
-    gridTemplateColumns: "28px minmax(0, 1fr) minmax(148px, auto)",
+    gridTemplateColumns: "10px 28px minmax(0, 1fr) minmax(148px, auto)",
     alignItems: "center",
     gap: "10px",
     minWidth: "0",
@@ -250,8 +262,18 @@ export default {
       outlineOffset: "0",
     },
     "@media (max-width: 760px)": {
-      gridTemplateColumns: "24px minmax(0, 1fr)",
+      gridTemplateColumns: "10px 24px minmax(0, 1fr)",
       alignItems: "start",
+    },
+  }),
+  rowUnreadMarker: css({
+    width: "7px",
+    height: "7px",
+    borderRadius: "999px",
+    backgroundColor: "transparent",
+    alignSelf: "center",
+    "&[data-visible='true']": {
+      backgroundColor: "accentStrong",
     },
   }),
   entityIcon: css({
@@ -324,7 +346,7 @@ export default {
     gap: "6px",
     minWidth: "0",
     "@media (max-width: 760px)": {
-      gridColumn: "2",
+      gridColumn: "3",
       justifyItems: "start",
     },
   }),

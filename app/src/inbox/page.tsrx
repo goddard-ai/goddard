@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks"
+import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
   InboxEntityId,
@@ -78,9 +78,46 @@ component InboxPage() {
   const workbenchTabSet = useWorkbenchTabSet()
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
+  const [realtimeErrorMessage, setRealtimeErrorMessage] = useState<string | null>(null)
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
     () => new Set(),
   )
+
+  useEffect(() => {
+    let active = true
+    let unsubscribe: (() => void) | null = null
+
+    void goddardSdk.inbox.subscribe(() => {
+      if (!active) {
+        return
+      }
+
+      setRealtimeErrorMessage(null)
+      invalidateInboxQueries()
+    }).then(
+      (nextUnsubscribe) => {
+        if (active) {
+          unsubscribe = nextUnsubscribe
+        } else {
+          nextUnsubscribe()
+        }
+      },
+      (error) => {
+        if (!active) {
+          return
+        }
+
+        console.error("Failed to subscribe to inbox updates.", error)
+        setRealtimeErrorMessage(getErrorMessage(error))
+      },
+    )
+
+    return () => {
+      active = false
+      unsubscribe?.()
+      unsubscribe = null
+    }
+  }, [])
 
   function clearSelectedInboxItems() {
     setSelectedEntityIds(new Set())
@@ -253,6 +290,11 @@ component InboxPage() {
         }}
       />
       <div class={styles.listBody}>
+        if (realtimeErrorMessage) {
+          <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
+            {"Realtime inbox updates are unavailable. Manual refresh still works."}
+          </div>
+        }
         try {
           <InboxQueryContent
             {filterId}

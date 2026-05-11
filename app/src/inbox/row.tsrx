@@ -133,6 +133,11 @@ export component InboxRow(props: {
         handleRowOpenKeyDown(event, () => mutations.openInboxItem(props.item))
       }}
     >
+      <span
+        aria-hidden="true"
+        class={styles.rowUnreadMarker}
+        data-visible={props.item.status === "unread" ? "true" : undefined}
+      />
       <span class={styles.entityIcon} aria-hidden="true">
         <EntityIcon size={16} strokeWidth={2.1} />
       </span>
