@@ -111,6 +111,11 @@ export default {
     '&[data-tone="danger"]': {
       color: "danger",
     },
+    '&[data-active="true"]': {
+      borderColor: "accent",
+      backgroundColor: "bg.hover",
+      color: "accentStrong",
+    },
   }),
   headerActionError: css({
     display: "flex",

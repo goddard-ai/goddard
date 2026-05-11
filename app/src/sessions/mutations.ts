@@ -59,6 +59,16 @@ export async function cancelSessionTurn(sessionId: DaemonSession["id"]) {
   return result
 }
 
+/**
+ * Marks one session completed without shutting it down, then refreshes session and inbox views.
+ */
+export async function completeSession(sessionId: DaemonSession["id"]) {
+  const result = await goddardSdk.session.complete({ id: sessionId })
+  refreshSessionViews(sessionId)
+  queryClient.invalidate(goddardSdk.inbox.list)
+  return result
+}
+
 export const SessionsPageMutations = createMutationsProvider<{
   openSession: (sessionId: DaemonSession["id"]) => void
   openSessionChanges: (sessionId: DaemonSession["id"]) => void

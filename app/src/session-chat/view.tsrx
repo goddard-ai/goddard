@@ -25,6 +25,7 @@ import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-p
 import { goddardSdk } from "~/sdk.ts"
 import {
   cancelSessionTurn,
+  completeSession,
   reconnectSession,
   respondSessionPermission,
   submitSessionPrompt,
@@ -155,7 +156,12 @@ component LoadedSessionChatView(props: {
   session: DaemonSession;
 }) {
   const [submitError, setSubmitError] = useState<unknown>(null)
-  const [activeHeaderAction, setActiveHeaderAction] = useState<"cancel" | "reconnect" | null>(null)
+  const [activeHeaderAction, setActiveHeaderAction] = useState<
+    "cancel" | "complete" | "reconnect" | null
+  >(null)
+  const [sessionCompletedHidden, setSessionCompletedHidden] = useState(
+    () => props.session.completedHidden,
+  )
   const [olderHistoryState, setOlderHistoryState] = useState<
     { status: "idle" } | { status: "loading" } | { message: string; status: "error" }
   >({ status: "idle" })
@@ -199,12 +205,26 @@ component LoadedSessionChatView(props: {
       chat.session.connectionMode === "live"
   const canOpenSessionChanges = chat.session.cwd.trim().length > 0
   const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
+  const completeActionDisabled =
+    activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
+  const completeActionLabel =
+    sessionCompletedHidden
+      ? "Session completed"
+      : chat.session.activeDaemonSession
+        ? "Complete unavailable while agent is active"
+        : activeHeaderAction === "complete"
+          ? "Completing session"
+          : "Complete session"
 
   useReportTabProject(resolvedProjectPath)
 
   useEffect(() => {
     void inbox.markSessionVisited(props.session.id)
   }, [inbox, props.session.id])
+
+  useEffect(() => {
+    setSessionCompletedHidden(props.session.completedHidden)
+  }, [props.session.completedHidden, props.session.id])
 
   async function reconnectCurrentSession() {
     if (!canReconnect || activeHeaderAction) {
@@ -222,6 +242,41 @@ component LoadedSessionChatView(props: {
       setHeaderActionError(
         {
           title: "Reconnect failed",
+          description: formatSessionRequestError(error),
+        },
+      )
+    } finally {
+      setActiveHeaderAction(null)
+    }
+  }
+
+  async function completeCurrentSession() {
+    if (completeActionDisabled) {
+      return
+    }
+
+    setActiveHeaderAction("complete")
+    setHeaderActionError(null)
+
+    try {
+      const result = await completeSession(chat.session.id)
+
+      if (result.item) {
+        inbox.applyItem(result.item)
+      }
+
+      setSessionCompletedHidden(true)
+      chat.syncSession(
+        {
+          ...chat.session,
+          completedHidden: true,
+        },
+      )
+    } catch (error) {
+      console.error("Failed to complete session.", error)
+      setHeaderActionError(
+        {
+          title: "Complete failed",
           description: formatSessionRequestError(error),
         },
       )
@@ -349,6 +404,20 @@ component LoadedSessionChatView(props: {
               </button>
             </GoodTooltip>
           }
+          <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
+            <button
+              aria-label={completeActionLabel}
+              class={styles.headerActionButton}
+              data-active={sessionCompletedHidden ? "true" : undefined}
+              disabled={completeActionDisabled}
+              type="button"
+              onClick={() => {
+                void completeCurrentSession()
+              }}
+            >
+              <CheckCircle2 size={15} strokeWidth={2.1} />
+            </button>
+          </GoodTooltip>
           if (canReconnect) {
             <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
               <button
@@ -461,6 +530,7 @@ component LoadedSessionChatView(props: {
                 prompt,
               },
             )
+            setSessionCompletedHidden(false)
           } catch (error) {
             console.error("Failed to submit session prompt.", error)
             setSubmitError(error)
