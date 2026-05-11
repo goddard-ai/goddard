@@ -210,6 +210,14 @@ const workbenchTabDefinitions = {
     getTitle: () => "Terminal Debug",
     icon: "tabs/sessions",
   },
+  terminal: {
+    component: lazy(() => import("~/terminal/view.tsrx")),
+    getId: (props: { tabId: string }) => props.tabId,
+    getTitle: (_props: { terminalId: string }) => "Terminal",
+    icon: "tabs/sessions",
+    getRelatedFilesystemPath: (props: { cwd: string | null }) => props.cwd,
+    restoreScroll: false,
+  },
 } satisfies Record<string, WorkbenchTabDefinition>
 
 export const workbenchTabKinds = defineWorkbenchTabs(workbenchTabDefinitions)

@@ -5,7 +5,11 @@ import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { ChevronRight, Folder } from "lucide-react"
 import { useEffect, useRef, useState } from "preact/hooks"
 
-import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import {
+  useMainTab,
+  useProjectContext,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
@@ -53,6 +57,7 @@ const mainTabCommands: Record<MainTabItemId, AppCommand> = {
 /** Renders the merged shell chrome and owns its local interaction wiring. */
 export function AppShellChrome() @{
   const mainTab = useMainTab()
+  const projectContext = useProjectContext()
   const workbenchTabSet = useWorkbenchTabSet()
   const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null)
   const topBarSelectorShortcutActive = workbenchTabSet.activeClosableTab?.kind !== "project"
@@ -85,6 +90,19 @@ export function AppShellChrome() @{
     workbenchTabSet.closeTab(tab.id)
   }
 
+  function openTerminalTab() {
+    const terminalId = crypto.randomUUID()
+
+    workbenchTabSet.openOrFocusTab({
+      kind: "terminal",
+      props: {
+        tabId: `terminal:${terminalId}`,
+        terminalId,
+        cwd: projectContext.activeProjectPath,
+      },
+    })
+  }
+
   useAppCommand(AppCommand.workbench.closeActiveTab, () => {
     if (workbenchTabSet.activeTabId !== WORKBENCH_MAIN_TAB.id) {
       requestCloseTab(workbenchTabSet.activeTabId)
@@ -104,6 +122,10 @@ export function AppShellChrome() @{
       kind: "keyboardShortcuts",
       props: {},
     })
+  })
+
+  useAppCommand(AppCommand.navigation.openTerminal, () => {
+    openTerminalTab()
   })
 
   useAppCommand(AppCommand.navigation.openInbox, () => {

@@ -2,6 +2,7 @@ import { t } from "@lingui/core/macro"
 import { Sigma, type Immutable } from "preact-sigma"
 
 import type { MainTabItemId } from "./main-tab-items.ts"
+import { workbenchTabLifecycle } from "./workbench-tab-lifecycle.ts"
 import {
   createWorkbenchTab,
   getWorkbenchTabRelatedFilesystemPath,
@@ -300,6 +301,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.recency = this.recency.filter((id) => id !== tabId && isFocusableWorkbenchTab(this, id))
     this.#removeDetailNavigationLocation(tabId)
     this.#onCloseTab(tabId)
+    workbenchTabLifecycle.emit("closed", { tab })
 
     if (this.activeTabId === tabId) {
       const nextActiveTabId = this.recency[0] ?? WORKBENCH_MAIN_TAB.id

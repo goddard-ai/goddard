@@ -25,6 +25,7 @@ import {
   Search,
   SendHorizontal,
   Settings,
+  Terminal,
 } from "lucide-react"
 
 import { defineAppCommands } from "./app-command.ts"
@@ -77,6 +78,11 @@ export const AppCommand = defineAppCommands({
           return t`Open New Session Dialog`
         },
         icon: MessageSquarePlus,
+      },
+      openTerminal: {
+        label: "Open Terminal",
+        icon: Terminal,
+        keywords: ["shell", "pty"],
       },
       openSwitchProject: {
         get label() {

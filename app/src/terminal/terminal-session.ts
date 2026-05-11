@@ -50,6 +50,7 @@ export type TerminalViewportSetup = {
   font?: TerminalViewportFont
   minimumCols?: number
   minimumRows?: number
+  disposeOnTeardown?: boolean
 }
 
 export type TerminalViewportSegment = {
@@ -97,6 +98,8 @@ export class TerminalSession extends SigmaTarget<TerminalViewportEvents, Termina
   #processedChunkCount = 0
   /** Monotonic token used to ignore stale async writes after resets or newer sync passes. */
   #writeVersion = 0
+  /** Whether subscriber teardown should destroy the headless terminal instead of only detaching DOM. */
+  #disposeOnTeardown: boolean
 
   constructor(config: TerminalViewportSetup = {}) {
     super({
@@ -111,6 +114,7 @@ export class TerminalSession extends SigmaTarget<TerminalViewportEvents, Termina
       minimumCols: config.minimumCols ?? DEFAULT_MINIMUM_COLS,
       minimumRows: config.minimumRows ?? DEFAULT_MINIMUM_ROWS,
     })
+    this.#disposeOnTeardown = config.disposeOnTeardown ?? true
   }
 
   /** Rebuilds the renderable rows from the current terminal buffer. */
@@ -246,6 +250,18 @@ export class TerminalSession extends SigmaTarget<TerminalViewportEvents, Termina
     this.refreshSnapshot()
   }
 
+  /** Destroys the headless terminal buffer when the owning terminal tab is closed. */
+  dispose() {
+    this.#resizeObserver?.disconnect()
+    this.#resizeObserver = null
+    this.#terminal?.dispose()
+    this.#terminal = null
+    this.#viewportElement = null
+    this.#processedChunkCount = 0
+    this.#writeVersion += 1
+    this.refreshSnapshot()
+  }
+
   onSetup() {
     if (!this.#terminal) {
       this.#terminal = new Terminal({
@@ -282,13 +298,11 @@ export class TerminalSession extends SigmaTarget<TerminalViewportEvents, Termina
       () => {
         this.#resizeObserver?.disconnect()
         this.#resizeObserver = null
-
-        this.#terminal?.dispose()
-        this.#terminal = null
         this.#viewportElement = null
-        this.#processedChunkCount = 0
-        this.#writeVersion += 1
-        this.refreshSnapshot()
+
+        if (this.#disposeOnTeardown) {
+          this.dispose()
+        }
       },
     ]
   }
