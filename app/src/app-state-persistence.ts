@@ -10,7 +10,6 @@ import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
 import { goddardSdk } from "./sdk.ts"
-import type { AppStateSnapshot } from "./shared/app-state.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION, type ShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
 import { shortcutRegistry, type ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
@@ -29,7 +28,7 @@ export type AppState = {
 }
 
 /** Persisted Sigma state captured and restored through the Bun-host app state file. */
-export type PersistedAppStateSnapshot = AppStateSnapshot & {
+export type AppStateSnapshot = {
   appearance: Immutable<AppearanceState>
   navigation: Immutable<NavigationState>
   projectContext: Immutable<ProjectContextState>
