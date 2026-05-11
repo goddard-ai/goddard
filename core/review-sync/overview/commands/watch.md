@@ -23,7 +23,8 @@
 - **What it changes**
   - Everything `start` may change when an explicit agent branch starts or reuses a session.
   - Everything `sync` may change during each completed sync cycle.
-  - The review branch while preparing or refreshing from the agent branch ref.
+  - The review branch while preparing from the agent branch ref, and the review
+    worktree while refreshing from it.
   - Session pause state when watch exits.
   - The review worktree checkout when watch can safely restore the branch that
     was active at startup.
@@ -48,7 +49,10 @@
 - **Exit behavior**
   - When stopped after a session is active, `watch` pauses the session.
   - It tries to restore the review worktree checkout that was active at startup.
-  - Immediately before exit, it deletes the disposable `review-sync/*` review branch.
+  - Before restoring the startup checkout, it discards rendered baseline dirt
+    when the review worktree has no unapplied human patch.
+  - Immediately before exit, it deletes the disposable `review-sync/*` review
+    branch when there is no unapplied human patch that must stay visible.
   - If cleanup cannot fully complete, the final result reports what remains for the user to handle.
   - If watch stops before a durable session is ready, it tries to undo any safe
     review-branch preview checkout.

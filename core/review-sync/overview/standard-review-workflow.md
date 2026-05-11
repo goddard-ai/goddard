@@ -6,20 +6,23 @@
   - Run `start <agent-branch>` from the review worktree, or run
     `watch <agent-branch>` to start and keep watching in one command.
   - The review worktree is checked out to the derived review branch.
-  - The first refresh makes the review worktree show the agent branch content.
+  - The first refresh makes the review worktree index and working tree show the
+    agent branch content.
 
 - **Agent-to-review flow**
-  - When the agent changes files on the agent branch, the next sync refreshes the review branch.
+  - When the agent changes files on the agent branch, the next sync refreshes the review worktree.
   - Agent changes can be committed or uncommitted.
   - Non-ignored untracked files are included.
-  - The review worktree is reset to the latest synchronized agent content.
+  - The review worktree index and working tree are rendered to the latest
+    synchronized agent content without moving the visible review branch to the
+    synthetic snapshot commit.
 
 - **Human-to-agent flow**
   - When the human edits the review worktree, the next sync treats those changes as a human patch.
   - If the patch applies cleanly:
     - The patch is saved as accepted.
     - The same file changes appear in the agent worktree.
-    - The review branch is refreshed from the resulting agent content.
+    - The review worktree is refreshed from the resulting agent content.
   - If the patch does not apply cleanly:
     - The patch is saved as rejected.
     - The agent worktree is left unchanged by the rejected patch.
@@ -36,7 +39,8 @@
     when doing so will not discard human work.
   - When stopped, `watch` pauses the session and tries to restore the review
     worktree checkout that was active when watching began.
-  - The disposable `review-sync/*` branch is deleted before `watch` exits.
+  - The disposable `review-sync/*` branch is deleted before `watch` exits when
+    doing so will not hide unapplied human edits.
 
 - **Pause and resume**
   - Use `pause` when sync mutations should temporarily stop.

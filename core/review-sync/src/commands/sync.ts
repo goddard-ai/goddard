@@ -30,7 +30,7 @@ export async function syncLoadedReviewSyncSession(session: SessionState, context
     rejectedPatchPath: syncResult.rejectedPatchPath ?? undefined,
     message:
       syncResult.status === "rejected-human-patch"
-        ? `Human patch rejected and saved to ${syncResult.rejectedPatchPath}. Review branch refreshed from ${latest.agentBranch}.`
+        ? `Human patch rejected and saved to ${syncResult.rejectedPatchPath}. Review worktree refreshed from ${latest.agentBranch}.`
         : `Synced ${latest.agentBranch} to ${latest.reviewBranch}.`,
   })
 }
@@ -39,7 +39,7 @@ export async function syncLoadedReviewSyncSession(session: SessionState, context
 export function createSyncCommand(cwd: string) {
   return command({
     name: "sync",
-    description: "Apply clean human edits to the agent worktree and refresh the review branch",
+    description: "Apply clean human edits to the agent worktree and refresh the review worktree",
     args: {},
     handler: () => syncReviewSession({ cwd }),
   })

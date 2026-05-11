@@ -36,7 +36,7 @@
   - [`sync`](./commands/sync.md)
     - Run one review-sync cycle between the agent and review worktrees.
     - Audience: humans or agents after either side changes.
-    - Mutates: accepted agent-side files, review branch contents, and session state.
+    - Mutates: accepted agent-side files, rendered review worktree contents, and session state.
   - [`watch`](./commands/watch.md)
     - Keep syncing when either worktree or the agent branch changes.
     - Audience: humans reviewing live agent work.

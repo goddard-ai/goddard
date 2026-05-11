@@ -22,7 +22,7 @@
       commit history as the durable review record.
   - `Review Worktree`
     - The separate local worktree a human opens in an editor.
-    - It is where the review branch is checked out and refreshed.
+    - It is where the review branch is checked out and synchronized content is rendered.
 
 - **Session ownership**
   - A review-sync session binds:
@@ -39,8 +39,12 @@
       sessions only after checking their saved patches.
 
 - **Rendered snapshot**
-  - A rendered snapshot is the review branch content from the last successful refresh.
+  - A rendered snapshot is the synthetic content last written into the review
+    worktree's index and working tree.
   - It is the baseline used to decide whether the human changed the review worktree.
+  - It may appear as staged or unstaged changes relative to the visible review
+    branch `HEAD` when synchronized agent content has not been committed on the
+    review branch.
   - It is not a user-facing branch role; it exists so the next sync can
     distinguish review edits from agent edits.
 
@@ -78,7 +82,7 @@
   - Sync mutations require the recorded review worktree to be on the derived review branch.
   - In-progress Git operations that make branch or patch movement ambiguous are blocked.
   - Paused sessions block sync mutations until resumed.
-  - Review branch checkout or reset operations protect local review edits
+  - Review branch checkout or render operations protect local review edits
     instead of silently discarding them.
 
 - **Human and agent ownership**

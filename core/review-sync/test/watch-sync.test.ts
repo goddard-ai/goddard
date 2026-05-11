@@ -28,6 +28,7 @@ test("watch syncs when the review worktree changes", async () => {
   expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
   expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
     false,
   )

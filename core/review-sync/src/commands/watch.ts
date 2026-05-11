@@ -24,6 +24,7 @@ import {
   resolveRequiredGitDir,
   resolveRequiredRepoRoot,
 } from "../git.ts"
+import { hasHumanPatch } from "../patch-flow.ts"
 import { createRuntimeContext, writeResult } from "../runtime.ts"
 import {
   AgentBranchWorktreeMissingError,
@@ -310,6 +311,18 @@ async function cleanupWatchExit(input: {
   }
 
   if (input.startedWorktree === latest.reviewWorktree) {
+    let cleanupReady: Awaited<ReturnType<typeof prepareReviewWorktreeForWatchCheckout>>
+    try {
+      cleanupReady = await prepareReviewWorktreeForWatchCheckout(latest, input.context)
+    } catch (error) {
+      failures.push(`Could not inspect ${latest.reviewBranch}: ${formatThrownError(error)}`)
+      return { latest, notes, failures }
+    }
+    if (!cleanupReady.ready) {
+      notes.push(cleanupReady.note)
+      return { latest, notes, failures }
+    }
+
     if (input.startedBranch) {
       try {
         const currentBranch = await resolveCurrentBranch(latest.reviewWorktree, input.context)
@@ -361,6 +374,28 @@ async function cleanupWatchExit(input: {
   }
 
   return { latest, notes, failures }
+}
+
+/** Removes rendered baseline dirt before watch restores the user's starting checkout. */
+async function prepareReviewWorktreeForWatchCheckout(
+  session: SessionState,
+  context: RuntimeContext,
+) {
+  const currentBranch = await resolveCurrentBranch(session.reviewWorktree, context)
+  if (currentBranch !== session.reviewBranch) {
+    return { ready: true } as const
+  }
+
+  if (await hasHumanPatch(session, context)) {
+    return {
+      ready: false,
+      note: `Left ${session.reviewBranch} checked out and did not delete it because ${session.reviewWorktree} has unapplied human edits.`,
+    } as const
+  }
+
+  await git(session.reviewWorktree, ["reset", "--hard"], context)
+  await git(session.reviewWorktree, ["clean", "-fd"], context)
+  return { ready: true } as const
 }
 
 /** Formats the final watch result with any cleanup outcome the user must act on. */

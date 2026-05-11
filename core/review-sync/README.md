@@ -8,8 +8,8 @@ For durable conceptual documentation, start with [overview/README.md](./overview
 The package derives a disposable review branch by prepending `review-sync/` to the
 full agent branch name. Each sync captures the review worktree against the last rendered
 snapshot, tries to apply the resulting human patch to the agent worktree, saves the
-patch as accepted or rejected, then refreshes the review branch from the agent
-snapshot.
+patch as accepted or rejected, then renders the agent snapshot into the review
+worktree's index and working tree.
 
 Daemon review sessions use this package as the owner of review branch and sync
 semantics.

@@ -75,7 +75,7 @@ try {
   // The review branch is disposable, but a reviewer might still commit there.
   // The final file contents should still flow back to the agent worktree.
   // TECHNICAL NOTE: Review commit history is not preserved; sync turns the
-  // resulting review tree into a patch and resets the review branch.
+  // resulting review tree into a patch and refreshes the review worktree.
   await runSmokeStep("review committed change", async () => {
     await writeText(join(fixture.reviewDir, "shared.txt"), "review committed edit\n")
     await runGit(fixture.reviewDir, ["add", "shared.txt"])
@@ -128,8 +128,8 @@ try {
 
   // Agent commits should mirror just like uncommitted agent edits. The reviewer
   // should see the committed content after sync.
-  // TECHNICAL NOTE: The review branch reset should land on the latest synthetic
-  // agent snapshot.
+  // TECHNICAL NOTE: The latest synthetic agent snapshot is rendered into the
+  // review index and working tree without becoming the visible review branch HEAD.
   await runSmokeStep("agent committed change", async () => {
     await writeText(join(fixture.agentDir, "shared.txt"), "agent committed edit\n")
     await runGit(fixture.agentDir, ["add", "shared.txt"])

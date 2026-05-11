@@ -5,8 +5,8 @@ import { createSnapshotCommit, diffCommits } from "./snapshot.ts"
 import { savePatch } from "./state.ts"
 import type { PatchFlowResult, RuntimeContext, SessionState } from "./types.ts"
 
-/** Computes and applies the human patch when a rendered baseline already exists. */
-export async function handleHumanPatch(session: SessionState, context: RuntimeContext) {
+/** Computes the human patch from the rendered baseline to the review worktree. */
+async function createHumanPatch(session: SessionState, context: RuntimeContext) {
   const renderedSnapshot = await resolveRef(
     session.agentWorktree,
     session.refs.renderedSnapshot,
@@ -14,11 +14,7 @@ export async function handleHumanPatch(session: SessionState, context: RuntimeCo
   )
 
   if (!renderedSnapshot) {
-    return createPatchFlowResult({
-      status: "synced",
-      acceptedPatchPath: null,
-      rejectedPatchPath: null,
-    })
+    return null
   }
 
   const reviewSnapshot = await createSnapshotCommit({
@@ -26,7 +22,26 @@ export async function handleHumanPatch(session: SessionState, context: RuntimeCo
     label: `${session.sessionId}:review`,
     context,
   })
-  const patch = await diffCommits(session.agentWorktree, renderedSnapshot, reviewSnapshot, context)
+  return await diffCommits(session.agentWorktree, renderedSnapshot, reviewSnapshot, context)
+}
+
+/** Checks whether the review worktree contains changes beyond the rendered baseline. */
+export async function hasHumanPatch(session: SessionState, context: RuntimeContext) {
+  const patch = await createHumanPatch(session, context)
+  return patch === null || patch.trim().length > 0
+}
+
+/** Computes and applies the human patch when a rendered baseline already exists. */
+export async function handleHumanPatch(session: SessionState, context: RuntimeContext) {
+  const patch = await createHumanPatch(session, context)
+
+  if (patch === null) {
+    return createPatchFlowResult({
+      status: "synced",
+      acceptedPatchPath: null,
+      rejectedPatchPath: null,
+    })
+  }
 
   if (!patch.trim()) {
     return createPatchFlowResult({

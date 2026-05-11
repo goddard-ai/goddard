@@ -18,7 +18,7 @@
 
 - **What it changes**
   - Review worktree checkout state.
-  - Review branch content.
+  - Review worktree index and working tree content.
   - Review-sync session state.
   - If the review branch already contained human work, a clean human patch may
     be accepted into the agent worktree.

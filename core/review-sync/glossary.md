@@ -7,7 +7,7 @@
 - `Review Branch`
   - The disposable branch derived as `review-sync/<agent-branch>` and checked out in the review worktree.
 - `Rendered Snapshot`
-  - The synthetic snapshot commit last written into the review branch.
+  - The synthetic snapshot commit last rendered into the review worktree's index and working tree.
 - `Human Patch`
   - The binary Git diff from the rendered snapshot to the review worktree's current snapshot.
 - `Accepted Patch`

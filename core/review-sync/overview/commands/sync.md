@@ -13,17 +13,18 @@
   - Applies a clean human patch to the agent worktree and saves it as accepted.
   - Saves a conflicting human patch as rejected without applying it to the agent worktree.
   - Captures the latest agent content after any accepted patch.
-  - Refreshes the review branch to that latest agent content.
+  - Renders the review worktree index and working tree to that latest agent content.
 
 - **What it changes**
   - The agent worktree when a human patch is accepted.
-  - The review branch and review worktree after every completed sync.
+  - The review worktree index and working tree after every completed sync.
   - The saved accepted or rejected patch inventory when a human patch exists.
   - The session's last-sync outcome.
 
 - **What it never changes**
   - It does not mutate a paused session.
   - It does not apply a rejected human patch to the agent worktree.
+  - It does not move the visible review branch to synthetic snapshot commits.
   - It does not preserve review branch commit history as the durable record.
   - It does not synchronize ignored files.
 

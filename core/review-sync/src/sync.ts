@@ -9,9 +9,9 @@ import {
   updateRef,
 } from "./git.ts"
 import { withSessionLock } from "./lock.ts"
-import { handleHumanPatch } from "./patch-flow.ts"
+import { handleHumanPatch, hasHumanPatch } from "./patch-flow.ts"
 import { validateSessionWorktrees } from "./session.ts"
-import { createSnapshotCommit, diffCommits } from "./snapshot.ts"
+import { createSnapshotCommit } from "./snapshot.ts"
 import { appendEvent, readSessionState, writeSessionState } from "./state.ts"
 import type { RuntimeContext, SessionState } from "./types.ts"
 
@@ -36,7 +36,7 @@ export async function syncSession(session: SessionState, context: RuntimeContext
     })
 
     await updateRef(latest.agentWorktree, latest.refs.agentSnapshot, agentSnapshot, context)
-    await refreshReviewWorktree(latest, agentSnapshot, context)
+    await renderReviewWorktreeSnapshot(latest, agentSnapshot, context)
     await updateRef(latest.agentWorktree, latest.refs.renderedSnapshot, agentSnapshot, context)
 
     latest.updatedAt = new Date().toISOString()
@@ -92,22 +92,11 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
       } as const
     }
 
-    const reviewSnapshot = await createSnapshotCommit({
-      cwd: latest.reviewWorktree,
-      label: `${latest.sessionId}:review`,
-      context,
-    })
-    const humanPatch = await diffCommits(
-      latest.reviewWorktree,
-      renderedSnapshot,
-      reviewSnapshot,
-      context,
-    )
-    if (humanPatch.trim()) {
+    if (await hasHumanPatch(latest, context)) {
       return { status: "skipped", reason: "pending-human-patch" } as const
     }
 
-    await refreshReviewWorktree(latest, branchHead, context)
+    await renderReviewWorktreeSnapshot(latest, branchHead, context)
     await updateRef(latest.reviewWorktree, latest.refs.renderedSnapshot, branchHead, context)
     latest.updatedAt = new Date().toISOString()
     await writeSessionState(latest)
@@ -120,13 +109,13 @@ export async function refreshReviewWorktreeFromAgentBranchRef(
   })
 }
 
-/** Moves the checked-out review branch to the latest agent snapshot and cleans mirror state. */
-async function refreshReviewWorktree(
+/** Renders synchronized content into the review index and worktree without moving branch HEAD. */
+async function renderReviewWorktreeSnapshot(
   session: SessionState,
   agentSnapshot: string,
   context: RuntimeContext,
 ) {
-  await git(session.reviewWorktree, ["reset", "--hard", agentSnapshot], context)
+  await git(session.reviewWorktree, ["read-tree", "--reset", "-u", agentSnapshot], context)
   await git(session.reviewWorktree, ["clean", "-fd"], context)
 }
 

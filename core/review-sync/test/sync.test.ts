@@ -52,6 +52,9 @@ test("sync applies clean human edits back to the agent worktree", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
+  const reviewHeadBeforeSync = (
+    await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])
+  ).stdout.trim()
 
   await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
   const result = await syncReviewSession({
@@ -63,6 +66,31 @@ test("sync applies clean human edits back to the agent worktree", async () => {
   expect(existsSync(result.acceptedPatchPath!)).toBe(true)
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+  expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+    reviewHeadBeforeSync,
+  )
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe(
+    "M  shared.txt\n",
+  )
+})
+
+test("sync does not reapply the rendered baseline as another human patch", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
+  const first = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  const second = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+
+  expect(first.status).toBe("ok")
+  expect(first.acceptedPatchPath).toBeTruthy()
+  expect(second.status).toBe("ok")
+  expect(second.acceptedPatchPath).toBeUndefined()
 })
 
 test("sync fails when the agent worktree is not on the expected branch", async () => {
