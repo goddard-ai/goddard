@@ -29,6 +29,7 @@
     "@goddard-ai/adapter": "workspace:*",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/worktree": "workspace:*",
     "ai-sdk-json-schema": "catalog:",
     "rouzer": "catalog:",
     "zod": "catalog:"

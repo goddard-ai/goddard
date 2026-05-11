@@ -26,9 +26,9 @@ import type {
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
   SessionWorkforceParams,
-  SessionWorktreeParams,
   ShutdownSessionResponse,
 } from "@goddard-ai/schema/daemon"
+import type { SessionWorktreeParams } from "@goddard-ai/worktree/schema"
 
 export type {
   CreateSessionRequest,
@@ -50,11 +50,11 @@ export type {
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
   SessionWorkforceParams,
-  SessionWorktreeParams,
   ListSessionsRequest,
   ListSessionsResponse,
   ShutdownSessionResponse,
 }
+export type { SessionWorktreeParams } from "@goddard-ai/worktree/schema"
 
 export { deriveSessionLaunchModelConfig } from "./session-launch-model-config.ts"
 

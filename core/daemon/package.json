@@ -51,6 +51,7 @@
     "@goddard-ai/paths": "workspace:^",
     "@goddard-ai/review-sync": "workspace:^",
     "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/worktree": "workspace:*",
     "@goddard-ai/worktree-plugin": "workspace:^",
     "@openrouter/ai-sdk-provider": "^2.5.1",
     "ai": "^6.0.158",

@@ -1,6 +1,7 @@
 import { adapterIpcSchema } from "@goddard-ai/adapter/daemon-ipc"
 import { inboxIpcSchema } from "@goddard-ai/inbox/daemon-ipc"
 import { $type, composeIpcSchemas, defineIpcSchema, IpcSchema } from "@goddard-ai/ipc"
+import { worktreeIpcSchema } from "@goddard-ai/worktree/daemon-ipc"
 import { z } from "zod"
 
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
@@ -31,11 +32,9 @@ import {
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   ListSessionsRequest,
-  MountSessionReviewSessionRequest as MountSessionReviewSessionRequestSchema,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
-  RunSessionReviewSessionRequest as RunSessionReviewSessionRequestSchema,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
@@ -43,7 +42,6 @@ import {
   SessionMessageEvent,
   SessionSubpackagesRequest,
   SteerSessionRequest,
-  UnmountSessionReviewSessionRequest as UnmountSessionReviewSessionRequestSchema,
   type CancelSessionResponse,
   type CompleteSessionResponse,
   type CreateSessionResponse,
@@ -52,9 +50,7 @@ import {
   type GetSessionHistoryResponse,
   type GetSessionResponse,
   type GetSessionWorkforceResponse,
-  type GetSessionWorktreeResponse,
   type ListSessionsResponse,
-  type MutateSessionReviewSessionResponse,
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
@@ -163,22 +159,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
     "session.diagnostics": {
       payload: DaemonSessionIdParams,
       response: $type<GetSessionDiagnosticsResponse>(),
-    },
-    "session.worktree.get": {
-      payload: DaemonSessionIdParams,
-      response: $type<GetSessionWorktreeResponse>(),
-    },
-    "session.reviewSession.mount": {
-      payload: MountSessionReviewSessionRequestSchema,
-      response: $type<MutateSessionReviewSessionResponse>(),
-    },
-    "session.reviewSession.run": {
-      payload: RunSessionReviewSessionRequestSchema,
-      response: $type<MutateSessionReviewSessionResponse>(),
-    },
-    "session.reviewSession.unmount": {
-      payload: UnmountSessionReviewSessionRequestSchema,
-      response: $type<MutateSessionReviewSessionResponse>(),
     },
     "session.workforce.get": {
       payload: DaemonSessionIdParams,
@@ -304,4 +284,5 @@ export const daemonIpcSchema = composeIpcSchemas([
   coreDaemonIpcSchema,
   adapterIpcSchema,
   inboxIpcSchema,
+  worktreeIpcSchema,
 ]) satisfies IpcSchema

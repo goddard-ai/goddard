@@ -1,18 +1,47 @@
-import * as acp from "@agentclientprotocol/sdk"
+import type * as acp from "@agentclientprotocol/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
-import {
-  InferStreamFilter,
-  InferStreamPayload,
-  IpcClient,
-  IpcSchema,
-  RequestArguments,
-  StreamTarget,
-  ValidRequestName,
-  ValidStreamName,
-} from "@goddard-ai/ipc"
-import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
+import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
+import type {
+  CancelSessionRequest,
+  CancelWorkforceRequest,
+  CreateSessionRequest,
+  CreateWorkforceRequest,
+  DeclareSessionInitiativeRequest,
+  DiscoverWorkforceCandidatesRequest,
+  GetLoopRequest,
+  GetPullRequestRequest,
+  GetSessionChangesRequest,
+  GetSessionHistoryRequest,
+  GetWorkforceRequest,
+  InitializeWorkforceRequest,
+  ListSessionsRequest,
+  ReplyPrRequest,
+  ReportSessionBlockerRequest,
+  ReportSessionTurnEndedRequest,
+  ResolveSessionTokenRequest,
+  RespondWorkforceRequest,
+  RunNamedActionRequest,
+  SendSessionMessageRequest,
+  SessionComposerSuggestionsRequest,
+  SessionDraftSuggestionsRequest,
+  SessionLaunchPreviewRequest,
+  SessionSubpackagesRequest,
+  ShutdownLoopRequest,
+  ShutdownWorkforceRequest,
+  StartLoopRequest,
+  StartWorkforceRequest,
+  SteerSessionRequest,
+  SubmitPrRequest,
+  SubscribeWorkforceEventsRequest,
+  SuspendWorkforceRequest,
+  TruncateWorkforceRequest,
+  UpdateWorkforceRequest,
+  WorkforceEventEnvelope,
+} from "@goddard-ai/schema/daemon"
+import { worktreeSdkPlugin } from "@goddard-ai/worktree/sdk"
 
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
@@ -24,73 +53,236 @@ import {
   type SessionPromptRequest,
 } from "./session.ts"
 
-/** Daemon IPC schema used for SDK-specific stream payload shaping. */
-type DaemonIpcSchema = typeof daemonIpcSchema
-
-/** Turns a union of function overload shapes into one callable overloaded type. */
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
-  ? I
-  : never
-
-/** Subscription overloads for streams that require a daemon-side filter. */
-type FilteredSubscribeOverload<Filter, Payload> =
-  | ((filter: Filter, onMessage: (payload: Payload) => void) => Promise<() => void>)
-  | ((
-      filter: Filter,
-      onMessage: (payload: Payload) => void,
-      onError: (error: unknown) => void,
-    ) => () => void)
-  | ((
-      filter: Filter,
-      onMessage: (payload: Payload) => void,
-      onError?: (error: unknown) => void,
-    ) => (() => void) | Promise<() => void>)
-
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
 
-/** Caches a getter result on first access by replacing the instance getter with the concrete value. */
-function lazy<This extends object, Value>(
-  getter: (this: This) => Value,
-  context: ClassGetterDecoratorContext<This, Value>,
-) {
-  return function getLazyValue(this: This) {
-    const value = getter.call(this)
+/** Caches one namespace on first access by replacing the instance getter with the concrete value. */
+function defineCachedNamespace<TValue>(owner: object, key: string, value: TValue): TValue {
+  Object.defineProperty(owner, key, {
+    configurable: true,
+    value,
+  })
+  return value
+}
 
-    Object.defineProperty(this, context.name, {
-      configurable: true,
-      value,
-    })
-
-    return value
+/** Builds the health namespace with one thin method per daemon health IPC action. */
+function createDaemonNamespace(client: DaemonIpcClient) {
+  return {
+    /** Probes daemon liveness without adding SDK-specific behavior. */
+    health: async () => client.send("daemon.health"),
   }
 }
 
-function defineRequest<S extends IpcSchema, K extends ValidRequestName<S>>(
-  client: IpcClient<S>,
-  name: K,
-) {
-  return (...args: RequestArguments<S, K>) => client.send(name, ...args)
+/** Builds the auth namespace with one thin method per daemon auth IPC action. */
+function createAuthNamespace(client: DaemonIpcClient) {
+  return {
+    /** Starts one GitHub device flow through the daemon auth contract. */
+    startDeviceFlow: async (input: DeviceFlowStart) => client.send("auth.device.start", input),
+
+    /** Completes one pending GitHub device flow through the daemon auth contract. */
+    completeDeviceFlow: async (input: DeviceFlowComplete) =>
+      client.send("auth.device.complete", input),
+
+    /** Reads the current daemon-owned auth session as-is. */
+    whoami: async () => client.send("auth.whoami"),
+
+    /** Clears the current daemon-owned auth session as-is. */
+    logout: async () => client.send("auth.logout"),
+  }
 }
 
-function defineUnwrappedSubscription<S extends IpcSchema, K extends ValidStreamName<S>, Payload>(
-  client: IpcClient<S>,
-  name: K,
-  unwrap: (payload: InferStreamPayload<S, K>) => Payload,
-) {
-  return function subscribe(
-    filter: InferStreamFilter<S, K>,
-    onMessage: (payload: Payload) => void,
-    onError?: (error: unknown) => void,
-  ) {
-    return client.subscribe(
-      { name, filter } as StreamTarget<S, K>,
-      (payload) => {
-        onMessage(unwrap(payload))
-      },
-      onError,
-    )
-  } as UnionToIntersection<FilteredSubscribeOverload<InferStreamFilter<S, K>, Payload>>
+/** Builds the pull request namespace with one thin method per daemon PR IPC action. */
+function createPrNamespace(client: DaemonIpcClient) {
+  return {
+    /** Submits one pull request through the daemon PR contract. */
+    submit: async (input: SubmitPrRequest & { token: string }) => client.send("pr.submit", input),
+
+    /** Fetches one daemon-managed pull request by tagged id. */
+    get: async (input: GetPullRequestRequest) => client.send("pr.get", input),
+
+    /** Posts one pull request reply through the daemon PR contract. */
+    reply: async (input: ReplyPrRequest & { token: string }) => client.send("pr.reply", input),
+  }
+}
+
+/** Builds the session namespace with one thin method per daemon session IPC action. */
+function createSessionNamespace(client: DaemonIpcClient) {
+  const worktree = worktreeSdkPlugin.create({ client })
+
+  return {
+    /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
+    run: async (input: SessionParams, handler?: acp.Client) => runSession(client, input, handler),
+
+    /** Creates one daemon-managed session record. */
+    create: async (input: CreateSessionRequest) => client.send("session.create", input),
+
+    /** Lists daemon-managed sessions and pagination state. */
+    list: async (input: ListSessionsRequest) => client.send("session.list", input),
+
+    /** Fetches one daemon-managed session record. */
+    get: async (input: DaemonSessionIdParams) => client.send("session.get", input),
+
+    /** Reconnects to one daemon-managed session record. */
+    connect: async (input: DaemonSessionIdParams) => client.send("session.connect", input),
+
+    /** Reads one daemon-managed session history with session identity and connection state. */
+    history: async (input: GetSessionHistoryRequest) => client.send("session.history", input),
+
+    /** Reads the current git diff for one daemon-managed session workspace. */
+    changes: async (input: GetSessionChangesRequest) => client.send("session.changes", input),
+
+    /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
+    composerSuggestions: async (input: SessionComposerSuggestionsRequest) =>
+      client.send("session.composerSuggestions", input),
+
+    /** Reads draft composer suggestions that only depend on one repository cwd. */
+    draftSuggestions: async (input: SessionDraftSuggestionsRequest) =>
+      client.send("session.draftSuggestions", input),
+
+    /** Loads launch-time adapter and repository capabilities before a session is created. */
+    launchPreview: async (input: SessionLaunchPreviewRequest) =>
+      client.send("session.launchPreview", input),
+
+    /** Discovers launchable subpackage working directories under one project cwd. */
+    subpackages: async (input: SessionSubpackagesRequest) =>
+      client.send("session.subpackages", input),
+
+    /** Reads one daemon-managed session diagnostics with event history and connection state. */
+    diagnostics: async (input: DaemonSessionIdParams) => client.send("session.diagnostics", input),
+
+    ...worktree,
+
+    /** Reads persisted workforce metadata attached to one daemon-managed session. */
+    workforce: async (input: DaemonSessionIdParams) => client.send("session.workforce.get", input),
+
+    /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
+    shutdown: async (input: DaemonSessionIdParams) => client.send("session.shutdown", input),
+
+    /** Marks one session inbox row completed without shutting down the session. */
+    complete: async (input: DaemonSessionIdParams) => client.send("session.complete", input),
+
+    /** Records the current session initiative without creating an inbox row. */
+    declareInitiative: async (input: DeclareSessionInitiativeRequest) =>
+      client.send("session.declareInitiative", input),
+
+    /** Reports a session blocker and marks the session inbox row unread. */
+    reportBlocker: async (input: ReportSessionBlockerRequest) =>
+      client.send("session.reportBlocker", input),
+
+    /** Reports an end-of-turn session update when no other entity claimed attention. */
+    reportTurnEnded: async (input: ReportSessionTurnEndedRequest) =>
+      client.send("session.reportTurnEnded", input),
+
+    /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
+    cancel: async (input: CancelSessionRequest) => client.send("session.cancel", input),
+    /** Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary. */
+    steer: async (input: SteerSessionRequest) => client.send("session.steer", input),
+    /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
+    send: async (input: SendSessionMessageRequest) => client.send("session.send", input),
+    /** Sends one ACP permission response through the daemon-managed session transport. */
+    respondPermission: async (input: SessionPermissionResponseRequest) =>
+      client.send("session.send", {
+        id: input.id,
+        message: createSessionPermissionResponseMessage(input),
+      }),
+    /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
+    prompt: async (input: SessionPromptRequest) =>
+      client.send("session.send", {
+        id: input.id,
+        message: createSessionPromptMessage(input),
+      }),
+    /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
+    subscribe: async (
+      input: DaemonSessionIdParams,
+      onMessage: (message: acp.AnyMessage) => void,
+    ): Promise<() => void> => {
+      return client.subscribe({ name: "session.message", filter: input }, (payload) => {
+        onMessage(payload.message)
+      })
+    },
+
+    /** Resolves one daemon session token to its daemon session id. */
+    resolveToken: async (input: ResolveSessionTokenRequest) =>
+      client.send("session.resolveToken", input),
+  }
+}
+
+/** Builds the action namespace with one thin method per daemon action IPC call. */
+function createActionNamespace(client: DaemonIpcClient) {
+  return {
+    /** Runs one named daemon action and creates the resulting daemon session. */
+    run: async (input: RunNamedActionRequest) => client.send("action.run", input),
+  }
+}
+
+/** Builds the loop namespace with one thin method per daemon loop IPC action. */
+function createLoopNamespace(client: DaemonIpcClient) {
+  return {
+    /** Starts or reuses one daemon loop runtime. */
+    start: async (input: StartLoopRequest) => client.send("loop.start", input),
+
+    /** Fetches one daemon loop runtime and its resolved config. */
+    get: async (input: GetLoopRequest) => client.send("loop.get", input),
+
+    /** Lists daemon loop runtime summaries. */
+    list: async () => client.send("loop.list"),
+
+    /** Shuts down one daemon loop and reports whether shutdown succeeded. */
+    shutdown: async (input: ShutdownLoopRequest) => client.send("loop.shutdown", input),
+  }
+}
+
+/** Builds the workforce namespace with one thin method per daemon workforce IPC action. */
+function createWorkforceNamespace(client: DaemonIpcClient) {
+  return {
+    /** Starts or reuses one daemon workforce runtime. */
+    start: async (input: StartWorkforceRequest) => client.send("workforce.start", input),
+
+    /** Discovers package candidates for one repository workforce initialization flow. */
+    discoverCandidates: async (input: DiscoverWorkforceCandidatesRequest) =>
+      client.send("workforce.discoverCandidates", input),
+
+    /** Initializes one repository workforce config and ledger through the daemon. */
+    initialize: async (input: InitializeWorkforceRequest) =>
+      client.send("workforce.initialize", input),
+
+    /** Fetches one daemon workforce runtime and its resolved config. */
+    get: async (input: GetWorkforceRequest) => client.send("workforce.get", input),
+
+    /** Lists daemon workforce runtime summaries. */
+    list: async () => client.send("workforce.list"),
+
+    /** Subscribes to live daemon-published workforce ledger events for one repository root. */
+    subscribe: async (
+      input: SubscribeWorkforceEventsRequest,
+      onEvent: (event: WorkforceEventEnvelope["event"]) => void,
+    ): Promise<() => void> => {
+      return client.subscribe({ name: "workforce.event", filter: input }, (payload) => {
+        onEvent(payload.event)
+      })
+    },
+
+    /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
+    shutdown: async (input: ShutdownWorkforceRequest) => client.send("workforce.shutdown", input),
+
+    /** Enqueues one workforce request and includes the updated workforce projection. */
+    request: async (input: CreateWorkforceRequest) => client.send("workforce.request", input),
+
+    /** Updates one workforce request and includes the updated workforce projection. */
+    update: async (input: UpdateWorkforceRequest) => client.send("workforce.update", input),
+
+    /** Cancels one workforce request and includes the updated workforce projection. */
+    cancel: async (input: CancelWorkforceRequest) => client.send("workforce.cancel", input),
+
+    /** Truncates one workforce queue and includes the updated workforce projection. */
+    truncate: async (input: TruncateWorkforceRequest) => client.send("workforce.truncate", input),
+
+    /** Responds to one active workforce request and includes the updated workforce projection. */
+    respond: async (input: RespondWorkforceRequest) => client.send("workforce.respond", input),
+
+    /** Suspends one active workforce request and includes the updated workforce projection. */
+    suspend: async (input: SuspendWorkforceRequest) => client.send("workforce.suspend", input),
+  }
 }
 
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
@@ -101,230 +293,47 @@ export class GoddardSdk {
     this.#client = resolveIpcClient(options)
   }
 
-  @lazy
   get daemon() {
-    return {
-      /** Probes daemon liveness without adding SDK-specific behavior. */
-      health: defineRequest(this.#client, "daemon.health"),
-    }
+    return defineCachedNamespace(this, "daemon", createDaemonNamespace(this.#client))
   }
 
-  @lazy
   get auth() {
-    return {
-      /** Starts one GitHub device flow through the daemon auth contract. */
-      startDeviceFlow: defineRequest(this.#client, "auth.device.start"),
-
-      /** Completes one pending GitHub device flow through the daemon auth contract. */
-      completeDeviceFlow: defineRequest(this.#client, "auth.device.complete"),
-
-      /** Reads the current daemon-owned auth session as-is. */
-      whoami: defineRequest(this.#client, "auth.whoami"),
-
-      /** Clears the current daemon-owned auth session as-is. */
-      logout: defineRequest(this.#client, "auth.logout"),
-    }
+    return defineCachedNamespace(this, "auth", createAuthNamespace(this.#client))
   }
 
-  @lazy
   get adapter() {
-    return adapterSdkPlugin.create({ client: this.#client })
+    return defineCachedNamespace(
+      this,
+      adapterSdkPlugin.namespace,
+      adapterSdkPlugin.create({ client: this.#client }),
+    )
   }
 
-  @lazy
   get pr() {
-    return {
-      /** Submits one pull request through the daemon PR contract. */
-      submit: defineRequest(this.#client, "pr.submit"),
-
-      /** Fetches one daemon-managed pull request by tagged id. */
-      get: defineRequest(this.#client, "pr.get"),
-
-      /** Posts one pull request reply through the daemon PR contract. */
-      reply: defineRequest(this.#client, "pr.reply"),
-    }
+    return defineCachedNamespace(this, "pr", createPrNamespace(this.#client))
   }
 
-  @lazy
   get inbox() {
-    return inboxSdkPlugin.create({ client: this.#client })
+    return defineCachedNamespace(
+      this,
+      inboxSdkPlugin.namespace,
+      inboxSdkPlugin.create({ client: this.#client }),
+    )
   }
 
-  @lazy
   get session() {
-    return {
-      /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
-      run: async (input: SessionParams, handler?: acp.Client) =>
-        runSession(this.#client, input, handler),
-
-      /** Creates one daemon-managed session record. */
-      create: defineRequest(this.#client, "session.create"),
-
-      /** Lists daemon-managed sessions and pagination state. */
-      list: defineRequest(this.#client, "session.list"),
-
-      /** Fetches one daemon-managed session record. */
-      get: defineRequest(this.#client, "session.get"),
-
-      /** Reconnects to one daemon-managed session record. */
-      connect: defineRequest(this.#client, "session.connect"),
-
-      /** Reads one daemon-managed session history with session identity and connection state. */
-      history: defineRequest(this.#client, "session.history"),
-
-      /** Reads the current git diff for one daemon-managed session workspace. */
-      changes: defineRequest(this.#client, "session.changes"),
-
-      /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
-      composerSuggestions: defineRequest(this.#client, "session.composerSuggestions"),
-
-      /** Reads draft composer suggestions that only depend on one repository cwd. */
-      draftSuggestions: defineRequest(this.#client, "session.draftSuggestions"),
-
-      /** Loads launch-time adapter and repository capabilities before a session is created. */
-      launchPreview: defineRequest(this.#client, "session.launchPreview"),
-
-      /** Discovers launchable subpackage working directories under one project cwd. */
-      subpackages: defineRequest(this.#client, "session.subpackages"),
-
-      /** Reads one daemon-managed session diagnostics with event history and connection state. */
-      diagnostics: defineRequest(this.#client, "session.diagnostics"),
-
-      /** Reads persisted worktree metadata attached to one daemon-managed session. */
-      worktree: defineRequest(this.#client, "session.worktree.get"),
-
-      /** Mounts a review session for one daemon-managed session worktree. */
-      mountReviewSession: defineRequest(this.#client, "session.reviewSession.mount"),
-
-      /** Runs one mounted review session immediately. */
-      runReviewSession: defineRequest(this.#client, "session.reviewSession.run"),
-
-      /** Unmounts a review session from one daemon-managed session worktree. */
-      unmountReviewSession: defineRequest(this.#client, "session.reviewSession.unmount"),
-
-      /** Reads persisted workforce metadata attached to one daemon-managed session. */
-      workforce: defineRequest(this.#client, "session.workforce.get"),
-
-      /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
-      shutdown: defineRequest(this.#client, "session.shutdown"),
-
-      /** Marks one session inbox row completed without shutting down the session. */
-      complete: defineRequest(this.#client, "session.complete"),
-
-      /** Records the current session initiative without creating an inbox row. */
-      declareInitiative: defineRequest(this.#client, "session.declareInitiative"),
-
-      /** Reports a session blocker and marks the session inbox row unread. */
-      reportBlocker: defineRequest(this.#client, "session.reportBlocker"),
-
-      /** Reports an end-of-turn session update when no other entity claimed attention. */
-      reportTurnEnded: defineRequest(this.#client, "session.reportTurnEnded"),
-
-      /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
-      cancel: defineRequest(this.#client, "session.cancel"),
-
-      /** Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary. */
-      steer: defineRequest(this.#client, "session.steer"),
-
-      /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
-      send: defineRequest(this.#client, "session.send"),
-
-      /** Sends one ACP permission response through the daemon-managed session transport. */
-      respondPermission: async (input: SessionPermissionResponseRequest) =>
-        this.#client.send("session.send", {
-          id: input.id,
-          message: createSessionPermissionResponseMessage(input),
-        }),
-
-      /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
-      prompt: async (input: SessionPromptRequest) =>
-        this.#client.send("session.send", {
-          id: input.id,
-          message: createSessionPromptMessage(input),
-        }),
-
-      /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
-      subscribe: defineUnwrappedSubscription<DaemonIpcSchema, "session.message", acp.AnyMessage>(
-        this.#client,
-        "session.message",
-        ({ message }) => message,
-      ),
-
-      /** Resolves one daemon session token to its daemon session id. */
-      resolveToken: defineRequest(this.#client, "session.resolveToken"),
-    }
+    return defineCachedNamespace(this, "session", createSessionNamespace(this.#client))
   }
 
-  @lazy
   get action() {
-    return {
-      /** Runs one named daemon action and creates the resulting daemon session. */
-      run: defineRequest(this.#client, "action.run"),
-    }
+    return defineCachedNamespace(this, "action", createActionNamespace(this.#client))
   }
 
-  @lazy
   get loop() {
-    return {
-      /** Starts or reuses one daemon loop runtime. */
-      start: defineRequest(this.#client, "loop.start"),
-
-      /** Fetches one daemon loop runtime and its resolved config. */
-      get: defineRequest(this.#client, "loop.get"),
-
-      /** Lists daemon loop runtime summaries. */
-      list: defineRequest(this.#client, "loop.list"),
-
-      /** Shuts down one daemon loop and reports whether shutdown succeeded. */
-      shutdown: defineRequest(this.#client, "loop.shutdown"),
-    }
+    return defineCachedNamespace(this, "loop", createLoopNamespace(this.#client))
   }
 
-  @lazy
   get workforce() {
-    return {
-      /** Starts or reuses one daemon workforce runtime. */
-      start: defineRequest(this.#client, "workforce.start"),
-
-      /** Discovers package candidates for one repository workforce initialization flow. */
-      discoverCandidates: defineRequest(this.#client, "workforce.discoverCandidates"),
-
-      /** Initializes one repository workforce config and ledger through the daemon. */
-      initialize: defineRequest(this.#client, "workforce.initialize"),
-
-      /** Fetches one daemon workforce runtime and its resolved config. */
-      get: defineRequest(this.#client, "workforce.get"),
-
-      /** Lists daemon workforce runtime summaries. */
-      list: defineRequest(this.#client, "workforce.list"),
-
-      /** Subscribes to live daemon-published workforce ledger events for one repository root. */
-      subscribe: defineUnwrappedSubscription<
-        DaemonIpcSchema,
-        "workforce.event",
-        InferStreamPayload<DaemonIpcSchema, "workforce.event">["event"]
-      >(this.#client, "workforce.event", ({ event }) => event),
-
-      /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
-      shutdown: defineRequest(this.#client, "workforce.shutdown"),
-
-      /** Enqueues one workforce request and includes the updated workforce projection. */
-      request: defineRequest(this.#client, "workforce.request"),
-
-      /** Updates one workforce request and includes the updated workforce projection. */
-      update: defineRequest(this.#client, "workforce.update"),
-
-      /** Cancels one workforce request and includes the updated workforce projection. */
-      cancel: defineRequest(this.#client, "workforce.cancel"),
-
-      /** Truncates one workforce queue and includes the updated workforce projection. */
-      truncate: defineRequest(this.#client, "workforce.truncate"),
-
-      /** Responds to one active workforce request and includes the updated workforce projection. */
-      respond: defineRequest(this.#client, "workforce.respond"),
-
-      /** Suspends one active workforce request and includes the updated workforce projection. */
-      suspend: defineRequest(this.#client, "workforce.suspend"),
-    }
+    return defineCachedNamespace(this, "workforce", createWorkforceNamespace(this.#client))
   }
 }

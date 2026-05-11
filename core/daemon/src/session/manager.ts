@@ -41,13 +41,11 @@ import type {
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
   GetSessionWorkforceResponse,
-  GetSessionWorktreeResponse,
   InboxHeadline,
   InboxScope,
   InitialPromptOption,
   ListSessionsRequest,
   ListSessionsResponse,
-  MutateSessionReviewSessionResponse,
   SessionComposerFileSuggestion,
   SessionComposerSkillSuggestion,
   SessionComposerSlashCommandSuggestion,
@@ -65,6 +63,10 @@ import type {
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
+import type {
+  GetSessionWorktreeResponse,
+  MutateSessionReviewSessionResponse,
+} from "@goddard-ai/worktree/schema"
 import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
 

@@ -150,6 +150,7 @@
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/review-sync": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
+        "@goddard-ai/worktree": "workspace:*",
         "@goddard-ai/worktree-plugin": "workspace:^",
         "@openrouter/ai-sdk-provider": "^2.5.1",
         "ai": "^6.0.158",
@@ -231,6 +232,7 @@
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/worktree": "workspace:*",
         "ai-sdk-json-schema": "catalog:",
         "rouzer": "catalog:",
         "zod": "catalog:",
@@ -246,6 +248,7 @@
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
+        "@goddard-ai/worktree": "workspace:*",
       },
       "devDependencies": {
         "@goddard-ai/daemon": "workspace:^",
@@ -297,6 +300,18 @@
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
         "@goddard-ai/sdk-plugin": "workspace:*",
+      },
+    },
+    "features/worktree": {
+      "name": "@goddard-ai/worktree",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/daemon-client": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "zod": "catalog:",
       },
     },
     "workforce": {
@@ -649,6 +664,8 @@
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
 
     "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
+
+    "@goddard-ai/worktree": ["@goddard-ai/worktree@workspace:features/worktree"],
 
     "@goddard-ai/worktree-plugin": ["@goddard-ai/worktree-plugin@workspace:core/worktree-plugin"],
 

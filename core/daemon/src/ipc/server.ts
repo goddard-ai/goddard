@@ -9,6 +9,7 @@ import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import { worktreePlugin } from "@goddard-ai/worktree/daemon"
 import { getErrorMessage } from "radashi"
 
 import { createConfigManager } from "../config-manager.ts"
@@ -348,18 +349,12 @@ export async function startDaemonServer(
     "session.diagnostics": async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },
-    "session.worktree.get": async ({ id }) => {
-      return sessionManager.getWorktree(id)
-    },
-    "session.reviewSession.mount": async ({ id }) => {
-      return sessionManager.mountReviewSession(id)
-    },
-    "session.reviewSession.run": async ({ id }) => {
-      return sessionManager.runReviewSession(id)
-    },
-    "session.reviewSession.unmount": async ({ id }) => {
-      return sessionManager.unmountReviewSession(id)
-    },
+    ...worktreePlugin.createRequestHandlers({
+      getWorktree: (id) => sessionManager.getWorktree(id),
+      mountReviewSession: (id) => sessionManager.mountReviewSession(id),
+      runReviewSession: (id) => sessionManager.runReviewSession(id),
+      unmountReviewSession: (id) => sessionManager.unmountReviewSession(id),
+    }),
     "session.workforce.get": async ({ id }) => {
       return sessionManager.getWorkforce(id)
     },
