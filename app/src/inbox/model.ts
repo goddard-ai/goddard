@@ -1,15 +1,8 @@
-import type {
-  InboxEntityId,
-  InboxItem,
-  InboxItemEvent,
-  InboxStatus,
-  ListInboxRequest,
-  ListInboxResponse,
-  UpdateInboxItemRequest,
-  UpdateInboxItemResponse,
-} from "@goddard-ai/schema/daemon"
+import type { InboxEntityId, InboxItem, InboxStatus } from "@goddard-ai/schema/daemon"
 import { Sigma } from "preact-sigma"
 import { getErrorMessage, objectify } from "radashi"
+
+import { goddardSdk } from "~/sdk.ts"
 
 export type InboxConnectionStatus = "loading" | "ready" | "stale" | "error"
 
@@ -21,14 +14,6 @@ export type InboxState = {
   errorMessage: string | null
   loadedAt: number | null
 }
-
-type InboxClient = {
-  list(input?: ListInboxRequest): Promise<ListInboxResponse>
-  update(input: UpdateInboxItemRequest): Promise<UpdateInboxItemResponse>
-  subscribe(onItem: (event: InboxItemEvent) => void): Promise<() => void>
-}
-
-export type { InboxClient }
 
 const inboxStatuses: InboxStatus[] = ["unread", "read", "replied", "completed", "saved", "archived"]
 
@@ -42,21 +27,18 @@ function isSessionEntityId(entityId: InboxEntityId) {
 
 /** Reactive owner for app-visible daemon inbox rows and realtime updates. */
 export class Inbox extends Sigma<InboxState> {
-  /** Daemon-backed inbox API used for initial load, mutations, and stream subscription. */
-  #client: InboxClient
   /** Entity ids with an in-flight read-on-visit mutation to prevent duplicate updates. */
   #pendingReadEntityIds = new Set<InboxEntityId>()
   /** Session entity ids that have loaded successfully, including before their inbox rows arrive. */
   #visitedSessionEntityIds = new Set<InboxEntityId>()
 
-  constructor(client: InboxClient) {
+  constructor() {
     super({
       itemsByEntityId: {},
       connectionStatus: "loading",
       errorMessage: null,
       loadedAt: null,
     })
-    this.#client = client
   }
 
   /** Returns all known inbox items in daemon ordering. */
@@ -92,7 +74,7 @@ export class Inbox extends Sigma<InboxState> {
     }
 
     try {
-      const response = await this.#client.list({
+      const response = await goddardSdk.inbox.list({
         statuses: inboxStatuses,
         limit: 100,
       })
@@ -145,7 +127,7 @@ export class Inbox extends Sigma<InboxState> {
 
     this.#pendingReadEntityIds.add(sessionId)
     try {
-      const result = await this.#client.update({
+      const result = await goddardSdk.inbox.update({
         entityId: sessionId,
         status: "read",
       })
@@ -164,7 +146,7 @@ export class Inbox extends Sigma<InboxState> {
     let active = true
     let unsubscribe: (() => void) | null = null
 
-    void this.#client
+    void goddardSdk.inbox
       .subscribe((event) => {
         if (active) {
           this.applyItem(event.item)

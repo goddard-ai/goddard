@@ -1,7 +1,17 @@
 import type { InboxItem, InboxItemEvent } from "@goddard-ai/schema/daemon"
-import { expect, test, vi } from "bun:test"
+import { afterEach, expect, mock, test, vi } from "bun:test"
 
-import { Inbox } from "./model.ts"
+const inboxClient = {
+  list: vi.fn(),
+  update: vi.fn(),
+  subscribe: vi.fn(),
+}
+
+mock.module("~/sdk.ts", () => ({
+  goddardSdk: {
+    inbox: inboxClient,
+  },
+}))
 
 function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
   return {
@@ -18,7 +28,12 @@ function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">
   }
 }
 
-function createInboxClient(
+async function createInbox() {
+  const { Inbox } = await import("./model.ts")
+  return new Inbox()
+}
+
+function mockInboxClient(
   input: {
     items?: InboxItem[]
     update?: (entityId: string) => Promise<InboxItem>
@@ -27,25 +42,29 @@ function createInboxClient(
 ) {
   const items = input.items ?? []
 
-  return {
-    list: vi.fn(async () => ({
-      items,
-      nextCursor: null,
-      hasMore: false,
-    })),
-    update: vi.fn(async ({ entityId }) => ({
-      item: input.update
-        ? await input.update(entityId)
-        : createInboxItem({
-            entityId,
-            status: "read",
-            readAt: 2,
-            updatedAt: 2,
-          }),
-    })),
-    subscribe: vi.fn(input.subscribe ?? (async () => () => {})),
-  }
+  inboxClient.list.mockImplementation(async () => ({
+    items,
+    nextCursor: null,
+    hasMore: false,
+  }))
+  inboxClient.update.mockImplementation(async ({ entityId }) => ({
+    item: input.update
+      ? await input.update(entityId)
+      : createInboxItem({
+          entityId,
+          status: "read",
+          readAt: 2,
+          updatedAt: 2,
+        }),
+  }))
+  inboxClient.subscribe.mockImplementation(input.subscribe ?? (async () => () => {}))
+
+  return inboxClient
 }
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
 
 async function waitFor(check: () => boolean) {
   for (let index = 0; index < 10; index += 1) {
@@ -58,8 +77,9 @@ async function waitFor(check: () => boolean) {
   throw new Error("Timed out waiting for condition")
 }
 
-test("Inbox keeps one entity item in one current section", () => {
-  const inbox = new Inbox(createInboxClient())
+test("Inbox keeps one entity item in one current section", async () => {
+  mockInboxClient()
+  const inbox = await createInbox()
   const first = createInboxItem({ entityId: "ses_1", status: "unread", updatedAt: 1 })
   const second = createInboxItem({ entityId: "ses_1", status: "completed", updatedAt: 2 })
 
@@ -74,8 +94,8 @@ test("Inbox keeps one entity item in one current section", () => {
 })
 
 test("Inbox marks only unread session items read after a successful visit", async () => {
-  const client = createInboxClient()
-  const inbox = new Inbox(client)
+  const client = mockInboxClient()
+  const inbox = await createInbox()
   inbox.replaceItems([
     createInboxItem({ entityId: "ses_unread", status: "unread" }),
     createInboxItem({ entityId: "ses_read", status: "read" }),
@@ -96,8 +116,8 @@ test("Inbox marks only unread session items read after a successful visit", asyn
 })
 
 test("Inbox marks an unread session item read when it arrives after a successful visit", async () => {
-  const client = createInboxClient()
-  const inbox = new Inbox(client)
+  const client = mockInboxClient()
+  const inbox = await createInbox()
 
   await inbox.markSessionVisited("ses_late")
   inbox.applyItem(createInboxItem({ entityId: "ses_late", status: "unread" }))
@@ -112,10 +132,10 @@ test("Inbox marks an unread session item read when it arrives after a successful
 })
 
 test("Inbox marks an unread session item read when it arrives in a later refresh", async () => {
-  const client = createInboxClient({
+  const client = mockInboxClient({
     items: [createInboxItem({ entityId: "ses_late", status: "unread" })],
   })
-  const inbox = new Inbox(client)
+  const inbox = await createInbox()
 
   await inbox.markSessionVisited("ses_late")
   await inbox.refresh()
@@ -130,13 +150,13 @@ test("Inbox marks an unread session item read when it arrives in a later refresh
 })
 
 test("Inbox preserves unread state and marks stale when read-on-visit fails", async () => {
-  const client = createInboxClient({
+  mockInboxClient({
     items: [createInboxItem({ entityId: "ses_unread", status: "unread" })],
     update: async () => {
       throw new Error("daemon unavailable")
     },
   })
-  const inbox = new Inbox(client)
+  const inbox = await createInbox()
 
   await inbox.refresh()
 
@@ -148,10 +168,10 @@ test("Inbox preserves unread state and marks stale when read-on-visit fails", as
 })
 
 test("Inbox keeps the last list visible when refresh fails after data loaded", async () => {
-  const client = createInboxClient({
+  const client = mockInboxClient({
     items: [createInboxItem({ entityId: "ses_1", status: "unread" })],
   })
-  const inbox = new Inbox(client)
+  const inbox = await createInbox()
 
   await inbox.refresh()
   client.list.mockRejectedValueOnce(new Error("disconnected"))
@@ -166,13 +186,13 @@ test("Inbox keeps the last list visible when refresh fails after data loaded", a
 test("Inbox starts realtime only for focused use and cleans it up", async () => {
   let onItem: ((event: InboxItemEvent) => void) | null = null
   const unsubscribe = vi.fn()
-  const client = createInboxClient({
+  const client = mockInboxClient({
     subscribe: async (nextOnItem) => {
       onItem = nextOnItem
       return unsubscribe
     },
   })
-  const inbox = new Inbox(client)
+  const inbox = await createInbox()
 
   expect(client.subscribe).not.toHaveBeenCalled()
 

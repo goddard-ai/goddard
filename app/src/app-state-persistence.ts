@@ -9,7 +9,6 @@ import { Inbox } from "./inbox/model.ts"
 import { Navigation, type NavigationState } from "./navigation.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
-import { goddardSdk } from "./sdk.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION, type ShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
 import { shortcutRegistry, type ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
@@ -211,7 +210,7 @@ export function createAppState() {
 
   return {
     appearance,
-    inbox: castProtected(new Inbox(goddardSdk.inbox)),
+    inbox: castProtected(new Inbox()),
     navigation: castProtected(new Navigation()),
     projectContext: castProtected(new ProjectContext()),
     projectRegistry: castProtected(new ProjectRegistry()),
