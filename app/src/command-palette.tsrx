@@ -52,6 +52,7 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
       { threshold: 0 },
     ).items.map((entry) => entry.value.command)
   })()
+
   <DialogPortal>
     <Dialog.Backdrop class={styles.backdrop} />
     <Dialog.Positioner class={styles.positioner}>
@@ -78,7 +79,9 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
           </div>
           <Command.List
             class={styles.list}
-            empty={<tsrx><div class={styles.empty}>"No matching commands."</div></tsrx>}
+            empty={<tsrx>
+              <div class={styles.empty}>"No matching commands."</div>
+            </tsrx>}
             children={(item, state) => {
               const command = item as AppCommand
               const Icon = command.icon
@@ -89,12 +92,15 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                   : shortcutBinding?.combo ?? shortcutBinding?.sequence
 
               return <tsrx>
-                <div class={styles.item} data-active={state.active ? "true" : "false"} style={{
-                  gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
-                }}>
+                <div
+                  class={styles.item}
+                  data-active={state.active ? "true" : "false"}
+                  style={{
+                    gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+                  }}
+                >
                   if (Icon) {
-                    const CommandIcon = Icon
-                    <CommandIcon aria-hidden={true} size={16} strokeWidth={2} style={{
+                    <Icon aria-hidden={true} size={16} strokeWidth={2} style={{
                         color: state.active ? token.var("colors.text") : token.var("colors.muted"),
                       }} />
                   }
