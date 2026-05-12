@@ -29,20 +29,20 @@ export type GoddardClient = {
 /** Shared explicit connection options for SDK calls that talk to the daemon over IPC. */
 export type IpcClientOptions =
   | {
-      client: GoddardClient
+      client: GoddardClient | DaemonIpcClient
     }
   | {
       daemonUrl: string
-      createClient: DaemonIpcClientFactory<GoddardClient>
+      createClient: DaemonIpcClientFactory<GoddardClient | DaemonIpcClient>
     }
 
 /** Resolves the daemon IPC client from explicit browser-safe connection inputs. */
 export function resolveIpcClient(options: IpcClientOptions): DaemonIpcClient {
   if ("client" in options) {
-    return options.client
+    return options.client as DaemonIpcClient
   }
   const { createClient, daemonUrl } = options
   return createClient({
     daemonUrl,
-  })
+  }) as DaemonIpcClient
 }

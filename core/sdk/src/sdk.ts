@@ -1,3 +1,4 @@
+import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import {
   InferStreamFilter,
@@ -10,7 +11,15 @@ import {
   ValidStreamName,
 } from "@goddard-ai/ipc"
 
+import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
+import {
+  createSessionPermissionResponseMessage,
+  createSessionPromptMessage,
+  type SessionParams,
+  type SessionPermissionResponseRequest,
+  type SessionPromptRequest,
+} from "./session.ts"
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
@@ -160,7 +169,8 @@ export class GoddardSdk {
   get session() {
     return {
       /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
-      run: defineRequest(this.#client, "session.run"),
+      run: async (input: SessionParams, handler?: acp.Client) =>
+        runSession(this.#client, input, handler),
 
       /** Creates one daemon-managed session record. */
       create: defineRequest(this.#client, "session.create"),
@@ -235,10 +245,18 @@ export class GoddardSdk {
       send: defineRequest(this.#client, "session.send"),
 
       /** Sends one ACP permission response through the daemon-managed session transport. */
-      respondPermission: defineRequest(this.#client, "session.respondPermission"),
+      respondPermission: async (input: SessionPermissionResponseRequest) =>
+        this.#client.send("session.send", {
+          id: input.id,
+          message: createSessionPermissionResponseMessage(input),
+        }),
 
       /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
-      prompt: defineRequest(this.#client, "session.prompt"),
+      prompt: async (input: SessionPromptRequest) =>
+        this.#client.send("session.send", {
+          id: input.id,
+          message: createSessionPromptMessage(input),
+        }),
 
       /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
       subscribe: defineSubscription(this.#client, "session.message"),
