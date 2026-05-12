@@ -7,14 +7,13 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
 import { closeTopmostModal } from "~/lib/modal-stack.ts"
-import type { NavigationItemId } from "~/navigation.ts"
+import type { NavigationItem, NavigationItemId } from "~/navigation.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_PRIMARY_TAB } from "~/workbench-tab-set.ts"
 import styles from "./chrome.style.ts"
 import {
   appShellDefaultSidebarDot,
-  appShellSections,
   appShellSidebarDots,
   type AppShellSidebarDot,
 } from "./config.ts"
@@ -95,24 +94,12 @@ function useAppShellTabStrip(
 export component AppShellChrome() {
   const navigation = useNavigation()
   const workbenchTabSet = useWorkbenchTabSet()
-  const navigationItems: Array<{
-    group: "primary" | "secondary";
-    icon: SvgIconName;
-    id: NavigationItemId;
-    label: string;
-  }> = navigation.items.map((item) => {
-    const section = appShellSections.find((candidate) => candidate.tabKinds.includes(item.id))
-
-    if (!section) {
-      throw new Error(`Missing app shell section for navigation item ${item.id}.`)
-    }
-
-    return {
+  const navigationItems = navigation.items.map(
+    (item) => ({
       ...item,
-      group: section.group,
       icon: getWorkbenchTabIcon(item.id),
-    }
-  })
+    }),
+  )
   const selectedNavigation =
     navigationItems.find((item) => item.id === navigation.selectedNavId) ?? navigationItems[0]
   const tabStrip = useAppShellTabStrip(
@@ -347,10 +334,8 @@ export component AppShellChrome() {
 
 /** Renders one grouped section of the left navigation rail. */
 component AppShellSidebarSection(props: {
-  items: Array<{
+  items: Array<NavigationItem & {
     icon: SvgIconName;
-    id: NavigationItemId;
-    label: string;
   }>;
   onNavigationSelect: (id: NavigationItemId, options?: {
     openInTab?: boolean;

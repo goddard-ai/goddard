@@ -1,25 +1,12 @@
 import { Sigma } from "preact-sigma"
 
-const defaultNavigationItems = [
-  { id: "inbox", label: "Inbox" },
-  { id: "sessions", label: "Sessions" },
-  { id: "search", label: "Search" },
-  { id: "specs", label: "Specs" },
-  { id: "tasks", label: "Tasks" },
-  { id: "roadmap", label: "Roadmap" },
-] as const satisfies {
-  id: string
-  label: string
-}[]
+import { defaultNavigationItems, type NavigationItemId } from "./navigation-items.ts"
 
-/** Stable ids for the primary workbench navigation items. */
-export type NavigationItemId = (typeof defaultNavigationItems)[number]["id"]
-
-/** One item rendered in the left navigation rail. */
-export type NavigationItem = {
-  id: NavigationItemId
-  label: string
-}
+export {
+  defaultNavigationItems,
+  type NavigationItem,
+  type NavigationItemId,
+} from "./navigation-items.ts"
 
 /** Public state owned by the navigation model. */
 export type NavigationState = {
