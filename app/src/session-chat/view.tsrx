@@ -34,200 +34,200 @@ export component SessionChatView(props: {
   projectPath: string | null;
   sessionId: DaemonSession["id"];
 }) {
-  try {
-    const [sessionHistory, { session }] = useQueries([
-      [goddardSdk.session.history, [{ id: props.sessionId }]],
-      [goddardSdk.session.get, [{ id: props.sessionId }]],
-    ])
-    const [submitError, setSubmitError] = useState<unknown>(null)
-    const [activeHeaderAction, setActiveHeaderAction] = useState<
-      "cancel" | "complete" | "reconnect" | null
-    >(null)
-    const [olderHistoryState, setOlderHistoryState] = useState<
-      { status: "idle" } | { status: "loading" } | { message: string; status: "error" }
-    >({ status: "idle" })
-    const [headerActionError, setHeaderActionError] = useState<
-      {
-        description: string;
-        title: string;
-      } | null
-    >(null)
-    const [cancelRequestedTurnId, setCancelRequestedTurnId] = useState<string | null>(null)
-    const chat = useSigma(
-      () => new SessionChat({
-        history: sessionHistory,
-        session,
-      }),
-      { deps: [session.id] },
-    )
-    const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
+  <main class={styles.root}>
+    try {
+      const [sessionHistory, { session }] = useQueries([
+        [goddardSdk.session.history, [{ id: props.sessionId }]],
+        [goddardSdk.session.get, [{ id: props.sessionId }]],
+      ])
+      const [submitError, setSubmitError] = useState<unknown>(null)
+      const [activeHeaderAction, setActiveHeaderAction] = useState<
+        "cancel" | "complete" | "reconnect" | null
+      >(null)
+      const [olderHistoryState, setOlderHistoryState] = useState<
+        { status: "idle" } | { status: "loading" } | { message: string; status: "error" }
+      >({ status: "idle" })
+      const [headerActionError, setHeaderActionError] = useState<
+        {
+          description: string;
+          title: string;
+        } | null
+      >(null)
+      const [cancelRequestedTurnId, setCancelRequestedTurnId] = useState<string | null>(null)
+      const chat = useSigma(
+        () => new SessionChat({
+          history: sessionHistory,
+          session,
+        }),
+        { deps: [session.id] },
+      )
+      const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
 
-    useEffect(() => {
-      chat.syncLoadedData({
-        history: sessionHistory,
-        session,
-      })
-    }, [chat, sessionHistory, session])
-
-    const status = getSessionChatStatusPresentation(chat.summary.status)
-    const StatusIcon = status.icon
-    const activeTurnId = chat.summary.activeTurnId
-    const cancelAlreadyRequested = activeTurnId !== null && cancelRequestedTurnId === activeTurnId
-    const canCancelTurn =
-      activeTurnId !== null && chat.session.activeDaemonSession &&
-        chat.summary.status === "running" &&
-        !cancelAlreadyRequested
-    const canReconnect =
-      chat.connection.reconnectable && !chat.session.activeDaemonSession &&
-        chat.session.connectionMode === "live"
-    const canOpenSessionChanges = chat.session.cwd.trim().length > 0
-    const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
-    const sessionCompletedHidden = chat.session.completedHidden
-    const completeActionDisabled =
-      activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
-    const completeActionLabel =
-      sessionCompletedHidden
-        ? "Session completed"
-        : chat.session.activeDaemonSession
-          ? "Complete unavailable while agent is active"
-          : activeHeaderAction === "complete"
-            ? "Completing session"
-            : "Complete session"
-
-    useReportTabProject(resolvedProjectPath)
-
-    const inbox = useInbox()
-
-    useEffect(() => {
-      void inbox.markSessionVisited(session.id)
-    }, [inbox, session.id])
-
-    async function reconnectCurrentSession() {
-      if (!canReconnect || activeHeaderAction) {
-        return
-      }
-
-      setActiveHeaderAction("reconnect")
-      setHeaderActionError(null)
-
-      try {
-        const { session } = await reconnectSession(chat.session.id)
-        chat.syncSession(session)
-      } catch (error) {
-        console.error("Failed to reconnect session.", error)
-        setHeaderActionError({
-          title: "Reconnect failed",
-          description: formatSessionRequestError(error),
+      useEffect(() => {
+        chat.syncLoadedData({
+          history: sessionHistory,
+          session,
         })
-      } finally {
-        setActiveHeaderAction(null)
-      }
-    }
+      }, [chat, sessionHistory, session])
 
-    async function completeCurrentSession() {
-      if (completeActionDisabled) {
-        return
-      }
+      const status = getSessionChatStatusPresentation(chat.summary.status)
+      const StatusIcon = status.icon
+      const activeTurnId = chat.summary.activeTurnId
+      const cancelAlreadyRequested = activeTurnId !== null && cancelRequestedTurnId === activeTurnId
+      const canCancelTurn =
+        activeTurnId !== null && chat.session.activeDaemonSession &&
+          chat.summary.status === "running" &&
+          !cancelAlreadyRequested
+      const canReconnect =
+        chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+          chat.session.connectionMode === "live"
+      const canOpenSessionChanges = chat.session.cwd.trim().length > 0
+      const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
+      const sessionCompletedHidden = chat.session.completedHidden
+      const completeActionDisabled =
+        activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
+      const completeActionLabel =
+        sessionCompletedHidden
+          ? "Session completed"
+          : chat.session.activeDaemonSession
+            ? "Complete unavailable while agent is active"
+            : activeHeaderAction === "complete"
+              ? "Completing session"
+              : "Complete session"
 
-      setActiveHeaderAction("complete")
-      setHeaderActionError(null)
+      useReportTabProject(resolvedProjectPath)
 
-      try {
-        const result = await completeSession(chat.session.id)
+      const inbox = useInbox()
 
-        if (result.item) {
-          inbox.applyItem(result.item)
-        }
+      useEffect(() => {
+        void inbox.markSessionVisited(session.id)
+      }, [inbox, session.id])
 
-        chat.toggleCompletedHidden(true)
-      } catch (error) {
-        console.error("Failed to complete session.", error)
-        setHeaderActionError({
-          title: "Complete failed",
-          description: formatSessionRequestError(error),
-        })
-      } finally {
-        setActiveHeaderAction(null)
-      }
-    }
-
-    async function cancelActiveTurn() {
-      if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
-        return
-      }
-
-      setActiveHeaderAction("cancel")
-      setHeaderActionError(null)
-
-      try {
-        const result = await cancelSessionTurn(chat.session.id)
-
-        if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
-          setHeaderActionError({
-            title: "Stop skipped",
-            description: "The daemon did not find an active turn to stop.",
-          })
+      async function reconnectCurrentSession() {
+        if (!canReconnect || activeHeaderAction) {
           return
         }
 
-        setCancelRequestedTurnId(activeTurnId)
-      } catch (error) {
-        console.error("Failed to stop session turn.", error)
-        setHeaderActionError({
-          title: "Stop failed",
-          description: formatSessionRequestError(error),
+        setActiveHeaderAction("reconnect")
+        setHeaderActionError(null)
+
+        try {
+          const { session } = await reconnectSession(chat.session.id)
+          chat.syncSession(session)
+        } catch (error) {
+          console.error("Failed to reconnect session.", error)
+          setHeaderActionError({
+            title: "Reconnect failed",
+            description: formatSessionRequestError(error),
+          })
+        } finally {
+          setActiveHeaderAction(null)
+        }
+      }
+
+      async function completeCurrentSession() {
+        if (completeActionDisabled) {
+          return
+        }
+
+        setActiveHeaderAction("complete")
+        setHeaderActionError(null)
+
+        try {
+          const result = await completeSession(chat.session.id)
+
+          if (result.item) {
+            inbox.applyItem(result.item)
+          }
+
+          chat.toggleCompletedHidden(true)
+        } catch (error) {
+          console.error("Failed to complete session.", error)
+          setHeaderActionError({
+            title: "Complete failed",
+            description: formatSessionRequestError(error),
+          })
+        } finally {
+          setActiveHeaderAction(null)
+        }
+      }
+
+      async function cancelActiveTurn() {
+        if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
+          return
+        }
+
+        setActiveHeaderAction("cancel")
+        setHeaderActionError(null)
+
+        try {
+          const result = await cancelSessionTurn(chat.session.id)
+
+          if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
+            setHeaderActionError({
+              title: "Stop skipped",
+              description: "The daemon did not find an active turn to stop.",
+            })
+            return
+          }
+
+          setCancelRequestedTurnId(activeTurnId)
+        } catch (error) {
+          console.error("Failed to stop session turn.", error)
+          setHeaderActionError({
+            title: "Stop failed",
+            description: formatSessionRequestError(error),
+          })
+        } finally {
+          setActiveHeaderAction(null)
+        }
+      }
+
+      const workbenchTabSet = useWorkbenchTabSet()
+
+      function openSessionChanges() {
+        if (!canOpenSessionChanges) {
+          return
+        }
+
+        queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
+        workbenchTabSet.openOrFocusTab({
+          id: `session-changes:${chat.session.id}`,
+          kind: "sessionChanges",
+          title: `Changes · ${chat.title}`,
+          payload: {
+            sessionId: chat.session.id,
+            sessionTitle: chat.title,
+            repositoryLabel: chat.repositoryLabel,
+          },
+          dirty: false,
         })
-      } finally {
-        setActiveHeaderAction(null)
-      }
-    }
-
-    const workbenchTabSet = useWorkbenchTabSet()
-
-    function openSessionChanges() {
-      if (!canOpenSessionChanges) {
-        return
       }
 
-      queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
-      workbenchTabSet.openOrFocusTab({
-        id: `session-changes:${chat.session.id}`,
-        kind: "sessionChanges",
-        title: `Changes · ${chat.title}`,
-        payload: {
-          sessionId: chat.session.id,
-          sessionTitle: chat.title,
-          repositoryLabel: chat.repositoryLabel,
-        },
-        dirty: false,
-      })
-    }
+      async function loadOlderHistory() {
+        if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
+          return
+        }
 
-    async function loadOlderHistory() {
-      if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
-        return
+        setOlderHistoryState({ status: "loading" })
+
+        try {
+          const history = await goddardSdk.session.history({
+            id: chat.session.id,
+            cursor: chat.nextCursor,
+          })
+
+          chat.prependOlderHistory(history)
+          setOlderHistoryState({ status: "idle" })
+        } catch (error) {
+          console.error("Failed to load older session history.", error)
+          setOlderHistoryState({
+            status: "error",
+            message: formatSessionRequestError(error),
+          })
+        }
       }
 
-      setOlderHistoryState({ status: "loading" })
-
-      try {
-        const history = await goddardSdk.session.history({
-          id: chat.session.id,
-          cursor: chat.nextCursor,
-        })
-
-        chat.prependOlderHistory(history)
-        setOlderHistoryState({ status: "idle" })
-      } catch (error) {
-        console.error("Failed to load older session history.", error)
-        setOlderHistoryState({
-          status: "error",
-          message: formatSessionRequestError(error),
-        })
-      }
-    }
-
-    <main class={styles.root}>
       <header class={styles.header}>
         <div class={styles.headerIdentity}>
           <p class={styles.headerRepository}>
@@ -391,18 +391,14 @@ export component SessionChatView(props: {
           }}
         />
       </footer>
-    </main>
-  } pending {
-    <main class={styles.root}>
+    } pending {
       <SessionChatStateMessage
         description="Loading the session transcript and current session details."
         title="Loading session"
       />
-    </main>
-  } catch {
-    const [, setRetryVersion] = useState(0)
+    } catch {
+      const [, setRetryVersion] = useState(0)
 
-    <main class={styles.root}>
       <SessionChatStateMessage
         actionLabel="Try again"
         description="The daemon-backed session or history request failed."
@@ -412,8 +408,8 @@ export component SessionChatView(props: {
         }}
         title="Couldn't load session"
       />
-    </main>
-  }
+    }
+  </main>
 }
 
 component SessionChatStateMessage(props: {
