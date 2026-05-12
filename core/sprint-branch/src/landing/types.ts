@@ -15,7 +15,7 @@ export type LandInput = HumanCommandInput & {
   target: string
 }
 
-/** Inputs needed to remove landed sprint branches and review worktrees. */
+/** Inputs needed to remove landed sprint branches and private sprint state. */
 export type CleanupInput = HumanCommandInput & {
   target: string
 }
@@ -29,8 +29,8 @@ export type SprintCandidate = {
   state: SprintBranchState
 }
 
-/** A clean worktree that belongs to the landed sprint and can be removed. */
-export type AssociatedWorktree = {
+/** A clean worktree that must release a sprint branch before that branch is deleted. */
+export type SprintBranchWorktree = {
   path: string
   head: string | null
   branch: string | null
@@ -75,6 +75,6 @@ export type SprintLandReport = HumanCommandReport & {
 export type SprintCleanupReport = HumanCommandReport & {
   command: "cleanup"
   branchesToDelete: string[]
-  worktreesToRemove: AssociatedWorktree[]
+  worktreesToDetach: SprintBranchWorktree[]
   stateFilesToRemove: string[]
 }

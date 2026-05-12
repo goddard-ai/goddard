@@ -41,7 +41,8 @@
     - Real execution requires interactive confirmation.
   - Use `cleanup` after landing.
     - Landed sprint branches are removed.
-    - Clean associated review worktrees are removed.
+    - Clean worktrees checked out on sprint branches are detached.
+    - Detached review snapshots are left in place.
     - Private sprint state is removed.
 
 - **Recovery**

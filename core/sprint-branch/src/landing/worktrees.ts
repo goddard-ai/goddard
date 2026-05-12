@@ -1,10 +1,8 @@
-import path from "node:path"
-
 import { runGit } from "../git/command"
 import { branchExists } from "../git/refs"
 import { getWorkingTreeStatus } from "../git/worktree"
 import type { SprintBranchState, SprintDiagnostic } from "../types"
-import type { AssociatedWorktree, WorktreeEntry } from "./types"
+import type { SprintBranchWorktree, WorktreeEntry } from "./types"
 
 /** Lists recorded sprint branches that cleanup can delete after landing. */
 export async function cleanupBranches(rootDir: string, state: SprintBranchState) {
@@ -15,35 +13,18 @@ export async function cleanupBranches(rootDir: string, state: SprintBranchState)
   return branches
 }
 
-/** Finds clean worktrees associated with a landed sprint review snapshot. */
-export async function associatedWorktrees(
+/** Finds clean worktrees that must detach before cleanup deletes sprint branches. */
+export async function sprintBranchWorktrees(
   rootDir: string,
-  state: SprintBranchState,
-  reviewCommit: string | null,
   branchesToDelete: string[],
   diagnostics: SprintDiagnostic[],
 ) {
-  const currentRoot = path.resolve(rootDir)
   const branchSet = new Set(branchesToDelete)
-  const worktrees: AssociatedWorktree[] = []
+  const worktrees: SprintBranchWorktree[] = []
 
   for (const worktree of await listWorktrees(rootDir)) {
-    const resolvedPath = path.resolve(worktree.path)
     const branchMatch = worktree.branch && branchSet.has(worktree.branch)
-    const detachedReview = Boolean(
-      worktree.detached && reviewCommit && worktree.head === reviewCommit,
-    )
-    if (!branchMatch && !detachedReview) {
-      continue
-    }
-
-    const reason = branchMatch ? `branch ${worktree.branch}` : "detached review snapshot"
-    if (resolvedPath === currentRoot) {
-      diagnostics.push({
-        severity: "error",
-        code: "current_worktree_would_be_removed",
-        message: `Current worktree is associated with the sprint by ${reason}.`,
-      })
+    if (!branchMatch) {
       continue
     }
 
@@ -51,15 +32,15 @@ export async function associatedWorktrees(
     if (!status.clean) {
       diagnostics.push({
         severity: "error",
-        code: "dirty_associated_worktree",
-        message: `Associated worktree ${worktree.path} is dirty.`,
+        code: "dirty_sprint_branch_worktree",
+        message: `Sprint branch worktree ${worktree.path} is dirty.`,
       })
       continue
     }
 
     worktrees.push({
       ...worktree,
-      reason,
+      reason: `branch ${worktree.branch}`,
     })
   }
 

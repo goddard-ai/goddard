@@ -14,7 +14,7 @@ Each sprint state records `lastActedAt`, the time `sprint-branch` last acted on 
 
 `sprint-branch park [--sprint <name>]` hides a sprint from default active-sprint selection without deleting branches or Git-private state. `sprint-branch unpark [--sprint <name>]` makes it active again. Use `sprint-branch list --all` to include parked sprints.
 
-`sprint-branch land <target> [name]` and `sprint-branch cleanup <target> [name]` are human-only landing commands. Actual landing and cleanup require an interactive terminal confirmation; use `--dry-run` to inspect them non-interactively. Cleanup removes landed sprint branches, associated review worktrees, and the Git-private sprint state file.
+`sprint-branch land <target> [name]` and `sprint-branch cleanup <target> [name]` are human-only landing commands. Actual landing and cleanup require an interactive terminal confirmation; use `--dry-run` to inspect them non-interactively. Cleanup detaches clean worktrees that are checked out on landed sprint branches, then removes those sprint branches and the Git-private sprint state file.
 
 `sprint-branch reset-state [--task <task>] [--force]` recreates only the Git-private state file after a sprint plan is reworked. It makes the first task, or the selected task, the next valid `start` target by recording earlier task files as approved; it does not move Git branches.
 

@@ -1,5 +1,4 @@
 import { getBranchHead, isAncestor } from "../git/refs"
-import { getCurrentBranch } from "../git/repository"
 import { getWorkingTreeStatus } from "../git/worktree"
 import { parseSprintBranchName } from "../state/branches"
 import type { SprintBranchState, SprintDiagnostic } from "../types"
@@ -59,7 +58,7 @@ export async function pushLandingDiagnostics(
   }
 }
 
-/** Adds diagnostics for deleting sprint refs and associated worktrees after landing. */
+/** Adds diagnostics for deleting sprint refs and private sprint state after landing. */
 export async function pushCleanupDiagnostics(
   rootDir: string,
   input: CleanupInput,
@@ -88,14 +87,6 @@ export async function pushCleanupDiagnostics(
       code: "target_missing_review",
       message: `${input.target} does not contain finalized review commit ${reviewCommit.slice(0, 12)}.`,
       suggestion: `Run sprint-branch land ${input.target} ${state.sprint} before cleanup.`,
-    })
-  }
-  if (currentBranchIsDeleted(await getCurrentBranch(rootDir), branchesToDelete)) {
-    diagnostics.push({
-      severity: "error",
-      code: "current_branch_would_be_deleted",
-      message: "The current branch is one of the sprint branches cleanup would delete.",
-      suggestion: `Check out ${input.target} before cleanup.`,
     })
   }
 }
@@ -198,8 +189,4 @@ async function pushSharedFinalizedDiagnostics(
       message: `Target branch ${input.target} could not be resolved.`,
     })
   }
-}
-
-function currentBranchIsDeleted(currentBranch: string | null, branchesToDelete: string[]) {
-  return Boolean(currentBranch && branchesToDelete.includes(currentBranch))
 }

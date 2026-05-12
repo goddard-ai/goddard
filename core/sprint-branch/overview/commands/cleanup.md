@@ -11,32 +11,34 @@
 
 - **What it removes**
   - Landed sprint branches.
-  - Clean associated review worktrees, including detached review snapshots.
   - Private sprint state for the selected sprint.
   - The optional `next` branch when it exists.
 
 - **What it changes**
-  - Local sprint branches, associated worktrees, and private state are removed.
+  - Clean worktrees checked out on sprint branches are detached so those
+    branches can be deleted.
+  - Detached review snapshots are left in place.
+  - Local sprint branches and private state are removed.
   - The target branch is not advanced by cleanup.
 
 - **Guardrails**
   - The target branch must contain the finalized review commit.
   - The sprint must be finalized.
   - The working tree must be clean.
-  - The current branch must not be one of the branches that would be deleted.
   - The target branch must exist.
   - The target branch must not itself be a sprint branch.
-  - Associated worktrees must be clean before they are removed.
-  - Cleanup will not remove the current worktree.
+  - Worktrees checked out on sprint branches must be clean before they are
+    detached.
+  - Cleanup does not remove worktree directories.
 
 - **Interactive and dry-run behavior**
   - Real execution is a human operation and requires interactive confirmation.
   - Real execution is not available in JSON or non-interactive mode.
   - Non-interactive JSON output is available for `--dry-run` inspection.
-  - Dry run reports what would be removed without deleting branches, worktrees,
-    or private sprint state.
+  - Dry run reports what would be detached or removed without changing
+    worktrees, deleting branches, or deleting private sprint state.
 
 - **Why it exists**
   - Cleanup is intentionally separate from landing.
   - A sprint can be landed and inspected before local sprint branches and review
-    worktrees are removed.
+    state are removed.

@@ -8,9 +8,9 @@ import { confirmHumanAction } from "./landing/confirmation"
 import { handleHumanGitError } from "./landing/report"
 import { candidatesForOutput, resolveSprintCandidate } from "./landing/selection"
 import type {
-  AssociatedWorktree,
   CleanupInput,
   LandInput,
+  SprintBranchWorktree,
   SprintCleanupReport,
   SprintLandReport,
 } from "./landing/types"
@@ -19,7 +19,7 @@ import {
   pushLandingDiagnostics,
   pushTargetBranchDiagnostics,
 } from "./landing/validation"
-import { associatedWorktrees, cleanupBranches, listWorktrees } from "./landing/worktrees"
+import { cleanupBranches, listWorktrees, sprintBranchWorktrees } from "./landing/worktrees"
 import { writeSprintLastActedAt } from "./state/activity"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
 import type { SprintBranchState, SprintDiagnostic } from "./types"
@@ -135,7 +135,7 @@ export async function executeLandOperations(
   await runGit(targetWorktree.path, ["merge", "--ff-only", reviewBranch])
 }
 
-/** Deletes landed sprint branches and clean associated worktrees after review is on target. */
+/** Deletes landed sprint branches and private sprint state after review is on target. */
 export async function runCleanup(input: CleanupInput) {
   const rootDir = await resolveRepositoryRoot(input.cwd)
   const currentBranch = await getCurrentBranch(rootDir)
@@ -147,11 +147,13 @@ export async function runCleanup(input: CleanupInput) {
   const targetCommit = await getBranchHead(rootDir, input.target)
   const branchesToDelete = state ? await cleanupBranches(rootDir, state) : []
   const stateFileToRemove = state ? sprintStateDisplayPath(state.sprint) : null
-  const worktreesToRemove = state
-    ? await associatedWorktrees(rootDir, state, reviewCommit, branchesToDelete, diagnostics)
+  const worktreesToDetach = state
+    ? await sprintBranchWorktrees(rootDir, branchesToDelete, diagnostics)
     : []
   const gitOperations = [
-    ...worktreesToRemove.map((worktree) => `git worktree remove ${JSON.stringify(worktree.path)}`),
+    ...worktreesToDetach.map(
+      (worktree) => `git -C ${JSON.stringify(worktree.path)} checkout --detach`,
+    ),
     ...branchesToDelete.map((branch) => `git branch -d ${branch}`),
   ]
 
@@ -179,7 +181,7 @@ export async function runCleanup(input: CleanupInput) {
     diagnostics,
     candidates: candidate ? [] : await candidatesForOutput(rootDir),
     branchesToDelete,
-    worktreesToRemove,
+    worktreesToDetach,
     stateFilesToRemove: stateFileToRemove ? [stateFileToRemove] : [],
   } satisfies SprintCleanupReport
 
@@ -195,22 +197,22 @@ export async function runCleanup(input: CleanupInput) {
   }
 
   try {
-    await executeCleanupOperations(rootDir, state, branchesToDelete, worktreesToRemove)
+    await executeCleanupOperations(rootDir, state, branchesToDelete, worktreesToDetach)
     return { ...report, executed: true } satisfies SprintCleanupReport
   } catch (error) {
     return handleHumanGitError(report, error)
   }
 }
 
-/** Executes already-confirmed cleanup of sprint refs, worktrees, and Git-private state. */
+/** Executes already-confirmed cleanup of sprint refs and Git-private state. */
 export async function executeCleanupOperations(
   rootDir: string,
   state: Pick<SprintBranchState, "sprint">,
   branchesToDelete: string[],
-  worktreesToRemove: AssociatedWorktree[],
+  worktreesToDetach: SprintBranchWorktree[],
 ) {
-  for (const worktree of worktreesToRemove) {
-    await runGit(rootDir, ["worktree", "remove", worktree.path])
+  for (const worktree of worktreesToDetach) {
+    await runGit(worktree.path, ["checkout", "--detach"])
   }
   for (const branch of branchesToDelete) {
     await runGit(rootDir, ["branch", "-d", branch])

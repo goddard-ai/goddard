@@ -64,9 +64,11 @@
     - Audience: humans.
     - Mutates: target branch.
   - [`cleanup`](./commands/cleanup.md)
-    - Remove landed sprint branches, review worktrees, and state.
+    - Detach sprint branch worktrees, then remove landed sprint branches and
+      state.
     - Audience: humans.
-    - Mutates: local sprint branches, associated worktrees, and sprint state.
+    - Mutates: local sprint branches, sprint branch worktree checkouts, and
+      sprint state.
 
 - **Setup, recovery, and visibility commands**
   - [`init`](./commands/init.md)

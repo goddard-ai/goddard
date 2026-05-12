@@ -33,7 +33,7 @@ type HumanCommandOutput = {
   diagnostics: Array<{ code: string; severity?: string }>
   candidates: Array<{ sprint: string; reviewBranch: string }>
   branchesToDelete?: string[]
-  worktreesToRemove?: Array<{ path: string }>
+  worktreesToDetach?: Array<{ path: string }>
   stateFilesToRemove?: string[]
 }
 
@@ -207,9 +207,9 @@ describe("sprint-branch human landing commands", () => {
     expect(diagnostic?.severity).toBe("warning")
   })
 
-  // Cleanup can remove detached human snapshots, but only when the target branch
-  // already contains the finalized review commit and all associated worktrees are clean.
-  test("plans cleanup of landed sprint branches and detached review worktree", async () => {
+  // Cleanup detaches sprint branch worktrees so branch deletion does not require
+  // manual checkout changes, but detached human snapshots are left alone.
+  test("plans cleanup by detaching sprint branch worktrees without removing snapshots", async () => {
     const repo = await createSprintRepo(
       "example",
       {
@@ -223,6 +223,10 @@ describe("sprint-branch human landing commands", () => {
     extraPaths.push(snapshot)
     await fs.rm(snapshot, { recursive: true, force: true })
     await git(repo, ["worktree", "add", "--detach", snapshot, "sprint/example/review"])
+    const branchWorktree = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-review-worktree-"))
+    extraPaths.push(branchWorktree)
+    await fs.rm(branchWorktree, { recursive: true, force: true })
+    await git(repo, ["worktree", "add", branchWorktree, "sprint/example/review"])
 
     const result = await runCli(repo, ["cleanup", "main", "example", "--dry-run", "--json"])
     const cleanup = JSON.parse(result.stdout) as HumanCommandOutput
@@ -234,18 +238,42 @@ describe("sprint-branch human landing commands", () => {
       "sprint/example/approved",
       "sprint/example/next",
     ])
-    const worktreePaths = await Promise.all(
-      (cleanup.worktreesToRemove ?? []).map((worktree) => fs.realpath(worktree.path)),
+    const worktreesToDetach = await Promise.all(
+      (cleanup.worktreesToDetach ?? []).map((worktree) => fs.realpath(worktree.path)),
     )
-    expect(worktreePaths).toContain(await fs.realpath(snapshot))
+    expect(worktreesToDetach).toContain(await fs.realpath(branchWorktree))
+    expect(worktreesToDetach).not.toContain(await fs.realpath(snapshot))
+    expect(cleanup.gitOperations).toContain(
+      `git -C ${JSON.stringify(await fs.realpath(branchWorktree))} checkout --detach`,
+    )
     expect(cleanup.gitOperations).toContain("git branch -d sprint/example/review")
     expect(cleanup.stateFilesToRemove).toEqual([".git/sprint-branch/example/state.json"])
   })
 
+  test("allows cleanup from a clean worktree checked out on a sprint branch", async () => {
+    const repo = await createSprintRepo("example", {
+      review: null,
+      next: null,
+      approved: ["010-task-name"],
+    })
+    await git(repo, ["checkout", "sprint/example/review"])
+
+    const result = await runCli(repo, ["cleanup", "main", "example", "--dry-run", "--json"])
+    const cleanup = JSON.parse(result.stdout) as HumanCommandOutput
+    const worktreesToDetach = await Promise.all(
+      (cleanup.worktreesToDetach ?? []).map((worktree) => fs.realpath(worktree.path)),
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(cleanup.ok).toBe(true)
+    expect(diagnosticCodes(cleanup)).not.toContain("current_branch_would_be_deleted")
+    expect(worktreesToDetach).toContain(await fs.realpath(repo))
+  })
+
   // The interactive cleanup command confirms with a human before calling this operation.
   // Testing the confirmed operation directly keeps the prompt policy intact while still
-  // proving cleanup removes the Git-private state file along with sprint refs.
-  test("removes sprint state when confirmed cleanup executes", async () => {
+  // proving cleanup detaches branch worktrees, then removes sprint refs and state.
+  test("detaches sprint branch worktrees and removes sprint state when confirmed cleanup executes", async () => {
     const repo = await createSprintRepo(
       "example",
       {
@@ -256,18 +284,31 @@ describe("sprint-branch human landing commands", () => {
       { createNextBranch: true },
     )
     const state = await readState(repo, "example")
+    const branchWorktree = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-review-worktree-"))
+    extraPaths.push(branchWorktree)
+    await fs.rm(branchWorktree, { recursive: true, force: true })
+    await git(repo, ["worktree", "add", branchWorktree, "sprint/example/review"])
 
     await executeCleanupOperations(
       repo,
       state,
       ["sprint/example/review", "sprint/example/approved", "sprint/example/next"],
-      [],
+      [
+        {
+          path: branchWorktree,
+          head: await branchHead(repo, "sprint/example/review"),
+          branch: "sprint/example/review",
+          detached: false,
+          reason: "branch sprint/example/review",
+        },
+      ],
     )
 
     expect(await stateFileExists(repo, "example")).toBe(false)
     expect(await branchExists(repo, "sprint/example/review")).toBe(false)
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
     expect(await branchExists(repo, "sprint/example/next")).toBe(false)
+    expect(await currentBranch(branchWorktree)).toBe("")
   })
 
   // Git refuses to check out a branch that another linked worktree already owns.

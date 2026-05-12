@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { getErrorMessage } from "radashi"
 
 import { executeCleanupOperations } from "../src/landing"
-import type { AssociatedWorktree } from "../src/landing/types"
+import type { SprintBranchWorktree } from "../src/landing/types"
 import type { SprintBranchState } from "../src/types"
 
 type JsonOutput = {
@@ -17,7 +17,7 @@ type JsonOutput = {
   output?: string
   diagnostics: Array<{ severity?: string; code: string }>
   branchesToDelete?: string[]
-  worktreesToRemove?: AssociatedWorktree[]
+  worktreesToDetach?: SprintBranchWorktree[]
 }
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -211,8 +211,8 @@ async function main() {
     await git(primary, ["merge", "--ff-only", "sprint/example/review"])
     assert.equal(await branchHead(primary, "main"), reviewHead)
 
-    // Cleanup should find the sprint branches and the agent worktree, then remove
-    // the sprint's leftover state after landing.
+    // Cleanup should find the sprint branches and detach the agent worktree, then
+    // remove the sprint's leftover state after landing.
     // TECHNICAL NOTE: We call the confirmed cleanup operation directly to avoid
     // weakening the CLI's interactive prompt requirement.
     const cleanup = await expectOk<JsonOutput>(primary, [
@@ -227,7 +227,7 @@ async function main() {
       "sprint/example/approved",
       "sprint/example/next",
     ])
-    const cleanupWorktrees = cleanup.worktreesToRemove ?? []
+    const cleanupWorktrees = cleanup.worktreesToDetach ?? []
     assert.ok(
       (await realpaths(cleanupWorktrees.map((worktree) => worktree.path))).includes(
         await fs.realpath(agent),
@@ -239,6 +239,7 @@ async function main() {
       cleanup.branchesToDelete ?? [],
       cleanupWorktrees,
     )
+    assert.equal(await currentBranch(agent), "")
     assert.equal(await stateFileExists(primary, "example"), false)
     assert.equal(await branchExists(primary, "sprint/example/review"), false)
     assert.equal(await branchExists(primary, "sprint/example/approved"), false)

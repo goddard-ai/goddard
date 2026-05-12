@@ -384,7 +384,7 @@ export async function main(argv: string[]) {
       }),
       cleanup: command({
         name: "cleanup",
-        description: "Delete landed sprint branches and clean review worktrees",
+        description: "Delete landed sprint branches and detach clean branch worktrees",
         args: {
           target: positional({
             type: string,
