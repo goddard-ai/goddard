@@ -10,6 +10,7 @@ import {
   ValidRequestName,
   ValidStreamName,
 } from "@goddard-ai/ipc"
+import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
@@ -20,6 +21,28 @@ import {
   type SessionPermissionResponseRequest,
   type SessionPromptRequest,
 } from "./session.ts"
+
+/** Daemon IPC schema used for SDK-specific stream payload shaping. */
+type DaemonIpcSchema = typeof daemonIpcSchema
+
+/** Turns a union of function overload shapes into one callable overloaded type. */
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
+  ? I
+  : never
+
+/** Subscription overloads for streams that require a daemon-side filter. */
+type FilteredSubscribeOverload<Filter, Payload> =
+  | ((filter: Filter, onMessage: (payload: Payload) => void) => Promise<() => void>)
+  | ((
+      filter: Filter,
+      onMessage: (payload: Payload) => void,
+      onError: (error: unknown) => void,
+    ) => () => void)
+  | ((
+      filter: Filter,
+      onMessage: (payload: Payload) => void,
+      onError?: (error: unknown) => void,
+    ) => (() => void) | Promise<() => void>)
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
@@ -63,12 +86,6 @@ function defineSubscription<S extends IpcSchema, K extends ValidStreamName<S>>(
         onError?: (error: unknown) => void,
       ) => (() => void) | Promise<() => void>)
 
-  type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
-    k: infer I,
-  ) => void
-    ? I
-    : never
-
   return function subscribe(
     filter: InferStreamFilter<S, K> | ((payload: InferStreamPayload<S, K>) => void),
     onMessage?: ((payload: InferStreamPayload<S, K>) => void) | ((error: unknown) => void),
@@ -91,6 +108,26 @@ function defineSubscription<S extends IpcSchema, K extends ValidStreamName<S>>(
           : never
         : never
   >
+}
+
+function defineUnwrappedSubscription<S extends IpcSchema, K extends ValidStreamName<S>, Payload>(
+  client: IpcClient<S>,
+  name: K,
+  unwrap: (payload: InferStreamPayload<S, K>) => Payload,
+) {
+  return function subscribe(
+    filter: InferStreamFilter<S, K>,
+    onMessage: (payload: Payload) => void,
+    onError?: (error: unknown) => void,
+  ) {
+    return client.subscribe(
+      { name, filter } as StreamTarget<S, K>,
+      (payload) => {
+        onMessage(unwrap(payload))
+      },
+      onError,
+    )
+  } as UnionToIntersection<FilteredSubscribeOverload<InferStreamFilter<S, K>, Payload>>
 }
 
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
@@ -259,7 +296,11 @@ export class GoddardSdk {
         }),
 
       /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
-      subscribe: defineSubscription(this.#client, "session.message"),
+      subscribe: defineUnwrappedSubscription<DaemonIpcSchema, "session.message", acp.AnyMessage>(
+        this.#client,
+        "session.message",
+        ({ message }) => message,
+      ),
 
       /** Resolves one daemon session token to its daemon session id. */
       resolveToken: defineRequest(this.#client, "session.resolveToken"),
@@ -310,7 +351,11 @@ export class GoddardSdk {
       list: defineRequest(this.#client, "workforce.list"),
 
       /** Subscribes to live daemon-published workforce ledger events for one repository root. */
-      subscribe: defineSubscription(this.#client, "workforce.event"),
+      subscribe: defineUnwrappedSubscription<
+        DaemonIpcSchema,
+        "workforce.event",
+        InferStreamPayload<DaemonIpcSchema, "workforce.event">["event"]
+      >(this.#client, "workforce.event", ({ event }) => event),
 
       /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
       shutdown: defineRequest(this.#client, "workforce.shutdown"),
