@@ -4,6 +4,7 @@ import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { executeCleanupOperations, executeLandOperations } from "../src/landing"
+import { sprintStatePath } from "../src/state/paths"
 import {
   branchExists,
   branchHead,
@@ -14,6 +15,7 @@ import {
   currentBranch,
   diagnosticCodes,
   git,
+  pathExists,
   readState,
   runCli,
   stateFileExists,
@@ -306,7 +308,8 @@ describe("sprint-branch human landing commands", () => {
 
   // The interactive cleanup command confirms with a human before calling this operation.
   // Testing the confirmed operation directly keeps the prompt policy intact while still
-  // proving cleanup detaches branch worktrees, then removes sprint refs and state.
+  // proving cleanup detaches branch worktrees, then removes sprint refs and Git-private
+  // metadata without leaving empty .git/sprint-branch/<sprint> directories behind.
   test("detaches sprint branch worktrees and removes sprint state when confirmed cleanup executes", async () => {
     const repo = await createSprintRepo(
       "example",
@@ -339,6 +342,7 @@ describe("sprint-branch human landing commands", () => {
     )
 
     expect(await stateFileExists(repo, "example")).toBe(false)
+    expect(await pathExists(path.dirname(await sprintStatePath(repo, "example")))).toBe(false)
     expect(await branchExists(repo, "sprint/example/review")).toBe(false)
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
     expect(await branchExists(repo, "sprint/example/next")).toBe(false)

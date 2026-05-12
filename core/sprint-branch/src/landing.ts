@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises"
+import path from "node:path"
 
 import { hasDiagnosticErrors } from "./diagnostics"
 import { GitCommandError, runGit } from "./git/command"
@@ -217,7 +218,20 @@ export async function executeCleanupOperations(
   for (const branch of branchesToDelete) {
     await runGit(rootDir, ["branch", "-d", branch])
   }
-  await fs.rm(await sprintStatePath(rootDir, state.sprint), { force: true })
+  const statePath = await sprintStatePath(rootDir, state.sprint)
+  await fs.rm(statePath, { force: true })
+  // Prune only the now-empty sprint directory so unexpected metadata survives.
+  try {
+    await fs.rmdir(path.dirname(statePath))
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: unknown }).code
+        : null
+    if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EEXIST") {
+      throw error
+    }
+  }
 }
 
 function isTargetBranchUsedByAnotherWorktree(error: unknown, targetBranch: string) {
