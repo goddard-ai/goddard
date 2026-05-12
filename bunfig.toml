@@ -1,3 +1,10 @@
 [install]
-minimumReleaseAge = 1209600    # 14 days
-minimumReleaseAgeExcludes = []
+minimumReleaseAge = 1209600 # 14 days
+minimumReleaseAgeExcludes = [
+  "radashi",
+  "@clack/prompts",
+  "@tsrx/preact",
+  "@tsrx/bun-plugin-preact",
+  "@tsrx/vite-plugin-preact",
+  "electrobun",
+]
