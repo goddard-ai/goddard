@@ -1,10 +1,21 @@
 [install]
 minimumReleaseAge = 1209600 # 14 days
 minimumReleaseAgeExcludes = [
-  "radashi",
+  "@clack/core",
   "@clack/prompts",
-  "@tsrx/preact",
-  "@tsrx/bun-plugin-preact",
-  "@tsrx/vite-plugin-preact",
   "electrobun",
+  "powerkeys",
+  "preact-sigma",
+  "radashi",
+
+  # TSRX
+  "@tsrx/bun-plugin-preact",
+  "@tsrx/core",
+  "@tsrx/eslint-parser",
+  "@tsrx/eslint-plugin",
+  "@tsrx/preact",
+  "@tsrx/prettier-plugin",
+  "@tsrx/typescript-plugin",
+  "@tsrx/vite-plugin-preact",
+  "esrap",
 ]
