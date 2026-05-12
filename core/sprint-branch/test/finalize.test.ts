@@ -129,6 +129,10 @@ describe("sprint-branch finalize", () => {
     expect(finalize.ok).toBe(true)
     expect(diagnostic?.severity).toBe("warning")
     expect(await currentBranch(repo)).toBe("sprint/example/review")
+    expect((await readState(repo, "example")).ignoredNextBranchAtFinalize).toEqual({
+      reviewCommit: await branchHead(repo, "sprint/example/review"),
+      nextCommit: await branchHead(repo, "sprint/example/next"),
+    })
   })
 
   // The final rebase is intentionally the last Git rewrite before human merge.

@@ -12,6 +12,7 @@ import { parseSprintBranchName, validateSprintName } from "../state/branches"
 import { findSprintStateFiles, readSprintStateFile } from "../state/io"
 import { sprintStateDisplayPath, sprintStatePath } from "../state/paths"
 import type { SprintDiagnostic } from "../types"
+import { isIgnoredNextBranchAtFinalize } from "../workflow/ignored-next-branch"
 import type { HumanCommandInput, SprintCandidate } from "./types"
 
 type SprintSelectionOptions = {
@@ -235,7 +236,10 @@ async function isFinalizedCandidate(
     reviewCommit &&
     approvedCommit &&
     reviewCommit === approvedCommit &&
-    (ignoreNextBranch || !nextCommit || nextCommit === reviewCommit),
+    (ignoreNextBranch ||
+      !nextCommit ||
+      nextCommit === reviewCommit ||
+      isIgnoredNextBranchAtFinalize(state, reviewCommit, nextCommit)),
   )
 }
 

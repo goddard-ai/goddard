@@ -12,6 +12,8 @@
   - When prompting interactively, only finalized active sprints are listed.
   - `--ignore-next-branch` allows selecting and landing a sprint whose dormant
     `next` branch differs from finalized `review`.
+    - If successful finalization already accepted that exact `next`
+      divergence, the flag is not required again.
 
 - **What it does**
   - Fast-forwards a human-selected target branch to finalized sprint review
@@ -33,6 +35,8 @@
   - `review` and `approved` must represent the same finalized content.
   - `next`, if present, must not contain different work.
     - `--ignore-next-branch` downgrades only this check to a warning.
+    - A divergence accepted by successful finalization remains a warning as
+      long as the recorded `review` and `next` commits have not changed.
   - The target branch must exist.
   - The target branch must not itself be a sprint branch.
   - The target must be able to fast-forward to the finalized review content.

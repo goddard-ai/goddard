@@ -24,6 +24,8 @@
 - **Guardrails**
   - The target branch must contain the finalized review commit.
   - The sprint must be finalized.
+  - An obsolete `next` branch accepted during finalization remains a warning
+    only while its recorded commit still matches the finalized state.
   - The working tree must be clean.
   - The target branch must exist.
   - The target branch must not itself be a sprint branch.

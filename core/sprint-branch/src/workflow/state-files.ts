@@ -15,6 +15,7 @@ type StoredSprintState = {
   lastActedAt: SprintBranchState["lastActedAt"]
   tasks: SprintBranchState["tasks"]
   activeStashes: SprintBranchState["activeStashes"]
+  ignoredNextBranchAtFinalize: SprintBranchState["ignoredNextBranchAtFinalize"]
   conflict: SprintBranchState["conflict"]
 }
 
@@ -43,6 +44,7 @@ function storedSprintState(state: SprintBranchState) {
     lastActedAt: state.lastActedAt,
     tasks: state.tasks,
     activeStashes: state.activeStashes,
+    ignoredNextBranchAtFinalize: state.ignoredNextBranchAtFinalize,
     conflict: state.conflict,
   } satisfies StoredSprintState
 }

@@ -41,6 +41,10 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
   const lastActedAt = readOptionalTimestamp(record.lastActedAt, diagnostics)
   const tasks = parseTasks(record.tasks, diagnostics)
   const activeStashes = parseActiveStashes(record.activeStashes, diagnostics)
+  const ignoredNextBranchAtFinalize = parseIgnoredNextBranchAtFinalize(
+    record.ignoredNextBranchAtFinalize,
+    diagnostics,
+  )
   const conflict =
     record.conflict === null || isRecord(record.conflict)
       ? (record.conflict as SprintBranchState["conflict"] | null)
@@ -81,6 +85,7 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
     branches: getExpectedBranches(sprint),
     tasks,
     activeStashes,
+    ignoredNextBranchAtFinalize,
     conflict,
   }
 
@@ -151,6 +156,38 @@ function parseActiveStashes(value: unknown, diagnostics: SprintDiagnostic[]) {
   }
 
   return stashes
+}
+
+function parseIgnoredNextBranchAtFinalize(value: unknown, diagnostics: SprintDiagnostic[]) {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!isRecord(value)) {
+    diagnostics.push({
+      severity: "error",
+      code: "invalid_ignored_next_branch_at_finalize",
+      message: "ignoredNextBranchAtFinalize must be null or an object.",
+    })
+    return null
+  }
+
+  const reviewCommit = readString(
+    value.reviewCommit,
+    "ignoredNextBranchAtFinalize.reviewCommit",
+    diagnostics,
+  )
+  const nextCommit = readString(
+    value.nextCommit,
+    "ignoredNextBranchAtFinalize.nextCommit",
+    diagnostics,
+  )
+
+  return reviewCommit && nextCommit
+    ? {
+        reviewCommit,
+        nextCommit,
+      }
+    : null
 }
 
 function readString(value: unknown, field: string, diagnostics: SprintDiagnostic[]) {

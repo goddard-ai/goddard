@@ -34,6 +34,12 @@ export type SprintConflictState = {
   [key: string]: unknown
 }
 
+/** Exact dormant next-branch divergence accepted during successful finalization. */
+export type SprintIgnoredNextBranchAtFinalize = {
+  reviewCommit: string
+  nextCommit: string
+}
+
 /** Runtime representation of canonical sprint state loaded from Git metadata. */
 export type SprintBranchState = {
   schemaVersion?: number
@@ -45,6 +51,7 @@ export type SprintBranchState = {
   branches: SprintBranchNames
   tasks: SprintTaskState
   activeStashes: SprintActiveStash[]
+  ignoredNextBranchAtFinalize: SprintIgnoredNextBranchAtFinalize | null
   lock?: SprintConflictState | null
   conflict: SprintConflictState | null
 }

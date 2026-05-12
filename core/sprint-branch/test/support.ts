@@ -250,6 +250,7 @@ async function writeSprintState(repo: string, sprint: string, tasks: SprintTestT
           finishedUnreviewed: tasks.finishedUnreviewed ?? [],
         },
         activeStashes: [],
+        ignoredNextBranchAtFinalize: null,
         conflict: null,
       },
       null,

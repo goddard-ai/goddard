@@ -39,6 +39,7 @@ describe("sprint-branch init", () => {
       "lastActedAt",
       "tasks",
       "activeStashes",
+      "ignoredNextBranchAtFinalize",
       "conflict",
     ])
     expect(state.sprintWorktreeRoot).toBe(await fs.realpath(repo))

@@ -2,6 +2,7 @@ import { getBranchHead, isAncestor } from "../git/refs"
 import { getWorkingTreeStatus } from "../git/worktree"
 import { parseSprintBranchName } from "../state/branches"
 import type { SprintBranchState, SprintDiagnostic } from "../types"
+import { isIgnoredNextBranchAtFinalize } from "../workflow/ignored-next-branch"
 import type { CleanupInput, HumanCommandInput, LandInput } from "./types"
 
 /** Adds diagnostics for target branches before sprint selection can infer or prompt. */
@@ -173,13 +174,15 @@ async function pushSharedFinalizedDiagnostics(
     })
   }
   if (nextCommit && reviewCommit && nextCommit !== reviewCommit) {
+    const ignoredByFinalization = isIgnoredNextBranchAtFinalize(state, reviewCommit, nextCommit)
     diagnostics.push({
-      severity: input.ignoreNextBranch ? "warning" : "error",
+      severity: input.ignoreNextBranch || ignoredByFinalization ? "warning" : "error",
       code: "active_next_branch_exists",
       message: `${state.branches.next} still points at content different from review.`,
-      suggestion: input.ignoreNextBranch
-        ? "Landing will ignore the dormant next branch because --ignore-next-branch was provided."
-        : undefined,
+      suggestion:
+        input.ignoreNextBranch || ignoredByFinalization
+          ? "Landing will ignore the dormant next branch because this divergence was explicitly accepted."
+          : undefined,
     })
   }
   if (!targetCommit) {

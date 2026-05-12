@@ -207,6 +207,40 @@ describe("sprint-branch human landing commands", () => {
     expect(diagnostic?.severity).toBe("warning")
   })
 
+  test("keeps ignored finalized next divergence as a landing warning", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+    await createDivergentNextBranch(repo, "example")
+    await runCli(repo, ["finalize", "--sprint", "example", "--ignore-next-branch", "--json"])
+
+    const result = await runCli(repo, ["land", "main", "example", "--dry-run", "--json"])
+    const land = JSON.parse(result.stdout) as HumanCommandOutput
+    const diagnostic = land.diagnostics.find((item) => item.code === "active_next_branch_exists")
+
+    expect(result.exitCode).toBe(0)
+    expect(land.ok).toBe(true)
+    expect(diagnostic?.severity).toBe("warning")
+  })
+
+  // The persisted waiver is commit-bound. New next-branch work after finalization
+  // must not inherit the earlier recovery decision.
+  test("rejects landing when ignored finalized next branch moves again", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+    await createDivergentNextBranch(repo, "example")
+    await runCli(repo, ["finalize", "--sprint", "example", "--ignore-next-branch", "--json"])
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "later-next.txt"), "later next\n")
+    await commitAll(repo, "add later next work")
+    await git(repo, ["checkout", "main"])
+
+    const result = await runCli(repo, ["land", "main", "example", "--dry-run", "--json"])
+    const land = JSON.parse(result.stdout) as HumanCommandOutput
+    const diagnostic = land.diagnostics.find((item) => item.code === "active_next_branch_exists")
+
+    expect(result.exitCode).toBe(1)
+    expect(land.ok).toBe(false)
+    expect(diagnostic?.severity).toBe("error")
+  })
+
   // Cleanup detaches sprint branch worktrees so branch deletion does not require
   // manual checkout changes, but detached human snapshots are left alone.
   test("plans cleanup by detaching sprint branch worktrees without removing snapshots", async () => {

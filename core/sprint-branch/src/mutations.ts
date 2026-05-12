@@ -22,6 +22,10 @@ import {
   pushActiveGitOperationDiagnostics,
   writeConflictStateWhenSafe,
 } from "./workflow/conflicts"
+import {
+  isIgnoredNextBranchAtFinalize,
+  recordIgnoredNextBranchAtFinalize,
+} from "./workflow/ignored-next-branch"
 import { withSprintLock } from "./workflow/lock"
 import {
   formatMutationReport,
@@ -59,6 +63,7 @@ export async function runInit(input: MutationInput & { base: string }) {
     branches,
     tasks: emptyTasks(),
     activeStashes: [],
+    ignoredNextBranchAtFinalize: null,
     conflict: null,
   }
   const diagnostics: SprintDiagnostic[] = []
@@ -160,6 +165,7 @@ export async function runResetState(
       finishedUnreviewed: [],
     },
     activeStashes: [],
+    ignoredNextBranchAtFinalize: null,
     conflict: null,
   }
 
@@ -985,13 +991,15 @@ export async function runFinalize(
     })
   }
   if (nextHead && reviewHead && nextHead !== reviewHead) {
+    const ignoredByFinalization = isIgnoredNextBranchAtFinalize(state, reviewHead, nextHead)
     diagnostics.push({
-      severity: input.ignoreNextBranch ? "warning" : "error",
+      severity: input.ignoreNextBranch || ignoredByFinalization ? "warning" : "error",
       code: "active_next_branch_exists",
       message: `${state.branches.next} still points at content different from review.`,
-      suggestion: input.ignoreNextBranch
-        ? "Finalize will ignore the dormant next branch because --ignore-next-branch was provided."
-        : undefined,
+      suggestion:
+        input.ignoreNextBranch || ignoredByFinalization
+          ? "Finalize will ignore the dormant next branch because this divergence was explicitly accepted."
+          : undefined,
     })
   }
   if (!(await refExists(context.rootDir, baseBranch))) {
@@ -1036,6 +1044,11 @@ export async function runFinalize(
         state,
         state.branches.approved,
         state.branches.review,
+      )
+      recordIgnoredNextBranchAtFinalize(
+        nextState,
+        await getBranchHead(context.rootDir, state.branches.review),
+        await getBranchHead(context.rootDir, state.branches.next),
       )
       nextState.conflict = null
       await writeSprintState(context.rootDir, nextState)
