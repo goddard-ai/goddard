@@ -2,7 +2,7 @@ import { useListener } from "preact-sigma"
 import { useEffect } from "preact/hooks"
 
 import { useInbox } from "~/app-state-context.tsrx"
-import type { NavigationItemId } from "~/navigation.ts"
+import type { NavigationItemId } from "~/navigation-items.ts"
 
 /** Reactive predicate and accessibility copy for one optional sidebar dot. */
 export type AppShellSidebarDot = {

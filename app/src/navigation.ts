@@ -2,12 +2,6 @@ import { Sigma } from "preact-sigma"
 
 import { defaultNavigationItems, type NavigationItemId } from "./navigation-items.ts"
 
-export {
-  defaultNavigationItems,
-  type NavigationItem,
-  type NavigationItemId,
-} from "./navigation-items.ts"
-
 /** Public state owned by the navigation model. */
 export type NavigationState = {
   selectedNavId: NavigationItemId

@@ -3,7 +3,7 @@ import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
 import { isAppCommandHandled } from "~/commands/app-command.ts"
 import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
-import type { NavigationItemId } from "~/navigation.ts"
+import type { NavigationItemId } from "~/navigation-items.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
 
