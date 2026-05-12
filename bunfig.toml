@@ -7,6 +7,7 @@ minimumReleaseAgeExcludes = [
   "powerkeys",
   "preact-sigma",
   "radashi",
+  "turbo",
 
   # TSRX
   "@tsrx/bun-plugin-preact",
@@ -15,6 +16,7 @@ minimumReleaseAgeExcludes = [
   "@tsrx/eslint-plugin",
   "@tsrx/preact",
   "@tsrx/prettier-plugin",
+  "@tsrx/ripple",
   "@tsrx/typescript-plugin",
   "@tsrx/vite-plugin-preact",
   "esrap",
