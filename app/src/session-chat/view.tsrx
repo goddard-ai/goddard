@@ -11,7 +11,6 @@ import {
 } from "lucide-react"
 import { useEffect, useState } from "preact/hooks"
 import { useSigma } from "preact-sigma"
-import { isPromise } from "radashi"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
@@ -393,29 +392,27 @@ export component SessionChatView(props: {
         />
       </footer>
     </main>
-  } catch (error) {
-    if (isPromise(error)) {
-      <main class={styles.root}>
-        <SessionChatStateMessage
-          description="Loading the session transcript and current session details."
-          title="Loading session"
-        />
-      </main>
-    } else {
-      const [, setRetryVersion] = useState(0)
+  } pending {
+    <main class={styles.root}>
+      <SessionChatStateMessage
+        description="Loading the session transcript and current session details."
+        title="Loading session"
+      />
+    </main>
+  } catch {
+    const [, setRetryVersion] = useState(0)
 
-      <main class={styles.root}>
-        <SessionChatStateMessage
-          actionLabel="Try again"
-          description="The daemon-backed session or history request failed."
-          onAction={() => {
-            retrySessionChatLoad(props.sessionId)
-            setRetryVersion((version) => version + 1)
-          }}
-          title="Couldn't load session"
-        />
-      </main>
-    }
+    <main class={styles.root}>
+      <SessionChatStateMessage
+        actionLabel="Try again"
+        description="The daemon-backed session or history request failed."
+        onAction={() => {
+          retrySessionChatLoad(props.sessionId)
+          setRetryVersion((version) => version + 1)
+        }}
+        title="Couldn't load session"
+      />
+    </main>
   }
 }
 
