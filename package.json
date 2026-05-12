@@ -73,5 +73,8 @@
   "patchedDependencies": {
     "@zag-js/popover@1.39.1": "patches/@zag-js%2Fpopover@1.39.1.patch",
     "@ark-ui/react@5.36.0": "patches/@ark-ui%2Freact@5.36.0.patch"
+  },
+  "overrides": {
+    "zod": "^4.3.6"
   }
 }
