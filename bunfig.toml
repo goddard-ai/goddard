@@ -3,6 +3,7 @@ minimumReleaseAge = 1209600 # 14 days
 minimumReleaseAgeExcludes = [
   "@clack/core",
   "@clack/prompts",
+  "ai-sdk-json-schema",
   "electrobun",
   "powerkeys",
   "preact-sigma",
