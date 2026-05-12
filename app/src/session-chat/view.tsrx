@@ -159,9 +159,6 @@ component LoadedSessionChatView(props: {
   const [activeHeaderAction, setActiveHeaderAction] = useState<
     "cancel" | "complete" | "reconnect" | null
   >(null)
-  const [sessionCompletedHidden, setSessionCompletedHidden] = useState(
-    () => props.session.completedHidden,
-  )
   const [olderHistoryState, setOlderHistoryState] = useState<
     { status: "idle" } | { status: "loading" } | { message: string; status: "error" }
   >({ status: "idle" })
@@ -205,6 +202,7 @@ component LoadedSessionChatView(props: {
       chat.session.connectionMode === "live"
   const canOpenSessionChanges = chat.session.cwd.trim().length > 0
   const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
+  const sessionCompletedHidden = chat.session.completedHidden
   const completeActionDisabled =
     activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
   const completeActionLabel =
@@ -221,10 +219,6 @@ component LoadedSessionChatView(props: {
   useEffect(() => {
     void inbox.markSessionVisited(props.session.id)
   }, [inbox, props.session.id])
-
-  useEffect(() => {
-    setSessionCompletedHidden(props.session.completedHidden)
-  }, [props.session.completedHidden, props.session.id])
 
   async function reconnectCurrentSession() {
     if (!canReconnect || activeHeaderAction) {
@@ -265,13 +259,7 @@ component LoadedSessionChatView(props: {
         inbox.applyItem(result.item)
       }
 
-      setSessionCompletedHidden(true)
-      chat.syncSession(
-        {
-          ...chat.session,
-          completedHidden: true,
-        },
-      )
+      chat.toggleCompletedHidden(true)
     } catch (error) {
       console.error("Failed to complete session.", error)
       setHeaderActionError(
@@ -530,7 +518,7 @@ component LoadedSessionChatView(props: {
                 prompt,
               },
             )
-            setSessionCompletedHidden(false)
+            chat.toggleCompletedHidden(false)
           } catch (error) {
             console.error("Failed to submit session prompt.", error)
             setSubmitError(error)

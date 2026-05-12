@@ -1,7 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
 import hashSum from "hash-sum"
-import { Sigma } from "preact-sigma"
+import { castDraft } from "immer"
+import { Sigma, type Immutable } from "preact-sigma"
 
 import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
@@ -452,9 +453,14 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   /** Applies a freshly returned session record without replacing the merged transcript. */
-  syncSession(session: DaemonSession) {
-    this.session = session
+  syncSession(session: Immutable<DaemonSession>) {
+    this.session = castDraft(session)
     this.#refreshTranscriptState()
+  }
+
+  /** Control whether the session is completed. */
+  toggleCompletedHidden(completedHidden: boolean) {
+    this.session.completedHidden = completedHidden
   }
 
   #mergeMessage(message: acp.AnyMessage, receivedAt: string) {
