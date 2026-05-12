@@ -1,6 +1,3 @@
-import { useListener } from "preact-sigma"
-import { useEffect } from "preact/hooks"
-
 import { useInbox } from "~/app-state-context.tsrx"
 import type { NavigationItemId } from "~/navigation-items.ts"
 
@@ -16,30 +13,13 @@ export const appShellDefaultSidebarDot: AppShellSidebarDot = {
   usePredicate: () => false,
 }
 
-function useInboxUnreadDot() {
-  const inbox = useInbox()
-
-  useEffect(() => {
-    void inbox.refresh()
-  }, [inbox])
-
-  useListener(window, "focus", () => {
-    void inbox.refresh()
-  })
-
-  useListener(document, "visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      void inbox.refresh()
-    }
-  })
-
-  return inbox.hasUnreadItems
-}
-
 /** Optional dot predicates keyed by sidebar navigation item. */
 export const appShellSidebarDots: Partial<Record<NavigationItemId, AppShellSidebarDot>> = {
   inbox: {
     getAriaLabel: (label) => `${label}, unread items`,
-    usePredicate: useInboxUnreadDot,
+    usePredicate: () => {
+      const inbox = useInbox()
+      return inbox.hasUnreadItems
+    },
   },
 }
