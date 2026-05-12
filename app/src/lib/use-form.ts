@@ -3,12 +3,7 @@ import { useEffect, useRef } from "preact/hooks"
 import { z } from "zod"
 
 import { FormController } from "./use-form/controller.ts"
-import {
-  createForm,
-  type AnyObjectSchema,
-  type FormInvalidResult,
-  type FormSchema,
-} from "./use-form/schema.ts"
+import { type AnyObjectSchema, type FormInvalidResult, type FormSchema } from "./use-form/schema.ts"
 
 export { createForm } from "./use-form/schema.ts"
 
