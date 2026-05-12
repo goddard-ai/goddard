@@ -53,6 +53,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@babel/plugin-proposal-decorators": "^7.29.0",
     "@happy-dom/global-registrator": "^20.9.0",
     "@pandacss/dev": "catalog:",
     "@preact/preset-vite": "^2.10.5",

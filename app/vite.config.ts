@@ -9,7 +9,16 @@ export default defineConfig({
   root: "src/main",
   base: "./",
   publicDir: "../../public",
-  plugins: [svgIcons(), tsrxPreact(), preact()],
+  plugins: [
+    svgIcons(),
+    tsrxPreact(),
+    preact({
+      // Workspace source can contain standard decorators; transform them before Prefresh parses HMR signatures.
+      babel: {
+        plugins: [["@babel/plugin-proposal-decorators", { version: "2023-11" }]],
+      },
+    }),
+  ],
   server: {
     host: "127.0.0.1",
     port: 5173,
