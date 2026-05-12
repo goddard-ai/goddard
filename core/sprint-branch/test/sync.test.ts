@@ -50,8 +50,8 @@ describe("sprint-branch sync", () => {
     const timeoutReason = "sprint sync test timeout"
     const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
     const watching = createDeferred<void>()
+    const syncedFeatureText = createDeferred<string>()
     let watchingResolved = false
-    let syncedFeatureText: string | null = null
     const results: NonNullable<SyncOutput["reviewSync"]>[] = []
     const syncPromise = runSprintSync({
       cwd: reviewWorktree,
@@ -64,7 +64,9 @@ describe("sprint-branch sync", () => {
           watching.resolve()
         }
         if (result.command === "sync" && result.status === "ok") {
-          syncedFeatureText = await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")
+          syncedFeatureText.resolve(
+            await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8"),
+          )
           controller.abort()
         }
       },
@@ -100,7 +102,7 @@ describe("sprint-branch sync", () => {
       expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(
         true,
       )
-      expect(syncedFeatureText).toBe("agent changed while watched\n")
+      expect(await syncedFeatureText.promise).toBe("agent changed while watched\n")
     } finally {
       clearTimeout(timeout)
     }
@@ -131,10 +133,9 @@ describe("sprint-branch sync", () => {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort("sprint sync test timeout"), 5000)
     const waiting = createDeferred<void>()
-    const watching = createDeferred<void>()
+    const watching = createDeferred<string>()
     let waitingResolved = false
     let watchingResolved = false
-    let watchedFeatureText: string | null = null
     const syncPromise = runSprintSync({
       cwd: reviewWorktree,
       sprint: "example",
@@ -145,9 +146,12 @@ describe("sprint-branch sync", () => {
           waiting.resolve()
         }
         if (result.command === "watch" && result.reviewBranch) {
-          watchedFeatureText = await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")
+          const watchedFeatureText = await fs.readFile(
+            path.join(reviewWorktree, "feature.txt"),
+            "utf-8",
+          )
           watchingResolved = true
-          watching.resolve()
+          watching.resolve(watchedFeatureText)
           controller.abort()
         }
       },
@@ -178,7 +182,7 @@ describe("sprint-branch sync", () => {
       expect(sync.ok).toBe(true)
       expect(sync.reviewSync?.command).toBe("watch")
       expect(sync.reviewSync?.status).toBe("paused")
-      expect(watchedFeatureText).toBe("agent review work\n")
+      expect(await watching.promise).toBe("agent review work\n")
     } finally {
       clearTimeout(timeout)
       controller.abort()
@@ -192,11 +196,10 @@ describe("sprint-branch sync", () => {
     const timeout = setTimeout(() => controller.abort("sprint sync test timeout"), 5000)
     const watching = createDeferred<void>()
     const waiting = createDeferred<void>()
-    const synced = createDeferred<void>()
+    const synced = createDeferred<string>()
     let watchingResolved = false
     let waitingResolved = false
     let syncedResolved = false
-    let syncedFeatureText: string | null = null
     const syncPromise = runSprintSync({
       cwd: reviewWorktree,
       sprint: "example",
@@ -211,9 +214,12 @@ describe("sprint-branch sync", () => {
           waiting.resolve()
         }
         if (result.command === "sync" && result.status === "ok" && !syncedResolved) {
-          syncedFeatureText = await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")
+          const syncedFeatureText = await fs.readFile(
+            path.join(reviewWorktree, "feature.txt"),
+            "utf-8",
+          )
           syncedResolved = true
-          synced.resolve()
+          synced.resolve(syncedFeatureText)
           controller.abort()
         }
       },
@@ -261,7 +267,7 @@ describe("sprint-branch sync", () => {
       const sync = await syncPromise
 
       expect(sync.ok).toBe(true)
-      expect(syncedFeatureText).toBe("agent changed while locked\n")
+      expect(await synced.promise).toBe("agent changed while locked\n")
     } finally {
       clearTimeout(timeout)
       controller.abort()
