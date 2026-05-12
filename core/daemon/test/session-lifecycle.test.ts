@@ -2011,6 +2011,8 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
       },
     },
   })
+  runGit(repoDir, ["add", ".goddard/config.json"])
+  runGit(repoDir, ["commit", "-m", "add local goddard config"])
 
   const created = await client.send("session.create", {
     agent: createWrappedNodeAgent(exampleAgentPath),
