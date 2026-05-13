@@ -41,7 +41,7 @@ import type {
   UpdateWorkforceRequest,
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
-import { worktreeSdkPlugin } from "@goddard-ai/worktree/sdk"
+import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
@@ -107,7 +107,7 @@ function createPrNamespace(client: DaemonIpcClient) {
 
 /** Builds the session namespace with one thin method per daemon session IPC action. */
 function createSessionNamespace(client: DaemonIpcClient) {
-  const worktree = worktreeSdkPlugin.create({ client })
+  const sessionFeature = sessionSdkPlugin.create({ client })
 
   return {
     /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
@@ -150,7 +150,7 @@ function createSessionNamespace(client: DaemonIpcClient) {
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: async (input: DaemonSessionIdParams) => client.send("session.diagnostics", input),
 
-    ...worktree,
+    ...sessionFeature,
 
     /** Reads persisted workforce metadata attached to one daemon-managed session. */
     workforce: async (input: DaemonSessionIdParams) => client.send("session.workforce.get", input),

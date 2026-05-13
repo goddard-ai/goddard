@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
-import { SessionWorktreeParams } from "@goddard-ai/worktree/schema"
+import { SessionWorktreeParams } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
 import { ACPAdapterName } from "../acp-adapters.ts"

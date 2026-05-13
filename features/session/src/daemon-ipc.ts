@@ -9,7 +9,7 @@ import {
   type MutateSessionReviewSessionResponse,
 } from "./schema.ts"
 
-export const worktreeIpcSchema = defineIpcSchema({
+export const sessionIpcSchema = defineIpcSchema({
   requests: {
     "session.worktree.get": {
       payload: GetSessionWorktreeRequest,

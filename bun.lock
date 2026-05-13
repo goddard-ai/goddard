@@ -150,7 +150,7 @@
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/review-sync": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
-        "@goddard-ai/worktree": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
         "@goddard-ai/worktree-plugin": "workspace:^",
         "@openrouter/ai-sdk-provider": "^2.5.1",
         "ai": "^6.0.158",
@@ -232,7 +232,7 @@
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
-        "@goddard-ai/worktree": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
         "ai-sdk-json-schema": "catalog:",
         "rouzer": "catalog:",
         "zod": "catalog:",
@@ -248,7 +248,7 @@
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
-        "@goddard-ai/worktree": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
       },
       "devDependencies": {
         "@goddard-ai/daemon": "workspace:^",
@@ -302,10 +302,11 @@
         "@goddard-ai/sdk-plugin": "workspace:*",
       },
     },
-    "features/worktree": {
-      "name": "@goddard-ai/worktree",
+    "features/session": {
+      "name": "@goddard-ai/session",
       "version": "0.1.0",
       "dependencies": {
+        "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
@@ -659,13 +660,13 @@
 
     "@goddard-ai/sdk-plugin": ["@goddard-ai/sdk-plugin@workspace:core/sdk-plugin"],
 
+    "@goddard-ai/session": ["@goddard-ai/session@workspace:features/session"],
+
     "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
 
     "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
-
-    "@goddard-ai/worktree": ["@goddard-ai/worktree@workspace:features/worktree"],
 
     "@goddard-ai/worktree-plugin": ["@goddard-ai/worktree-plugin@workspace:core/worktree-plugin"],
 

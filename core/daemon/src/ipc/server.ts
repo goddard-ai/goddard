@@ -9,7 +9,7 @@ import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { worktreePlugin } from "@goddard-ai/worktree/daemon"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { getErrorMessage } from "radashi"
 
 import { createConfigManager } from "../config-manager.ts"
@@ -186,7 +186,7 @@ export async function startDaemonServer(
 
   const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
   const inboxSetup = await inboxPlugin.setup?.({ inboxManager })
-  const worktreeSetup = await worktreePlugin.setup?.({
+  const sessionSetup = await sessionPlugin.setup?.({
     getWorktree: (id) => sessionManager.getWorktree(id),
     mountReviewSession: (id) => sessionManager.mountReviewSession(id),
     runReviewSession: (id) => sessionManager.runReviewSession(id),
@@ -199,8 +199,8 @@ export async function startDaemonServer(
   if (!inboxSetup?.requestHandlers) {
     throw new Error("Inbox daemon plugin did not return request handlers")
   }
-  if (!worktreeSetup?.requestHandlers) {
-    throw new Error("Worktree daemon plugin did not return request handlers")
+  if (!sessionSetup?.requestHandlers) {
+    throw new Error("Session daemon plugin did not return request handlers")
   }
 
   const requestHandlers = {
@@ -368,7 +368,7 @@ export async function startDaemonServer(
     "session.diagnostics": async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },
-    ...worktreeSetup.requestHandlers,
+    ...sessionSetup.requestHandlers,
     "session.workforce.get": async ({ id }) => {
       return sessionManager.getWorkforce(id)
     },

@@ -1,7 +1,7 @@
 import { adapterIpcSchema } from "@goddard-ai/adapter/daemon-ipc"
 import { inboxIpcSchema } from "@goddard-ai/inbox/daemon-ipc"
 import { $type, composeIpcSchemas, defineIpcSchema, IpcSchema } from "@goddard-ai/ipc"
-import { worktreeIpcSchema } from "@goddard-ai/worktree/daemon-ipc"
+import { sessionIpcSchema } from "@goddard-ai/session/daemon-ipc"
 import { z } from "zod"
 
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
@@ -284,5 +284,5 @@ export const daemonIpcSchema = composeIpcSchemas([
   coreDaemonIpcSchema,
   adapterIpcSchema,
   inboxIpcSchema,
-  worktreeIpcSchema,
+  sessionIpcSchema,
 ]) satisfies IpcSchema

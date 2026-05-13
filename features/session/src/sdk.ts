@@ -29,8 +29,8 @@ export function createSessionWorktreeNamespace(client: DaemonIpcClient) {
   }
 }
 
-export const worktreeSdkPlugin = defineSdkPlugin({
-  name: "worktree",
+export const sessionSdkPlugin = defineSdkPlugin({
+  name: "session",
   namespace: "session",
   create({ client }: { client: DaemonIpcClient }) {
     return createSessionWorktreeNamespace(client)

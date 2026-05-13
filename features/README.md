@@ -45,7 +45,8 @@ loading remain in core packages.
 
 `features/inbox` is the current reference daemon + SDK + app feature package.
 
-`features/worktree` owns session worktree schemas, daemon IPC routes, SDK
-session worktree method construction, and the daemon feature extension that the
-session feature will consume. Low-level linked-worktree substrate and
-third-party worktree provider contracts remain in core packages.
+`features/session` owns session feature schemas, session-owned daemon IPC
+routes, SDK session method fragments, app session metadata, and the first-class
+daemon `context.session` extension that downstream feature packages consume.
+Low-level linked-worktree substrate and third-party worktree provider contracts
+remain in core packages.

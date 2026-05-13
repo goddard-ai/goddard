@@ -62,11 +62,11 @@ import type {
   SessionSubpackagesResponse,
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
-import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type {
   GetSessionWorktreeResponse,
   MutateSessionReviewSessionResponse,
-} from "@goddard-ai/worktree/schema"
+} from "@goddard-ai/session/schema"
+import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
 
