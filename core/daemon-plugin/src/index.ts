@@ -63,13 +63,14 @@ type InferConfigDefinition<TPlugin> = TPlugin extends {
 
 type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
 
+type SetupConfigContext<TConfig> = keyof TConfig extends never ? {} : { readonly config: TConfig }
+
 /** Infers setup context fields from a plugin's own definition and consumed plugins. */
 export type SetupContext<
   TConsumes extends readonly unknown[],
   TSelf = unknown,
-> = UnionToIntersection<InferProvides<TConsumes[number]>> & {
-  readonly config: UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>
-}
+> = UnionToIntersection<InferProvides<TConsumes[number]>> &
+  SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>>
 
 /** Daemon plugin shape used to constrain feature plugin values without widening them. */
 export type Plugin = {
@@ -79,7 +80,6 @@ export type Plugin = {
   readonly config?: ConfigDefinition
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
-  readonly createRequestHandlers?: (...args: any[]) => unknown
   // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
   readonly setup?: (context: any) => unknown | Promise<unknown>
   readonly register?: (...args: never[]) => void | Promise<void>
@@ -152,9 +152,17 @@ type PluginOptions<
   readonly register?: TRegister
 }
 
-type PluginSetup<TConsumes extends readonly Plugin[] | undefined, TSelf> = (
-  context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
-) => unknown | Promise<unknown>
+type PluginSetup<TConsumes extends readonly Plugin[] | undefined, TSelf, TContext> = (
+  context: TContext & SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
+) => void | SetupContributions<TSelf> | Promise<void | SetupContributions<TSelf>>
+
+type SetupContributions<TPlugin> = TPlugin extends { readonly ipc: infer TIpc }
+  ? {
+      readonly requestHandlers: RequestHandlers<TIpc>
+    }
+  : {
+      readonly requestHandlers?: never
+    }
 
 type DefinePlugin = {
   <
@@ -165,21 +173,21 @@ type DefinePlugin = {
     const TIpc extends IpcSchema,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
-    const TRequestHandlerArgs extends readonly unknown[],
+    const TContext,
   >(
     plugin: PluginOptions<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
       readonly ipc: TIpc
-      readonly createRequestHandlers: (...args: TRequestHandlerArgs) => RequestHandlers<TIpc>
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+        PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>,
+        TContext
       >
     },
   ): PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
-    readonly createRequestHandlers: (...args: TRequestHandlerArgs) => RequestHandlers<TIpc>
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+      PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>,
+      TContext
     >
   }
   <
@@ -190,18 +198,21 @@ type DefinePlugin = {
     const TIpc extends IpcSchema | undefined,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
+    const TContext,
   >(
     plugin: PluginOptions<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
-      readonly createRequestHandlers?: undefined
+      readonly ipc?: undefined
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+        PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>,
+        TContext
       >
     },
   ): PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+      PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>,
+      TContext
     >
   }
 }

@@ -3,7 +3,7 @@ import { once } from "node:events"
 import type { Server } from "node:http"
 import * as acp from "@agentclientprotocol/sdk"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
-import { createInboxRequestHandlers } from "@goddard-ai/inbox/daemon"
+import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
@@ -184,9 +184,28 @@ export async function startDaemonServer(
     return actor.requestId
   }
 
+  const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
+  const inboxSetup = await inboxPlugin.setup?.({ inboxManager })
+  const worktreeSetup = await worktreePlugin.setup?.({
+    getWorktree: (id) => sessionManager.getWorktree(id),
+    mountReviewSession: (id) => sessionManager.mountReviewSession(id),
+    runReviewSession: (id) => sessionManager.runReviewSession(id),
+    unmountReviewSession: (id) => sessionManager.unmountReviewSession(id),
+  })
+
+  if (!adapterSetup?.requestHandlers) {
+    throw new Error("Adapter daemon plugin did not return request handlers")
+  }
+  if (!inboxSetup?.requestHandlers) {
+    throw new Error("Inbox daemon plugin did not return request handlers")
+  }
+  if (!worktreeSetup?.requestHandlers) {
+    throw new Error("Worktree daemon plugin did not return request handlers")
+  }
+
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),
-    ...adapterPlugin.createRequestHandlers({ registryService, configManager }),
+    ...adapterSetup.requestHandlers,
     "auth.device.start": async (payload) => client.auth.startDeviceFlow(payload),
     "auth.device.complete": async (payload) => {
       const session = await client.auth.completeDeviceFlow(payload)
@@ -349,12 +368,7 @@ export async function startDaemonServer(
     "session.diagnostics": async ({ id }) => {
       return sessionManager.getDiagnostics(id)
     },
-    ...worktreePlugin.createRequestHandlers({
-      getWorktree: (id) => sessionManager.getWorktree(id),
-      mountReviewSession: (id) => sessionManager.mountReviewSession(id),
-      runReviewSession: (id) => sessionManager.runReviewSession(id),
-      unmountReviewSession: (id) => sessionManager.unmountReviewSession(id),
-    }),
+    ...worktreeSetup.requestHandlers,
     "session.workforce.get": async ({ id }) => {
       return sessionManager.getWorkforce(id)
     },
@@ -402,7 +416,7 @@ export async function startDaemonServer(
         id,
       }
     },
-    ...createInboxRequestHandlers({ inboxManager }),
+    ...inboxSetup.requestHandlers,
     "action.run": async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionManager.newSession({

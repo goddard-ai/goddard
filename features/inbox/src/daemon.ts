@@ -22,19 +22,16 @@ type InboxHandlerContext = {
   }
 }
 
-/** Creates daemon request handlers for feature-owned inbox IPC routes. */
-export function createInboxRequestHandlers({ inboxManager }: InboxHandlerContext) {
-  return {
-    "inbox.list": async (payload: ListInboxRequest) => inboxManager.listInboxItems(payload),
-    "inbox.update": async (payload: UpdateInboxItemRequest) =>
-      inboxManager.updateInboxItem(payload),
-    "inbox.bulkUpdate": async (payload: BulkUpdateInboxItemsRequest) =>
-      inboxManager.bulkUpdateInboxItems(payload),
-  }
-}
-
 export const inboxPlugin = definePlugin({
   name: "inbox",
   ipc: inboxIpcSchema,
-  createRequestHandlers: createInboxRequestHandlers,
+  setup({ inboxManager }: InboxHandlerContext) {
+    return {
+      requestHandlers: {
+        "inbox.list": async (payload) => inboxManager.listInboxItems(payload),
+        "inbox.update": async (payload) => inboxManager.updateInboxItem(payload),
+        "inbox.bulkUpdate": async (payload) => inboxManager.bulkUpdateInboxItems(payload),
+      },
+    }
+  },
 })

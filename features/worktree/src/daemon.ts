@@ -2,13 +2,9 @@ import { definePlugin } from "@goddard-ai/daemon-plugin"
 
 import { worktreeIpcSchema } from "./daemon-ipc.ts"
 import type {
-  GetSessionWorktreeRequest,
   GetSessionWorktreeResponse,
-  MountSessionReviewSessionRequest,
   MutateSessionReviewSessionResponse,
-  RunSessionReviewSessionRequest,
   SessionWorktreeIdentity,
-  UnmountSessionReviewSessionRequest,
 } from "./schema.ts"
 
 /** Session worktree behavior exposed for the session feature and daemon IPC handlers. */
@@ -31,15 +27,14 @@ export const worktreePlugin = definePlugin({
   provides: {
     worktree: null as unknown as WorktreeFeatureExtension,
   },
-  createRequestHandlers(context: WorktreeFeatureExtension) {
+  setup(context: WorktreeFeatureExtension) {
     return {
-      "session.worktree.get": async ({ id }: GetSessionWorktreeRequest) => context.getWorktree(id),
-      "session.reviewSession.mount": async ({ id }: MountSessionReviewSessionRequest) =>
-        context.mountReviewSession(id),
-      "session.reviewSession.run": async ({ id }: RunSessionReviewSessionRequest) =>
-        context.runReviewSession(id),
-      "session.reviewSession.unmount": async ({ id }: UnmountSessionReviewSessionRequest) =>
-        context.unmountReviewSession(id),
+      requestHandlers: {
+        "session.worktree.get": async ({ id }) => context.getWorktree(id),
+        "session.reviewSession.mount": async ({ id }) => context.mountReviewSession(id),
+        "session.reviewSession.run": async ({ id }) => context.runReviewSession(id),
+        "session.reviewSession.unmount": async ({ id }) => context.unmountReviewSession(id),
+      },
     }
   },
 })

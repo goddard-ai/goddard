@@ -18,7 +18,13 @@ Use `definePlugin()` from `features/<name>/src/daemon.ts` to preserve exact plug
 export const inboxPlugin = definePlugin({
   name: "inbox",
   ipc: inboxIpcSchema,
-  createRequestHandlers: createInboxRequestHandlers,
+  setup({ inboxManager }) {
+    return {
+      requestHandlers: {
+        "inbox.list": (payload) => inboxManager.listInboxItems(payload),
+      },
+    }
+  },
 })
 ```
 
