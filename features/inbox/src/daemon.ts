@@ -1,4 +1,4 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, defineSetupContext } from "@goddard-ai/daemon-plugin"
 
 import { inboxIpcSchema } from "./daemon-ipc.ts"
 import type {
@@ -25,7 +25,8 @@ type InboxHandlerContext = {
 export const inboxPlugin = definePlugin({
   name: "inbox",
   ipc: inboxIpcSchema,
-  setup({ inboxManager }: InboxHandlerContext) {
+  setupContext: defineSetupContext<InboxHandlerContext>(),
+  setup({ inboxManager }) {
     return {
       requestHandlers: {
         "inbox.list": async (payload) => inboxManager.listInboxItems(payload),

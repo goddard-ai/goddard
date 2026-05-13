@@ -7,11 +7,6 @@ describe("daemon plugin composition", () => {
   test("orders plugins by consumed dependencies and composes IPC/config fragments", () => {
     const session = definePlugin({
       name: "session",
-      provides: {
-        session: {
-          start: () => "started",
-        },
-      },
       config: {
         schema: z.object({
           enabled: z.boolean(),
@@ -25,6 +20,18 @@ describe("daemon plugin composition", () => {
           },
         },
         streams: {},
+      },
+      setup() {
+        return {
+          provides: {
+            session: {
+              start: () => "started",
+            },
+          },
+          requestHandlers: {
+            "session.create": () => ({ id: "session-1" }),
+          },
+        }
       },
     })
     const inbox = definePlugin({
