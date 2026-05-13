@@ -185,27 +185,18 @@ export default component SessionChatView(props: {
           })
         }
 
-        const olderHistoryState = page.olderHistoryState.value
+        const olderHistory = page.olderHistory
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
         async function loadOlderHistory() {
-          if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
+          if (!canLoadOlderHistory || olderHistory.isPending.value) {
             return
           }
 
-          page.startOlderHistoryLoad()
-
           try {
-            const history = await goddardSdk.session.history({
-              id: chat.session.id,
-              cursor: chat.nextCursor,
-            })
-
-            chat.prependOlderHistory(history)
-            page.finishOlderHistoryLoad()
+            await olderHistory.run(() => chat.loadOlderHistory())
           } catch (error) {
             console.error("Failed to load older session history.", error)
-            page.failOlderHistoryLoad(formatSessionRequestError(error))
           }
         }
 
@@ -331,8 +322,10 @@ export default component SessionChatView(props: {
               messages={chat.transcriptMessages}
               olderHistory={{
                 canLoad: canLoadOlderHistory,
-                error: olderHistoryState.status === "error" ? olderHistoryState.message : null,
-                loading: olderHistoryState.status === "loading",
+                error: olderHistory.error.value
+                  ? formatSessionRequestError(olderHistory.error.value)
+                  : null,
+                loading: olderHistory.isPending.value,
                 onLoad: loadOlderHistory,
               }}
               onSelectPermissionOption={async (input) => {

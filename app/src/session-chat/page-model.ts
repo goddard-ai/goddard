@@ -1,13 +1,9 @@
 import { signal } from "@preact/signals"
 
 import { createPageModelContext } from "~/lib/page-model-context.tsrx"
+import { createTask } from "~/lib/task.ts"
 
 export type SessionChatHeaderAction = "cancel" | "complete" | "reconnect"
-
-export type SessionChatOlderHistoryState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { message: string; status: "error" }
 
 export type SessionChatHeaderActionError = {
   description: string
@@ -21,7 +17,7 @@ export const {
   const retryVersion = signal(0)
   const submitError = signal<unknown>(null)
   const activeHeaderAction = signal<SessionChatHeaderAction | null>(null)
-  const olderHistoryState = signal<SessionChatOlderHistoryState>({ status: "idle" })
+  const olderHistory = createTask()
   const headerActionError = signal<SessionChatHeaderActionError | null>(null)
   const cancelRequestedTurnId = signal<string | null>(null)
 
@@ -37,15 +33,6 @@ export const {
     failHeaderAction(error: SessionChatHeaderActionError) {
       headerActionError.value = error
     },
-    failOlderHistoryLoad(message: string) {
-      olderHistoryState.value = {
-        status: "error",
-        message,
-      }
-    },
-    finishOlderHistoryLoad() {
-      olderHistoryState.value = { status: "idle" }
-    },
     headerActionError,
     markCancelRequested(turnId: string) {
       cancelRequestedTurnId.value = turnId
@@ -53,7 +40,7 @@ export const {
     markSubmitFailed(error: unknown) {
       submitError.value = error
     },
-    olderHistoryState,
+    olderHistory,
     retryLoad() {
       retryVersion.value += 1
     },
@@ -61,9 +48,6 @@ export const {
     startHeaderAction(action: SessionChatHeaderAction) {
       activeHeaderAction.value = action
       headerActionError.value = null
-    },
-    startOlderHistoryLoad() {
-      olderHistoryState.value = { status: "loading" }
     },
     submitError,
   }

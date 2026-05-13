@@ -431,6 +431,20 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.#refreshTranscriptState()
   }
 
+  /** Loads the next older history page and merges it ahead of the current transcript. */
+  async loadOlderHistory() {
+    if (!this.hasMore || this.nextCursor === null) {
+      return
+    }
+
+    const history = await goddardSdk.session.history({
+      id: this.session.id,
+      cursor: this.nextCursor,
+    })
+
+    this.prependOlderHistory(history)
+  }
+
   /** Merges one older history page ahead of the currently loaded transcript. */
   prependOlderHistory(history: GetSessionHistoryResponse) {
     this.connection = history.connection
