@@ -1,4 +1,4 @@
-import { signal, type Signal } from "@preact/signals"
+import { signal } from "@preact/signals"
 
 import { createPageModelContext } from "~/lib/page-model-context.tsrx"
 
@@ -14,29 +14,10 @@ export type SessionChatHeaderActionError = {
   title: string
 }
 
-type SessionChatPageModel = {
-  activeHeaderAction: Signal<SessionChatHeaderAction | null>
-  cancelRequestedTurnId: Signal<string | null>
-  clearHeaderAction: () => void
-  clearSubmitError: () => void
-  failHeaderAction: (error: SessionChatHeaderActionError) => void
-  failOlderHistoryLoad: (message: string) => void
-  finishOlderHistoryLoad: () => void
-  headerActionError: Signal<SessionChatHeaderActionError | null>
-  markCancelRequested: (turnId: string) => void
-  markSubmitFailed: (error: unknown) => void
-  olderHistoryState: Signal<SessionChatOlderHistoryState>
-  retryLoad: () => void
-  retryVersion: Signal<number>
-  startHeaderAction: (action: SessionChatHeaderAction) => void
-  startOlderHistoryLoad: () => void
-  submitError: Signal<unknown>
-}
-
 export const {
   PageModelProvider: SessionChatPageModelProvider,
   usePageModel: useSessionChatPageModel,
-} = createPageModelContext<SessionChatPageModel>(function () {
+} = createPageModelContext(function () {
   const retryVersion = signal(0)
   const submitError = signal<unknown>(null)
   const activeHeaderAction = signal<SessionChatHeaderAction | null>(null)

@@ -4,9 +4,9 @@ import { createModel, useModel, type Model, type ReadonlySignal } from "@preact/
 
 type PageModelValue<Value> = Value extends ReadonlySignal<unknown> ? Value : Value extends (...args: any[]) => any ? Value : Value extends object ? { [Key in keyof Value]: PageModelValue<Value[Key]> } : never
 
-type PageModelFactory<PageModel extends object> = () => PageModelValue<PageModel>
+export function createPageModelContext<CreatePageModel extends () => object>(createPageModel: CreatePageModel & (() => PageModelValue<ReturnType<CreatePageModel>>)) {
+  type PageModel = ReturnType<CreatePageModel>
 
-export function createPageModelContext<PageModel extends object>(createPageModel: PageModelFactory<PageModel>) {
   const PageModel = createModel<PageModel>(createPageModel as never)
   const pageModelContext = createContext<Model<PageModel> | null>(null)
 
