@@ -10,12 +10,6 @@ import type { z } from "zod"
 /** Named feature extensions exposed by one daemon plugin to plugins that consume it. */
 export type FeatureExtensions = Record<string, unknown>
 
-// Plugin definitions need assignable setup callbacks while `definePlugin()` preserves
-// the exact context for feature authors.
-type SetupFunction<TContext> = {
-  bivarianceHack: (context: TContext) => unknown | Promise<unknown>
-}["bivarianceHack"]
-
 type UnionToIntersection<TUnion> = (
   TUnion extends unknown ? (value: TUnion) => void : never
 ) extends (value: infer TIntersection) => void
@@ -94,7 +88,8 @@ export type Plugin = {
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
   readonly createRequestHandlers?: (...args: any[]) => unknown
-  readonly setup?: SetupFunction<SetupContext<readonly Plugin[], Plugin>>
+  // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
+  readonly setup?: (context: any) => unknown | Promise<unknown>
   readonly register?: (...args: never[]) => void | Promise<void>
 }
 
@@ -133,7 +128,9 @@ type InferConsumes<TPlugin> = TPlugin extends {
 export function definePlugin<const TPlugin extends Omit<Plugin, "setup">>(
   plugin: TPlugin & {
     readonly createRequestHandlers?: RequestHandlerFactory<TPlugin>
-    readonly setup?: SetupFunction<SetupContext<InferConsumes<TPlugin>, TPlugin>>
+    readonly setup?: (
+      context: SetupContext<InferConsumes<TPlugin>, TPlugin>,
+    ) => unknown | Promise<unknown>
   },
 ) {
   return plugin
