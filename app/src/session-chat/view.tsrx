@@ -34,6 +34,8 @@ export component SessionChatView(props: {
   projectPath: string | null;
   sessionId: DaemonSession["id"];
 }) {
+  const [, setRetryVersion] = useState(0)
+
   <main class={styles.root}>
     try {
       const [sessionHistory, { session }] = useQueries([
@@ -397,8 +399,6 @@ export component SessionChatView(props: {
         title="Loading session"
       />
     } catch {
-      const [, setRetryVersion] = useState(0)
-
       <SessionChatStateMessage
         actionLabel="Try again"
         description="The daemon-backed session or history request failed."
