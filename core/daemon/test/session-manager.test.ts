@@ -8,12 +8,13 @@ import { afterEach, expect, test, vi } from "bun:test"
 import * as tarFs from "tar-fs"
 
 import { resetDb } from "../src/persistence/store.ts"
+import { resolveAgentProcessSpec } from "../src/session/agent-process.ts"
 import {
   detectBinaryTargetPayloadFormat,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
 } from "../src/session/archive.ts"
-import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/session/manager.ts"
+import { injectSystemPrompt } from "../src/session/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME

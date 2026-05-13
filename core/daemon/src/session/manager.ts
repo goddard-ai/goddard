@@ -1,16 +1,10 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { constants as fsConstants, type Dirent } from "node:fs"
-import { access, mkdir, mkdtemp, readdir, realpath, rename, rm, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { basename, dirname, join, relative, resolve } from "node:path"
-import { Readable, Writable } from "node:stream"
-import { ReadableStream } from "node:stream/web"
-import { pathToFileURL } from "node:url"
+import { randomBytes, randomUUID } from "node:crypto"
+import { realpath } from "node:fs/promises"
+import { resolve } from "node:path"
 import * as acp from "@agentclientprotocol/sdk"
-import treeKill, { type ProcessLike } from "@alloc/tree-kill"
+import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { IpcClientError } from "@goddard-ai/ipc"
-import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import {
   listReviewSessions,
   startReviewSync,
@@ -21,20 +15,12 @@ import {
   type ReviewSyncResult,
   type ReviewSyncStatusData,
 } from "@goddard-ai/review-sync"
-import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
-import {
-  agentBinaryPlatforms,
-  type AgentBinaryPlatform,
-  type AgentBinaryTarget,
-  type AgentDistribution,
-} from "@goddard-ai/schema/agent-distribution"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
   AbortedSessionPrompt,
   CancelSessionResponse,
   CreateSessionRequest,
   DaemonSession,
-  DaemonSessionMetadata,
   DaemonSessionStatus,
   GetSessionChangesResponse,
   GetSessionDiagnosticsResponse,
@@ -48,12 +34,8 @@ import type {
   ListSessionsRequest,
   ListSessionsResponse,
   MutateSessionReviewSessionResponse,
-  SessionComposerFileSuggestion,
-  SessionComposerSkillSuggestion,
-  SessionComposerSlashCommandSuggestion,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
-  SessionConnection,
   SessionDraftSuggestionsRequest,
   SessionHistoryTurn,
   SessionInboxMetadataInput,
@@ -70,7 +52,6 @@ import { getErrorMessage, omit } from "radashi"
 
 import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
 import type { ConfigManager } from "../config-manager.ts"
-import { prependAgentBinToPath } from "../config.ts"
 import { SessionContext } from "../context.ts"
 import type { InboxManager } from "../inbox/manager.ts"
 import { resolveInboxMetadata } from "../inbox/metadata.ts"
@@ -94,12 +75,31 @@ import {
   type AgentOutputStream,
 } from "./acp.ts"
 import {
-  binaryInstallMarkerFileName,
-  installBinaryTargetPayload,
-  resolveInstalledBinaryCommand,
-} from "./archive.ts"
+  spawnAgentProcess,
+  waitForAgentProcessExit,
+  type AgentProcessHandle,
+} from "./agent-process.ts"
 import { readSessionChanges } from "./changes.ts"
+import {
+  getDraftComposerSuggestions,
+  getSlashComposerSuggestions,
+  MAX_COMPOSER_SUGGESTION_LIMIT,
+  normalizeComposerSuggestionLimit,
+} from "./composer-suggestions.ts"
 import type { ACPRegistryService } from "./registry.ts"
+import {
+  agentNameFromInput,
+  createReconnectRequest,
+  createSessionRecordUpdate,
+  disconnectedConnectionMode,
+  mergeSessionMetadata,
+  parseRepoScope,
+  persistLaunchedSession,
+  resolveExistingSessionArtifacts,
+  resolveLatestStoredTurnSequence,
+  toConnectionState,
+  type ResolvedCreateSessionRequest,
+} from "./session-records.ts"
 import { discoverSessionSubpackages } from "./subpackages.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
@@ -146,15 +146,6 @@ const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 type SessionDoc = KindOutput<typeof db.schema.sessions>
 type SessionTurnDraftDoc = KindOutput<typeof db.schema.sessionTurnDrafts>
 type SessionWorktreeDoc = KindOutput<typeof db.schema.worktrees>
-type SessionWorkforceDoc = KindOutput<typeof db.schema.workforces>
-
-type ExistingSessionArtifacts = {
-  draftRecord: SessionTurnDraftDoc | null
-  nextTurnSequence: number
-  worktreeRecord: SessionWorktreeDoc | null
-  worktree: SessionWorktreeState | null
-  workforceRecord: SessionWorkforceDoc | null
-}
 
 type SessionTitleGeneratorConfig = NonNullable<
   NonNullable<UserConfig["sessionTitles"]>["generator"]
@@ -163,354 +154,6 @@ type SessionTitleGeneratorConfig = NonNullable<
 const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
 const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
   "Queued prompt aborted before dispatch by session cancellation."
-const DEFAULT_COMPOSER_SUGGESTION_LIMIT = 20
-const MAX_COMPOSER_SUGGESTION_LIMIT = 50
-const COMPOSER_IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"])
-
-/** Returns true when one filesystem path currently exists. */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path, fsConstants.F_OK)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Reads one directory with string entry names across Node and Bun. */
-async function readDirectoryEntries(path: string) {
-  return (await readdir(path, {
-    encoding: "utf-8",
-    withFileTypes: true,
-  })) as Dirent<string>[]
-}
-
-/** Returns true when one unknown value is a plain object record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
-/** Bounds the chat-composer suggestion limit to one small stable range. */
-function normalizeComposerSuggestionLimit(limit: number | undefined) {
-  return Math.min(
-    Math.max(limit ?? DEFAULT_COMPOSER_SUGGESTION_LIMIT, 1),
-    MAX_COMPOSER_SUGGESTION_LIMIT,
-  )
-}
-
-/** Resolves the current user home directory while respecting test overrides. */
-function getUserHomeDir() {
-  return process.env.HOME || homedir()
-}
-
-/** Formats one path relative to the active session cwd for compact UI display. */
-function formatCwdRelativePath(cwd: string, path: string) {
-  const relativePath = relative(cwd, path)
-
-  if (relativePath.length === 0) {
-    return "."
-  }
-
-  return relativePath.startsWith("..") ? relativePath : `./${relativePath}`
-}
-
-/** Formats one path relative to the user home directory when possible. */
-function formatHomeRelativePath(path: string) {
-  const relativePath = relative(getUserHomeDir(), path)
-
-  if (relativePath.length === 0) {
-    return "~"
-  }
-
-  return relativePath.startsWith("..") ? path : `~/${relativePath}`
-}
-
-/** Converts one filesystem path into the ACP-friendly file URI used for resource links. */
-function toFileUri(path: string) {
-  return pathToFileURL(path).toString()
-}
-
-/** Produces one stable display suggestion for a file or folder under the session cwd. */
-function toFilesystemSuggestion(cwd: string, path: string, type: "file" | "folder") {
-  return {
-    type,
-    path,
-    uri: toFileUri(path),
-    label: basename(path),
-    detail: formatCwdRelativePath(cwd, path),
-  } satisfies SessionComposerFileSuggestion
-}
-
-/** Returns true when one filesystem entry matches the current case-insensitive query. */
-function matchesFilesystemQuery(cwd: string, path: string, query: string) {
-  const normalizedQuery = query.trim().toLowerCase()
-
-  if (normalizedQuery.length === 0) {
-    return true
-  }
-
-  return (
-    basename(path).toLowerCase().includes(normalizedQuery) ||
-    formatCwdRelativePath(cwd, path).toLowerCase().includes(normalizedQuery)
-  )
-}
-
-/** Sorts directory entries so folders stay ahead of files and names remain deterministic. */
-function sortDirectoryEntries(entries: readonly Dirent<string>[]) {
-  return [...entries].sort((left, right) => {
-    if (left.isDirectory() !== right.isDirectory()) {
-      return left.isDirectory() ? -1 : 1
-    }
-
-    return left.name.localeCompare(right.name)
-  })
-}
-
-/** Reads immediate child suggestions for one empty `@` lookup. */
-async function listComposerEntriesAtCwd(cwd: string, limit: number) {
-  const entries = sortDirectoryEntries(await readDirectoryEntries(cwd))
-  const suggestions: SessionComposerFileSuggestion[] = []
-
-  for (const entry of entries) {
-    if (entry.isDirectory() && COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)) {
-      continue
-    }
-
-    if (!entry.isDirectory() && !entry.isFile()) {
-      continue
-    }
-
-    const path = join(cwd, entry.name)
-    suggestions.push(toFilesystemSuggestion(cwd, path, entry.isDirectory() ? "folder" : "file"))
-
-    if (suggestions.length >= limit) {
-      break
-    }
-  }
-
-  return suggestions
-}
-
-/** Recursively searches the session cwd subtree for matching file and folder suggestions. */
-async function searchComposerEntriesUnderCwd(cwd: string, query: string, limit: number) {
-  const suggestions: SessionComposerFileSuggestion[] = []
-
-  async function visit(directory: string) {
-    if (suggestions.length >= limit) {
-      return
-    }
-
-    const entries = sortDirectoryEntries(await readDirectoryEntries(directory))
-
-    for (const entry of entries) {
-      if (entry.isDirectory() && COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)) {
-        continue
-      }
-
-      if (!entry.isDirectory() && !entry.isFile()) {
-        continue
-      }
-
-      const path = join(directory, entry.name)
-      const type = entry.isDirectory() ? "folder" : "file"
-
-      if (matchesFilesystemQuery(cwd, path, query)) {
-        suggestions.push(toFilesystemSuggestion(cwd, path, type))
-
-        if (suggestions.length >= limit) {
-          return
-        }
-      }
-
-      if (entry.isDirectory()) {
-        await visit(path)
-
-        if (suggestions.length >= limit) {
-          return
-        }
-      }
-    }
-  }
-
-  await visit(cwd)
-  return suggestions
-}
-
-/** Resolves the nearest `.agents/skills` directory reachable from the session cwd. */
-async function findNearestSkillRoot(cwd: string) {
-  let current = resolve(cwd)
-
-  while (true) {
-    const candidate = join(current, ".agents", "skills")
-
-    if (await pathExists(candidate)) {
-      return candidate
-    }
-
-    const parent = dirname(current)
-
-    if (parent === current) {
-      return null
-    }
-
-    current = parent
-  }
-}
-
-/** Reads one skill root into stable `$` composer suggestion items. */
-async function readSkillSuggestions(params: {
-  cwd: string
-  root: string
-  source: "local" | "global"
-  query: string
-}) {
-  if (!(await pathExists(params.root))) {
-    return [] satisfies SessionComposerSuggestionsResponse["suggestions"]
-  }
-
-  const entries = sortDirectoryEntries(await readDirectoryEntries(params.root))
-  const normalizedQuery = params.query.trim().toLowerCase()
-  const suggestions: SessionComposerSkillSuggestion[] = []
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue
-    }
-
-    const skillPath = join(params.root, entry.name, "SKILL.md")
-
-    if (!(await pathExists(skillPath))) {
-      continue
-    }
-
-    const detail =
-      params.source === "global"
-        ? formatHomeRelativePath(skillPath)
-        : formatCwdRelativePath(params.cwd, skillPath)
-
-    if (
-      normalizedQuery.length > 0 &&
-      entry.name.toLowerCase().includes(normalizedQuery) === false &&
-      detail.toLowerCase().includes(normalizedQuery) === false
-    ) {
-      continue
-    }
-
-    suggestions.push({
-      type: "skill",
-      path: skillPath,
-      uri: toFileUri(skillPath),
-      label: entry.name,
-      detail,
-      source: params.source,
-    })
-  }
-
-  return suggestions
-}
-
-/** Merges local and global skill roots while preserving local name precedence. */
-async function getSkillComposerSuggestions(cwd: string, query: string, limit: number) {
-  const localRoot = await findNearestSkillRoot(cwd)
-  const globalRoot = join(getUserHomeDir(), ".agents", "skills")
-  const [localSuggestions, globalSuggestions] = await Promise.all([
-    localRoot ? readSkillSuggestions({ cwd, root: localRoot, source: "local", query }) : [],
-    readSkillSuggestions({ cwd, root: globalRoot, source: "global", query }),
-  ])
-  const suggestions: SessionComposerSkillSuggestion[] = []
-  const seenLabels = new Set<string>()
-
-  for (const suggestion of [...localSuggestions, ...globalSuggestions]) {
-    if (seenLabels.has(suggestion.label)) {
-      continue
-    }
-
-    seenLabels.add(suggestion.label)
-    suggestions.push(suggestion)
-
-    if (suggestions.length >= limit) {
-      break
-    }
-  }
-
-  return suggestions
-}
-
-/** Filters the latest ACP slash commands into session composer suggestion items. */
-function getSlashComposerSuggestions(
-  availableCommands: readonly acp.AvailableCommand[],
-  query: string,
-  limit: number,
-) {
-  const normalizedQuery = query.trim().toLowerCase()
-  const suggestions: SessionComposerSlashCommandSuggestion[] = []
-
-  for (const command of availableCommands) {
-    const inputHint =
-      isRecord(command.input) && typeof command.input.hint === "string" ? command.input.hint : null
-
-    if (
-      normalizedQuery.length > 0 &&
-      command.name.toLowerCase().includes(normalizedQuery) === false &&
-      command.description.toLowerCase().includes(normalizedQuery) === false &&
-      (inputHint?.toLowerCase().includes(normalizedQuery) ?? false) === false
-    ) {
-      continue
-    }
-
-    suggestions.push({
-      type: "slash_command",
-      name: command.name,
-      description: command.description,
-      inputHint,
-    })
-
-    if (suggestions.length >= limit) {
-      break
-    }
-  }
-
-  return suggestions
-}
-
-/** Reads the highest persisted turn sequence across completed turns and any durable draft. */
-function resolveLatestStoredTurnSequence(id: SessionId) {
-  const latestTurn =
-    db.sessionTurns.first({
-      where: { sessionId: id },
-      orderBy: {
-        sessionId: "asc",
-        sequence: "desc",
-      },
-    }) ?? null
-  const draft =
-    db.sessionTurnDrafts.first({
-      where: { sessionId: id },
-      orderBy: {
-        sessionId: "asc",
-        sequence: "desc",
-      },
-    }) ?? null
-
-  return Math.max(latestTurn?.sequence ?? 0, draft?.sequence ?? 0)
-}
-
-/** Resolves the current set of draft composer suggestions before a daemon session exists. */
-async function getDraftComposerSuggestions(params: {
-  cwd: string
-  trigger: SessionDraftSuggestionsRequest["trigger"]
-  query: string
-  limit: number
-}) {
-  if (params.trigger === "at") {
-    return params.query.trim().length === 0
-      ? await listComposerEntriesAtCwd(params.cwd, params.limit)
-      : await searchComposerEntriesUnderCwd(params.cwd, params.query, params.limit)
-  }
-
-  return await getSkillComposerSuggestions(params.cwd, params.query, params.limit)
-}
-
 /** Lists local git branches for one launch dialog and keeps the current branch first. */
 async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
   const repoRoot = await resolveGitRepoRoot(cwd)
@@ -598,59 +241,8 @@ async function applyInitialSessionConfiguration(params: {
   }
 }
 
-/** Loads any persisted session-side artifacts that need to be reused during launch. */
-function resolveExistingSessionArtifacts(id: SessionId, existingSession: SessionDoc | null) {
-  if (!existingSession) {
-    return {
-      draftRecord: null,
-      nextTurnSequence: 1,
-      worktreeRecord: null,
-      worktree: null,
-      workforceRecord: null,
-    } satisfies ExistingSessionArtifacts
-  }
-
-  const draftRecord =
-    db.sessionTurnDrafts.first({
-      where: { sessionId: id },
-    }) ?? null
-  const worktreeRecord =
-    db.worktrees.first({
-      where: { sessionId: id },
-    }) ?? null
-  const workforceRecord =
-    db.workforces.first({
-      where: { sessionId: id },
-    }) ?? null
-
-  return {
-    draftRecord,
-    nextTurnSequence: resolveLatestStoredTurnSequence(id) + 1,
-    worktreeRecord,
-    worktree: toSessionWorktreeState(worktreeRecord),
-    workforceRecord,
-  } satisfies ExistingSessionArtifacts
-}
-
-/** Removes kindstore-only identity fields from one persisted worktree record. */
-function toSessionWorktreeState(record: SessionWorktreeDoc | null) {
-  if (!record) {
-    return null
-  }
-
-  const { id: _id, sessionId: _sessionId, ...worktree } = record
-  return worktree
-}
-
 /** Tracks in-flight client requests so agent responses can be correlated back to session state. */
 type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
-
-/** Describes the concrete child-process invocation for a resolved agent distribution. */
-type AgentProcessSpec = {
-  cmd: string
-  args: string[]
-  env?: Record<string, string>
-}
 
 /** Represents the most recent permission request awaiting a client decision. */
 type PermissionRequest = acp.AnyMessage & {
@@ -692,22 +284,6 @@ type PendingSteerRequest = {
 type PendingPromptRequest = {
   resolve: (response: acp.PromptResponse) => void
   reject: (error: Error) => void
-}
-
-/** Couples a binary target with the platform key that selected it. */
-type ResolvedBinaryTarget = {
-  platformKey: AgentBinaryPlatform
-  target: AgentBinaryTarget
-}
-
-/** Callback fired when one Bun-managed agent process exits. */
-type AgentProcessExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void
-
-/** Bun subprocess wrapper that preserves the exit hooks and stdio surface the daemon expects. */
-type AgentProcessHandle = ProcessLike & {
-  stdin: AgentInputStream
-  stdout: AgentOutputStream
-  onceExit: (handler: AgentProcessExitHandler) => void
 }
 
 /** Holds the live runtime state for a daemon-owned session process. */
@@ -755,11 +331,6 @@ interface NewSessionParams extends SessionLaunchParams {}
 /** Stored daemon session input accepted by `SessionManager.loadSession()`. */
 interface LoadSessionParams extends SessionLaunchParams {
   id: SessionId
-}
-
-/** Internal launch request shape after the daemon has resolved the effective agent. */
-type ResolvedCreateSessionRequest = CreateSessionRequest & {
-  agent: NonNullable<CreateSessionRequest["agent"]>
 }
 
 /** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
@@ -875,366 +446,9 @@ function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
   return params.request.oneShot === true && params.request.initialPrompt !== undefined
 }
 
-/** Derives reconnectability from stored connection state without joining adjacent kinds. */
-function toConnectionState(input: {
-  mode: SessionConnectionMode
-  activeDaemonSession: boolean
-}): SessionConnection {
-  return {
-    mode: input.mode,
-    reconnectable: input.mode === "live",
-    activeDaemonSession: input.activeDaemonSession,
-  }
-}
-
-/** Chooses the archived connection mode from whether any session turn history survived persistence. */
-function archivedConnectionMode(hasHistory: boolean): SessionConnectionMode {
-  return hasHistory ? "history" : "none"
-}
-
-/** Keeps reloadable sessions live even when the current daemon process has already detached. */
-function disconnectedConnectionMode(
-  hasHistory: boolean,
-  supportsLoadSession: boolean,
-): SessionConnectionMode {
-  return supportsLoadSession ? "live" : archivedConnectionMode(hasHistory)
-}
-
-/** Merges structured session metadata layers while dropping empty results. */
-function mergeSessionMetadata(
-  a: DaemonSessionMetadata | null | undefined,
-  b: DaemonSessionMetadata | null | undefined,
-): DaemonSessionMetadata | undefined {
-  const merged = { ...a, ...b }
-  return Object.keys(merged).length > 0 ? merged : undefined
-}
-
-/** Produces a stable agent name whether the request used an id or a resolved distribution. */
-function agentNameFromInput(agent: string | AgentDistribution): string {
-  if (typeof agent === "string") {
-    return agent
-  }
-
-  return agent.name
-}
-
 /** Returns true when the ACP adapter can reopen this session later via `session/load`. */
 function supportsSessionLoad(initialized: Pick<InitializedSession, "agentCapabilities">): boolean {
   return initialized.agentCapabilities?.loadSession === true
-}
-
-/** Rebuilds the daemon launch request used to reconnect one previously stored session. */
-function createReconnectRequest(session: SessionDoc): CreateSessionRequest {
-  return {
-    agent: session.agent ?? undefined,
-    cwd: session.cwd,
-    mcpServers: session.mcpServers,
-    systemPrompt: "",
-    repository: session.repository ?? undefined,
-    prNumber: session.prNumber ?? undefined,
-    metadata: session.metadata ?? undefined,
-  }
-}
-
-/** Builds the child-process environment expected by session agents. */
-function buildAgentProcessEnv(input: {
-  daemonUrl: string
-  token: string
-  agentBinDir: string
-  env?: Record<string, string>
-}): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    ...prependAgentBinToPath(input.agentBinDir, input.env),
-    GODDARD_DAEMON_URL: input.daemonUrl,
-    GODDARD_SESSION_TOKEN: input.token,
-  }
-}
-
-/** Wraps Bun's subprocess API with the minimal process hooks used by session management. */
-function createAgentProcessHandle(input: {
-  cmd: string
-  args: string[]
-  cwd: string
-  env: NodeJS.ProcessEnv
-}): AgentProcessHandle {
-  let exitState: { code: number | null; signal: NodeJS.Signals | null } | null = null
-  const exitHandlers = new Set<AgentProcessExitHandler>()
-  const subprocess = Bun.spawn([input.cmd, ...input.args], {
-    cwd: input.cwd,
-    env: input.env,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "inherit",
-    onExit(_subprocess, exitCode, signalCode) {
-      exitState = {
-        code: exitCode,
-        signal: signalCode as NodeJS.Signals | null,
-      }
-
-      for (const handler of exitHandlers) {
-        handler(exitState.code, exitState.signal)
-      }
-      exitHandlers.clear()
-    },
-  })
-
-  if (!subprocess.stdin || !subprocess.stdout) {
-    throw new Error(`Agent process ${input.cmd} did not expose piped stdio`)
-  }
-
-  const stdin = new Writable({
-    write(chunk, _encoding, callback) {
-      Promise.resolve(subprocess.stdin!.write(chunk))
-        .then(() => callback())
-        .catch((error) => {
-          callback(error instanceof Error ? error : new Error(getErrorMessage(error)))
-        })
-    },
-    final(callback) {
-      Promise.resolve(subprocess.stdin!.end())
-        .then(() => callback())
-        .catch((error) => {
-          callback(error instanceof Error ? error : new Error(getErrorMessage(error)))
-        })
-    },
-  })
-  const stdout = Readable.fromWeb(subprocess.stdout as unknown as ReadableStream)
-
-  return {
-    stdin,
-    stdout,
-    pid: subprocess.pid,
-    kill(signal) {
-      subprocess.kill(signal as never)
-      return true
-    },
-    onceExit(handler) {
-      if (exitState) {
-        handler(exitState.code, exitState.signal)
-        return
-      }
-
-      const wrapped: AgentProcessExitHandler = (code, signal) => {
-        exitHandlers.delete(wrapped)
-        handler(code, signal)
-      }
-      exitHandlers.add(wrapped)
-    },
-  }
-}
-
-/** Waits until one tracked agent process reports that it has exited. */
-function waitForAgentProcessExit(process: AgentProcessHandle) {
-  return new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    process.onceExit((code, signal) => {
-      resolve({ code, signal })
-    })
-  })
-}
-
-/** Resolves and launches the requested agent distribution for a new daemon session. */
-export async function spawnAgentProcess(params: {
-  daemonUrl: string
-  token: string
-  agent: ACPAdapterName | AgentDistribution
-  cwd: string
-  agentBinDir: string
-  env?: Record<string, string>
-  registryService: ACPRegistryService
-  registry?: Record<string, AgentDistribution>
-}): Promise<AgentProcessHandle> {
-  let agent = params.agent
-
-  if (typeof agent === "string") {
-    if (params.registry?.[agent]) {
-      agent = params.registry[agent]
-    } else {
-      const registryEntry = await params.registryService.getAdapter(agent)
-      if (!registryEntry.adapter) {
-        throw new Error(`Agent not found: ${agent}`)
-      }
-      agent = registryEntry.adapter
-    }
-  }
-
-  const { cmd, args, env } = await resolveAgentProcessSpec(agent)
-
-  return createAgentProcessHandle({
-    cmd,
-    args,
-    cwd: params.cwd,
-    env: buildAgentProcessEnv({
-      daemonUrl: params.daemonUrl,
-      token: params.token,
-      agentBinDir: params.agentBinDir,
-      env: {
-        ...env,
-        ...params.env,
-      },
-    }),
-  })
-}
-
-/** Chooses the concrete command invocation for a resolved agent distribution. */
-export async function resolveAgentProcessSpec(agent: AgentDistribution): Promise<AgentProcessSpec> {
-  const binaryTarget = resolveBinaryTarget(agent)
-  if (binaryTarget) {
-    return {
-      cmd: await resolveBinaryCommand(agent, binaryTarget),
-      args: binaryTarget.target.args ?? [],
-      env: binaryTarget.target.env,
-    }
-  }
-
-  if (agent.distribution.npx) {
-    return {
-      cmd: "npx",
-      args: ["-y", agent.distribution.npx.package, ...(agent.distribution.npx.args ?? [])],
-      env: agent.distribution.npx.env,
-    }
-  }
-
-  if (agent.distribution.uvx) {
-    return {
-      cmd: "uvx",
-      args: [agent.distribution.uvx.package, ...(agent.distribution.uvx.args ?? [])],
-      env: agent.distribution.uvx.env,
-    }
-  }
-
-  throw new Error(`Unsupported agent distribution for ${agent.id}`)
-}
-
-/** Selects the platform-specific binary target for the current runtime when available. */
-function resolveBinaryTarget(agent: AgentDistribution): ResolvedBinaryTarget | null {
-  const platformKey = toAgentBinaryPlatform(process.platform, process.arch)
-  if (!platformKey) {
-    return null
-  }
-
-  const target = agent.distribution.binary?.[platformKey]
-  if (!target) {
-    return null
-  }
-
-  return {
-    platformKey,
-    target,
-  }
-}
-
-/** Converts Node platform metadata into the registry's binary target keys. */
-function toAgentBinaryPlatform(
-  platform: NodeJS.Platform,
-  arch: string,
-): AgentBinaryPlatform | null {
-  const normalizedPlatform =
-    platform === "win32"
-      ? "windows"
-      : platform === "darwin"
-        ? "darwin"
-        : platform === "linux"
-          ? "linux"
-          : null
-  const normalizedArch = arch === "arm64" ? "aarch64" : arch === "x64" ? "x86_64" : null
-  if (!normalizedPlatform || !normalizedArch) {
-    return null
-  }
-
-  const key = `${normalizedPlatform}-${normalizedArch}`
-  return agentBinaryPlatforms.includes(key as AgentBinaryPlatform)
-    ? (key as AgentBinaryPlatform)
-    : null
-}
-
-/** Resolves the runnable binary path for an archive-backed target, installing it into the global cache first. */
-async function resolveBinaryCommand(
-  agent: AgentDistribution,
-  binaryTarget: ResolvedBinaryTarget,
-): Promise<string> {
-  const installDir = getBinaryInstallDir(agent, binaryTarget)
-  const installMarkerPath = join(installDir, binaryInstallMarkerFileName)
-
-  if (!(await pathExists(installMarkerPath))) {
-    await installBinaryArchive(
-      agent.id,
-      binaryTarget.target.archive,
-      binaryTarget.target.cmd,
-      installDir,
-    )
-  }
-
-  await cleanupOtherAgentBinaryInstalls(agent.id, installDir)
-
-  return await resolveInstalledBinaryCommand(installDir, binaryTarget.target.cmd)
-}
-
-/** Computes the global cache directory for one archive-backed binary target. */
-function getBinaryInstallDir(agent: AgentDistribution, binaryTarget: ResolvedBinaryTarget): string {
-  const archiveHash = createHash("sha256")
-    .update(binaryTarget.target.archive)
-    .digest("hex")
-    .slice(0, 12)
-
-  return join(
-    getGoddardGlobalDir(),
-    "binaries",
-    `${agent.id}-${agent.version}-${binaryTarget.platformKey}-${archiveHash}`,
-  )
-}
-
-/** Downloads and installs one archive-backed or raw binary target into its final global cache directory. */
-async function installBinaryArchive(
-  agentId: string,
-  archiveUrl: string,
-  cmd: string,
-  installDir: string,
-): Promise<void> {
-  const binariesDir = join(getGoddardGlobalDir(), "binaries")
-  await mkdir(binariesDir, { recursive: true })
-  await rm(installDir, { recursive: true, force: true })
-
-  const stagingParentDir = await mkdtemp(join(binariesDir, "install-"))
-  const stagedInstallDir = join(stagingParentDir, "install")
-
-  try {
-    await installBinaryTargetPayload({
-      archiveUrl,
-      cmd,
-      installDir: stagedInstallDir,
-    })
-    await writeFile(join(stagedInstallDir, binaryInstallMarkerFileName), `${archiveUrl}\n`, "utf8")
-    await rename(stagedInstallDir, installDir)
-    await cleanupOtherAgentBinaryInstalls(agentId, installDir)
-  } finally {
-    await rm(stagingParentDir, { recursive: true, force: true })
-  }
-}
-
-/** Removes cached binary installs for the same agent id except for the active install directory. */
-async function cleanupOtherAgentBinaryInstalls(
-  agentId: string,
-  activeInstallDir: string,
-): Promise<void> {
-  const binariesDir = join(getGoddardGlobalDir(), "binaries")
-  if (!(await pathExists(binariesDir))) {
-    return
-  }
-
-  const agentPrefix = `${agentId}-`
-  const installs = await readdir(binariesDir, { withFileTypes: true })
-
-  await Promise.all(
-    installs
-      .filter(
-        (entry) =>
-          entry.isDirectory() &&
-          entry.name.startsWith(agentPrefix) &&
-          join(binariesDir, entry.name) !== activeInstallDir,
-      )
-      .map((entry) => rm(join(binariesDir, entry.name), { recursive: true, force: true })),
-  )
 }
 
 /** Performs the ACP handshake and optional initial prompt before live streaming begins. */
@@ -1443,133 +657,6 @@ async function resolveLaunchWorktree(params: {
       defaultPluginDirName: params.defaultWorktreesFolder,
     }),
   )
-}
-
-/** Builds the persisted daemon session record written after ACP session initialization completes. */
-function createSessionRecordUpdate(params: {
-  initialized: InitializedSession
-  request: ResolvedCreateSessionRequest
-  cwd: string
-  token: string
-  scope: ReturnType<typeof parseRepoScope>
-  nextPermission: {
-    owner: string
-    repo: string
-    allowedPrNumbers: number[]
-  }
-  sessionMetadata: DaemonSessionMetadata | null | undefined
-  existingSession: SessionDoc | null
-  exitAfterInitialPrompt: boolean
-  supportsLoadSession: boolean
-  title: string
-  titleState: DaemonSession["titleState"]
-  availableCommands: acp.AvailableCommand[]
-}) {
-  const connectionMode: SessionConnectionMode =
-    params.exitAfterInitialPrompt && !params.supportsLoadSession ? "history" : "live"
-
-  return {
-    acpSessionId: params.initialized.acpSessionId,
-    status: params.initialized.status,
-    stopReason: params.initialized.stopReason ?? params.existingSession?.stopReason ?? null,
-    agent: params.request.agent,
-    agentName: agentNameFromInput(params.request.agent),
-    cwd: params.cwd,
-    title: params.existingSession?.title ?? params.title,
-    titleState: params.existingSession?.titleState ?? params.titleState,
-    mcpServers: params.request.mcpServers,
-    connectionMode,
-    supportsLoadSession: params.supportsLoadSession,
-    activeDaemonSession: !params.exitAfterInitialPrompt,
-    completedHidden: false,
-    repository: params.scope.repository,
-    prNumber: params.scope.prNumber,
-    token: params.token,
-    permissions: params.nextPermission,
-    metadata: params.sessionMetadata ?? null,
-    models: params.initialized.models ?? params.existingSession?.models ?? null,
-    availableCommands: params.availableCommands,
-    errorMessage: null,
-    blockedReason: null,
-    initiative: params.existingSession?.initiative ?? null,
-    inboxScope: params.existingSession?.inboxScope ?? null,
-    lastAgentMessage: null,
-  }
-}
-
-/** Persists the records produced by one successful session launch across all daemon-owned kinds. */
-function persistLaunchedSession(params: {
-  id: SessionId
-  existingSession: SessionDoc | null
-  initialTurn: SessionHistoryTurn | null
-  existingWorktreeRecord: SessionWorktreeDoc | null
-  existingWorkforceRecord: SessionWorkforceDoc | null
-  worktree: PreparedSessionWorktree | null
-  workforceMetadata: CreateSessionRequest["workforce"] | undefined
-  sessionRecord: ReturnType<typeof createSessionRecordUpdate>
-}) {
-  if (params.initialTurn) {
-    db.sessionTurns.create(toCompletedTurnInput(params.id, params.initialTurn))
-  }
-
-  if (params.worktree) {
-    const nextWorktree = {
-      sessionId: params.id,
-      ...params.worktree.state,
-    }
-    if (params.existingWorktreeRecord) {
-      db.worktrees.put(params.existingWorktreeRecord.id, nextWorktree)
-    } else {
-      db.worktrees.create(nextWorktree)
-    }
-  }
-
-  if (params.workforceMetadata) {
-    const nextWorkforce: KindInput<typeof db.schema.workforces> = {
-      sessionId: params.id,
-      rootDir: params.workforceMetadata.rootDir,
-      agentId: params.workforceMetadata.agentId,
-      requestId: params.workforceMetadata.requestId,
-    }
-    if (params.existingWorkforceRecord) {
-      db.workforces.put(params.existingWorkforceRecord.id, nextWorkforce)
-    } else {
-      db.workforces.create(nextWorkforce)
-    }
-  }
-
-  if (params.existingSession) {
-    const existingDocument = db.sessions.get(params.id) ?? null
-    if (!existingDocument) {
-      throw new IpcClientError(`Cannot update unknown session: ${params.id}`)
-    }
-
-    db.sessions.update(params.id, params.sessionRecord)
-    return
-  }
-
-  db.sessions.put(params.id, params.sessionRecord)
-}
-
-/** Extracts repository ownership fields used for permission scoping and persistence. */
-function parseRepoScope(params: { repository?: string; prNumber?: number }): {
-  repository: string | null
-  prNumber: number | null
-  owner: string
-  repo: string
-  allowedPrNumbers: number[]
-} {
-  const repository = params.repository?.trim() ?? ""
-  const prNumber = typeof params.prNumber === "number" ? params.prNumber : null
-  const [owner, repo] = repository.split("/")
-
-  return {
-    repository: repository.length > 0 ? repository : null,
-    prNumber,
-    owner: owner ?? "",
-    repo: repo ?? "",
-    allowedPrNumbers: prNumber === null ? [] : [prNumber],
-  }
 }
 
 /** Builds the structured logging context shared across session lifecycle events. */
@@ -3785,16 +2872,23 @@ export function createSessionManager(input: {
 
     if (params.trigger === "at") {
       return {
-        suggestions:
-          params.query.trim().length === 0
-            ? await listComposerEntriesAtCwd(session.cwd, limit)
-            : await searchComposerEntriesUnderCwd(session.cwd, params.query, limit),
+        suggestions: await getDraftComposerSuggestions({
+          cwd: session.cwd,
+          trigger: params.trigger,
+          query: params.query,
+          limit,
+        }),
       }
     }
 
     if (params.trigger === "dollar") {
       return {
-        suggestions: await getSkillComposerSuggestions(session.cwd, params.query, limit),
+        suggestions: await getDraftComposerSuggestions({
+          cwd: session.cwd,
+          trigger: params.trigger,
+          query: params.query,
+          limit,
+        }),
       }
     }
 
@@ -3895,7 +2989,7 @@ export function createSessionManager(input: {
         slashCommands: getSlashComposerSuggestions(
           availableCommands,
           "",
-          Math.max(DEFAULT_COMPOSER_SUGGESTION_LIMIT, MAX_COMPOSER_SUGGESTION_LIMIT),
+          MAX_COMPOSER_SUGGESTION_LIMIT,
         ),
       }
     } finally {
