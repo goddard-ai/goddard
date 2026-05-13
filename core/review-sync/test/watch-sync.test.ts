@@ -7,6 +7,7 @@ import {
   cleanupReviewSyncFixtures,
   createDeferred,
   createStartedFixture,
+  currentBranch,
   refExists,
   runGit,
   runWatchUntilNextSync,
@@ -28,6 +29,29 @@ test("watch syncs when the review worktree changes", async () => {
   expect(stopped.status).toBe("paused")
   expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+  expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+    false,
+  )
+})
+
+test("watch syncs review commits when the agent branch is already checked out", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
+
+  expect(await currentBranch(fixture.agentDir)).toBe("codex/review-sync-test")
+
+  const { results, stopped } = await runWatchUntilNextSync(fixture.reviewDir, async () => {
+    await writeText(join(fixture.reviewDir, "shared.txt"), "human commit\n")
+    await runGit(fixture.reviewDir, ["add", "shared.txt"])
+    await runGit(fixture.reviewDir, ["commit", "-m", "human review commit"])
+  })
+
+  expect(stopped.status).toBe("paused")
+  expect(results.some((result) => result.command === "sync" && result.status === "ok")).toBe(true)
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human commit\n")
   expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
   expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
     false,
