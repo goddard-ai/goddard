@@ -139,7 +139,9 @@ function getPackageVersion(): string {
 }
 
 const logger = createLogger()
+
 type SessionId = DaemonSession["id"]
+
 const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
@@ -154,6 +156,7 @@ type SessionTitleGeneratorConfig = NonNullable<
 const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
 const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
   "Queued prompt aborted before dispatch by session cancellation."
+
 /** Lists local git branches for one launch dialog and keeps the current branch first. */
 async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
   const repoRoot = await resolveGitRepoRoot(cwd)
