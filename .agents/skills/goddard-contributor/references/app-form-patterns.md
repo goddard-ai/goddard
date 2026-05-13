@@ -25,11 +25,11 @@ Use this reference for app-local form guidance that intentionally does not live 
 - Keep async field loading local to the field or narrow subcomponent that needs it, not the whole dialog or page shell.
 - When a query-backed subfield needs to publish data into the form model, keep that write narrow and intentional.
 
-## Async Fields And Suspense
+## Async Fields And Pending UI
 
-- Suspend narrowly around the async field that actually needs data, not around the whole form.
-- Use a fallback that preserves the same field footprint when possible, such as a disabled placeholder control, so the form layout stays stable while data resolves.
-- Keep field labels and surrounding layout outside the suspended subcomponent unless the entire field truly depends on the async read.
+- Use TSRX `try` / `pending` blocks narrowly around the async field that actually needs data, not around the whole form.
+- Use a pending fallback that preserves the same field footprint when possible, such as a disabled placeholder control, so the form layout stays stable while data resolves.
+- Keep field labels and surrounding layout outside the pending subcomponent unless the entire field truly depends on the async read.
 
 ## Submission
 
