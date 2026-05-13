@@ -5,7 +5,6 @@ import { sessionIpcSchema } from "@goddard-ai/session/daemon-ipc"
 import { z } from "zod"
 
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
-import { DaemonSessionIdParams } from "./common/params.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
   GetLoopRequest,
@@ -24,40 +23,7 @@ import {
   type ReplyPrResponse,
   type SubmitPrResponse,
 } from "./daemon/pull-requests.ts"
-import {
-  CancelSessionRequest,
-  CompleteSessionRequest,
-  CreateSessionRequest,
-  DeclareSessionInitiativeRequest,
-  GetSessionChangesRequest as GetSessionChangesRequestSchema,
-  GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
-  ListSessionsRequest,
-  ReportSessionBlockerRequest,
-  ReportSessionTurnEndedRequest,
-  ResolveSessionTokenRequest,
-  SendSessionMessageRequest,
-  SessionComposerSuggestionsRequest,
-  SessionDraftSuggestionsRequest,
-  SessionLaunchPreviewRequest,
-  SessionMessageEvent,
-  SessionSubpackagesRequest,
-  SteerSessionRequest,
-  type CancelSessionResponse,
-  type CompleteSessionResponse,
-  type CreateSessionResponse,
-  type GetSessionChangesResponse,
-  type GetSessionDiagnosticsResponse,
-  type GetSessionHistoryResponse,
-  type GetSessionResponse,
-  type GetSessionWorkforceResponse,
-  type ListSessionsResponse,
-  type ReportSessionResponse,
-  type SessionComposerSuggestionsResponse,
-  type SessionLaunchPreviewResponse,
-  type SessionSubpackagesResponse,
-  type ShutdownSessionResponse,
-  type SteerSessionResponse,
-} from "./daemon/sessions.ts"
+import { type CreateSessionResponse } from "./daemon/sessions.ts"
 import {
   CancelWorkforceRequest,
   CreateWorkforceRequest,
@@ -115,90 +81,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
         token: z.string(),
       }),
       response: $type<ReplyPrResponse>(),
-    },
-    "session.create": {
-      payload: CreateSessionRequest,
-      response: $type<CreateSessionResponse>(),
-    },
-    "session.list": {
-      payload: ListSessionsRequest,
-      response: $type<ListSessionsResponse>(),
-    },
-    "session.get": {
-      payload: DaemonSessionIdParams,
-      response: $type<GetSessionResponse>(),
-    },
-    "session.connect": {
-      payload: DaemonSessionIdParams,
-      response: $type<GetSessionResponse>(),
-    },
-    "session.history": {
-      payload: GetSessionHistoryRequestSchema,
-      response: $type<GetSessionHistoryResponse>(),
-    },
-    "session.changes": {
-      payload: GetSessionChangesRequestSchema,
-      response: $type<GetSessionChangesResponse>(),
-    },
-    "session.composerSuggestions": {
-      payload: SessionComposerSuggestionsRequest,
-      response: $type<SessionComposerSuggestionsResponse>(),
-    },
-    "session.draftSuggestions": {
-      payload: SessionDraftSuggestionsRequest,
-      response: $type<SessionComposerSuggestionsResponse>(),
-    },
-    "session.launchPreview": {
-      payload: SessionLaunchPreviewRequest,
-      response: $type<SessionLaunchPreviewResponse>(),
-    },
-    "session.subpackages": {
-      payload: SessionSubpackagesRequest,
-      response: $type<SessionSubpackagesResponse>(),
-    },
-    "session.diagnostics": {
-      payload: DaemonSessionIdParams,
-      response: $type<GetSessionDiagnosticsResponse>(),
-    },
-    "session.workforce.get": {
-      payload: DaemonSessionIdParams,
-      response: $type<GetSessionWorkforceResponse>(),
-    },
-    "session.shutdown": {
-      payload: DaemonSessionIdParams,
-      response: $type<ShutdownSessionResponse>(),
-    },
-    "session.cancel": {
-      payload: CancelSessionRequest,
-      response: $type<CancelSessionResponse>(),
-    },
-    "session.steer": {
-      payload: SteerSessionRequest,
-      response: $type<SteerSessionResponse>(),
-    },
-    "session.send": {
-      payload: SendSessionMessageRequest,
-      response: $type<{ accepted: true }>(),
-    },
-    "session.complete": {
-      payload: CompleteSessionRequest,
-      response: $type<CompleteSessionResponse>(),
-    },
-    "session.declareInitiative": {
-      payload: DeclareSessionInitiativeRequest,
-      response: $type<ReportSessionResponse>(),
-    },
-    "session.reportBlocker": {
-      payload: ReportSessionBlockerRequest,
-      response: $type<ReportSessionResponse>(),
-    },
-    "session.reportTurnEnded": {
-      payload: ReportSessionTurnEndedRequest,
-      response: $type<ReportSessionResponse>(),
-    },
-    "session.resolveToken": {
-      payload: ResolveSessionTokenRequest,
-      response: $type<{ id: string }>(),
     },
     "action.run": {
       payload: RunNamedActionRequest,
@@ -268,10 +150,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
     },
   },
   streams: {
-    "session.message": {
-      payload: $type<SessionMessageEvent>(),
-      filter: DaemonSessionIdParams,
-    },
     "workforce.event": {
       payload: $type<WorkforceEventEnvelope>(),
       filter: SubscribeWorkforceEventsRequest,

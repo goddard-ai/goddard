@@ -34,6 +34,9 @@ feature becomes part of a supported product surface.
 - Feature packages must not circularly depend on other feature packages.
   Daemon feature interop goes through explicit `consumes` declarations and
   first-class `context.<feature>` extensions.
+- Layer entrypoints such as `src/daemon.ts` should stay as thin plugin
+  entrypoints. Feature-owned daemon implementation can live in focused modules
+  under `src/daemon/` and be reached from the entrypoint.
 - JSON configuration is not a feature package. Daemon plugins may contribute
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge

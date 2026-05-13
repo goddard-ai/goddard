@@ -306,6 +306,7 @@
       "name": "@goddard-ai/session",
       "version": "0.1.0",
       "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
-import * as acp from "@agentclientprotocol/sdk"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
@@ -9,7 +8,7 @@ import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { sessionPlugin } from "@goddard-ai/session/daemon"
+import { sessionPlugin, type SessionController } from "@goddard-ai/session/daemon"
 import { getErrorMessage } from "radashi"
 
 import { createConfigManager } from "../config-manager.ts"
@@ -184,13 +183,45 @@ export async function startDaemonServer(
     return actor.requestId
   }
 
-  const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
-  const inboxSetup = await inboxPlugin.setup?.({ inboxManager })
-  const sessionSetup = await sessionPlugin.setup?.({
+  const sessionController: SessionController = {
+    newSession: (params) => sessionManager.newSession(params),
+    listSessions: (params) => sessionManager.listSessions(params),
+    connectSession: (id) => sessionManager.connectSession(id),
+    getSession: (id) => sessionManager.getSession(id),
+    getHistory: (params) => sessionManager.getHistory(params),
+    getChanges: (id) => sessionManager.getChanges(id),
+    getComposerSuggestions: (params) => sessionManager.getComposerSuggestions(params),
+    getDraftSuggestions: (params) => sessionManager.getDraftSuggestions(params),
+    getLaunchPreview: (params) => sessionManager.getLaunchPreview(params),
+    getSubpackages: (params) => sessionManager.getSubpackages(params),
+    getDiagnostics: (id) => sessionManager.getDiagnostics(id),
     getWorktree: (id) => sessionManager.getWorktree(id),
     mountReviewSession: (id) => sessionManager.mountReviewSession(id),
     runReviewSession: (id) => sessionManager.runReviewSession(id),
     unmountReviewSession: (id) => sessionManager.unmountReviewSession(id),
+    getWorkforce: (id) => sessionManager.getWorkforce(id),
+    shutdownSession: (id) => sessionManager.shutdownSession(id),
+    cancelSessionTurn: (id) => sessionManager.cancelSessionTurn(id),
+    steerSession: (id, prompt) => sessionManager.steerSession(id, prompt),
+    sendMessage: (id, message) => sessionManager.sendMessage(id, message),
+    completeSession: (id) => sessionManager.completeSession(id),
+    declareInitiative: (id, title) => sessionManager.declareInitiative(id, title),
+    reportBlocker: (id, reason, metadata) => sessionManager.reportBlocker(id, reason, metadata),
+    reportTurnEnded: (id, metadata) => sessionManager.reportTurnEnded(id, metadata),
+    recordTurnAttentionActivity: (id, metadata) =>
+      sessionManager.recordTurnAttentionActivity(id, metadata),
+    sessionSubscriberConnected: (id) => sessionManager.sessionSubscriberConnected(id),
+    sessionSubscriberDisconnected: (id) => sessionManager.sessionSubscriberDisconnected(id),
+    resolveSessionIdByToken: (token) => sessionManager.resolveSessionIdByToken(token),
+  }
+
+  const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
+  const inboxSetup = await inboxPlugin.setup?.({ inboxManager })
+  const sessionSetup = await sessionPlugin.setup?.({
+    controller: sessionController,
+    setRequestSessionId: (id) => {
+      requireIpcRequestContext().setSessionId(id)
+    },
   })
 
   if (!adapterSetup?.requestHandlers) {
@@ -199,9 +230,10 @@ export async function startDaemonServer(
   if (!inboxSetup?.requestHandlers) {
     throw new Error("Inbox daemon plugin did not return request handlers")
   }
-  if (!sessionSetup?.requestHandlers) {
+  if (!sessionSetup?.requestHandlers || !sessionSetup.provides) {
     throw new Error("Session daemon plugin did not return request handlers")
   }
+  const sessionFeature = sessionSetup.provides.session
 
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),
@@ -250,7 +282,7 @@ export async function startDaemonServer(
         prNumber: pr.number,
         cwd: payload.cwd,
       })
-      const metadata = await sessionManager.recordTurnAttentionActivity(session.sessionId, {
+      const metadata = await sessionFeature.recordTurnAttentionActivity(session.sessionId, {
         scope: payload.scope,
         headline: payload.headline,
         fallbackHeadline: resolvedInput.title,
@@ -308,7 +340,7 @@ export async function startDaemonServer(
         prNumber: resolvedInput.prNumber,
         cwd: payload.cwd,
       })
-      const metadata = await sessionManager.recordTurnAttentionActivity(session.sessionId, {
+      const metadata = await sessionFeature.recordTurnAttentionActivity(session.sessionId, {
         scope: payload.scope,
         headline: payload.headline,
         fallbackHeadline: "PR reply posted",
@@ -326,101 +358,12 @@ export async function startDaemonServer(
       })
       return response
     },
-    "session.create": async (payload) => {
-      const response = {
-        session: await sessionManager.newSession({ request: payload }),
-      }
-      const context = requireIpcRequestContext()
-      context.setSessionId(response.session.id)
-      return response
-    },
-    "session.list": async (payload) => {
-      return sessionManager.listSessions(payload)
-    },
-    "session.get": async ({ id }) => {
-      return {
-        session: await sessionManager.getSession(id),
-      }
-    },
-    "session.connect": async ({ id }) => {
-      return {
-        session: await sessionManager.connectSession(id),
-      }
-    },
-    "session.history": async (params) => {
-      return sessionManager.getHistory(params)
-    },
-    "session.changes": async ({ id }) => {
-      return sessionManager.getChanges(id)
-    },
-    "session.composerSuggestions": async (payload) => {
-      return sessionManager.getComposerSuggestions(payload)
-    },
-    "session.draftSuggestions": async (payload) => {
-      return sessionManager.getDraftSuggestions(payload)
-    },
-    "session.launchPreview": async (payload) => {
-      return sessionManager.getLaunchPreview(payload)
-    },
-    "session.subpackages": async (payload) => {
-      return sessionManager.getSubpackages(payload)
-    },
-    "session.diagnostics": async ({ id }) => {
-      return sessionManager.getDiagnostics(id)
-    },
     ...sessionSetup.requestHandlers,
-    "session.workforce.get": async ({ id }) => {
-      return sessionManager.getWorkforce(id)
-    },
-    "session.shutdown": async ({ id }) => {
-      return {
-        id,
-        success: await sessionManager.shutdownSession(id),
-      }
-    },
-    "session.cancel": async ({ id }) => {
-      return sessionManager.cancelSessionTurn(id)
-    },
-    "session.steer": async ({ id, prompt }) => {
-      return sessionManager.steerSession(id, prompt)
-    },
-    "session.send": async ({ id, message }) => {
-      await sessionManager.sendMessage(id, message as acp.AnyMessage)
-      return { accepted: true as const }
-    },
-    "session.complete": async ({ id }) => {
-      return {
-        item: await sessionManager.completeSession(id),
-      }
-    },
-    "session.declareInitiative": async ({ id, title }) => {
-      return {
-        session: await sessionManager.declareInitiative(id, title),
-      }
-    },
-    "session.reportBlocker": async ({ id, reason, scope, headline }) => {
-      return {
-        session: await sessionManager.reportBlocker(id, reason, { scope, headline }),
-      }
-    },
-    "session.reportTurnEnded": async ({ id, scope, headline }) => {
-      return {
-        session: await sessionManager.reportTurnEnded(id, { scope, headline }),
-      }
-    },
-    "session.resolveToken": async ({ token }) => {
-      const id = await sessionManager.resolveSessionIdByToken(token)
-      const context = requireIpcRequestContext()
-      context.setSessionId(id)
-      return {
-        id,
-      }
-    },
     ...inboxSetup.requestHandlers,
     "action.run": async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
-      const session = await sessionManager.newSession({
-        request: buildNamedActionSessionParams(action, payload.cwd, {
+      const session = await sessionFeature.create(
+        buildNamedActionSessionParams(action, payload.cwd, {
           cwd: payload.cwd,
           agent: payload.agent,
           mcpServers: payload.mcpServers,
@@ -430,7 +373,7 @@ export async function startDaemonServer(
           prNumber: payload.prNumber,
           metadata: payload.metadata,
         }),
-      })
+      )
       const context = requireIpcRequestContext()
       context.setSessionId(session.id)
       return { session }
@@ -624,7 +567,7 @@ export async function startDaemonServer(
       if (name === "session.message") {
         const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
         if (typeof sessionId === "string") {
-          await sessionManager.sessionSubscriberConnected(sessionId)
+          await sessionFeature.subscriberConnected(sessionId)
         }
       }
     },
@@ -632,7 +575,7 @@ export async function startDaemonServer(
       if (name === "session.message") {
         const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
         if (typeof sessionId === "string") {
-          await sessionManager.sessionSubscriberDisconnected(sessionId)
+          await sessionFeature.subscriberDisconnected(sessionId)
         }
       }
     },
