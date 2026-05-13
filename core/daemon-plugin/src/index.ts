@@ -1,5 +1,10 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
-import { composeIpcSchemas, type ComposeIpcSchemas, type IpcSchema } from "@goddard-ai/ipc"
+import {
+  composeIpcSchemas,
+  type ComposeIpcSchemas,
+  type Handlers,
+  type IpcSchema,
+} from "@goddard-ai/ipc"
 import type { z } from "zod"
 
 /** Named feature extensions exposed by one daemon plugin to plugins that consume it. */
@@ -62,6 +67,16 @@ type InferConfigDefinition<TPlugin> = TPlugin extends {
   ? { readonly [TKey in TName]: TConfig }
   : {}
 
+type InferIpc<TPlugin> = TPlugin extends { readonly ipc: infer TIpc } ? TIpc : undefined
+
+type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
+
+type RequestHandlerFactory<TPlugin> = TPlugin extends {
+  readonly createRequestHandlers: (...args: infer TArgs) => unknown
+}
+  ? (...args: TArgs) => RequestHandlers<InferIpc<TPlugin>>
+  : never
+
 /** Infers setup context fields from a plugin's own definition and consumed plugins. */
 export type SetupContext<
   TConsumes extends readonly unknown[],
@@ -78,6 +93,7 @@ export type Plugin = {
   readonly config?: ConfigDefinition
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
+  readonly createRequestHandlers?: (...args: any[]) => unknown
   readonly setup?: SetupFunction<SetupContext<readonly Plugin[], Plugin>>
   readonly register?: (...args: never[]) => void | Promise<void>
 }
@@ -116,6 +132,7 @@ type InferConsumes<TPlugin> = TPlugin extends {
 /** Preserves the exact daemon plugin object for composition-time type inference. */
 export function definePlugin<const TPlugin extends Omit<Plugin, "setup">>(
   plugin: TPlugin & {
+    readonly createRequestHandlers?: RequestHandlerFactory<TPlugin>
     readonly setup?: SetupFunction<SetupContext<InferConsumes<TPlugin>, TPlugin>>
   },
 ) {
