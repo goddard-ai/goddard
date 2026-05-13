@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
-import { composeDaemonPlugins, defineDaemonPlugin } from "../src/index.ts"
+import { composePlugins, definePlugin } from "../src/index.ts"
 
 describe("daemon plugin composition", () => {
   test("orders plugins by consumed dependencies and composes IPC/config fragments", () => {
-    const session = defineDaemonPlugin({
+    const session = definePlugin({
       name: "session",
       provides: {
         session: {
@@ -27,12 +27,12 @@ describe("daemon plugin composition", () => {
         streams: {},
       },
     })
-    const inbox = defineDaemonPlugin({
+    const inbox = definePlugin({
       name: "inbox",
       consumes: [session],
     })
 
-    const composition = composeDaemonPlugins([inbox, session])
+    const composition = composePlugins([inbox, session])
 
     expect(composition.plugins.map((plugin) => plugin.name)).toEqual(["session", "inbox"])
     expect(Object.keys(composition.ipc.requests)).toEqual(["session.create"])
@@ -40,37 +40,37 @@ describe("daemon plugin composition", () => {
   })
 
   test("rejects duplicate plugin names", () => {
-    const first = defineDaemonPlugin({ name: "session" })
-    const second = defineDaemonPlugin({ name: "session" })
+    const first = definePlugin({ name: "session" })
+    const second = definePlugin({ name: "session" })
 
-    expect(() => composeDaemonPlugins([first, second])).toThrow("Duplicate daemon plugin: session")
+    expect(() => composePlugins([first, second])).toThrow("Duplicate daemon plugin: session")
   })
 
   test("rejects consumed plugins that are not part of the composition", () => {
-    const session = defineDaemonPlugin({ name: "session" })
-    const inbox = defineDaemonPlugin({
+    const session = definePlugin({ name: "session" })
+    const inbox = definePlugin({
       name: "inbox",
       consumes: [session],
     })
 
-    expect(() => composeDaemonPlugins([inbox])).toThrow(
+    expect(() => composePlugins([inbox])).toThrow(
       "Daemon plugin inbox consumes session, but session is not composed.",
     )
   })
 
   test("rejects circular feature dependencies", () => {
-    const first = defineDaemonPlugin({
+    const first = definePlugin({
       name: "first",
       get consumes() {
         return [second]
       },
     })
-    const second = defineDaemonPlugin({
+    const second = definePlugin({
       name: "second",
       consumes: [first],
     })
 
-    expect(() => composeDaemonPlugins([first, second])).toThrow(
+    expect(() => composePlugins([first, second])).toThrow(
       "Circular daemon plugin dependency: first -> second -> first",
     )
   })

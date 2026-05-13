@@ -44,7 +44,7 @@ A daemon feature will usually contribute one or more of:
 Example shape:
 
 ```ts
-export const sessionDaemonPlugin = defineDaemonPlugin({
+export const sessionPlugin = definePlugin({
   name: "session",
   ipc: sessionDaemonIpc,
   register(context) {
@@ -75,10 +75,10 @@ If a feature affects shared behavior, its schema and SDK entrypoints should be u
 The daemon composition root imports all daemon feature entrypoints and registers them statically:
 
 ```ts
-import { sessionDaemonPlugin } from "@goddard-ai/session/daemon"
-import { workforceDaemonPlugin } from "@goddard-ai/workforce/daemon"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
+import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 
-registerDaemonPlugins([sessionDaemonPlugin, workforceDaemonPlugin])
+composePlugins([sessionPlugin, workforcePlugin])
 ```
 
 The daemon composition root should also compose feature-owned daemon IPC contracts into the daemon IPC schema that clients use. The SDK composition root should consume those same feature-owned contracts through the feature SDK plugins.
@@ -97,7 +97,7 @@ Invalid daemon feature registration should block daemon startup in both developm
 
 ## Implementation Planning Questions
 
-- Should `defineDaemonPlugin()` use one `const` type parameter for the full plugin object, or separate `const` parameters for name, IPC contract, lifecycle metadata, and registrations?
+- Should `definePlugin()` use one `const` type parameter for the full plugin object, or separate `const` parameters for name, IPC contract, lifecycle metadata, and registrations?
 - Should daemon plugins declare the IPC names and stream names they own as metadata?
 - Should daemon plugins provide migrations, or should migrations stay in a separate persistence layer?
 - How should daemon plugins contribute to health checks without making health output noisy?

@@ -12,10 +12,10 @@ Daemon plugins may also contribute a namespaced JSON config fragment. The featur
 
 ## Contract Shape
 
-Use `defineDaemonPlugin()` from `features/<name>/src/daemon.ts` to preserve exact plugin metadata for static composition:
+Use `definePlugin()` from `features/<name>/src/daemon.ts` to preserve exact plugin metadata for static composition:
 
 ```ts
-export const inboxDaemonPlugin = defineDaemonPlugin({
+export const inboxPlugin = definePlugin({
   name: "inbox",
   ipc: inboxIpcSchema,
   createRequestHandlers: createInboxRequestHandlers,
@@ -25,9 +25,9 @@ export const inboxDaemonPlugin = defineDaemonPlugin({
 Feature interop is declared through package imports instead of string names:
 
 ```ts
-export const inboxDaemonPlugin = defineDaemonPlugin({
+export const inboxPlugin = definePlugin({
   name: "inbox",
-  consumes: [sessionDaemonPlugin],
+  consumes: [sessionPlugin],
   setup(context) {
     context.session.turnEnded.subscribe(handleTurnEnded)
   },
@@ -36,8 +36,8 @@ export const inboxDaemonPlugin = defineDaemonPlugin({
 
 The `provides` map is the only feature-owned extension surface. It can contain methods, event channels, or other typed feature capabilities, but it should not expose feature-private implementation details such as manager instances.
 
-Composition roots use `composeDaemonPlugins()` after statically importing the feature daemon entrypoints. Composition validates that feature names are unique, every consumed feature is present, feature dependencies are acyclic, IPC fragments do not collide, and config fragments are grouped under the contributing feature name.
+Composition roots use `composePlugins()` after statically importing the feature daemon entrypoints. Composition validates that feature names are unique, every consumed feature is present, feature dependencies are acyclic, IPC fragments do not collide, and config fragments are grouped under the contributing feature name.
 
 ```ts
-const daemonFeatures = composeDaemonPlugins([sessionDaemonPlugin, inboxDaemonPlugin])
+const daemonFeatures = composePlugins([sessionPlugin, inboxPlugin])
 ```

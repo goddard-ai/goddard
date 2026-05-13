@@ -3,13 +3,11 @@ import { composeIpcSchemas, type ComposeIpcSchemas, type IpcSchema } from "@godd
 import type { z } from "zod"
 
 /** Named feature extensions exposed by one daemon plugin to plugins that consume it. */
-export type DaemonFeatureExtensions = Record<string, unknown>
+export type FeatureExtensions = Record<string, unknown>
 
-type EmptyDaemonFeatureExtensions = Record<never, never>
-type EmptyDaemonConfig = Record<never, never>
-// Plugin definitions need assignable setup callbacks while `defineDaemonPlugin()` preserves
+// Plugin definitions need assignable setup callbacks while `definePlugin()` preserves
 // the exact context for feature authors.
-type DaemonPluginSetupFunction<TContext> = {
+type SetupFunction<TContext> = {
   bivarianceHack: (context: TContext) => unknown | Promise<unknown>
 }["bivarianceHack"]
 
@@ -20,12 +18,12 @@ type UnionToIntersection<TUnion> = (
   : never
 
 /** Persisted JSON config scopes supported by daemon-owned root config files. */
-export type DaemonPluginConfigScope = "user" | "project"
+export type ConfigScope = "user" | "project"
 
 /** Feature-owned config fragment metadata consumed by daemon-owned config substrate. */
-export type DaemonPluginConfigDefinition<TRawConfig = unknown, TResolvedConfig = TRawConfig> = {
+export type ConfigDefinition<TRawConfig = unknown, TResolvedConfig = TRawConfig> = {
   readonly schema: z.ZodType<TRawConfig>
-  readonly scopes?: readonly DaemonPluginConfigScope[]
+  readonly scopes?: readonly ConfigScope[]
   readonly resolve?: (input: {
     readonly user?: TRawConfig | undefined
     readonly project?: TRawConfig | undefined
@@ -33,109 +31,104 @@ export type DaemonPluginConfigDefinition<TRawConfig = unknown, TResolvedConfig =
 }
 
 /** Extracts the first-class context fields provided by one daemon plugin. */
-export type InferDaemonPluginProvides<TPlugin> = TPlugin extends {
-  readonly provides: infer TProvides extends DaemonFeatureExtensions
+export type InferProvides<TPlugin> = TPlugin extends {
+  readonly provides: infer TProvides extends FeatureExtensions
 }
   ? TProvides
-  : EmptyDaemonFeatureExtensions
+  : {}
 
-type InferDaemonPluginConfigValue<TPlugin> = TPlugin extends {
-  readonly config: infer TConfig extends DaemonPluginConfigDefinition
+type InferConfigValue<TPlugin> = TPlugin extends {
+  readonly config: infer TConfig extends ConfigDefinition
 }
   ? TConfig extends { readonly resolve: (...args: never[]) => infer TResolved }
     ? Awaited<TResolved>
-    : TConfig extends DaemonPluginConfigDefinition<unknown, infer TResolved>
+    : TConfig extends ConfigDefinition<unknown, infer TResolved>
       ? TResolved
       : unknown
   : never
 
 /** Extracts the resolved config namespace contributed by one daemon plugin. */
-export type InferDaemonPluginConfig<TPlugin> = TPlugin extends {
+export type InferConfig<TPlugin> = TPlugin extends {
   readonly name: infer TName extends string
-  readonly config: DaemonPluginConfigDefinition
+  readonly config: ConfigDefinition
 }
-  ? { readonly [TKey in TName]: InferDaemonPluginConfigValue<TPlugin> }
-  : EmptyDaemonConfig
+  ? { readonly [TKey in TName]: InferConfigValue<TPlugin> }
+  : {}
 
-type InferDaemonPluginConfigDefinition<TPlugin> = TPlugin extends {
+type InferConfigDefinition<TPlugin> = TPlugin extends {
   readonly name: infer TName extends string
-  readonly config: infer TConfig extends DaemonPluginConfigDefinition
+  readonly config: infer TConfig extends ConfigDefinition
 }
   ? { readonly [TKey in TName]: TConfig }
-  : EmptyDaemonConfig
+  : {}
 
 /** Infers setup context fields from a plugin's own definition and consumed plugins. */
-export type DaemonPluginSetupContext<
+export type SetupContext<
   TConsumes extends readonly unknown[],
   TSelf = unknown,
-> = UnionToIntersection<InferDaemonPluginProvides<TConsumes[number]>> & {
-  readonly config: UnionToIntersection<InferDaemonPluginConfig<TSelf | TConsumes[number]>>
+> = UnionToIntersection<InferProvides<TConsumes[number]>> & {
+  readonly config: UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>
 }
 
 /** Daemon plugin shape used to constrain feature plugin values without widening them. */
-export type DaemonPluginDefinition = {
+export type Plugin = {
   readonly name: string
-  readonly consumes?: readonly DaemonPluginDefinition[]
-  readonly provides?: DaemonFeatureExtensions
-  readonly config?: DaemonPluginConfigDefinition
+  readonly consumes?: readonly Plugin[]
+  readonly provides?: FeatureExtensions
+  readonly config?: ConfigDefinition
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
-  readonly setup?: DaemonPluginSetupFunction<
-    DaemonPluginSetupContext<readonly DaemonPluginDefinition[], DaemonPluginDefinition>
-  >
+  readonly setup?: SetupFunction<SetupContext<readonly Plugin[], Plugin>>
   readonly register?: (...args: never[]) => void | Promise<void>
 }
 
-type ExtractDaemonPluginIpcs<TPlugins extends readonly unknown[]> = TPlugins extends readonly [
+type ExtractIpcs<TPlugins extends readonly unknown[]> = TPlugins extends readonly [
   infer THead,
   ...infer TTail,
 ]
   ? THead extends { readonly ipc: infer TIpc extends IpcSchema }
-    ? readonly [TIpc, ...ExtractDaemonPluginIpcs<TTail>]
-    : ExtractDaemonPluginIpcs<TTail>
+    ? readonly [TIpc, ...ExtractIpcs<TTail>]
+    : ExtractIpcs<TTail>
   : readonly []
 
 /** Infers the resolved config map produced by one daemon plugin composition. */
-export type InferDaemonPluginCompositionConfig<TPlugins extends readonly unknown[]> =
-  UnionToIntersection<InferDaemonPluginConfig<TPlugins[number]>>
+export type InferCompositionConfig<TPlugins extends readonly unknown[]> = UnionToIntersection<
+  InferConfig<TPlugins[number]>
+>
 
 /** Infers the config contribution definitions produced by one daemon plugin composition. */
-export type InferDaemonPluginCompositionConfigDefinitions<TPlugins extends readonly unknown[]> =
-  UnionToIntersection<InferDaemonPluginConfigDefinition<TPlugins[number]>>
+export type InferCompositionConfigDefinitions<TPlugins extends readonly unknown[]> =
+  UnionToIntersection<InferConfigDefinition<TPlugins[number]>>
 
 /** Runtime daemon feature composition produced by static composition roots. */
-export type DaemonPluginComposition<TPlugins extends readonly DaemonPluginDefinition[]> = {
-  readonly plugins: readonly DaemonPluginDefinition[]
-  readonly ipc: ComposeIpcSchemas<ExtractDaemonPluginIpcs<TPlugins>>
-  readonly config: InferDaemonPluginCompositionConfigDefinitions<TPlugins>
+export type Composition<TPlugins extends readonly Plugin[]> = {
+  readonly plugins: readonly Plugin[]
+  readonly ipc: ComposeIpcSchemas<ExtractIpcs<TPlugins>>
+  readonly config: InferCompositionConfigDefinitions<TPlugins>
 }
 
-type InferDaemonPluginConsumes<TPlugin> = TPlugin extends {
-  readonly consumes: infer TConsumes extends readonly DaemonPluginDefinition[]
+type InferConsumes<TPlugin> = TPlugin extends {
+  readonly consumes: infer TConsumes extends readonly Plugin[]
 }
   ? TConsumes
   : []
 
 /** Preserves the exact daemon plugin object for composition-time type inference. */
-export function defineDaemonPlugin<const TPlugin extends Omit<DaemonPluginDefinition, "setup">>(
+export function definePlugin<const TPlugin extends Omit<Plugin, "setup">>(
   plugin: TPlugin & {
-    readonly setup?: DaemonPluginSetupFunction<
-      DaemonPluginSetupContext<InferDaemonPluginConsumes<TPlugin>, TPlugin>
-    >
+    readonly setup?: SetupFunction<SetupContext<InferConsumes<TPlugin>, TPlugin>>
   },
 ) {
   return plugin
 }
 
 /** Composes statically imported daemon feature plugins and validates dependency ownership. */
-export function composeDaemonPlugins<const TPlugins extends readonly DaemonPluginDefinition[]>(
-  plugins: TPlugins,
-) {
+export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins: TPlugins) {
   assertUniquePluginNames(plugins)
   assertConsumedPluginsAreComposed(plugins)
-  const orderedPlugins = sortDaemonPluginsByDependency(plugins)
+  const orderedPlugins = sortPluginsByDependency(plugins)
 
-  const config: Record<string, DaemonPluginConfigDefinition> = {}
+  const config: Record<string, ConfigDefinition> = {}
   const ipcSchemas: IpcSchema[] = []
 
   for (const plugin of orderedPlugins) {
@@ -151,10 +144,10 @@ export function composeDaemonPlugins<const TPlugins extends readonly DaemonPlugi
     plugins: orderedPlugins,
     ipc: composeIpcSchemas(ipcSchemas),
     config,
-  } as unknown as DaemonPluginComposition<TPlugins>
+  } as unknown as Composition<TPlugins>
 }
 
-function assertUniquePluginNames(plugins: readonly DaemonPluginDefinition[]) {
+function assertUniquePluginNames(plugins: readonly Plugin[]) {
   const names = new Set<string>()
 
   for (const plugin of plugins) {
@@ -165,7 +158,7 @@ function assertUniquePluginNames(plugins: readonly DaemonPluginDefinition[]) {
   }
 }
 
-function assertConsumedPluginsAreComposed(plugins: readonly DaemonPluginDefinition[]) {
+function assertConsumedPluginsAreComposed(plugins: readonly Plugin[]) {
   const pluginNames = new Set(plugins.map((plugin) => plugin.name))
 
   for (const plugin of plugins) {
@@ -179,13 +172,13 @@ function assertConsumedPluginsAreComposed(plugins: readonly DaemonPluginDefiniti
   }
 }
 
-function sortDaemonPluginsByDependency(plugins: readonly DaemonPluginDefinition[]) {
-  const orderedPlugins: DaemonPluginDefinition[] = []
+function sortPluginsByDependency(plugins: readonly Plugin[]) {
+  const orderedPlugins: Plugin[] = []
   const visiting = new Set<string>()
   const visited = new Set<string>()
   const pluginsByName = new Map(plugins.map((plugin) => [plugin.name, plugin]))
 
-  function visit(plugin: DaemonPluginDefinition, path: readonly string[]) {
+  function visit(plugin: Plugin, path: readonly string[]) {
     if (visited.has(plugin.name)) {
       return
     }

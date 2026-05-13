@@ -313,9 +313,9 @@ function createDaemonEntrypoint(options: FeatureScaffoldOptions, name: string) {
   const ipcProperty = isDaemonIpcNeeded(options) ? `,\n  ipc: ${identifier}IpcSchema` : ""
 
   return `${dedent`
-    import { defineDaemonPlugin } from "@goddard-ai/daemon-plugin"
+    import { definePlugin } from "@goddard-ai/daemon-plugin"
     ${ipcImport}
-    export const ${identifier}DaemonPlugin = defineDaemonPlugin({
+    export const ${identifier}Plugin = definePlugin({
       name: "${name}"${ipcProperty},
     })
   `}\n`
@@ -389,7 +389,7 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
       ? `import { ${identifier}BackendEntrypoint } from "../src/backend.ts"`
       : undefined,
     hasLayer(options.layers, "daemon")
-      ? `import { ${identifier}DaemonPlugin } from "../src/daemon.ts"`
+      ? `import { ${identifier}Plugin } from "../src/daemon.ts"`
       : undefined,
     isDaemonIpcNeeded(options)
       ? `import { ${identifier}IpcSchema } from "../src/daemon-ipc.ts"`
@@ -410,7 +410,7 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
       ? `    expect(${identifier}BackendEntrypoint.name).toBe("${name}")`
       : undefined,
     hasLayer(options.layers, "daemon")
-      ? `    expect(${identifier}DaemonPlugin.name).toBe("${name}")`
+      ? `    expect(${identifier}Plugin.name).toBe("${name}")`
       : undefined,
     isDaemonIpcNeeded(options)
       ? `    expect(${identifier}IpcSchema).toEqual({ requests: {}, streams: {} })`

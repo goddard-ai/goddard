@@ -1,4 +1,4 @@
-import { defineDaemonPlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 
 import { worktreeIpcSchema } from "./daemon-ipc.ts"
 import type {
@@ -25,7 +25,7 @@ export interface WorktreeFeatureExtension {
   ) => Promise<MutateSessionReviewSessionResponse>
 }
 
-export const worktreePlugin = defineDaemonPlugin({
+export const worktreePlugin = definePlugin({
   name: "worktree",
   ipc: worktreeIpcSchema,
   provides: {
