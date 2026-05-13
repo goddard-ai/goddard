@@ -1,7 +1,7 @@
 # Session Manager Domain Concepts
 
 - Scope:
-  - This document explains the domain concepts that appear in [`core/daemon/src/session/manager.ts`](./manager.ts).
+  - This document explains the domain concepts that appear in [`manager.ts`](./manager.ts).
   - It focuses on what each concept means and why it exists, not on implementation details.
 - `Daemon Session`
   - The unit of work the daemon creates and supervises for an agent run.

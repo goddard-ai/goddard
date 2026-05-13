@@ -6,8 +6,8 @@ The Goddard Daemon is a local background process that executes autonomous coding
 
 - [Daemon Glossary](./glossary.md)
 - [Daemon IPC Server Concepts](./src/ipc/server.md)
-- [Session Manager Domain Concepts](./src/session/manager.md)
-- [Session Turn History Design](./src/session/turn-history-design.md)
+- [Session Manager Domain Concepts](../../features/session/src/daemon/manager.md)
+- [Session Turn History Design](../../features/session/src/daemon/turn-history-design.md)
 - [Workforce Runtime Domain Concepts](./src/workforce/runtime.md)
 
 ## Feature Composition

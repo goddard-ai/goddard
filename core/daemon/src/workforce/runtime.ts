@@ -9,12 +9,12 @@ import type {
   WorkforceRequestRecord,
   WorkforceStatus,
 } from "@goddard-ai/schema/workforce"
+import type { SessionManager } from "@goddard-ai/session/daemon"
 import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
 import { WorkforceActorContext, WorkforceDispatchContext } from "../context.ts"
 import { createLogger, createPayloadPreview, isVerboseLogging } from "../logging.ts"
-import type { SessionManager } from "../session/index.ts"
 import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
 import {
   appendWorkforceLedgerEvent,

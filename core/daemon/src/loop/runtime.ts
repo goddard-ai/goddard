@@ -1,12 +1,12 @@
 import { pathToFileURL } from "node:url"
 import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonLoop, DaemonLoopStatus, DaemonSession } from "@goddard-ai/schema/daemon"
+import type { SessionManager } from "@goddard-ai/session/daemon"
 import { getErrorMessage, proportionalJitter } from "radashi"
 
 import { LoopContext } from "../context.ts"
 import { createLogger, createPayloadPreview } from "../logging.ts"
 import type { ResolvedLoopStartRequest } from "../resolvers/loops.ts"
-import type { SessionManager } from "../session/index.ts"
 import { LoopRateLimiter } from "./rate-limiter.ts"
 
 const logger = createLogger()

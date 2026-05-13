@@ -1,14 +1,19 @@
 import { Readable, Writable } from "node:stream"
 import * as acp from "@agentclientprotocol/sdk"
-import type { FileSink } from "bun"
 import { getErrorMessage } from "radashi"
 
-import { createLogger } from "../logging.ts"
+import { createLogger } from "../../../../core/daemon/src/logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
 
+/** Minimal Bun process stdin contract needed for ACP framing. */
+type BunWritablePipe = {
+  write(chunk: Uint8Array): unknown
+  end(): unknown
+}
+
 /** Agent stdin shape supported across Node-compatible and Bun-native subprocesses. */
-export type AgentInputStream = Writable | FileSink
+export type AgentInputStream = Writable | BunWritablePipe
 
 /** Agent stdout shape supported across Node-compatible and Bun-native subprocesses. */
 export type AgentOutputStream = Readable | ReadableStream<Uint8Array>

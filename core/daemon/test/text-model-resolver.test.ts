@@ -4,7 +4,10 @@ import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { afterEach, expect, test } from "bun:test"
 
-import { loadDaemonTextModel, MissingProviderPackageError } from "../src/ai/text-model-resolver.ts"
+import {
+  loadDaemonTextModel,
+  MissingProviderPackageError,
+} from "../../../features/session/src/daemon/text-model-resolver.ts"
 
 const cleanupPaths: string[] = []
 

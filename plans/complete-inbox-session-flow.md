@@ -189,7 +189,7 @@ Complete the UI flow where a human creates a session, the agent ends a turn with
 - `core/schema/src/daemon/inbox.ts`
 - `core/daemon/src/inbox/manager.ts`
 - `core/daemon/src/ipc/server.ts`
-- `core/daemon/src/session/manager.ts`
+- `features/session/src/daemon/manager.ts`
 - `core/sdk/src/sdk.ts`
 - `app/src/inbox/*`
 - `app/src/workbench-tab-registry.ts`

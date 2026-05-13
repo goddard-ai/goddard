@@ -70,22 +70,26 @@ import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
 
-import { loadDaemonTextModel } from "../ai/text-model-resolver.ts"
-import type { ConfigManager } from "../config-manager.ts"
-import { prependAgentBinToPath } from "../config.ts"
-import { SessionContext } from "../context.ts"
-import type { InboxManager } from "../inbox/manager.ts"
-import { resolveInboxMetadata } from "../inbox/metadata.ts"
-import { createChunkPreview, createLogger, createPayloadPreview } from "../logging.ts"
+import type { ConfigManager } from "../../../../core/daemon/src/config-manager.ts"
+import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
+import { SessionContext } from "../../../../core/daemon/src/context.ts"
+import type { InboxManager } from "../../../../core/daemon/src/inbox/manager.ts"
+import { resolveInboxMetadata } from "../../../../core/daemon/src/inbox/metadata.ts"
+import {
+  createChunkPreview,
+  createLogger,
+  createPayloadPreview,
+} from "../../../../core/daemon/src/logging.ts"
 import {
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
-} from "../persistence/session-state.ts"
-import { db } from "../persistence/store.ts"
-import { prepareFreshWorktree } from "../worktrees/bootstrap.ts"
-import { createWorktree } from "../worktrees/index.ts"
-import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
-import { defaultPlugin } from "../worktrees/plugins/default.ts"
+} from "../../../../core/daemon/src/persistence/session-state.ts"
+import { db } from "../../../../core/daemon/src/persistence/store.ts"
+import type { ACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
+import { prepareFreshWorktree } from "../../../../core/daemon/src/worktrees/bootstrap.ts"
+import { createWorktree } from "../../../../core/daemon/src/worktrees/index.ts"
+import { createWorktreePluginManager } from "../../../../core/daemon/src/worktrees/plugin-manager.ts"
+import { defaultPlugin } from "../../../../core/daemon/src/worktrees/plugins/default.ts"
 import {
   createAgentConnection,
   createAgentMessageStream,
@@ -101,8 +105,8 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import { readSessionChanges } from "./changes.ts"
-import type { ACPRegistryService } from "./registry.ts"
 import { discoverSessionSubpackages } from "./subpackages.ts"
+import { loadDaemonTextModel } from "./text-model-resolver.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
   appendSessionHistoryMessage,

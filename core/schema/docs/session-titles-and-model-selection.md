@@ -142,9 +142,9 @@ Resolution precedence for this new config is:
 
 This feature does not use action config, loop config, or per-session runtime overrides in v1 because title generation is an operator preference, not task semantics.
 
-### 3. Keep provider resolution in a reusable daemon module
+### 3. Keep provider resolution separate from title prompting
 
-Introduce a daemon-owned module whose only responsibility is to map JSON text-model config values into runtime AI SDK model instances.
+Keep one module whose only responsibility is to map JSON text-model config values into runtime AI SDK model instances.
 
 Recommended boundary:
 
@@ -156,9 +156,10 @@ Recommended boundary:
 
 Recommended implementation location:
 
-- a daemon-local module such as `core/daemon/src/ai/text-model-resolver.ts` or equivalent, owned by the provider-integration layer rather than by session-title code.
+- the current implementation lives in `features/session/src/daemon/text-model-resolver.ts` because session title generation is its only caller;
+- if another config-backed AI feature needs this behavior, extract it into a daemon/core provider-integration package rather than coupling features to session-title code.
 
-This module should be reusable by future config-backed AI features, not owned by the title generator itself.
+This module should remain reusable in shape for future config-backed AI features, even while its current file location is session-owned.
 
 Implementation basis:
 

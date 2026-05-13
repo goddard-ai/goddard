@@ -7,13 +7,16 @@ import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
 import { afterEach, expect, test, vi } from "bun:test"
 import * as tarFs from "tar-fs"
 
-import { resetDb } from "../src/persistence/store.ts"
 import {
   detectBinaryTargetPayloadFormat,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
-} from "../src/session/archive.ts"
-import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/session/manager.ts"
+} from "../../../features/session/src/daemon/archive.ts"
+import {
+  injectSystemPrompt,
+  resolveAgentProcessSpec,
+} from "../../../features/session/src/daemon/manager.ts"
+import { resetDb } from "../src/persistence/store.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME

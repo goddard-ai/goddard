@@ -2,9 +2,9 @@
 import * as os from "node:os"
 import * as acp from "@agentclientprotocol/sdk"
 
+import { createACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
 import { createAgentMessageStream } from "./acp.ts"
 import { spawnAgentProcess } from "./manager.ts"
-import { createACPRegistryService } from "./registry.ts"
 
 /** Starts one raw ACP adapter and returns a client connection for inspection commands. */
 async function startAdapterInspection(adapter: string, cwd: string) {

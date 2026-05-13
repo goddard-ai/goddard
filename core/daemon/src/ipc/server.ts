@@ -8,7 +8,11 @@ import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { sessionPlugin, type SessionController } from "@goddard-ai/session/daemon"
+import {
+  createSessionManager,
+  sessionPlugin,
+  type SessionManager,
+} from "@goddard-ai/session/daemon"
 import { getErrorMessage } from "radashi"
 
 import { createConfigManager } from "../config-manager.ts"
@@ -20,7 +24,6 @@ import { createLoopManager, type LoopManager } from "../loop/index.ts"
 import { db } from "../persistence/store.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
-import { createSessionManager, type SessionManager } from "../session/manager.ts"
 import { createACPRegistryService } from "../session/registry.ts"
 import {
   discoverWorkforceInitCandidates,
@@ -183,42 +186,15 @@ export async function startDaemonServer(
     return actor.requestId
   }
 
-  const sessionController: SessionController = {
-    newSession: (params) => sessionManager.newSession(params),
-    listSessions: (params) => sessionManager.listSessions(params),
-    connectSession: (id) => sessionManager.connectSession(id),
-    getSession: (id) => sessionManager.getSession(id),
-    getHistory: (params) => sessionManager.getHistory(params),
-    getChanges: (id) => sessionManager.getChanges(id),
-    getComposerSuggestions: (params) => sessionManager.getComposerSuggestions(params),
-    getDraftSuggestions: (params) => sessionManager.getDraftSuggestions(params),
-    getLaunchPreview: (params) => sessionManager.getLaunchPreview(params),
-    getSubpackages: (params) => sessionManager.getSubpackages(params),
-    getDiagnostics: (id) => sessionManager.getDiagnostics(id),
-    getWorktree: (id) => sessionManager.getWorktree(id),
-    mountReviewSession: (id) => sessionManager.mountReviewSession(id),
-    runReviewSession: (id) => sessionManager.runReviewSession(id),
-    unmountReviewSession: (id) => sessionManager.unmountReviewSession(id),
-    getWorkforce: (id) => sessionManager.getWorkforce(id),
-    shutdownSession: (id) => sessionManager.shutdownSession(id),
-    cancelSessionTurn: (id) => sessionManager.cancelSessionTurn(id),
-    steerSession: (id, prompt) => sessionManager.steerSession(id, prompt),
-    sendMessage: (id, message) => sessionManager.sendMessage(id, message),
-    completeSession: (id) => sessionManager.completeSession(id),
-    declareInitiative: (id, title) => sessionManager.declareInitiative(id, title),
-    reportBlocker: (id, reason, metadata) => sessionManager.reportBlocker(id, reason, metadata),
-    reportTurnEnded: (id, metadata) => sessionManager.reportTurnEnded(id, metadata),
-    recordTurnAttentionActivity: (id, metadata) =>
-      sessionManager.recordTurnAttentionActivity(id, metadata),
-    sessionSubscriberConnected: (id) => sessionManager.sessionSubscriberConnected(id),
-    sessionSubscriberDisconnected: (id) => sessionManager.sessionSubscriberDisconnected(id),
-    resolveSessionIdByToken: (token) => sessionManager.resolveSessionIdByToken(token),
-  }
-
   const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
   const inboxSetup = await inboxPlugin.setup?.({ inboxManager })
   const sessionSetup = await sessionPlugin.setup?.({
-    controller: sessionController,
+    get sessionManager() {
+      if (!sessionManager) {
+        throw new Error("Session manager is unavailable before daemon startup completes")
+      }
+      return sessionManager
+    },
     setRequestSessionId: (id) => {
       requireIpcRequestContext().setSessionId(id)
     },
