@@ -1,12 +1,12 @@
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 
 import type { SessionChat } from "./model.ts"
-import { createPageQueryDataContext } from "~/lib/page-query-data-context.tsrx"
+import { createQueryDataContext } from "~/lib/query-data-context.tsrx"
 
 export const {
-  PageQueryDataProvider: SessionChatQueryDataProvider,
-  usePageQueryData: useSessionChatQueryData,
-} = createPageQueryDataContext<
+  QueryDataProvider: SessionChatQueryDataProvider,
+  useQueryData: useSessionChatQueryData,
+} = createQueryDataContext<
   {
     chat: SessionChat;
     session: DaemonSession;

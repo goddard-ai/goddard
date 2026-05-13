@@ -31,32 +31,32 @@ function useStableObjectByValues<QueryData extends Record<string, unknown>>(valu
   return stableValueRef.current
 }
 
-export function createPageQueryDataContext<QueryData extends Record<string, unknown>>() {
-  const pageQueryDataContext = createContext<QueryData | null>(null)
+export function createQueryDataContext<QueryData extends Record<string, unknown>>() {
+  const queryDataContext = createContext<QueryData | null>(null)
 
-  component PageQueryDataProvider(props: {
+  component QueryDataProvider(props: {
     children: preact.ComponentChildren;
     value: QueryData;
   }) {
     const value = useStableObjectByValues(props.value)
 
-    <pageQueryDataContext.Provider {value}>
+    <queryDataContext.Provider {value}>
       {props.children}
-    </pageQueryDataContext.Provider>
+    </queryDataContext.Provider>
   }
 
-  function usePageQueryData() {
-    const queryData = useContext(pageQueryDataContext)
+  function useQueryData() {
+    const queryData = useContext(queryDataContext)
 
     if (!queryData) {
-      throw new Error("Page query data is missing.")
+      throw new Error("Query data is missing.")
     }
 
     return queryData
   }
 
   return {
-    PageQueryDataProvider,
-    usePageQueryData,
+    QueryDataProvider,
+    useQueryData,
   }
 }
