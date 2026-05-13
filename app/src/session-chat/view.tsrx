@@ -15,6 +15,7 @@ import { useSigma } from "preact-sigma"
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
 import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-model.ts"
+import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
@@ -224,169 +225,171 @@ component SessionChatViewContent(props: {
         }
       }
 
-      <header class={styles.header}>
-        <div class={styles.headerIdentity}>
-          <p class={styles.headerRepository}>
-            {chat.repositoryLabel}
-          </p>
-          <h1 class={styles.headerTitle}>
-            {chat.title}
-          </h1>
-        </div>
-        <div class={styles.headerControls}>
-          <div
-            aria-label={`${status.label}: ${status.description}`}
-            class={styles.headerStatus}
-            data-tone={status.tone}
-            title={status.description}
-          >
-            <StatusIcon size={15} strokeWidth={2.2} />
-            <span class={styles.headerStatusLabel}>
-              {status.label}
+      <SessionChatQueryDataProvider value={{ chat, session, sessionHistory }}>
+        <header class={styles.header}>
+          <div class={styles.headerIdentity}>
+            <p class={styles.headerRepository}>
+              {chat.repositoryLabel}
+            </p>
+            <h1 class={styles.headerTitle}>
+              {chat.title}
+            </h1>
+          </div>
+          <div class={styles.headerControls}>
+            <div
+              aria-label={`${status.label}: ${status.description}`}
+              class={styles.headerStatus}
+              data-tone={status.tone}
+              title={status.description}
+            >
+              <StatusIcon size={15} strokeWidth={2.2} />
+              <span class={styles.headerStatusLabel}>
+                {status.label}
+              </span>
+            </div>
+            <div class={styles.headerActions}>
+              if (canOpenSessionChanges) {
+                <GoodTooltip ariaLabel="View changes" content="View changes">
+                  <button
+                    aria-label="View session changes"
+                    class={styles.headerActionButton}
+                    type="button"
+                    onClick={openSessionChanges}
+                  >
+                    <GitBranch size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
+              }
+              <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
+                <button
+                  aria-label={completeActionLabel}
+                  class={styles.headerActionButton}
+                  data-active={sessionCompletedHidden ? "true" : undefined}
+                  disabled={completeActionDisabled}
+                  type="button"
+                  onClick={() => {
+                    void completeCurrentSession()
+                  }}
+                >
+                  <CheckCircle2 size={15} strokeWidth={2.1} />
+                </button>
+              </GoodTooltip>
+              if (canReconnect) {
+                <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
+                  <button
+                    aria-label="Reconnect session"
+                    class={styles.headerActionButton}
+                    disabled={activeHeaderAction !== null}
+                    type="button"
+                    onClick={() => {
+                      void reconnectCurrentSession()
+                    }}
+                  >
+                    <RefreshCcw size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
+              }
+              if (canCancelTurn) {
+                <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
+                  <button
+                    aria-label="Stop active turn"
+                    class={styles.headerActionButton}
+                    data-tone="danger"
+                    disabled={activeHeaderAction !== null}
+                    type="button"
+                    onClick={() => {
+                      void cancelActiveTurn()
+                    }}
+                  >
+                    <XCircle size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
+              }
+            </div>
+          </div>
+        </header>
+        if (headerActionError) {
+          <div class={styles.headerActionError} role="alert">
+            <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>
+            <span class={styles.headerActionErrorDescription}>
+              {headerActionError.description}
             </span>
           </div>
-          <div class={styles.headerActions}>
-            if (canOpenSessionChanges) {
-              <GoodTooltip ariaLabel="View changes" content="View changes">
-                <button
-                  aria-label="View session changes"
-                  class={styles.headerActionButton}
-                  type="button"
-                  onClick={openSessionChanges}
-                >
-                  <GitBranch size={15} strokeWidth={2.1} />
-                </button>
-              </GoodTooltip>
-            }
-            <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
-              <button
-                aria-label={completeActionLabel}
-                class={styles.headerActionButton}
-                data-active={sessionCompletedHidden ? "true" : undefined}
-                disabled={completeActionDisabled}
-                type="button"
-                onClick={() => {
-                  void completeCurrentSession()
-                }}
-              >
-                <CheckCircle2 size={15} strokeWidth={2.1} />
-              </button>
-            </GoodTooltip>
-            if (canReconnect) {
-              <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
-                <button
-                  aria-label="Reconnect session"
-                  class={styles.headerActionButton}
-                  disabled={activeHeaderAction !== null}
-                  type="button"
-                  onClick={() => {
-                    void reconnectCurrentSession()
-                  }}
-                >
-                  <RefreshCcw size={15} strokeWidth={2.1} />
-                </button>
-              </GoodTooltip>
-            }
-            if (canCancelTurn) {
-              <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
-                <button
-                  aria-label="Stop active turn"
-                  class={styles.headerActionButton}
-                  data-tone="danger"
-                  disabled={activeHeaderAction !== null}
-                  type="button"
-                  onClick={() => {
-                    void cancelActiveTurn()
-                  }}
-                >
-                  <XCircle size={15} strokeWidth={2.1} />
-                </button>
-              </GoodTooltip>
-            }
-          </div>
-        </div>
-      </header>
-      if (headerActionError) {
-        <div class={styles.headerActionError} role="alert">
-          <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>
-          <span class={styles.headerActionErrorDescription}>
-            {headerActionError.description}
-          </span>
-        </div>
-      }
-      if (chat.hasEmptyTranscript) {
-        <div class={styles.transcript}>
-          <SessionChatStateMessage
-            description="Send a prompt to start this session."
-            title="No messages yet"
-          />
-        </div>
-      } else {
-        <Transcript
-          class={styles.transcript}
-          initialScrollPosition="bottom"
-          messages={chat.transcriptMessages}
-          olderHistory={{
-            canLoad: canLoadOlderHistory,
-            error: olderHistoryState.status === "error" ? olderHistoryState.message : null,
-            loading: olderHistoryState.status === "loading",
-            onLoad: loadOlderHistory,
-          }}
-          onSelectPermissionOption={async (input) => {
-            await respondSessionPermission({
-              id: chat.session.id,
-              requestId: input.requestId,
-              outcome: {
-                outcome: "selected",
-                optionId: input.optionId,
-              },
-            })
-          }}
-          scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
-        />
-      }
-      <footer class={styles.composerDock}>
-        if (submitError) {
-          <div class={styles.composerError} role="alert">
-            <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
-            <span
-              class={styles.composerErrorDescription}
-            >"Your draft is still here. Try again when the session is available."</span>
-          </div>
         }
-        <Composer
-          loadSuggestions={async (input) => {
-            const response = await goddardSdk.session.composerSuggestions({
-              id: chat.session.id,
-              trigger: input.trigger,
-              query: input.query,
-            })
-
-            return response.suggestions
-          }}
-          onPromptChange={() => {
-            if (submitError) {
-              pageModel.clearSubmitError()
-            }
-          }}
-          onSubmit={async (prompt) => {
-            pageModel.clearSubmitError()
-
-            try {
-              await submitSessionPrompt({
+        if (chat.hasEmptyTranscript) {
+          <div class={styles.transcript}>
+            <SessionChatStateMessage
+              description="Send a prompt to start this session."
+              title="No messages yet"
+            />
+          </div>
+        } else {
+          <Transcript
+            class={styles.transcript}
+            initialScrollPosition="bottom"
+            messages={chat.transcriptMessages}
+            olderHistory={{
+              canLoad: canLoadOlderHistory,
+              error: olderHistoryState.status === "error" ? olderHistoryState.message : null,
+              loading: olderHistoryState.status === "loading",
+              onLoad: loadOlderHistory,
+            }}
+            onSelectPermissionOption={async (input) => {
+              await respondSessionPermission({
                 id: chat.session.id,
-                acpId: chat.session.acpSessionId,
-                prompt,
+                requestId: input.requestId,
+                outcome: {
+                  outcome: "selected",
+                  optionId: input.optionId,
+                },
               })
-              chat.toggleCompletedHidden(false)
-            } catch (error) {
-              console.error("Failed to submit session prompt.", error)
-              pageModel.markSubmitFailed(error)
-              throw error
-            }
-          }}
-        />
-      </footer>
+            }}
+            scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
+          />
+        }
+        <footer class={styles.composerDock}>
+          if (submitError) {
+            <div class={styles.composerError} role="alert">
+              <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
+              <span
+                class={styles.composerErrorDescription}
+              >"Your draft is still here. Try again when the session is available."</span>
+            </div>
+          }
+          <Composer
+            loadSuggestions={async (input) => {
+              const response = await goddardSdk.session.composerSuggestions({
+                id: chat.session.id,
+                trigger: input.trigger,
+                query: input.query,
+              })
+
+              return response.suggestions
+            }}
+            onPromptChange={() => {
+              if (submitError) {
+                pageModel.clearSubmitError()
+              }
+            }}
+            onSubmit={async (prompt) => {
+              pageModel.clearSubmitError()
+
+              try {
+                await submitSessionPrompt({
+                  id: chat.session.id,
+                  acpId: chat.session.acpSessionId,
+                  prompt,
+                })
+                chat.toggleCompletedHidden(false)
+              } catch (error) {
+                console.error("Failed to submit session prompt.", error)
+                pageModel.markSubmitFailed(error)
+                throw error
+              }
+            }}
+          />
+        </footer>
+      </SessionChatQueryDataProvider>
     } pending {
       <SessionChatStateMessage
         description="Loading the session transcript and current session details."
