@@ -58,6 +58,102 @@ test("watch syncs review commits when the agent branch is already checked out", 
   )
 })
 
+test("watch syncs review commits after the dirty edit was already rendered back", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  await runGit(fixture.reviewDir, ["checkout", "main"])
+
+  const controller = new AbortController()
+  const timeoutReason = "watch test timeout"
+  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const started = createDeferred<void>()
+  const firstSync = createDeferred<ReviewSyncResult>()
+  const secondSync = createDeferred<ReviewSyncResult>()
+  let startedResolved = false
+  let firstSyncResolved = false
+  let secondSyncResolved = false
+  let syncCount = 0
+  const watch = watchReviewSession({
+    cwd: fixture.reviewDir,
+    signal: controller.signal,
+    onResult: (result) => {
+      if (result.command === "watch") {
+        startedResolved = true
+        started.resolve()
+      }
+      if (result.command === "sync" && result.status === "ok") {
+        syncCount += 1
+        if (syncCount === 1) {
+          firstSyncResolved = true
+          firstSync.resolve(result)
+        }
+        if (syncCount === 2) {
+          secondSyncResolved = true
+          secondSync.resolve(result)
+          controller.abort()
+        }
+      }
+    },
+  })
+
+  try {
+    await Promise.race([
+      started.promise,
+      watch.then((result) => {
+        if (!startedResolved) {
+          throw new Error(`watch stopped before starting: ${result.message}`)
+        }
+      }),
+    ])
+    await sleep(100)
+
+    await writeText(join(fixture.reviewDir, "shared.txt"), "human edit before commit\n")
+
+    const firstResult = await Promise.race([
+      firstSync.promise,
+      watch.then((result) => {
+        if (!firstSyncResolved) {
+          throw new Error(`watch stopped before first sync: ${result.message}`)
+        }
+        return firstSync.promise
+      }),
+    ])
+    expect(firstResult.acceptedPatchPath).toBeTruthy()
+    expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe(
+      "human edit before commit\n",
+    )
+    expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe(
+      "human edit before commit\n",
+    )
+
+    await sleep(250)
+    await runGit(fixture.reviewDir, ["add", "shared.txt"])
+    await runGit(fixture.reviewDir, ["commit", "-m", "human review commit after sync"])
+
+    const secondResult = await Promise.race([
+      secondSync.promise,
+      watch.then((result) => {
+        if (!secondSyncResolved) {
+          throw new Error(`watch stopped before second sync: ${result.message}`)
+        }
+        return secondSync.promise
+      }),
+    ])
+    const stopped = await watch
+
+    expect(stopped.status).toBe("paused")
+    expect(controller.signal.reason).not.toBe(timeoutReason)
+    expect(secondResult.acceptedPatchPath).toBeUndefined()
+    expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe(
+      "human edit before commit\n",
+    )
+    expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
 test("watch syncs when the agent worktree changes", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
