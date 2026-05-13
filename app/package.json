@@ -29,6 +29,7 @@
     "@goddard-ai/styled-system": "workspace:^",
     "@lexical/react": "^0.42.0",
     "@preact/signals": "^2.9.0",
+    "@preact/signals-core": "^1.14.1",
     "@tsrx/preact": "^0.1.7",
     "@xterm/headless": "^6.0.0",
     "ark-cmdk": "^0.1.1",
