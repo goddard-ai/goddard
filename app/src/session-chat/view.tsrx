@@ -32,7 +32,7 @@ import {
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
 
-export component SessionChatView(props: {
+export default component SessionChatView(props: {
   projectPath: string | null;
   sessionId: DaemonSession["id"];
 }) {
@@ -45,11 +45,6 @@ export component SessionChatView(props: {
           [goddardSdk.session.history, [{ id: props.sessionId }]],
           [goddardSdk.session.get, [{ id: props.sessionId }]],
         ])
-        const submitError = page.submitError.value
-        const activeHeaderAction = page.activeHeaderAction.value
-        const olderHistoryState = page.olderHistoryState.value
-        const headerActionError = page.headerActionError.value
-        const cancelRequestedTurnId = page.cancelRequestedTurnId.value
         const chat = useSigma(
           () => new SessionChat({
             history: sessionHistory,
@@ -66,32 +61,6 @@ export component SessionChatView(props: {
           })
         }, [chat, sessionHistory, session])
 
-        const status = getSessionChatStatusPresentation(chat.summary.status)
-        const StatusIcon = status.icon
-        const activeTurnId = chat.summary.activeTurnId
-        const cancelAlreadyRequested =
-          activeTurnId !== null && cancelRequestedTurnId === activeTurnId
-        const canCancelTurn =
-          activeTurnId !== null && chat.session.activeDaemonSession &&
-            chat.summary.status === "running" &&
-            !cancelAlreadyRequested
-        const canReconnect =
-          chat.connection.reconnectable && !chat.session.activeDaemonSession &&
-            chat.session.connectionMode === "live"
-        const canOpenSessionChanges = chat.session.cwd.trim().length > 0
-        const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
-        const sessionCompletedHidden = chat.session.completedHidden
-        const completeActionDisabled =
-          activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
-        const completeActionLabel =
-          sessionCompletedHidden
-            ? "Session completed"
-            : chat.session.activeDaemonSession
-              ? "Complete unavailable while agent is active"
-              : activeHeaderAction === "complete"
-                ? "Completing session"
-                : "Complete session"
-
         useReportTabProject(resolvedProjectPath)
 
         const inbox = useInbox()
@@ -99,6 +68,11 @@ export component SessionChatView(props: {
         useEffect(() => {
           void inbox.markSessionVisited(session.id)
         }, [inbox, session.id])
+
+        const activeHeaderAction = page.activeHeaderAction.value
+        const canReconnect =
+          chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+            chat.session.connectionMode === "live"
 
         async function reconnectCurrentSession() {
           if (!canReconnect || activeHeaderAction) {
@@ -122,7 +96,10 @@ export component SessionChatView(props: {
         }
 
         async function completeCurrentSession() {
-          if (completeActionDisabled) {
+          if (
+            activeHeaderAction !== null || chat.session.activeDaemonSession ||
+              chat.session.completedHidden
+          ) {
             return
           }
 
@@ -146,6 +123,15 @@ export component SessionChatView(props: {
             page.clearHeaderAction()
           }
         }
+
+        const cancelRequestedTurnId = page.cancelRequestedTurnId.value
+        const activeTurnId = chat.summary.activeTurnId
+        const cancelAlreadyRequested =
+          activeTurnId !== null && cancelRequestedTurnId === activeTurnId
+        const canCancelTurn =
+          activeTurnId !== null && chat.session.activeDaemonSession &&
+            chat.summary.status === "running" &&
+            !cancelAlreadyRequested
 
         async function cancelActiveTurn() {
           if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
@@ -178,6 +164,7 @@ export component SessionChatView(props: {
         }
 
         const workbenchTabSet = useWorkbenchTabSet()
+        const canOpenSessionChanges = chat.session.cwd.trim().length > 0
 
         function openSessionChanges() {
           if (!canOpenSessionChanges) {
@@ -197,6 +184,9 @@ export component SessionChatView(props: {
             dirty: false,
           })
         }
+
+        const olderHistoryState = page.olderHistoryState.value
+        const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
         async function loadOlderHistory() {
           if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
@@ -230,6 +220,9 @@ export component SessionChatView(props: {
               </h1>
             </div>
             <div class={styles.headerControls}>
+              const status = getSessionChatStatusPresentation(chat.summary.status)
+              const StatusIcon = status.icon
+
               <div
                 aria-label={`${status.label}: ${status.description}`}
                 class={styles.headerStatus}
@@ -254,11 +247,23 @@ export component SessionChatView(props: {
                     </button>
                   </GoodTooltip>
                 }
+                const completeActionDisabled =
+                  activeHeaderAction !== null || chat.session.activeDaemonSession ||
+                    chat.session.completedHidden
+                const completeActionLabel =
+                  chat.session.completedHidden
+                    ? "Session completed"
+                    : chat.session.activeDaemonSession
+                      ? "Complete unavailable while agent is active"
+                      : activeHeaderAction === "complete"
+                        ? "Completing session"
+                        : "Complete session"
+
                 <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
                   <button
                     aria-label={completeActionLabel}
                     class={styles.headerActionButton}
-                    data-active={sessionCompletedHidden ? "true" : undefined}
+                    data-active={chat.session.completedHidden ? "true" : undefined}
                     disabled={completeActionDisabled}
                     type="button"
                     onClick={() => {
@@ -302,6 +307,8 @@ export component SessionChatView(props: {
               </div>
             </div>
           </header>
+          const headerActionError = page.headerActionError.value
+
           if (headerActionError) {
             <div class={styles.headerActionError} role="alert">
               <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>
@@ -342,6 +349,8 @@ export component SessionChatView(props: {
             />
           }
           <footer class={styles.composerDock}>
+            const submitError = page.submitError.value
+
             if (submitError) {
               <div class={styles.composerError} role="alert">
                 <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
@@ -396,7 +405,8 @@ export component SessionChatView(props: {
           actionLabel="Try again"
           description="The daemon-backed session or history request failed."
           onAction={() => {
-            retrySessionChatLoad(props.sessionId)
+            queryClient.invalidate(goddardSdk.session.get, [{ id: props.sessionId }])
+            queryClient.invalidate(goddardSdk.session.history, [{ id: props.sessionId }])
             page.retryLoad()
           }}
           title="Couldn't load session"
@@ -421,12 +431,6 @@ component SessionChatStateMessage(props: {
       </button>
     }
   </div>
-}
-
-/** Retries both reads required for the current query-driven session chat view. */
-function retrySessionChatLoad(sessionId: DaemonSession["id"]) {
-  queryClient.invalidate(goddardSdk.session.get, [{ id: sessionId }])
-  queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
 }
 
 function getSessionChatStatusPresentation(status: SessionChatStatus) {
@@ -483,5 +487,3 @@ function formatSessionRequestError(error: unknown) {
 
   return "The daemon rejected the request."
 }
-
-export default SessionChatView
