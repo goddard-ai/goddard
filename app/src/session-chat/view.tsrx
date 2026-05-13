@@ -37,378 +37,373 @@ export component SessionChatView(props: {
   sessionId: DaemonSession["id"];
 }) {
   <SessionChatPageModelProvider>
-    <SessionChatViewContent {...props} />
-  </SessionChatPageModelProvider>
-}
+    const page = useSessionChatPageModel()
 
-component SessionChatViewContent(props: {
-  projectPath: string | null;
-  sessionId: DaemonSession["id"];
-}) {
-  const pageModel = useSessionChatPageModel()
-  <main class={styles.root}>
-    try {
-      const [sessionHistory, { session }] = useQueries([
-        [goddardSdk.session.history, [{ id: props.sessionId }]],
-        [goddardSdk.session.get, [{ id: props.sessionId }]],
-      ])
-      const submitError = pageModel.submitError.value
-      const activeHeaderAction = pageModel.activeHeaderAction.value
-      const olderHistoryState = pageModel.olderHistoryState.value
-      const headerActionError = pageModel.headerActionError.value
-      const cancelRequestedTurnId = pageModel.cancelRequestedTurnId.value
-      const chat = useSigma(
-        () => new SessionChat({
-          history: sessionHistory,
-          session,
-        }),
-        { deps: [session.id] },
-      )
-      const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
+    <main class={styles.root}>
+      try {
+        const [sessionHistory, { session }] = useQueries([
+          [goddardSdk.session.history, [{ id: props.sessionId }]],
+          [goddardSdk.session.get, [{ id: props.sessionId }]],
+        ])
+        const submitError = page.submitError.value
+        const activeHeaderAction = page.activeHeaderAction.value
+        const olderHistoryState = page.olderHistoryState.value
+        const headerActionError = page.headerActionError.value
+        const cancelRequestedTurnId = page.cancelRequestedTurnId.value
+        const chat = useSigma(
+          () => new SessionChat({
+            history: sessionHistory,
+            session,
+          }),
+          { deps: [session.id] },
+        )
+        const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
 
-      useEffect(() => {
-        chat.syncLoadedData({
-          history: sessionHistory,
-          session,
-        })
-      }, [chat, sessionHistory, session])
-
-      const status = getSessionChatStatusPresentation(chat.summary.status)
-      const StatusIcon = status.icon
-      const activeTurnId = chat.summary.activeTurnId
-      const cancelAlreadyRequested = activeTurnId !== null && cancelRequestedTurnId === activeTurnId
-      const canCancelTurn =
-        activeTurnId !== null && chat.session.activeDaemonSession &&
-          chat.summary.status === "running" &&
-          !cancelAlreadyRequested
-      const canReconnect =
-        chat.connection.reconnectable && !chat.session.activeDaemonSession &&
-          chat.session.connectionMode === "live"
-      const canOpenSessionChanges = chat.session.cwd.trim().length > 0
-      const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
-      const sessionCompletedHidden = chat.session.completedHidden
-      const completeActionDisabled =
-        activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
-      const completeActionLabel =
-        sessionCompletedHidden
-          ? "Session completed"
-          : chat.session.activeDaemonSession
-            ? "Complete unavailable while agent is active"
-            : activeHeaderAction === "complete"
-              ? "Completing session"
-              : "Complete session"
-
-      useReportTabProject(resolvedProjectPath)
-
-      const inbox = useInbox()
-
-      useEffect(() => {
-        void inbox.markSessionVisited(session.id)
-      }, [inbox, session.id])
-
-      async function reconnectCurrentSession() {
-        if (!canReconnect || activeHeaderAction) {
-          return
-        }
-
-        pageModel.startHeaderAction("reconnect")
-
-        try {
-          const { session } = await reconnectSession(chat.session.id)
-          chat.syncSession(session)
-        } catch (error) {
-          console.error("Failed to reconnect session.", error)
-          pageModel.failHeaderAction({
-            title: "Reconnect failed",
-            description: formatSessionRequestError(error),
+        useEffect(() => {
+          chat.syncLoadedData({
+            history: sessionHistory,
+            session,
           })
-        } finally {
-          pageModel.clearHeaderAction()
-        }
-      }
+        }, [chat, sessionHistory, session])
 
-      async function completeCurrentSession() {
-        if (completeActionDisabled) {
-          return
-        }
+        const status = getSessionChatStatusPresentation(chat.summary.status)
+        const StatusIcon = status.icon
+        const activeTurnId = chat.summary.activeTurnId
+        const cancelAlreadyRequested =
+          activeTurnId !== null && cancelRequestedTurnId === activeTurnId
+        const canCancelTurn =
+          activeTurnId !== null && chat.session.activeDaemonSession &&
+            chat.summary.status === "running" &&
+            !cancelAlreadyRequested
+        const canReconnect =
+          chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+            chat.session.connectionMode === "live"
+        const canOpenSessionChanges = chat.session.cwd.trim().length > 0
+        const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
+        const sessionCompletedHidden = chat.session.completedHidden
+        const completeActionDisabled =
+          activeHeaderAction !== null || chat.session.activeDaemonSession || sessionCompletedHidden
+        const completeActionLabel =
+          sessionCompletedHidden
+            ? "Session completed"
+            : chat.session.activeDaemonSession
+              ? "Complete unavailable while agent is active"
+              : activeHeaderAction === "complete"
+                ? "Completing session"
+                : "Complete session"
 
-        pageModel.startHeaderAction("complete")
+        useReportTabProject(resolvedProjectPath)
 
-        try {
-          const result = await completeSession(chat.session.id)
+        const inbox = useInbox()
 
-          if (result.item) {
-            inbox.applyItem(result.item)
-          }
+        useEffect(() => {
+          void inbox.markSessionVisited(session.id)
+        }, [inbox, session.id])
 
-          chat.toggleCompletedHidden(true)
-        } catch (error) {
-          console.error("Failed to complete session.", error)
-          pageModel.failHeaderAction({
-            title: "Complete failed",
-            description: formatSessionRequestError(error),
-          })
-        } finally {
-          pageModel.clearHeaderAction()
-        }
-      }
-
-      async function cancelActiveTurn() {
-        if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
-          return
-        }
-
-        pageModel.startHeaderAction("cancel")
-
-        try {
-          const result = await cancelSessionTurn(chat.session.id)
-
-          if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
-            pageModel.failHeaderAction({
-              title: "Stop skipped",
-              description: "The daemon did not find an active turn to stop.",
-            })
+        async function reconnectCurrentSession() {
+          if (!canReconnect || activeHeaderAction) {
             return
           }
 
-          pageModel.markCancelRequested(activeTurnId)
-        } catch (error) {
-          console.error("Failed to stop session turn.", error)
-          pageModel.failHeaderAction({
-            title: "Stop failed",
-            description: formatSessionRequestError(error),
+          page.startHeaderAction("reconnect")
+
+          try {
+            const { session } = await reconnectSession(chat.session.id)
+            chat.syncSession(session)
+          } catch (error) {
+            console.error("Failed to reconnect session.", error)
+            page.failHeaderAction({
+              title: "Reconnect failed",
+              description: formatSessionRequestError(error),
+            })
+          } finally {
+            page.clearHeaderAction()
+          }
+        }
+
+        async function completeCurrentSession() {
+          if (completeActionDisabled) {
+            return
+          }
+
+          page.startHeaderAction("complete")
+
+          try {
+            const result = await completeSession(chat.session.id)
+
+            if (result.item) {
+              inbox.applyItem(result.item)
+            }
+
+            chat.toggleCompletedHidden(true)
+          } catch (error) {
+            console.error("Failed to complete session.", error)
+            page.failHeaderAction({
+              title: "Complete failed",
+              description: formatSessionRequestError(error),
+            })
+          } finally {
+            page.clearHeaderAction()
+          }
+        }
+
+        async function cancelActiveTurn() {
+          if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
+            return
+          }
+
+          page.startHeaderAction("cancel")
+
+          try {
+            const result = await cancelSessionTurn(chat.session.id)
+
+            if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
+              page.failHeaderAction({
+                title: "Stop skipped",
+                description: "The daemon did not find an active turn to stop.",
+              })
+              return
+            }
+
+            page.markCancelRequested(activeTurnId)
+          } catch (error) {
+            console.error("Failed to stop session turn.", error)
+            page.failHeaderAction({
+              title: "Stop failed",
+              description: formatSessionRequestError(error),
+            })
+          } finally {
+            page.clearHeaderAction()
+          }
+        }
+
+        const workbenchTabSet = useWorkbenchTabSet()
+
+        function openSessionChanges() {
+          if (!canOpenSessionChanges) {
+            return
+          }
+
+          queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
+          workbenchTabSet.openOrFocusTab({
+            id: `session-changes:${chat.session.id}`,
+            kind: "sessionChanges",
+            title: `Changes · ${chat.title}`,
+            payload: {
+              sessionId: chat.session.id,
+              sessionTitle: chat.title,
+              repositoryLabel: chat.repositoryLabel,
+            },
+            dirty: false,
           })
-        } finally {
-          pageModel.clearHeaderAction()
-        }
-      }
-
-      const workbenchTabSet = useWorkbenchTabSet()
-
-      function openSessionChanges() {
-        if (!canOpenSessionChanges) {
-          return
         }
 
-        queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
-        workbenchTabSet.openOrFocusTab({
-          id: `session-changes:${chat.session.id}`,
-          kind: "sessionChanges",
-          title: `Changes · ${chat.title}`,
-          payload: {
-            sessionId: chat.session.id,
-            sessionTitle: chat.title,
-            repositoryLabel: chat.repositoryLabel,
-          },
-          dirty: false,
-        })
-      }
+        async function loadOlderHistory() {
+          if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
+            return
+          }
 
-      async function loadOlderHistory() {
-        if (!canLoadOlderHistory || olderHistoryState.status === "loading") {
-          return
+          page.startOlderHistoryLoad()
+
+          try {
+            const history = await goddardSdk.session.history({
+              id: chat.session.id,
+              cursor: chat.nextCursor,
+            })
+
+            chat.prependOlderHistory(history)
+            page.finishOlderHistoryLoad()
+          } catch (error) {
+            console.error("Failed to load older session history.", error)
+            page.failOlderHistoryLoad(formatSessionRequestError(error))
+          }
         }
 
-        pageModel.startOlderHistoryLoad()
-
-        try {
-          const history = await goddardSdk.session.history({
-            id: chat.session.id,
-            cursor: chat.nextCursor,
-          })
-
-          chat.prependOlderHistory(history)
-          pageModel.finishOlderHistoryLoad()
-        } catch (error) {
-          console.error("Failed to load older session history.", error)
-          pageModel.failOlderHistoryLoad(formatSessionRequestError(error))
-        }
-      }
-
-      <SessionChatQueryDataProvider value={{ chat, session, sessionHistory }}>
-        <header class={styles.header}>
-          <div class={styles.headerIdentity}>
-            <p class={styles.headerRepository}>
-              {chat.repositoryLabel}
-            </p>
-            <h1 class={styles.headerTitle}>
-              {chat.title}
-            </h1>
-          </div>
-          <div class={styles.headerControls}>
-            <div
-              aria-label={`${status.label}: ${status.description}`}
-              class={styles.headerStatus}
-              data-tone={status.tone}
-              title={status.description}
-            >
-              <StatusIcon size={15} strokeWidth={2.2} />
-              <span class={styles.headerStatusLabel}>
-                {status.label}
+        <SessionChatQueryDataProvider value={{ chat, session, sessionHistory }}>
+          <header class={styles.header}>
+            <div class={styles.headerIdentity}>
+              <p class={styles.headerRepository}>
+                {chat.repositoryLabel}
+              </p>
+              <h1 class={styles.headerTitle}>
+                {chat.title}
+              </h1>
+            </div>
+            <div class={styles.headerControls}>
+              <div
+                aria-label={`${status.label}: ${status.description}`}
+                class={styles.headerStatus}
+                data-tone={status.tone}
+                title={status.description}
+              >
+                <StatusIcon size={15} strokeWidth={2.2} />
+                <span class={styles.headerStatusLabel}>
+                  {status.label}
+                </span>
+              </div>
+              <div class={styles.headerActions}>
+                if (canOpenSessionChanges) {
+                  <GoodTooltip ariaLabel="View changes" content="View changes">
+                    <button
+                      aria-label="View session changes"
+                      class={styles.headerActionButton}
+                      type="button"
+                      onClick={openSessionChanges}
+                    >
+                      <GitBranch size={15} strokeWidth={2.1} />
+                    </button>
+                  </GoodTooltip>
+                }
+                <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
+                  <button
+                    aria-label={completeActionLabel}
+                    class={styles.headerActionButton}
+                    data-active={sessionCompletedHidden ? "true" : undefined}
+                    disabled={completeActionDisabled}
+                    type="button"
+                    onClick={() => {
+                      void completeCurrentSession()
+                    }}
+                  >
+                    <CheckCircle2 size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
+                if (canReconnect) {
+                  <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
+                    <button
+                      aria-label="Reconnect session"
+                      class={styles.headerActionButton}
+                      disabled={activeHeaderAction !== null}
+                      type="button"
+                      onClick={() => {
+                        void reconnectCurrentSession()
+                      }}
+                    >
+                      <RefreshCcw size={15} strokeWidth={2.1} />
+                    </button>
+                  </GoodTooltip>
+                }
+                if (canCancelTurn) {
+                  <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
+                    <button
+                      aria-label="Stop active turn"
+                      class={styles.headerActionButton}
+                      data-tone="danger"
+                      disabled={activeHeaderAction !== null}
+                      type="button"
+                      onClick={() => {
+                        void cancelActiveTurn()
+                      }}
+                    >
+                      <XCircle size={15} strokeWidth={2.1} />
+                    </button>
+                  </GoodTooltip>
+                }
+              </div>
+            </div>
+          </header>
+          if (headerActionError) {
+            <div class={styles.headerActionError} role="alert">
+              <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>
+              <span class={styles.headerActionErrorDescription}>
+                {headerActionError.description}
               </span>
             </div>
-            <div class={styles.headerActions}>
-              if (canOpenSessionChanges) {
-                <GoodTooltip ariaLabel="View changes" content="View changes">
-                  <button
-                    aria-label="View session changes"
-                    class={styles.headerActionButton}
-                    type="button"
-                    onClick={openSessionChanges}
-                  >
-                    <GitBranch size={15} strokeWidth={2.1} />
-                  </button>
-                </GoodTooltip>
-              }
-              <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
-                <button
-                  aria-label={completeActionLabel}
-                  class={styles.headerActionButton}
-                  data-active={sessionCompletedHidden ? "true" : undefined}
-                  disabled={completeActionDisabled}
-                  type="button"
-                  onClick={() => {
-                    void completeCurrentSession()
-                  }}
-                >
-                  <CheckCircle2 size={15} strokeWidth={2.1} />
-                </button>
-              </GoodTooltip>
-              if (canReconnect) {
-                <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
-                  <button
-                    aria-label="Reconnect session"
-                    class={styles.headerActionButton}
-                    disabled={activeHeaderAction !== null}
-                    type="button"
-                    onClick={() => {
-                      void reconnectCurrentSession()
-                    }}
-                  >
-                    <RefreshCcw size={15} strokeWidth={2.1} />
-                  </button>
-                </GoodTooltip>
-              }
-              if (canCancelTurn) {
-                <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
-                  <button
-                    aria-label="Stop active turn"
-                    class={styles.headerActionButton}
-                    data-tone="danger"
-                    disabled={activeHeaderAction !== null}
-                    type="button"
-                    onClick={() => {
-                      void cancelActiveTurn()
-                    }}
-                  >
-                    <XCircle size={15} strokeWidth={2.1} />
-                  </button>
-                </GoodTooltip>
-              }
-            </div>
-          </div>
-        </header>
-        if (headerActionError) {
-          <div class={styles.headerActionError} role="alert">
-            <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>
-            <span class={styles.headerActionErrorDescription}>
-              {headerActionError.description}
-            </span>
-          </div>
-        }
-        if (chat.hasEmptyTranscript) {
-          <div class={styles.transcript}>
-            <SessionChatStateMessage
-              description="Send a prompt to start this session."
-              title="No messages yet"
-            />
-          </div>
-        } else {
-          <Transcript
-            class={styles.transcript}
-            initialScrollPosition="bottom"
-            messages={chat.transcriptMessages}
-            olderHistory={{
-              canLoad: canLoadOlderHistory,
-              error: olderHistoryState.status === "error" ? olderHistoryState.message : null,
-              loading: olderHistoryState.status === "loading",
-              onLoad: loadOlderHistory,
-            }}
-            onSelectPermissionOption={async (input) => {
-              await respondSessionPermission({
-                id: chat.session.id,
-                requestId: input.requestId,
-                outcome: {
-                  outcome: "selected",
-                  optionId: input.optionId,
-                },
-              })
-            }}
-            scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
-          />
-        }
-        <footer class={styles.composerDock}>
-          if (submitError) {
-            <div class={styles.composerError} role="alert">
-              <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
-              <span
-                class={styles.composerErrorDescription}
-              >"Your draft is still here. Try again when the session is available."</span>
-            </div>
           }
-          <Composer
-            loadSuggestions={async (input) => {
-              const response = await goddardSdk.session.composerSuggestions({
-                id: chat.session.id,
-                trigger: input.trigger,
-                query: input.query,
-              })
-
-              return response.suggestions
-            }}
-            onPromptChange={() => {
-              if (submitError) {
-                pageModel.clearSubmitError()
-              }
-            }}
-            onSubmit={async (prompt) => {
-              pageModel.clearSubmitError()
-
-              try {
-                await submitSessionPrompt({
+          if (chat.hasEmptyTranscript) {
+            <div class={styles.transcript}>
+              <SessionChatStateMessage
+                description="Send a prompt to start this session."
+                title="No messages yet"
+              />
+            </div>
+          } else {
+            <Transcript
+              class={styles.transcript}
+              initialScrollPosition="bottom"
+              messages={chat.transcriptMessages}
+              olderHistory={{
+                canLoad: canLoadOlderHistory,
+                error: olderHistoryState.status === "error" ? olderHistoryState.message : null,
+                loading: olderHistoryState.status === "loading",
+                onLoad: loadOlderHistory,
+              }}
+              onSelectPermissionOption={async (input) => {
+                await respondSessionPermission({
                   id: chat.session.id,
-                  acpId: chat.session.acpSessionId,
-                  prompt,
+                  requestId: input.requestId,
+                  outcome: {
+                    outcome: "selected",
+                    optionId: input.optionId,
+                  },
                 })
-                chat.toggleCompletedHidden(false)
-              } catch (error) {
-                console.error("Failed to submit session prompt.", error)
-                pageModel.markSubmitFailed(error)
-                throw error
-              }
-            }}
-          />
-        </footer>
-      </SessionChatQueryDataProvider>
-    } pending {
-      <SessionChatStateMessage
-        description="Loading the session transcript and current session details."
-        title="Loading session"
-      />
-    } catch {
-      pageModel.retryVersion.value
+              }}
+              scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
+            />
+          }
+          <footer class={styles.composerDock}>
+            if (submitError) {
+              <div class={styles.composerError} role="alert">
+                <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
+                <span
+                  class={styles.composerErrorDescription}
+                >"Your draft is still here. Try again when the session is available."</span>
+              </div>
+            }
+            <Composer
+              loadSuggestions={async (input) => {
+                const response = await goddardSdk.session.composerSuggestions({
+                  id: chat.session.id,
+                  trigger: input.trigger,
+                  query: input.query,
+                })
 
-      <SessionChatStateMessage
-        actionLabel="Try again"
-        description="The daemon-backed session or history request failed."
-        onAction={() => {
-          retrySessionChatLoad(props.sessionId)
-          pageModel.retryLoad()
-        }}
-        title="Couldn't load session"
-      />
-    }
-  </main>
+                return response.suggestions
+              }}
+              onPromptChange={() => {
+                if (submitError) {
+                  page.clearSubmitError()
+                }
+              }}
+              onSubmit={async (prompt) => {
+                page.clearSubmitError()
+
+                try {
+                  await submitSessionPrompt({
+                    id: chat.session.id,
+                    acpId: chat.session.acpSessionId,
+                    prompt,
+                  })
+                  chat.toggleCompletedHidden(false)
+                } catch (error) {
+                  console.error("Failed to submit session prompt.", error)
+                  page.markSubmitFailed(error)
+                  throw error
+                }
+              }}
+            />
+          </footer>
+        </SessionChatQueryDataProvider>
+      } pending {
+        <SessionChatStateMessage
+          description="Loading the session transcript and current session details."
+          title="Loading session"
+        />
+      } catch {
+        page.retryVersion.value
+
+        <SessionChatStateMessage
+          actionLabel="Try again"
+          description="The daemon-backed session or history request failed."
+          onAction={() => {
+            retrySessionChatLoad(props.sessionId)
+            page.retryLoad()
+          }}
+          title="Couldn't load session"
+        />
+      }
+    </main>
+  </SessionChatPageModelProvider>
 }
 
 component SessionChatStateMessage(props: {

@@ -13,21 +13,21 @@ export function createPageModelContext<CreatePageModel extends () => object>(cre
   component PageModelProvider(props: {
     children: preact.ComponentChildren;
   }) {
-    const pageModel = useModel(PageModel)
+    const page = useModel(PageModel)
 
-    <pageModelContext.Provider value={pageModel}>
+    <pageModelContext.Provider value={page}>
       {props.children}
     </pageModelContext.Provider>
   }
 
   function usePageModel() {
-    const pageModel = useContext(pageModelContext)
+    const page = useContext(pageModelContext)
 
-    if (!pageModel) {
+    if (!page) {
       throw new Error("Page model is missing.")
     }
 
-    return pageModel
+    return page
   }
 
   return {
