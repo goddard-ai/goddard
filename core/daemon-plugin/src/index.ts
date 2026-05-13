@@ -61,15 +61,7 @@ type InferConfigDefinition<TPlugin> = TPlugin extends {
   ? { readonly [TKey in TName]: TConfig }
   : {}
 
-type InferIpc<TPlugin> = TPlugin extends { readonly ipc: infer TIpc } ? TIpc : undefined
-
 type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
-
-type RequestHandlerFactory<TPlugin> = TPlugin extends {
-  readonly createRequestHandlers: (...args: infer TArgs) => unknown
-}
-  ? (...args: TArgs) => RequestHandlers<InferIpc<TPlugin>>
-  : never
 
 /** Infers setup context fields from a plugin's own definition and consumed plugins. */
 export type SetupContext<
@@ -118,23 +110,104 @@ export type Composition<TPlugins extends readonly Plugin[]> = {
   readonly config: InferCompositionConfigDefinitions<TPlugins>
 }
 
-type InferConsumes<TPlugin> = TPlugin extends {
-  readonly consumes: infer TConsumes extends readonly Plugin[]
+type RegisterFunction = (...args: never[]) => void | Promise<void>
+
+type ConsumedPlugins<TConsumes> =
+  Extract<TConsumes, readonly Plugin[]> extends never ? [] : Extract<TConsumes, readonly Plugin[]>
+
+type OptionalPluginField<TKey extends string, TValue> = undefined extends TValue
+  ? {}
+  : { readonly [K in TKey]: TValue }
+
+type PluginShape<
+  TName extends string,
+  TConsumes extends readonly Plugin[] | undefined,
+  TProvides extends FeatureExtensions | undefined,
+  TConfig extends ConfigDefinition | undefined,
+  TIpc extends IpcSchema | undefined,
+  TLifecycle,
+  TRegister extends RegisterFunction | undefined,
+> = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
+  OptionalPluginField<"provides", TProvides> &
+  OptionalPluginField<"config", TConfig> &
+  OptionalPluginField<"ipc", TIpc> &
+  OptionalPluginField<"lifecycle", TLifecycle> &
+  OptionalPluginField<"register", TRegister>
+
+type PluginOptions<
+  TName extends string,
+  TConsumes extends readonly Plugin[] | undefined,
+  TProvides extends FeatureExtensions | undefined,
+  TConfig extends ConfigDefinition | undefined,
+  TIpc extends IpcSchema | undefined,
+  TLifecycle,
+  TRegister extends RegisterFunction | undefined,
+> = {
+  readonly name: TName
+  readonly consumes?: TConsumes
+  readonly provides?: TProvides
+  readonly config?: TConfig
+  readonly ipc?: TIpc
+  readonly lifecycle?: TLifecycle
+  readonly register?: TRegister
 }
-  ? TConsumes
-  : []
+
+type PluginSetup<TConsumes extends readonly Plugin[] | undefined, TSelf> = (
+  context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
+) => unknown | Promise<unknown>
+
+type DefinePlugin = {
+  <
+    const TName extends string,
+    const TConsumes extends readonly Plugin[] | undefined,
+    const TProvides extends FeatureExtensions | undefined,
+    const TConfig extends ConfigDefinition | undefined,
+    const TIpc extends IpcSchema,
+    const TLifecycle,
+    const TRegister extends RegisterFunction | undefined,
+    const TRequestHandlerArgs extends readonly unknown[],
+  >(
+    plugin: PluginOptions<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
+      readonly ipc: TIpc
+      readonly createRequestHandlers: (...args: TRequestHandlerArgs) => RequestHandlers<TIpc>
+      readonly setup?: PluginSetup<
+        TConsumes,
+        PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+      >
+    },
+  ): PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
+    readonly createRequestHandlers: (...args: TRequestHandlerArgs) => RequestHandlers<TIpc>
+    readonly setup?: PluginSetup<
+      TConsumes,
+      PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+    >
+  }
+  <
+    const TName extends string,
+    const TConsumes extends readonly Plugin[] | undefined,
+    const TProvides extends FeatureExtensions | undefined,
+    const TConfig extends ConfigDefinition | undefined,
+    const TIpc extends IpcSchema | undefined,
+    const TLifecycle,
+    const TRegister extends RegisterFunction | undefined,
+  >(
+    plugin: PluginOptions<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
+      readonly createRequestHandlers?: undefined
+      readonly setup?: PluginSetup<
+        TConsumes,
+        PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+      >
+    },
+  ): PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister> & {
+    readonly setup?: PluginSetup<
+      TConsumes,
+      PluginShape<TName, TConsumes, TProvides, TConfig, TIpc, TLifecycle, TRegister>
+    >
+  }
+}
 
 /** Preserves the exact daemon plugin object for composition-time type inference. */
-export function definePlugin<const TPlugin extends Omit<Plugin, "setup">>(
-  plugin: TPlugin & {
-    readonly createRequestHandlers?: RequestHandlerFactory<TPlugin>
-    readonly setup?: (
-      context: SetupContext<InferConsumes<TPlugin>, TPlugin>,
-    ) => unknown | Promise<unknown>
-  },
-) {
-  return plugin
-}
+export const definePlugin = ((plugin: Plugin) => plugin) as DefinePlugin
 
 /** Composes statically imported daemon feature plugins and validates dependency ownership. */
 export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins: TPlugins) {
