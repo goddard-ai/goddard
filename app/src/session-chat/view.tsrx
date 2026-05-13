@@ -9,11 +9,12 @@ import {
   RefreshCcw,
   XCircle,
 } from "lucide-react"
-import { useEffect, useState } from "preact/hooks"
+import { useEffect } from "preact/hooks"
 import { useSigma } from "preact-sigma"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
+import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-model.ts"
 import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
@@ -34,28 +35,27 @@ export component SessionChatView(props: {
   projectPath: string | null;
   sessionId: DaemonSession["id"];
 }) {
-  const [, setRetryVersion] = useState(0)
+  <SessionChatPageModelProvider>
+    <SessionChatViewContent {...props} />
+  </SessionChatPageModelProvider>
+}
 
+component SessionChatViewContent(props: {
+  projectPath: string | null;
+  sessionId: DaemonSession["id"];
+}) {
+  const pageModel = useSessionChatPageModel()
   <main class={styles.root}>
     try {
       const [sessionHistory, { session }] = useQueries([
         [goddardSdk.session.history, [{ id: props.sessionId }]],
         [goddardSdk.session.get, [{ id: props.sessionId }]],
       ])
-      const [submitError, setSubmitError] = useState<unknown>(null)
-      const [activeHeaderAction, setActiveHeaderAction] = useState<
-        "cancel" | "complete" | "reconnect" | null
-      >(null)
-      const [olderHistoryState, setOlderHistoryState] = useState<
-        { status: "idle" } | { status: "loading" } | { message: string; status: "error" }
-      >({ status: "idle" })
-      const [headerActionError, setHeaderActionError] = useState<
-        {
-          description: string;
-          title: string;
-        } | null
-      >(null)
-      const [cancelRequestedTurnId, setCancelRequestedTurnId] = useState<string | null>(null)
+      const submitError = pageModel.submitError.value
+      const activeHeaderAction = pageModel.activeHeaderAction.value
+      const olderHistoryState = pageModel.olderHistoryState.value
+      const headerActionError = pageModel.headerActionError.value
+      const cancelRequestedTurnId = pageModel.cancelRequestedTurnId.value
       const chat = useSigma(
         () => new SessionChat({
           history: sessionHistory,
@@ -110,20 +110,19 @@ export component SessionChatView(props: {
           return
         }
 
-        setActiveHeaderAction("reconnect")
-        setHeaderActionError(null)
+        pageModel.startHeaderAction("reconnect")
 
         try {
           const { session } = await reconnectSession(chat.session.id)
           chat.syncSession(session)
         } catch (error) {
           console.error("Failed to reconnect session.", error)
-          setHeaderActionError({
+          pageModel.failHeaderAction({
             title: "Reconnect failed",
             description: formatSessionRequestError(error),
           })
         } finally {
-          setActiveHeaderAction(null)
+          pageModel.clearHeaderAction()
         }
       }
 
@@ -132,8 +131,7 @@ export component SessionChatView(props: {
           return
         }
 
-        setActiveHeaderAction("complete")
-        setHeaderActionError(null)
+        pageModel.startHeaderAction("complete")
 
         try {
           const result = await completeSession(chat.session.id)
@@ -145,12 +143,12 @@ export component SessionChatView(props: {
           chat.toggleCompletedHidden(true)
         } catch (error) {
           console.error("Failed to complete session.", error)
-          setHeaderActionError({
+          pageModel.failHeaderAction({
             title: "Complete failed",
             description: formatSessionRequestError(error),
           })
         } finally {
-          setActiveHeaderAction(null)
+          pageModel.clearHeaderAction()
         }
       }
 
@@ -159,29 +157,28 @@ export component SessionChatView(props: {
           return
         }
 
-        setActiveHeaderAction("cancel")
-        setHeaderActionError(null)
+        pageModel.startHeaderAction("cancel")
 
         try {
           const result = await cancelSessionTurn(chat.session.id)
 
           if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
-            setHeaderActionError({
+            pageModel.failHeaderAction({
               title: "Stop skipped",
               description: "The daemon did not find an active turn to stop.",
             })
             return
           }
 
-          setCancelRequestedTurnId(activeTurnId)
+          pageModel.markCancelRequested(activeTurnId)
         } catch (error) {
           console.error("Failed to stop session turn.", error)
-          setHeaderActionError({
+          pageModel.failHeaderAction({
             title: "Stop failed",
             description: formatSessionRequestError(error),
           })
         } finally {
-          setActiveHeaderAction(null)
+          pageModel.clearHeaderAction()
         }
       }
 
@@ -211,7 +208,7 @@ export component SessionChatView(props: {
           return
         }
 
-        setOlderHistoryState({ status: "loading" })
+        pageModel.startOlderHistoryLoad()
 
         try {
           const history = await goddardSdk.session.history({
@@ -220,13 +217,10 @@ export component SessionChatView(props: {
           })
 
           chat.prependOlderHistory(history)
-          setOlderHistoryState({ status: "idle" })
+          pageModel.finishOlderHistoryLoad()
         } catch (error) {
           console.error("Failed to load older session history.", error)
-          setOlderHistoryState({
-            status: "error",
-            message: formatSessionRequestError(error),
-          })
+          pageModel.failOlderHistoryLoad(formatSessionRequestError(error))
         }
       }
 
@@ -372,11 +366,11 @@ export component SessionChatView(props: {
           }}
           onPromptChange={() => {
             if (submitError) {
-              setSubmitError(null)
+              pageModel.clearSubmitError()
             }
           }}
           onSubmit={async (prompt) => {
-            setSubmitError(null)
+            pageModel.clearSubmitError()
 
             try {
               await submitSessionPrompt({
@@ -387,7 +381,7 @@ export component SessionChatView(props: {
               chat.toggleCompletedHidden(false)
             } catch (error) {
               console.error("Failed to submit session prompt.", error)
-              setSubmitError(error)
+              pageModel.markSubmitFailed(error)
               throw error
             }
           }}
@@ -399,12 +393,14 @@ export component SessionChatView(props: {
         title="Loading session"
       />
     } catch {
+      pageModel.retryVersion.value
+
       <SessionChatStateMessage
         actionLabel="Try again"
         description="The daemon-backed session or history request failed."
         onAction={() => {
           retrySessionChatLoad(props.sessionId)
-          setRetryVersion((version) => version + 1)
+          pageModel.retryLoad()
         }}
         title="Couldn't load session"
       />
