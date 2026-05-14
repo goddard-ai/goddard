@@ -4,7 +4,7 @@ import { z } from "zod"
 
 import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
-import { DaemonSessionId, DaemonSessionIdParams } from "../common/params.ts"
+import { DaemonSessionId, DaemonSessionIdParams } from "../id.ts"
 import { SessionInboxMetadataInput, type InboxItem } from "./inbox.ts"
 import {
   DaemonSessionMetadata,

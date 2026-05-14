@@ -1,6 +1,6 @@
 /** Typed lifecycle events emitted by the session feature for downstream daemon plugins. */
 import type { InboxHeadline, InboxItem, InboxScope } from "@goddard-ai/inbox/schema"
-import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
 type MaybePromise<T> = T | Promise<T>
 

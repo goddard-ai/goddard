@@ -1,6 +1,6 @@
 import { $type, route } from "rouzer"
 
-import { BearerHeaders } from "../../common/auth.ts"
+import { BearerHeaders } from "../../auth.ts"
 import {
   DeviceFlowComplete,
   DeviceFlowStart,

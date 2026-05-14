@@ -3,7 +3,7 @@ import { z } from "zod"
 
 import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
-import { DaemonPullRequestId, DaemonSessionId } from "../common/params.ts"
+import { DaemonPullRequestId, DaemonSessionId } from "../id.ts"
 import {
   InboxEntityId,
   InboxHeadline,

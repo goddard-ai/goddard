@@ -1,4 +1,4 @@
-import { DaemonSessionId, DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
+import { DaemonSessionId, DaemonSessionIdParams } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
 /** Review-session options accepted by the daemon session API. */

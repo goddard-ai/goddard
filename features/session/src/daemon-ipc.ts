@@ -1,5 +1,4 @@
 import { $type, defineIpcSchema } from "@goddard-ai/ipc"
-import { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
 import {
   CancelSessionRequest,
   CompleteSessionRequest,
@@ -34,6 +33,7 @@ import {
   type ShutdownSessionResponse,
   type SteerSessionResponse,
 } from "@goddard-ai/schema/daemon/sessions"
+import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 
 import {
   GetSessionWorktreeRequest,

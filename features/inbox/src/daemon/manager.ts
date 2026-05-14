@@ -1,5 +1,5 @@
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/common/params"
+import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
 import type { KindInput } from "kindstore"
 
 import { db } from "../../../../core/daemon/src/persistence/store.ts"

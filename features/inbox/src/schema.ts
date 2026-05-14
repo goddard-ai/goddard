@@ -1,4 +1,4 @@
-import { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/common/params"
+import { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
 /** Tagged inbox item id emitted by the daemon inbox store. */

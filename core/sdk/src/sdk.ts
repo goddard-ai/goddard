@@ -3,7 +3,6 @@ import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
-import type { DaemonSessionIdParams } from "@goddard-ai/schema/common/params"
 import type {
   CancelSessionRequest,
   CancelWorkforceRequest,
@@ -41,6 +40,7 @@ import type {
   UpdateWorkforceRequest,
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
+import type { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 
 import { runSession } from "./daemon/session/client.ts"

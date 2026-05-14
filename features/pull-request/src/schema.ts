@@ -1,6 +1,6 @@
 import { SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
-import { DaemonPullRequestIdParams } from "@goddard-ai/schema/common/params"
 import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
+import { DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
 /** Request payload used to create one pull request through the daemon. */

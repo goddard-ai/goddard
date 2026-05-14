@@ -1,7 +1,7 @@
 import { definePlugin, defineSetupContext } from "@goddard-ai/daemon-plugin"
 import type { Handlers } from "@goddard-ai/ipc"
-import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type { SendSessionMessageRequest } from "@goddard-ai/schema/daemon"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
 import { sessionIpcSchema } from "./daemon-ipc.ts"
 import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"

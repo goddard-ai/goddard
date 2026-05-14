@@ -2,7 +2,6 @@
 import * as acp from "@agentclientprotocol/sdk"
 import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type {
   CreateSessionRequest,
   CreateSessionResponse,
@@ -28,6 +27,7 @@ import type {
   SessionWorkforceParams,
   ShutdownSessionResponse,
 } from "@goddard-ai/schema/daemon"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { SessionWorktreeParams } from "@goddard-ai/session/schema"
 
 export type {
