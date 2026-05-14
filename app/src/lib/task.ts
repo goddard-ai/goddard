@@ -7,7 +7,6 @@ export function createTask<TaskError = unknown>() {
   const status = signal<TaskStatus>("idle")
   const error = signal<TaskError | null>(null)
   const isPending = computed(() => status.value === "pending")
-  let activePromise: Promise<unknown> | null = null
 
   function clearError() {
     error.value = null
@@ -17,37 +16,23 @@ export function createTask<TaskError = unknown>() {
     }
   }
 
-  async function run<Result>(operation: () => Promise<Result>) {
-    if (activePromise) {
-      return activePromise as Promise<Result>
+  async function run(operation: () => Promise<unknown>) {
+    if (isPending.value) {
+      return
     }
 
     status.value = "pending"
     error.value = null
 
-    const promise = Promise.resolve().then(operation)
-    activePromise = promise
-
     try {
-      const result = await promise
-
-      if (activePromise === promise) {
-        status.value = "idle"
-        error.value = null
-      }
-
-      return result
+      await operation()
+      status.value = "idle"
+      error.value = null
     } catch (cause) {
-      if (activePromise === promise) {
-        error.value = cause as TaskError
-        status.value = "failed"
-      }
+      error.value = cause as TaskError
+      status.value = "failed"
 
       throw cause
-    } finally {
-      if (activePromise === promise) {
-        activePromise = null
-      }
     }
   }
 
@@ -66,42 +51,27 @@ export function createKeyedTask<TaskKey, TaskError = unknown>() {
   const activeKey = signal<TaskKey | null>(null)
   const error = signal<TaskError | null>(null)
   const isPending = computed(() => status.value === "pending")
-  let activePromise: Promise<unknown> | null = null
 
-  async function run<Result>(key: TaskKey, operation: () => Promise<Result>) {
-    if (activePromise) {
-      return activePromise as Promise<Result>
+  async function run(key: TaskKey, operation: () => Promise<unknown>) {
+    if (isPending.value) {
+      return
     }
 
     status.value = "pending"
     activeKey.value = key
     error.value = null
 
-    const promise = Promise.resolve().then(operation)
-    activePromise = promise
-
     try {
-      const result = await promise
-
-      if (activePromise === promise) {
-        status.value = "idle"
-        activeKey.value = null
-        error.value = null
-      }
-
-      return result
+      await operation()
+      status.value = "idle"
+      activeKey.value = null
+      error.value = null
     } catch (cause) {
-      if (activePromise === promise) {
-        status.value = "failed"
-        activeKey.value = null
-        error.value = cause as TaskError
-      }
+      status.value = "failed"
+      activeKey.value = null
+      error.value = cause as TaskError
 
       throw cause
-    } finally {
-      if (activePromise === promise) {
-        activePromise = null
-      }
     }
   }
 
