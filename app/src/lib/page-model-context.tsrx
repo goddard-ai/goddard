@@ -33,7 +33,7 @@ export function createPageModelContext<TModel, TFactoryArgs extends any[] = []>(
       throw new Error("Page model is missing.")
     }
 
-    return page as ReadonlyPageModel<Model<TModel>>
+    return page as Model<ReadonlyPageModel<TModel>>
   }
 
   return {
