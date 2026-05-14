@@ -7,7 +7,7 @@ import { afterEach, expect, test } from "bun:test"
 import {
   loadDaemonTextModel,
   MissingProviderPackageError,
-} from "../../../features/session/src/daemon/text-model-resolver.ts"
+} from "../src/daemon/text-model-resolver.ts"
 
 const cleanupPaths: string[] = []
 

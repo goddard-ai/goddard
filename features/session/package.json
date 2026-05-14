@@ -50,7 +50,7 @@
     "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "prettier -w .",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {

@@ -6,7 +6,7 @@ import {
   createFallbackSessionTitle,
   normalizeGeneratedSessionTitle,
   prepareSessionTitle,
-} from "../../../features/session/src/daemon/title.ts"
+} from "../src/daemon/title.ts"
 
 test("prepareSessionTitle derives fallback and pending state from the first prompt", () => {
   const preparedTitle = prepareSessionTitle("Fix the session list title flicker on refresh.", {
