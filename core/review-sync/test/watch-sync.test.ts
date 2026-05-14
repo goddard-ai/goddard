@@ -58,7 +58,7 @@ test("watch syncs review commits when the agent branch is already checked out", 
   )
 })
 
-test("watch syncs review commits after the dirty edit was already rendered back", async () => {
+test("watch preserves a review commit that records already-rendered content", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
@@ -69,10 +69,9 @@ test("watch syncs review commits after the dirty edit was already rendered back"
   const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
   const started = createDeferred<void>()
   const firstSync = createDeferred<ReviewSyncResult>()
-  const secondSync = createDeferred<ReviewSyncResult>()
   let startedResolved = false
   let firstSyncResolved = false
-  let secondSyncResolved = false
+  let unexpectedSecondSync: ReviewSyncResult | null = null
   let syncCount = 0
   const watch = watchReviewSession({
     cwd: fixture.reviewDir,
@@ -88,10 +87,8 @@ test("watch syncs review commits after the dirty edit was already rendered back"
           firstSyncResolved = true
           firstSync.resolve(result)
         }
-        if (syncCount === 2) {
-          secondSyncResolved = true
-          secondSync.resolve(result)
-          controller.abort()
+        if (syncCount > 1) {
+          unexpectedSecondSync = result
         }
       }
     },
@@ -127,29 +124,37 @@ test("watch syncs review commits after the dirty edit was already rendered back"
       "human edit before commit\n",
     )
 
-    await sleep(250)
-    await runGit(fixture.reviewDir, ["add", "shared.txt"])
+    expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe(
+      "M  shared.txt\n",
+    )
+    const beforeCommitHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
     await runGit(fixture.reviewDir, ["commit", "-m", "human review commit after sync"])
+    const afterCommitHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
 
-    const secondResult = await Promise.race([
-      secondSync.promise,
-      watch.then((result) => {
-        if (!secondSyncResolved) {
-          throw new Error(`watch stopped before second sync: ${result.message}`)
-        }
-        return secondSync.promise
-      }),
-    ])
+    expect(afterCommitHead).not.toBe(beforeCommitHead)
+    await sleep(500)
+    expect(unexpectedSecondSync).toBeNull()
+    expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+      afterCommitHead,
+    )
+    expect((await runGit(fixture.reviewDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+      "human review commit after sync",
+    )
+
+    controller.abort()
     const stopped = await watch
 
     expect(stopped.status).toBe("paused")
     expect(controller.signal.reason).not.toBe(timeoutReason)
-    expect(secondResult.acceptedPatchPath).toBeUndefined()
     expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe(
       "human edit before commit\n",
     )
     expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
   } finally {
+    if (!controller.signal.aborted) {
+      controller.abort()
+    }
+    await watch.catch(() => {})
     clearTimeout(timeout)
   }
 })

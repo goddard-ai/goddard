@@ -1065,21 +1065,21 @@ async function refreshReviewWorktreeFromAgentBranchRefForWatch(
   return true
 }
 
-/** Builds a content fingerprint that changes for commits, branch moves, and dirty files. */
+/** Builds a content fingerprint that changes for agent commits, branch moves, and dirty files. */
 async function createWatchFingerprint(
   session: { agentWorktree: string; reviewWorktree: string; agentBranch: string },
   context: RuntimeContext,
 ) {
   const [agent, review, agentBranchHead] = await Promise.all([
-    createWorktreeFingerprint(session.agentWorktree, context),
-    createWorktreeFingerprint(session.reviewWorktree, context),
+    createAgentWorktreeFingerprint(session.agentWorktree, context),
+    createReviewWorktreeFingerprint(session.reviewWorktree, context),
     resolveRef(session.reviewWorktree, `refs/heads/${session.agentBranch}`, context),
   ])
   return JSON.stringify({ agent, review, agentBranchHead })
 }
 
 /** Captures the branch, HEAD, and snapshot tree for one worktree. */
-async function createWorktreeFingerprint(cwd: string, context: RuntimeContext) {
+async function createAgentWorktreeFingerprint(cwd: string, context: RuntimeContext) {
   const [branch, head, tree] = await Promise.all([
     git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
       allowFailure: true,
@@ -1094,6 +1094,24 @@ async function createWorktreeFingerprint(cwd: string, context: RuntimeContext) {
   return {
     branch: branch.status === 0 ? branch.stdout.trim() : null,
     head: head.stdout.trim(),
+    tree,
+  }
+}
+
+/** Captures review content without treating content-equivalent review commits as sync work. */
+async function createReviewWorktreeFingerprint(cwd: string, context: RuntimeContext) {
+  const [branch, tree] = await Promise.all([
+    git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
+      allowFailure: true,
+    }),
+    createSnapshotTree({
+      cwd,
+      context,
+    }),
+  ])
+
+  return {
+    branch: branch.status === 0 ? branch.stdout.trim() : null,
     tree,
   }
 }
