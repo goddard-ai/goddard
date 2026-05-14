@@ -70,53 +70,6 @@ export default component SessionChatView(props: {
         }, [inbox, session.id])
 
         const activeHeaderAction = page.headerAction.activeKey.value
-        const canReconnect =
-          chat.connection.reconnectable && !chat.session.activeDaemonSession &&
-            chat.session.connectionMode === "live"
-
-        async function reconnectCurrentSession() {
-          if (!canReconnect) {
-            return
-          }
-
-          await page.headerAction.run("reconnect", async () => {
-            try {
-              const { session } = await reconnectSession(chat.session.id)
-              chat.syncSession(session)
-            } catch (error) {
-              console.error("Failed to reconnect session.", error)
-              throw {
-                title: "Reconnect failed",
-                description: formatSessionRequestError(error),
-              }
-            }
-          }).catch(() => {})
-        }
-
-        async function completeCurrentSession() {
-          if (chat.session.activeDaemonSession || chat.session.completedHidden) {
-            return
-          }
-
-          await page.headerAction.run("complete", async () => {
-            try {
-              const result = await completeSession(chat.session.id)
-
-              if (result.item) {
-                inbox.applyItem(result.item)
-              }
-
-              chat.toggleCompletedHidden(true)
-            } catch (error) {
-              console.error("Failed to complete session.", error)
-              throw {
-                title: "Complete failed",
-                description: formatSessionRequestError(error),
-              }
-            }
-          }).catch(() => {})
-        }
-
         const cancelRequestedTurnId = page.cancelRequestedTurnId.value
         const activeTurnId = chat.summary.activeTurnId
         const cancelAlreadyRequested =
@@ -126,58 +79,8 @@ export default component SessionChatView(props: {
             chat.summary.status === "running" &&
             !cancelAlreadyRequested
 
-        async function cancelActiveTurn() {
-          if (!canCancelTurn) {
-            return
-          }
-
-          await page.headerAction.run("cancel", async () => {
-            try {
-              const result = await cancelSessionTurn(chat.session.id)
-
-              if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
-                throw {
-                  title: "Stop skipped",
-                  description: "The daemon did not find an active turn to stop.",
-                }
-              }
-
-              page.markCancelRequested(activeTurnId)
-            } catch (error) {
-              if (isSessionChatHeaderActionError(error)) {
-                throw error
-              }
-
-              console.error("Failed to stop session turn.", error)
-              throw {
-                title: "Stop failed",
-                description: formatSessionRequestError(error),
-              }
-            }
-          }).catch(() => {})
-        }
-
-        const workbenchTabSet = useWorkbenchTabSet()
         const canOpenSessionChanges = chat.session.cwd.trim().length > 0
-
-        function openSessionChanges() {
-          if (!canOpenSessionChanges) {
-            return
-          }
-
-          queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
-          workbenchTabSet.openOrFocusTab({
-            id: `session-changes:${chat.session.id}`,
-            kind: "sessionChanges",
-            title: `Changes · ${chat.title}`,
-            payload: {
-              sessionId: chat.session.id,
-              sessionTitle: chat.title,
-              repositoryLabel: chat.repositoryLabel,
-            },
-            dirty: false,
-          })
-        }
+        const workbenchTabSet = useWorkbenchTabSet()
 
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
@@ -219,7 +122,26 @@ export default component SessionChatView(props: {
                 </span>
               </div>
               <div class={styles.headerActions}>
+                const canReconnect =
+                  chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+                    chat.session.connectionMode === "live"
+
                 if (canOpenSessionChanges) {
+                  function openSessionChanges() {
+                    queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
+                    workbenchTabSet.openOrFocusTab({
+                      id: `session-changes:${chat.session.id}`,
+                      kind: "sessionChanges",
+                      title: `Changes · ${chat.title}`,
+                      payload: {
+                        sessionId: chat.session.id,
+                        sessionTitle: chat.title,
+                        repositoryLabel: chat.repositoryLabel,
+                      },
+                      dirty: false,
+                    })
+                  }
+
                   <GoodTooltip ariaLabel="View changes" content="View changes">
                     <button
                       aria-label="View session changes"
@@ -242,6 +164,29 @@ export default component SessionChatView(props: {
                       : activeHeaderAction === "complete"
                         ? "Completing session"
                         : "Complete session"
+                async function completeCurrentSession() {
+                  if (chat.session.activeDaemonSession || chat.session.completedHidden) {
+                    return
+                  }
+
+                  await page.headerAction.run("complete", async () => {
+                    try {
+                      const result = await completeSession(chat.session.id)
+
+                      if (result.item) {
+                        inbox.applyItem(result.item)
+                      }
+
+                      chat.toggleCompletedHidden(true)
+                    } catch (error) {
+                      console.error("Failed to complete session.", error)
+                      throw {
+                        title: "Complete failed",
+                        description: formatSessionRequestError(error),
+                      }
+                    }
+                  }).catch(() => {})
+                }
 
                 <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
                   <button
@@ -256,6 +201,21 @@ export default component SessionChatView(props: {
                   </button>
                 </GoodTooltip>
                 if (canReconnect) {
+                  async function reconnectCurrentSession() {
+                    await page.headerAction.run("reconnect", async () => {
+                      try {
+                        const { session } = await reconnectSession(chat.session.id)
+                        chat.syncSession(session)
+                      } catch (error) {
+                        console.error("Failed to reconnect session.", error)
+                        throw {
+                          title: "Reconnect failed",
+                          description: formatSessionRequestError(error),
+                        }
+                      }
+                    }).catch(() => {})
+                  }
+
                   <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
                     <button
                       aria-label="Reconnect session"
@@ -269,6 +229,33 @@ export default component SessionChatView(props: {
                   </GoodTooltip>
                 }
                 if (canCancelTurn) {
+                  async function cancelActiveTurn() {
+                    await page.headerAction.run("cancel", async () => {
+                      try {
+                        const result = await cancelSessionTurn(chat.session.id)
+
+                        if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
+                          throw {
+                            title: "Stop skipped",
+                            description: "The daemon did not find an active turn to stop.",
+                          }
+                        }
+
+                        page.markCancelRequested(activeTurnId)
+                      } catch (error) {
+                        if (isSessionChatHeaderActionError(error)) {
+                          throw error
+                        }
+
+                        console.error("Failed to stop session turn.", error)
+                        throw {
+                          title: "Stop failed",
+                          description: formatSessionRequestError(error),
+                        }
+                      }
+                    }).catch(() => {})
+                  }
+
                   <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
                     <button
                       aria-label="Stop active turn"
