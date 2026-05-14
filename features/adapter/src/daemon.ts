@@ -1,12 +1,11 @@
-import { definePlugin, defineSetupContext } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 
 import { adapterIpcSchema } from "./daemon-ipc.ts"
-import { listAdapters, type ListAdaptersContext } from "./list-adapters.ts"
+import { listAdapters } from "./list-adapters.ts"
 
 export const adapterPlugin = definePlugin({
   name: "adapter",
   ipc: adapterIpcSchema,
-  setupContext: defineSetupContext<ListAdaptersContext>(),
   setup(context) {
     return {
       requestHandlers: {

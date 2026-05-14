@@ -1,17 +1,10 @@
-import { definePlugin, defineSetupContext, type Plugin } from "@goddard-ai/daemon-plugin"
-import { sessionPlugin, type SessionEventEmitter } from "@goddard-ai/session/daemon"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { inboxIpcSchema } from "./daemon-ipc.ts"
 import { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
-
-type InboxHandlerContext = {
-  publishInboxItemEvent: Parameters<typeof createInboxManager>[0]["publishEvent"]
-  session: {
-    events: SessionEventEmitter
-  }
-}
 
 /** First-class inbox methods exposed to daemon plugins that create attention items. */
 type InboxExtension = Pick<
@@ -27,9 +20,8 @@ type InboxExtension = Pick<
 
 export const inboxPlugin = definePlugin({
   name: "inbox",
-  consumes: [sessionPlugin as Plugin],
+  consumes: [sessionPlugin],
   ipc: inboxIpcSchema,
-  setupContext: defineSetupContext<InboxHandlerContext>(),
   setup({ publishInboxItemEvent, session }) {
     const inbox = createInboxManager({
       publishEvent: publishInboxItemEvent,

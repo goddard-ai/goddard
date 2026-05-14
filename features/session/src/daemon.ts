@@ -1,7 +1,6 @@
-import { definePlugin, defineSetupContext } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import type { Handlers } from "@goddard-ai/ipc"
 import type { SendSessionMessageRequest } from "@goddard-ai/schema/daemon"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
 import { sessionIpcSchema } from "./daemon-ipc.ts"
 import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"
@@ -14,12 +13,6 @@ export {
   type SessionManager,
 } from "./daemon/manager.ts"
 export { type SessionEventEmitter, type SessionEvents } from "./daemon/events.ts"
-
-/** Daemon-owned runtime objects the session feature needs to bind IPC handlers. */
-type SessionSetupContext = {
-  sessionManager: SessionManager
-  setRequestSessionId: (id: DaemonSessionId) => void
-}
 
 /** First-class session methods exposed to other daemon feature plugins. */
 type SessionExtension = {
@@ -59,7 +52,6 @@ type SessionExtension = {
 export const sessionPlugin = definePlugin({
   name: "session",
   ipc: sessionIpcSchema,
-  setupContext: defineSetupContext<SessionSetupContext>(),
   setup(context) {
     const events = createSessionEventEmitter()
     const session = {

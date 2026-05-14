@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
+import type { DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
@@ -176,8 +177,15 @@ export async function startDaemonServer(
     return actor.requestId
   }
 
-  const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
-  const sessionSetup = await sessionPlugin.setup?.({
+  const daemonSubstrate = {
+    addAllowedPrToSession,
+    backendClient: client,
+    configManager,
+    getSessionByToken,
+    publishInboxItemEvent: (payload) => {
+      publishInboxItemEvent(payload)
+    },
+    registryService,
     get sessionManager() {
       if (!sessionManager) {
         throw new Error("Session manager is unavailable before daemon startup completes")
@@ -187,7 +195,14 @@ export async function startDaemonServer(
     setRequestSessionId: (id) => {
       requireIpcRequestContext().setSessionId(id)
     },
-  })
+  } satisfies DaemonSetupSubstrate
+
+  function createSetupContext<TExtensions extends object>(extensions: TExtensions) {
+    return Object.assign(Object.create(daemonSubstrate) as DaemonSetupSubstrate, extensions)
+  }
+
+  const adapterSetup = await adapterPlugin.setup?.(daemonSubstrate)
+  const sessionSetup = await sessionPlugin.setup?.(daemonSubstrate)
 
   if (!adapterSetup?.requestHandlers) {
     throw new Error("Adapter daemon plugin did not return request handlers")
@@ -196,26 +211,21 @@ export async function startDaemonServer(
     throw new Error("Session daemon plugin did not return request handlers")
   }
   const sessionFeature = sessionSetup.provides.session
-  const inboxSetup = await inboxPlugin.setup?.({
-    publishInboxItemEvent: (payload) => {
-      publishInboxItemEvent(payload)
-    },
-    session: sessionFeature,
-  })
+  const inboxSetup = await inboxPlugin.setup?.(
+    createSetupContext({
+      session: sessionFeature,
+    }),
+  )
   if (!inboxSetup?.requestHandlers || !inboxSetup.provides) {
     throw new Error("Inbox daemon plugin did not return request handlers")
   }
   const inboxFeature = inboxSetup.provides.inbox
-  const pullRequestSetup = await pullRequestPlugin.setup?.({
-    addAllowedPrToSession,
-    backendClient: client,
-    getSessionByToken,
-    inbox: inboxFeature,
-    session: sessionFeature,
-    setRequestSessionId: (id) => {
-      requireIpcRequestContext().setSessionId(id)
-    },
-  })
+  const pullRequestSetup = await pullRequestPlugin.setup?.(
+    createSetupContext({
+      inbox: inboxFeature,
+      session: sessionFeature,
+    }),
+  )
   if (!pullRequestSetup?.requestHandlers) {
     throw new Error("Pull request daemon plugin did not return request handlers")
   }

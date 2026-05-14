@@ -72,18 +72,59 @@ type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
 
 type SetupConfigContext<TConfig> = keyof TConfig extends never ? {} : { readonly config: TConfig }
 
+/** Core daemon runtime substrate available to statically composed daemon plugins. */
+export type DaemonSetupSubstrate = {
+  readonly addAllowedPrToSession: (
+    sessionId: `ses_${string}`,
+    prNumber: number,
+  ) => void | Promise<void>
+  readonly backendClient: {
+    readonly pr: {
+      readonly create: (input: {
+        readonly owner: string
+        readonly repo: string
+        readonly title: string
+        readonly body?: string | undefined
+        readonly head: string
+        readonly base: string
+      }) => Promise<{ readonly number: number; readonly url: string }>
+      readonly reply: (input: {
+        readonly owner: string
+        readonly repo: string
+        readonly prNumber: number
+        readonly body: string
+      }) => Promise<{ readonly success: boolean }>
+    }
+  }
+  readonly configManager: {
+    readonly getRootConfig: (cwd: string) => Promise<any>
+  }
+  readonly getSessionByToken: (token: string) => Promise<{
+    readonly sessionId: `ses_${string}`
+    readonly owner: string | null
+    readonly repo: string | null
+    readonly allowedPrNumbers: readonly number[]
+  } | null>
+  readonly publishInboxItemEvent: (payload: any) => void
+  readonly registryService: {
+    readonly listAdapters: () => Promise<any>
+  }
+  readonly sessionManager: any
+  readonly setRequestSessionId: (id: `ses_${string}`) => void
+}
+
 /** Infers setup context fields from a plugin's own definition and consumed plugins. */
 export type SetupContext<
   TConsumes extends readonly unknown[],
   TSelf = unknown,
-> = UnionToIntersection<InferProvides<TConsumes[number]>> &
+> = DaemonSetupSubstrate &
+  UnionToIntersection<InferProvides<TConsumes[number]>> &
   SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>>
 
 /** Daemon plugin shape used to constrain feature plugin values without widening them. */
 export type Plugin = {
   readonly name: string
   readonly consumes?: readonly Plugin[]
-  readonly setupContext?: unknown
   readonly config?: ConfigDefinition
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
@@ -129,13 +170,11 @@ type OptionalPluginField<TKey extends string, TValue> = undefined extends TValue
 type PluginShape<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
-  TSetupContext,
   TConfig extends ConfigDefinition | undefined,
   TIpc extends IpcSchema | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
-  OptionalPluginField<"setupContext", TSetupContext> &
   OptionalPluginField<"config", TConfig> &
   OptionalPluginField<"ipc", TIpc> &
   OptionalPluginField<"lifecycle", TLifecycle> &
@@ -144,7 +183,6 @@ type PluginShape<
 type PluginOptions<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
-  TSetupContext,
   TConfig extends ConfigDefinition | undefined,
   TIpc extends IpcSchema | undefined,
   TLifecycle,
@@ -153,7 +191,6 @@ type PluginOptions<
   readonly name: TName
   readonly consumes?: TConsumes
   readonly provides?: never
-  readonly setupContext?: TSetupContext
   readonly config?: TConfig
   readonly ipc?: TIpc
   readonly lifecycle?: TLifecycle
@@ -163,11 +200,10 @@ type PluginOptions<
 type PluginSetup<
   TConsumes extends readonly Plugin[] | undefined,
   TSelf,
-  TSetupContext,
   TIpc,
   TProvides extends FeatureExtensions | undefined,
 > = (
-  context: TSetupContext & SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
+  context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
 ) =>
   | void
   | SetupContributions<TIpc, TProvides>
@@ -198,28 +234,25 @@ type DefinePlugin = {
   <
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
-    const TSetupContext,
     const TConfig extends ConfigDefinition | undefined,
     const TIpc extends IpcSchema,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TSetupContext, TConfig, TIpc, TLifecycle, TRegister> & {
+    plugin: PluginOptions<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister> & {
       readonly ipc: TIpc
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TSetupContext, TConfig, TIpc, TLifecycle, TRegister>,
-        TSetupContext,
+        PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister>,
         TIpc,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TSetupContext, TConfig, TIpc, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister> & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TSetupContext, TConfig, TIpc, TLifecycle, TRegister>,
-      TSetupContext,
+      PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister>,
       TIpc,
       TProvides
     >
@@ -227,35 +260,24 @@ type DefinePlugin = {
   <
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
-    const TSetupContext,
     const TConfig extends ConfigDefinition | undefined,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<
-      TName,
-      TConsumes,
-      TSetupContext,
-      TConfig,
-      undefined,
-      TLifecycle,
-      TRegister
-    > & {
+    plugin: PluginOptions<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister> & {
       readonly ipc?: undefined
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TSetupContext, TConfig, undefined, TLifecycle, TRegister>,
-        TSetupContext,
+        PluginShape<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister>,
         undefined,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TSetupContext, TConfig, undefined, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister> & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TSetupContext, TConfig, undefined, TLifecycle, TRegister>,
-      TSetupContext,
+      PluginShape<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister>,
       undefined,
       TProvides
     >
@@ -264,11 +286,6 @@ type DefinePlugin = {
 
 /** Preserves the exact daemon plugin object for composition-time type inference. */
 export const definePlugin = ((plugin: Plugin) => plugin) as DefinePlugin
-
-/** Declares daemon-supplied setup context without adding runtime behavior. */
-export function defineSetupContext<const TContext>() {
-  return null as unknown as TContext
-}
 
 /** Composes statically imported daemon feature plugins and validates dependency ownership. */
 export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins: TPlugins) {

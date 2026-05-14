@@ -140,6 +140,7 @@
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/config": "workspace:^",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
@@ -284,6 +285,7 @@
       "name": "@goddard-ai/inbox",
       "version": "0.1.0",
       "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
@@ -300,6 +302,7 @@
       "name": "@goddard-ai/pull-request",
       "version": "0.1.0",
       "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",

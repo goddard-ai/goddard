@@ -1,49 +1,21 @@
-import { definePlugin, defineSetupContext, type Plugin } from "@goddard-ai/daemon-plugin"
-import { inboxPlugin, type InboxManager } from "@goddard-ai/inbox/daemon"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import { sessionPlugin, type SessionManager } from "@goddard-ai/session/daemon"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { db } from "../../../core/daemon/src/persistence/store.ts"
 import { pullRequestIpcSchema } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 
-type BackendPrClient = {
-  pr: {
-    create: (input: {
-      owner: string
-      repo: string
-      title: string
-      body?: string
-      head: string
-      base: string
-    }) => Promise<{ number: number; url: string }>
-    reply: (input: {
-      owner: string
-      repo: string
-      prNumber: number
-      body: string
-    }) => Promise<{ success: boolean }>
-  }
+type PullRequestSessionRecord = {
+  sessionId: DaemonSession["id"]
+  owner: string | null
+  repo: string | null
+  allowedPrNumbers: readonly number[]
 }
 
-type PullRequestSetupContext = {
-  backendClient: BackendPrClient
-  inbox: Pick<InboxManager, "getPullRequest" | "touchInboxItem">
-  session: Pick<SessionManager, "recordTurnAttentionActivity">
-  getSessionByToken: (token: string) => Promise<{
-    sessionId: DaemonSession["id"]
-    owner: string | null
-    repo: string | null
-    allowedPrNumbers: readonly number[]
-  } | null>
-  addAllowedPrToSession: (sessionId: DaemonSession["id"], prNumber: number) => Promise<void>
-  setRequestSessionId: (id: DaemonSession["id"]) => void
-}
-
-function requireRepositorySession(
-  session: Awaited<ReturnType<PullRequestSetupContext["getSessionByToken"]>>,
-) {
+function requireRepositorySession(session: PullRequestSessionRecord | null) {
   if (!session) {
     throw new IpcClientError("Invalid session token")
   }
@@ -72,9 +44,8 @@ async function recordPullRequest(record: Parameters<typeof db.pullRequests.creat
 
 export const pullRequestPlugin = definePlugin({
   name: "pull-request",
-  consumes: [sessionPlugin as Plugin, inboxPlugin as Plugin],
+  consumes: [sessionPlugin, inboxPlugin],
   ipc: pullRequestIpcSchema,
-  setupContext: defineSetupContext<PullRequestSetupContext>(),
   setup({
     addAllowedPrToSession,
     backendClient,
