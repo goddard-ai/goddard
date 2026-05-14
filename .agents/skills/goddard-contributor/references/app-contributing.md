@@ -23,3 +23,4 @@ Use this reference for app-local contribution guidance that intentionally does n
 - Name extracted style entries by element role or intent, not by incidental visual details, and keep the exported object roughly ordered with the JSX structure.
 - Use `styled(...)` for reusable presentational primitives shared within a feature or surface, not for singleton page shells or one-off elements.
 - When a sigma instance helper type is essentially `InstanceType<typeof MySigma>`, export it as a same-name interface: `export interface MySigma extends InstanceType<typeof MySigma> {}`.
+- Prefer passing async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise with `void`.

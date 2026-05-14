@@ -255,9 +255,7 @@ export default component SessionChatView(props: {
                     data-active={chat.session.completedHidden ? "true" : undefined}
                     disabled={completeActionDisabled}
                     type="button"
-                    onClick={() => {
-                      void completeCurrentSession()
-                    }}
+                    onClick={completeCurrentSession}
                   >
                     <CheckCircle2 size={15} strokeWidth={2.1} />
                   </button>
@@ -269,9 +267,7 @@ export default component SessionChatView(props: {
                       class={styles.headerActionButton}
                       disabled={activeHeaderAction !== null}
                       type="button"
-                      onClick={() => {
-                        void reconnectCurrentSession()
-                      }}
+                      onClick={reconnectCurrentSession}
                     >
                       <RefreshCcw size={15} strokeWidth={2.1} />
                     </button>
@@ -285,9 +281,7 @@ export default component SessionChatView(props: {
                       data-tone="danger"
                       disabled={activeHeaderAction !== null}
                       type="button"
-                      onClick={() => {
-                        void cancelActiveTurn()
-                      }}
+                      onClick={cancelActiveTurn}
                     >
                       <XCircle size={15} strokeWidth={2.1} />
                     </button>
