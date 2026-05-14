@@ -153,7 +153,7 @@ export type InferCompositionConfigDefinitions<TPlugins extends readonly unknown[
 
 /** Runtime daemon feature composition produced by static composition roots. */
 export type Composition<TPlugins extends readonly Plugin[]> = {
-  readonly plugins: readonly Plugin[]
+  readonly plugins: TPlugins
   readonly ipc: ComposeIpcSchemas<ExtractIpcs<TPlugins>>
   readonly config: InferCompositionConfigDefinitions<TPlugins>
 }

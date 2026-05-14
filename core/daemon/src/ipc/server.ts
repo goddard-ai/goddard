@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
-import type { DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
+import {
+  composePlugins,
+  type DaemonSetupSubstrate,
+  type InferProvides,
+} from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
@@ -39,6 +43,16 @@ import {
 import { createWorkforceManager, type WorkforceManager } from "../workforce/index.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
+
+const daemonPlugins = [adapterPlugin, sessionPlugin, inboxPlugin, pullRequestPlugin] as const
+const daemonPluginComposition = composePlugins(daemonPlugins)
+
+type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
+
+type PluginSetupContributions = {
+  readonly requestHandlers: Record<string, unknown>
+  readonly provides?: Record<string, unknown>
+}
 
 export async function startDaemonServer(
   client: BackendPrClient,
@@ -197,30 +211,11 @@ export async function startDaemonServer(
     },
   } satisfies DaemonSetupSubstrate
 
-  function createSetupContext<TExtensions extends object>(extensions: TExtensions) {
-    return Object.assign(Object.create(daemonSubstrate) as DaemonSetupSubstrate, extensions)
-  }
-
-  const adapterSetup = await adapterPlugin.setup(daemonSubstrate)
-  const sessionSetup = await sessionPlugin.setup(daemonSubstrate)
-
-  const sessionFeature = sessionSetup.provides.session
-  const inboxSetup = await inboxPlugin.setup(
-    createSetupContext({
-      session: sessionFeature,
-    }),
-  )
-  const inboxFeature = inboxSetup.provides.inbox
-  const pullRequestSetup = await pullRequestPlugin.setup(
-    createSetupContext({
-      inbox: inboxFeature,
-      session: sessionFeature,
-    }),
-  )
+  const pluginSetup = await setupDaemonPlugins(daemonSubstrate)
+  const sessionFeature = pluginSetup.extensions.session as SessionExtension
 
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),
-    ...adapterSetup.requestHandlers,
     "auth.device.start": async (payload) => client.auth.startDeviceFlow(payload),
     "auth.device.complete": async (payload) => {
       const session = await client.auth.completeDeviceFlow(payload)
@@ -233,9 +228,7 @@ export async function startDaemonServer(
       db.metadata.delete("authToken")
       return { success: true as const }
     },
-    ...pullRequestSetup.requestHandlers,
-    ...sessionSetup.requestHandlers,
-    ...inboxSetup.requestHandlers,
+    ...pluginSetup.requestHandlers,
     "action.run": async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionFeature.create(
@@ -385,7 +378,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-  } satisfies Handlers<typeof daemonIpcSchema>
+  } as Handlers<typeof daemonIpcSchema>
 
   const ipcServer = createServer({
     port: runtime.port,
@@ -529,6 +522,40 @@ export async function startDaemonServer(
         daemonUrl,
       })
     },
+  }
+}
+
+async function setupDaemonPlugins(substrate: DaemonSetupSubstrate) {
+  const extensions: Record<string, unknown> = {}
+  const extensionsByPluginName = new Map<string, Record<string, unknown>>()
+  const requestHandlers: Record<string, unknown> = {}
+
+  for (const plugin of daemonPluginComposition.plugins) {
+    const consumedPlugins = "consumes" in plugin ? plugin.consumes : undefined
+    const consumedExtensions = (consumedPlugins ?? []).map(
+      (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
+    )
+    const context = Object.assign(
+      Object.create(substrate) as DaemonSetupSubstrate,
+      ...consumedExtensions,
+    )
+    const setup = await (
+      plugin.setup as (
+        context: DaemonSetupSubstrate & Record<string, unknown>,
+      ) => PluginSetupContributions | Promise<PluginSetupContributions>
+    )(context)
+
+    Object.assign(requestHandlers, setup.requestHandlers)
+
+    if (setup.provides) {
+      Object.assign(extensions, setup.provides)
+      extensionsByPluginName.set(plugin.name, setup.provides)
+    }
+  }
+
+  return {
+    extensions,
+    requestHandlers,
   }
 }
 
