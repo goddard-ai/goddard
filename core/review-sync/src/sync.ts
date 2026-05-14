@@ -43,17 +43,29 @@ export async function syncSession(session: SessionState, context: RuntimeContext
     if (!agentBranchHead) {
       throw new UserError(`Agent branch ${latest.agentBranch} no longer exists.`)
     }
-    const renderTarget = (await isWorktreeClean(latest.agentWorktree, context))
+    const acceptedReviewHead = await resolveAcceptedCleanReviewHead({
+      session: latest,
+      patchAccepted: patchResult.acceptedPatchPath !== null,
+      agentSnapshot,
+      context,
+    })
+    const renderTarget = acceptedReviewHead
       ? {
-          branchHead: agentBranchHead,
-          content: agentBranchHead,
-          renderedSnapshot: agentBranchHead,
+          branchHead: acceptedReviewHead,
+          content: acceptedReviewHead,
+          renderedSnapshot: acceptedReviewHead,
         }
-      : {
-          branchHead: agentBranchHead,
-          content: agentSnapshot,
-          renderedSnapshot: agentSnapshot,
-        }
+      : (await isWorktreeClean(latest.agentWorktree, context))
+        ? {
+            branchHead: agentBranchHead,
+            content: agentBranchHead,
+            renderedSnapshot: agentBranchHead,
+          }
+        : {
+            branchHead: agentBranchHead,
+            content: agentSnapshot,
+            renderedSnapshot: agentSnapshot,
+          }
 
     await updateRef(latest.agentWorktree, latest.refs.agentSnapshot, agentSnapshot, context)
     await renderReviewWorktreeTarget(latest, renderTarget, context)
@@ -79,6 +91,47 @@ export async function syncSession(session: SessionState, context: RuntimeContext
     })
     return patchResult
   })
+}
+
+/** Keeps clean review commits visible when their accepted patch now matches the agent tree. */
+async function resolveAcceptedCleanReviewHead(input: {
+  session: SessionState
+  patchAccepted: boolean
+  agentSnapshot: string
+  context: RuntimeContext
+}) {
+  if (
+    !input.patchAccepted ||
+    !(await isWorktreeClean(input.session.reviewWorktree, input.context))
+  ) {
+    return null
+  }
+
+  const reviewHead = await resolveRef(input.session.reviewWorktree, "HEAD", input.context)
+  if (!reviewHead) {
+    return null
+  }
+
+  const diff = await git(
+    input.session.reviewWorktree,
+    ["diff", "--quiet", input.agentSnapshot, reviewHead],
+    input.context,
+    {
+      allowFailure: true,
+    },
+  )
+  if (diff.status === 0) {
+    return reviewHead
+  }
+  if (diff.status === 1) {
+    return null
+  }
+
+  throw new Error(
+    `git diff --quiet failed in ${input.session.reviewWorktree}: ${
+      diff.stderr.trim() || diff.stdout.trim() || "unknown Git error"
+    }`,
+  )
 }
 
 /**

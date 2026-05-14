@@ -14,6 +14,8 @@
   - Saves a conflicting human patch as rejected without applying it to the agent worktree.
   - Captures the latest agent content after any accepted patch.
   - Renders the review worktree index and working tree to that latest agent content.
+  - Keeps an accepted clean review commit visible when that commit already has
+    the same content as the latest agent snapshot.
   - Advances the disposable review branch to the latest real agent commit when
     synchronized agent content includes committed work.
 

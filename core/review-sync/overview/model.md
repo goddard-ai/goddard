@@ -58,6 +58,8 @@
   - Ignored files are not synchronized.
   - Human commits on the review branch are treated as review content:
     - The resulting file changes can be accepted.
+    - Clean review commits can stay visible after their changes are accepted
+      when their content matches the synchronized agent content.
     - The review branch history itself is not preserved as the durable record.
 
 - **Patch outcomes**
