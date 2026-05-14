@@ -1,4 +1,5 @@
-import type { DaemonSession, InboxHeadline, InboxScope } from "@goddard-ai/schema/daemon"
+import type { InboxHeadline, InboxScope } from "@goddard-ai/inbox/schema"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 
 const genericScopes = new Set(["task", "update", "work", "work in progress", "progress"])
 
@@ -47,8 +48,8 @@ function fallbackHeadline(input: {
   )
 }
 
-/** Resolves agent-supplied inbox metadata into stable, bounded row preview text. */
-export function resolveInboxMetadata(input: {
+/** Resolves session attention metadata into stable, bounded row preview text. */
+export function resolveSessionAttentionMetadata(input: {
   session: Pick<
     DaemonSession,
     "inboxScope" | "initiative" | "title" | "titleState" | "blockedReason"

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test"
 
-import { createInboxManager } from "../src/inbox/manager.ts"
-import { db, resetDb } from "../src/persistence/store.ts"
+import { db, resetDb } from "../../../core/daemon/src/persistence/store.ts"
+import { createInboxManager } from "../src/daemon/manager.ts"
 
 beforeEach(() => {
   resetDb({ filename: ":memory:" })

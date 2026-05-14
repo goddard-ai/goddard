@@ -42,6 +42,7 @@ import type {
   GetSessionHistoryResponse,
   GetSessionWorkforceResponse,
   InboxHeadline,
+  InboxItem,
   InboxScope,
   InitialPromptOption,
   ListSessionsRequest,
@@ -73,8 +74,6 @@ import { getErrorMessage, omit } from "radashi"
 import type { ConfigManager } from "../../../../core/daemon/src/config-manager.ts"
 import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
 import { SessionContext } from "../../../../core/daemon/src/context.ts"
-import type { InboxManager } from "../../../../core/daemon/src/inbox/manager.ts"
-import { resolveInboxMetadata } from "../../../../core/daemon/src/inbox/metadata.ts"
 import {
   createChunkPreview,
   createLogger,
@@ -105,6 +104,8 @@ import {
   resolveInstalledBinaryCommand,
 } from "./archive.ts"
 import { readSessionChanges } from "./changes.ts"
+import type { SessionEventEmitter } from "./events.ts"
+import { resolveSessionAttentionMetadata } from "./metadata.ts"
 import { discoverSessionSubpackages } from "./subpackages.ts"
 import { loadDaemonTextModel } from "./text-model-resolver.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
@@ -802,7 +803,7 @@ export type SessionManager = {
     id: SessionId,
     metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string },
   ) => Promise<{ scope: InboxScope; headline: InboxHeadline; turnId: string | null }>
-  completeSession: (id: SessionId) => Promise<ReturnType<InboxManager["completeSession"]>>
+  completeSession: (id: SessionId) => Promise<InboxItem | null>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
   cancelSessionTurn: (id: SessionId) => Promise<CancelSessionResponse>
   steerSession: (
@@ -1731,7 +1732,7 @@ export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
   publish: (id: SessionId, message: acp.AnyMessage) => void
-  inboxManager: InboxManager
+  events: SessionEventEmitter
   configManager: ConfigManager
   registryService: ACPRegistryService
   idleSessionShutdownTimeoutMs?: number
@@ -1838,7 +1839,7 @@ export function createSessionManager(input: {
     metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string }
     blockedReason?: string | null
   }) {
-    const resolved = resolveInboxMetadata({
+    const resolved = resolveSessionAttentionMetadata({
       session: {
         ...input.session,
         blockedReason: input.blockedReason ?? input.session.blockedReason,
@@ -4093,9 +4094,9 @@ export function createSessionManager(input: {
       completedHidden: false,
       blockedReason: reason,
     })
-    input.inboxManager.touchInboxItem({
-      entityId: id,
-      reason: "session.blocked",
+    await input.events.emit("lifecycle.blocked", {
+      sessionId: id,
+      reason,
       scope: resolved.scope,
       headline: resolved.headline,
       turnId: resolveCurrentTurnId(id),
@@ -4123,9 +4124,8 @@ export function createSessionManager(input: {
 
     const activeTurn = activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn?.touchedAttentionEntity !== true) {
-      input.inboxManager.touchInboxItem({
-        entityId: id,
-        reason: "session.turn_ended",
+      await input.events.emit("lifecycle.turnEnded", {
+        sessionId: id,
         scope: resolved.scope,
         headline: resolved.headline,
         turnId: resolveCurrentTurnId(id),
@@ -4192,7 +4192,10 @@ export function createSessionManager(input: {
     updateSession(id, {
       completedHidden: true,
     })
-    return input.inboxManager.completeSession(id)
+    const [item = null] = await input.events.emit("lifecycle.completed", {
+      sessionId: id,
+    })
+    return item
   }
 
   async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
@@ -4220,7 +4223,9 @@ export function createSessionManager(input: {
       updateSession(id, {
         completedHidden: false,
       })
-      input.inboxManager.markSessionReplied(id)
+      await input.events.emit("lifecycle.replied", {
+        sessionId: id,
+      })
       refreshIdleShutdownState(active.id, "prompt_enqueued")
       emitDiagnostic(active.id, "session_prompt_enqueued", {
         requestId: message.id,

@@ -1,21 +1,21 @@
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/common/params"
+import type { KindInput } from "kindstore"
+
+import { db } from "../../../../core/daemon/src/persistence/store.ts"
 import type {
   BulkUpdateInboxItemsRequest,
   InboxEntityId,
   InboxHeadline,
   InboxItem,
+  InboxItemEventMutation,
   InboxPriority,
   InboxReason,
   InboxScope,
   InboxStatus,
   ListInboxRequest,
   UpdateInboxItemRequest,
-} from "@goddard-ai/schema/daemon"
-import type { InboxItemEventMutation } from "@goddard-ai/schema/daemon/inbox"
-import type { KindInput } from "kindstore"
-
-import { db } from "../persistence/store.ts"
+} from "../schema.ts"
 
 const DEFAULT_INBOX_PAGE_SIZE = 50
 const MAX_INBOX_PAGE_SIZE = 100

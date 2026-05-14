@@ -4,6 +4,7 @@ import type { DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type { SendSessionMessageRequest } from "@goddard-ai/schema/daemon"
 
 import { sessionIpcSchema } from "./daemon-ipc.ts"
+import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"
 import type { SessionManager } from "./daemon/manager.ts"
 
 export {
@@ -12,6 +13,7 @@ export {
   resolveAgentProcessSpec,
   type SessionManager,
 } from "./daemon/manager.ts"
+export { type SessionEventEmitter, type SessionEvents } from "./daemon/events.ts"
 
 /** Daemon-owned runtime objects the session feature needs to bind IPC handlers. */
 type SessionSetupContext = {
@@ -51,6 +53,7 @@ type SessionExtension = {
   subscriberConnected: SessionManager["sessionSubscriberConnected"]
   subscriberDisconnected: SessionManager["sessionSubscriberDisconnected"]
   resolveToken: SessionManager["resolveSessionIdByToken"]
+  events: SessionEventEmitter
 }
 
 export const sessionPlugin = definePlugin({
@@ -58,6 +61,7 @@ export const sessionPlugin = definePlugin({
   ipc: sessionIpcSchema,
   setupContext: defineSetupContext<SessionSetupContext>(),
   setup(context) {
+    const events = createSessionEventEmitter()
     const session = {
       create: (request) => context.sessionManager.newSession({ request }),
       list: (params) => context.sessionManager.listSessions(params),
@@ -89,6 +93,7 @@ export const sessionPlugin = definePlugin({
       subscriberConnected: (id) => context.sessionManager.sessionSubscriberConnected(id),
       subscriberDisconnected: (id) => context.sessionManager.sessionSubscriberDisconnected(id),
       resolveToken: (token) => context.sessionManager.resolveSessionIdByToken(token),
+      events,
     } satisfies SessionExtension
 
     return {

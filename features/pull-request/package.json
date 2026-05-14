@@ -1,18 +1,10 @@
 {
-  "name": "@goddard-ai/inbox",
+  "name": "@goddard-ai/pull-request",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./app": {
-      "types": {
-        "source": "./src/app.tsx",
-        "default": "./dist/app.d.mts"
-      },
-      "bun": "./src/app.tsx",
-      "import": "./dist/app.mjs"
-    },
     "./daemon": {
       "types": {
         "source": "./src/daemon.ts",
@@ -54,9 +46,8 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@goddard-ai/app-plugin": "workspace:*",
-    "@goddard-ai/daemon-client": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/schema": "workspace:*",

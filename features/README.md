@@ -41,3 +41,15 @@ feature becomes part of a supported product surface.
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
   precedence, validation, persistence, and hot reload.
+
+## Current Feature Boundaries
+
+`features/inbox` owns inbox IPC, SDK namespace construction, app metadata, inbox
+manager logic, inbox metadata resolution, and inbox item state transitions.
+Daemon persistence remains core substrate.
+
+`features/session` owns session feature schemas, session-owned daemon IPC
+routes, session lifecycle implementation modules, SDK session method fragments,
+app session metadata, and the first-class daemon `context.session` extension
+that downstream feature packages consume. Low-level linked-worktree substrate
+and third-party worktree provider contracts remain in core packages.

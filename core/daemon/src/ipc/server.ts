@@ -5,9 +5,15 @@ import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import type { Handlers } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
-import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
+import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
+import {
+  type DaemonSession,
+  type InboxItem,
+  type SubscribeWorkforceEventsRequest,
+} from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import type { InboxItemEventMutation } from "@goddard-ai/schema/daemon/inbox"
 import {
   createSessionManager,
   sessionPlugin,
@@ -18,7 +24,6 @@ import { getErrorMessage } from "radashi"
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
-import { createInboxManager } from "../inbox/manager.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager, type LoopManager } from "../loop/index.ts"
 import { db } from "../persistence/store.ts"
@@ -32,7 +37,6 @@ import {
 } from "../workforce/config.ts"
 import { createWorkforceManager, type WorkforceManager } from "../workforce/index.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
-import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./git.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
 
 export async function startDaemonServer(
@@ -55,12 +59,10 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
 
   const registryService = createACPRegistryService()
-  let publishInboxItemEvent: Parameters<typeof createInboxManager>[0]["publishEvent"] = () => {}
-  const inboxManager = createInboxManager({
-    publishEvent: (payload) => {
-      publishInboxItemEvent(payload)
-    },
-  })
+  let publishInboxItemEvent: (payload: {
+    item: InboxItem
+    mutation: InboxItemEventMutation
+  }) => void = () => {}
 
   let sessionManager!: SessionManager
   let loopManager!: LoopManager
@@ -102,18 +104,6 @@ export async function startDaemonServer(
         },
       }
     })
-  }
-
-  async function recordPullRequest(record: Parameters<typeof db.pullRequests.create>[0]) {
-    return db.pullRequests.putByUnique(
-      {
-        host: record.host,
-        owner: record.owner,
-        repo: record.repo,
-        prNumber: record.prNumber,
-      },
-      record,
-    )
   }
 
   function requireIpcRequestContext() {
@@ -187,7 +177,6 @@ export async function startDaemonServer(
   }
 
   const adapterSetup = await adapterPlugin.setup?.({ registryService, configManager })
-  const inboxSetup = await inboxPlugin.setup?.({ inboxManager })
   const sessionSetup = await sessionPlugin.setup?.({
     get sessionManager() {
       if (!sessionManager) {
@@ -203,13 +192,33 @@ export async function startDaemonServer(
   if (!adapterSetup?.requestHandlers) {
     throw new Error("Adapter daemon plugin did not return request handlers")
   }
-  if (!inboxSetup?.requestHandlers) {
-    throw new Error("Inbox daemon plugin did not return request handlers")
-  }
   if (!sessionSetup?.requestHandlers || !sessionSetup.provides) {
     throw new Error("Session daemon plugin did not return request handlers")
   }
   const sessionFeature = sessionSetup.provides.session
+  const inboxSetup = await inboxPlugin.setup?.({
+    publishInboxItemEvent: (payload) => {
+      publishInboxItemEvent(payload)
+    },
+    session: sessionFeature,
+  })
+  if (!inboxSetup?.requestHandlers || !inboxSetup.provides) {
+    throw new Error("Inbox daemon plugin did not return request handlers")
+  }
+  const inboxFeature = inboxSetup.provides.inbox
+  const pullRequestSetup = await pullRequestPlugin.setup?.({
+    addAllowedPrToSession,
+    backendClient: client,
+    getSessionByToken,
+    inbox: inboxFeature,
+    session: sessionFeature,
+    setRequestSessionId: (id) => {
+      requireIpcRequestContext().setSessionId(id)
+    },
+  })
+  if (!pullRequestSetup?.requestHandlers) {
+    throw new Error("Pull request daemon plugin did not return request handlers")
+  }
 
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),
@@ -226,114 +235,7 @@ export async function startDaemonServer(
       db.metadata.delete("authToken")
       return { success: true as const }
     },
-    "pr.submit": async (payload) => {
-      const session = await getSessionByToken(payload.token)
-      if (!session) {
-        throw new IpcClientError("Invalid session token")
-      }
-      const context = requireIpcRequestContext()
-      context.setSessionId(session.sessionId)
-      if (!session.owner || !session.repo) {
-        throw new IpcClientError("Session is not scoped to a repository")
-      }
-
-      const resolvedInput = await resolveSubmitRequestFromGit({
-        cwd: payload.cwd,
-        title: payload.title,
-        body: payload.body,
-        head: payload.head,
-        base: payload.base,
-      })
-
-      const pr = await client.pr.create({
-        ...resolvedInput,
-        owner: session.owner,
-        repo: session.repo,
-      })
-      await addAllowedPrToSession(session.sessionId, pr.number)
-      const pullRequest = await recordPullRequest({
-        host: "github",
-        owner: session.owner,
-        repo: session.repo,
-        prNumber: pr.number,
-        cwd: payload.cwd,
-      })
-      const metadata = await sessionFeature.recordTurnAttentionActivity(session.sessionId, {
-        scope: payload.scope,
-        headline: payload.headline,
-        fallbackHeadline: resolvedInput.title,
-      })
-      inboxManager.touchInboxItem({
-        entityId: pullRequest.id,
-        reason: "pull_request.created",
-        scope: metadata.scope,
-        headline: metadata.headline,
-        turnId: metadata.turnId,
-      })
-      db.sessions.update(session.sessionId, {
-        status: "done",
-        lastAgentMessage: `PR Submitted: ${resolvedInput.title}\n${pr.url}\n\n${
-          resolvedInput.body ?? ""
-        }`,
-      })
-      return { number: pr.number, url: pr.url }
-    },
-    "pr.get": async ({ id }) => {
-      return {
-        pullRequest: inboxManager.getPullRequest(id),
-      }
-    },
-    "pr.reply": async (payload) => {
-      const session = await getSessionByToken(payload.token)
-      if (!session) {
-        throw new IpcClientError("Invalid session token")
-      }
-      const context = requireIpcRequestContext()
-      context.setSessionId(session.sessionId)
-      if (!session.owner || !session.repo) {
-        throw new IpcClientError("Session is not scoped to a repository")
-      }
-
-      const resolvedInput = await resolveReplyRequestFromGit({
-        cwd: payload.cwd,
-        message: payload.message,
-        prNumber: payload.prNumber,
-      })
-
-      if (!session.allowedPrNumbers.includes(resolvedInput.prNumber)) {
-        throw new IpcClientError(`PR #${resolvedInput.prNumber} is not allowed for this session`)
-      }
-
-      const response = await client.pr.reply({
-        ...resolvedInput,
-        owner: session.owner,
-        repo: session.repo,
-      })
-      const pullRequest = await recordPullRequest({
-        host: "github",
-        owner: session.owner,
-        repo: session.repo,
-        prNumber: resolvedInput.prNumber,
-        cwd: payload.cwd,
-      })
-      const metadata = await sessionFeature.recordTurnAttentionActivity(session.sessionId, {
-        scope: payload.scope,
-        headline: payload.headline,
-        fallbackHeadline: "PR reply posted",
-      })
-      inboxManager.touchInboxItem({
-        entityId: pullRequest.id,
-        reason: "pull_request.updated",
-        scope: metadata.scope,
-        headline: metadata.headline,
-        turnId: metadata.turnId,
-      })
-      db.sessions.update(session.sessionId, {
-        status: "done",
-        lastAgentMessage: `PR Reply: ${payload.message}`,
-      })
-      return response
-    },
+    ...pullRequestSetup.requestHandlers,
     ...sessionSetup.requestHandlers,
     ...inboxSetup.requestHandlers,
     "action.run": async (payload) => {
@@ -570,7 +472,7 @@ export async function startDaemonServer(
     agentBinDir: runtime.agentBinDir,
     configManager,
     registryService,
-    inboxManager,
+    events: sessionFeature.events,
     idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
     publish(id, message) {
       ipcServer.publish("session.message", { id, message })
