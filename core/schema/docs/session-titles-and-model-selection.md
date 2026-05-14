@@ -18,7 +18,7 @@ This feature is separate from the session agent's own model selection:
 
 ## Context
 
-- `app/plans/components/SessionListRow.md` and `app/plans/components/SessionChatHeader.md` already assume that a session summary exposes `title`.
+- `app/src/sessions/display.ts` already treats `session.title` as the primary display value for session rows, chat tabs, and related surfaces.
 - `spec/configuration.md` requires shared JSON-backed configuration and rejects app-only parallel config models.
 - The feature needs provider-backed text generation only for the short title-refinement step, not for the primary daemon session lifecycle.
 - The repository is pre-alpha, so the simplest forward-looking design is preferred.

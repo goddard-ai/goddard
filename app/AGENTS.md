@@ -8,6 +8,9 @@
 ## App Rules
 
 - Treat `app/` as an Electrobun desktop app with a Bun-owned host layer and a frontend-heavy TypeScript webview.
+- Planning and rendering:
+  - Do not introduce or plan Pretext-backed app rendering at this stage unless a human explicitly reopens that approach.
+  - Before rewriting retained `app/plans/` documents, run the proposed change by the user for clarification.
 - Desktop boundaries:
   - Put desktop integrations behind the Electrobun RPC bridge instead of importing host APIs directly into UI code.
   - UI components should render props and invoke actions, not call host APIs.
