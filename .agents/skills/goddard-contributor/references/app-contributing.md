@@ -24,3 +24,4 @@ Use this reference for app-local contribution guidance that intentionally does n
 - Use `styled(...)` for reusable presentational primitives shared within a feature or surface, not for singleton page shells or one-off elements.
 - When a sigma instance helper type is essentially `InstanceType<typeof MySigma>`, export it as a same-name interface: `export interface MySigma extends InstanceType<typeof MySigma> {}`.
 - Prefer passing async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise with `void`.
+- Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`; introduce locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.

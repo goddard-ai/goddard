@@ -69,8 +69,7 @@ export default component SessionChatView(props: {
           void inbox.markSessionVisited(session.id)
         }, [inbox, session.id])
 
-        const headerAction = page.headerAction
-        const activeHeaderAction = headerAction.activeKey.value
+        const activeHeaderAction = page.headerAction.activeKey.value
         const canReconnect =
           chat.connection.reconnectable && !chat.session.activeDaemonSession &&
             chat.session.connectionMode === "live"
@@ -80,7 +79,7 @@ export default component SessionChatView(props: {
             return
           }
 
-          await headerAction.run("reconnect", async () => {
+          await page.headerAction.run("reconnect", async () => {
             try {
               const { session } = await reconnectSession(chat.session.id)
               chat.syncSession(session)
@@ -102,7 +101,7 @@ export default component SessionChatView(props: {
             return
           }
 
-          await headerAction.run("complete", async () => {
+          await page.headerAction.run("complete", async () => {
             try {
               const result = await completeSession(chat.session.id)
 
@@ -135,7 +134,7 @@ export default component SessionChatView(props: {
             return
           }
 
-          await headerAction.run("cancel", async () => {
+          await page.headerAction.run("cancel", async () => {
             try {
               const result = await cancelSessionTurn(chat.session.id)
 
@@ -183,16 +182,15 @@ export default component SessionChatView(props: {
           })
         }
 
-        const olderHistory = page.olderHistory
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
         async function loadOlderHistory() {
-          if (!canLoadOlderHistory || olderHistory.isPending.value) {
+          if (!canLoadOlderHistory || page.olderHistory.isPending.value) {
             return
           }
 
           try {
-            await olderHistory.run(() => chat.loadOlderHistory())
+            await page.olderHistory.run(() => chat.loadOlderHistory())
           } catch (error) {
             console.error("Failed to load older session history.", error)
           }
@@ -290,7 +288,7 @@ export default component SessionChatView(props: {
               </div>
             </div>
           </header>
-          const headerActionError = headerAction.error.value
+          const headerActionError = page.headerAction.error.value
 
           if (headerActionError) {
             <div class={styles.headerActionError} role="alert">
@@ -314,10 +312,10 @@ export default component SessionChatView(props: {
               messages={chat.transcriptMessages}
               olderHistory={{
                 canLoad: canLoadOlderHistory,
-                error: olderHistory.error.value
-                  ? formatSessionRequestError(olderHistory.error.value)
+                error: page.olderHistory.error.value
+                  ? formatSessionRequestError(page.olderHistory.error.value)
                   : null,
-                loading: olderHistory.isPending.value,
+                loading: page.olderHistory.isPending.value,
                 onLoad: loadOlderHistory,
               }}
               onSelectPermissionOption={async (input) => {
@@ -334,8 +332,7 @@ export default component SessionChatView(props: {
             />
           }
           <footer class={styles.composerDock}>
-            const submitPrompt = page.submitPrompt
-            const submitError = submitPrompt.error.value
+            const submitError = page.submitPrompt.error.value
 
             if (submitError) {
               <div class={styles.composerError} role="alert">
@@ -357,11 +354,11 @@ export default component SessionChatView(props: {
               }}
               onPromptChange={() => {
                 if (submitError) {
-                  submitPrompt.clearError()
+                  page.submitPrompt.clearError()
                 }
               }}
               onSubmit={async (prompt) => {
-                await submitPrompt.run(async () => {
+                await page.submitPrompt.run(async () => {
                   await submitSessionPrompt({
                     id: chat.session.id,
                     acpId: chat.session.acpSessionId,
