@@ -14,24 +14,18 @@ export const {
   PageModelProvider: SessionChatPageModelProvider,
   usePageModel: useSessionChatPageModel,
 } = createPageModelContext(function () {
-  const submitError = signal<unknown>(null)
   const headerAction = createKeyedTask<SessionChatHeaderAction, SessionChatHeaderActionError>()
   const olderHistory = createTask()
   const cancelRequestedTurnId = signal<string | null>(null)
+  const submitPrompt = createTask()
 
   return {
     cancelRequestedTurnId,
-    clearSubmitError() {
-      submitError.value = null
-    },
     headerAction,
     markCancelRequested(turnId: string) {
       cancelRequestedTurnId.value = turnId
     },
-    markSubmitFailed(error: unknown) {
-      submitError.value = error
-    },
     olderHistory,
-    submitError,
+    submitPrompt,
   }
 })

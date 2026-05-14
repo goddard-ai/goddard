@@ -9,6 +9,14 @@ export function createTask<TaskError = unknown>() {
   const isPending = computed(() => status.value === "pending")
   let activePromise: Promise<unknown> | null = null
 
+  function clearError() {
+    error.value = null
+
+    if (status.value === "failed") {
+      status.value = "idle"
+    }
+  }
+
   async function run<Result>(operation: () => Promise<Result>) {
     if (activePromise) {
       return activePromise as Promise<Result>
@@ -44,6 +52,7 @@ export function createTask<TaskError = unknown>() {
   }
 
   return {
+    clearError,
     error,
     isPending,
     run,

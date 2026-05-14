@@ -334,7 +334,8 @@ export default component SessionChatView(props: {
             />
           }
           <footer class={styles.composerDock}>
-            const submitError = page.submitError.value
+            const submitPrompt = page.submitPrompt
+            const submitError = submitPrompt.error.value
 
             if (submitError) {
               <div class={styles.composerError} role="alert">
@@ -356,24 +357,21 @@ export default component SessionChatView(props: {
               }}
               onPromptChange={() => {
                 if (submitError) {
-                  page.clearSubmitError()
+                  submitPrompt.clearError()
                 }
               }}
               onSubmit={async (prompt) => {
-                page.clearSubmitError()
-
-                try {
+                await submitPrompt.run(async () => {
                   await submitSessionPrompt({
                     id: chat.session.id,
                     acpId: chat.session.acpSessionId,
                     prompt,
                   })
                   chat.toggleCompletedHidden(false)
-                } catch (error) {
+                }).catch((error) => {
                   console.error("Failed to submit session prompt.", error)
-                  page.markSubmitFailed(error)
                   throw error
-                }
+                })
               }}
             />
           </footer>
