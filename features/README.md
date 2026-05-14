@@ -41,15 +41,3 @@ feature becomes part of a supported product surface.
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
   precedence, validation, persistence, and hot reload.
-
-`features/adapter` owns adapter catalog IPC, SDK namespace construction, and
-catalog merge/parsing helpers. Daemon-owned registry cache and JSON config
-loading remain in core packages.
-
-`features/inbox` is the current reference daemon + SDK + app feature package.
-
-`features/session` owns session feature schemas, session-owned daemon IPC
-routes, session lifecycle implementation modules, SDK session method fragments,
-app session metadata, and the first-class daemon `context.session` extension
-that downstream feature packages consume. Low-level linked-worktree substrate
-and third-party worktree provider contracts remain in core packages.
