@@ -201,34 +201,22 @@ export async function startDaemonServer(
     return Object.assign(Object.create(daemonSubstrate) as DaemonSetupSubstrate, extensions)
   }
 
-  const adapterSetup = await adapterPlugin.setup?.(daemonSubstrate)
-  const sessionSetup = await sessionPlugin.setup?.(daemonSubstrate)
+  const adapterSetup = await adapterPlugin.setup(daemonSubstrate)
+  const sessionSetup = await sessionPlugin.setup(daemonSubstrate)
 
-  if (!adapterSetup?.requestHandlers) {
-    throw new Error("Adapter daemon plugin did not return request handlers")
-  }
-  if (!sessionSetup?.requestHandlers || !sessionSetup.provides) {
-    throw new Error("Session daemon plugin did not return request handlers")
-  }
   const sessionFeature = sessionSetup.provides.session
-  const inboxSetup = await inboxPlugin.setup?.(
+  const inboxSetup = await inboxPlugin.setup(
     createSetupContext({
       session: sessionFeature,
     }),
   )
-  if (!inboxSetup?.requestHandlers || !inboxSetup.provides) {
-    throw new Error("Inbox daemon plugin did not return request handlers")
-  }
   const inboxFeature = inboxSetup.provides.inbox
-  const pullRequestSetup = await pullRequestPlugin.setup?.(
+  const pullRequestSetup = await pullRequestPlugin.setup(
     createSetupContext({
       inbox: inboxFeature,
       session: sessionFeature,
     }),
   )
-  if (!pullRequestSetup?.requestHandlers) {
-    throw new Error("Pull request daemon plugin did not return request handlers")
-  }
 
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),

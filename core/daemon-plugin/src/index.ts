@@ -209,6 +209,15 @@ type PluginSetup<
   | SetupContributions<TIpc, TProvides>
   | Promise<void | SetupContributions<TIpc, TProvides>>
 
+type RequiredPluginSetup<
+  TConsumes extends readonly Plugin[] | undefined,
+  TSelf,
+  TIpc,
+  TProvides extends FeatureExtensions | undefined,
+> = (
+  context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
+) => SetupContributions<TIpc, TProvides> | Promise<SetupContributions<TIpc, TProvides>>
+
 type RequestHandlerContributions<TIpc> = TIpc extends IpcSchema
   ? {
       readonly requestHandlers: RequestHandlers<TIpc>
@@ -242,7 +251,7 @@ type DefinePlugin = {
   >(
     plugin: PluginOptions<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister> & {
       readonly ipc: TIpc
-      readonly setup?: PluginSetup<
+      readonly setup: RequiredPluginSetup<
         TConsumes,
         PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister>,
         TIpc,
@@ -250,7 +259,7 @@ type DefinePlugin = {
       >
     },
   ): PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister> & {
-    readonly setup?: PluginSetup<
+    readonly setup: RequiredPluginSetup<
       TConsumes,
       PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister>,
       TIpc,
