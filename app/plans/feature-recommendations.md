@@ -1,8 +1,8 @@
 # Feature Recommendations
 
 - Context:
-  - This file now tracks intentionally deferred follow-up work that is not yet represented by dedicated plan files.
-  - MVP plans now exist for auth, project management, session launch, actions, pull request triage and compose, global search, spec discovery, task lists, roadmap lists, and loop management.
+  - This file tracks intentionally deferred follow-up work that is not already represented by a focused retained plan or implemented app surface.
+  - Session launch, sessions, inbox, shortcuts, project management, basic settings, basic pull request detail, and session changes now exist in code, so future notes should describe what is still missing rather than restating those baselines.
 
 - 1. Dedicated PR-Feedback Runtime Surface
   - Why deferred:
@@ -24,11 +24,11 @@
   - Potential future plans:
     - Components: `ProjectHomeView`, `ProjectStatusBar`
 
-- 4. Configuration and Settings Editing
+- 4. Configuration Editing Inside Settings
   - Why deferred:
-    - You explicitly punted on settings for now, even though `spec/configuration.md` implies a future need for operator-facing config editing and workspace preferences.
+    - `SettingsPage` exists for appearance, but operator-facing shared configuration editing and workspace preferences are not implemented.
   - Potential future plans:
-    - Components: `SettingsPage`, `ConfigScopeSwitcher`, `TextModelSelector`, `JsonConfigEditor`, `WorkspacePreferencesPanel`
+    - Components: `ConfigScopeSwitcher`, `TextModelSelector`, `JsonConfigEditor`, `WorkspacePreferencesPanel`
     - State: `ConfigurationState`, `WorkspacePreferencesState`
 
 - 5. Extension Catalog and Connectivity Diagnostics

@@ -11,7 +11,7 @@
   - Track turn lifecycle, baseline snapshot metadata, changed-file records, diff provenance, and final stop reason.
 - **Primary consumer:** `SessionChatTranscript`
   - Render one `TurnChangeSummaryCard` after a completed turn when the summary is non-empty.
-- **Secondary consumer:** `CodeDiffView`
+- **Secondary consumer:** `CodeDiffView` once a reusable diff review surface exists beyond the current raw session changes tab.
   - Open a dedicated diff tab when the user drills into one summarized file or the full turn patch.
 
 ## MVP Data Model

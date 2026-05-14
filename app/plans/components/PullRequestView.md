@@ -1,9 +1,10 @@
 # Component: PullRequestView
 
-- **Minimum Viable Component:** GitHub-like pull request detail view that emphasizes the author description, a collapsed discussion summary, a reply flow, and the code diff at the bottom.
-- **Props Interface:** `pullRequestRef: { owner, repo, number }`; `sourceSessionId?: string`; `initialDiscussionMode?: "collapsed" | "expanded"`.
-- **Sub-components:** `PullRequestHeader`, `PullRequestDiscussionSummary`, `PullRequestReplyComposer`, `CodeDiffView`.
-- **State Complexity:** Simple local anchor-link and section-collapse presentation; pull request data loading and discussion expansion belong in `PullRequestState`, while reply drafting belongs in `PullRequestComposeState`.
-- **Required Context:** `PullRequestContext`, `PullRequestComposeContext`, `CodeDiffContext`.
-- **Electrobun RPC:** None directly; external navigation or refresh actions should route through service or state layers.
-- **Interactions & Events:** Loads a PR by stable reference; reveals the full discussion when requested; drafts and submits one managed reply; scrolls to the embedded diff; can open related repository URLs through header callbacks.
+- **Current Baseline:** `app/src/pull-requests/view.tsrx` opens a daemon-managed pull request by `pullRequestId`, renders repository identity, basic metadata, project affinity, and a canonical GitHub link.
+- **Minimum Viable Follow-On:** Extend the existing detail tab only as daemon PR data becomes richer. Keep the first detail surface focused on identity, status, linked workspace, external navigation, and recoverable loading errors.
+- **Props Interface:** `pullRequestId: DaemonPullRequestId`; `projectPath: string | null`.
+- **Sub-components:** `PullRequestHeader` can replace the current inline header when it needs more actions. `PullRequestDiscussionSummary`, `PullRequestReplyComposer`, and embedded `CodeDiffView` are follow-ons gated on daemon discussion, reply, and diff contracts.
+- **State Complexity:** Keep basic loading in `useQuery(goddardSdk.pr.get)`. Add `PullRequestState` only when detail tabs need discussion expansion, realtime merging, or shared data beyond query cache behavior.
+- **Required Context:** None for the current detail tab beyond existing app state hooks. Add compose or diff providers only when those features land.
+- **Electrobun RPC:** None directly; external navigation should stay a normal link or route through a host helper only when the app needs native open behavior.
+- **Interactions & Events:** Retry failed loads; open the canonical PR URL; report the tab's project path; later refresh discussion, open related sessions, compose replies, and inspect diffs.
