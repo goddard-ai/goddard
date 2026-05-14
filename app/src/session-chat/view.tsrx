@@ -389,16 +389,14 @@ export default component SessionChatView(props: {
           description="Loading the session transcript and current session details."
           title="Loading session"
         />
-      } catch {
-        page.retryVersion.value
-
+      } catch (_error, retry) {
         <SessionChatStateMessage
           actionLabel="Try again"
           description="The daemon-backed session or history request failed."
           onAction={() => {
             queryClient.invalidate(goddardSdk.session.get, [{ id: props.sessionId }])
             queryClient.invalidate(goddardSdk.session.history, [{ id: props.sessionId }])
-            page.retryLoad()
+            retry()
           }}
           title="Couldn't load session"
         />

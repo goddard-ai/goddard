@@ -14,7 +14,6 @@ export const {
   PageModelProvider: SessionChatPageModelProvider,
   usePageModel: useSessionChatPageModel,
 } = createPageModelContext(function () {
-  const retryVersion = signal(0)
   const submitError = signal<unknown>(null)
   const headerAction = createKeyedTask<SessionChatHeaderAction, SessionChatHeaderActionError>()
   const olderHistory = createTask()
@@ -33,10 +32,6 @@ export const {
       submitError.value = error
     },
     olderHistory,
-    retryLoad() {
-      retryVersion.value += 1
-    },
-    retryVersion,
     submitError,
   }
 })

@@ -263,7 +263,7 @@ switch (status) {
 
 ### `try` / `pending` / `catch`
 
-Use `try { ... } catch (e) { ... }` for error fallback UI. Add `pending { ... }` to model async loading boundaries around child components or resources.
+Use `try { ... } catch (e) { ... }` for error fallback UI. Add `pending { ... }` to model async loading boundaries around child components or resources. A `catch` block may receive a retry callback as its second parameter, `catch (error, retry) { ... }`, and UI can call `retry()` to rerender the failed boundary after any needed cache invalidation or local cleanup.
 
 ```tsrx
 const UserProfile = lazy(() => import('./UserProfile.tsrx'));
@@ -273,8 +273,11 @@ export component App() {
     <UserProfile id={1} />
   } pending {
     <p>"Loading..."</p>
-  } catch (e) {
+  } catch (e, retry) {
     <p>"Something went wrong."</p>
+    <button onClick={retry}>
+      "Try again"
+    </button>
   }
 }
 ```
