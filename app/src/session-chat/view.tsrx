@@ -69,7 +69,8 @@ export default component SessionChatView(props: {
           void inbox.markSessionVisited(session.id)
         }, [inbox, session.id])
 
-        const activeHeaderAction = page.activeHeaderAction.value
+        const headerAction = page.headerAction
+        const activeHeaderAction = headerAction.activeKey.value
         const canReconnect =
           chat.connection.reconnectable && !chat.session.activeDaemonSession &&
             chat.session.connectionMode === "live"
@@ -79,20 +80,18 @@ export default component SessionChatView(props: {
             return
           }
 
-          page.startHeaderAction("reconnect")
-
-          try {
-            const { session } = await reconnectSession(chat.session.id)
-            chat.syncSession(session)
-          } catch (error) {
-            console.error("Failed to reconnect session.", error)
-            page.failHeaderAction({
-              title: "Reconnect failed",
-              description: formatSessionRequestError(error),
-            })
-          } finally {
-            page.clearHeaderAction()
-          }
+          await headerAction.run("reconnect", async () => {
+            try {
+              const { session } = await reconnectSession(chat.session.id)
+              chat.syncSession(session)
+            } catch (error) {
+              console.error("Failed to reconnect session.", error)
+              throw {
+                title: "Reconnect failed",
+                description: formatSessionRequestError(error),
+              }
+            }
+          }).catch(() => {})
         }
 
         async function completeCurrentSession() {
@@ -103,25 +102,23 @@ export default component SessionChatView(props: {
             return
           }
 
-          page.startHeaderAction("complete")
+          await headerAction.run("complete", async () => {
+            try {
+              const result = await completeSession(chat.session.id)
 
-          try {
-            const result = await completeSession(chat.session.id)
+              if (result.item) {
+                inbox.applyItem(result.item)
+              }
 
-            if (result.item) {
-              inbox.applyItem(result.item)
+              chat.toggleCompletedHidden(true)
+            } catch (error) {
+              console.error("Failed to complete session.", error)
+              throw {
+                title: "Complete failed",
+                description: formatSessionRequestError(error),
+              }
             }
-
-            chat.toggleCompletedHidden(true)
-          } catch (error) {
-            console.error("Failed to complete session.", error)
-            page.failHeaderAction({
-              title: "Complete failed",
-              description: formatSessionRequestError(error),
-            })
-          } finally {
-            page.clearHeaderAction()
-          }
+          }).catch(() => {})
         }
 
         const cancelRequestedTurnId = page.cancelRequestedTurnId.value
@@ -138,29 +135,30 @@ export default component SessionChatView(props: {
             return
           }
 
-          page.startHeaderAction("cancel")
+          await headerAction.run("cancel", async () => {
+            try {
+              const result = await cancelSessionTurn(chat.session.id)
 
-          try {
-            const result = await cancelSessionTurn(chat.session.id)
+              if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
+                throw {
+                  title: "Stop skipped",
+                  description: "The daemon did not find an active turn to stop.",
+                }
+              }
 
-            if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
-              page.failHeaderAction({
-                title: "Stop skipped",
-                description: "The daemon did not find an active turn to stop.",
-              })
-              return
+              page.markCancelRequested(activeTurnId)
+            } catch (error) {
+              if (isSessionChatHeaderActionError(error)) {
+                throw error
+              }
+
+              console.error("Failed to stop session turn.", error)
+              throw {
+                title: "Stop failed",
+                description: formatSessionRequestError(error),
+              }
             }
-
-            page.markCancelRequested(activeTurnId)
-          } catch (error) {
-            console.error("Failed to stop session turn.", error)
-            page.failHeaderAction({
-              title: "Stop failed",
-              description: formatSessionRequestError(error),
-            })
-          } finally {
-            page.clearHeaderAction()
-          }
+          }).catch(() => {})
         }
 
         const workbenchTabSet = useWorkbenchTabSet()
@@ -298,7 +296,7 @@ export default component SessionChatView(props: {
               </div>
             </div>
           </header>
-          const headerActionError = page.headerActionError.value
+          const headerActionError = headerAction.error.value
 
           if (headerActionError) {
             <div class={styles.headerActionError} role="alert">
@@ -479,4 +477,8 @@ function formatSessionRequestError(error: unknown) {
   }
 
   return "The daemon rejected the request."
+}
+
+function isSessionChatHeaderActionError(error: unknown) {
+  return typeof error === "object" && error !== null && "description" in error && "title" in error
 }
