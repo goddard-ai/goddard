@@ -75,7 +75,7 @@ export default component SessionChatView(props: {
             chat.session.connectionMode === "live"
 
         async function reconnectCurrentSession() {
-          if (!canReconnect || activeHeaderAction) {
+          if (!canReconnect) {
             return
           }
 
@@ -94,10 +94,7 @@ export default component SessionChatView(props: {
         }
 
         async function completeCurrentSession() {
-          if (
-            activeHeaderAction !== null || chat.session.activeDaemonSession ||
-              chat.session.completedHidden
-          ) {
+          if (chat.session.activeDaemonSession || chat.session.completedHidden) {
             return
           }
 
@@ -130,7 +127,7 @@ export default component SessionChatView(props: {
             !cancelAlreadyRequested
 
         async function cancelActiveTurn() {
-          if (!canCancelTurn || activeHeaderAction || activeTurnId === null) {
+          if (!canCancelTurn) {
             return
           }
 
@@ -185,7 +182,7 @@ export default component SessionChatView(props: {
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
         async function loadOlderHistory() {
-          if (!canLoadOlderHistory || page.olderHistory.isPending.value) {
+          if (!canLoadOlderHistory) {
             return
           }
 
