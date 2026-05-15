@@ -25,7 +25,8 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    outDir: "../../dist",
+    // relative to "src/main"
+    outDir: "../../build/views/main",
     emptyOutDir: true,
   },
   resolve: {

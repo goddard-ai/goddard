@@ -22,7 +22,7 @@ export default {
       tsconfig: "src/bun/tsconfig.json",
     },
     copy: {
-      dist: "views/main",
+      "build/views/main": "views/main",
       ...(shouldBuildEmbeddedRuntime && {
         ".generated/embedded-runtime": "embedded-runtime",
       }),
