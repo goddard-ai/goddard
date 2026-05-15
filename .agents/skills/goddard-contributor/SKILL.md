@@ -25,6 +25,7 @@ This skill is the repository's source for long-form contribution guidance that s
 ## Loading Hints
 
 - When editing `app/`, usually read `references/app-best-practices.md`.
+- When editing page-like TSRX components, page models, query data contexts, or TSRX loading/error flow, read `references/tsrx-page-patterns.md`.
 - When building or refactoring app forms, also read `references/app-form-patterns.md` and consider whether `src/lib/use-form.ts` fits before adding local draft state or a feature form model.
 - When adding or reviewing behavior-affecting defaults, read `references/repository-contributing.md`.
 - When changing tests or deciding whether to add tests, read `references/repository-contributing.md`.
