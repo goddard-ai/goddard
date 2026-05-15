@@ -1,5 +1,11 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
-import { composeIpcSchemas, type Handlers, type IpcSchema } from "@goddard-ai/ipc"
+import {
+  composeIpcSchemas,
+  type Handlers,
+  type InferStreamPayload,
+  type IpcSchema,
+  type ValidStreamName,
+} from "@goddard-ai/ipc"
 import type { z } from "zod"
 
 /** Named feature extensions exposed by one daemon plugin to plugins that consume it. */
@@ -65,6 +71,17 @@ type RuntimeSetupContributions = {
 
 type SetupConfigContext<TConfig> = keyof TConfig extends never ? {} : { readonly config: TConfig }
 
+type PublishContext<TPlugin> = TPlugin extends { readonly ipc: infer TIpc extends IpcSchema }
+  ? keyof TIpc["streams"] extends never
+    ? {}
+    : {
+        readonly publish: <K extends ValidStreamName<TIpc>>(
+          name: K,
+          payload: InferStreamPayload<TIpc, K>,
+        ) => void
+      }
+  : {}
+
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
 export type DaemonSetupSubstrate = {
   readonly addAllowedPrToSession: (
@@ -98,7 +115,6 @@ export type DaemonSetupSubstrate = {
     readonly repo: string | null
     readonly allowedPrNumbers: readonly number[]
   } | null>
-  readonly publishInboxItemEvent: (payload: any) => void
   readonly registryService: {
     readonly listAdapters: () => Promise<any>
   }
@@ -111,6 +127,7 @@ export type SetupContext<
   TConsumes extends readonly unknown[],
   TSelf = unknown,
 > = DaemonSetupSubstrate &
+  PublishContext<TSelf> &
   UnionToIntersection<InferProvides<TConsumes[number]>> &
   SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>>
 

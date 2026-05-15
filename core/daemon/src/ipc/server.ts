@@ -8,17 +8,12 @@ import {
   type InferProvides,
 } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
-import type { Handlers } from "@goddard-ai/ipc"
+import type { Handlers, InferStreamPayload } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
-import {
-  type DaemonSession,
-  type InboxItem,
-  type SubscribeWorkforceEventsRequest,
-} from "@goddard-ai/schema/daemon"
+import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import type { InboxItemEventMutation } from "@goddard-ai/schema/daemon/inbox"
 import {
   createSessionManager,
   sessionPlugin,
@@ -44,10 +39,10 @@ import { createWorkforceManager, type WorkforceManager } from "../workforce/inde
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
 
-const daemonPlugins = [adapterPlugin, sessionPlugin, inboxPlugin, pullRequestPlugin] as const
-const daemonPluginComposition = composePlugins(daemonPlugins)
+const daemonPlugins = composePlugins([adapterPlugin, sessionPlugin, inboxPlugin, pullRequestPlugin])
 
 type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
+type DaemonStreamName = keyof typeof daemonIpcSchema.streams & string
 
 export async function startDaemonServer(
   client: BackendPrClient,
@@ -69,10 +64,7 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
 
   const registryService = createACPRegistryService()
-  let publishInboxItemEvent: (payload: {
-    item: InboxItem
-    mutation: InboxItemEventMutation
-  }) => void = () => {}
+  let publishPluginEvent: ((name: string, payload: unknown) => void) | null = null
 
   let sessionManager!: SessionManager
   let loopManager!: LoopManager
@@ -191,9 +183,6 @@ export async function startDaemonServer(
     backendClient: client,
     configManager,
     getSessionByToken,
-    publishInboxItemEvent: (payload) => {
-      publishInboxItemEvent(payload)
-    },
     registryService,
     get sessionManager() {
       if (!sessionManager) {
@@ -206,7 +195,15 @@ export async function startDaemonServer(
     },
   } satisfies DaemonSetupSubstrate
 
-  const pluginSetup = await setupDaemonPlugins(daemonSubstrate)
+  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, (plugin, name, payload) => {
+    if (!plugin.ipc?.streams[name]) {
+      throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC stream ${name}`)
+    }
+    if (!publishPluginEvent) {
+      throw new Error(`Daemon plugin ${plugin.name} published IPC stream ${name} before startup`)
+    }
+    publishPluginEvent(name, payload)
+  })
   const sessionFeature = pluginSetup.extensions.session as SessionExtension
 
   const requestHandlers = {
@@ -445,8 +442,12 @@ export async function startDaemonServer(
     },
   })
 
-  publishInboxItemEvent = (payload) => {
-    ipcServer.publish("inbox.item", payload)
+  publishPluginEvent = (name, payload) => {
+    const streamName = name as DaemonStreamName
+    ipcServer.publish(
+      streamName,
+      payload as InferStreamPayload<typeof daemonIpcSchema, typeof streamName>,
+    )
   }
 
   await once(ipcServer.server, "listening")
@@ -520,17 +521,25 @@ export async function startDaemonServer(
   }
 }
 
-async function setupDaemonPlugins(substrate: DaemonSetupSubstrate) {
+async function setupDaemonPlugins(
+  substrate: DaemonSetupSubstrate,
+  publish: (plugin: (typeof daemonPlugins.plugins)[number], name: string, payload: unknown) => void,
+) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const requestHandlers: Record<string, unknown> = {}
 
-  for (const plugin of daemonPluginComposition.plugins) {
+  for (const plugin of daemonPlugins.plugins) {
     const consumedExtensions = (plugin.consumes ?? []).map(
       (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
     )
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
+      {
+        publish: (name: string, payload: unknown) => {
+          publish(plugin, name, payload)
+        },
+      },
       ...consumedExtensions,
     )
     const setup = await plugin.setup?.(context)

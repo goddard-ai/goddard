@@ -22,9 +22,11 @@ export const inboxPlugin = definePlugin({
   name: "inbox",
   consumes: [sessionPlugin],
   ipc: inboxIpcSchema,
-  setup({ publishInboxItemEvent, session }) {
+  setup({ publish, session }) {
     const inbox = createInboxManager({
-      publishEvent: publishInboxItemEvent,
+      publishEvent: (payload) => {
+        publish("inbox.item", payload)
+      },
     }) satisfies InboxExtension
 
     session.events.on("lifecycle.blocked", (event) => {
