@@ -41,6 +41,7 @@ import type {
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/id"
+import { composeSdkPlugins } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 
 import { runSession } from "./daemon/session/client.ts"
@@ -52,6 +53,11 @@ import {
   type SessionPermissionResponseRequest,
   type SessionPromptRequest,
 } from "./session.ts"
+
+const sdkPlugins = composeSdkPlugins([adapterSdkPlugin, inboxSdkPlugin])
+
+type FeatureSdkNamespaces = ReturnType<typeof adapterSdkPlugin.create> &
+  ReturnType<typeof inboxSdkPlugin.create>
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
@@ -107,7 +113,7 @@ function createPrNamespace(client: DaemonIpcClient) {
 
 /** Builds the session namespace with one thin method per daemon session IPC action. */
 function createSessionNamespace(client: DaemonIpcClient) {
-  const sessionFeature = sessionSdkPlugin.create({ client })
+  const sessionFeature = sessionSdkPlugin.create({ client }).session
 
   return {
     /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
@@ -288,9 +294,17 @@ function createWorkforceNamespace(client: DaemonIpcClient) {
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
 export class GoddardSdk {
   readonly #client: DaemonIpcClient
+  #featureNamespaces: FeatureSdkNamespaces | undefined
 
   constructor(options: GoddardClientOptions) {
     this.#client = resolveIpcClient(options)
+  }
+
+  get #features() {
+    this.#featureNamespaces ??= sdkPlugins.create({
+      client: this.#client,
+    }) as FeatureSdkNamespaces
+    return this.#featureNamespaces
   }
 
   get daemon() {
@@ -302,11 +316,7 @@ export class GoddardSdk {
   }
 
   get adapter() {
-    return defineCachedNamespace(
-      this,
-      adapterSdkPlugin.namespace,
-      adapterSdkPlugin.create({ client: this.#client }),
-    )
+    return defineCachedNamespace(this, "adapter", this.#features.adapter)
   }
 
   get pr() {
@@ -314,11 +324,7 @@ export class GoddardSdk {
   }
 
   get inbox() {
-    return defineCachedNamespace(
-      this,
-      inboxSdkPlugin.namespace,
-      inboxSdkPlugin.create({ client: this.#client }),
-    )
+    return defineCachedNamespace(this, "inbox", this.#features.inbox)
   }
 
   get session() {

@@ -13,8 +13,9 @@ export function createAdapterNamespace(client: DaemonIpcClient) {
 
 export const adapterSdkPlugin = defineSdkPlugin({
   name: "adapter",
-  namespace: "adapter",
   create({ client }: { client: DaemonIpcClient }) {
-    return createAdapterNamespace(client)
+    return {
+      adapter: createAdapterNamespace(client),
+    }
   },
 })

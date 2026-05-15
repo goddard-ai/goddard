@@ -1,13 +1,45 @@
 /** Internal SDK plugin support contracts for statically composed feature packages. */
 
+type SdkNamespaces = Record<string, Record<string, unknown>>
+
 /** SDK plugin shape used to constrain feature plugin values without widening them. */
 export type SdkPluginDefinition = {
   readonly name: string
-  readonly namespace: string
-  readonly create: (...args: any[]) => object
+  readonly create: (...args: any[]) => SdkNamespaces
 }
 
 /** Preserves the exact SDK plugin object for composition-time type inference. */
 export function defineSdkPlugin<const TPlugin extends SdkPluginDefinition>(plugin: TPlugin) {
   return plugin
+}
+
+/** Composes SDK feature plugins by merging namespace objects and rejecting method collisions. */
+export function composeSdkPlugins(plugins: readonly SdkPluginDefinition[]) {
+  return {
+    create(input: Parameters<SdkPluginDefinition["create"]>[0]) {
+      const namespaces: SdkNamespaces = {}
+
+      for (const plugin of plugins) {
+        const pluginNamespaces = plugin.create(input)
+
+        for (const [namespaceName, namespace] of Object.entries(pluginNamespaces)) {
+          const existingNamespace = namespaces[namespaceName]
+          if (!existingNamespace) {
+            namespaces[namespaceName] = { ...namespace }
+            continue
+          }
+
+          for (const methodName of Object.keys(namespace)) {
+            if (Object.hasOwn(existingNamespace, methodName)) {
+              throw new Error(`Duplicate SDK namespace method: ${namespaceName}.${methodName}`)
+            }
+          }
+
+          Object.assign(existingNamespace, namespace)
+        }
+      }
+
+      return namespaces
+    },
+  }
 }
