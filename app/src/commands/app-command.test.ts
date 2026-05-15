@@ -13,9 +13,9 @@ function createTestRegistry() {
   const registry = new ShortcutRegistry(runtimeDocument)
   const cleanup = registry.setup()
   commandContext.activeScopes.value = []
-  commandContext.activeTabKind.value = "main"
+  commandContext.activeTabKind.value = "inbox"
   commandContext.hasClosableActiveTab.value = false
-  commandContext.selectedNavId.value = "inbox"
+  commandContext.selectedKind.value = "inbox"
 
   return {
     registry,

@@ -10,43 +10,43 @@ import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { AppShellChrome } from "./app-shell/chrome.tsrx"
 import { AppShellOnboarding } from "./app-shell/onboarding.tsrx"
 import {
-  useNavigation,
+  useMainTab,
   useProjectContext,
   useProjectRegistry,
   useWorkbenchTabSet,
 } from "./app-state-context.tsrx"
 import { CommandDialog } from "./commands/command-dialog.tsrx"
-import { WORKBENCH_PRIMARY_TAB } from "./workbench-tab-set.ts"
+import { WORKBENCH_MAIN_TAB } from "./workbench-tab-set.ts"
 
 export component AppShell() {
-  const navigation = useNavigation()
+  const mainTab = useMainTab()
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const projects = projectRegistry.projectList
-  const activeTabKind = workbenchTabSet.activeTab?.kind ?? WORKBENCH_PRIMARY_TAB.kind
+  const activeTabKind = workbenchTabSet.activeClosableTab?.kind ?? mainTab.selectedKind
 
   useEffect(() => {
     commandContext.activeTabKind.value = activeTabKind
     commandContext.hasClosableActiveTab.value = workbenchTabSet.activeTabId !==
-    WORKBENCH_PRIMARY_TAB.id
-    commandContext.selectedNavId.value = navigation.selectedNavId
-  }, [activeTabKind, navigation.selectedNavId, workbenchTabSet.activeTabId])
+    WORKBENCH_MAIN_TAB.id
+    commandContext.selectedKind.value = mainTab.selectedKind
+  }, [activeTabKind, mainTab.selectedKind, workbenchTabSet.activeTabId])
 
   useEffect(() => {
     projectContext.syncProjects(projects.map((project) => project.path))
   }, [projectContext, projects])
 
   useEffect(() => {
-    if (workbenchTabSet.activeTabId === WORKBENCH_PRIMARY_TAB.id) {
-      projectContext.applyFocusedTabProject(WORKBENCH_PRIMARY_TAB.id, null)
+    if (workbenchTabSet.activeTabId === WORKBENCH_MAIN_TAB.id) {
+      projectContext.applyFocusedTabProject(WORKBENCH_MAIN_TAB.id, null)
       return
     }
 
-    const activeTab = workbenchTabSet.activeTab
+    const activeTab = workbenchTabSet.activeClosableTab
 
     if (!activeTab) {
-      projectContext.applyFocusedTabProject(WORKBENCH_PRIMARY_TAB.id, null)
+      projectContext.applyFocusedTabProject(WORKBENCH_MAIN_TAB.id, null)
       return
     }
 
@@ -69,7 +69,7 @@ export component AppShell() {
   }, [
     projectContext,
     projects,
-    workbenchTabSet.activeTab,
+    workbenchTabSet.activeClosableTab,
     workbenchTabSet.activeTabId,
   ])
 
@@ -80,49 +80,41 @@ export component AppShell() {
   useListener(globalEventHub, "debugMenu", ({ surface }) => {
     switch (surface) {
       case "Inbox":
-        workbenchTabSet.openOrFocusTab(
-          {
-            id: "debug:inbox",
-            kind: "inboxDebug",
-            title: "Inbox Debug",
-            payload: {},
-            dirty: false,
-          },
-        )
+        workbenchTabSet.openOrFocusTab({
+          id: "debug:inbox",
+          kind: "inboxDebug",
+          title: "Inbox Debug",
+          payload: {},
+          dirty: false,
+        })
         return
       case "SessionChatTranscript":
-        workbenchTabSet.openOrFocusTab(
-          {
-            id: "debug:session-chat-transcript",
-            kind: "sessionChatTranscriptDebug",
-            title: "Session Chat Debug",
-            payload: {},
-            dirty: false,
-          },
-        )
+        workbenchTabSet.openOrFocusTab({
+          id: "debug:session-chat-transcript",
+          kind: "sessionChatTranscriptDebug",
+          title: "Session Chat Debug",
+          payload: {},
+          dirty: false,
+        })
         return
       case "Terminal":
-        workbenchTabSet.openOrFocusTab(
-          {
-            id: "debug:terminal",
-            kind: "terminalDebug",
-            title: "Terminal Debug",
-            payload: {},
-            dirty: false,
-          },
-        )
+        workbenchTabSet.openOrFocusTab({
+          id: "debug:terminal",
+          kind: "terminalDebug",
+          title: "Terminal Debug",
+          payload: {},
+          dirty: false,
+        })
         return
     }
   })
 
   useAppCommand(AppCommand.projects.openFolder, async () => {
-    await openProjectFromFilesystem(
-      {
-        projectContext,
-        projectRegistry,
-        workbenchTabSet,
-      },
-    )
+    await openProjectFromFilesystem({
+      projectContext,
+      projectRegistry,
+      workbenchTabSet,
+    })
   })
 
   if (projects.length === 0) {

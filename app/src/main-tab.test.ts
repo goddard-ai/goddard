@@ -5,7 +5,7 @@ import {
   observeAppStateSnapshot,
   type AppStateSnapshot,
 } from "./app-state-persistence.ts"
-import { Navigation } from "./navigation.ts"
+import { MainTab } from "./main-tab.ts"
 import { shortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 
 function ensureMatchMedia() {
@@ -25,10 +25,10 @@ function ensureMatchMedia() {
   }) as typeof window.matchMedia
 }
 
-test("navigation omits projects from the primary workbench items", () => {
-  const navigation = new Navigation()
+test("main tab omits projects from the primary workbench items", () => {
+  const mainTab = new MainTab()
 
-  expect(navigation.items.map((item) => item.id)).toEqual([
+  expect(mainTab.items.map((item) => item.id)).toEqual([
     "inbox",
     "sessions",
     "search",
@@ -38,7 +38,7 @@ test("navigation omits projects from the primary workbench items", () => {
   ])
 })
 
-test("app state persistence observes captured navigation snapshots", async () => {
+test("app state persistence observes captured main tab snapshots", async () => {
   ensureMatchMedia()
   const appState = createAppState()
   const snapshots: AppStateSnapshot[] = []
@@ -53,12 +53,12 @@ test("app state persistence observes captured navigation snapshots", async () =>
   )
 
   try {
-    appState.navigation.selectNavItem("sessions")
+    appState.mainTab.selectKind("sessions")
     await observer.flush()
 
     expect(snapshots).toHaveLength(1)
-    expect(snapshots[0].navigation).toEqual({
-      selectedNavId: "sessions",
+    expect(snapshots[0].mainTab).toEqual({
+      selectedKind: "sessions",
     })
   } finally {
     await observer.stop()

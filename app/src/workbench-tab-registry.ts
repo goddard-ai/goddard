@@ -102,16 +102,8 @@ type NormalizeWorkbenchTabPayload<TPayload> = [TPayload] extends [never]
     ? TPayload
     : Record<string, never>
 
-/** One workbench tab tracked by the shell, including the always-present main tab. */
+/** One closable workbench tab tracked by the shell. */
 type WorkbenchTabByKind = {
-  main: {
-    id: "main"
-    kind: "main"
-    title: string
-    dirty?: undefined
-    payload?: undefined
-  }
-} & {
   [TKind in WorkbenchRegisteredTabKind]: {
     id: string
     kind: TKind
@@ -121,12 +113,24 @@ type WorkbenchTabByKind = {
   }
 }
 
-/** The supported workbench tab kinds available in the shell. */
+/** The supported closable workbench tab kinds available in the shell. */
 export type WorkbenchTabKind = keyof WorkbenchTabByKind
 
-/** One workbench tab tracked by the shell. */
+/** One closable workbench tab tracked by the shell. */
 export type WorkbenchTab<TKind extends WorkbenchTabKind = WorkbenchTabKind> =
   WorkbenchTabByKind[TKind]
+
+/** The tab kind rendered by the active workbench content area. */
+export type WorkbenchContentKind = WorkbenchRegisteredTabKind
+
+/** The always-present main workbench tab. */
+export type WorkbenchMainTab = {
+  id: "main"
+  title: string
+}
+
+/** Any tab tracked by the shell, including the always-present main tab. */
+export type WorkbenchAnyTab = WorkbenchMainTab | WorkbenchTab
 
 /** Returns the component registered for one non-primary workbench tab kind. */
 export function getWorkbenchTabComponent(
@@ -137,15 +141,11 @@ export function getWorkbenchTabComponent(
 
 /** Returns the SVG icon registered for one workbench tab kind. */
 export function getWorkbenchTabIcon(kind: WorkbenchTabKind): SvgIconName {
-  return kind === "main" ? "tabs/home" : workbenchTabKinds[kind].icon
+  return workbenchTabKinds[kind].icon
 }
 
 /** Returns whether the shell should restore raw scrollTop for one tab kind. */
 export function shouldRestoreWorkbenchTabScroll(kind: WorkbenchTabKind) {
-  if (kind === "main") {
-    return true
-  }
-
   const tabKind = workbenchTabKinds[kind]
   return "restoreScroll" in tabKind ? tabKind.restoreScroll : true
 }

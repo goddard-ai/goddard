@@ -58,14 +58,14 @@ test("app state persistence rejects invalid app state files", async () => {
   await expect(loadAppStateSnapshot()).rejects.toThrow()
 })
 
-function createSnapshot(selectedNavId: string): AppStateSnapshot {
+function createSnapshot(selectedKind: string): AppStateSnapshot {
   return {
     appearance: {
       mode: "system",
       highContrast: false,
     },
-    navigation: {
-      selectedNavId,
+    mainTab: {
+      selectedKind,
     },
     projectContext: {
       selectedProjectPath: null,

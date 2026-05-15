@@ -1,8 +1,20 @@
 import { Sigma } from "preact-sigma"
 
-import { type WorkbenchTab, type WorkbenchTabKind } from "./workbench-tab-registry.ts"
+import {
+  type WorkbenchAnyTab,
+  type WorkbenchContentKind,
+  type WorkbenchMainTab,
+  type WorkbenchTab,
+  type WorkbenchTabKind,
+} from "./workbench-tab-registry.ts"
 
-export type { WorkbenchTab, WorkbenchTabKind }
+export type {
+  WorkbenchAnyTab,
+  WorkbenchContentKind,
+  WorkbenchMainTab,
+  WorkbenchTab,
+  WorkbenchTabKind,
+}
 
 /** Top-level public state owned by the workbench tab model. */
 export type WorkbenchTabSetState = {
@@ -12,10 +24,9 @@ export type WorkbenchTabSetState = {
   recency: string[]
 }
 
-/** Immutable runtime value for the always-present primary workbench tab. */
-export const WORKBENCH_PRIMARY_TAB: WorkbenchTab<"main"> = {
+/** Immutable runtime value for the always-present main workbench tab. */
+export const WORKBENCH_MAIN_TAB: WorkbenchMainTab = {
   id: "main",
-  kind: "main",
   title: "Main",
 }
 
@@ -28,7 +39,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     super({
       tabs: {},
       orderedTabIds: [],
-      activeTabId: WORKBENCH_PRIMARY_TAB.id,
+      activeTabId: WORKBENCH_MAIN_TAB.id,
       recency: [],
     })
   }
@@ -38,11 +49,16 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     return this.orderedTabIds.map((tabId) => this.tabs[tabId]).filter(Boolean)
   }
 
+  /** Returns the active tab, including the always-present main tab. */
+  get activeTab(): WorkbenchAnyTab {
+    return this.activeTabId === WORKBENCH_MAIN_TAB.id
+      ? WORKBENCH_MAIN_TAB
+      : (this.tabs[this.activeTabId] ?? WORKBENCH_MAIN_TAB)
+  }
+
   /** Returns the active closable tab, when one is selected. */
-  get activeTab() {
-    return this.activeTabId === WORKBENCH_PRIMARY_TAB.id
-      ? null
-      : (this.tabs[this.activeTabId] ?? null)
+  get activeClosableTab() {
+    return this.activeTabId === WORKBENCH_MAIN_TAB.id ? null : (this.tabs[this.activeTabId] ?? null)
   }
 
   /** Opens one closable tab or focuses the existing tab with the same stable id. */
@@ -67,7 +83,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   activateTab(tabId: string) {
     this.activeTabId = tabId
 
-    if (tabId !== WORKBENCH_PRIMARY_TAB.id) {
+    if (tabId !== WORKBENCH_MAIN_TAB.id) {
       this.recency = [tabId, ...this.recency.filter((id) => id !== tabId)]
     }
   }
@@ -85,17 +101,16 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.recency = this.recency.filter((id) => id !== tabId)
 
     if (this.activeTabId === tabId) {
-      this.activeTabId =
-        this.orderedTabIds[this.orderedTabIds.length - 1] ?? WORKBENCH_PRIMARY_TAB.id
+      this.activeTabId = this.orderedTabIds[this.orderedTabIds.length - 1] ?? WORKBENCH_MAIN_TAB.id
     }
   }
 
   /** Enforces the tab cap by closing the least-recently-used closable tab. */
   closeLeastRecentlyUsedTab() {
     const leastRecentTabId =
-      this.recency[this.recency.length - 1] ?? this.orderedTabIds[0] ?? WORKBENCH_PRIMARY_TAB.id
+      this.recency[this.recency.length - 1] ?? this.orderedTabIds[0] ?? WORKBENCH_MAIN_TAB.id
 
-    if (leastRecentTabId !== WORKBENCH_PRIMARY_TAB.id) {
+    if (leastRecentTabId !== WORKBENCH_MAIN_TAB.id) {
       this.closeTab(leastRecentTabId)
     }
   }

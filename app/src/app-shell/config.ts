@@ -1,5 +1,5 @@
 import { useInbox } from "~/app-state-context.tsrx"
-import type { NavigationItemId } from "~/navigation-items.ts"
+import type { MainTabItemId } from "~/main-tab-items.ts"
 
 /** Reactive predicate and accessibility copy for one optional sidebar dot. */
 export type AppShellSidebarDot = {
@@ -13,8 +13,8 @@ export const appShellDefaultSidebarDot: AppShellSidebarDot = {
   usePredicate: () => false,
 }
 
-/** Optional dot predicates keyed by sidebar navigation item. */
-export const appShellSidebarDots: Partial<Record<NavigationItemId, AppShellSidebarDot>> = {
+/** Optional dot predicates keyed by sidebar main tab item. */
+export const appShellSidebarDots: Partial<Record<MainTabItemId, AppShellSidebarDot>> = {
   inbox: {
     getAriaLabel: (label) => `${label}, unread items`,
     usePredicate: () => {

@@ -6,7 +6,7 @@ import { getErrorMessage } from "radashi"
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { desktopHost } from "./desktop-host.ts"
 import { Inbox } from "./inbox/model.ts"
-import { Navigation, type NavigationState } from "./navigation.ts"
+import { MainTab, type MainTabState } from "./main-tab.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION, type ShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
@@ -19,7 +19,7 @@ const APP_STATE_WRITE_DEBOUNCE_MS = 250
 export type AppState = {
   appearance: Protected<Appearance>
   inbox: Protected<Inbox>
-  navigation: Protected<Navigation>
+  mainTab: Protected<MainTab>
   projectContext: Protected<ProjectContext>
   projectRegistry: Protected<ProjectRegistry>
   shortcutRegistry: ShortcutRegistry
@@ -29,7 +29,7 @@ export type AppState = {
 /** Persisted Sigma state captured and restored through the Bun-host app state file. */
 export type AppStateSnapshot = {
   appearance: Immutable<AppearanceState>
-  navigation: Immutable<NavigationState>
+  mainTab: Immutable<MainTabState>
   projectContext: Immutable<ProjectContextState>
   projectRegistry: Immutable<ProjectRegistryState>
   workbenchTabSet: Immutable<WorkbenchTabSetState>
@@ -60,7 +60,7 @@ export const shortcutPersistenceErrors = signal({
 export function captureAppStateSnapshot(appState: AppState) {
   return {
     appearance: sigma.captureState(appState.appearance as unknown as Appearance),
-    navigation: sigma.captureState(appState.navigation as unknown as Navigation),
+    mainTab: sigma.captureState(appState.mainTab as unknown as MainTab),
     projectContext: sigma.captureState(appState.projectContext as unknown as ProjectContext),
     projectRegistry: sigma.captureState(appState.projectRegistry as unknown as ProjectRegistry),
     workbenchTabSet: sigma.captureState(appState.workbenchTabSet as unknown as WorkbenchTabSet),
@@ -188,7 +188,7 @@ export function observeAppStateSnapshot(
     writeSnapshot,
     (queueSnapshotWrite) => [
       sigma.subscribe(appState.appearance as unknown as Appearance, queueSnapshotWrite),
-      sigma.subscribe(appState.navigation as unknown as Navigation, queueSnapshotWrite),
+      sigma.subscribe(appState.mainTab as unknown as MainTab, queueSnapshotWrite),
       sigma.subscribe(appState.projectContext as unknown as ProjectContext, queueSnapshotWrite),
       sigma.subscribe(appState.projectRegistry as unknown as ProjectRegistry, queueSnapshotWrite),
       sigma.subscribe(appState.workbenchTabSet as unknown as WorkbenchTabSet, queueSnapshotWrite),
@@ -211,7 +211,7 @@ export function createAppState() {
   return {
     appearance,
     inbox: castProtected(new Inbox()),
-    navigation: castProtected(new Navigation()),
+    mainTab: castProtected(new MainTab()),
     projectContext: castProtected(new ProjectContext()),
     projectRegistry: castProtected(new ProjectRegistry()),
     shortcutRegistry,
@@ -267,10 +267,7 @@ export function useAppState() {
             appState.appearance as unknown as Appearance,
             persistedSnapshot.appearance,
           )
-          sigma.replaceState(
-            appState.navigation as unknown as Navigation,
-            persistedSnapshot.navigation,
-          )
+          sigma.replaceState(appState.mainTab as unknown as MainTab, persistedSnapshot.mainTab)
           sigma.replaceState(
             appState.projectContext as unknown as ProjectContext,
             persistedSnapshot.projectContext,
@@ -388,7 +385,7 @@ export function useAppState() {
   return {
     appearance: appState.appearance,
     inbox: appState.inbox,
-    navigation: appState.navigation,
+    mainTab: appState.mainTab,
     projectContext: appState.projectContext,
     projectRegistry: appState.projectRegistry,
     shortcutRegistry,

@@ -23,7 +23,7 @@ export const INBOX_DEBUG_ITEMS = [
     updatedAt: Date.UTC(2026, 0, 10, 11, 44),
     readAt: Date.UTC(2026, 0, 10, 11, 45),
     scope: "Inbox UI",
-    headline: "Rendered the primary workbench view with local search and filters.",
+    headline: "Rendered the main tab view with local search and filters.",
     turnId: "turn_debug_read",
   },
   {

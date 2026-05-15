@@ -12,8 +12,8 @@ function requireContext<Value>(value: Value | null, name: string) {
 }
 
 type RequiredContext<Value> = preact.Context<Value | null> & {
-  use(): Value;
-}
+    use(): Value;
+  }
 
 function createRequiredContext<Value>(name: string): RequiredContext<Value> {
   const nextContext = createContext<Value | null>(null) as RequiredContext<Value>
@@ -28,7 +28,7 @@ function createRequiredContext<Value>(name: string): RequiredContext<Value> {
 const context = {
   Appearance: createRequiredContext<AppState["appearance"]>("appearanceContext"),
   Inbox: createRequiredContext<AppState["inbox"]>("inboxContext"),
-  Navigation: createRequiredContext<AppState["navigation"]>("navigationContext"),
+  MainTab: createRequiredContext<AppState["mainTab"]>("mainTabContext"),
   ProjectContext: createRequiredContext<AppState["projectContext"]>("projectContextContext"),
   ProjectRegistry: createRequiredContext<AppState["projectRegistry"]>("projectRegistryContext"),
   ShortcutRegistry: createRequiredContext<AppState["shortcutRegistry"]>("shortcutRegistryContext"),
@@ -42,7 +42,7 @@ export component AppStateProvider(props: {
 
   <context.Appearance value={appState.appearance}>
     <context.Inbox value={appState.inbox}>
-      <context.Navigation value={appState.navigation}>
+      <context.MainTab value={appState.mainTab}>
         <context.ProjectContext value={appState.projectContext}>
           <context.ProjectRegistry value={appState.projectRegistry}>
             <context.ShortcutRegistry value={appState.shortcutRegistry}>
@@ -52,14 +52,14 @@ export component AppStateProvider(props: {
             </context.ShortcutRegistry>
           </context.ProjectRegistry>
         </context.ProjectContext>
-      </context.Navigation>
+      </context.MainTab>
     </context.Inbox>
   </context.Appearance>
 }
 
 export const useAppearance = context.Appearance.use
 export const useInbox = context.Inbox.use
-export const useNavigation = context.Navigation.use
+export const useMainTab = context.MainTab.use
 export const useProjectContext = context.ProjectContext.use
 export const useProjectRegistry = context.ProjectRegistry.use
 export const useShortcutRegistry = context.ShortcutRegistry.use

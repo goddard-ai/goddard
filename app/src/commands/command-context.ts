@@ -3,14 +3,14 @@ import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
 import { isAppCommandHandled } from "~/commands/app-command.ts"
 import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
-import type { NavigationItemId } from "~/navigation-items.ts"
+import type { MainTabItemId } from "~/main-tab-items.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
-import type { WorkbenchTabKind } from "~/workbench-tab-set.ts"
+import type { WorkbenchContentKind } from "~/workbench-tab-set.ts"
 
 const activeScopes = signal<readonly string[]>([])
-const activeTabKind = signal<WorkbenchTabKind>("main")
+const activeTabKind = signal<WorkbenchContentKind>("inbox")
 const hasClosableActiveTab = signal(false)
-const selectedNavId = signal<NavigationItemId>("inbox")
+const selectedKind = signal<MainTabItemId>("inbox")
 const hasCloseTarget = computed(() => {
   return hasClosableActiveTab.value || hasOpenModalDialog.value
 })
@@ -21,7 +21,7 @@ const whenContext = computed(() => {
     "workbench.hasCloseTarget": hasCloseTarget.value,
     "workbench.hasClosableActiveTab": hasClosableActiveTab.value,
     "workbench.hasOpenModal": hasOpenModalDialog.value,
-    "navigation.selectedNavId": selectedNavId.value,
+    "mainTab.selectedKind": selectedKind.value,
   }
 })
 
@@ -31,7 +31,7 @@ export const commandContext = {
   hasCloseTarget,
   hasClosableActiveTab,
   hasOpenModalDialog,
-  selectedNavId,
+  selectedKind,
   whenContext,
 } as const
 
