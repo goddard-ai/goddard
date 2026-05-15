@@ -1,8 +1,4 @@
-# App Contributing
-
-Use this reference for app-local contribution guidance that intentionally does not live in `app/AGENTS.md`.
-
-## Testing
+Use this reference for app-local testing guidance that intentionally does not live in `app/AGENTS.md`.
 
 - For runtime UI, Bun host, or full-stack app behavior changes, treat manual QA through `bun run dev` from the workspace root and the flow in `app/README.md` as the default verification path.
 - Reserve automated tests in `app/` for extracted pure logic or fragile user-visible contracts that are hard to validate manually and easy to regress, such as deterministic transforms, ordering or merge rules, serialization boundaries, theme derivation, and helpers with meaningful edge cases.
