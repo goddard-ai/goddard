@@ -9,33 +9,33 @@ const prependAnchorFirstItemIndex = 1000000
 
 /** One visible message row handed to the row renderer. */
 export type MessageListRow<Item> = {
-  item: Item;
-  index: number;
-  viewportWidth: number;
-}
+    item: Item;
+    index: number;
+    viewportWidth: number;
+  }
 
 /** Props accepted by the session-chat-owned Virtuoso wrapper. */
 export type MessageListProps<Item> = {
-  items: readonly Item[];
-  overscanPx?: number;
-  initialScrollPosition?: "top" | "bottom";
-  header?: preact.ComponentChild;
-  scrollCacheKey?: string;
-  preserveScrollOnPrepend?: boolean;
-  loadingFallback?: preact.ComponentChild;
-  defaultRowHeight?: number;
-  getItemKey?: (item: Item, index: number) => string;
-  estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number;
-  renderRow: (row: MessageListRow<Item>) => preact.ComponentChild;
-}
+    items: readonly Item[];
+    overscanPx?: number;
+    initialScrollPosition?: "top" | "bottom";
+    header?: preact.ComponentChild;
+    scrollCacheKey?: string;
+    preserveScrollOnPrepend?: boolean;
+    loadingFallback?: preact.ComponentChild;
+    defaultRowHeight?: number;
+    getItemKey?: (item: Item, index: number) => string;
+    estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number;
+    renderRow: (row: MessageListRow<Item>) => preact.ComponentChild;
+  }
 
 type MessageListContext = {
-  header: preact.ComponentChild;
-}
+    header: preact.ComponentChild;
+  }
 
 type MessageListViewport = {
-  width: number;
-}
+    width: number;
+  }
 
 /** Returns the first mount position for a list that should open from the top or bottom. */
 function getInitialTopMostItemIndex<Item>(
@@ -93,11 +93,9 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const firstItemIndexRef = useRef(prependAnchorFirstItemIndex)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const tabContext = useTabContext()
-  const [viewport, setViewport] = useState<MessageListViewport>(
-    {
-      width: 0,
-    },
-  )
+  const [viewport, setViewport] = useState<MessageListViewport>({
+    width: 0,
+  })
 
   const scrollCacheKey = props.scrollCacheKey
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
@@ -138,12 +136,10 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       return
     }
 
-    function updateViewport() {
-      setViewport(
-        {
-          width: rootElement.clientWidth,
-        },
-      )
+    const updateViewport = () => {
+      setViewport({
+        width: rootElement.clientWidth,
+      })
     }
 
     updateViewport()
@@ -202,13 +198,11 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
         firstItemIndex={props.preserveScrollOnPrepend ? effectiveFirstItemIndex : undefined}
         {heightEstimates}
         {initialTopMostItemIndex}
-        itemContent={(index, item) => props.renderRow(
-          {
-            item,
-            index: index - effectiveFirstItemIndex,
-            viewportWidth: viewport.width,
-          },
-        )}
+        itemContent={(index, item) => props.renderRow({
+          item,
+          index: index - effectiveFirstItemIndex,
+          viewportWidth: viewport.width,
+        })}
         overscan={{
           main: overscanPx,
           reverse: overscanPx,
