@@ -71,16 +71,6 @@ export default component SessionChatView(props: {
 
         const activeHeaderAction = page.headerAction.activeKey.value
         const cancelRequestedTurnId = page.cancelRequestedTurnId.value
-        const activeTurnId = chat.summary.activeTurnId
-        const cancelAlreadyRequested =
-          activeTurnId !== null && cancelRequestedTurnId === activeTurnId
-        const canCancelTurn =
-          activeTurnId !== null && chat.session.activeDaemonSession &&
-            chat.summary.status === "running" &&
-            !cancelAlreadyRequested
-
-        const canOpenSessionChanges = chat.session.cwd.trim().length > 0
-        const workbenchTabSet = useWorkbenchTabSet()
 
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
@@ -122,37 +112,34 @@ export default component SessionChatView(props: {
                 </span>
               </div>
               <div class={styles.headerActions}>
-                const canReconnect =
-                  chat.connection.reconnectable && !chat.session.activeDaemonSession &&
-                    chat.session.connectionMode === "live"
+                const workbenchTabSet = useWorkbenchTabSet()
 
-                if (canOpenSessionChanges) {
-                  function openSessionChanges() {
-                    queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
-                    workbenchTabSet.openOrFocusTab({
-                      id: `session-changes:${chat.session.id}`,
-                      kind: "sessionChanges",
-                      title: `Changes · ${chat.title}`,
-                      payload: {
-                        sessionId: chat.session.id,
-                        sessionTitle: chat.title,
-                        repositoryLabel: chat.repositoryLabel,
-                      },
-                      dirty: false,
-                    })
-                  }
-
-                  <GoodTooltip ariaLabel="View changes" content="View changes">
-                    <button
-                      aria-label="View session changes"
-                      class={styles.headerActionButton}
-                      type="button"
-                      onClick={openSessionChanges}
-                    >
-                      <GitBranch size={15} strokeWidth={2.1} />
-                    </button>
-                  </GoodTooltip>
+                function openSessionChanges() {
+                  queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
+                  workbenchTabSet.openOrFocusTab({
+                    id: `session-changes:${chat.session.id}`,
+                    kind: "sessionChanges",
+                    title: `Changes · ${chat.title}`,
+                    payload: {
+                      sessionId: chat.session.id,
+                      sessionTitle: chat.title,
+                      repositoryLabel: chat.repositoryLabel,
+                    },
+                    dirty: false,
+                  })
                 }
+
+                <GoodTooltip ariaLabel="View changes" content="View changes">
+                  <button
+                    aria-label="View session changes"
+                    class={styles.headerActionButton}
+                    type="button"
+                    onClick={openSessionChanges}
+                  >
+                    <GitBranch size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
+
                 const completeActionDisabled =
                   activeHeaderAction !== null || chat.session.activeDaemonSession ||
                     chat.session.completedHidden
@@ -164,7 +151,8 @@ export default component SessionChatView(props: {
                       : activeHeaderAction === "complete"
                         ? "Completing session"
                         : "Complete session"
-                async function completeCurrentSession() {
+
+                const completeCurrentSession = async () => {
                   if (chat.session.activeDaemonSession || chat.session.completedHidden) {
                     return
                   }
@@ -200,8 +188,13 @@ export default component SessionChatView(props: {
                     <CheckCircle2 size={15} strokeWidth={2.1} />
                   </button>
                 </GoodTooltip>
+
+                const canReconnect =
+                  chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+                    chat.session.connectionMode === "live"
+
                 if (canReconnect) {
-                  async function reconnectCurrentSession() {
+                  const reconnectCurrentSession = async () => {
                     await page.headerAction.run("reconnect", async () => {
                       try {
                         const { session } = await reconnectSession(chat.session.id)
@@ -228,8 +221,17 @@ export default component SessionChatView(props: {
                     </button>
                   </GoodTooltip>
                 }
+
+                const activeTurnId = chat.summary.activeTurnId
+                const cancelAlreadyRequested =
+                  activeTurnId !== null && cancelRequestedTurnId === activeTurnId
+                const canCancelTurn =
+                  activeTurnId !== null && chat.session.activeDaemonSession &&
+                    chat.summary.status === "running" &&
+                    !cancelAlreadyRequested
+
                 if (canCancelTurn) {
-                  async function cancelActiveTurn() {
+                  const cancelActiveTurn = async () => {
                     await page.headerAction.run("cancel", async () => {
                       try {
                         const result = await cancelSessionTurn(chat.session.id)
