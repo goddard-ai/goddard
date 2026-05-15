@@ -1,34 +1,27 @@
-import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
+import { defineRequest, defineSdkPlugin, defineSubscription } from "@goddard-ai/sdk-plugin"
 
 import { inboxIpcSchema } from "./daemon-ipc.ts"
-import type {
-  BulkUpdateInboxItemsRequest,
-  InboxItemEvent,
-  ListInboxRequest,
-  UpdateInboxItemRequest,
-} from "./schema.ts"
+import type { ListInboxRequest } from "./schema.ts"
 
 export const inboxSdkPlugin = defineSdkPlugin({
   name: "inbox",
   ipc: inboxIpcSchema,
   create({ client }) {
+    const listInboxItems = defineRequest(client, "inbox.list")
+
     return {
       inbox: {
         /** Lists daemon-local inbox rows using daemon ordering and filtering. */
-        list: async (input: ListInboxRequest = {}) => client.send("inbox.list", input),
+        list: (input: ListInboxRequest = {}) => listInboxItems(input),
 
         /** Updates one daemon-local inbox row by entity id. */
-        update: async (input: UpdateInboxItemRequest) => client.send("inbox.update", input),
+        update: defineRequest(client, "inbox.update"),
 
         /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
-        bulkUpdate: async (input: BulkUpdateInboxItemsRequest) =>
-          client.send("inbox.bulkUpdate", input),
+        bulkUpdate: defineRequest(client, "inbox.bulkUpdate"),
 
         /** Subscribes to daemon-published inbox item updates. */
-        subscribe: (
-          onMessage: (event: InboxItemEvent) => void,
-          onError?: (error: unknown) => void,
-        ) => client.subscribe("inbox.item", onMessage, onError),
+        subscribe: defineSubscription(client, "inbox.item"),
       },
     }
   },

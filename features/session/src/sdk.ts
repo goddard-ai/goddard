@@ -1,12 +1,6 @@
-import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
+import { defineRequest, defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 
 import { sessionIpcSchema } from "./daemon-ipc.ts"
-import type {
-  GetSessionWorktreeRequest,
-  MountSessionReviewSessionRequest,
-  RunSessionReviewSessionRequest,
-  UnmountSessionReviewSessionRequest,
-} from "./schema.ts"
 
 export const sessionSdkPlugin = defineSdkPlugin({
   name: "session",
@@ -15,20 +9,16 @@ export const sessionSdkPlugin = defineSdkPlugin({
     return {
       session: {
         /** Reads persisted worktree metadata attached to one daemon-managed session. */
-        worktree: async (input: GetSessionWorktreeRequest) =>
-          client.send("session.worktree.get", input),
+        worktree: defineRequest(client, "session.worktree.get"),
 
         /** Mounts a review session for one daemon-managed session worktree. */
-        mountReviewSession: async (input: MountSessionReviewSessionRequest) =>
-          client.send("session.reviewSession.mount", input),
+        mountReviewSession: defineRequest(client, "session.reviewSession.mount"),
 
         /** Runs one mounted review session immediately. */
-        runReviewSession: async (input: RunSessionReviewSessionRequest) =>
-          client.send("session.reviewSession.run", input),
+        runReviewSession: defineRequest(client, "session.reviewSession.run"),
 
         /** Unmounts a review session from one daemon-managed session worktree. */
-        unmountReviewSession: async (input: UnmountSessionReviewSessionRequest) =>
-          client.send("session.reviewSession.unmount", input),
+        unmountReviewSession: defineRequest(client, "session.reviewSession.unmount"),
       },
     }
   },
