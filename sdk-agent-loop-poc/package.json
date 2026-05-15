@@ -1,0 +1,17 @@
+{
+  "name": "@goddard-ai/sdk-agent-loop-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run ./run-agent-loop.ts",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
+    "@goddard-ai/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  }
+}

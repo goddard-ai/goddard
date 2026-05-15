@@ -252,6 +252,17 @@
       "name": "@goddard-ai/worktree-plugin",
       "version": "0.1.0",
     },
+    "sdk-agent-loop-poc": {
+      "name": "@goddard-ai/sdk-agent-loop-poc",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/sdk": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^25.6.0",
+      },
+    },
     "workforce": {
       "name": "@goddard-ai/workforce",
       "version": "0.1.0",
@@ -587,6 +598,8 @@
     "@goddard-ai/schema": ["@goddard-ai/schema@workspace:core/schema"],
 
     "@goddard-ai/sdk": ["@goddard-ai/sdk@workspace:core/sdk"],
+
+    "@goddard-ai/sdk-agent-loop-poc": ["@goddard-ai/sdk-agent-loop-poc@workspace:sdk-agent-loop-poc"],
 
     "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 

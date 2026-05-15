@@ -8,6 +8,7 @@
     "app/styled-system",
     "core/*",
     "core/daemon/client",
+    "sdk-agent-loop-poc",
     "workforce"
   ],
   "catalog": {
