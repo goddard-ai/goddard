@@ -19,17 +19,23 @@ const distDir = join(packageDir, "dist")
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const target = args.get("target") ?? resolveDefaultCompileTarget()
-  const helperRuntime = resolveHelperRuntime(args.get("helper-runtime"))
+  const runtime = resolveArtifactRuntime(args.get("runtime"), "--runtime")
+  const helperRuntime = resolveArtifactRuntime(
+    args.get("helper-runtime") ?? runtime,
+    "--helper-runtime",
+  )
   const outputDir = resolve(
     process.cwd(),
     args.get("out-dir") ?? join(packageDir, "dist", "standalone", target),
   )
   const executableExt = target.includes("windows") ? ".exe" : ""
+  const daemonExt = runtime === "shared-bun" ? "" : executableExt
   const helperExt = helperRuntime === "shared-bun" ? "" : executableExt
   const artifacts: StandaloneArtifact[] = [
     {
       sourcePath: join(distDir, "main.mjs"),
-      outputPath: join(outputDir, "bin", `goddard-daemon${executableExt}`),
+      outputPath: join(outputDir, "bin", `goddard-daemon${daemonExt}`),
+      runtime,
     },
     {
       sourcePath: join(distDir, "bin", "goddard-tool.mjs"),
@@ -89,8 +95,8 @@ async function main() {
   )
 }
 
-/** Resolves how helper commands are emitted for the standalone runtime. */
-function resolveHelperRuntime(value: string | undefined) {
+/** Resolves how command artifacts are emitted for the standalone runtime. */
+function resolveArtifactRuntime(value: string | undefined, flagName: string) {
   if (!value || value === "compiled") {
     return "compiled"
   }
@@ -99,7 +105,7 @@ function resolveHelperRuntime(value: string | undefined) {
     return "shared-bun"
   }
 
-  throw new Error("--helper-runtime must be either compiled or shared-bun")
+  throw new Error(`${flagName} must be either compiled or shared-bun`)
 }
 
 /** Writes a small launcher plus bundled JS payload for app builds that already ship Bun. */

@@ -155,7 +155,7 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
     }
   }
 
-  await writeAppBunHelperLaunchers(manifest, installDir)
+  await writeAppBunLaunchers(manifest, installDir)
 
   return {
     daemonRootDir: installDir,
@@ -165,28 +165,30 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
   } satisfies PreparedDaemonRuntime
 }
 
-/** Points lightweight packaged helper launchers at the current app-bundled Bun executable. */
-async function writeAppBunHelperLaunchers(manifest: EmbeddedRuntimeManifest, installDir: string) {
+/** Points lightweight packaged launchers at the current app-bundled Bun executable. */
+async function writeAppBunLaunchers(manifest: EmbeddedRuntimeManifest, installDir: string) {
   await Promise.all(
-    Object.values(manifest.daemon.helperPaths).map(async (relativeHelperPath) => {
-      const helperPath = join(installDir, relativeHelperPath)
-      const payloadPath = `${helperPath}.mjs`
+    [manifest.daemon.executablePath, ...Object.values(manifest.daemon.helperPaths)].map(
+      async (relativeLauncherPath) => {
+        const launcherPath = join(installDir, relativeLauncherPath)
+        const payloadPath = `${launcherPath}.mjs`
 
-      if (!(await pathExists(payloadPath))) {
-        return
-      }
+        if (!(await pathExists(payloadPath))) {
+          return
+        }
 
-      await writeFile(
-        helperPath,
-        [
-          "#!/bin/sh",
-          `exec ${quoteShellLiteral(process.execPath)} ${quoteShellLiteral(payloadPath)} "$@"`,
-          "",
-        ].join("\n"),
-        "utf8",
-      )
-      await chmod(helperPath, 0o755)
-    }),
+        await writeFile(
+          launcherPath,
+          [
+            "#!/bin/sh",
+            `exec ${quoteShellLiteral(process.execPath)} ${quoteShellLiteral(payloadPath)} "$@"`,
+            "",
+          ].join("\n"),
+          "utf8",
+        )
+        await chmod(launcherPath, 0o755)
+      },
+    ),
   )
 }
 

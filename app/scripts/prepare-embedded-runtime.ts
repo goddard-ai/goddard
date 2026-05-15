@@ -51,7 +51,7 @@ async function main() {
     bunTarget,
     "--out-dir",
     daemonOutputDir,
-    ...(os === "macos" ? ["--helper-runtime", "shared-bun"] : []),
+    ...(os === "macos" ? ["--runtime", "shared-bun"] : []),
   ])
 
   const daemonManifest = JSON.parse(
