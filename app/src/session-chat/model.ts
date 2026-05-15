@@ -250,6 +250,10 @@ function findNewestRunningTurn(turns: readonly SessionChatTurn[]) {
 }
 
 function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
+  if (getMessageId(message) === null) {
+    return false
+  }
+
   const fingerprint = buildMessageFingerprint(message)
 
   return turns.some((turn) =>
@@ -398,7 +402,7 @@ export class SessionChat extends Sigma<SessionChatState> {
     const localMessages: { message: acp.AnyMessage; receivedAt: string }[] = []
 
     for (const turn of this.turns) {
-      if (turn.source === "history") {
+      if (turn.source !== "live") {
         continue
       }
 
@@ -551,11 +555,13 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #insertTurnMessage(turn: SessionChatTurn, message: acp.AnyMessage) {
-    const fingerprint = buildMessageFingerprint(message)
+    const fingerprint = getMessageId(message) === null ? null : buildMessageFingerprint(message)
 
-    for (const existingMessage of turn.messages) {
-      if (buildMessageFingerprint(existingMessage) === fingerprint) {
-        return
+    if (fingerprint !== null) {
+      for (const existingMessage of turn.messages) {
+        if (buildMessageFingerprint(existingMessage) === fingerprint) {
+          return
+        }
       }
     }
 

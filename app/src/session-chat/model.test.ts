@@ -318,12 +318,16 @@ test("SessionChat merges live updates into an active history turn", () => {
     completedAt: "2026-04-14T00:00:04.000Z",
     status: "completed",
   })
-  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.turns[0].messages).toHaveLength(4)
   expect(chat.turns[0].events.map((event) => event.kind)).toEqual([
     "prompt",
     "sessionUpdate",
+    "sessionUpdate",
     "turnCompletion",
   ])
+  expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
+    content: [{ type: "text", text: "WorkingWorking" }],
+  })
 })
 
 test("SessionChat keeps prompt and terminal messages deterministic when updates arrive out of order", () => {
