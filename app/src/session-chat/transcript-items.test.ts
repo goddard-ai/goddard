@@ -625,6 +625,97 @@ test("buildSessionChatTranscript ignores routed session/update payloads without 
   ])
 })
 
+test("buildSessionChatTranscript ignores non-transcript chunk updates without logging", () => {
+  const session = createSession(null)
+  const turns = createTurns([
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: {
+            type: "text",
+            text: "Hidden reasoning should not render.",
+          },
+        },
+      },
+    },
+  ])
+
+  const errors: unknown[][] = []
+  const originalConsoleError = console.error
+  console.error = (...args) => {
+    errors.push(args)
+  }
+
+  try {
+    expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([
+      {
+        kind: "message",
+        id: "ses_session-1:context",
+        role: "system",
+        authorName: "System",
+        timestampLabel: "active",
+        content: [{ type: "text", text: "Working directory: /repo-a" }],
+      },
+    ])
+  } finally {
+    console.error = originalConsoleError
+  }
+
+  expect(errors).toEqual([])
+})
+
+test("buildSessionChatTranscript reports non-text agent message chunks explicitly", () => {
+  const session = createSession(null)
+  const turns = createTurns([
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "image",
+            uri: "file:///tmp/output.png",
+          },
+        },
+      },
+    },
+  ])
+
+  const errors: unknown[][] = []
+  const originalConsoleError = console.error
+  console.error = (...args) => {
+    errors.push(args)
+  }
+
+  try {
+    expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([
+      {
+        kind: "message",
+        id: "ses_session-1:context",
+        role: "system",
+        authorName: "System",
+        timestampLabel: "active",
+        content: [{ type: "text", text: "Working directory: /repo-a" }],
+      },
+    ])
+  } finally {
+    console.error = originalConsoleError
+  }
+
+  expect(errors).toHaveLength(1)
+  expect(errors[0]?.[1]).toEqual(
+    expect.objectContaining({
+      reason: "agent_message_chunk only supports text content.",
+    }),
+  )
+})
+
 test("buildSessionChatTranscript logs an error instead of flattening unsupported session/update payloads", () => {
   const session = createSession(null)
   const turns = createTurns([

@@ -121,6 +121,11 @@ const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
   "session_info_update",
 ])
 
+const TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES = new Set([
+  "agent_thought_chunk",
+  "user_message_chunk",
+])
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
@@ -565,13 +570,19 @@ function parseTranscriptSessionUpdate(
     if (agentMessageChunkText === null) {
       return {
         kind: "unsupported",
-        reason: "agent_message_chunk is missing text content.",
+        reason: "agent_message_chunk only supports text content.",
       }
     }
 
     return {
       kind: "agentMessageChunk",
       text: agentMessageChunkText,
+    }
+  }
+
+  if (TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES.has(update.sessionUpdate)) {
+    return {
+      kind: "ignored",
     }
   }
 
