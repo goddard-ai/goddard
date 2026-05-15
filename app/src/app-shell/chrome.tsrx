@@ -360,9 +360,7 @@ component SidebarItem(props: {
       color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
     }}
     type="button"
-    onClick={() => {
-      props.onSelect()
-    }}
+    onClick={props.onSelect}
   >
     <InlineSvgIcon icon={props.icon} size="22px 21px" />
     if (hasDot) {
