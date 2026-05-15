@@ -1,10 +1,5 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
-import {
-  composeIpcSchemas,
-  type ComposeIpcSchemas,
-  type Handlers,
-  type IpcSchema,
-} from "@goddard-ai/ipc"
+import { composeIpcSchemas, type Handlers, type IpcSchema } from "@goddard-ai/ipc"
 import type { z } from "zod"
 
 /** Named feature extensions exposed by one daemon plugin to plugins that consume it. */
@@ -61,14 +56,12 @@ export type InferConfig<TPlugin> = TPlugin extends {
   ? { readonly [TKey in TName]: InferConfigValue<TPlugin> }
   : {}
 
-type InferConfigDefinition<TPlugin> = TPlugin extends {
-  readonly name: infer TName extends string
-  readonly config: infer TConfig extends ConfigDefinition
-}
-  ? { readonly [TKey in TName]: TConfig }
-  : {}
-
 type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
+
+type RuntimeSetupContributions = {
+  readonly requestHandlers?: Record<string, unknown>
+  readonly provides?: FeatureExtensions
+}
 
 type SetupConfigContext<TConfig> = keyof TConfig extends never ? {} : { readonly config: TConfig }
 
@@ -129,33 +122,17 @@ export type Plugin = {
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
   // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
-  readonly setup?: (context: any) => unknown | Promise<unknown>
+  readonly setup?: (
+    context: any,
+  ) => void | RuntimeSetupContributions | Promise<void | RuntimeSetupContributions>
   readonly register?: (...args: never[]) => void | Promise<void>
 }
 
-type ExtractIpcs<TPlugins extends readonly unknown[]> = TPlugins extends readonly [
-  infer THead,
-  ...infer TTail,
-]
-  ? THead extends { readonly ipc: infer TIpc extends IpcSchema }
-    ? readonly [TIpc, ...ExtractIpcs<TTail>]
-    : ExtractIpcs<TTail>
-  : readonly []
-
-/** Infers the resolved config map produced by one daemon plugin composition. */
-export type InferCompositionConfig<TPlugins extends readonly unknown[]> = UnionToIntersection<
-  InferConfig<TPlugins[number]>
->
-
-/** Infers the config contribution definitions produced by one daemon plugin composition. */
-export type InferCompositionConfigDefinitions<TPlugins extends readonly unknown[]> =
-  UnionToIntersection<InferConfigDefinition<TPlugins[number]>>
-
 /** Runtime daemon feature composition produced by static composition roots. */
-export type Composition<TPlugins extends readonly Plugin[]> = {
-  readonly plugins: TPlugins
-  readonly ipc: ComposeIpcSchemas<ExtractIpcs<TPlugins>>
-  readonly config: InferCompositionConfigDefinitions<TPlugins>
+export type Composition = {
+  readonly plugins: readonly Plugin[]
+  readonly ipc: IpcSchema
+  readonly config: Record<string, ConfigDefinition>
 }
 
 type RegisterFunction = (...args: never[]) => void | Promise<void>
@@ -297,7 +274,7 @@ type DefinePlugin = {
 export const definePlugin = ((plugin: Plugin) => plugin) as DefinePlugin
 
 /** Composes statically imported daemon feature plugins and validates dependency ownership. */
-export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins: TPlugins) {
+export function composePlugins(plugins: readonly Plugin[]) {
   assertUniquePluginNames(plugins)
   assertConsumedPluginsAreComposed(plugins)
   const orderedPlugins = sortPluginsByDependency(plugins)
@@ -318,7 +295,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     plugins: orderedPlugins,
     ipc: composeIpcSchemas(ipcSchemas),
     config,
-  } as unknown as Composition<TPlugins>
+  } satisfies Composition
 }
 
 function assertUniquePluginNames(plugins: readonly Plugin[]) {

@@ -49,11 +49,6 @@ const daemonPluginComposition = composePlugins(daemonPlugins)
 
 type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
 
-type PluginSetupContributions = {
-  readonly requestHandlers: Record<string, unknown>
-  readonly provides?: Record<string, unknown>
-}
-
 export async function startDaemonServer(
   client: BackendPrClient,
   options: {
@@ -531,23 +526,20 @@ async function setupDaemonPlugins(substrate: DaemonSetupSubstrate) {
   const requestHandlers: Record<string, unknown> = {}
 
   for (const plugin of daemonPluginComposition.plugins) {
-    const consumedPlugins = "consumes" in plugin ? plugin.consumes : undefined
-    const consumedExtensions = (consumedPlugins ?? []).map(
+    const consumedExtensions = (plugin.consumes ?? []).map(
       (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
     )
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
       ...consumedExtensions,
     )
-    const setup = await (
-      plugin.setup as (
-        context: DaemonSetupSubstrate & Record<string, unknown>,
-      ) => PluginSetupContributions | Promise<PluginSetupContributions>
-    )(context)
+    const setup = await plugin.setup?.(context)
 
-    Object.assign(requestHandlers, setup.requestHandlers)
+    if (setup?.requestHandlers) {
+      Object.assign(requestHandlers, setup.requestHandlers)
+    }
 
-    if (setup.provides) {
+    if (setup?.provides) {
       Object.assign(extensions, setup.provides)
       extensionsByPluginName.set(plugin.name, setup.provides)
     }
