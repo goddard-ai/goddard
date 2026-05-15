@@ -42,7 +42,7 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 
 ## Use Tasks For Promise State
 
-- Use task primitives for common async UI state such as `isPending`, `error`, `run()`, and `clearError()`.
+- Use the task helpers in `app/src/lib/task.ts` for common async UI state such as `isPending`, `error`, `run()`, and `clearError()`.
 - Use keyed tasks when a group of mutually exclusive actions needs one active key and one shared error surface.
 - Let task `run()` own concurrent-run guarding so callers do not repeat redundant `isPending` checks.
 - Have `run()` no-op while pending and return `Promise<void>` rather than returning a shared active promise whose result type may not match concurrent callers.
