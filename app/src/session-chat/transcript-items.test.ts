@@ -16,6 +16,7 @@ function createSession(lastAgentMessage: string | null) {
     connectionMode: "live",
     supportsLoadSession: false,
     activeDaemonSession: true,
+    completedHidden: false,
     token: null,
     permissions: null,
     title: "New session",

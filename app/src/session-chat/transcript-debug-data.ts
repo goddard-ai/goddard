@@ -47,6 +47,7 @@ function createDebugSession(overrides: Partial<DaemonSession> = {}) {
     connectionMode: "live",
     supportsLoadSession: true,
     activeDaemonSession: false,
+    completedHidden: false,
     token: null,
     permissions: null,
     title: "Session chat ACP QA",
