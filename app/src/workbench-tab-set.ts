@@ -1,19 +1,12 @@
 import { Sigma } from "preact-sigma"
 
-import {
-  type WorkbenchDetailTabKind,
-  type WorkbenchTab,
-  type WorkbenchTabKind,
-} from "./workbench-tab-registry.ts"
+import { type WorkbenchTab, type WorkbenchTabKind } from "./workbench-tab-registry.ts"
 
 export type { WorkbenchTab, WorkbenchTabKind }
 
-/** One closable workbench tab tracked by the shell. */
-export type WorkbenchDetailTab = WorkbenchTab<WorkbenchDetailTabKind>
-
 /** Top-level public state owned by the workbench tab model. */
 export type WorkbenchTabSetState = {
-  tabs: Record<string, WorkbenchDetailTab>
+  tabs: Record<string, WorkbenchTab>
   orderedTabIds: string[]
   activeTabId: string
   recency: string[]
@@ -42,9 +35,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
 
   /** Returns the closable tabs in their rendered order. */
   get tabList() {
-    return this.orderedTabIds
-      .map((tabId) => this.tabs[tabId])
-      .filter((tab): tab is WorkbenchDetailTab => Boolean(tab))
+    return this.orderedTabIds.map((tabId) => this.tabs[tabId]).filter(Boolean)
   }
 
   /** Returns the active closable tab, when one is selected. */
@@ -55,7 +46,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   }
 
   /** Opens one closable tab or focuses the existing tab with the same stable id. */
-  openOrFocusTab(tab: WorkbenchDetailTab) {
+  openOrFocusTab(tab: WorkbenchTab) {
     if (this.tabs[tab.id]) {
       this.tabs[tab.id] = tab
       this.activateTab(tab.id)

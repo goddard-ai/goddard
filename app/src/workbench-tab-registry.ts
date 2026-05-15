@@ -18,7 +18,7 @@ function PlaceholderWorkbenchTab() {
 }
 
 /** Runtime registry for every non-primary workbench tab component. */
-export const workbenchTabComponents = {
+export const workbenchTabKinds = {
   inbox: {
     component: lazy(() => import("~/inbox/page.tsrx")),
     icon: "tabs/inbox",
@@ -88,14 +88,11 @@ export const workbenchTabComponents = {
 } satisfies Record<string, WorkbenchTabDefinition>
 
 /** The supported non-primary workbench tab kinds available in the shell. */
-export type WorkbenchRegisteredTabKind = keyof typeof workbenchTabComponents
-
-/** The supported closable workbench tab kinds available in the shell. */
-export type WorkbenchDetailTabKind = WorkbenchRegisteredTabKind
+type WorkbenchRegisteredTabKind = keyof typeof workbenchTabKinds
 
 /** Payload inferred from one registered non-primary workbench tab component. */
 type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> = NormalizeWorkbenchTabPayload<
-  preact.ComponentProps<(typeof workbenchTabComponents)[TKind]["component"]>
+  preact.ComponentProps<(typeof workbenchTabKinds)[TKind]["component"]>
 >
 
 /** Spreadable payload shape for tab components that infer no props. */
@@ -135,20 +132,20 @@ export type WorkbenchTab<TKind extends WorkbenchTabKind = WorkbenchTabKind> =
 export function getWorkbenchTabComponent(
   kind: WorkbenchRegisteredTabKind,
 ): LooseWorkbenchTabComponent {
-  return workbenchTabComponents[kind].component
+  return workbenchTabKinds[kind].component
 }
 
 /** Returns the SVG icon registered for one workbench tab kind. */
 export function getWorkbenchTabIcon(kind: WorkbenchTabKind): SvgIconName {
-  return kind === "main" ? "tabs/home" : workbenchTabComponents[kind].icon
+  return kind === "main" ? "tabs/home" : workbenchTabKinds[kind].icon
 }
 
 /** Returns whether the shell should restore raw scrollTop for one tab kind. */
-export function shouldRestoreWorkbenchTabScroll(kind: WorkbenchRegisteredTabKind) {
-  return workbenchTabComponents[kind].restoreScroll ?? true
-}
+export function shouldRestoreWorkbenchTabScroll(kind: WorkbenchTabKind) {
+  if (kind === "main") {
+    return true
+  }
 
-/** Returns whether one runtime string matches a registered closable tab kind. */
-export function isWorkbenchDetailTabKind(kind: string): kind is WorkbenchDetailTabKind {
-  return kind in workbenchTabComponents
+  const tabKind = workbenchTabKinds[kind]
+  return "restoreScroll" in tabKind ? tabKind.restoreScroll : true
 }
