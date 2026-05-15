@@ -79,6 +79,10 @@ function createChat(input: { history?: GetSessionHistoryResponse; session?: Daem
   })
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function promptMessage(id = "prompt-1") {
   return {
     jsonrpc: "2.0",
@@ -274,10 +278,10 @@ test("SessionChat preserves loaded older history across refreshed latest history
 test("SessionChat creates one live turn and ignores repeated messages", () => {
   const chat = createChat({})
 
-  chat.applyMessage(promptMessage("prompt-live"), {
+  chat.applyMessageNow(promptMessage("prompt-live"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessage(promptMessage("prompt-live"), {
+  chat.applyMessageNow(promptMessage("prompt-live"), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
 
@@ -302,13 +306,13 @@ test("SessionChat merges live updates into an active history turn", () => {
     ]),
   })
 
-  chat.applyMessage(agentChunk("Working"), {
+  chat.applyMessageNow(agentChunk("Working"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessage(agentChunk("Working"), {
+  chat.applyMessageNow(agentChunk("Working"), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
-  chat.applyMessage(promptResult(), {
+  chat.applyMessageNow(promptResult(), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
 
@@ -330,13 +334,48 @@ test("SessionChat merges live updates into an active history turn", () => {
   })
 })
 
+test("SessionChat receiveMessage batches chunks and flushes before boundary messages", async () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.receiveMessage(agentChunk("Still "))
+  chat.receiveMessage(agentChunk("working"))
+
+  expect(chat.turns[0].messages).toHaveLength(1)
+
+  await wait(40)
+
+  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
+    content: [{ type: "text", text: "Still working" }],
+  })
+
+  chat.receiveMessage(agentChunk("."))
+  chat.receiveMessage(promptResult())
+
+  expect(chat.turns[0]).toMatchObject({
+    completedAt: expect.any(String),
+    status: "completed",
+  })
+  expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
+    content: [{ type: "text", text: "Still working." }],
+  })
+})
+
 test("SessionChat keeps prompt and terminal messages deterministic when updates arrive out of order", () => {
   const chat = createChat({})
 
-  chat.applyMessage(promptResult("prompt-late"), {
+  chat.applyMessageNow(promptResult("prompt-late"), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
-  chat.applyMessage(promptMessage("prompt-late"), {
+  chat.applyMessageNow(promptMessage("prompt-late"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
 
@@ -349,12 +388,12 @@ test("SessionChat keeps prompt and terminal messages deterministic when updates 
 test("SessionChat returns to ready status after a live turn completes", () => {
   const chat = createChat({})
 
-  chat.applyMessage(promptMessage("prompt-ready"), {
+  chat.applyMessageNow(promptMessage("prompt-ready"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
   expect(chat.summary.status).toBe("running")
 
-  chat.applyMessage(promptResult("prompt-ready"), {
+  chat.applyMessageNow(promptResult("prompt-ready"), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
   expect(chat.summary.status).toBe("idle")
@@ -403,8 +442,8 @@ test("SessionChat exposes pending permission and plan events", () => {
     },
   } satisfies acp.AnyMessage
 
-  chat.applyMessage(permissionRequest)
-  chat.applyMessage(planUpdate)
+  chat.applyMessageNow(permissionRequest)
+  chat.applyMessageNow(planUpdate)
 
   expect(chat.summary.status).toBe("blocked")
   expect(chat.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
@@ -428,11 +467,11 @@ test("SessionChat clears pending permission after the matching response", () => 
   const permissionRequest = permissionRequestMessage()
   const permissionResponse = permissionResponseMessage()
 
-  chat.applyMessage(permissionRequest)
+  chat.applyMessageNow(permissionRequest)
   expect(chat.summary.status).toBe("blocked")
   expect(chat.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
 
-  chat.applyMessage(permissionResponse)
+  chat.applyMessageNow(permissionResponse)
 
   expect(chat.summary.pendingPermissionRequest).toBeNull()
   expect(chat.summary.status).toBe("running")
@@ -456,8 +495,8 @@ test("SessionChat does not duplicate a permission response after refreshed histo
     ]),
   })
 
-  chat.applyMessage(permissionRequest)
-  chat.applyMessage(permissionResponse)
+  chat.applyMessageNow(permissionRequest)
+  chat.applyMessageNow(permissionResponse)
   chat.syncLoadedData({
     session: createSession(),
     history: createHistory([
@@ -489,7 +528,7 @@ test("SessionChat preserves live messages that are not in refreshed history yet"
     ]),
   })
 
-  chat.applyMessage(agentChunk("Still working"), {
+  chat.applyMessageNow(agentChunk("Still working"), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
   chat.syncLoadedData({

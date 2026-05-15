@@ -372,6 +372,9 @@ function resolveSessionChatStatus(
 
 /** Reactive session chat owner that merges loaded history with live daemon updates. */
 export class SessionChat extends Sigma<SessionChatState> {
+  #chunkFlushTimer: ReturnType<typeof setTimeout> | null = null
+  #queuedChunks: QueuedSessionChatMessage[] = []
+
   constructor(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
     super({
       connection: input.history.connection,
@@ -480,11 +483,34 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.#refreshTranscriptState()
   }
 
-  /** Applies one daemon-published ACP message to the chat state. */
-  applyMessage(message: acp.AnyMessage, options: ApplySessionChatMessageOptions = {}) {
+  /** Applies one daemon-published ACP message through the live chunk batching queue. */
+  receiveMessage(message: acp.AnyMessage) {
+    const receivedAt = new Date().toISOString()
+
+    if (isTextAgentMessageChunk(message)) {
+      this.#queuedChunks.push({ message, receivedAt })
+      this.#scheduleQueuedChunkFlush()
+      return
+    }
+
+    this.#applyMessages([...this.#takeQueuedChunks(), { message, receivedAt }])
+  }
+
+  /** Applies one ACP message immediately, bypassing live chunk batching. */
+  applyMessageNow(message: acp.AnyMessage, options: ApplySessionChatMessageOptions = {}) {
     const receivedAt = options.receivedAt ?? new Date().toISOString()
 
     this.#applyMessages([{ message, receivedAt }])
+  }
+
+  /** Flushes queued live text chunks into chat state. */
+  flushReceivedMessages() {
+    if (this.#queuedChunks.length === 0) {
+      this.#takeQueuedChunks()
+      return
+    }
+
+    this.#applyMessages(this.#takeQueuedChunks())
   }
 
   /** Applies a freshly returned session record without replacing the merged transcript. */
@@ -541,6 +567,35 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
 
     this.#refreshTranscriptState()
+  }
+
+  #cancelQueuedChunkFlush() {
+    if (this.#chunkFlushTimer === null) {
+      return
+    }
+
+    clearTimeout(this.#chunkFlushTimer)
+    this.#chunkFlushTimer = null
+  }
+
+  #takeQueuedChunks() {
+    this.#cancelQueuedChunkFlush()
+    return this.#queuedChunks.splice(0, this.#queuedChunks.length)
+  }
+
+  #scheduleQueuedChunkFlush() {
+    if (this.#chunkFlushTimer !== null) {
+      return
+    }
+
+    this.#chunkFlushTimer = setTimeout(() => {
+      this.flushReceivedMessages()
+    }, liveChunkBatchIntervalMs)
+  }
+
+  #clearQueuedChunks() {
+    this.#cancelQueuedChunkFlush()
+    this.#queuedChunks.length = 0
   }
 
   #applyMessageToTurn(turn: SessionChatTurn, message: acp.AnyMessage, receivedAt: string) {
@@ -755,60 +810,13 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   onSetup() {
     let active = true
-    let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null
-    const queuedChunks: QueuedSessionChatMessage[] = []
     let unsubscribe: (() => void) | null = null
-
-    const cancelQueuedChunkFlush = () => {
-      if (chunkFlushTimer === null) {
-        return
-      }
-
-      clearTimeout(chunkFlushTimer)
-      chunkFlushTimer = null
-    }
-
-    const takeQueuedChunks = () => {
-      cancelQueuedChunkFlush()
-      return queuedChunks.splice(0, queuedChunks.length)
-    }
-
-    const flushQueuedChunks = () => {
-      if (!active || queuedChunks.length === 0) {
-        takeQueuedChunks()
-        return
-      }
-
-      this.#applyMessages(takeQueuedChunks())
-    }
-
-    const scheduleQueuedChunkFlush = () => {
-      if (chunkFlushTimer !== null) {
-        return
-      }
-
-      chunkFlushTimer = setTimeout(flushQueuedChunks, liveChunkBatchIntervalMs)
-    }
-
-    const applySubscribedMessage = (message: acp.AnyMessage) => {
-      if (!active) {
-        return
-      }
-
-      const receivedAt = new Date().toISOString()
-
-      if (isTextAgentMessageChunk(message)) {
-        queuedChunks.push({ message, receivedAt })
-        scheduleQueuedChunkFlush()
-        return
-      }
-
-      this.#applyMessages([...takeQueuedChunks(), { message, receivedAt }])
-    }
 
     void goddardSdk.session
       .subscribe({ id: this.session.id }, (message) => {
-        applySubscribedMessage(message)
+        if (active) {
+          this.receiveMessage(message)
+        }
       })
       .then(
         (nextUnsubscribe) => {
@@ -828,8 +836,7 @@ export class SessionChat extends Sigma<SessionChatState> {
     return [
       () => {
         active = false
-        cancelQueuedChunkFlush()
-        queuedChunks.length = 0
+        this.#clearQueuedChunks()
         unsubscribe?.()
         unsubscribe = null
       },

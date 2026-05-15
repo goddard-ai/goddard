@@ -795,7 +795,7 @@ export function createSessionChatDebugController() {
       refresh()
     },
     resolvePermission(input: { optionId: string; requestId: string | number }) {
-      chat.applyMessage(createSelectedPermissionResponse(input), {
+      chat.applyMessageNow(createSelectedPermissionResponse(input), {
         receivedAt: "2026-04-14T15:12:00.000Z",
       })
       refresh()
