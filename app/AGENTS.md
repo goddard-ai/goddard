@@ -25,9 +25,10 @@
   - In Sigma classes, add a short human-readable comment to each `#private` field explaining the runtime or bookkeeping it owns and why it stays outside reactive state.
   - Do not add private methods that only mirror a public Sigma action with the same parameters. Inline that logic into the public action.
   - Do not suffix Sigma owner class or module names with `State`; reserve `State` for explicit state-shape types.
-  - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.
-  - Do not model simple UI state in `preact-sigma`.
-  - For singleton UI components, prefer subscribing to shared Preact context directly instead of threading pass-through JSX props through parent components just to preserve an abstraction boundary.
+  - Use `useSignal()` or local component state for UI state owned by one component or UI primitive, such as open flags, drafts, and ephemeral form status.
+  - Use page models for page-level UI state shared across a page tree, such as pending tasks, action errors, selected IDs, or one-off page bookkeeping.
+  - Do not model page UI state in `preact-sigma`; keep `preact-sigma` focused on domain models and workflow state.
+  - For singleton or page-wide UI components, prefer subscribing to shared Preact context directly instead of threading pass-through JSX props through parent components just to preserve an abstraction boundary.
   - Avoid relay-layer parents. If a parent component mostly renames or forwards context-derived values and callbacks into a single app-specific child, move that wiring closer to the child unless the parent is coordinating behavior across multiple subtrees.
   - Keep event logic close to the event target. Do not hoist single-use UI event handlers into shell-level components unless coordination outside the local subtree requires it.
   - Prefer derived render values over sync effects when the next value can be computed during render.
@@ -66,7 +67,7 @@
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.
 - Never destructure component props. Define component prop types inline instead of creating `Props` aliases or interfaces.
 - Avoid assigning JSX/TSRX elements to local `const` variables. Prefer inlining elements at the use site, including inline `<tsrx>` expression blocks when needed.
-- In UI components, prefer inline JSX callbacks for single-use handlers instead of hoisted local function declarations.
+- Keep single-use event handlers at the use site. Prefer inline JSX callbacks for tiny handlers; for larger handlers, declare a block-scoped arrow function in the nearest JSX or control-flow block that uses it.
 - Prefer passing async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise with `void`.
 - Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`; introduce locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.
 - Run formatting after modifying app files.
