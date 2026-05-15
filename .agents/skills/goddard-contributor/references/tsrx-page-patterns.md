@@ -1,10 +1,10 @@
 # TSRX Page Patterns
 
-Use these patterns when refining route-level or page-like TSRX components. They come from the session chat view refactor, but they are meant to apply broadly to TSRX files.
+Use these patterns when refining page-like TSRX components. In app guidance, a page is the logical UI boundary defined in `app/glossary.md`: it may be a route, detail tab, panel, dialog, or embedded surface that owns any query data, page model, and internal UI coordination it needs.
 
 ## Keep The Page Shape Visible
 
-- Prefer one exported page component that shows the whole route skeleton when the component is only used once.
+- Prefer one exported page component that shows the whole page skeleton when the boundary is only used once.
 - Inline single-use local components unless extraction gives the JSX a meaningful reusable concept.
 - Keep `export default` on the `component` declaration when the module exports one primary page component.
 - Avoid relay components whose main job is to rename loaded data or forward props into a single child.
@@ -21,16 +21,22 @@ Use these patterns when refining route-level or page-like TSRX components. They 
 
 - Keep query data and page UI state in separate contexts.
 - Do not wrap query data inside the page model. Query data should remain available as query data, even when a page model also exists.
-- Use a query data context for loaded query results and any reactive domain model derived from them.
-- Use a page model context for route-level UI state such as pending tasks, local action errors, selected IDs, or one-off UI bookkeeping.
+- Use a query data context for loaded query results and any reactive domain model derived from them, including Sigma instances that wrap query data.
+- Use a page model context for page-level UI state such as pending tasks, local action errors, selected IDs, or one-off UI bookkeeping.
 - Prefer making both contexts available to the whole page tree when practical. Prop drilling should be the fallback, not the default.
+- Consume page-wide query data and page models through feature hooks instead of pass-through props.
+- Memoize provided context value objects based on their property values so consumers do not rerender just because a fresh object literal was created.
+- Let the page model provider wrap `try-pending-catch` when the model does not need query data. Put the query data provider in the successful loaded branch when it depends on loaded query results.
 
-## Prefer Page Models For Route-Level UI State
+## Prefer Page Models For Page-Level UI State
 
-- Represent route-level UI state with signals on a page model instead of scattered `useState` calls in the page component.
+- Represent page-level UI state with signals on a page model instead of scattered `useState` calls in the page component.
 - Keep the page model focused on UI state and common UI mutations. Domain data and query results belong outside it.
+- Keep UI state owned by one component or UI primitive local to that component or primitive.
 - Use readonly model access for consumers so subcomponents can observe page signals without casually mutating them.
 - Initialize the page model with a provider, then consume it through the page's `use...PageModel()` hook.
+- Create page model contexts from the model factory and rely on inference instead of duplicating explicit page model types.
+- TSRX allows a component to provide and consume the page model in the same component scope; do not add a wrapper component solely to make context consumption possible.
 - Prefer the local variable name `page` for the consumed page model. The `page.*` prefix is useful context.
 
 ## Use Tasks For Promise State
@@ -38,14 +44,21 @@ Use these patterns when refining route-level or page-like TSRX components. They 
 - Use task primitives for common async UI state such as `isPending`, `error`, `run()`, and `clearError()`.
 - Use keyed tasks when a group of mutually exclusive actions needs one active key and one shared error surface.
 - Let task `run()` own concurrent-run guarding so callers do not repeat redundant `isPending` checks.
+- Have `run()` no-op while pending and return `Promise<void>` rather than returning a shared active promise whose result type may not match concurrent callers.
 - Keep task result values out of task state unless the UI needs them. Most page tasks only need pending and error state.
 - Convert caught errors to the UI-facing error shape at the task boundary when the display surface needs a title or description.
 
 ## Let Domain Models Own Domain Mutations
 
 - Move domain-specific data loading and merging into the owning Sigma/domain model when the operation is part of the domain model's behavior.
-- It is acceptable for app domain models to call the SDK when that keeps domain transitions cohesive.
+- It is acceptable for app domain models to call the SDK when that keeps a domain transition cohesive.
 - Keep page code focused on triggering domain actions and rendering state, not stitching together domain data transforms.
+
+## Keep Context Modules Feature-Local
+
+- Keep page model and query data contexts near the page that owns them.
+- Keeping them in the same module is fine while they stay private and the file remains readable.
+- Move them into focused sibling modules once subcomponents consume them or the page module starts mixing too many concerns.
 
 ## Place Logic Near Use
 

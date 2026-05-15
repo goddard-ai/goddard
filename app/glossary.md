@@ -9,6 +9,12 @@
 - `Detail Tab`
   - One closable tab opened from a drill-down action such as opening a session chat, diff, pull request, terminal, or preview.
   - Why: so reusable work surfaces can coexist without replacing the primary view.
+- `Page`
+  - A logical UI boundary that owns any query data, page model, and internal UI coordination it needs without relying on parent state.
+  - Why: so page patterns can apply to self-contained routes, detail tabs, panels, dialogs, and embedded surfaces without tying the term to URL routing.
+- `Page Model`
+  - The signal-backed UI state and common UI mutations owned by one page.
+  - Why: so page-wide UI state stays separate from query data, domain models, and UI primitive internals while keeping the local variable name `page` meaningful.
 - `Tab Cache`
   - The in-memory record that keeps recently closed or hidden tab state available for fast restoration.
   - Why: so tab eviction can satisfy the cap without making every reopen a cold start.

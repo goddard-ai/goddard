@@ -20,7 +20,7 @@ This skill is the repository's source for long-form contribution guidance that s
 - App-local testing and verification policy: `references/app-testing.md`
 - Detailed app implementation patterns: `references/app-best-practices.md`
 - App form state, async field loading, and dialog-form composition patterns: `references/app-form-patterns.md`
-- TSRX route/page organization patterns: `references/tsrx-page-patterns.md`
+- TSRX page organization patterns: `references/tsrx-page-patterns.md`
 
 ## Loading Hints
 
